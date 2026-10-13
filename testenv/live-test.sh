@@ -333,6 +333,31 @@ checks=$((checks + 1))
 [ "$rc" != 0 ] || fail "a Gitea the host cannot reach after stop + up fails the session" "$(cat "$shared/dead.out")"
 check_contains "and says so" "$(cat "$shared/dead.out")" "still does not answer after stop + up"
 
+# Without the Gitea lock -- `just live-up gitea`, a TeamCity run's Gitea -- a
+# dead forward is a failure that names the healing recipe, and Gitea is not
+# stopped: another worktree's Gitea run may hold the lock (#699, #724).
+: >"$shared/state"
+: >"$shared/docker.log"
+echo 99 >"$shared/curl.dead"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  unset KNOBAS_LIVE_GITEA_LOCK_HOLDER
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_up gitea
+) >"$shared/unlocked.out" 2>&1 || rc=$?
+checks=$((checks + 1))
+[ "$rc" != 0 ] || fail "a dead forward outside the Gitea lock fails the start" "$(cat "$shared/unlocked.out")"
+check_contains "and names the recipe that heals it" "$(cat "$shared/unlocked.out")" "'just gitea-live' heals it under the lock"
+checks=$((checks + 1))
+if grep -E '(^| )(stop|down|rm|kill)( .*)? (knobas-)?gitea( |$)' "$shared/docker.log" >/dev/null; then
+  fail "a start outside the Gitea lock never stops Gitea" "$(cat "$shared/docker.log")"
+fi
+
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2
   exit 1

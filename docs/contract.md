@@ -11508,9 +11508,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The test environment:** `testenv/docker-compose.yml` sets
   `GITEA__migrations__ALLOW_LOCALNETWORKS`, so the seed (section 4b) mirrors `tidewater/
   ops-runbooks` from the same Gitea as `knobas/ops-runbooks-mirror` (`mirror_interval` 0) with no
-  internet; the change recreated the container once, inside the Gitea lock. `live-lib.sh`'s
-  `_live_gitea_up` checks the host's `:3000` after `up` and heals a dead OrbStack port forward
-  with `stop` + `up`, failing the session if that does not bring it back (`testenv/live-test.sh`).
+  internet; the change recreates the container on the next `up` (on this branch, the first `just
+  gitea-live`, inside the Gitea lock). `live-lib.sh`'s `_live_gitea_up` checks the host's `:3000`
+  after `up` and heals a dead OrbStack port forward with `stop` + `up` **only while holding the
+  Gitea lock**, failing the session if that does not bring it back; without the lock (`just
+  live-up gitea`, a TeamCity run's Gitea) it fails naming `just gitea-live` and stops nothing
+  (#699; `testenv/live-test.sh`).
 
   Pinned by: `knobas-http`'s `classify::tests::a_403_the_caller_reads_as_a_refusal_is_a_protocol_fault`;
   `knobas-source-gitea`'s `tests/it/write.rs`

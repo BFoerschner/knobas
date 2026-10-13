@@ -1094,4 +1094,4 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 
 **If you disagree, the cost of reversing this is:** low: one environment line, seed section 4b, and the live test's mirror half.
 
-As built (#722): `GITEA__migrations__ALLOW_LOCALNETWORKS` in `testenv/docker-compose.yml`; seed section 4b creates `knobas/ops-runbooks-mirror`; `_live_gitea_up` in `testenv/live-lib.sh` probes the host's `:3000` and heals with `stop` + `up`, pinned by `testenv/live-test.sh`. The first `just gitea-live` on this branch recreated the container inside the lock and the forward survived.
+As built (#722): `GITEA__migrations__ALLOW_LOCALNETWORKS` in `testenv/docker-compose.yml`; seed section 4b creates `knobas/ops-runbooks-mirror`; `_live_gitea_up` in `testenv/live-lib.sh` probes the host's `:3000` and heals with `stop` + `up` only while holding the Gitea lock (outside it, it fails naming `just gitea-live` and stops nothing), pinned by `testenv/live-test.sh`. The first `just gitea-live` on this branch recreated the container inside the lock and the forward survived.

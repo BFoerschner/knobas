@@ -334,6 +334,16 @@ _live_gitea_answers() {
   return 1
 }
 
+# _live_gitea_lock_held -- whether this process tree holds the Gitea lock: the
+# holder `live_lock_hold` exported is what the lock's symlink names, and its
+# pid is alive.
+_live_gitea_lock_held() {
+  local lock=${KNOBAS_LIVE_GITEA_LOCK:-${TMPDIR:-/tmp}/knobas-live-gitea.lock}
+  [ -n "${KNOBAS_LIVE_GITEA_LOCK_HOLDER:-}" ] &&
+    [ "$(readlink "$lock" 2>/dev/null || true)" = "$KNOBAS_LIVE_GITEA_LOCK_HOLDER" ] &&
+    _live_lock_pid_alive "$KNOBAS_LIVE_GITEA_LOCK_HOLDER"
+}
+
 # _live_gitea_up -- `up` Gitea, and heal the one way it comes up unreachable.
 #
 # `up -d --wait` recreates the container whenever docker-compose.yml changed
@@ -341,12 +351,17 @@ _live_gitea_answers() {
 # can leave the host's port forward dead: `--wait` passes on the container's
 # own healthcheck while 127.0.0.1:3000 answers nothing. `stop` + `up` heals
 # it; `restart` and another recreate do not (measured 2026-09-06). This runs
-# inside the Gitea lock a `just gitea-live` holds (#724), so no other Gitea
-# run is mid-suite when it stops the container -- and with the forward dead,
-# nobody on the host could be using it anyway.
+# only inside the Gitea lock (#724): a `just gitea-live` holds it, so no other
+# Gitea run is mid-suite when the container stops. A start without it -- a
+# TeamCity run's Gitea, `just live-up gitea` -- fails instead and says how to
+# heal: no live run stops Gitea behind a Gitea run's back (#699).
 _live_gitea_up() {
   _live_compose up -d --wait gitea
   _live_gitea_answers && return 0
+  if ! _live_gitea_lock_held; then
+    echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); not holding the Gitea lock, so not stopping it -- 'just gitea-live' heals it under the lock" >&2
+    return 1
+  fi
   echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); stop + up" >&2
   _live_compose stop gitea
   _live_compose up -d --wait gitea

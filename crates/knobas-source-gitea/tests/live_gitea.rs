@@ -4008,12 +4008,22 @@ async fn a_403_refusing_the_write_is_a_refusal_and_the_token_stays_good() {
     let auth = format!("token {}", env.token);
     let api = format!("{}/api/v1", env.url);
     let me = env.login().await;
-    let mirror = format!("{me}/ops-runbooks-mirror");
     let scratch = "knobas-live-refusals";
     let token_name = "knobas-live-readonly";
     let (admin, password) = TESTENV_ADMIN;
+    // The seed creates the mirror under its admin, whose token this is.
+    assert_eq!(me, admin, "the seeded token is the seed's admin's");
+    let mirror = format!("{admin}/ops-runbooks-mirror");
 
     let remove = async || {
+        // Nothing to remove unless Gitea took the branch the test expects refused.
+        let _ = http
+            .delete(format!(
+                "{api}/repos/{mirror}/branches/knobas-mirror-refusal"
+            ))
+            .header("Authorization", &auth)
+            .send()
+            .await;
         let _ = http
             .delete(format!("{api}/repos/{me}/{scratch}"))
             .header("Authorization", &auth)
