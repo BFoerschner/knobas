@@ -62,9 +62,29 @@ const MERGE = action("merge_pull_request", "Merge…", {
 test("a merge is queued as MergePullRequest with the style picked", () => {
   for (const style of ["merge", "rebase", "squash"] as const) {
     expect(actionPayload(MERGE, "gitea:o/r#7", { style })).toEqual({
-      MergePullRequest: { entity: "gitea:o/r#7", style },
+      MergePullRequest: { entity: "gitea:o/r#7", style, delete_branch: false },
     });
   }
+});
+
+test("a merge deletes its branch only when the flag came back true (#708)", () => {
+  const merge = (delete_branch?: string) =>
+    actionPayload(MERGE, "gitea:o/r#7", delete_branch === undefined ? { style: "squash" } : { style: "squash", delete_branch });
+  expect(merge("true")).toEqual({ MergePullRequest: { entity: "gitea:o/r#7", style: "squash", delete_branch: true } });
+  expect(merge("false")).toEqual({ MergePullRequest: { entity: "gitea:o/r#7", style: "squash", delete_branch: false } });
+  // A Merge… drawn without the flag keeps the branch, as every merge did before.
+  expect(merge()).toEqual({ MergePullRequest: { entity: "gitea:o/r#7", style: "squash", delete_branch: false } });
+});
+
+test("Update branch… is queued as UpdatePullRequestBranch with merge or rebase, and nothing else (#708)", () => {
+  const update = action("update_pull_request_branch", "Update branch…");
+  for (const style of ["merge", "rebase"] as const) {
+    expect(actionPayload(update, "gitea:o/r#7", { style })).toEqual({
+      UpdatePullRequestBranch: { entity: "gitea:o/r#7", style },
+    });
+  }
+  expect(actionPayload(update, "gitea:o/r#7", { style: "squash" })).toBeNull();
+  expect(actionPayload(update, "gitea:o/r#7", {})).toBeNull();
 });
 
 test("a style the SPI cannot carry, and an op this shell cannot queue, build nothing", () => {

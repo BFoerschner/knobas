@@ -17,6 +17,7 @@ import type {
   PullRequestState,
   ReviewComment,
   ReviewVerdict,
+  UpdateStyle,
   WriteOpPayload,
 } from "../../ipc/sources";
 
@@ -28,6 +29,13 @@ const MERGE_STYLES: Record<MergeStyle, true> = { merge: true, rebase: true, squa
 
 function isMergeStyle(option: string | undefined): option is MergeStyle {
   return option !== undefined && Object.hasOwn(MERGE_STYLES, option);
+}
+
+/** Keyed by the union, as `MERGE_STYLES` is. */
+const UPDATE_STYLES: Record<UpdateStyle, true> = { merge: true, rebase: true };
+
+function isUpdateStyle(option: string | undefined): option is UpdateStyle {
+  return option !== undefined && Object.hasOwn(UPDATE_STYLES, option);
 }
 
 /** Keyed by the union, as `MERGE_STYLES` is. */
@@ -128,8 +136,15 @@ const PAYLOADS: Record<
     comments: ReviewComment[],
   ) => WriteOpPayload | null
 > = {
+  // *Delete branch after merge* is a flag (#708); a Merge… drawn without it
+  // keeps the branch, as every merge did before.
   merge_pull_request: (entity, values) =>
-    isMergeStyle(values.style) ? { MergePullRequest: { entity, style: values.style } } : null,
+    isMergeStyle(values.style)
+      ? { MergePullRequest: { entity, style: values.style, delete_branch: values.delete_branch === "true" } }
+      : null,
+  // *Update branch…* (#708): the base merged in, or the head rebased onto it.
+  update_pull_request_branch: (entity, values) =>
+    isUpdateStyle(values.style) ? { UpdatePullRequestBranch: { entity, style: values.style } } : null,
   // A blank branch is the default branch, which is no branch at all: TeamCity
   // reads an explicit default branch's name as another branch (#669).
   run_build: (entity, values, settings) => ({

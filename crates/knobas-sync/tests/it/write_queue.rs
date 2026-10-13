@@ -1070,6 +1070,11 @@ fn write_op_probes() -> Vec<WriteOp> {
         WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
+            delete_branch: true,
+        },
+        WriteOp::UpdatePullRequestBranch {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::UpdateStyle::Merge,
         },
         WriteOp::SetParameter {
             entity: "teamcity:buildType:Payout_Build".to_owned(),
@@ -1135,7 +1140,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::RunBuild { .. }
             | WriteOp::SubmitReview { .. }
             | WriteOp::DeleteBranch { .. }
-            | WriteOp::EditPullRequest { .. } => op.identifier(),
+            | WriteOp::EditPullRequest { .. }
+            | WriteOp::UpdatePullRequestBranch { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1348,6 +1354,10 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // holds: what is left is that pull request as edited, which the
             // next sync reads back.
             | WriteOp::EditPullRequest { .. }
+            // An update moves the head of a pull request the mirror holds:
+            // what is left is that head, up to date with its base, which the
+            // next sync reads back (#708). Nothing new exists to claim.
+            | WriteOp::UpdatePullRequestBranch { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.

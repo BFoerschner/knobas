@@ -670,6 +670,11 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
         knobas_source::WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Squash,
+            delete_branch: true,
+        },
+        knobas_source::WriteOp::UpdatePullRequestBranch {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::UpdateStyle::Rebase,
         },
         knobas_source::WriteOp::SetParameter {
             entity: "teamcity:buildType:Payout_Build".to_owned(),
@@ -724,6 +729,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::SubmitReview { .. } => "SubmitReview",
             knobas_source::WriteOp::DeleteBranch { .. } => "DeleteBranch",
             knobas_source::WriteOp::EditPullRequest { .. } => "EditPullRequest",
+            knobas_source::WriteOp::UpdatePullRequestBranch { .. } => "UpdatePullRequestBranch",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

@@ -300,6 +300,7 @@ async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
             .write(WriteOp::MergePullRequest {
                 entity: "gitea:tidewater/payout-service#142".to_owned(),
                 style,
+                delete_branch: false,
             })
             .await
             .expect("a declared op is performed");
@@ -310,8 +311,114 @@ async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
             path,
             "/api/v1/repos/tidewater/payout-service/pulls/142/merge"
         );
-        assert_eq!(body, json!({ "Do": word }), "{word}");
+        assert_eq!(body["Do"], json!(word), "{word}");
     }
+}
+
+/// Workflow 9 of spec #701 (issue #708): *Delete branch after merge* travels
+/// in the merge's own request as Gitea's `delete_branch_after_merge`, and
+/// it is always said, both ways. Gitea 1.27 reads an absent field as the
+/// repository's default, so a reader who unticked the box must send `false`
+/// or Gitea may delete the branch anyway.
+#[tokio::test]
+async fn a_merge_says_whether_gitea_deletes_the_branch_after_it() {
+    for delete_branch in [true, false] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        source(&server)
+            .write(WriteOp::MergePullRequest {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                style: knobas_source::MergeStyle::Squash,
+                delete_branch,
+            })
+            .await
+            .expect("a declared op is performed");
+        let (_, _, body) = only_request(&server).await;
+        assert_eq!(
+            body,
+            json!({ "Do": "squash", "delete_branch_after_merge": delete_branch }),
+            "delete_branch = {delete_branch}"
+        );
+    }
+}
+
+/// Workflow 9 of spec #701 (issue #708): *Update branch…* is Gitea's
+/// `POST .../pulls/{n}/update`, the style the reader picked as `?style=`,
+/// and no body.
+#[tokio::test]
+async fn an_update_brings_the_head_up_to_date_in_the_style_picked() {
+    for (style, word) in [
+        (knobas_source::UpdateStyle::Merge, "merge"),
+        (knobas_source::UpdateStyle::Rebase, "rebase"),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/pulls/142/update",
+            ))
+            .and(header("Authorization", format!("token {TOKEN}").as_str()))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        source(&server)
+            .write(WriteOp::UpdatePullRequestBranch {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                style,
+            })
+            .await
+            .expect("a declared op is performed");
+
+        let received = server.received_requests().await.unwrap();
+        assert_eq!(received.len(), 1, "one write is one request");
+        let request = &received[0];
+        assert_eq!(request.method.to_string(), "POST");
+        assert_eq!(
+            request.url.path(),
+            "/api/v1/repos/tidewater/payout-service/pulls/142/update"
+        );
+        let query: Vec<(String, String)> = request.url.query_pairs().into_owned().collect();
+        assert_eq!(query, [("style".to_owned(), word.to_owned())], "{word}");
+    }
+}
+
+/// An update Gitea refuses -- a conflict is a **409** -- reaches the queue as
+/// a refusal carrying Gitea's sentence (ADR-0004); one aimed at anything but
+/// a pull request is refused before a request leaves.
+#[tokio::test]
+async fn an_update_gitea_refuses_or_aimed_wrong_is_a_refusal() {
+    let server = refusing(409, "merge conflict between base and head").await;
+    let error = source(&server)
+        .write(WriteOp::UpdatePullRequestBranch {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            style: knobas_source::UpdateStyle::Rebase,
+        })
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(409), "{error:?}");
+    assert!(
+        matches!(&error, SourceError::Protocol { message: m, .. } if m.contains("merge conflict")),
+        "{error:?}"
+    );
+
+    let untouched = refusing(500, "must not be reached").await;
+    let error = source(&untouched)
+        .write(WriteOp::UpdatePullRequestBranch {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            style: knobas_source::UpdateStyle::Merge,
+        })
+        .await
+        .expect_err("a repository is not a pull request");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
+    assert!(untouched.received_requests().await.unwrap().is_empty());
 }
 
 /// A pull request Gitea will not merge -- a conflict, a work-in-progress
@@ -324,6 +431,7 @@ async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
         .write(WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
         })
         .await
         .expect_err("the server refused");
@@ -343,6 +451,7 @@ async fn a_merge_aimed_at_a_repository_is_refused_before_a_request() {
         .write(WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service".to_owned(),
             style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
         })
         .await
         .expect_err("a repository is not a pull request");

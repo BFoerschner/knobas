@@ -61,8 +61,7 @@ fn edit(pull: &Pull) -> ViewAction {
 /// *Close*: it ends the pull request unmerged, so a danger, through a sentence
 /// naming what goes where.
 fn close(pull: &Pull) -> ViewAction {
-    let head = pull.head.as_ref().and_then(|b| b.r#ref.as_deref());
-    let base = pull.base.as_ref().and_then(|b| b.r#ref.as_deref());
+    let (head, base) = (pull.head_ref(), pull.base_ref());
     let confirm = match (head, base) {
         (Some(head), Some(base)) => format!("Close {head} → {base} without merging it?"),
         _ => "Close this pull request without merging it?".to_owned(),

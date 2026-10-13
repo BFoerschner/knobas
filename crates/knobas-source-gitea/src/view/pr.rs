@@ -8,16 +8,14 @@
 //! a stub with a count until its tab is opened (ADR-0020 rule 3).
 
 use knobas_source::SourceError;
-use knobas_source::view::{
-    ActionField, Block, ChoiceOption, Fact, FieldKind, SourceView, Tone, ViewAction, ViewRow,
-    ViewSection,
-};
+use knobas_source::view::{Block, Fact, SourceView, Tone, ViewRow, ViewSection};
 
 use super::rows::{self, ListedCommit};
 use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
+mod land;
 mod maintain;
 mod review;
 mod threads;
@@ -49,26 +47,32 @@ pub(super) async fn draw(
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
-            // on its own pull requests (#705).
-            let (reviews, commits, comments, viewer) = tokio::try_join!(
+            // on its own pull requests (#705). So do landing's reads (#708).
+            let (reviews, commits, comments, viewer, landing) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
+                at.landing(&pull),
             )?;
             // The order the #701 ruling sets: what a reviewer says first,
-            // then the maintenance (#706), *Merge…* last.
+            // then the maintenance (#706, *Update branch…* #708), *Merge…*
+            // last.
             actions.extend(review::actions(&pull, viewer.as_deref()));
             actions.extend(maintain::actions(&pull));
-            actions.extend(merge_action(&pull));
+            actions.extend(land::actions(&pull, &reviews, &landing));
             vec![
-                overview(&pull, &reviews),
+                overview(&pull, &reviews, &landing),
                 files_stub(&pull),
                 commits,
                 conversation(&reviews, &comments),
             ]
         }
-        Some(OVERVIEW) => vec![overview(&at.pull().await?, &at.reviews().await?)],
+        Some(OVERVIEW) => {
+            let pull = at.pull().await?;
+            let (reviews, landing) = tokio::try_join!(at.reviews(), at.landing(&pull))?;
+            vec![overview(&pull, &reviews, &landing)]
+        }
         Some(FILES) => vec![at.files().await?],
         Some(COMMITS) => vec![at.commits(None).await?],
         Some(CONVERSATION) => {
@@ -333,8 +337,8 @@ fn review_verdict(review: &Review) -> Option<(String, Option<Tone>)> {
 }
 
 /// The facts, each reviewer's standing verdict, and the description.
-fn overview(pull: &Pull, reviews: &[Review]) -> ViewSection {
-    let mut facts = overview_facts(pull);
+fn overview(pull: &Pull, reviews: &[Review], landing: &land::Landing) -> ViewSection {
+    let mut facts = overview_facts(pull, land::mergeable_fact(pull, reviews, landing));
     facts.extend(verdicts(reviews));
     let mut blocks = vec![Block::Facts { facts }];
     let body = pull.body.as_deref().map(str::trim_end).unwrap_or_default();
@@ -365,66 +369,9 @@ fn files_stub(pull: &Pull) -> ViewSection {
     }
 }
 
-/// *Merge…*, the pull request's main write, in the toolbar (issues #667,
-/// #702): enabled when Gitea would merge it now -- open, not merged, and
-/// Gitea answered `mergeable: true` -- and otherwise disabled with the reason,
-/// so the reader learns why rather than looking for the button. On a merged or
-/// closed pull request it is not offered at all (`None`): the #701 ruling
-/// draws a disabled action only where the entity can still reach the state
-/// that enables it, and a closed pull request merges only after a reopen,
-/// which is its own action.
-///
-/// Gitea's flag already says *no* for a conflict, a work-in-progress title and
-/// a mergeability check still running, which are the 405s a merge would get;
-/// it does not say which, so the reason names all three. An absent flag is not
-/// a yes. The styles are the SPI's [`MergeStyle`](knobas_source::MergeStyle)
-/// words, `merge` first because it is Gitea's own default. Whether the account
-/// may merge is not asked: that is a refusal the write queue shows with
-/// Gitea's sentence (ADR-0004).
-fn merge_action(pull: &Pull) -> Option<ViewAction> {
-    if pull.merged || pull.state.as_deref() != Some("open") {
-        return None;
-    }
-    let head = pull.head.as_ref().and_then(|b| b.r#ref.as_deref());
-    let base = pull.base.as_ref().and_then(|b| b.r#ref.as_deref());
-    let confirm = match (head, base) {
-        (Some(head), Some(base)) => format!("Merge {head} into {base}?"),
-        _ => "Merge this pull request?".to_owned(),
-    };
-    let disabled = match pull.mergeable {
-        Some(true) => None,
-        Some(false) => Some(format!(
-            "Not mergeable into {}: a conflict, a work-in-progress title or a check still \
-             running",
-            base.unwrap_or("its base")
-        )),
-        None => Some("Gitea has not said yet whether this can be merged".to_owned()),
-    };
-    let options = knobas_source::MergeStyle::ALL
-        .iter()
-        .map(|style| {
-            let label = match style {
-                knobas_source::MergeStyle::Merge => "Merge commit",
-                knobas_source::MergeStyle::Rebase => "Rebase",
-                knobas_source::MergeStyle::Squash => "Squash",
-            };
-            ChoiceOption::new(style.as_str(), label)
-        })
-        .collect();
-    Some(ViewAction {
-        fields: vec![ActionField {
-            required: true,
-            ..ActionField::new("style", "Style", FieldKind::Choice { options })
-        }],
-        confirm: Some(confirm),
-        primary: true,
-        disabled,
-        ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
-    })
-}
-
-/// State, author, `head → base`, whether it can be merged, its times.
-fn overview_facts(pull: &Pull) -> Vec<Fact> {
+/// State, author, `head → base`, whether it can be merged (`mergeable`,
+/// [`land`]'s to say), its times.
+fn overview_facts(pull: &Pull, mergeable: Option<Fact>) -> Vec<Fact> {
     let (state, tone) = if pull.merged {
         ("merged".to_owned(), Some(Tone::Ok))
     } else {
@@ -458,17 +405,7 @@ fn overview_facts(pull: &Pull) -> Vec<Fact> {
         };
         facts.push(fact("Branches", format!("{head_name} → {base_ref}")));
     }
-    // Only an open pull request can still be merged; Gitea keeps answering
-    // the flag on a closed one, where it says nothing.
-    if state == "open"
-        && let Some(mergeable) = pull.mergeable
-    {
-        facts.push(Fact {
-            label: "Mergeable".to_owned(),
-            value: if mergeable { "yes" } else { "no" }.to_owned(),
-            tone: (!mergeable).then_some(Tone::Warn),
-        });
-    }
+    facts.extend(mergeable);
     if let Some(at) = pull.created_at.as_deref() {
         facts.push(fact("Created", when_of(at)));
     }
@@ -536,6 +473,34 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
         .collect()
 }
 
+impl Pull {
+    /// Open and not merged: what reviews, the maintenance's *Close* and
+    /// landing all ask first.
+    fn is_open(&self) -> bool {
+        !self.merged && self.state.as_deref() == Some("open")
+    }
+
+    /// The head branch's name.
+    fn head_ref(&self) -> Option<&str> {
+        self.head.as_ref().and_then(|b| b.r#ref.as_deref())
+    }
+
+    /// The base branch's name.
+    fn base_ref(&self) -> Option<&str> {
+        self.base.as_ref().and_then(|b| b.r#ref.as_deref())
+    }
+
+    /// The head lives in the base's repository, not a fork's.
+    fn head_in_base_repo(&self) -> bool {
+        let repo = |b: &Option<PullBranch>| {
+            b.as_ref()
+                .and_then(|b| b.repo.as_ref())
+                .and_then(|r| r.full_name.clone())
+        };
+        repo(&self.head) == repo(&self.base)
+    }
+}
+
 /// The fields of Gitea's `PullRequest` this view reads.
 #[derive(Debug, serde::Deserialize)]
 struct Pull {
@@ -576,6 +541,9 @@ struct Pull {
 struct PullBranch {
     #[serde(default)]
     r#ref: Option<String>,
+    /// The head's tip, which landing asks the base about (#708).
+    #[serde(default)]
+    sha: Option<String>,
     #[serde(default)]
     repo: Option<PullRepo>,
 }
@@ -600,6 +568,13 @@ struct Review {
     state: Option<String>,
     #[serde(default)]
     dismissed: bool,
+    /// Counted against a protection's required approvals (#708).
+    #[serde(default)]
+    official: bool,
+    /// Given before the head last moved; not counted where the protection
+    /// ignores stale approvals (#708).
+    #[serde(default)]
+    stale: bool,
     #[serde(default)]
     body: Option<String>,
     /// As for [`Pull`]'s times, kept as text for [`when_of`].

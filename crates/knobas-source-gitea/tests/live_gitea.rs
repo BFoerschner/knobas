@@ -2717,9 +2717,13 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         "Gitea never said the fresh pull request was mergeable"
     );
     assert!(offered.primary, "{offered:?}");
-    let [field] = offered.fields.as_slice() else {
-        panic!("one field, the style: {offered:?}")
+    let [field, delete] = offered.fields.as_slice() else {
+        panic!("two fields, the style and the delete flag: {offered:?}")
     };
+    // The head is this repository's and unprotected, so Gitea could delete
+    // it: the flag is drawn ticked (#708). This test merges with it unticked.
+    assert_eq!(delete.name, "delete_branch");
+    assert_eq!(delete.value.as_deref(), Some("true"), "{delete:?}");
     let knobas_source::view::FieldKind::Choice { options } = &field.kind else {
         panic!("the style is a choice: {field:?}")
     };
@@ -2738,6 +2742,7 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         .write(knobas_source::WriteOp::MergePullRequest {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
         })
         .await
         .expect("Gitea merges a pull request it said it could");
@@ -2817,6 +2822,193 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         "the merge reached the default branch, which no cleanup takes back"
     );
     println!("merged #{number} ({head} into {base}) from its view; the next sync read it merged");
+}
+
+// -- landing: update a branch from its base, merge and delete it (#708) -----
+
+/// Workflow 9 of spec #701 (issue #708), against the real server: a pull
+/// request whose base has moved on offers *Update branch…*; the adapter's
+/// `update_pull_request_branch` brings the head level, after which the view
+/// no longer offers it; and `merge_pull_request` with `delete_branch` merges
+/// it and Gitea deletes the head.
+///
+/// # What it spends, and who takes it back
+///
+/// Everything is its own: a scratch base branch and a head branch, both
+/// `knobas-`-prefixed, a pull request between them, and one commit on each
+/// made through the contents API. Nothing touches `main` or a seeded pull
+/// request; [`Litter`] deletes the pull request and both branches (the head
+/// is already gone by then, which its check reads as gone) whether the test
+/// passes or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_branch() {
+    use knobas_source::view::{FieldKind, SourceView, ViewAction};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let get = |url: String| {
+        let (http, auth) = (http.clone(), auth.clone());
+        async move {
+            http.get(url)
+                .header("Authorization", auth)
+                .send()
+                .await
+                .expect("a read")
+        }
+    };
+
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let base = format!("knobas-land-{stamp}-base");
+    let head = format!("knobas-land-{stamp}");
+    litter.branch_off_main(&base).await;
+    litter.branch_off_main(&head).await;
+    push_file(
+        &http,
+        &env,
+        &head,
+        &format!("{head}.txt"),
+        &format!("{head}: the work"),
+    )
+    .await;
+    let opened = http
+        .post(format!("{api}/pulls"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "head": head, "base": base,
+            "title": format!("knobas landing check {stamp}"),
+            "body": "Opened by the knobas Gitea adapter's live suite, to be updated and merged."
+        }))
+        .send()
+        .await
+        .expect("open the pull request");
+    assert!(
+        opened.status().is_success(),
+        "pull: {}",
+        opened.text().await.unwrap_or_default()
+    );
+    let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+        .as_u64()
+        .expect("Gitea answers with the new pull request's number");
+    let id = format!("gitea:{}#{number}", env.full_name());
+
+    // 1. The base moves on: a commit on it, through the contents API.
+    let moved_on = push_file(
+        &http,
+        &env,
+        &base,
+        &format!("{base}.txt"),
+        &format!("{base}: the base moves on"),
+    )
+    .await;
+
+    let find = |view: &SourceView, op: &str| -> Option<ViewAction> {
+        view.actions.iter().find(|a| a.write_op == op).cloned()
+    };
+    let view = source.view(&id, None).await.unwrap().unwrap();
+    let update = find(&view, "update_pull_request_branch")
+        .unwrap_or_else(|| panic!("a head behind its base offers Update branch…: {view:#?}"));
+    println!("LIVE Update branch… action: {update:?}");
+    assert_eq!(update.disabled, None, "{update:?}");
+    let FieldKind::Choice { options } = &update.fields[0].kind else {
+        panic!("the style is a choice: {update:?}")
+    };
+    assert_eq!(
+        options.iter().map(|o| o.value.as_str()).collect::<Vec<_>>(),
+        ["merge", "rebase"]
+    );
+    let labels: Vec<&str> = view.actions.iter().map(|a| a.label.as_str()).collect();
+    let at = |label: &str| labels.iter().position(|l| *l == label);
+    assert!(
+        at("Update branch…") < at("Merge…") && at("Close") < at("Update branch…"),
+        "maintenance, then Update branch…, then Merge… last: {labels:?}"
+    );
+
+    // 2. The update, through the op the queue flushes, brings the head level:
+    //    the base's commit is in the head, and the view no longer offers it.
+    source
+        .write(knobas_source::WriteOp::UpdatePullRequestBranch {
+            entity: id.clone(),
+            style: knobas_source::UpdateStyle::Merge,
+        })
+        .await
+        .expect("Gitea updates a head that is behind and has no conflict");
+    let carried = get(format!(
+        "{api}/commits?sha={head}&limit=50&stat=false&files=false&verification=false"
+    ))
+    .await
+    .json::<Vec<serde_json::Value>>()
+    .await
+    .expect("the head's commits");
+    assert!(
+        carried.iter().any(|c| c["sha"] == moved_on.as_str()),
+        "the base's commit {moved_on} is not in the head after the update"
+    );
+    let view = source.view(&id, None).await.unwrap().unwrap();
+    assert!(
+        find(&view, "update_pull_request_branch").is_none(),
+        "a level head offers no Update branch…: {:#?}",
+        view.actions
+    );
+
+    // 3. Merge… with *Delete branch after merge* drawn ticked; it is enabled
+    //    once Gitea has re-checked the moved head (#721 is its refusal while
+    //    it has not).
+    let mut merge = None;
+    for _ in 0..40 {
+        let view = source.view(&id, None).await.unwrap().unwrap();
+        merge = find(&view, "merge_pull_request");
+        if merge.as_ref().is_some_and(|a| a.disabled.is_none()) {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    let merge = merge.expect("an open pull request offers Merge…");
+    println!("LIVE Merge… action: {merge:?}");
+    assert_eq!(
+        merge.disabled, None,
+        "Gitea never said the updated head was mergeable"
+    );
+    let delete = merge
+        .fields
+        .iter()
+        .find(|f| f.name == "delete_branch")
+        .unwrap_or_else(|| panic!("Merge… asks whether to delete the branch: {merge:?}"));
+    assert_eq!(delete.value.as_deref(), Some("true"), "{delete:?}");
+
+    source
+        .write(knobas_source::WriteOp::MergePullRequest {
+            entity: id.clone(),
+            style: knobas_source::MergeStyle::Merge,
+            delete_branch: true,
+        })
+        .await
+        .expect("Gitea merges the updated pull request");
+    let record: serde_json::Value = get(format!("{api}/pulls/{number}"))
+        .await
+        .json()
+        .await
+        .expect("a pull request record");
+    assert_eq!(record["merged"], true, "not merged: {record}");
+    let gone = get(format!("{api}/branches/{head}")).await.status();
+    assert_eq!(
+        gone,
+        reqwest::StatusCode::NOT_FOUND,
+        "the head branch is still there"
+    );
+    assert_eq!(
+        get(format!("{api}/branches/{base}")).await.status(),
+        reqwest::StatusCode::OK,
+        "the merge took the base with it"
+    );
+    println!("updated #{number} from {base}, merged it and Gitea deleted {head}");
 }
 
 // -- comment and review from the pull request's view (issue #705) ------------

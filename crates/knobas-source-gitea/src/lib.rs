@@ -178,6 +178,9 @@ pub const WRITE_OP_DELETE_BRANCH: &str = "delete_branch";
 /// See [`WRITE_OP_CREATE_BRANCH`]. A pull request's *Edit…*, *Close* and
 /// *Reopen*, one `PATCH` (issue #706).
 pub const WRITE_OP_EDIT_PULL_REQUEST: &str = "edit_pull_request";
+/// See [`WRITE_OP_CREATE_BRANCH`]. *Update branch…* on a pull request whose
+/// head is behind its base (issue #708).
+pub const WRITE_OP_UPDATE_PULL_REQUEST_BRANCH: &str = "update_pull_request_branch";
 
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
@@ -211,6 +214,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_SUBMIT_REVIEW.to_owned(),
             WRITE_OP_DELETE_BRANCH.to_owned(),
             WRITE_OP_EDIT_PULL_REQUEST.to_owned(),
+            WRITE_OP_UPDATE_PULL_REQUEST_BRANCH.to_owned(),
         ],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
@@ -366,7 +370,8 @@ mod tests {
                 "merge_pull_request",
                 "submit_review",
                 "delete_branch",
-                "edit_pull_request"
+                "edit_pull_request",
+                "update_pull_request_branch"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );

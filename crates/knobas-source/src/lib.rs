@@ -406,6 +406,7 @@ impl SourceError {
 /// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workflows, spec #701 (Gitea, #705) |
 /// | [`DeleteBranch`](Self::DeleteBranch) | `"delete_branch"` | source views (Gitea, #707) |
 /// | [`EditPullRequest`](Self::EditPullRequest) | `"edit_pull_request"` | git workflows, spec #701 (Gitea, #706) |
+/// | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -647,7 +648,20 @@ pub enum WriteOp {
     /// [`Approve`](WriteOp::Approve): a merge is a judgement on one state of
     /// the pull request, and a push after it was queued is a reason to look
     /// again.
-    MergePullRequest { entity: String, style: MergeStyle },
+    ///
+    /// `delete_branch` asks the source to delete the head branch once the
+    /// merge has landed (spec #701 workflow 9, issue #708), in the same
+    /// request: Gitea's `delete_branch_after_merge`. It defaults to `false`,
+    /// so a merge queued before the field existed still reads, as the merge
+    /// it was then: one that keeps the branch. A branch the source will not
+    /// delete (protected, in a fork the account cannot write) is the source's
+    /// to skip; the merge itself still lands.
+    MergePullRequest {
+        entity: String,
+        style: MergeStyle,
+        #[serde(default)]
+        delete_branch: bool,
+    },
     /// Identifier `"set_parameter"`. Set one parameter of a build
     /// configuration to `value` (spec #660 story 19, issue #668). `entity` is
     /// the **build configuration**; `name` is the parameter's full name
@@ -783,6 +797,21 @@ pub enum WriteOp {
         #[serde(default)]
         state: Option<PullRequestState>,
     },
+    /// Identifier `"update_pull_request_branch"`. Bring a pull request's head
+    /// branch up to date with its base (spec #701 workflow 9, issue #708):
+    /// the base merged into the head, or the head rebased onto the base, as
+    /// `style` says. `entity` is the **pull request**.
+    ///
+    /// Gitea's `POST .../pulls/{n}/update?style=`. A conflict, or a style the
+    /// repository does not allow, comes back refused with the source's own
+    /// sentence (ADR-0004). Hold detection takes the whole mirrored record,
+    /// as for [`MergePullRequest`](WriteOp::MergePullRequest): the update
+    /// rewrites (rebase) or extends (merge) the head as it stands at the
+    /// flush, and a push after the press is a reason to look again. Like a
+    /// merge it makes nothing new knobas would have to claim, so a withdrawal
+    /// in flight leaves no unclaimed write: what is left is the head moved,
+    /// which the next sync reads back.
+    UpdatePullRequestBranch { entity: String, style: UpdateStyle },
 }
 
 /// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
@@ -881,6 +910,34 @@ impl MergeStyle {
     }
 }
 
+/// How an [`UpdatePullRequestBranch`](WriteOp::UpdatePullRequestBranch)
+/// brings the head up to date with its base. Serialized as the lowercase
+/// word, which is also what the view's *Update branch…* offers as its options
+/// and what Gitea's `?style=` takes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateStyle {
+    /// The base merged into the head: a merge commit on the head.
+    Merge,
+    /// The head's commits replayed onto the base: the head rewritten.
+    Rebase,
+}
+
+impl UpdateStyle {
+    /// Every style, in the order a view offers them: `merge` first, the one
+    /// that rewrites nothing.
+    pub const ALL: [UpdateStyle; 2] = [UpdateStyle::Merge, UpdateStyle::Rebase];
+
+    /// The word on the wire, which is also the option a view offers.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UpdateStyle::Merge => "merge",
+            UpdateStyle::Rebase => "rebase",
+        }
+    }
+}
+
 /// The key half of what a [`CreateMonitor`](WriteOp::CreateMonitor) targets.
 ///
 /// Private, because nothing outside this module has a use for half an address:
@@ -947,6 +1004,7 @@ impl WriteOp {
             WriteOp::SubmitReview { .. } => "submit_review",
             WriteOp::DeleteBranch { .. } => "delete_branch",
             WriteOp::EditPullRequest { .. } => "edit_pull_request",
+            WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
         }
     }
 }
@@ -1355,6 +1413,7 @@ mod tests {
             WriteOp::MergePullRequest {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 style: MergeStyle::Squash,
+                delete_branch: true,
             },
             WriteOp::SetParameter {
                 entity: "teamcity:buildType:Payout_Build".into(),
@@ -1391,6 +1450,10 @@ mod tests {
                 body: Some("as discussed".into()),
                 state: Some(PullRequestState::Closed),
             },
+            WriteOp::UpdatePullRequestBranch {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                style: UpdateStyle::Rebase,
+            },
         ];
         for op in &probes {
             match op {
@@ -1413,7 +1476,8 @@ mod tests {
                 | WriteOp::RunBuild { .. }
                 | WriteOp::SubmitReview { .. }
                 | WriteOp::DeleteBranch { .. }
-                | WriteOp::EditPullRequest { .. } => {}
+                | WriteOp::EditPullRequest { .. }
+                | WriteOp::UpdatePullRequestBranch { .. } => {}
             }
         }
         probes
@@ -1459,14 +1523,72 @@ mod tests {
             let op = WriteOp::MergePullRequest {
                 entity: "gitea:o/r#1".into(),
                 style,
+                delete_branch: false,
             };
             assert_eq!(
                 serde_json::to_value(&op).unwrap(),
-                serde_json::json!({ "MergePullRequest": { "entity": "gitea:o/r#1", "style": word } })
+                serde_json::json!({
+                    "MergePullRequest": { "entity": "gitea:o/r#1", "style": word, "delete_branch": false }
+                })
             );
         }
         let odd = serde_json::from_value::<WriteOp>(serde_json::json!({
             "MergePullRequest": { "entity": "gitea:o/r#1", "style": "fast-forward-only" }
+        }));
+        assert!(odd.is_err(), "{odd:?}");
+    }
+
+    /// A merge queued before *Delete branch after merge* existed (#708) has no
+    /// `delete_branch` in its JSON; it still reads, as a merge that keeps the
+    /// branch -- what it meant when it was queued.
+    #[test]
+    fn a_merge_queued_before_the_delete_flag_reads_as_one_that_keeps_the_branch() {
+        let old = serde_json::json!({
+            "MergePullRequest": { "entity": "gitea:o/r#1", "style": "squash" }
+        });
+        let read = serde_json::from_value::<WriteOp>(old).unwrap();
+        assert!(
+            matches!(
+                &read,
+                WriteOp::MergePullRequest { entity, style: MergeStyle::Squash, delete_branch: false }
+                    if entity == "gitea:o/r#1"
+            ),
+            "{read:?}"
+        );
+        let new = WriteOp::MergePullRequest {
+            entity: "gitea:o/r#1".into(),
+            style: MergeStyle::Merge,
+            delete_branch: true,
+        };
+        assert_eq!(
+            serde_json::to_value(&new).unwrap(),
+            serde_json::json!({
+                "MergePullRequest": { "entity": "gitea:o/r#1", "style": "merge", "delete_branch": true }
+            })
+        );
+    }
+
+    /// An update's style crosses as `merge` or `rebase` and nothing else
+    /// decodes (#708): Gitea's `?style=` takes exactly those two.
+    #[test]
+    fn an_update_style_is_merge_or_rebase_and_nothing_else_decodes() {
+        for (style, word) in [
+            (UpdateStyle::Merge, "merge"),
+            (UpdateStyle::Rebase, "rebase"),
+        ] {
+            assert_eq!(style.as_str(), word);
+            let op = WriteOp::UpdatePullRequestBranch {
+                entity: "gitea:o/r#1".into(),
+                style,
+            };
+            assert_eq!(op.identifier(), "update_pull_request_branch");
+            assert_eq!(
+                serde_json::to_value(&op).unwrap(),
+                serde_json::json!({ "UpdatePullRequestBranch": { "entity": "gitea:o/r#1", "style": word } })
+            );
+        }
+        let odd = serde_json::from_value::<WriteOp>(serde_json::json!({
+            "UpdatePullRequestBranch": { "entity": "gitea:o/r#1", "style": "squash" }
         }));
         assert!(odd.is_err(), "{odd:?}");
     }
@@ -1630,7 +1752,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 20, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 21, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

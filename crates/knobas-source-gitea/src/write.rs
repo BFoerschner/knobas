@@ -19,7 +19,8 @@
 //! | pull request | `POST /repos/{o}/{r}/pulls` | `{"title":…,"body":…,"head":…,"base":…}` |
 //! | comment | `POST /repos/{o}/{r}/issues/{index}/comments` | `{"body":…}` |
 //! | approval | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":"APPROVED","body":…}` |
-//! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…}` |
+//! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…,"delete_branch_after_merge":…}` |
+//! | branch update | `POST /repos/{o}/{r}/pulls/{index}/update?style=…` | none |
 //! | review | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":…,"body":…,"comments":[…]}` |
 //! | branch delete | `DELETE /repos/{o}/{r}/branches/{name}` | none |
 //! | edit | `PATCH /repos/{o}/{r}/pulls/{index}` | only the given of `{"title":…,"body":…,"state":…}` |
@@ -33,6 +34,7 @@ use serde_json::json;
 
 use knobas_source::{
     MergeStyle, PullRequestState, ReviewComment, ReviewSide, ReviewVerdict, SourceError,
+    UpdateStyle,
 };
 
 use crate::client::GiteaClient;
@@ -154,9 +156,12 @@ pub(crate) async fn approve(
 /// Merge a pull request, the way `style` names (`merge`, `rebase`, `squash`).
 ///
 /// `Do` is the field Gitea's `MergePullRequestOption` requires, and it takes
-/// the SPI's three words as they are. Nothing else is sent: the merge commit's
-/// title and message are Gitea's defaults, which is what its own *Merge*
-/// button does without the reader typing anything.
+/// the SPI's three words as they are. `delete_branch_after_merge` is always
+/// sent, both ways (#708): Gitea 1.27 reads an absent field as the
+/// repository's own default, so leaving it out when the reader unticked the
+/// box could delete the branch anyway. Nothing else is sent: the merge
+/// commit's title and message are Gitea's defaults, which is what its own
+/// *Merge* button does without the reader typing anything.
 ///
 /// Gitea answers **405** for every pull request it will not merge -- a
 /// conflict, a work-in-progress title, one already merged, and *"Please try
@@ -174,16 +179,31 @@ pub(crate) async fn merge(
     repo: &str,
     index: u64,
     style: MergeStyle,
+    delete_branch: bool,
 ) -> Result<(), SourceError> {
     let path = format!(
         "/repos/{}/{}/pulls/{index}/merge",
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    client
-        .post(&path, &json!({ "Do": style.as_str() }))
-        .await
-        .map(|_| ())
+    let body = json!({ "Do": style.as_str(), "delete_branch_after_merge": delete_branch });
+    client.post(&path, &body).await.map(|_| ())
+}
+
+/// Bring a pull request's head up to date with its base (#708): Gitea's
+/// `update` with `style` as its query, `merge` or `rebase`.
+///
+/// # Errors
+///
+/// As [`create_branch`]; a conflict is Gitea's **409**.
+pub(crate) async fn update_branch(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    style: UpdateStyle,
+) -> Result<(), SourceError> {
+    client.update_pull(owner, repo, index, style).await
 }
 
 // -- submit_review (issue #705) ----------------------------------------------
