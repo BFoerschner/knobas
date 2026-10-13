@@ -25,6 +25,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
+use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
     CheckoutView, FoundBy, clones_root, commands, open, set_clones_root, set_command, set_override,
     view,
@@ -297,6 +298,7 @@ async fn a_repo_with_no_clone_reads_no_checkout_and_a_clone_command() {
     let answer = view(&pool, &repo.id).await.unwrap();
     assert_eq!(answer.found_by, FoundBy::Nothing);
     assert_eq!(answer.path, None);
+    assert_eq!(answer.tree, None, "no path, so nothing for git to read");
     assert_eq!(
         answer.clone_command.as_deref(),
         Some(format!("git clone {}", repo.url).as_str()),
@@ -344,6 +346,61 @@ async fn an_override_answers_without_a_clones_root() {
         answer.path.as_deref(),
         Some("/Users/mara/work/payout-service")
     );
+}
+
+/// The view carries where the checkout's working tree stands, read by git at
+/// the path the view resolved (#704, ADR-0021) -- here a real repository made
+/// by git, set as the override, on a branch of its own.
+#[tokio::test]
+async fn the_view_says_where_the_working_tree_stands() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let clone = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "-q", "-b", "feature/sepa-retry"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "first",
+        ][..],
+    ] {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(clone.path())
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    fs::write(clone.path().join("draft.txt"), "x").unwrap();
+    set_override(&pool, &repo.id, Some(&clone.path().to_string_lossy()))
+        .await
+        .unwrap();
+
+    let answer = view(&pool, &repo.id).await.unwrap();
+    match answer.tree {
+        Some(TreeRead::Read(state)) => {
+            assert_eq!(state.branch.as_deref(), Some("feature/sepa-retry"));
+            assert_eq!(state.untracked, 1);
+        }
+        other => panic!("expected the working tree read, got {other:?}"),
+    }
+
+    // A path that is no repository is a state the panel says, not a refusal.
+    let empty = tempfile::tempdir().unwrap();
+    set_override(&pool, &repo.id, Some(&empty.path().to_string_lossy()))
+        .await
+        .unwrap();
+    let answer = view(&pool, &repo.id).await.unwrap();
+    assert_eq!(answer.tree, Some(TreeRead::NotARepo));
 }
 
 /// The three refusals, each with the code the panel branches on.

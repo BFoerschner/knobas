@@ -14,7 +14,12 @@
   button whose action has no template on this platform is drawn disabled and
   says *not configured* — it never guesses at a program.
 
-  **Nothing here runs git** (ADR-0016). The clone command is text a person
+  Under the path, one line says where the working tree stands: the branch, and
+  what is changed, conflicted or waiting to be pushed (#704). It is read by
+  read-only git when the panel opens and again when the window regains focus,
+  never on a timer (ADR-0021).
+
+  **Nothing here writes to a repository** (ADR-0016). The clone command is text a person
   copies; knobas issues no clone, no checkout and no fetch, and the button
   beside it says *Copy* rather than *Clone* for that reason. The buttons that
   *do* run something keep the ADR's other half: the program is what a person
@@ -37,8 +42,21 @@
   } from "../ipc/entity";
   import { latestRead } from "../shell/latest-read";
   import { push } from "../shell/toasts.svelte";
+  import { treeLine } from "./working-tree";
 
-  let { entityId }: { entityId: string } = $props();
+  let {
+    entityId,
+    onread,
+  }: {
+    entityId: string;
+    /**
+     * What the panel read, handed to its detail so a branch view can say
+     * whether this checkout is on it (#704) without a second read. `null`
+     * while a new entity's read is in flight. `entityId` is the entity the
+     * read was for, so the detail can tell it from a read about another.
+     */
+    onread?: (entityId: string, checkout: CheckoutView | null) => void;
+  } = $props();
 
   let checkout = $state<CheckoutView | null>(null);
   let editing = $state(false);
@@ -66,13 +84,23 @@
    */
   const read = latestRead<CheckoutView>();
 
-  $effect(() => {
-    const id = entityId;
-    checkout = null;
-    editing = false;
+  /**
+   * Set once the panel is gone. A read still in flight then lands nowhere: the
+   * detail has moved on, and handing it this answer would put an old repo's
+   * working tree under a new branch's title (#704).
+   */
+  let gone = false;
+  $effect(() => () => {
+    gone = true;
+  });
+
+  /** Read the checkout, and with it where its working tree stands (#704). */
+  function load(id: string) {
     void read(() => entityCheckout(id), {
       ok: (answer) => {
+        if (gone) return;
         checkout = answer;
+        onread?.(id, answer);
       },
       fail: () => {
         // Nothing, on purpose, and it is the panel's own read: a repo detail
@@ -81,6 +109,14 @@
         // view renders the reading line and then nothing.
       },
     });
+  }
+
+  $effect(() => {
+    const id = entityId;
+    checkout = null;
+    editing = false;
+    onread?.(id, null);
+    load(id);
   });
 
   /**
@@ -135,6 +171,7 @@
     saving = true;
     try {
       checkout = await setCheckoutOverride(entityId, path);
+      onread?.(entityId, checkout);
       editing = false;
     } catch (rejection) {
       push({ text: `Could not set the checkout path: ${ipcErrorMessage(rejection)}`, tone: "err" });
@@ -160,6 +197,13 @@
     editing = true;
   }
 </script>
+
+<!--
+  The window came back: somebody may have committed, pushed or switched branch
+  in the terminal meanwhile. Read again, drawing over what is shown rather than
+  blanking it; no polling (ADR-0021).
+-->
+<svelte:window onfocus={() => load(entityId)} />
 
 <div class="sec">
   <div class="sec-h">
@@ -192,6 +236,11 @@
     <p class="muted">Reading…</p>
   {:else if checkout.path}
     <p class="cpath">{checkout.path}</p>
+    {#if checkout.tree}
+      {@const line = treeLine(checkout.tree)}
+      <!-- Where the working tree stands, by read-only git (ADR-0021). -->
+      <p class="ctree {line.tone}">{line.text}</p>
+    {/if}
     {#if commands}
       <div class="opens">
         {#each commands as command (command.action)}
@@ -264,6 +313,7 @@
     text follows.
   */
   .cpath,
+  .ctree,
   .ccmd {
     font: 12px/1.6 var(--mono);
     overflow-wrap: anywhere;

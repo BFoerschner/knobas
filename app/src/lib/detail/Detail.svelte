@@ -23,6 +23,7 @@
     type EntityDetail,
     type LinkEntry,
     type SourceView as SourceViewData,
+    type TreeRead,
     type ViewAction,
   } from "../ipc/entity";
   import { pendingWrites, type BuildParameter } from "../ipc/sources";
@@ -34,6 +35,7 @@
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
+  import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
@@ -708,6 +710,13 @@
   const hasCheckout = $derived(shownKind === "repo" || shownKind === "branch");
 
   /**
+   * Where the checkout's working tree stands, as the panel last read it, and
+   * for which entity (#704). Drawn only while that entity is the one shown, so
+   * the previous detail's read never sits under this one's title.
+   */
+  let localTree = $state<{ entityId: string; tree: TreeRead | null } | null>(null);
+
+  /**
    * The granted read (#177), for this ticket's source.
    *
    * Both halves of the select come out of it and nothing else: `sources` is the
@@ -1174,6 +1183,18 @@
             {key}
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
+          {#if shownKind === "branch"}
+            <!--
+              A branch's title is its name: the Gitea adapter maps it so
+              (`map.rs`, pinned by its own test), and it is the only source
+              with branches. A source that titles a branch otherwise needs a
+              declared name to compare here.
+            -->
+            <BranchCheckoutNote
+              tree={localTree?.entityId === detail.row.entity_id ? localTree.tree : null}
+              branch={detail.row.title}
+            />
+          {/if}
           {#if path}
             <div class="d-path">{path}</div>
           {/if}
@@ -1496,7 +1517,10 @@
         and *Open in browser* follow.
       -->
       {#if hasCheckout}
-        <CheckoutPanel entityId={detail.row.entity_id} />
+        <CheckoutPanel
+          entityId={detail.row.entity_id}
+          onread={(entityId, read) => (localTree = { entityId, tree: read?.tree ?? null })}
+        />
       {/if}
 
       <LinksPanel

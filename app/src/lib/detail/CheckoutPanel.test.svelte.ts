@@ -21,7 +21,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { toasts } from "../shell/toasts.svelte";
-import type { CheckoutCommand, CheckoutView } from "../ipc/entity";
+import type { CheckoutCommand, CheckoutView, TreeRead, WorkingTreeState } from "../ipc/entity";
 
 const reads: string[] = [];
 const writes: { entityId: string; path: string | null }[] = [];
@@ -109,6 +109,7 @@ function view(over: Partial<CheckoutView> = {}): CheckoutView {
     found_by: "nothing",
     clones_root: "/Users/mara/src",
     clone_command: `git clone ${URL}`,
+    tree: null,
     ...over,
   };
 }
@@ -116,8 +117,8 @@ function view(over: Partial<CheckoutView> = {}): CheckoutView {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(entityId = REPO) {
-  app = mount(CheckoutPanel, { target, props: { entityId } });
+function render(entityId = REPO, onread?: (entityId: string, checkout: CheckoutView | null) => void) {
+  app = mount(CheckoutPanel, { target, props: onread ? { entityId, onread } : { entityId } });
   flushSync();
   return app;
 }
@@ -399,4 +400,104 @@ test("a second detail re-reads the commands, so a changed template is not stale"
   button("Open in VS Code").click();
   await settle();
   expect(toasts.items.at(-1)?.text).toContain("code {path}");
+});
+
+// -- the working tree (#704, ADR-0021) ---------------------------------------
+
+/** One reading of a working tree, on `knobas-sepa-retry`. */
+function on(over: Partial<WorkingTreeState> = {}): TreeRead {
+  return {
+    status: "read",
+    branch: "knobas-sepa-retry",
+    head: "0123456789abcdef0123456789abcdef01234567",
+    upstream: "origin/knobas-sepa-retry",
+    ahead: 0,
+    behind: 0,
+    changed: 0,
+    untracked: 0,
+    conflicted: 0,
+    ...over,
+  };
+}
+
+function standing(tree: TreeRead): CheckoutView {
+  return view({ path: "/Users/mara/src/payout-service", found_by: "scan", tree });
+}
+
+test("the line under the path says where the working tree stands, in the warn tone for changes", async () => {
+  answer = standing(on({ changed: 3, ahead: 2 }));
+  render();
+  await settle();
+
+  const line = target.querySelector(".ctree");
+  expect(line?.textContent?.trim()).toBe("on knobas-sepa-retry · 3 changed · 2 to push");
+  expect(line?.classList.contains("amber")).toBe(true);
+});
+
+test("a path that is no repository says so under the path", async () => {
+  answer = standing({ status: "not_a_repo" });
+  render();
+  await settle();
+
+  expect(target.querySelector(".ctree")?.textContent?.trim()).toBe("not a git working tree");
+});
+
+test("the window regaining focus reads the checkout again, drawing over what it showed", async () => {
+  answer = standing(on({ changed: 3, ahead: 2 }));
+  render();
+  await settle();
+  expect(reads).toEqual([REPO]);
+
+  answer = standing(on());
+  window.dispatchEvent(new FocusEvent("focus"));
+  // Between the two reads the old line stays: no *Reading…* flash.
+  expect(text()).not.toContain("Reading");
+  await settle();
+
+  expect(reads).toEqual([REPO, REPO]);
+  expect(target.querySelector(".ctree")?.textContent?.trim()).toBe("on knobas-sepa-retry · clean");
+});
+
+test("the panel hands its detail nothing first, then what it read, each named by entity", async () => {
+  const handed: [string, CheckoutView | null][] = [];
+  answer = standing(on());
+  render(REPO, (entityId, checkout) => handed.push([entityId, checkout]));
+  await settle();
+
+  expect(handed).toEqual([
+    [REPO, null],
+    [REPO, answer],
+  ]);
+});
+
+test("a read that lands after the panel is gone is handed to nobody", async () => {
+  const handed: (CheckoutView | null)[] = [];
+  answer = standing(on());
+  render(REPO, (_, checkout) => handed.push(checkout));
+  // The detail moved on before git answered.
+  if (app) unmount(app);
+  app = undefined;
+  await settle();
+
+  expect(handed).toEqual([null]);
+});
+
+test("setting a path hands the detail the working tree the new path stands on", async () => {
+  const handed: (CheckoutView | null)[] = [];
+  answer = view();
+  afterWrite = standing(on({ changed: 1 }));
+  render(REPO, (_, checkout) => handed.push(checkout));
+  await settle();
+
+  button("Set path…").click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input");
+  if (!input) throw new Error("no path input");
+  input.value = "/Users/mara/src/payout-service";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+
+  expect(handed.at(-1)).toEqual(afterWrite);
 });

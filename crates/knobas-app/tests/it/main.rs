@@ -40,4 +40,5 @@ mod time_ipc;
 mod url_resolve;
 mod week_ipc;
 mod wiring;
+mod working_tree;
 mod worklog_ipc;

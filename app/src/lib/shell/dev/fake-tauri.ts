@@ -2569,6 +2569,23 @@ function fakeCheckout(entityId: string) {
     found_by: override !== undefined ? "override" : path !== null ? "scan" : "nothing",
     clones_root: fakeClonesRoot,
     clone_command: url === null ? null : `git clone ${url}`,
+    // The fixture has no git either (#704): a checkout stands on `main` with
+    // one change and one commit to push, so the panel's line has something to
+    // say and the warn tone shows.
+    tree:
+      path === null
+        ? null
+        : {
+            status: "read",
+            branch: "main",
+            head: "4f1c2a9e0b7d3c5a8e6f1b2d4c7a9e0f3b5d8c1a",
+            upstream: "origin/main",
+            ahead: 1,
+            behind: 0,
+            changed: 1,
+            untracked: 0,
+            conflicted: 0,
+          },
   };
 }
 

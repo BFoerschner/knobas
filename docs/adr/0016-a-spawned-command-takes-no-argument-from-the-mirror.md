@@ -1,12 +1,12 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0021
 ---
 
 # A spawned command takes no argument from the mirror
 
 *Open in editor* and *open a terminal at the checkout* (spec §5, §11; v1.5) are the first features that run a program on the user's machine. The obvious way to open VS Code is a `vscode://` URL through the opener plugin knobas already ships, and the obvious source for a path is the repo entity. Both are wrong for the same reason: the opener's capability is scoped to `http` and `https` on purpose — its own description says a `file://` or `vscode://` reaching the OS opener "would be a remote-code path that starts in somebody's backlog" — and a repo entity is a mirrored item, so every field on it was written by a remote system.
 
-Decided 2026-09-07 (Björn, v1.5 grilling session): **a program knobas spawns is built from a command template the user set in settings, and its arguments come only from what knobas found on the local disk or was told by hand — a [checkout](../../CONTEXT.md) under the clones root, or a path the user typed — never from a mirrored item.** The opener stays scoped to web URLs. The same rule covers the Docker importer (ADR-0015): the context name it passes to the docker CLI is an asset property a person typed, not a value the mirror holds. Nothing knobas spawns writes to a working tree: no clone, no checkout, no fetch; a repo with no checkout shows the clone command to copy.
+Decided 2026-09-07 (Björn, v1.5 grilling session): **a program knobas spawns is built from a command template the user set in settings, and its arguments come only from what knobas found on the local disk or was told by hand — a [checkout](../../CONTEXT.md) under the clones root, or a path the user typed — never from a mirrored item.** The opener stays scoped to web URLs. The same rule covers the Docker importer (ADR-0015): the context name it passes to the docker CLI is an asset property a person typed, not a value the mirror holds. Nothing knobas spawns writes to a working tree: no clone, no checkout, no fetch; a repo with no checkout shows the clone command to copy. (*Amended 2026-10-13 by [ADR-0021](0021-knobas-reads-a-checkouts-state-with-read-only-git.md):* knobas may run read-only `git status` at a checkout path to say where the working tree stands. The argument rule above is unchanged.)
 
 ## Considered options
 

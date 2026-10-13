@@ -22,16 +22,17 @@
 //! 3. **Nothing**, which is not a failure: the repo detail then shows *no
 //!    checkout* and the clone command to copy.
 //!
-//! # Nothing here runs git, and nothing it runs comes from the mirror (ADR-0016)
+//! # Nothing here writes to a repository, and nothing it runs comes from the mirror (ADR-0016)
 //!
 //! No clone, no checkout, no fetch. `clone_command` produces a **string a
 //! person copies**; it is never spawned, and nothing here writes to a working
-//! tree. [`open`] does start a process -- that is the whole of #501 -- and the
-//! rule it keeps is the other half of the ADR: the *program* is a template a
-//! person set in settings, and the only value substituted into it is the
-//! checkout [`view`] resolved off this disk. No field of the mirrored repo
-//! reaches it, which the one-`&Path` signature of
-//! `knobas_core::checkout::expand` is what enforces.
+//! tree. The one git command knobas runs is [`working_tree`]'s read-only
+//! `status` at the checkout path (ADR-0021, #704). [`open`] does start a
+//! process -- that is the whole of #501 -- and the rule it keeps is the other
+//! half of the ADR: the *program* is a template a person set in settings, and
+//! the only value substituted into it is the checkout [`view`] resolved off
+//! this disk. No field of the mirrored repo reaches it, which the
+//! one-`&Path` signature of `knobas_core::checkout::expand` is what enforces.
 
 use std::path::{Path, PathBuf};
 
@@ -43,6 +44,10 @@ use knobas_core::checkout::OpenAction;
 use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
+
+pub mod working_tree;
+
+use working_tree::TreeRead;
 
 // The `knobas.setting` reader, writer and blank rule live in `crate::settings`
 // since #503, which put a second feature's string in the same table. They were
@@ -104,6 +109,10 @@ pub struct CheckoutView {
     /// `git clone <the repo's URL>` -- **text to copy, never run** (ADR-0016).
     /// `None` exactly when [`repo_url`](Self::repo_url) is.
     pub clone_command: Option<String>,
+    /// Where the working tree at [`path`](Self::path) stands, read by
+    /// read-only git when the view is asked for (ADR-0021). `None` exactly
+    /// when there is no path.
+    pub tree: Option<TreeRead>,
 }
 
 /// The clones root, or nothing.
@@ -182,6 +191,18 @@ pub async fn set_override(
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold it;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
+    let mut checkout = resolve(pool, entity_id).await?;
+    if let Some(path) = checkout.path.as_deref() {
+        checkout.tree = Some(working_tree::read(Path::new(path)).await);
+    }
+    Ok(checkout)
+}
+
+/// [`view`] without the working tree read: where the checkout is, and no git.
+///
+/// What [`open`] asks, because an editor needs the path and not two seconds of
+/// `git status` on a large tree before it starts.
+async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
     let repo = repo_of(pool, entity_id).await?;
     let root = clones_root(pool).await?;
 
@@ -212,6 +233,7 @@ pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcErr
         path,
         found_by,
         clones_root: root,
+        tree: None,
     })
 }
 
@@ -466,7 +488,7 @@ pub async fn set_command(
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn open(pool: &PgPool, entity_id: &str, action: &str) -> Result<(), IpcError> {
     let action = open_action(action)?;
-    let checkout = view(pool, entity_id).await?;
+    let checkout = resolve(pool, entity_id).await?;
     let path = checkout.path.ok_or_else(|| {
         IpcError::not_found(format!(
             "{entity_id} has no checkout on this machine, so there is nothing to open"
@@ -750,6 +772,7 @@ mod tests {
             found_by: FoundBy::Nothing,
             clones_root: None,
             clone_command: None,
+            tree: None,
         };
         let json = serde_json::to_value(&view).unwrap();
         let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
@@ -762,7 +785,8 @@ mod tests {
                 "found_by",
                 "path",
                 "repo_entity_id",
-                "repo_url"
+                "repo_url",
+                "tree"
             ]
         );
         let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
