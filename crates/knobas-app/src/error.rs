@@ -108,6 +108,7 @@ impl std::error::Error for IpcError {}
 
 impl From<sqlx::Error> for IpcError {
     fn from(error: sqlx::Error) -> Self {
+        crate::logging::note_pool_timeout(&error);
         Self::internal(error)
     }
 }
@@ -124,7 +125,10 @@ impl From<knobas_core::CoreError> for IpcError {
             // link id nothing carries: the entity has not synced yet, which is
             // a normal event and not knobas being broken.
             | knobas_core::CoreError::EndpointMissing => Self::not_found(error),
-            knobas_core::CoreError::Db(_) => Self::internal(error),
+            knobas_core::CoreError::Db(ref db) => {
+                crate::logging::note_pool_timeout(db);
+                Self::internal(error)
+            }
         }
     }
 }

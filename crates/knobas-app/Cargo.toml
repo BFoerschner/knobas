@@ -58,7 +58,9 @@ serde_json.workspace = true
 # The `PgPool` in `AppState`, plus demo mode's two `source_config` statements.
 sqlx.workspace = true
 thiserror.workspace = true
-tauri = { version = "2", features = [] }
+# `tracing` makes Tauri wrap every command in the spans `logging::CommandLog`
+# times (#747); it adds no IPC and no permission.
+tauri = { version = "2", features = ["tracing"] }
 # The nightly backup task: `sleep` for its tick and `select!` for its
 # cancellation. Everything else in this crate runs on Tauri's runtime without
 # naming it; a loop that has to be stoppable cannot. `process` is the working
@@ -105,7 +107,8 @@ tracing = "0.1"
 # Without a subscriber every `tracing` line the database layer emits -- which
 # port the server came up on, whether it reused an existing data directory --
 # is dropped on the floor, and `tauri dev` is exactly when those are wanted.
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
+
 # `unlink` takes its link id as a string off the wire and parses it, so a
 # mistyped one is `invalid` rather than an argument Tauri refuses to decode at
 # all -- the same treatment `get_entity` gives a malformed entity id.

@@ -1257,3 +1257,42 @@ async fn unlinking_announces_its_line_and_an_already_withdrawn_link_announces_no
     .unwrap();
     assert_eq!(lines_written, 1, "the second unlink wrote a second line");
 }
+
+/// #747: Tauri's own command spans reach the log, so a slow command is found
+/// by name without any command naming itself. The threshold is zero, so the
+/// real `app_status` (an async command) counts as slow. The subscriber is the
+/// global one: the mock runtime runs the handler on a thread of its own, and no
+/// other test in this binary installs one.
+#[test]
+fn a_command_through_the_real_pipeline_is_timed_by_name() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let sink = knobas_app::logging::Sink::new();
+    sink.attach(dir.path(), knobas_app::logging::MAX_BYTES, 2)
+        .expect("attach");
+    let subscriber =
+        knobas_app::logging::subscriber(&sink, false, "info", std::time::Duration::ZERO);
+    tracing::subscriber::set_global_default(subscriber).expect("the only global subscriber");
+    {
+        let lifecycle = knobas_app::Lifecycle::new();
+        let _ = invoke_managing("app_status", serde_json::json!({}), move |app| {
+            app.manage(lifecycle);
+            app.manage(knobas_app::Profile::from_args(
+                Vec::<String>::new(),
+                std::path::Path::new("/tmp/knobas-test"),
+            ));
+        });
+    }
+    let live = dir.path().join("knobas.log");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    loop {
+        let log = std::fs::read_to_string(&live).unwrap_or_default();
+        if log.contains("slow ipc command") && log.contains("app_status") {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "no slow line: {log:?}"
+        );
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}

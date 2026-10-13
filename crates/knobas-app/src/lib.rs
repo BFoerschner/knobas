@@ -31,6 +31,7 @@ pub mod checkout;
 pub mod commands;
 mod error;
 pub mod inbox;
+pub mod logging;
 pub mod notify;
 mod profile;
 pub mod protocol;
@@ -150,7 +151,7 @@ impl AppState {
 /// Panics if the Tauri context is invalid or the database cannot be started --
 /// neither leaves a usable window to report the failure in.
 pub fn run() {
-    init_tracing();
+    let log_sink = logging::init();
     install_panic_hook();
 
     let builder = tauri::Builder::default();
@@ -199,7 +200,7 @@ pub fn run() {
                 })
                 .build(),
         )
-        .setup(|app| {
+        .setup(move |app| {
             // Both managed synchronously, before anything can call in, and
             // both for the same reason: they are what a command asks when the
             // database is *not* up yet. `Lifecycle` is the shared state's
@@ -207,6 +208,7 @@ pub fn run() {
             // rather than after bring-up is what makes `not_ready` reachable
             // instead of Tauri's bare "state not managed".
             let handle = app.handle().clone();
+            start_file_log(&handle, &log_sink);
             let profile = Profile::from_args(std::env::args(), &handle.path().app_data_dir()?);
             tracing::info!(demo = profile.demo, dir = %profile.dir.display(), "profile");
             handle.manage(profile);
@@ -618,22 +620,26 @@ fn shutdown_database(app: &tauri::AppHandle) {
     }
 }
 
-/// Send `tracing` output to stderr, at `info` unless `RUST_LOG` says otherwise.
+/// Start writing the log file (#747) and say what is running.
 ///
-/// Without this the database layer's diagnostics -- which port came up, whether
-/// an existing data directory was reused -- are discarded, and `tauri dev` is
-/// exactly when they are wanted.
-fn init_tracing() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        // Explicit, and not the `fmt()` default of stdout: diagnostics are not
-        // this program's output, and anything piping knobas' stdout should get
-        // nothing but what knobas means to say.
-        .with_writer(std::io::stderr)
-        .init();
+/// A directory that cannot be opened leaves stderr logging as it was.
+fn start_file_log(handle: &tauri::AppHandle, sink: &logging::Sink) {
+    match handle.path().app_log_dir() {
+        Ok(dir) => match sink.attach(&dir, logging::MAX_BYTES, logging::KEEP_FILES) {
+            Ok(()) => tracing::info!(
+                version = env!("CARGO_PKG_VERSION"),
+                build = if cfg!(debug_assertions) { "debug" } else { "release" },
+                os = std::env::consts::OS,
+                log_dir = %dir.display(),
+                data_dir = ?handle.path().app_data_dir().ok(),
+                "knobas starting"
+            ),
+            Err(error) => {
+                tracing::error!(%error, dir = %dir.display(), "the log file could not be opened")
+            }
+        },
+        Err(error) => tracing::error!(%error, "no log directory on this platform"),
+    }
 }
 
 /// Route panics through `tracing` as well as the default handler.

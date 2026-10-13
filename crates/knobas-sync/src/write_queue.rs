@@ -700,6 +700,17 @@ async fn announce_with(
     write: &QueuedWrite,
     remote_id: Option<&str>,
 ) {
+    // The log line for every state change a write makes (sent, refused, held,
+    // ...): the one place all of them pass, and before the parse below so an
+    // id nothing can parse is still on disk. #747.
+    tracing::info!(
+        write_id = write.id,
+        source_id = %write.source_id,
+        op = %write.op,
+        verb,
+        detail = write.detail.as_deref().unwrap_or(""),
+        "write queue"
+    );
     let entity = match EntityRef::parse(&write.entity_id) {
         Ok(entity) => entity,
         Err(_) => return,

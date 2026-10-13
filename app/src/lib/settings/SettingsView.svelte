@@ -29,6 +29,7 @@
   import BackupSection from "./BackupSection.svelte";
   import CaptureSection from "./CaptureSection.svelte";
   import CheckoutsSection from "./CheckoutsSection.svelte";
+  import LogsSection from "./LogsSection.svelte";
   import MonitoringSection from "./MonitoringSection.svelte";
   import NotificationsSection from "./NotificationsSection.svelte";
   import PassiveSection from "./PassiveSection.svelte";
@@ -48,5 +49,6 @@
     <PassiveSection />
     <NotificationsSection />
     <StandupSection />
+    <LogsSection />
   </div>
 </div>
