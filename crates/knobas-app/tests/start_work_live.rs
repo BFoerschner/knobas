@@ -606,6 +606,23 @@ impl Drop for Litter {
 /// assertion at the end of the round trip would be asserting an empty list is
 /// empty. A real source has it filled in from *Test connection* at add time.
 async fn app(env: &Env, jira_url: &str, account: &str) -> SourcesState {
+    app_timed(
+        env,
+        jira_url,
+        account,
+        knobas_sync::scheduler::SchedulerTiming::default(),
+    )
+    .await
+}
+
+/// [`app`] with the scheduler's clock chosen by the caller: a test that must
+/// know **what** delivered a write holds the tick off.
+async fn app_timed(
+    env: &Env,
+    jira_url: &str,
+    account: &str,
+    timing: knobas_sync::scheduler::SchedulerTiming,
+) -> SourcesState {
     let connector = knobas_db::test_util::scratch_database("start_work_live").await;
     let pool = connector
         .pool(4)
@@ -658,7 +675,7 @@ async fn app(env: &Env, jira_url: &str, account: &str) -> SourcesState {
         registry: Arc::new(Registry::builtin()),
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
-        timing: knobas_sync::scheduler::SchedulerTiming::default(),
+        timing,
     })
     .await
     .expect("a scheduler over the scratch database");
@@ -1453,5 +1470,220 @@ async fn a_write_answers_on_queue_and_lands_behind_the_reader() {
     eprintln!(
         "#752 Submit -> dialog closed: Comment {comment_before:?} before, {comment_after:?} after; \
          Merge {merge_before:?} before, {merge_after:?} after"
+    );
+}
+
+// -- append-only writes hold only on a declared state change (#758) ----------
+
+/// Open a pull request of the test's own, from a fresh head into a fresh
+/// scratch base (never the default branch, #373), and hand back the guard that
+/// takes both branches and the pull request back, plus the entity id.
+async fn scratch_pull(env: &Env, name: &str) -> (Litter, String) {
+    let pid = std::process::id();
+    let base = format!("{LITTER}i758-{pid}-{name}-base");
+    let head = format!("{LITTER}i758-{pid}-{name}-head");
+    let litter = Litter::new(env, head.clone(), base.clone()).await;
+    let repo = env.full_name();
+    env.api(
+        reqwest::Method::POST,
+        &format!("/repos/{repo}/branches"),
+        Some(json!({ "new_branch_name": base, "old_branch_name": litter.default_branch })),
+    )
+    .await;
+    env.api(
+        reqwest::Method::POST,
+        &format!("/repos/{repo}/branches"),
+        Some(json!({ "new_branch_name": head, "old_branch_name": base })),
+    )
+    .await;
+    env.api(
+        reqwest::Method::POST,
+        &format!("/repos/{repo}/contents/{head}.txt"),
+        Some(json!({ "branch": head, "content": "aTQ0Cg==", "message": format!("{head}: the work") })),
+    )
+    .await;
+    let opened = env
+        .api(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/pulls"),
+            Some(json!({ "head": head, "base": base, "title": format!("knobas i758 {name}") })),
+        )
+        .await;
+    let number = opened["number"]
+        .as_u64()
+        .unwrap_or_else(|| panic!("Gitea opened no pull request from {head}: {opened}"));
+    litter.opened(number);
+    (litter, format!("{GITEA}:{repo}#{number}"))
+}
+
+/// The tick held off for the whole test: it flushes the queue too, and a send
+/// the tick made would witness nothing about `submit_in_background`'s flush.
+fn tick_held_off() -> knobas_sync::scheduler::SchedulerTiming {
+    knobas_sync::scheduler::SchedulerTiming {
+        startup_delay: std::time::Duration::from_secs(3600),
+        tick: std::time::Duration::from_secs(3600),
+    }
+}
+
+fn comment_on(entity: &str, body: &str) -> serde_json::Value {
+    json!({ "Comment": { "entity": entity, "body": body } })
+}
+
+/// **Two comments queued back to back on one pull request both reach Gitea,
+/// in order, unheld** (issue #758; the live half of #757's fake-adapter test),
+/// and **a merge between two comments holds the second** -- the one state
+/// change an append-only write still holds on.
+///
+/// Both halves run through the real queue (`submit_in_background`), the real
+/// Gitea adapter and the real mirror, on pull requests this test opens itself.
+/// The tick is held off, so whatever delivers is the background flush.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_the_second() {
+    use knobas_core::write_queue::WriteState;
+
+    let env = env();
+    let account = env.account().await;
+    let state = app_timed(&env, "http://127.0.0.1:9", &account, tick_held_off()).await;
+    let pid = std::process::id();
+
+    let (_litter_a, back_to_back) = scratch_pull(&env, "a").await;
+    let (_litter_b, merged_between) = scratch_pull(&env, "b").await;
+    sync(&state, GITEA).await;
+
+    // -- Back to back, no wait between the two submits ----------------------
+    let (first_words, second_words) = (
+        format!("first of two, back to back, {pid}"),
+        format!("second of two, back to back, {pid}"),
+    );
+    let first = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        comment_on(&back_to_back, &first_words),
+    )
+    .await
+    .expect("the first comment is queued");
+    let second = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        comment_on(&back_to_back, &second_words),
+    )
+    .await
+    .expect("the second comment is queued");
+    let (first_row, second_row) = (
+        settled(&state, first.id).await,
+        settled(&state, second.id).await,
+    );
+    // The re-sync the first landing set off, finished: a hold on its echo
+    // would be on the second write already, but the view below is read after.
+    sync(&state, GITEA).await;
+    assert_eq!(first_row.state, WriteState::Sent, "{first_row:?}");
+    assert_eq!(
+        second_row.state,
+        WriteState::Sent,
+        "the second comment was not sent: {second_row:?}"
+    );
+    let view = view_text(&state, &back_to_back).await;
+    let (at_first, at_second) = (view.find(&first_words), view.find(&second_words));
+    assert!(
+        at_first.is_some() && at_second.is_some(),
+        "both comments are in the pull request's Conversation at Gitea: {view}"
+    );
+    assert!(
+        at_first < at_second,
+        "the comments arrived out of order: {at_first:?} then {at_second:?}"
+    );
+
+    // -- A merge between the queueing and the send holds the second --------
+    // The first lands; the second is queued against an open pull request
+    // (and not flushed: `queue` is the row alone); then the pull request is
+    // merged at Gitea and the mirror catches up. Its flush must hold.
+    let landed_words = format!("lands before the merge, {pid}");
+    let landed = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        comment_on(&merged_between, &landed_words),
+    )
+    .await
+    .expect("the comment is queued");
+    assert_eq!(
+        settled(&state, landed.id).await.state,
+        WriteState::Sent,
+        "the comment before the merge is sent"
+    );
+    sync(&state, GITEA).await;
+    let held_words = format!("queued before the merge, sent after it, {pid}");
+    let held_op: knobas_source::WriteOp =
+        serde_json::from_value(comment_on(&merged_between, &held_words)).expect("a write op");
+    let held = knobas_sync::write_queue::queue(state.scheduler.deps(), GITEA, held_op)
+        .await
+        .expect("the second comment is queued");
+    assert_eq!(held.state, WriteState::Pending);
+
+    let number: u64 = merged_between
+        .rsplit('#')
+        .next()
+        .and_then(|n| n.parse().ok())
+        .expect("a pull request number");
+    // A second's pause first. Gitea stamps `updated_at` to the second and the
+    // adapter's incremental run keeps a pull request it already read at the
+    // watermark second out of the next read; a merge landing in that same
+    // second is not mirrored by any later incremental run (measured: the
+    // mirror still said "open" after five seconds of re-syncs, 3 runs in 4).
+    // That is the sync's to witness, not this test's -- filed on the PR.
+    tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
+    // Gitea computes mergeability on its own time, and a loaded machine can
+    // outlast one call's five seconds: a few calls, and then say so if the
+    // pull request is still open, rather than blame the mirror for it.
+    let mut merged_at_gitea = false;
+    for _ in 0..4 {
+        merge_when_ready(&env, number).await;
+        merged_at_gitea = env
+            .pulls()
+            .await
+            .iter()
+            .any(|(n, _, merged)| *n == number && *merged);
+        if merged_at_gitea {
+            break;
+        }
+    }
+    assert!(merged_at_gitea, "Gitea never merged #{number}");
+    // `trigger` joins a run already in flight, and the refresh the first
+    // comment's landing set off may still be one that began before the merge:
+    // so re-sync until the mirror itself says merged, rather than trust one.
+    let mut mirrored = String::new();
+    for _ in 0..20 {
+        sync(&state, GITEA).await;
+        mirrored = knobas_app::commands::entity::get_entity_inner(&state.pool, &merged_between)
+            .await
+            .map(|entity| {
+                entity
+                    .row
+                    .state
+                    .map(|chip| chip.text.to_string())
+                    .unwrap_or_default()
+            })
+            .unwrap_or_default();
+        if mirrored == "merged" {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    assert_eq!(
+        mirrored, "merged",
+        "the mirror never caught up with the merge"
+    );
+    knobas_sync::write_queue::flush_source(state.scheduler.deps(), GITEA)
+        .await
+        .expect("the flush runs");
+
+    let row = settled(&state, held.id).await;
+    assert_eq!(
+        row.state,
+        WriteState::Held,
+        "a comment queued before the pull request was merged goes out anyway: {row:?}"
+    );
+    let view = view_text(&state, &merged_between).await;
+    assert!(view.contains(&landed_words), "the first comment is there");
+    assert!(
+        !view.contains(&held_words),
+        "the held comment reached Gitea: {view}"
     );
 }
