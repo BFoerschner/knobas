@@ -11562,6 +11562,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   command, no migration, no module, no frontend code beyond the type.
 
   Pinned by: `tests/it/entity.rs`'s `a_repos_default_branch_is_drawn_in_no_group`,
+  `an_ungrouped_room_draws_no_default_branch_either`,
   `a_fork_pull_request_does_not_propose_the_base_repos_branch` and
   `my_pull_request_asking_me_is_drawn_once_as_review_requested` (with #712's three, whose
   fixtures now declare `head.repo`); `sources_mirror.rs`'s `KindPaths` keys; `knobas-source-gitea`'s

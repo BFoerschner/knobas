@@ -51,10 +51,11 @@ fn non_blank(value: Option<&str>) -> Option<String> {
 /// object and not a bare `owner/name`, because a parent is an object or a
 /// chain of them (contract battery clause 6).
 ///
-/// With the repository's `default_branch`, also a key `base.repo` carries,
-/// where its record names one (#718): Gitea's branch record does not say
-/// whether it is the default, and the Code tile must know, so the
-/// descriptor declares a branch's `default_branch` here.
+/// The object also carries the repository's `default_branch` when the
+/// repository record names one (#718), a key `base.repo` carries too.
+/// Gitea's branch record does not say whether it is the default, and the
+/// Code tile must know, so the descriptor declares a branch's
+/// `default_branch` here.
 fn repository(at: RepoRef<'_>) -> Value {
     let mut repository = serde_json::json!({ "full_name": at.full_name, "name": at.name });
     if let Some(default_branch) = at.default_branch {

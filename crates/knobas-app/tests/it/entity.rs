@@ -1616,7 +1616,7 @@ async fn code_room(
             "requested_reviewers": asked.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
         })
     };
-    let unbased = |mut payload: serde_json::Value| {
+    let headless = |mut payload: serde_json::Value| {
         payload.as_object_mut().unwrap().remove("base");
         payload["head"].as_object_mut().unwrap().remove("repo");
         payload
@@ -1631,9 +1631,10 @@ async fn code_room(
         // Mine, merged; and others' asking me, closed: neither is drawn.
         (4, "björn", pr("closed", true, "björn/old", &[]), 2),
         (5, "ana", pr("closed", false, "ana/gone", &["björn"]), 3),
-        // Others', open from a `björn/sepa` whose repo misses too: two
-        // misses are not one repo, so it proposes no branch.
-        (6, "ana", unbased(pr("open", false, "björn/sepa", &[])), 30),
+        // Others', open from a `björn/sepa` whose head repo misses (as a
+        // deleted fork's does), with no base either: two misses are not one
+        // repo, so it proposes no branch.
+        (6, "ana", headless(pr("open", false, "björn/sepa", &[])), 30),
     ] {
         let key = format!("tidewater/payout-service#{n}");
         mirrored(&pool, &gitea, "pr", &key, payload).await;
@@ -2000,7 +2001,8 @@ async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_app::commands::
 /// (#718): when I made its last commit it is not drawn under my branches,
 /// and in a source with no identity not under its branches either. It is in
 /// no group, and the tile draws it nowhere (the repo view still reaches it).
-/// A branch named like another repo's default is still mine.
+/// A branch named like another repo's default is still mine, and so is one
+/// whose repo declares no default.
 #[tokio::test]
 async fn a_repos_default_branch_is_drawn_in_no_group() {
     use knobas_app::commands::entity::{AttentionGroup, GroupTally};
@@ -2069,10 +2071,14 @@ async fn a_repos_default_branch_is_drawn_in_no_group() {
         50,
     )
     .await;
+    // A repo whose default misses: its `main` is drawn as any branch of
+    // mine (ADR-0007), never guessed to be the default.
+    let unknown_main =
+        code_branch(&pool, &mine, "tidewater/unknown", None, "main", "björn", 35).await;
 
     let page = code_page(&pool, &[&mine, &anon]).await;
     let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
-    assert_eq!(ids, [my_spike, ledger_main, anon_wip]);
+    assert_eq!(ids, [my_spike, ledger_main, unknown_main, anon_wip]);
     for default in [&my_main, &ledger_trunk, &anon_main] {
         assert!(
             !ids.contains(default),
@@ -2083,12 +2089,30 @@ async fn a_repos_default_branch_is_drawn_in_no_group() {
     assert_eq!(
         page.groups,
         Some(vec![
-            group(AttentionGroup::MyBranches, 2),
+            group(AttentionGroup::MyBranches, 3),
             group(AttentionGroup::Branches, 1),
         ]),
         "no group counts a default branch"
     );
-    assert_eq!(page.total, 3);
+    assert_eq!(page.total, 4);
+}
+
+/// A room nobody is "me" in is not grouped (#712), and still draws no
+/// repo's default branch (#718): what keeps it out is that it never wants a
+/// pull request, not whose it is.
+#[tokio::test]
+async fn an_ungrouped_room_draws_no_default_branch_either() {
+    let pool = seeded().await;
+    let anon = configured_as(&pool, None).await;
+    let repo = "tidewater/payout-service";
+    let main = code_branch(&pool, &anon, repo, Some("main"), "main", "björn", 5).await;
+    let wip = code_branch(&pool, &anon, repo, Some("main"), "ana/wip", "ana", 10).await;
+
+    let page = code_page(&pool, &[&anon]).await;
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    assert_eq!(ids, [wip], "{main} is the repo's default");
+    assert_eq!(page.groups, None, "nobody to group for");
+    assert_eq!(page.total, 1);
 }
 
 /// A fork's pull request is opened from a branch of the **fork** (#718), so

@@ -551,6 +551,7 @@ knobas-app	test/it	entity::activity_can_be_scoped_to_one_entity
 knobas-app	test/it	entity::an_empty_filter_list_means_unfiltered_not_empty
 knobas-app	test/it	entity::an_entity_cannot_be_linked_to_itself
 knobas-app	test/it	entity::an_entity_whose_source_was_never_configured_is_still_readable
+knobas-app	test/it	entity::an_ungrouped_room_draws_no_default_branch_either
 knobas-app	test/it	entity::an_unknown_id_is_not_found_not_internal
 knobas-app	test/it	entity::deleting_a_note_over_the_seam_is_idempotent_and_a_stale_editor_is_told
 knobas-app	test/it	entity::deleting_a_note_writes_one_deleted_line_on_the_address_that_survives
