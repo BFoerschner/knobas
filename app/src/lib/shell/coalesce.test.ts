@@ -24,11 +24,11 @@ test("ten events during a read make one more read, after it", async () => {
   for (let n = 0; n < 10; n++) void reread();
   expect(gates, "one read in flight").toHaveLength(1);
 
-  gates[0].open();
+  gates[0]!.open();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(gates, "one trailing read, for everything that arrived").toHaveLength(2);
 
-  gates[1].open();
+  gates[1]!.open();
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(gates).toHaveLength(2);
 
