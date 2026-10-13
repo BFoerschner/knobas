@@ -31,6 +31,7 @@ mod estate_exit;
 mod inbox_ipc;
 mod ipc;
 mod protocol_ipc;
+mod responsiveness_probe;
 mod search_ipc;
 mod sources_crud;
 mod sources_mirror;
