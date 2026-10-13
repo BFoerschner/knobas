@@ -2644,7 +2644,11 @@ async fn repositories_gitea_refuses_pull_requests_for_do_not_end_a_full_sync() {
 /// Gitea computes `mergeable` in the background and answers `false` (and a
 /// merge *"Please try again later"*) until it has. The adapter offers the
 /// action only on `true`, so the test waits for the offer rather than for a
-/// clock -- which is also the assertion that the offer appears.
+/// clock -- which is also the assertion that the offer appears. A `true` is
+/// not the end of it: the check of the head's push can still start after it
+/// and refuse the merge for a second or two (#721, which this test failed on
+/// twice), and the adapter's merge waits that out itself
+/// ([`a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten`]).
 #[tokio::test]
 #[ignore = "needs testenv's seeded Gitea container"]
 async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_reads_it_merged() {
@@ -2854,6 +2858,238 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         "the merge reached the default branch, which no cleanup takes back"
     );
     println!("merged #{number} ({head} into {base}) from its view; the next sync read it merged");
+}
+
+/// Issue #721, against the real server: a pull request merged **the moment
+/// it is opened** -- no view read, no wait -- lands, ten times in ten. Gitea
+/// answers such a merge 405 *"Please try again later"* while it is still
+/// checking the pull request (measured before the fix: 3 of 5), and the
+/// adapter's merge waits that out with backoff rather than failing the write.
+///
+/// Spends what [`a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_reads_it_merged`]
+/// spends, ten times: each round merges into a scratch base of its own, and
+/// [`Litter`] removes every branch and pull request whether the test passes
+/// or panics. `main` does not move.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten() {
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    for round in 1..=10 {
+        let base = format!("knobas-merge-now-{stamp}-{round}-base");
+        let head = format!("knobas-merge-now-{stamp}-{round}");
+        litter.branch_off_main(&base).await;
+        litter.branch_off_main(&head).await;
+        push_file(
+            &http,
+            &env,
+            &head,
+            &format!("{head}.txt"),
+            &format!("{head}: the work"),
+        )
+        .await;
+        let opened = http
+            .post(format!("{api}/pulls"))
+            .header("Authorization", &auth)
+            .json(&serde_json::json!({
+                "head": head, "base": base,
+                "title": format!("knobas merge-at-once check {stamp} #{round}"),
+                "body": "Opened by the knobas Gitea adapter's live suite, merged at once (#721)."
+            }))
+            .send()
+            .await
+            .expect("open the pull request");
+        assert!(opened.status().is_success(), "round {round}: open");
+        let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+            .as_u64()
+            .expect("Gitea answers with the new pull request's number");
+
+        let started = std::time::Instant::now();
+        source
+            .write(knobas_source::WriteOp::MergePullRequest {
+                entity: format!("gitea:{}#{number}", env.full_name()),
+                style: knobas_source::MergeStyle::Merge,
+                delete_branch: false,
+            })
+            .await
+            .unwrap_or_else(|e| panic!("round {round}: the merge did not land: {e:?}"));
+        let took = started.elapsed();
+        let record: serde_json::Value = http
+            .get(format!("{api}/pulls/{number}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read the pull request back")
+            .json()
+            .await
+            .expect("a pull request record");
+        assert_eq!(record["merged"], true, "round {round}: {record}");
+        println!("LIVE round {round}/10: #{number} merged at once, the write took {took:?}");
+    }
+}
+
+/// Issue #721's scope addition, against the real server: a base whose
+/// protection requires a status check keeps *Merge…* disabled, saying what
+/// the check is doing, until the head commit reports it passed -- and Gitea
+/// agrees, refusing the merge until then with a 405 that the adapter does
+/// **not** wait out (it is not *"Please try again later"*).
+///
+/// The protection rule is named for the scratch base branch, so [`Litter`]
+/// removes it with the branch (a protected branch cannot be deleted).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_required_status_check_holds_the_merge_until_it_passes() {
+    use knobas_source::view::SourceView;
+
+    const CHECK: &str = "knobas/live-check";
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    let base = format!("knobas-checks-{stamp}-base");
+    let head = format!("knobas-checks-{stamp}");
+    litter.branch_off_main(&base).await;
+    litter.branch_off_main(&head).await;
+    let sha = push_file(
+        &http,
+        &env,
+        &head,
+        &format!("{head}.txt"),
+        &format!("{head}: the work"),
+    )
+    .await;
+    let protected = http
+        .post(format!("{api}/branch_protections"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "rule_name": base,
+            "enable_status_check": true,
+            "status_check_contexts": [CHECK],
+        }))
+        .send()
+        .await
+        .expect("protect the base");
+    assert!(
+        protected.status().is_success(),
+        "protection: {}",
+        protected.text().await.unwrap_or_default()
+    );
+    let opened = http
+        .post(format!("{api}/pulls"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "head": head, "base": base,
+            "title": format!("knobas required-check check {stamp}"),
+            "body": "Opened by the knobas Gitea adapter's live suite (#721)."
+        }))
+        .send()
+        .await
+        .expect("open the pull request");
+    assert!(opened.status().is_success(), "open");
+    let number = opened.json::<serde_json::Value>().await.unwrap()["number"]
+        .as_u64()
+        .expect("Gitea answers with the new pull request's number");
+    let id = format!("gitea:{}#{number}", env.full_name());
+
+    let merge_reason = |view: &SourceView| {
+        view.actions
+            .iter()
+            .find(|a| a.write_op == "merge_pull_request")
+            .expect("an open pull request offers Merge…")
+            .disabled
+            .clone()
+    };
+    // What *Merge…* says once Gitea's own mergeability check has settled.
+    let settled = |want: Option<String>| {
+        let source = &source;
+        let id = &id;
+        async move {
+            let mut said = None;
+            for _ in 0..40 {
+                let view = source.view(id, None).await.unwrap().unwrap();
+                said = merge_reason(&view);
+                if said == want {
+                    return said;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            said
+        }
+    };
+    let report = |state: &str| {
+        let (http, auth, api, sha) = (&http, &auth, &api, &sha);
+        let state = state.to_owned();
+        async move {
+            let posted = http
+                .post(format!("{api}/statuses/{sha}"))
+                .header("Authorization", auth)
+                .json(&serde_json::json!({ "state": state, "context": CHECK }))
+                .send()
+                .await
+                .expect("report a status");
+            assert!(posted.status().is_success(), "status {state}");
+        }
+    };
+
+    let waiting = Some(format!("Required check {CHECK} has not reported"));
+    assert_eq!(settled(waiting.clone()).await, waiting);
+    println!("LIVE no status: Merge… says {waiting:?}");
+
+    // Gitea agrees, and its 405 is a refusal at once, not a wait.
+    let started = std::time::Instant::now();
+    let refused = source
+        .write(knobas_source::WriteOp::MergePullRequest {
+            entity: id.clone(),
+            style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
+        })
+        .await
+        .expect_err("Gitea merged past a required check that never reported");
+    assert_eq!(refused.status(), Some(405), "{refused:?}");
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(3),
+        "a refusal that is not 'try again later' is not waited out: {:?}",
+        started.elapsed()
+    );
+    println!("LIVE Gitea refused the merge: {refused:?}");
+
+    report("pending").await;
+    let pending = Some(format!("Required check {CHECK} is pending"));
+    assert_eq!(settled(pending.clone()).await, pending);
+    report("failure").await;
+    let failed = Some(format!("Required check {CHECK} failed"));
+    assert_eq!(settled(failed.clone()).await, failed);
+    report("success").await;
+    assert_eq!(
+        settled(None).await,
+        None,
+        "a passed check leaves Merge… enabled"
+    );
+
+    source
+        .write(knobas_source::WriteOp::MergePullRequest {
+            entity: id.clone(),
+            style: knobas_source::MergeStyle::Merge,
+            delete_branch: false,
+        })
+        .await
+        .expect("Gitea merges once the required check passed");
+    println!("LIVE #{number}: held by {CHECK} through pending and failure, merged on success");
 }
 
 // -- landing: update a branch from its base, merge and delete it (#708) -----

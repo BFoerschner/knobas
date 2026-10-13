@@ -651,6 +651,15 @@ async fn remove(http: &reqwest::Client, auth: &str, api: &str, branches: &[Strin
             ));
         }
     }
+    // A protection rule a test named for its scratch branch (#721) goes
+    // before the branch: Gitea refuses to delete a protected branch. Absent,
+    // it is one 404.
+    for branch in branches {
+        tried.push(format!(
+            "DELETE branch_protections/{branch} -> {}",
+            delete(http, auth, &format!("{api}/branch_protections/{branch}")).await
+        ));
+    }
     for branch in branches {
         tried.push(format!(
             "DELETE branches/{branch} -> {}",

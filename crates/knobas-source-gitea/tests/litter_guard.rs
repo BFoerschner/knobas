@@ -419,6 +419,20 @@ async fn a_guard_clears_what_a_killed_run_left_and_takes_nothing_else_with_it() 
          the only thing a later run can recognise either of them by. Order sent: {:?}",
         after.deleted
     );
+    // A protection rule named for the branch (#721) goes before it: Gitea
+    // refuses to delete a protected branch, and a killed run's protected
+    // leftover would otherwise stand for good.
+    let protection = at(&format!("branch_protections/{LITTER}live-9")).unwrap_or_else(|| {
+        panic!(
+            "the leftover branch's protection was never deleted; the guard sent {:?}",
+            after.deleted
+        )
+    });
+    assert!(
+        protection < branch,
+        "a branch's protection must go before the branch. Order sent: {:?}",
+        after.deleted
+    );
 
     drop(guard);
 }
