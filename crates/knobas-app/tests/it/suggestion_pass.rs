@@ -175,3 +175,55 @@ async fn a_pass_past_its_statement_timeout_is_cancelled_and_the_next_one_finishe
         .await
         .expect("the same corpus under a sane limit");
 }
+
+/// A pass that panics does not wedge the queue: the requests it owed are
+/// answered with an error rather than left waiting, and the next request
+/// starts a pass of its own that finishes.
+#[tokio::test]
+async fn a_pass_that_panics_answers_its_requests_and_the_next_one_runs() {
+    let (connector, pool) = scratch("pass_panic", 1).await;
+    corpus(&pool, 20).await;
+
+    /// Panics on the first open, the way a bug in a pass would, and opens
+    /// real connections after that.
+    struct PanicsOnce {
+        connector: knobas_db::embedded::Connector,
+        opened: AtomicUsize,
+    }
+    #[async_trait::async_trait]
+    impl RunConnections for PanicsOnce {
+        async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
+            assert!(
+                self.opened.fetch_add(1, Ordering::SeqCst) > 0,
+                "the injected panic"
+            );
+            self.connector.connect().await
+        }
+    }
+    let pass = SuggestionPass::new(
+        Arc::new(PanicsOnce {
+            connector,
+            opened: AtomicUsize::new(0),
+        }),
+        Duration::from_secs(60),
+    );
+
+    let refusal = tokio::time::timeout(Duration::from_secs(20), detect_suggestions_inner(&pass))
+        .await
+        .expect("a pass that panicked must answer, not leave its caller waiting")
+        .unwrap_err();
+    assert!(
+        refusal.message.contains("stopped part-way"),
+        "the refusal says the pass stopped: {}",
+        refusal.message
+    );
+
+    let written = tokio::time::timeout(Duration::from_secs(20), detect_suggestions_inner(&pass))
+        .await
+        .expect("the queue must not stay wedged behind the pass that panicked")
+        .unwrap();
+    assert!(
+        written > 0,
+        "the next pass ran and proposed the corpus' pairs"
+    );
+}

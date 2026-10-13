@@ -158,11 +158,16 @@ impl SuggestionPass {
 impl Inner {
     /// Run passes until every request is answered, then stop.
     async fn drive(self: Arc<Self>) {
+        let mut stopped = Stopped {
+            inner: Arc::clone(&self),
+            armed: true,
+        };
         loop {
             let answers_through = {
                 let mut queue = self.queue.lock().unwrap_or_else(PoisonError::into_inner);
                 if queue.answered >= queue.requested {
                     queue.running = false;
+                    stopped.armed = false;
                     return;
                 }
                 queue.requested
@@ -220,6 +225,44 @@ impl Inner {
                 Err(error.into())
             }
         }
+    }
+}
+
+/// What clears the queue when [`Inner::drive`] ends without saying so: a pass
+/// that panicked, or a task dropped at runtime shutdown. Without it `running`
+/// stayed `true`, no later request started a pass, and every caller waited
+/// for an answer nobody would send.
+///
+/// Every request owed so far is answered with an error, and the next request
+/// starts a pass of its own.
+struct Stopped {
+    inner: Arc<Inner>,
+    /// `false` once `drive` returns by its own path, having cleared the queue.
+    armed: bool,
+}
+
+impl Drop for Stopped {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        let answers_through = {
+            let mut queue = self
+                .inner
+                .queue
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
+            queue.running = false;
+            queue.answered = queue.requested;
+            queue.requested
+        };
+        tracing::error!("the suggestion pass stopped part-way; the next request starts a new one");
+        self.inner.finished.send_replace(Finished {
+            answers_through,
+            outcome: Err(IpcError::internal(
+                "the suggestion pass stopped part-way; the next sync starts a new one",
+            )),
+        });
     }
 }
 
