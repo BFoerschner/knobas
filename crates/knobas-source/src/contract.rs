@@ -174,13 +174,17 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // build configuration's address, so an adapter that attempted it
         // anyway is refused on the id's shape before a request leaves.
         crate::WriteOp::RunBuild {
-            entity: target,
+            entity: target.clone(),
             branch: Some("contract-battery".into()),
             parameters: vec![crate::BuildParameter {
                 name: "contract.battery.probe".into(),
                 value: "contract battery probe".into(),
             }],
         },
+        // A delete could not be taken back. The target is no branch's
+        // address -- it has no `@refs/heads/` -- so an adapter that attempted
+        // it anyway is refused on the id's shape before a request leaves.
+        crate::WriteOp::DeleteBranch { entity: target },
     ]
     .into_iter()
     .map(|op| (op.identifier(), op))

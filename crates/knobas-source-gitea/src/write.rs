@@ -1,6 +1,7 @@
 //! The four writes M2 ratified for Gitea -- branch, pull request, comment,
-//! approval -- the merge the source views added (issue #667), and the review
-//! a pull request's toolbar writes (issue #705).
+//! approval -- the merge the source views added (issue #667), the review a
+//! pull request's toolbar writes (issue #705) and the branch delete (issue
+//! #707).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the Jira adapter's is:
 //! knobas has one outbound write path, and
@@ -20,6 +21,7 @@
 //! | approval | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":"APPROVED","body":…}` |
 //! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…}` |
 //! | review | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":…,"body":…,"comments":[…]}` |
+//! | branch delete | `DELETE /repos/{o}/{r}/branches/{name}` | none |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -236,4 +238,83 @@ pub(crate) async fn submit_review(
         )
         .await
         .map(|_| ())
+}
+
+/// What a delete reads of the repository before it acts: its default branch
+/// and whether it is a mirror.
+#[derive(serde::Deserialize)]
+struct RepoHead {
+    #[serde(default)]
+    default_branch: Option<String>,
+    #[serde(default)]
+    mirror: bool,
+}
+
+/// What a delete reads of the branch before it acts: whether it is protected.
+#[derive(serde::Deserialize)]
+struct BranchGuard {
+    #[serde(default)]
+    protected: bool,
+}
+
+/// Delete branch `name` (issue #707).
+///
+/// The repository's default branch, a protected branch and a branch of a
+/// mirror are **refused here, before the delete**, with a sentence naming
+/// why. Gitea refuses all three itself, but with a 403, which the shared fault
+/// mapping reads as a dead credential (`knobas_http`'s 401-and-403 rule): the
+/// write would wait for a token that is fine instead of saying what is wrong.
+/// The view offers none of them, so these reads only answer a payload that
+/// names one anyway, or a branch protected between the view and the flush.
+///
+/// A protection set in the milliseconds between these reads and the delete
+/// still comes back as that 403. The write then waits as unauthorized for one
+/// scheduler tick, and the next flush makes these reads again and refuses it
+/// with the sentence: a short wrong wait, never a lost or a wrong delete.
+///
+/// Gitea answers a delete with 204, and 404 for a branch that is already gone
+/// -- a refusal carrying its sentence (ADR-0004).
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for the default branch, a protected branch, a
+/// branch of a mirror, a repository whose record names no default branch, or
+/// a name that is not one Gitea could have issued; otherwise whatever the
+/// request maps to.
+pub(crate) async fn delete_branch(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    name: &str,
+) -> Result<(), SourceError> {
+    let (head, guard) = tokio::try_join!(
+        client.repo_as::<RepoHead>(owner, repo),
+        client.branch_as::<BranchGuard>(owner, repo, name),
+    )?;
+    // No guess where Gitea names none: the views' `main` fallback is a fine
+    // label and a wrong guard, since on a `master` repository it would let the
+    // real default go.
+    let Some(default) = head.default_branch.as_deref().filter(|b| !b.is_empty()) else {
+        return Err(SourceError::protocol(format!(
+            "gitea: {owner}/{repo} names no default branch, so {name:?} is not deleted"
+        )));
+    };
+    if head.mirror {
+        return Err(SourceError::protocol(format!(
+            "gitea: {owner}/{repo} is a mirror, whose branches come from upstream, so {name:?} is \
+             not deleted"
+        )));
+    }
+    if name == default {
+        return Err(SourceError::protocol(format!(
+            "gitea: {name:?} is the default branch of {owner}/{repo}, which is not deleted"
+        )));
+    }
+    if guard.protected {
+        return Err(SourceError::protocol(format!(
+            "gitea: {name:?} is a protected branch of {owner}/{repo}; lift its protection on Gitea \
+             to delete it"
+        )));
+    }
+    client.delete_branch(owner, repo, name).await
 }

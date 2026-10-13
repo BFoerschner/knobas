@@ -895,3 +895,59 @@ Ruled 2026-10-13. Comment:
 **If you disagree, the cost of reversing this is:** low.
 
 As built (#705): `view/pr.rs`'s `merge_action` answers `None` on a merged or closed pull request and keeps the two `mergeable` reasons; `view/pr/review.rs` offers the verdicts only on an open pull request the token did not open. ADR-0020 rule 4 and CONTEXT.md's *Source view* carry the amendment, and #705's §10.8 entry notes it on #702's.
+
+## #707 — a branch's open pull request: an entity row on its Overview, not a toolbar item
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #707.
+
+**The fork:** a branch that already has an open pull request should show *Open PR #n* instead of *Open pull request…*. A toolbar action always names a write (#716), so a plain navigation cannot be a toolbar item without a vocabulary change. Options: (a) draw the pull request as an entity row on the branch's Overview, no contract change; (b) add a navigation kind of toolbar item, a §10.8 change.
+
+**Ruling:** **(a).** The branch Overview's first block is an entity row for the open pull request (state chip, title), and the toolbar shows no *Open pull request…* for that branch.
+
+**Reasoning:** the overview is where a reader already looks for the branch's pull request, and a contract change for one link is not worth its cost.
+
+**If you disagree, the cost of reversing this is:** low. A navigation toolbar item can be added later without moving this row.
+
+As built (#707): `crates/knobas-source-gitea/src/view/branch.rs` puts the `Pull request` entities block before the facts; `toolbar` leaves out `create_pull_request` when a pull request is open from the branch.
+
+## #707 — the repository a branch's or a commit's create targets: `ViewAction.entity`
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #707.
+
+**The fork:** *New branch…* on a branch or commit view and *Open pull request…* on a branch view queue a write whose target is the repository, not the view's entity, and the shell must not parse source ids. Options: (a) Gitea's create ops accept any id inside the repository; (b) a one-option `repository` choice field in the dialog; (c) `ViewAction` gains `entity: Option<String>` (serde default), the write's target where it is not the view's own. The implementer leaned to (c).
+
+**Ruling:** **(c).** `actions.ts` uses `action.entity ?? view entity`. The §10.8 entry on `ViewAction` is signed off under #701's delegation. The one-option *From* and *Head* choices are fine.
+
+**Reasoning:** `Block::Settings` already carries its target entity. `WriteOp` semantics and the queue's ordering stay untouched, which (a) would have changed (the queue would order and hold a create on a branch or a commit). The dialog shows nothing the reader does not need, which (b) would have.
+
+**If you disagree, the cost of reversing this is:** low: one optional field on `ViewAction`, its TypeScript mirror and one expression in `actions.ts`.
+
+As built (#707): `knobas_source::view::ViewAction::entity`, set by `crates/knobas-source-gitea/src/view/act.rs`'s `new_branch` and `pull_request` on a branch's and a commit's view; `actionPayload` in `app/src/lib/detail/view/actions.ts`. The §10.8 entry is in `docs/contract.md`.
+
+## #707 — after *New branch…*: the queued toast, no link to a branch the shell cannot name
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #707.
+
+**The fork:** the issue says that on success the toast offers to open the new branch, or the detail navigates to it ("pick one and say which"). Both need the new branch's entity id. The source mints that id, the shell must not compose one, and the branch reaches the mirror only after the write flushes and the post-write sync runs. Options: (a) the usual queued toast, and the view's re-read lists the branch; (b) a toast action that runs a launcher search for the typed name; (c) a new IPC that resolves (repository, name) to the branch's id through the mirror, a §10.8 addition. The implementer leaned to (a).
+
+**Ruling:** **(a).**
+
+**Reasoning:** no id is guessed and no IPC is added, and the re-read already puts the branch one click away.
+
+**If you disagree, the cost of reversing this is:** low. (c) can be added later without changing anything this ticket built.
+
+As built (#707): `queueAction` in `app/src/lib/detail/Detail.svelte` is unchanged. It pushes *New branch queued for …* and re-reads the mirror and the view.
+
+## #707 — *Open pull request…* with nothing ahead: drawn disabled, saying why
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #707.
+
+**The fork:** the issue offers *Open pull request…* "on a branch view whose branch has no open PR and is ahead of the default branch". The implementer drew it disabled, with *No commits ahead of {default}*, on a branch with nothing ahead. Options: keep it drawn disabled, or leave it out.
+
+**Ruling:** keep it **drawn disabled with the reason**. It is absent only on the default branch and on a branch with an open pull request.
+
+**Reasoning:** this is the #702 disabled-with-reason pattern. The reader learns why, rather than wondering where the action went.
+
+**If you disagree, the cost of reversing this is:** trivial: one condition in `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`.
+
+As built (#707): `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`. A later cross-ticket ruling on #701 (2026-10-13) sets the rule this applies: an action is drawn disabled with a reason only where the entity can still reach the enabled state, and an action that can never apply is absent. So *Delete branch…* is absent on the default branch and disabled, with the reason, on a protected one. The same ruling message accepted a cut on the candidates the repository's *New pull request…* asks about (20 then; ten since review, to stay inside Gitea's burst of 20 per opening), which the head field's label names, and the live test deleting its own pull request through the API rather than closing it.

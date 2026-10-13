@@ -868,7 +868,12 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
     assert_eq!(ids, ["overview", "commits", "diff"], "{id}");
 
     let overview = &view.sections[0];
-    let Block::Facts { facts } = &overview.blocks[0] else {
+    // Its open pull request leads the overview (#707), so the facts are the
+    // block after it.
+    let Some(facts) = overview.blocks.iter().find_map(|b| match b {
+        Block::Facts { facts } => Some(facts),
+        _ => None,
+    }) else {
         panic!("{overview:#?}");
     };
     for f in facts {
@@ -2858,4 +2863,196 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         );
     }
     println!("commented, requested changes and approved #{theirs} from its view; #{own} refused");
+}
+
+/// A branch's life from its views (#707, spec #701 workflows 2, 4 and 10),
+/// against the real server: the repository's *New branch…* makes a branch
+/// from the default branch; with a commit on it, the branch's *Open pull
+/// request…* is offered prefilled and opens one; the branch's overview then
+/// opens on that pull request and offers no second one; with the pull
+/// request gone, *Delete branch…* says what is lost and the delete lands;
+/// the next sync tombstones the branch. The default branch is refused.
+///
+/// Only this test's own branch and pull request are touched, and nothing
+/// seeded is written to. [`Litter`] removes both on a panic up to the delete;
+/// the pull request is removed by the test itself before the branch goes,
+/// because a pull request whose head branch was deleted is listed with the
+/// head `refs/pull/{n}/head`, which no longer names the branch `Litter` finds
+/// it by (measured on 1.27.3: the first run left #412 standing).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_branch_lives_from_its_views_new_branch_pull_request_and_delete() {
+    use knobas_source::view::{Block, FieldKind, SourceView, ViewAction};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let repo_id = format!("gitea:{}", env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-life-{stamp}");
+    let branch_id = format!("gitea:{}@refs/heads/{branch}", env.full_name());
+
+    let action = |view: &SourceView, op: &str| -> Option<ViewAction> {
+        view.actions.iter().find(|a| a.write_op == op).cloned()
+    };
+    let options = |action: &ViewAction, name: &str| -> Vec<String> {
+        let field = action.fields.iter().find(|f| f.name == name).unwrap();
+        let FieldKind::Choice { options } = &field.kind else {
+            panic!("{name} is a choice: {field:?}")
+        };
+        options.iter().map(|o| o.value.clone()).collect()
+    };
+    let prefill = |action: &ViewAction, name: &str| -> Option<String> {
+        action
+            .fields
+            .iter()
+            .find(|f| f.name == name)
+            .and_then(|f| f.value.clone())
+    };
+
+    // 1. The repository's New branch…, from the default branch it offers first.
+    let repo_view = source.view(&repo_id, None).await.unwrap().unwrap();
+    let new = action(&repo_view, "create_branch").expect("the repository offers New branch…");
+    println!("LIVE repository New branch…: {new:?}");
+    assert_eq!(new.disabled, None);
+    let from = options(&new, "from_ref");
+    assert_eq!(from[0], "main", "the default branch first: {from:?}");
+    assert!(
+        action(&repo_view, "create_pull_request").is_some(),
+        "the repository offers New pull request…"
+    );
+    litter.will_create(&branch);
+    source
+        .write(knobas_source::WriteOp::CreateBranch {
+            entity: new.entity.clone().unwrap_or_else(|| repo_id.clone()),
+            name: branch.clone(),
+            from_ref: from[0].clone(),
+        })
+        .await
+        .expect("the adapter creates the branch");
+    let subject = format!("knobas life check {stamp}");
+    push_file(&http, &env, &branch, &format!("{branch}.txt"), &subject).await;
+
+    // 2. The branch offers Open pull request…, prefilled from its one commit.
+    let view = source.view(&branch_id, None).await.unwrap().unwrap();
+    let open = action(&view, "create_pull_request").expect("the branch offers a pull request");
+    println!("LIVE branch Open pull request…: {open:?}");
+    assert_eq!(open.disabled, None, "one commit ahead");
+    assert_eq!(open.entity.as_deref(), Some(repo_id.as_str()));
+    assert_eq!(prefill(&open, "title").as_deref(), Some(subject.as_str()));
+    assert_eq!(
+        prefill(&open, "body").as_deref(),
+        Some(format!("- {subject}").as_str())
+    );
+    assert_eq!(options(&open, "head"), std::slice::from_ref(&branch));
+    assert_eq!(options(&open, "base")[0], "main");
+    source
+        .write(knobas_source::WriteOp::CreatePullRequest {
+            entity: repo_id.clone(),
+            title: subject.clone(),
+            body: format!("- {subject}"),
+            head: branch.clone(),
+            base: "main".to_owned(),
+        })
+        .await
+        .expect("the adapter opens the pull request");
+    let number = litter
+        .pulls()
+        .await
+        .into_iter()
+        .find(|(_, head)| head == &branch)
+        .map(|(number, _)| number)
+        .expect("the pull request is in the server's listing");
+
+    // 3. The overview opens on it, and nothing proposes a second.
+    let view = source.view(&branch_id, None).await.unwrap().unwrap();
+    let Some(Block::Entities { title, rows }) = view.sections[0].blocks.first() else {
+        panic!("the overview opens on its pull request: {view:#?}");
+    };
+    assert_eq!(title.as_deref(), Some("Pull request"));
+    assert_eq!(
+        rows[0].entity_id.as_deref(),
+        Some(format!("gitea:{}#{number}", env.full_name()).as_str())
+    );
+    assert!(action(&view, "create_pull_request").is_none());
+
+    // 4. Cleanup's half: the pull request removed through the API (closed and
+    //    gone, see above), then the delete the view offers, saying what is
+    //    lost.
+    let removed = http
+        .delete(format!("{api}/issues/{number}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("remove the pull request");
+    assert!(
+        removed.status().is_success(),
+        "remove: {}",
+        removed.status()
+    );
+    let view = source.view(&branch_id, None).await.unwrap().unwrap();
+    let delete = action(&view, "delete_branch").expect("the branch offers Delete branch…");
+    println!("LIVE branch Delete branch…: {delete:?}");
+    assert!(delete.danger && delete.disabled.is_none(), "{delete:?}");
+    assert_eq!(
+        delete.confirm.as_deref(),
+        Some(
+            format!(
+                "Delete {branch}? Not merged into main: 1 commit will only be reachable by SHA."
+            )
+            .as_str()
+        )
+    );
+    let (before, cursor) = full(&*source).await;
+    assert!(
+        before.iter().any(|i| i.entity.to_string() == branch_id),
+        "the mirror holds the branch before its delete"
+    );
+    source
+        .write(knobas_source::WriteOp::DeleteBranch {
+            entity: branch_id.clone(),
+        })
+        .await
+        .expect("the adapter deletes the branch");
+    assert!(
+        !litter.branch_names().await.contains(&branch),
+        "the server still lists the branch"
+    );
+
+    // 5. The next sync carries its tombstone, and a full one no longer the branch.
+    let mut sink = VecSink(Vec::new());
+    source
+        .sync(Some(cursor), &mut sink)
+        .await
+        .expect("incremental sync");
+    let gone = sink
+        .0
+        .iter()
+        .find(|i| i.entity.to_string() == branch_id)
+        .unwrap_or_else(|| panic!("the next sync said nothing of the deleted branch"));
+    assert!(gone.deleted, "{gone:?}");
+    let (after, _) = full(&*source).await;
+    assert!(
+        !after.iter().any(|i| i.entity.to_string() == branch_id),
+        "a full sync still emits the deleted branch, so the sweep would keep it"
+    );
+
+    // 6. The default branch is refused before a request deletes anything.
+    let refused = source
+        .write(knobas_source::WriteOp::DeleteBranch {
+            entity: format!("gitea:{}@refs/heads/main", env.full_name()),
+        })
+        .await;
+    assert!(
+        matches!(&refused, Err(SourceError::Protocol { status: None, message }) if message.contains("default branch")),
+        "{refused:?}"
+    );
+    assert!(litter.branch_names().await.contains(&"main".to_owned()));
+    println!("{branch}: created, proposed as #{number}, removed, deleted and tombstoned");
 }

@@ -42,6 +42,30 @@ impl GiteaClient {
         .await
     }
 
+    /// `DELETE /repos/{o}/{r}/branches/{branch}` (#707): the one delete this
+    /// adapter makes, the name one escaped segment as for [`Self::branch_as`].
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, Gitea's sentence in it.
+    pub(crate) async fn delete_branch(
+        &self,
+        owner: &str,
+        repo: &str,
+        branch: &str,
+    ) -> Result<(), SourceError> {
+        let path = format!(
+            "{API_ROOT}/repos/{}/{}/branches/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped(branch)?
+        );
+        self.http
+            .send(self.http.request(Method::DELETE, &path))
+            .await
+            .map(|_| ())
+    }
+
     /// `GET /repos/{o}/{r}/compare/{base}...{head}` -- the commits `head`
     /// carries that `base` does not, and how many.
     pub(crate) async fn compare_as<T: serde::de::DeserializeOwned>(
@@ -88,17 +112,26 @@ impl GiteaClient {
         not: &str,
     ) -> Result<Option<u64>, SourceError> {
         let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
-        let query = [
-            ("sha", sha.to_owned()),
-            ("not", not.to_owned()),
-            ("stat", "false".to_owned()),
-            ("verification", "false".to_owned()),
-            ("files", "false".to_owned()),
-            ("limit", "1".to_owned()),
-        ];
+        let query = one_commit_not_in(sha, not);
         let (_, total): (Vec<serde::de::IgnoredAny>, _) =
             self.get_json_counted(&path, &query).await?;
         Ok(total.map(|n| n as u64))
+    }
+
+    /// Whether `sha` has any commit `not` does not: one commit of
+    /// `/commits?sha=…&not=…` asked for, and whether one came (#707). Unlike
+    /// [`Self::count_commits_not_in`] it needs no count header.
+    pub(crate) async fn has_commits_not_in(
+        &self,
+        owner: &str,
+        repo: &str,
+        sha: &str,
+        not: &str,
+    ) -> Result<bool, SourceError> {
+        let path = format!("/repos/{}/{}/commits", segment(owner)?, segment(repo)?);
+        let page: Option<Vec<serde::de::IgnoredAny>> =
+            self.get_json(&path, &one_commit_not_in(sha, not)).await?;
+        Ok(page.is_some_and(|commits| !commits.is_empty()))
     }
 
     /// One page of a repository's **open** pull requests, most recently
@@ -196,6 +229,19 @@ impl GiteaClient {
             ))
         })
     }
+}
+
+/// One commit of what `sha` has that `not` has not, with every projection
+/// Gitea defaults on turned off: the query both of those reads send.
+fn one_commit_not_in(sha: &str, not: &str) -> [(&'static str, String); 6] {
+    [
+        ("sha", sha.to_owned()),
+        ("not", not.to_owned()),
+        ("stat", "false".to_owned()),
+        ("verification", "false".to_owned()),
+        ("files", "false".to_owned()),
+        ("limit", "1".to_owned()),
+    ]
 }
 
 /// `/repos/{o}/{r}/compare/{base}...{head}`, both refs escaped.

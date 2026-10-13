@@ -259,6 +259,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     disabled: null,
     with_settings: false,
     values: {},
+    entity: null,
     ...more,
   };
 }

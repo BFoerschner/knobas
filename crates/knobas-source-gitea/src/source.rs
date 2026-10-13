@@ -156,6 +156,26 @@ impl GiteaSource {
         }
     }
 
+    /// The branch a write acts on: its repository and its name.
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::key_of`], plus an id that names anything but a branch.
+    fn branch_of(&self, entity: &str) -> Result<(String, String, String), SourceError> {
+        match self.key_of(entity)? {
+            crate::keys::GiteaKey::Branch {
+                owner,
+                repo,
+                branch,
+            } => Ok((owner, repo, branch)),
+            _ => Err(SourceError::protocol(format!(
+                "gitea: {entity:?} is not a branch -- this operation is performed on one, so the \
+                 target is an id like \"{}:owner/repo@refs/heads/feature/x\"",
+                self.id
+            ))),
+        }
+    }
+
     /// The pull request a write acts on.
     ///
     /// # Errors
@@ -220,8 +240,8 @@ impl Source for GiteaSource {
     }
 
     /// Perform one of the four writes M2 ratified for Gitea, the merge the
-    /// source views added (#667), or the review the pull request's toolbar
-    /// writes (#705), or refuse.
+    /// source views added (#667), the review the pull request's toolbar
+    /// writes (#705) or the branch delete (#707), or refuse.
     ///
     /// The match unpacks and hands values to [`crate::write`], which never
     /// names `WriteOp`: knobas has one outbound write path and
@@ -280,6 +300,11 @@ impl Source for GiteaSource {
                 let (owner, repo, index) = self.pull_of(entity)?;
                 write::submit_review(&self.client, &owner, &repo, index, *verdict, body, comments)
                     .await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::DeleteBranch { entity } => {
+                let (owner, repo, branch) = self.branch_of(entity)?;
+                write::delete_branch(&self.client, &owner, &repo, &branch).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }
@@ -380,7 +405,8 @@ mod tests {
                 "comment",
                 "approve",
                 "merge_pull_request",
-                "submit_review"
+                "submit_review",
+                "delete_branch"
             ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly

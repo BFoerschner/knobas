@@ -27,6 +27,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     disabled: null,
     with_settings: false,
     values: {},
+    entity: null,
     ...more,
   };
 }
@@ -237,4 +238,44 @@ test("the fixed values lie under the dialog's: a value the reader gave under the
   expect(actionPayload(both, "gitea:o/r#7", { body: "typed" })).toEqual({
     SubmitReview: { entity: "gitea:o/r#7", verdict: "comment", body: "typed", comments: [] },
   });
+});
+
+// -- a branch's life (#707) -------------------------------------------------
+
+const BRANCH = "gitea:o/r@refs/heads/feature/x";
+
+test("a new branch is created in the repository the action names, from the ref picked", () => {
+  const fromBranch = action("create_branch", "New branch…", { entity: "gitea:o/r" });
+  expect(actionPayload(fromBranch, BRANCH, { name: " feature/y ", from_ref: "feature/x" })).toEqual({
+    CreateBranch: { entity: "gitea:o/r", name: "feature/y", from_ref: "feature/x" },
+  });
+  // On the repository's own view the action names no other entity.
+  const onRepo = action("create_branch", "New branch…");
+  expect(actionPayload(onRepo, "gitea:o/r", { name: "feature/y", from_ref: "main" })).toEqual({
+    CreateBranch: { entity: "gitea:o/r", name: "feature/y", from_ref: "main" },
+  });
+  expect(actionPayload(onRepo, "gitea:o/r", { name: "  ", from_ref: "main" })).toBeNull();
+  expect(actionPayload(onRepo, "gitea:o/r", { name: "y", from_ref: "" })).toBeNull();
+});
+
+test("a pull request is opened in the named repository with its title, description, head and base", () => {
+  const open = action("create_pull_request", "Open pull request…", { entity: "gitea:o/r" });
+  expect(
+    actionPayload(open, BRANCH, { title: " SEPA retry ", body: "- one\n- two", head: "feature/x", base: "main" }),
+  ).toEqual({
+    CreatePullRequest: { entity: "gitea:o/r", title: "SEPA retry", body: "- one\n- two", head: "feature/x", base: "main" },
+  });
+  // A description may be empty; a title, a head and a base may not.
+  expect(actionPayload(open, BRANCH, { title: "t", head: "feature/x", base: "main" })).toEqual({
+    CreatePullRequest: { entity: "gitea:o/r", title: "t", body: "", head: "feature/x", base: "main" },
+  });
+  for (const missing of ["title", "head", "base"]) {
+    const values: Record<string, string> = { title: "t", body: "", head: "feature/x", base: "main", [missing]: " " };
+    expect(actionPayload(open, BRANCH, values), missing).toBeNull();
+  }
+});
+
+test("a branch is deleted as itself", () => {
+  const remove = action("delete_branch", "Delete branch…", { danger: true, confirm: "Delete feature/x?" });
+  expect(actionPayload(remove, BRANCH, {})).toEqual({ DeleteBranch: { entity: BRANCH } });
 });

@@ -537,6 +537,7 @@ function runnable(): SourceView {
         disabled: null,
         with_settings: true,
         values: {},
+        entity: null,
       },
     ],
   };

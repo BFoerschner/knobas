@@ -691,6 +691,10 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             body: "bound the jitter".to_owned(),
             comments: vec![],
         },
+        knobas_source::WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
+                .to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -712,6 +716,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::SetParameter { .. } => "SetParameter",
             knobas_source::WriteOp::RunBuild { .. } => "RunBuild",
             knobas_source::WriteOp::SubmitReview { .. } => "SubmitReview",
+            knobas_source::WriteOp::DeleteBranch { .. } => "DeleteBranch",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

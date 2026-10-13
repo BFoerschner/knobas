@@ -471,3 +471,215 @@ async fn a_review_aimed_at_a_repository_is_refused_before_a_request() {
     );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// A Gitea holding `tidewater/payout-service` (default branch `main`) and one
+/// branch `name`, protected or not, that answers a delete with Gitea's 204.
+async fn holding_branch(name: &str, protected: bool) -> MockServer {
+    let server = MockServer::start().await;
+    let token = format!("token {TOKEN}");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/tidewater/payout-service"))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 7,
+            "full_name": "tidewater/payout-service",
+            "name": "payout-service",
+            "owner": { "login": "tidewater" },
+            "default_branch": "main"
+        })))
+        .mount(&server)
+        .await;
+    let escaped = name.replace('/', "%2F");
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/api/v1/repos/tidewater/payout-service/branches/{escaped}"
+        )))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": name,
+            "protected": protected,
+            "commit": { "id": "c90d11aa" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    server
+}
+
+/// The requests that were not reads.
+async fn writes_received(server: &MockServer) -> Vec<(String, String)> {
+    server
+        .received_requests()
+        .await
+        .expect("the mock server records requests")
+        .iter()
+        .filter(|r| r.method.as_str() != "GET")
+        .map(|r| (r.method.to_string(), r.url.path().to_owned()))
+        .collect()
+}
+
+/// Workflow 10 (#707): a branch is deleted with Gitea's
+/// `DELETE /repos/{o}/{r}/branches/{name}`, its name one escaped segment.
+#[tokio::test]
+async fn a_branch_is_deleted_by_its_own_path() {
+    let server = holding_branch("feature/PAY-231-sepa-retry", false).await;
+    source(&server)
+        .write(WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
+                .to_owned(),
+        })
+        .await
+        .expect("a declared op is performed");
+    assert_eq!(
+        writes_received(&server).await,
+        vec![(
+            "DELETE".to_owned(),
+            "/api/v1/repos/tidewater/payout-service/branches/feature%2FPAY-231-sepa-retry"
+                .to_owned()
+        )]
+    );
+}
+
+/// The default branch is refused by name before anything is deleted: Gitea
+/// answers that one 403, which the shared fault mapping reads as a dead
+/// credential, so the adapter says why itself.
+#[tokio::test]
+async fn the_default_branch_is_refused_before_a_delete() {
+    let server = holding_branch("main", false).await;
+    let error = source(&server)
+        .write(WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/main".to_owned(),
+        })
+        .await
+        .expect_err("the default branch is not deleted");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message } if message.contains("default branch")),
+        "{error:?}"
+    );
+    assert!(writes_received(&server).await.is_empty());
+}
+
+/// A protected branch is refused by name before anything is deleted.
+#[tokio::test]
+async fn a_protected_branch_is_refused_before_a_delete() {
+    let server = holding_branch("release/2026.08", true).await;
+    let error = source(&server)
+        .write(WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/release/2026.08".to_owned(),
+        })
+        .await
+        .expect_err("a protected branch is not deleted");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message } if message.contains("protected")),
+        "{error:?}"
+    );
+    assert!(writes_received(&server).await.is_empty());
+}
+
+/// A delete is aimed at a **branch**: a repository's or a pull request's id is
+/// refused before a request leaves.
+#[tokio::test]
+async fn a_delete_aimed_at_anything_but_a_branch_is_refused_before_a_request() {
+    let server = refusing(500, "must not be reached").await;
+    for entity in [
+        "gitea:tidewater/payout-service",
+        "gitea:tidewater/payout-service#142",
+        "gitea:tidewater/payout-service@c90d11aa",
+    ] {
+        let error = source(&server)
+            .write(WriteOp::DeleteBranch {
+                entity: entity.to_owned(),
+            })
+            .await
+            .expect_err("only a branch is deleted");
+        assert!(
+            matches!(&error, SourceError::Protocol { status: None, message } if message.contains("not a branch")),
+            "{entity}: {error:?}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}
+
+/// A repository whose record names no default branch is not guessed at: the
+/// delete is refused rather than taking `main` on trust, which on a `master`
+/// repository would let the real default go.
+#[tokio::test]
+async fn a_delete_where_gitea_names_no_default_branch_is_refused() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/tidewater/payout-service"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "full_name": "tidewater/payout-service", "default_branch": ""
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/branches/master",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "master", "protected": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+    let error = source(&server)
+        .write(WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/master".to_owned(),
+        })
+        .await
+        .expect_err("no default branch named, no delete");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message } if message.contains("default branch")),
+        "{error:?}"
+    );
+    assert!(writes_received(&server).await.is_empty());
+}
+
+/// A branch of a pull mirror is refused by name before anything is deleted:
+/// Gitea answers that delete 403 (*Git Repository is a mirror.*), which the
+/// shared fault mapping reads as a dead credential.
+#[tokio::test]
+async fn a_branch_of_a_mirror_is_refused_before_a_delete() {
+    let server = MockServer::start().await;
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/tidewater/payout-service"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "full_name": "tidewater/payout-service", "default_branch": "main", "mirror": true
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/branches/upstream-topic",
+        ))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "upstream-topic", "protected": false
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("DELETE"))
+        .respond_with(ResponseTemplate::new(403).set_body_json(json!({
+            "message": "Git Repository is a mirror."
+        })))
+        .mount(&server)
+        .await;
+    let error = source(&server)
+        .write(WriteOp::DeleteBranch {
+            entity: "gitea:tidewater/payout-service@refs/heads/upstream-topic".to_owned(),
+        })
+        .await
+        .expect_err("a mirror's branch is not deleted");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message } if message.contains("mirror")),
+        "{error:?}"
+    );
+    assert!(writes_received(&server).await.is_empty());
+}

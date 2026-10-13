@@ -303,7 +303,8 @@ impl Source for KumaSource {
             | WriteOp::MergePullRequest { .. }
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
-            | WriteOp::SubmitReview { .. } => {
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::DeleteBranch { .. } => {
                 return Err(SourceError::protocol(format!(
                     "the Uptime Kuma adapter offers pause, resume and create, so it cannot \
                      perform {:?}",

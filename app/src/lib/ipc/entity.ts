@@ -844,6 +844,11 @@ export interface ViewAction {
    * (`submit_review`'s *Approve…* and *Request changes…*, by `verdict`).
    */
   values: Record<string, string>;
+  /**
+   * The entity the write targets where it is not the view's own (#707): a
+   * branch's *New branch…* names its repository. `null` targets the view's.
+   */
+  entity: string | null;
 }
 
 /** One input of an action's dialog — `knobas_source::view::ActionField`. */

@@ -226,7 +226,8 @@ impl Source for ConfluenceSource {
             | WriteOp::MergePullRequest { .. }
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
-            | WriteOp::SubmitReview { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::SubmitReview { .. }
+            | WriteOp::DeleteBranch { .. } => Err(SourceError::protocol(format!(
                 "the Confluence adapter does not support {:?}",
                 op.identifier()
             ))),
