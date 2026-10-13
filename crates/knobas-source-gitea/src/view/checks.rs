@@ -31,13 +31,31 @@ pub(super) async fn block(
     repo: &str,
     reference: &str,
 ) -> Option<Block> {
-    match source
+    block_of(&read(source, owner, repo, reference).await)
+}
+
+/// The latest status of each context reported on the commit `reference`
+/// names: the one read behind [`block`]. A pull request's view keeps it to
+/// read its base's required checks from as well (#721), so the view asks
+/// Gitea once.
+pub(super) async fn read(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+    reference: &str,
+) -> Result<Vec<Status>, SourceError> {
+    source
         .client
         .combined_status_as::<Combined>(owner, repo, reference)
         .await
-    {
-        Ok(combined) => drawn(combined.statuses),
-        Err(error) => Some(unread(&error)),
+        .map(|combined| combined.statuses)
+}
+
+/// [`block`] for a [`read`] already made.
+pub(super) fn block_of(read: &Result<Vec<Status>, SourceError>) -> Option<Block> {
+    match read {
+        Ok(statuses) => drawn(statuses),
+        Err(error) => Some(unread(error)),
     }
 }
 
@@ -60,22 +78,22 @@ fn unread(error: &SourceError) -> Block {
 }
 
 /// The statuses as rows, failing first; `None` for none.
-fn drawn(statuses: Vec<Status>) -> Option<Block> {
+fn drawn(statuses: &[Status]) -> Option<Block> {
     let mut rows: Vec<(u8, ViewRow)> = statuses
-        .into_iter()
+        .iter()
         .filter_map(|status| {
-            let context = nonblank(status.context)?;
-            let state = nonblank(status.status).unwrap_or_default();
+            let context = nonblank(status.context.clone())?;
+            let state = nonblank(status.status.clone()).unwrap_or_default();
             let (rank, tone) = weigh(&state);
             Some((
                 rank,
                 ViewRow {
                     entity_id: None,
                     title: context,
-                    meta: nonblank(status.description),
+                    meta: nonblank(status.description.clone()),
                     tone,
                     chip: (!state.is_empty()).then_some(state),
-                    url: nonblank(status.target_url),
+                    url: nonblank(status.target_url.clone()),
                     commit: None,
                 },
             ))
@@ -117,12 +135,12 @@ struct Combined {
 }
 
 /// One `CommitStatus`. Gitea names its state `status` here.
-#[derive(Debug, serde::Deserialize)]
-struct Status {
+#[derive(Debug, Clone, serde::Deserialize)]
+pub(super) struct Status {
     #[serde(default)]
-    status: Option<String>,
+    pub(super) status: Option<String>,
     #[serde(default)]
-    context: Option<String>,
+    pub(super) context: Option<String>,
     #[serde(default)]
     description: Option<String>,
     #[serde(default)]

@@ -1549,6 +1549,14 @@ async fn required_status_checks_block_until_they_pass() {
             reason,
             "{what}"
         );
+        // *Checks* and *Merge…* are drawn from one read of the head's
+        // statuses, not one each.
+        let status_reads = paths(&server)
+            .await
+            .iter()
+            .filter(|p| **p == format!("{REPO}/commits/{HEAD_SHA}/status"))
+            .count();
+        assert_eq!(status_reads, 1, "{what}: the head's statuses read once");
     }
 }
 

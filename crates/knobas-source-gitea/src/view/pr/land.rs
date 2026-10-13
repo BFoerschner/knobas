@@ -10,6 +10,7 @@
 use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, Fact, FieldKind, Tone, ViewAction};
 
+use super::super::checks::Status;
 use super::{Pull, PullView, Review};
 use crate::client::is_repo_scoped;
 
@@ -38,8 +39,11 @@ pub(super) struct Landing {
     /// The base's protection refuses a merge while a review requested from
     /// an official reviewer is open (`block_on_official_review_requests`).
     block_on_requested: bool,
-    /// The base's required status checks and what the head reported, where
-    /// the protection enables them and Gitea answered both (#721).
+    /// The base's required status checks (Gitea's `status_check_contexts`,
+    /// none for "every status reported"), where its protection enables them.
+    required_checks: Option<Vec<String>>,
+    /// Those against what the head reported, once the view's one status read
+    /// has answered ([`Landing::with_statuses`], #721).
     checks: Option<Checks>,
 }
 
@@ -49,33 +53,26 @@ struct Checks {
     /// Gitea's `status_check_contexts`: glob patterns, none for "every
     /// status reported".
     required: Vec<String>,
-    /// The latest status of each context reported on the head commit.
-    reported: Vec<CommitStatus>,
+    /// The latest status of each context reported on the head commit; a
+    /// state or context Gitea sent `null` reads as empty, and an empty state
+    /// is pending, as Gitea's own combination reads it.
+    reported: Vec<Status>,
 }
 
-/// Gitea's `CombinedStatus`, the field landing reads.
-#[derive(Debug, serde::Deserialize)]
-struct CombinedStatus {
-    #[serde(default)]
-    statuses: Option<Vec<CommitStatus>>,
-}
-
-/// Gitea's `CommitStatus`: its state is spelled `status`. Either may come
-/// `null`; an absent state is pending, as Gitea's own combination reads it.
-#[derive(Debug, serde::Deserialize)]
-struct CommitStatus {
-    #[serde(default, deserialize_with = "null_as_default")]
-    context: String,
-    #[serde(default, deserialize_with = "null_as_default")]
-    status: String,
-}
-
-fn null_as_default<'de, D>(deserializer: D) -> Result<String, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    use serde::Deserialize;
-    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
+impl Landing {
+    /// The head commit's statuses as the view read them for *Checks*
+    /// (`None` where the record names no head sha), held against the base's
+    /// required checks. A read that failed decides nothing: *Checks* says
+    /// why, and Gitea's own refusal at the write says the rest (ADR-0004).
+    pub(super) fn with_statuses(mut self, read: Option<&Result<Vec<Status>, SourceError>>) -> Self {
+        if let (Some(required), Some(Ok(reported))) = (self.required_checks.take(), read) {
+            self.checks = Some(Checks {
+                required,
+                reported: reported.clone(),
+            });
+        }
+        self
+    }
 }
 
 /// Gitea's `Branch`, the fields landing reads.
@@ -189,21 +186,8 @@ impl PullView<'_> {
                     landing.block_on_rejected = protection.block_on_rejected_reviews;
                     landing.block_on_requested = protection.block_on_official_review_requests;
                     if protection.enable_status_check {
-                        let sha = pull.head.as_ref().and_then(|b| b.sha.as_deref());
-                        landing.checks = match sha {
-                            Some(sha) => unless_refused(
-                                client
-                                    .combined_status_as::<CombinedStatus>(
-                                        self.owner, self.repo, sha,
-                                    )
-                                    .await,
-                            )?
-                            .map(|combined| Checks {
-                                required: protection.status_check_contexts.unwrap_or_default(),
-                                reported: combined.statuses.unwrap_or_default(),
-                            }),
-                            None => None,
-                        };
+                        landing.required_checks =
+                            Some(protection.status_check_contexts.unwrap_or_default());
                     }
                 }
             }
@@ -345,10 +329,11 @@ fn official_reviewers(reviews: &[Review], state: &str) -> Vec<String> {
 /// alternatives) is not judged: the doubt leaves *Merge…* enabled and
 /// Gitea's refusal says the rest (ADR-0004).
 fn unmet_checks(checks: &Checks) -> Option<Vec<String>> {
-    let verdict = |status: &CommitStatus| match status.status.as_str() {
+    let context = |status: &Status| status.context.clone().unwrap_or_default();
+    let verdict = |status: &Status| match status.status.as_deref().unwrap_or_default() {
         "success" | "skipped" => None,
-        "error" | "failure" | "warning" => Some(format!("{} failed", status.context)),
-        _ => Some(format!("{} is pending", status.context)),
+        "error" | "failure" | "warning" => Some(format!("{} failed", context(status))),
+        _ => Some(format!("{} is pending", context(status))),
     };
     let mut unmet = Vec::new();
     if checks.required.is_empty() {
@@ -361,10 +346,10 @@ fn unmet_checks(checks: &Checks) -> Option<Vec<String>> {
             if pattern.contains(['[', '{', '\\']) {
                 continue;
             }
-            let matched: Vec<&CommitStatus> = checks
+            let matched: Vec<&Status> = checks
                 .reported
                 .iter()
-                .filter(|s| glob_matches(pattern, &s.context))
+                .filter(|s| glob_matches(pattern, &context(s)))
                 .collect();
             if matched.is_empty() {
                 unmet.push(format!("{pattern} has not reported"));

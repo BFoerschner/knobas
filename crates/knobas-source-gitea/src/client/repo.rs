@@ -91,8 +91,9 @@ impl GiteaClient {
     /// status: the latest status of each context reported on the commit
     /// `reference` names, a sha or a branch name (one escaped segment, as
     /// for [`Self::branch_as`]). A branch's view asks by its name so the read
-    /// goes beside the one that learns its tip. A pull request's landing
-    /// asks by the head's sha, for the base's required checks (#721).
+    /// goes beside the one that learns its tip. A pull request's view
+    /// asks by the head's sha, once, for *Checks* and the base's required
+    /// checks alike (#721).
     pub(crate) async fn combined_status_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
