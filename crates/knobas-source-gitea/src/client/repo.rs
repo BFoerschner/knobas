@@ -42,6 +42,27 @@ impl GiteaClient {
         .await
     }
 
+    /// `GET /repos/{o}/{r}/branch_protections/{rule}` -- one protection
+    /// rule (#708). Gitea answers it to a repository administrator only; to
+    /// anyone else it is a 403.
+    pub(crate) async fn branch_protection_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        rule: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &format!(
+                "/repos/{}/{}/branch_protections/{}",
+                segment(owner)?,
+                segment(repo)?,
+                escaped(rule)?
+            ),
+            &[],
+        )
+        .await
+    }
+
     /// `DELETE /repos/{o}/{r}/branches/{branch}` (#707): the one delete this
     /// adapter makes, the name one escaped segment as for [`Self::branch_as`].
     ///

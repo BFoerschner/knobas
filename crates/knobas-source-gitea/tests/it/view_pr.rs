@@ -214,7 +214,91 @@ async fn slow_gitea(
         )
         .mount(&server)
         .await;
+    // What landing reads (#708): the base and the head branch, unprotected
+    // and asking for no approvals, and whether the base has a commit the
+    // head lacks -- none, so the head is level.
+    get(format!("{REPO}/branches/main"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(branch("main", false))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
+    get(format!("{REPO}/branches/{HEAD_WIRE}"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(branch("feature/PAY-231-sepa-retry", false))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
+    get(format!("{REPO}/commits"))
+        .and(query_param("sha", "main"))
+        .and(query_param("not", HEAD_SHA))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([]))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
     server
+}
+
+/// The head branch's name as one escaped path segment.
+const HEAD_WIRE: &str = "feature%2FPAY-231-sepa-retry";
+
+/// Gitea's `Branch` record, as `/branches/{name}` answers it.
+fn branch(name: &str, protected: bool) -> Value {
+    json!({
+        "name": name,
+        "commit": { "id": HEAD_SHA },
+        "protected": protected,
+        "required_approvals": 0,
+        "effective_branch_protection_name": if protected { name } else { "" },
+    })
+}
+
+/// Answer `GET p` with `status` and `body`, over the fake's own answer.
+async fn answer(server: &MockServer, p: String, status: u16, body: Value) {
+    Mock::given(method("GET"))
+        .and(path(p))
+        .respond_with(ResponseTemplate::new(status).set_body_json(body))
+        .with_priority(2)
+        .mount(server)
+        .await;
+}
+
+/// The base has a commit the head lacks: the head is behind.
+async fn behind(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/commits")))
+        .and(query_param("sha", "main"))
+        .and(query_param("not", HEAD_SHA))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([{ "sha": FIRST_SHA }])))
+        .with_priority(2)
+        .mount(server)
+        .await;
+}
+
+/// `main` protected by a rule that requires `approvals` approvals and,
+/// where `outdated`, an up-to-date head.
+async fn protect_main(server: &MockServer, approvals: u64, outdated: bool) {
+    let mut main = branch("main", true);
+    main["required_approvals"] = json!(approvals);
+    answer(server, format!("{REPO}/branches/main"), 200, main).await;
+    answer(
+        server,
+        format!("{REPO}/branch_protections/main"),
+        200,
+        json!({
+            "rule_name": "main",
+            "required_approvals": approvals,
+            "block_on_outdated_branch": outdated,
+        }),
+    )
+    .await;
 }
 
 fn source(server: &MockServer) -> Box<dyn Source> {
@@ -284,7 +368,11 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("State", "open", Some(Tone::Info)),
             ("Author", "mara.lindqvist", None),
             ("Branches", "feature/PAY-231-sepa-retry → main", None),
-            ("Mergeable", "no", Some(Tone::Warn)),
+            (
+                "Mergeable",
+                "no: conflicts with main, or Gitea is still checking",
+                Some(Tone::Warn)
+            ),
             ("Created", "2026-08-21 17:41 +00:00", None),
             ("Updated", "2026-08-22 10:20 +00:00", None),
             ("Review", "approved by priya.nair", Some(Tone::Ok)),
@@ -955,21 +1043,36 @@ fn no_fixed_value_is_a_field(view: &SourceView) {
 /// SPI's three styles with `merge` (Gitea's own default) first, the sentence
 /// naming what goes where; `disabled` is the one part that varies.
 fn merge(disabled: Option<&str>) -> ViewAction {
+    merge_deleting(disabled, true)
+}
+
+/// [`merge`], with *Delete branch after merge* drawn ticked or not (#708).
+fn merge_deleting(disabled: Option<&str>, delete: bool) -> ViewAction {
     ViewAction {
-        fields: vec![ActionField {
-            required: true,
-            ..ActionField::new(
-                "style",
-                "Style",
-                FieldKind::Choice {
-                    options: vec![
-                        ChoiceOption::new("merge", "Merge commit"),
-                        ChoiceOption::new("rebase", "Rebase"),
-                        ChoiceOption::new("squash", "Squash"),
-                    ],
-                },
-            )
-        }],
+        fields: vec![
+            ActionField {
+                required: true,
+                ..ActionField::new(
+                    "style",
+                    "Style",
+                    FieldKind::Choice {
+                        options: vec![
+                            ChoiceOption::new("merge", "Merge commit"),
+                            ChoiceOption::new("rebase", "Rebase"),
+                            ChoiceOption::new("squash", "Squash"),
+                        ],
+                    },
+                )
+            },
+            ActionField {
+                value: Some(delete.to_string()),
+                ..ActionField::new(
+                    "delete_branch",
+                    "Delete branch after merge",
+                    FieldKind::Flag,
+                )
+            },
+        ],
         confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
         primary: true,
         disabled: disabled.map(str::to_owned),
@@ -1018,13 +1121,16 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
     for (pull, reason) in [
         (
             not_mergeable,
-            "Not mergeable into main: a conflict, a work-in-progress title or a check still \
-             running",
+            "Conflicts with main, or Gitea is still checking",
         ),
-        (unknown, "Gitea has not said yet whether this can be merged"),
+        (unknown, "Gitea has not said yet whether it can be merged"),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        // Not yet said is no fact to draw; the toolbar says why it waits.
+        if reason.starts_with("Gitea") {
+            assert_eq!(mergeable_fact(&view), None, "{view:#?}");
+        }
         assert_eq!(
             action(&view, "merge_pull_request"),
             merge(Some(reason)),
@@ -1032,6 +1138,318 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
         );
         assert!(!has_actions_block(&view), "{view:#?}");
     }
+}
+
+// -- Landing: the merge's reasons, its delete flag, Update branch… (#708) ----
+
+/// An open pull request Gitea says it can merge, everything else as `pull`.
+fn mergeable_pull() -> Value {
+    let mut pull = open_pull();
+    pull["mergeable"] = json!(true);
+    pull
+}
+
+/// The overview's *Mergeable* fact, if it has one.
+fn mergeable_fact(view: &SourceView) -> Option<Fact> {
+    fact(facts_of(section(view, "overview")), "Mergeable").cloned()
+}
+
+/// *Merge…*'s disabled reason names what stands in the way, each thing Gitea
+/// would refuse it for that the reader can still change: a conflict, a
+/// work-in-progress title, a head behind a base whose protection requires it
+/// level, approvals the protection requires and has not got. Several at once
+/// are all said. The overview's *Mergeable* says the same, toned warn.
+#[tokio::test]
+async fn a_merge_says_specifically_what_stands_in_its_way() {
+    struct Case {
+        what: &'static str,
+        pull: Value,
+        approvals: Option<(u64, bool)>,
+        behind: bool,
+        reason: &'static str,
+    }
+    let mut wip = open_pull();
+    wip["title"] = json!("WIP: SEPA retry with exponential backoff");
+    let mut bracketed = open_pull();
+    bracketed["title"] = json!("[wip] SEPA retry");
+    let cases = [
+        Case {
+            what: "a conflict",
+            pull: open_pull(),
+            approvals: None,
+            behind: false,
+            reason: "Conflicts with main, or Gitea is still checking",
+        },
+        Case {
+            what: "a work-in-progress title",
+            pull: wip,
+            approvals: None,
+            behind: false,
+            reason: "Marked work in progress in its title",
+        },
+        Case {
+            what: "a work-in-progress title, Gitea's other prefix, any case",
+            pull: bracketed,
+            approvals: None,
+            behind: false,
+            reason: "Marked work in progress in its title",
+        },
+        Case {
+            what: "behind a base that must be level",
+            pull: mergeable_pull(),
+            approvals: Some((0, true)),
+            behind: true,
+            reason: "Behind main, which its protection forbids: update the branch",
+        },
+        Case {
+            what: "approvals missing",
+            pull: mergeable_pull(),
+            approvals: Some((2, false)),
+            behind: false,
+            reason: "1 of 2 required approvals",
+        },
+        Case {
+            what: "all of it",
+            pull: open_pull(),
+            approvals: Some((2, true)),
+            behind: true,
+            reason: "Conflicts with main, or Gitea is still checking; behind main, which its \
+                     protection forbids: update the branch; 1 of 2 required approvals",
+        },
+    ];
+    for case in cases {
+        let server = gitea(case.pull, official_reviews()).await;
+        if let Some((approvals, outdated)) = case.approvals {
+            protect_main(&server, approvals, outdated).await;
+        }
+        if case.behind {
+            behind(&server).await;
+        }
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            action(&view, "merge_pull_request").disabled.as_deref(),
+            Some(case.reason),
+            "{}",
+            case.what
+        );
+        let mut lower = case.reason.to_owned();
+        lower[..1].make_ascii_lowercase();
+        assert_eq!(
+            mergeable_fact(&view),
+            Some(Fact {
+                label: "Mergeable".into(),
+                value: format!("no: {lower}"),
+                tone: Some(Tone::Warn),
+            }),
+            "{}",
+            case.what
+        );
+    }
+}
+
+/// Reviews where one official approval stands: Priya's. Olu's approval is not
+/// official (Gitea counts only reviewers its protection names), Rae's was
+/// dismissed, and Lee asks for changes.
+fn official_reviews() -> Value {
+    json!([
+        { "id": 1, "user": { "login": "priya.nair" }, "state": "APPROVED", "official": true },
+        { "id": 2, "user": { "login": "olu" }, "state": "APPROVED", "official": false },
+        { "id": 3, "user": { "login": "rae" }, "state": "APPROVED", "official": true,
+          "dismissed": true },
+        { "id": 4, "user": { "login": "lee" }, "state": "REQUEST_CHANGES", "official": true }
+    ])
+}
+
+/// What does not stand in the way does not disable it: a head behind a base
+/// that does not require it level, approvals the protection has, a
+/// protection the token may not read (Gitea answers its rules to
+/// administrators only) -- Gitea's own refusal is the last word there
+/// (ADR-0004). The overview reads *yes*, untoned, saying the head is behind
+/// where it is.
+#[tokio::test]
+async fn what_does_not_stand_in_the_way_leaves_the_merge_enabled() {
+    // Behind, not required level.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    behind(&server).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request"), merge(None));
+    assert_eq!(
+        mergeable_fact(&view),
+        Some(Fact {
+            label: "Mergeable".into(),
+            value: "yes, behind main".into(),
+            tone: None,
+        })
+    );
+
+    // One approval required, one official approval given.
+    let server = gitea(mergeable_pull(), official_reviews()).await;
+    protect_main(&server, 1, true).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request"), merge(None));
+    assert_eq!(mergeable_fact(&view).map(|f| f.value), Some("yes".into()));
+
+    // Protected, its rule unreadable to this token, behind.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    answer(
+        &server,
+        format!("{REPO}/branches/main"),
+        200,
+        branch("main", true),
+    )
+    .await;
+    answer(
+        &server,
+        format!("{REPO}/branch_protections/main"),
+        403,
+        json!({ "message": "token does not have at least one of required scope(s)" }),
+    )
+    .await;
+    behind(&server).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request").disabled, None);
+}
+
+/// *Delete branch after merge* is ticked where Gitea can delete the head: a
+/// branch of the same repository that is not protected. A protected head, a
+/// head in a fork, and a head branch already gone draw it unticked.
+#[tokio::test]
+async fn a_merge_deletes_its_branch_by_default_only_where_it_can() {
+    // Protected head.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    answer(
+        &server,
+        format!("{REPO}/branches/{HEAD_WIRE}"),
+        200,
+        branch("feature/PAY-231-sepa-retry", true),
+    )
+    .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        action(&view, "merge_pull_request"),
+        merge_deleting(None, false),
+        "a protected head"
+    );
+
+    // Head already deleted.
+    let server = gitea(mergeable_pull(), json!([])).await;
+    answer(
+        &server,
+        format!("{REPO}/branches/{HEAD_WIRE}"),
+        404,
+        json!({ "message": "branch does not exist" }),
+    )
+    .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        action(&view, "merge_pull_request"),
+        merge_deleting(None, false),
+        "a head that is gone"
+    );
+
+    // Head in a fork: its branch is not this repository's to read or delete.
+    let mut forked = mergeable_pull();
+    forked["head"]["repo"]["full_name"] = json!("mara/payout-service");
+    let server = gitea(forked, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        action(&view, "merge_pull_request"),
+        merge_deleting(None, false),
+        "a fork's head"
+    );
+    assert!(
+        !paths(&server)
+            .await
+            .contains(&format!("{REPO}/branches/{HEAD_WIRE}")),
+        "a fork's branch is not read in the base repository"
+    );
+}
+
+/// *Update branch…* as the toolbar draws it (workflow 9 of spec #701): the
+/// base merged in or the head rebased onto it, `merge` first, Gitea's own
+/// default; maintenance, so neither primary nor a danger.
+fn update_action() -> ViewAction {
+    ViewAction {
+        fields: vec![ActionField {
+            required: true,
+            ..ActionField::new(
+                "style",
+                "How",
+                FieldKind::Choice {
+                    options: vec![
+                        ChoiceOption::new("merge", "Merge main in"),
+                        ChoiceOption::new("rebase", "Rebase onto main"),
+                    ],
+                },
+            )
+        }],
+        confirm: Some("Bring feature/PAY-231-sepa-retry up to date with main?".into()),
+        ..ViewAction::new("update_pull_request_branch", "Update branch…")
+    }
+}
+
+/// *Update branch…* is offered where the head is behind its base, after the
+/// maintenance and before *Merge…* (the #701 ruling's order); level, there is
+/// nothing to update; closed or merged, nothing ever will be (absent, the
+/// #701 ruling).
+#[tokio::test]
+async fn update_branch_is_offered_where_the_head_is_behind() {
+    let server = gitea(mergeable_pull(), json!([])).await;
+    behind(&server).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "update_pull_request_branch"), update_action());
+    let labels: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
+    assert_eq!(
+        labels,
+        [
+            "Comment…",
+            "Approve…",
+            "Request changes…",
+            "Edit…",
+            "Close",
+            "Update branch…",
+            "Merge…"
+        ],
+        "{view:#?}"
+    );
+
+    let level = gitea(mergeable_pull(), json!([])).await;
+    let view = source(&level).view(PR, None).await.unwrap().unwrap();
+    assert!(!offers(&view, "Update branch…"), "a level head: {view:#?}");
+
+    let mut closed = mergeable_pull();
+    closed["state"] = json!("closed");
+    let mut merged = closed.clone();
+    merged["merged"] = json!(true);
+    for pull in [closed, merged] {
+        let server = gitea(pull, json!([])).await;
+        behind(&server).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert!(!offers(&view, "Update branch…"), "{view:#?}");
+    }
+}
+
+/// The overview read on its own says what the whole view's says: one place
+/// decides mergeability, the toolbar and the fact alike.
+#[tokio::test]
+async fn the_overview_read_alone_says_the_same_mergeability() {
+    let server = gitea(mergeable_pull(), official_reviews()).await;
+    protect_main(&server, 2, false).await;
+    let whole = source(&server).view(PR, None).await.unwrap().unwrap();
+    let alone = source(&server)
+        .view(PR, Some("overview"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        mergeable_fact(&alone),
+        Some(Fact {
+            label: "Mergeable".into(),
+            value: "no: 1 of 2 required approvals".into(),
+            tone: Some(Tone::Warn),
+        })
+    );
+    assert_eq!(mergeable_fact(&alone), mergeable_fact(&whole));
 }
 
 /// A section read answers that section alone: the toolbar comes with the
@@ -1050,8 +1468,10 @@ async fn a_section_read_carries_no_toolbar() {
 }
 
 /// A pull request's tabs are read side by side over its one record (#703):
-/// once the record is in, the reviews, the commits, the comments and who the
-/// token is (#705) are in flight together. Read in turn, one is.
+/// once the record is in, the reviews, the commits, the comments, who the
+/// token is (#705) and landing's three -- the base branch, the head branch,
+/// whether the head is behind (#708) -- are in flight together. Read in
+/// turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1065,7 +1485,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 4, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 7, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
