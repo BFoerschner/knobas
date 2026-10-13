@@ -70,18 +70,20 @@ fn review(
     } else {
         None
     };
-    // The SPI's own word for the verdict, as the shell's payload reads it.
-    let word = serde_json::to_value(verdict)
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default();
+    // The SPI's own word for the verdict, as the shell's payload reads it
+    // (`ReviewVerdict`'s snake_case serde form, pinned in `knobas_source`).
+    let word = match verdict {
+        ReviewVerdict::Approve => "approve",
+        ReviewVerdict::RequestChanges => "request_changes",
+        ReviewVerdict::Comment => "comment",
+    };
     ViewAction {
         fields: vec![ActionField {
             required,
             ..ActionField::new("body", "Comment", FieldKind::LongText)
         }],
         disabled,
-        values: [("verdict".to_owned(), word)].into(),
+        values: [("verdict".to_owned(), word.to_owned())].into(),
         ..ViewAction::new(crate::WRITE_OP_SUBMIT_REVIEW, label)
     }
 }

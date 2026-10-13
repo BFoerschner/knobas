@@ -381,9 +381,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// module every source's payload shape.
 ///
 /// **The whole mirrored record** -- `"transition"`, `"approve"`,
-/// `"merge_pull_request"` and `"submit_review"`, the ops that put a *judgement* onto a target whose
-/// current state is the whole reason for the judgement, and `"set_parameter"`,
-/// which overwrites a value. Any change to the target at all holds the write.
+/// `"merge_pull_request"` and `"submit_review"`, the ops that put a
+/// *judgement* onto a target whose current state is the whole reason for the
+/// judgement, and `"set_parameter"`, which overwrites a value. Any change to
+/// the target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there

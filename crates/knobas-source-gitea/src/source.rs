@@ -1,6 +1,10 @@
 //! The `Source` implementation: what the sync engine and *Test connection*
 //! hold.
 
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::sync::{Mutex, OnceLock, PoisonError};
+
 use knobas_source::instance::{SourceInstance, validate_instance_id};
 use knobas_source::{
     ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
@@ -32,9 +36,8 @@ pub struct GiteaSource {
 /// only once Gitea answered it. A user renamed in Gitea leaves the old login
 /// here until restart, which only leaves the review actions enabled on their
 /// own pull requests, and Gitea's refusal then says why (ADR-0004).
-fn viewers() -> &'static std::sync::Mutex<std::collections::HashMap<u64, String>> {
-    static VIEWERS: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<u64, String>>> =
-        std::sync::OnceLock::new();
+fn viewers() -> &'static Mutex<HashMap<u64, String>> {
+    static VIEWERS: OnceLock<Mutex<HashMap<u64, String>>> = OnceLock::new();
     VIEWERS.get_or_init(Default::default)
 }
 
@@ -65,7 +68,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     let config = GiteaConfig::from_json(&instance.config)?;
     let viewer_key = {
         use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        let mut hasher = DefaultHasher::new();
         (&instance.id, &instance.base_url, &instance.secret).hash(&mut hasher);
         hasher.finish()
     };
@@ -92,7 +95,7 @@ impl GiteaSource {
     pub(crate) async fn viewer(&self) -> Option<String> {
         if let Some(login) = viewers()
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .get(&self.viewer_key)
         {
             return Some(login.clone());
@@ -101,7 +104,7 @@ impl GiteaSource {
         let login = user.login.filter(|l| !l.trim().is_empty())?;
         viewers()
             .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .unwrap_or_else(PoisonError::into_inner)
             .insert(self.viewer_key, login.clone());
         Some(login)
     }

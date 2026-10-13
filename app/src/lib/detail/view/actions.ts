@@ -60,8 +60,8 @@ const PAYLOADS: Record<
 
 /**
  * The write `action` queues against `entity` with its fixed values and the
- * dialog's `values`, and the `settings` changed, or `null` when this shell cannot build it: an op it
- * has no entry for, or values the op cannot carry.
+ * dialog's `values`, and the `settings` changed, or `null` when this shell
+ * cannot build it: an op it has no entry for, or values the op cannot carry.
  */
 export function actionPayload(
   action: ViewAction,
