@@ -95,67 +95,33 @@ async fn whole(
     only: Option<&str>,
 ) -> Result<Vec<ViewSection>, SourceError> {
     let id = &source.id;
-    let base = record.default_branch();
-    let is_default = branch == base;
-    let tip: BranchRecord = source.client.branch_as(owner, repo, branch).await?;
-    // A mirror's `/pulls` is a bare 404: it has none, which is not a failure.
-    let open = if record.repo.can_have_pulls() {
-        rows::open_pulls(source, owner, repo).await?
-    } else {
-        rows::Paged::default()
-    };
+    // The tip, the open pull requests and what the branch carries are each
+    // their own reads, so they are read side by side (#703); the first to
+    // fail fails the view, as it did in turn.
+    let (tip, open, carried) = tokio::try_join!(
+        source.client.branch_as::<BranchRecord>(owner, repo, branch),
+        async {
+            // A mirror's `/pulls` is a bare 404: it has none, which is not a failure.
+            if record.repo.can_have_pulls() {
+                rows::open_pulls(source, owner, repo).await
+            } else {
+                Ok(rows::Paged::default())
+            }
+        },
+        read_carried(source, record, owner, repo, branch),
+    )?;
     let pulls: Vec<_> = open
         .items
         .iter()
         .filter(|p| p.is_from(owner, repo, branch))
         .collect();
-
-    let mut facts = Vec::new();
-    // The commits the tab lists, the tab's count, the note ending the list.
-    let (commits, count, files, note) = if is_default {
-        facts.push(fact("Branch", "default branch".to_owned()));
-        let latest: Vec<ListedCommit> = source
-            .client
-            .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
-            .await?;
-        (latest, None, None, None)
-    } else {
-        let ahead: Compare = source.client.compare_as(owner, repo, base, branch).await?;
-        // Behind is a count, so it is read as one; the reverse compare
-        // would list every commit the default branch gained since.
-        let behind = match source
-            .client
-            .count_commits_not_in(owner, repo, base, branch)
-            .await?
-        {
-            Some(count) => count,
-            None => {
-                let behind: Compare = source.client.compare_as(owner, repo, branch, base).await?;
-                behind.commit_count()
-            }
-        };
-        facts.push(fact("Base", base.to_owned()));
-        facts.push(fact("Ahead", ahead.commit_count().to_string()));
-        facts.push(fact("Behind", behind.to_string()));
-        let files = ahead.files();
-        let total = usize::try_from(ahead.commit_count()).unwrap_or(usize::MAX);
-        let mut commits = ahead.commits;
-        let read = commits.len();
-        commits.truncate(rows::COMMIT_CAP);
-        let listed = commits.len();
-        let note = rows::left_out(
-            "commits",
-            listed,
-            Some(total.max(read)),
-            false,
-            record.web(&format!(
-                "/compare/{}...{}",
-                map::url_path(base),
-                map::url_path(branch)
-            )),
-        );
-        (commits, Some(listed as u64), Some(files), note)
-    };
+    let Carried {
+        mut facts,
+        commits,
+        count,
+        files,
+        note,
+    } = carried;
     if pulls.is_empty() {
         facts.push(Fact {
             label: "Pull request".to_owned(),
@@ -227,6 +193,92 @@ async fn whole(
         sections.retain(|s| s.id == only);
     }
     Ok(sections)
+}
+
+/// What a branch carries: its facts about the base, the commits its tab
+/// lists, the tab's count, the files the diff touches and the note ending the
+/// list.
+struct Carried {
+    facts: Vec<Fact>,
+    commits: Vec<ListedCommit>,
+    count: Option<u64>,
+    files: Option<u64>,
+    note: Option<knobas_source::view::ViewRow>,
+}
+
+/// The default branch's latest commits, or what another branch carries over
+/// it, ahead and behind read side by side (#703).
+async fn read_carried(
+    source: &GiteaSource,
+    record: &RepoRecord,
+    owner: &str,
+    repo: &str,
+    branch: &str,
+) -> Result<Carried, SourceError> {
+    let base = record.default_branch();
+    if branch == base {
+        let latest: Vec<ListedCommit> = source
+            .client
+            .latest_commits_as(owner, repo, branch, rows::LATEST_COMMITS)
+            .await?;
+        return Ok(Carried {
+            facts: vec![fact("Branch", "default branch".to_owned())],
+            commits: latest,
+            count: None,
+            files: None,
+            note: None,
+        });
+    }
+    let (ahead, behind) = tokio::try_join!(
+        source
+            .client
+            .compare_as::<Compare>(owner, repo, base, branch),
+        async {
+            // Behind is a count, so it is read as one; the reverse compare
+            // would list every commit the default branch gained since.
+            match source
+                .client
+                .count_commits_not_in(owner, repo, base, branch)
+                .await?
+            {
+                Some(count) => Ok(count),
+                None => {
+                    let behind: Compare =
+                        source.client.compare_as(owner, repo, branch, base).await?;
+                    Ok(behind.commit_count())
+                }
+            }
+        },
+    )?;
+    let facts = vec![
+        fact("Base", base.to_owned()),
+        fact("Ahead", ahead.commit_count().to_string()),
+        fact("Behind", behind.to_string()),
+    ];
+    let files = ahead.files();
+    let total = usize::try_from(ahead.commit_count()).unwrap_or(usize::MAX);
+    let mut commits = ahead.commits;
+    let read = commits.len();
+    commits.truncate(rows::COMMIT_CAP);
+    let listed = commits.len();
+    let note = rows::left_out(
+        "commits",
+        listed,
+        Some(total.max(read)),
+        false,
+        record.web(&format!(
+            "/compare/{}...{}",
+            map::url_path(base),
+            map::url_path(branch)
+        )),
+    );
+    Ok(Carried {
+        facts,
+        commits,
+        count: Some(listed as u64),
+        files: Some(files),
+        note,
+    })
 }
 
 /// The deferred *Diff*: the compare as `git diff` prints it.

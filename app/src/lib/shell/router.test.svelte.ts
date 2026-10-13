@@ -503,3 +503,25 @@ test("back and forward are available exactly where the history has somewhere to 
   expect(location.hash).toBe("#/sources");
   stop();
 });
+
+/**
+ * The webview's `hashchange` for an address `go()` already read keeps the
+ * route as it is (#703). A new object for the same place re-ran everything
+ * that follows the route: the room restarted its hold on the next detail,
+ * and the open detail read its row and its view a second time.
+ */
+test("the hashchange for an address go() already read keeps the same route", () => {
+  location.hash = "#/ctx/all";
+  const router = createRouter();
+  const stop = router.start();
+
+  router.go("#/repo/gitea:tidewater/ledger-api");
+  const read = router.route;
+  window.dispatchEvent(new HashChangeEvent("hashchange"));
+  expect(router.route).toBe(read);
+
+  router.go("#/repo/gitea:tidewater/other");
+  expect(router.route).not.toBe(read);
+
+  stop();
+});

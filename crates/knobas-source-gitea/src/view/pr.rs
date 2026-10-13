@@ -43,12 +43,14 @@ pub(super) async fn draw(
         None => {
             let pull = at.pull().await?;
             actions.push(merge_action(&pull));
-            vec![
-                at.overview(&pull).await?,
-                files_stub(&pull),
-                at.commits(Some(&pull)).await?,
-                at.conversation().await?,
-            ]
+            // Each tab is its own reads over the one record, so they are read
+            // side by side (#703); the first to fail fails the view.
+            let (overview, commits, conversation) = tokio::try_join!(
+                at.overview(&pull),
+                at.commits(Some(&pull)),
+                at.conversation(),
+            )?;
+            vec![overview, files_stub(&pull), commits, conversation]
         }
         Some(OVERVIEW) => vec![at.overview(&at.pull().await?).await?],
         Some(FILES) => vec![at.files().await?],

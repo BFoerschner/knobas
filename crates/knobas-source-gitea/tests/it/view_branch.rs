@@ -8,13 +8,16 @@
 //! (`a_seeded_branchs_view_reads_ahead_with_its_seeded_commits`), and on
 //! disagreement this fake is what is wrong.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use knobas_source::view::{Block, DiffChange, Fact, SourceView, Tone, ViewRow, ViewSection};
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{InFlight, TOKEN, instance};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const FEATURE: &str = "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry";
@@ -89,6 +92,8 @@ fn pull(number: u64, title: &str, head: &str) -> Value {
 /// What one fake serves, so a test can take something away.
 struct Served {
     pulls: Vec<Value>,
+    /// Holds every answer and counts the requests in flight; none by default.
+    flight: Option<Arc<InFlight>>,
 }
 
 impl Default for Served {
@@ -106,6 +111,7 @@ impl Default for Served {
                     "feature/PAY-231-sepa-retry",
                 ),
             ],
+            flight: None,
         }
     }
 }
@@ -114,7 +120,15 @@ async fn gitea(served: Served) -> MockServer {
     let server = MockServer::start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
-    let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
+    if let Some(flight) = &served.flight {
+        flight.watch(&server).await;
+    }
+    let delay = served.flight.as_ref().map_or(Duration::ZERO, |f| f.delay());
+    let ok = |body: Value| {
+        ResponseTemplate::new(200)
+            .set_body_json(body)
+            .set_delay(delay)
+    };
 
     authed(Mock::given(method("GET")).and(path(REPO)))
         .respond_with(ok(repo_record()))
@@ -142,7 +156,11 @@ async fn gitea(served: Served) -> MockServer {
     // of two files -- the count is files, not touches.
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/compare/main...{FEATURE_WIRE}"))))
         .and(query_param("output", "diff"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(DIFF)
+                .set_delay(delay),
+        )
         .with_priority(1)
         .mount(&server)
         .await;
@@ -404,6 +422,7 @@ async fn a_branch_with_no_pull_request_says_so() {
             from_fork,
             from_gone,
         ],
+        ..Served::default()
     })
     .await;
     let view = source(&server).view(FEATURE, None).await.unwrap().unwrap();
@@ -519,4 +538,25 @@ async fn behind_falls_back_to_the_reverse_compare_without_a_count() {
         facts(section(&view, "overview")).contains(&("Behind".to_owned(), "1".to_owned())),
         "{view:#?}"
     );
+}
+
+/// A branch's reads are made side by side, not one after another (#703):
+/// once the record is in, its tip, its open pull requests, what it carries
+/// ahead and how far it is behind are in flight together. Read in turn, one
+/// is; with only ahead and behind side by side, two.
+#[tokio::test]
+async fn a_branchs_reads_are_made_at_the_same_time() {
+    let flight = InFlight::new(Duration::from_millis(300));
+    let server = gitea(Served {
+        flight: Some(Arc::clone(&flight)),
+        ..Served::default()
+    })
+    .await;
+    let view = source(&server)
+        .view(FEATURE, None)
+        .await
+        .expect("reads")
+        .expect("a branch draws a view");
+    assert_eq!(view.sections.len(), 3);
+    assert_eq!(flight.most(), 4, "the branch's reads in flight at once");
 }

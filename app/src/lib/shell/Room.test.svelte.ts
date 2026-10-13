@@ -17,6 +17,7 @@ import type {
   EntityRow,
   MiniBoard,
   NoteLinkInput,
+  SourceView,
 } from "../ipc/entity";
 import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
 
@@ -38,6 +39,9 @@ let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Pr
 const notInMirror = (entityId: string): Promise<EntityDetail> =>
   Promise.reject({ code: "not_found", message: `${entityId} is not in the mirror`, source_id: null });
 let entity = notInMirror;
+/** What `entity_view` answers, and every entity it was asked about. */
+let sourceView: (entityId: string) => Promise<SourceView | null> = () => Promise.resolve(null);
+const viewReads: string[] = [];
 
 const written: string[] = [];
 /**
@@ -70,8 +74,11 @@ vi.mock("../ipc/entity", () => ({
     calls.push({ filter, limit, offset });
     return answer(filter);
   },
-  // No source view (#661): the panel is the mirror's, as before.
-  entityView: () => Promise.resolve(null),
+  // No source view (#661) unless a test draws one: the panel is the mirror's.
+  entityView: (entityId: string) => {
+    viewReads.push(entityId);
+    return sourceView(entityId);
+  },
   getEntity: (entityId: string): Promise<EntityDetail> => entity(entityId),
   createNote: (_title?: string, _bodyMd?: string, links?: NoteLinkInput[]) => {
     written.push("note:new");
@@ -297,6 +304,8 @@ beforeEach(() => {
   calls.length = 0;
   assetCalls.length = 0;
   entity = notInMirror;
+  sourceView = () => Promise.resolve(null);
+  viewReads.length = 0;
   answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
   board = () => Promise.resolve({ columns: [], sources: [] });
   assets = () => Promise.resolve([]);
@@ -1501,4 +1510,91 @@ test("a detail closed while its row was being read is not drawn when the read an
   expect(screen.target.querySelector(".detail"), "B's late row draws nothing").toBeNull();
 
   screen.done();
+});
+
+/**
+ * Opening a repo from another detail flickered (#703): the next panel was
+ * mounted once its row was read, and said *Reading from Gitea…* for the
+ * moment its view took. Now the panel being left stays drawn until the next
+ * one can be drawn whole -- row and view -- for up to the placeholder's
+ * threshold, and the reads made ahead are the ones the panel draws: the
+ * view is read once.
+ */
+test("navigating A to B keeps A drawn until B's view answers, and B is drawn whole", async () => {
+  // `Date` too: the panel counts the time its borrowed reads have taken
+  // toward its own waits, and on the real clock a stalled machine would make
+  // it say *Reading…* at mount.
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"] });
+  try {
+    const detail = (id: string): EntityDetail => ({
+      row: { ...row("commit", id), entity_id: `mock:${id}` },
+      source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
+      kind_info: null,
+      body_text: "",
+      author: null,
+      payload: {},
+      web_url: null,
+      deleted_at: null,
+      links: [],
+      activity: [],
+    });
+    const drawn = (label: string): SourceView => ({
+      sections: [
+        {
+          id: "overview",
+          title: "Overview",
+          count: null,
+          deferred: false,
+          blocks: [{ type: "facts", facts: [{ label: "Commit", value: label, tone: null }] }],
+        },
+      ],
+      actions: [],
+    });
+    entity = (id) => Promise.resolve(detail(id.slice(5)));
+    sourceView = (id) =>
+      new Promise((resolve) => setTimeout(() => resolve(drawn(`view of ${id}`)), 200));
+    const settle = async () => {
+      for (let i = 0; i < 20; i++) await Promise.resolve();
+      flushSync();
+    };
+
+    const screen = render("#/ctx/all");
+    screen.router.go("#/commit/mock:A");
+    flushSync();
+    await settle();
+    vi.advanceTimersByTime(200);
+    await settle();
+    const title = () => screen.target.querySelector(".detail h2")?.textContent;
+    expect(title()).toBe("Title of A");
+
+    // Every reading line drawn from here on, however briefly.
+    const said: string[] = [];
+    const observer = new MutationObserver(() => {
+      for (const line of screen.target.querySelectorAll(".detail .view-wait p, .detail h2")) {
+        if (line.textContent?.includes("Reading")) said.push(line.textContent);
+      }
+    });
+    observer.observe(screen.target, { childList: true, subtree: true, characterData: true });
+
+    viewReads.length = 0;
+    screen.router.go("#/commit/mock:B");
+    flushSync();
+    await settle();
+    vi.advanceTimersByTime(150);
+    await settle();
+    expect(title(), "A is still drawn while B's view is read").toBe("Title of A");
+
+    vi.advanceTimersByTime(50);
+    await settle();
+    expect(title()).toBe("Title of B");
+    expect(screen.target.textContent).toContain("view of mock:B");
+    expect(screen.target.querySelector(".view-wait"), "B arrives whole").toBeNull();
+    expect(said, "no reading line on the way").toEqual([]);
+    expect(viewReads, "the view read ahead is the one drawn").toEqual(["mock:B"]);
+
+    observer.disconnect();
+    screen.done();
+  } finally {
+    vi.useRealTimers();
+  }
 });

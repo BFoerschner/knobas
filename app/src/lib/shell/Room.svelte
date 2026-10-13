@@ -16,7 +16,7 @@
   import { untrack } from "svelte";
   import { ipcErrorMessage } from "../ipc";
   import { inbox } from "../inbox/inbox.svelte";
-  import { contextMembers, getEntity } from "../ipc/entity";
+  import { contextMembers, entityView, getEntity } from "../ipc/entity";
   import { HOLD_MS, readAhead } from "../detail/view-read";
   import { push } from "./toasts.svelte";
   import Detail from "../detail/Detail.svelte";
@@ -81,11 +81,11 @@
    * The detail the slide-over draws, which trails the address by at most a
    * moment (#693).
    *
-   * Opened from another detail, the next one's row is read first while the
-   * panel being left stays drawn, as a browser keeps a page until the next
-   * one paints; the next panel then mounts with its row in hand, and without
-   * the fade a panel opening over the room has. Opened over the room, closed,
-   * or not read within `HOLD_MS`, it follows the address at once.
+   * Opened from another detail, the next one's row and view are read first
+   * while the panel being left stays drawn, as a browser keeps a page until
+   * the next one paints (#703); the next panel then mounts with both in hand,
+   * and without the fade a panel opening over the room has. Opened over the
+   * room, closed, or not read within `HOLD_MS`, it follows the address at once.
    */
   // svelte-ignore state_referenced_locally
   // Seeded with the address it mounts on, so a room opened on a detail draws it in its first frame.
@@ -110,7 +110,7 @@
     };
     // A note reads through its own command; it is not held.
     if (isNote(next.entityId, next.kind)) commit();
-    else void readAhead(next.entityId, getEntity).then(commit);
+    else void readAhead(next.entityId, getEntity, entityView).then(commit);
     const cap = setTimeout(commit, HOLD_MS);
     return () => {
       settled = true;

@@ -14,6 +14,9 @@ knobas-http = { path = "../knobas-http" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# One item: `tokio::try_join!`, which reads a view's sections side by side in
+# the one task that asked (#703). It spawns nothing.
+tokio = { workspace = true, features = ["macros"] }
 tracing = "0.1"
 
 [dev-dependencies]

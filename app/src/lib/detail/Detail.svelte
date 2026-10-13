@@ -45,7 +45,7 @@
   import { projectPayload } from "./payload";
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
-  import { sameAnswer, VIEW_PATIENCE_MS, viewMemory } from "./view-read";
+  import { PLACEHOLDER_MS, sameAnswer, VIEW_PATIENCE_MS, viewMemory, type Loan } from "./view-read";
   import { actionName, actionPayload, type ActionValues } from "./view/actions";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
@@ -107,9 +107,12 @@
       if (sourceView) void adoptQueuedSettings(sourceView, mine);
     });
     // Both reads at once: the view does not need the row, and starting it a
-    // round trip later is a round trip more of placeholder.
-    const getting = getEntity(id);
-    const patience = readView(id, mine);
+    // round trip later is a round trip more of placeholder. Reads the room
+    // made ahead while the panel being left stayed drawn are these reads
+    // (#703), and the time they have taken counts toward the waits.
+    const loan = viewMemory.borrow(id);
+    const getting = loan?.row ?? getEntity(id);
+    const timers = readView(id, mine, loan);
     void getting
       .then((answer) => {
         if (mine !== token) return;
@@ -122,7 +125,7 @@
           message: ipcErrorMessage(rejection),
         };
       });
-    return () => clearTimeout(patience);
+    return () => timers.forEach(clearTimeout);
   });
 
   // -- the source view (#661, ADR-0020) ---------------------------------------
@@ -146,6 +149,12 @@
   let viewAnswered = $state(false);
   /** Whether the read has outlasted {@link VIEW_PATIENCE_MS}. */
   let viewOverdue = $state(false);
+  /**
+   * Whether the opening has outlasted {@link PLACEHOLDER_MS} (#703): until
+   * then nothing says *Reading…*, so an answer that comes promptly is drawn
+   * with no line before it.
+   */
+  let slow = $state(false);
 
   /**
    * Whether the body waits for the view rather than drawing the mirror's
@@ -180,16 +189,27 @@
    * panel has left is dropped exactly as a stale entity read is. Not re-read
    * by `refresh()`: a link drawn or withdrawn changes the mirror's row, not
    * what the source draws. A write queued from the view is what re-reads it
-   * (`rereadView`). Answers the patience timer, for the opening effect to
-   * clear when the panel moves on.
+   * (`rereadView`). `loan` holds the read the room started, and when (#703).
+   * Answers its two timers, the placeholder's and the patience's, for the
+   * opening effect to clear when the panel moves on.
    */
-  function readView(id: string, mine: number): ReturnType<typeof setTimeout> {
+  function readView(
+    id: string,
+    mine: number,
+    loan: Loan | null,
+  ): ReturnType<typeof setTimeout>[] {
     rawOpen = false;
-    viewOverdue = false;
+    const waited = loan ? Date.now() - loan.since : 0;
+    // A wait already over is over in the first frame, not one timer later.
+    viewOverdue = waited >= VIEW_PATIENCE_MS;
+    slow = waited >= PLACEHOLDER_MS;
+    const placeholder = setTimeout(() => {
+      if (mine === token) slow = true;
+    }, PLACEHOLDER_MS - waited);
     const patience = setTimeout(() => {
       if (mine === token) viewOverdue = true;
-    }, VIEW_PATIENCE_MS);
-    void entityView(id)
+    }, VIEW_PATIENCE_MS - waited);
+    void (loan?.view ?? entityView(id))
       .then((answer) => {
         if (mine !== token) return;
         viewAnswered = true;
@@ -208,7 +228,7 @@
         viewFailure = ipcErrorMessage(rejection);
       })
       .finally(() => clearTimeout(patience));
-    return patience;
+    return [placeholder, patience];
   }
 
   /**
@@ -1134,7 +1154,8 @@
       <div class="d-title">
         <div>
           <span class="k">{key}</span>
-          <h2 id={titleId}>Reading…</h2>
+          <!-- Silent, at its height, for the moment a prompt read takes (#703). -->
+          <h2 id={titleId}>{slow ? "Reading…" : "\u00a0"}</h2>
         </div>
       </div>
     {:else}
@@ -1311,13 +1332,16 @@
       -->
       {#if viewWaiting}
         <!--
-          The body's place while the view is read (#693): one quiet line, and
-          the height a view takes reserved, so nothing below moves when it
-          lands. The header, path and links above and below are the mirror's
-          and are already drawn.
+          The body's place while the view is read (#693): the height a view
+          takes reserved, so nothing below moves when it lands, and one quiet
+          line once the read has taken long enough to be news (#703). The
+          header, path and links above and below are the mirror's and are
+          already drawn.
         -->
         <div class="sec view-wait" aria-busy="true">
-          <p class="muted">Reading from {detail.source.display_name}…</p>
+          {#if slow}
+            <p class="muted">Reading from {detail.source.display_name}…</p>
+          {/if}
         </div>
       {:else if pageParts}
         <div class="sec">
