@@ -1165,3 +1165,21 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: `Pacing` and the `ChangedProse` arm of `run_rule` in `crates/knobas-core/src/suggest.rs`.
 
 As built (#755): `Pacing` keeps the batch size across passes (the app's `SuggestionPass` owns one). A timeout on a batch of n > 1 sets the size to n/2 and the pass fails as before; a timeout on a single item logs a warning with its id, settles it, and the pass goes on. A pass that completes doubles the size, up to 100. The skipped item is still found from the other side: a later changed item that matches it proposes the pair. The oracle test is unchanged.
+
+## #752 — writes in the background: what a quick second write holds on, and what *Edit and resend* leaves behind
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation, at the merge review of PR #757. Posted on #752.
+
+**The fork:** with the send behind the reader, a second comment queued while the first one's re-sync is landing is held, because a comment held on the item's text (`body_text`) and an approval or a review on the whole record. Separately, *Edit and resend* queued a new write and left the refused or held original in the queue. And the shell cannot name the discussion section of a source's view (ADR-0020), so a pending comment needs a place to draw.
+
+**Ruling:**
+
+1. A write that adds does not hold on text drift. `comment`, `approve` and `submit_review` hold only when the entity's declared **state** moved (a pull request merged or closed), or the entity left the mirror; #706's per-field machinery and the declared `state` path are reused. The creates and build triggers keep holding on liveness alone. The overwrite ops (`edit_pull_request`, `set_parameter`, `transition`, `merge_pull_request`, `delete_branch`, `update_pull_request_branch`, `update_page`) keep their holds.
+2. *Edit and resend* replaces: once the new write is queued, the original is withdrawn, so a resend leaves one write in the queue, not two.
+3. Pending comments and reviews are drawn at the end of the view's last tab. Accepted as built.
+
+**Reasoning:** Björn wants to work at his own speed, and a hold the reader caused with his own first comment is noise he cannot learn from. A merged or closed pull request is the change that makes added words moot. Two copies of one write in the queue invite sending both.
+
+**If you disagree, the cost of reversing this is:** low. For 1, `STATE_HELD_OPS` and `added` in `crates/knobas-core/src/write_queue.rs`. For 2, the `replaces` argument of `queueAction` in `app/src/lib/detail/Detail.svelte`.
+
+As built (#752, PR #757): `project` gives the three ops `{op, live, text: <declared state>}` where the kind declares a state (Gitea pull requests), `{op, live}` where it declares none (Jira tickets, Gitea issues), and the whole record where a declaration resolves nothing (ADR-0007's false-hold direction). `knobas-sync`'s `declared_state` looks the paths up for every op `reads_declared_state` names. A comment queued before this change and still pending after it holds once, because its stored snapshot has the old shape. `CONTEXT.md`'s **Held write** says what *changed* means for each kind of write; ADR-0012 says nothing about holds and is unchanged. Pinned by `a_write_that_adds_holds_only_on_the_declared_state` (core), `two_comments_back_to_back_on_one_pull_request_both_go_in_order` (the queue), and `Edit and resend replaces the refused write` (the detail).
