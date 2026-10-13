@@ -3,8 +3,9 @@
 //!
 //! **Mergeability is decided here and nowhere else**: [`blockers`] is what
 //! both *Merge…*'s disabled reason and the overview's fact are made from, so
-//! the two cannot disagree, and a refinement of one reason (#721, Gitea's
-//! *"Please try again later"* while it is still checking) is one edit.
+//! the two cannot disagree. Gitea's own merge check also refuses for what
+//! these do not read (signed commits, protected files, an owner's required
+//! workflows); its refusal says so at the write (ADR-0004).
 
 use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, Fact, FieldKind, Tone, ViewAction};
@@ -148,8 +149,11 @@ enum Blocker {
     /// Gitea has not answered `mergeable`: it has not checked yet.
     Unknown,
     /// Gitea said `mergeable: false` for a title it does not read as work in
-    /// progress: a conflict, or its check still running or failed -- the flag
-    /// does not say which.
+    /// progress: its check still running, a conflict, or a check that failed
+    /// -- the flag does not say which, and Gitea 1.27's API has nothing that
+    /// does (#721). Still checking is said first, because it is the common
+    /// case: for a second or two after a pull request opens or its head
+    /// moves, which is exactly when the reader is looking at it.
     Conflict,
     /// The title carries one of Gitea's default work-in-progress prefixes.
     WorkInProgress,
@@ -163,8 +167,8 @@ impl Blocker {
     /// The phrase, lowercase where the sentence it goes into is not.
     fn phrase(&self, base: &str) -> String {
         match self {
-            Blocker::Unknown => "Gitea has not said yet whether it can be merged".to_owned(),
-            Blocker::Conflict => format!("conflicts with {base}, or Gitea is still checking"),
+            Blocker::Unknown => STILL_CHECKING.to_owned(),
+            Blocker::Conflict => format!("{STILL_CHECKING}, or it conflicts with {base}"),
             Blocker::WorkInProgress => "marked work in progress in its title".to_owned(),
             Blocker::Outdated => {
                 format!("behind {base}, which its protection forbids: update the branch")
@@ -175,6 +179,9 @@ impl Blocker {
         }
     }
 }
+
+/// What *Merge…* says while Gitea works out whether it can merge (#721).
+const STILL_CHECKING: &str = "Gitea is still checking whether this can merge";
 
 /// Gitea's default `WORK_IN_PROGRESS_PREFIXES`, matched as it matches them:
 /// the start of the title, any case.

@@ -381,7 +381,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("Branches", "feature/PAY-231-sepa-retry → main", None),
             (
                 "Mergeable",
-                "no: conflicts with main, or Gitea is still checking",
+                "no: Gitea is still checking whether this can merge, or it conflicts with main",
                 Some(Tone::Warn)
             ),
             ("Created", "2026-08-21 17:41 +00:00", None),
@@ -1132,14 +1132,14 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
     for (pull, reason) in [
         (
             not_mergeable,
-            "Conflicts with main, or Gitea is still checking",
+            "Gitea is still checking whether this can merge, or it conflicts with main",
         ),
-        (unknown, "Gitea has not said yet whether it can be merged"),
+        (unknown, "Gitea is still checking whether this can merge"),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
         // Not yet said is no fact to draw; the toolbar says why it waits.
-        if reason.starts_with("Gitea") {
+        if !reason.contains("conflicts") {
             assert_eq!(mergeable_fact(&view), None, "{view:#?}");
         }
         assert_eq!(
@@ -1189,7 +1189,7 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             pull: open_pull(),
             approvals: None,
             behind: false,
-            reason: "Conflicts with main, or Gitea is still checking",
+            reason: "Gitea is still checking whether this can merge, or it conflicts with main",
         },
         Case {
             what: "a work-in-progress title",
@@ -1224,7 +1224,8 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             pull: open_pull(),
             approvals: Some((2, true)),
             behind: true,
-            reason: "Conflicts with main, or Gitea is still checking; behind main, which its \
+            reason: "Gitea is still checking whether this can merge, or it conflicts with main; \
+                     behind main, which its \
                      protection forbids: update the branch; 1 of 2 required approvals",
         },
     ];
@@ -1243,8 +1244,12 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             "{}",
             case.what
         );
+        // The toolbar's sentence starts with a capital; the fact's reading
+        // does not, unless it starts with a name.
         let mut lower = case.reason.to_owned();
-        lower[..1].make_ascii_lowercase();
+        if !lower.starts_with("Gitea") {
+            lower[..1].make_ascii_lowercase();
+        }
         assert_eq!(
             mergeable_fact(&view),
             Some(Fact {
