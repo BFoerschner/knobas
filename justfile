@@ -397,9 +397,37 @@ shell:
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
+    scripts/append-only-merge-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/live-lock-test.sh
+
+# The step before every `just check` (issue #736): the mechanical misses that
+# failed gates in the #701 wave, found in about a minute instead of a gate's.
+# It FIXES what is mechanical (`cargo fmt --all`, `inventory-update`), runs the
+# fast table tests that fail first -- the `$effect` cleanup table
+# (`residue.test.svelte.ts`: a new component with an effect must be in it) and
+# the write-op count (`every_op_has_its_own_snake_case_identifier`: a new
+# `WriteOp` variant needs a probe in `every_write_op` and the count bumped) --
+# and svelte-check. Then it prints what it changed, so you commit exactly that.
+# It is not the gate; run `just check` once after it, as before.
+pre-gate:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    snapshot() { { git status --short; git diff; } | shasum; }
+    before=$(snapshot)
+    env -u RUSTUP_TOOLCHAIN cargo fmt --all
+    just inventory-update
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
+    (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
+    (cd app && npx svelte-check --tsconfig ./tsconfig.json)
+    echo
+    if [ "$before" = "$(snapshot)" ]; then
+        echo "pre-gate: green, nothing changed."
+    else
+        echo "pre-gate: green. Uncommitted changes (commit what is yours):"
+        git status --short
+    fi
 
 # The integration-test layout guard of ADR-0017 (issue #573): a top-level
 # `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its
