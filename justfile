@@ -939,6 +939,50 @@ builds-perf:
     fi
     exit "$status"
 
+# The suggestion pass with nothing new (#745): `knobas-core`'s one ignored test
+# in `tests/it/similar_text_perf.rs` -- 10,000 mirrored items seeded into a
+# scratch database, one pass to settle them, then the fastest of five passes
+# over the unchanged mirror held to one second, each rule's time printed.
+# Ignored, and so here rather than in `check`, for `search-perf`'s reason. The
+# gate keeps the behaviour, `similar_text_incremental`. Takes a gate slot and
+# prints the head and the load average before and after.
+# Take the nothing-new suggestion pass reading at 10,000 items.
+suggest-perf:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    expected=1
+    log=
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
+    hold_gate_slot suggest-perf
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-suggest-perf.XXXXXX")
+    mark() {
+        local when=$1 tree=clean
+        [ -z "$(git status --porcelain)" ] || tree=dirty
+        echo "suggest-perf: $when head=$(git rev-parse HEAD) tree=$tree" \
+             "load1=$(uptime | sed -E 's/.*load averages?:[[:space:]]*//; s/[,[:space:]].*//')" \
+             "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+    mark before
+    status=0
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-core --test it similar_text_perf \
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
+    mark after
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "suggest-perf: cargo exited $status; $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected is pinned." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
+    exit "$status"
+
 # The UI pool under a syncing estate (#745): `knobas-app`'s one ignored test in
 # `tests/it/ui_pool_probe.rs` -- five slow sources syncing through the real
 # scheduler for three minutes while a frontend loop searches, opens, lists and

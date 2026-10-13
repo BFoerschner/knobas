@@ -242,7 +242,9 @@ macro_rules! tickets {
 ///
 /// Separate, named and independently testable (#41). `sql` is the whole
 /// statement, already carrying the driver, and takes four binds: the origin,
-/// `created_by`, the rule name and the rule class -- in that order.
+/// `created_by`, the rule name and the rule class -- in that order. A
+/// similarity rule takes a fifth, the batch of item ids it
+/// compares.
 pub struct Rule {
     /// Stored in `knobas.link.rule`. Stable: it is what a test names and what
     /// a later reader uses to find out where a proposal came from.
@@ -682,9 +684,9 @@ macro_rules! digest_of {
 
 /// Text that reads alike -- the connection nobody wrote a key for.
 ///
-/// Built on the **existing** full-text corpus (`sync.item.fts`, `0001`) rather
-/// than on a new index: the anchor's title becomes an OR query, and the pair is
-/// then judged on how many distinct lexemes the two *documents* share.
+/// Built on the **existing** full-text corpus (`sync.item.fts`, `0001`): the
+/// anchor's title becomes an OR query, and the pair is then judged on how many
+/// distinct lexemes the two *documents* share.
 ///
 /// Three deliberate narrowings, each of which is the difference between a rule
 /// and noise:
@@ -840,7 +842,7 @@ const MARK_SEEN: &str = concat!(
             title_lex = excluded.title_lex"
 );
 
-/// How many changed items one [`SIMILAR_TEXT`] statement compares.
+/// How many changed items one `SIMILAR_TEXT` statement compares.
 ///
 /// Each batch is its own statement and its own transaction, so a pass that
 /// times out keeps what its finished batches settled and the next pass goes
@@ -941,7 +943,7 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
 /// # Errors
 ///
 /// [`CoreError::Db`] if a statement fails, a timeout included. A
-/// [`Scope::ChangedProse`] rule keeps the batches it finished before it.
+/// similarity rule keeps the batches it finished before it.
 pub async fn detect_rule<'c, A>(conn: A, rule: &Rule) -> Result<u64, CoreError>
 where
     A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
@@ -949,7 +951,7 @@ where
     detect_rule_batched(conn, rule, SIMILAR_TEXT_BATCH).await
 }
 
-/// [`detect_rule`] with the batch size of a [`Scope::ChangedProse`] rule
+/// [`detect_rule`] with the batch size of a similarity rule
 /// spelled out, for the tests that hold batching to the same answer as one
 /// batch. A whole-mirror rule ignores it.
 ///
