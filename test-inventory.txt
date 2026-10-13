@@ -1768,6 +1768,7 @@ knobas-source	lib/knobas_source	tests::every_op_has_its_own_snake_case_identifie
 knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
 knobas-source	lib/knobas_source	tests::the_create_target_is_not_a_monitor_id
 knobas-source	lib/knobas_source	tests::write_op_round_trips
+knobas-source	lib/knobas_source	view::tests::a_tree_and_a_file_have_the_wire_shape_the_shell_reads
 knobas-source	lib/knobas_source	view::tests::every_block_round_trips
 knobas-source	lib/knobas_source	view::tests::the_wire_shape_is_a_union_on_type
 knobas-source-confluence	lib/knobas_source_confluence	config::tests::a_page_size_past_the_servers_own_cap_is_refused
@@ -1975,6 +1976,8 @@ knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_describes_a_gite
 knobas-source-gitea	lib/knobas_source_gitea	tests::the_template_round_trips_as_json
 knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_branch_name_reads_as_a_title
 knobas-source-gitea	lib/knobas_source_gitea	view::act::tests::a_proposal_is_titled_by_its_one_commit_and_lists_what_it_carries
+knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::a_file_is_cut_at_whole_lines
+knobas-source-gitea	lib/knobas_source_gitea	view::files::tests::languages_are_named_by_extension_or_name
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::a_long_text_is_cut_at_a_line_within_the_cap
 knobas-source-gitea	lib/knobas_source_gitea	view::repo::tests::sizes_read_in_the_unit_that_fits
 knobas-source-gitea	lib/knobas_source_gitea	view::rows::tests::all_of_keeps_the_order_and_fails_on_the_first_failure
@@ -2055,6 +2058,16 @@ knobas-source-gitea	test/it	view_branch::deleting_an_unmerged_branch_says_what_o
 knobas-source-gitea	test/it	view_branch::the_default_branch_offers_no_delete_and_a_protected_one_says_why_not_yet
 knobas-source-gitea	test/it	view_branch::the_default_branch_shows_no_compare
 knobas-source-gitea	test/it	view_branch::the_diff_tab_reads_the_compares_diff
+knobas-source-gitea	test/it	view_files::a_binary_file_says_so_with_its_size
+knobas-source-gitea	test/it	view_files::a_branch_reads_its_tree_at_the_branch
+knobas-source-gitea	test/it	view_files::a_file_is_read_raw_at_the_ref
+knobas-source-gitea	test/it	view_files::a_file_over_the_byte_cap_is_cut_at_a_line_within_it
+knobas-source-gitea	test/it	view_files::a_file_over_the_line_cap_is_cut_at_it
+knobas-source-gitea	test/it	view_files::a_markdown_file_is_hinted_as_markdown
+knobas-source-gitea	test/it	view_files::a_nested_directory_is_read_by_the_section_its_entry_names
+knobas-source-gitea	test/it	view_files::a_path_that_walks_out_is_refused
+knobas-source-gitea	test/it	view_files::a_repo_view_has_a_deferred_files_tab
+knobas-source-gitea	test/it	view_files::the_top_directory_lists_directories_first
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
 knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
 knobas-source-gitea	test/it	view_pr::a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
@@ -2133,6 +2146,7 @@ knobas-source-gitea	test/live_gitea	the_adapter_creates_a_branch_a_pull_request_
 knobas-source-gitea	test/live_gitea	the_discussion_endpoint_does_not_page
 knobas-source-gitea	test/live_gitea	the_seeded_content_lands_under_the_documented_key_forms
 knobas-source-gitea	test/live_gitea	the_seeded_repos_view_lists_its_pull_requests_and_branches
+knobas-source-gitea	test/live_gitea	the_seeded_trees_are_walked_and_a_seeded_file_is_drawn
 knobas-source-gitea	test/live_gitea	the_shapes_the_fake_only_assumes_are_certified_here
 knobas-source-gitea	test/live_gitea_capped	every_listing_is_walked_to_the_end_against_a_server_that_caps_its_pages
 knobas-source-jira	lib/knobas_source_jira	api::tests::every_call_is_one_the_wadl_declares
