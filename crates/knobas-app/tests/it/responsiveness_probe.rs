@@ -530,7 +530,7 @@ async fn what_the_reader_waits_on() {
         })
         .await;
         if kind == "ticket" {
-            let source = vec!["jira0".to_owned()];
+            let source = ["jira0".to_owned()];
             let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
                 .await
                 .unwrap();
