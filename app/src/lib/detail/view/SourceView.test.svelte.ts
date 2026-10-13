@@ -866,3 +866,182 @@ test("a run offers only this entity's own settings, and a dialog opened again st
   expect(control("Branch").value).toBe("");
   screen.done();
 });
+
+// --- Walking a tree in one tab (#711) -------------------------------------
+
+/** A repository's view: an overview, and a deferred *Files* tab. */
+const REPO_VIEW: View = {
+  sections: [
+    { id: "overview", title: "Overview", count: null, deferred: false, blocks: [{ type: "text", text: "a repo", markdown: false }] },
+    { id: "files", title: "Files", count: null, deferred: true, blocks: [] },
+  ],
+  actions: [],
+};
+
+/** What the source answers for each place in the tree, by section id. */
+function tree(section: string | null): Promise<View | null> {
+  const id = section ?? "files";
+  const top = { name: "main", section: "files" };
+  const blocks: Record<string, ViewSection["blocks"]> = {
+    files: [
+      {
+        type: "tree",
+        trail: [top],
+        entries: [
+          { name: "src", kind: "dir", size: null, section: "files:src" },
+          { name: "README.md", kind: "file", size: 9, section: "file:README.md" },
+        ],
+      },
+    ],
+    "files:src": [
+      {
+        type: "tree",
+        trail: [top, { name: "src", section: "files:src" }],
+        entries: [{ name: "main.rs", kind: "file", size: 12, section: "file:src/main.rs" }],
+      },
+    ],
+    "file:src/main.rs": [
+      {
+        type: "file",
+        trail: [top, { name: "src", section: "files:src" }, { name: "main.rs", section: "file:src/main.rs" }],
+        path: "src/main.rs",
+        text: "fn main() {}\n",
+        language: "rust",
+        size: 13,
+        truncated: false,
+        binary: false,
+        url: null,
+      },
+    ],
+  };
+  return Promise.resolve({
+    sections: [{ id, title: "Files", count: null, deferred: false, blocks: blocks[id] ?? [] }],
+    actions: [],
+  });
+}
+
+function entry(target: HTMLElement, name: string): HTMLButtonElement {
+  return [...target.querySelectorAll<HTMLButtonElement>(".tb-line")].find((b) =>
+    b.textContent!.includes(name),
+  )!;
+}
+
+test("an entry opens its section in the same tab; the tab stays Files", async () => {
+  answer = tree;
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+
+  entry(screen.panel(), "src").click();
+  flushSync();
+  expect(reads.at(-1)).toEqual(["gitea:tidewater/payout-service@c90d11", "files:src"]);
+  await vi.waitFor(() => expect(screen.panel().textContent).toContain("main.rs"));
+  expect(screen.tabs().map((t) => t.textContent!.trim())).toEqual(["Overview", "Files"]);
+  expect(screen.tabs()[1]!.getAttribute("aria-selected")).toBe("true");
+
+  entry(screen.panel(), "main.rs").click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".fb-code")?.textContent).toBe("fn main() {}"));
+  expect(screen.panel().querySelector("[aria-current=location]")!.textContent).toBe("main.rs");
+  screen.done();
+});
+
+test("Back walks the tab's own steps without reading again, and is not offered at the start", async () => {
+  answer = tree;
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+  expect(screen.panel().querySelector(".tr-back"), "nowhere to go back to yet").toBeNull();
+
+  entry(screen.panel(), "src").click();
+  flushSync();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+  entry(screen.panel(), "main.rs").click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".fb-code")).not.toBeNull());
+  const before = reads.length;
+
+  screen.panel().querySelector<HTMLButtonElement>(".tr-back")!.click();
+  flushSync();
+  expect(entry(screen.panel(), "main.rs"), "back in src").toBeDefined();
+  screen.panel().querySelector<HTMLButtonElement>(".tr-back")!.click();
+  flushSync();
+  expect(entry(screen.panel(), "README.md"), "back at the top").toBeDefined();
+  expect(screen.panel().querySelector(".tr-back")).toBeNull();
+  expect(reads, "each place was read once").toHaveLength(before);
+  screen.done();
+});
+
+test("the trail leads up, and the tab keeps its place while another tab is open", async () => {
+  answer = tree;
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+  entry(screen.panel(), "src").click();
+  flushSync();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+  entry(screen.panel(), "main.rs").click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".fb-code")).not.toBeNull());
+
+  screen.tabs()[0]!.click();
+  flushSync();
+  expect(screen.panel().textContent).toContain("a repo");
+  screen.tabs()[1]!.click();
+  flushSync();
+  expect(screen.panel().querySelector(".fb-code"), "still on the file").not.toBeNull();
+
+  const up = [...screen.panel().querySelectorAll<HTMLButtonElement>("nav[aria-label=Path] button")];
+  expect(up.map((b) => b.textContent)).toEqual(["main", "src"]);
+  up[0]!.click();
+  flushSync();
+  expect(entry(screen.panel(), "README.md")).toBeDefined();
+  screen.done();
+});
+
+test("a place that cannot be read says why in the tab, and can be read again", async () => {
+  let fail = true;
+  answer = (section) =>
+    section === "files:src" && fail
+      ? Promise.reject({ code: "not_found", message: "no such path", source_id: null })
+      : tree(section);
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+  entry(screen.panel(), "src").click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().textContent).toContain("no such path"));
+  fail = false;
+  [...screen.panel().querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.includes("Try again"))!.click();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+  screen.done();
+});
+
+test("while the next place is read, the last one stays drawn and busy, with no line between", async () => {
+  let release: () => void = () => {};
+  answer = (section) =>
+    section === "files:src"
+      ? new Promise((resolve) => {
+          release = () => void tree(section).then(resolve);
+        })
+      : tree(section);
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+
+  entry(screen.panel(), "src").click();
+  flushSync();
+  expect(screen.panel().textContent).not.toContain("Reading from");
+  expect(screen.panel().querySelector("[aria-busy=true]")).not.toBeNull();
+  expect(entry(screen.panel(), "README.md"), "the top, still drawn").toBeDefined();
+
+  release();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+  expect(screen.panel().querySelector("[aria-busy=true]")).toBeNull();
+  screen.done();
+});

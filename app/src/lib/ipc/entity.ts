@@ -936,7 +936,47 @@ export type ViewBlock =
       write_op: string;
       values: Setting[];
     }
-  | { type: "actions"; actions: ViewAction[] };
+  | { type: "actions"; actions: ViewAction[] }
+  | { type: "tree"; trail: Crumb[]; entries: TreeEntry[] }
+  | {
+      type: "file";
+      trail: Crumb[];
+      path: string;
+      /** Empty for a binary file. */
+      text: string;
+      /** A hint from the file's name (`"rust"`, `"markdown"`); nothing is highlighted. */
+      language: string | null;
+      /** The whole file's size in bytes. */
+      size: number;
+      /** A cap cut the text; the rest is at `url`. */
+      truncated: boolean;
+      binary: boolean;
+      /** The file's page at its source. */
+      url: string | null;
+    };
+
+/**
+ * One step of a tree's or a file's trail (#711): a name and the section that
+ * opens it. A section a block names opens **in the tab it is drawn in**, read
+ * with `entityView(entity, section)`; the id is the source's and never parsed.
+ */
+export interface Crumb {
+  name: string;
+  section: string;
+}
+
+/** What a tree entry is, as git records it. */
+export type EntryKind = "dir" | "file" | "symlink" | "submodule";
+
+/** One entry of a directory's listing. */
+export interface TreeEntry {
+  name: string;
+  kind: EntryKind;
+  /** A file's size in bytes; `null` for a directory or a submodule. */
+  size: number | null;
+  /** The section that opens it in the same tab; `null` where it cannot be opened. */
+  section: string | null;
+}
 
 /** One tab. A `deferred` one carries no blocks until its own read. */
 export interface ViewSection {
