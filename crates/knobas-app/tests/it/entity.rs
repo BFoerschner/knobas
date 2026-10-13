@@ -1613,6 +1613,10 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
             "requested_reviewers": asked.iter().map(|login| serde_json::json!({ "login": login })).collect::<Vec<_>>(),
         })
     };
+    let unbased = |mut payload: serde_json::Value| {
+        payload.as_object_mut().unwrap().remove("base");
+        payload
+    };
     for (n, author, payload, minutes) in [
         // Others', asking somebody else: the newest pull request of all.
         (1, "ana", pr("open", false, "ana/retry", &["cleo"]), 1),
@@ -1623,6 +1627,9 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
         // Mine, merged; and others' asking me, closed: neither is drawn.
         (4, "björn", pr("closed", true, "björn/old", &[]), 2),
         (5, "ana", pr("closed", false, "ana/gone", &["björn"]), 3),
+        // Others', open from a `björn/sepa` whose repo misses too: two
+        // misses are not one repo, so it proposes no branch.
+        (6, "ana", unbased(pr("open", false, "björn/sepa", &[])), 30),
     ] {
         let key = format!("tidewater/payout-service#{n}");
         mirrored(&pool, &gitea, "pr", &key, payload).await;
@@ -1702,6 +1709,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
             pr(2),
             pr(3),
             pr(1),
+            pr(6),
             branch("payout-service", "björn/old"),
             branch("payout-service", "björn/spike"),
             branch("ledger", "björn/sepa"),
@@ -1723,7 +1731,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
             },
             GroupTally {
                 group: AttentionGroup::OpenPullRequests,
-                count: 1
+                count: 2
             },
             GroupTally {
                 group: AttentionGroup::MyBranches,
@@ -1736,7 +1744,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
         ]),
         "every drawn row in exactly one group, the groups in draw order"
     );
-    assert_eq!(page.total, 9);
+    assert_eq!(page.total, 10);
 }
 
 /// A source with no configured identity draws the Code tile as it always
@@ -1754,6 +1762,7 @@ async fn a_code_tile_with_no_identity_draws_todays_order() {
         [
             pr(1),
             pr(3),
+            pr(6),
             pr(2),
             branch("payout-service", "ana/wip"),
             branch("payout-service", "björn/sepa"),
