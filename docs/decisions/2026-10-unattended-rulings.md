@@ -951,3 +951,18 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** trivial: one condition in `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`.
 
 As built (#707): `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`. A later cross-ticket ruling on #701 (2026-10-13) sets the rule this applies: an action is drawn disabled with a reason only where the entity can still reach the enabled state, and an action that can never apply is absent. So *Delete branch…* is absent on the default branch and disabled, with the reason, on a protected one. The same ruling message accepted a cut on the candidates the repository's *New pull request…* asks about (20 then; ten since review, to stay inside Gitea's burst of 20 per opening), which the head field's label names, and the live test deleting its own pull request through the API rather than closing it.
+
+## #706 — an edit sends only what the reader changed: the payload table sees the declared defaults
+
+Ruled 2026-10-13. Comment:
+<https://github.com/BFoerschner/knobas/issues/706#issuecomment-6144136147>
+
+**The fork:** the ticket asks that the `PATCH` carry only the fields given, and the #702 review (PR #716, noted on #706) found the shell's payload table takes `(entity, values, settings)` and never sees a field's declared `value`, so it cannot tell an untouched prefilled description from a changed one. `actionPayload` already holds the `ViewAction`.
+
+**Ruling:** to send only the changed fields, the shell's payload builder in `actions.ts` may receive the action's declared field defaults alongside the submitted values (a shell-only change, no contract change), and compare.
+
+**Reasoning:** the `PATCH` must not overwrite a description someone else edited since the view was read with an unchanged copy.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#706): each `PAYLOADS` entry takes a fourth argument, the dialog's `initialValues(action)`; `edit_pull_request`'s entry sends `title` and `body` only where they differ from it, comparing line ends as `\n` (a text area gives back `\n` for Gitea's `\r\n`), and answers `null` when nothing changed. `just gitea-live`'s `a_pull_request_is_edited_closed_and_reopened_from_its_view` witnesses the reason against the real server: a description changed behind knobas' back survives a title edit. Close and Reopen use #705's `ViewAction.values` ruling above (also posted on #706): `{state: closed}` and `{state: open}` on the one op.
