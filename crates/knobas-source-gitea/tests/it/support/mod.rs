@@ -89,7 +89,10 @@ pub struct State {
     /// `missing` entries whose **first** `GET /repos/{owner}/{repo}` still
     /// answers the record: a repository deleted after that read, between a
     /// configured `repos[]` entry's selection and its walk (issue #728). Every
-    /// read after the first answers `missing`'s 404.
+    /// read after the first answers `missing`'s 404. A fake for the same
+    /// reason as the fields below (ADR-0013): the deletion falls between two
+    /// requests inside one `sync` call, which nothing opens on demand on the
+    /// pinned container.
     pub read_once: BTreeSet<String>,
     /// Why a fake witnesses this and the three fields below (ADR-0013, "a
     /// fault the real instance cannot produce is witnessed by a fake"): the
