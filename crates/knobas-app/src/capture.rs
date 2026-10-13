@@ -402,6 +402,17 @@ pub fn reveal_note<R: Runtime>(app: &tauri::AppHandle<R>, note_id: &str) -> Resu
         .map_err(IpcError::internal)
 }
 
+/// Bring the main window forward: what a second launch asks of the first
+/// (#748). Best effort -- a window that is not there has nothing to focus, and
+/// the second launch has already gone.
+pub fn focus_main_window<R: Runtime>(app: &tauri::AppHandle<R>) {
+    if let Some(window) = app.get_webview_window(MAIN_LABEL) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

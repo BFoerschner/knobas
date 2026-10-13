@@ -1001,6 +1001,14 @@ demo: deps
 desktop-witness driver="":
     testenv/desktop-witness.sh {{ quote(driver) }}
 
+# The single-instance witness (#748): launches the debug binary twice against a
+# temp HOME and an unreachable database, and checks the second never reaches
+# database startup. `--demo-beside` checks the demo profile still runs beside a
+# normal instance. Opens a window; not part of `just check`.
+single-instance-witness mode="":
+    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-app
+    scripts/single-instance-witness.sh {{ mode }}
+
 # Where the three Gitea-backed live recipes get their gate variables, in one
 # place because all three obtain them the same way: the lines this text names
 # are literally the lines above each guard call. Kept as a variable rather than
