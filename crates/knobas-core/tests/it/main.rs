@@ -15,6 +15,7 @@ mod mini_board;
 mod notes;
 mod payload_paths;
 mod projects;
+mod similar_text_incremental;
 mod stores;
 mod suggestions;
 mod web_url;

@@ -261,6 +261,8 @@ pub struct Rule {
     pub origin: Origin,
     /// The complete statement. Private so a caller cannot run half of one.
     sql: &'static str,
+    /// What the statement reads on each pass.
+    scope: Scope,
 }
 
 /// An issue key in a branch name -- the most common connection in this work.
@@ -621,12 +623,46 @@ macro_rules! similarity_floor {
 /// counted, so these are content stems.
 pub const SIMILARITY_FLOOR: usize = 5;
 
+/// The kinds the similarity rule reads: prose.
+macro_rules! prose_kinds {
+    () => {
+        "('ticket','page','pr')"
+    };
+}
+
+/// An item's title as the OR query the similarity rule matches other
+/// documents with: every lexeme of the title, quoted, joined by `|`. `null`
+/// for a title with no lexemes, and `null` matches nothing.
+///
+/// One spelling for the two places it is built -- the batch a pass compares
+/// and the row [`MARK_SEEN`] stores -- because a stored query that differed
+/// from the one a pass builds would judge a pair differently depending on
+/// which of its ends changed last.
+macro_rules! title_query {
+    ($title:expr) => {
+        concat!(
+            "to_tsquery('english', (select string_agg(quote_literal(w), ' | ')
+                                       from unnest(tsvector_to_array(to_tsvector('english', ",
+            $title,
+            "))) w))"
+        )
+    };
+}
+
+/// What `sync.similar_text_seen.digest` holds for an item (`0031`): the two
+/// things the rule reads of it, the title its query is built from and the
+/// `fts` its lexemes are counted in.
+macro_rules! digest_of {
+    ($item:expr) => {
+        concat!("md5(", $item, ".title || E'\\n' || ", $item, ".fts::text)")
+    };
+}
+
 /// Text that reads alike -- the connection nobody wrote a key for.
 ///
 /// Built on the **existing** full-text corpus (`sync.item.fts`, `0001`) rather
-/// than on a new index: the anchor's title becomes an OR query so the GIN index
-/// does the candidate selection, and the pair is then judged on how many
-/// distinct lexemes the two *documents* share.
+/// than on a new index: the anchor's title becomes an OR query, and the pair is
+/// then judged on how many distinct lexemes the two *documents* share.
 ///
 /// Three deliberate narrowings, each of which is the difference between a rule
 /// and noise:
@@ -634,33 +670,66 @@ pub const SIMILARITY_FLOOR: usize = 5;
 /// * **Prose kinds only.** A branch and its repository share their whole name
 ///   and are not "similar" in any sense a reader cares about.
 /// * **`o.entity_id > a.entity_id`.** Each unordered pair is considered once,
-///   so the rule cannot propose `A/B` and `B/A` in one pass.
+///   and the smaller id is always the anchor whose title is the query, so the
+///   rule cannot propose `A/B` and `B/A` in one pass.
 /// * **A floor on shared lexemes.** English stop words are already gone by the
 ///   time `to_tsvector` is done, so [`SIMILARITY_FLOOR`] distinct shared stems
 ///   is a real overlap rather than two documents both being about work.
 ///
 /// The reason names the overlap itself, because "these look related" is exactly
 /// the generic sentence #41's story 3 rejects.
+///
+/// # Incremental (#745)
+///
+/// A pair's verdict depends on the two items' text and nothing else, so this
+/// statement judges only the pairs with at least one end in **`$5`**, a batch
+/// of items that changed since a pass last compared them, against the
+/// **settled** corpus: the live prose items `sync.similar_text_seen` (`0031`)
+/// says were compared with the text they have now. Three joins cover every
+/// such pair once, the smaller id always the anchor: batch with batch, a batch
+/// anchor with a settled item, a settled anchor with a batch item. A pair of
+/// two settled items was judged by the pass that settled the later of them, so
+/// a pass with nothing new judges nothing. [`detect_rule`] feeds the batches
+/// and marks each one settled in the same transaction; before #745 the
+/// statement judged every pair on every pass, 55 s at 2,000 items whether or
+/// not anything had changed.
 const SIMILAR_TEXT: &str = detection!(concat!(
-    "with prose as (
-         select entity_id, title, fts from sync.live_item where kind in ('ticket','page','pr')
+    "with batch as materialized (
+         select p.entity_id, p.fts, ",
+    title_query!("p.title"),
+    " as q
+           from sync.live_item p
+          where p.entity_id = any($5) and p.kind in ",
+    prose_kinds!(),
+    "
      ),
-     anchor as (
-         select entity_id, fts,
-                (select string_agg(quote_literal(w), ' | ')
-                   from unnest(tsvector_to_array(to_tsvector('english', title))) w) as q
-           from prose
+     settled as materialized (
+         select p.entity_id, p.fts, s.title_q as q
+           from sync.live_item p
+           join sync.similar_text_seen s
+             on s.entity_id = p.entity_id and s.digest = ",
+    digest_of!("p"),
+    "
+          where p.kind in ",
+    prose_kinds!(),
+    " and p.entity_id <> all($5)
+     ),
+     judged as (
+         select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts
+           from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
+         union all
+         select a.entity_id, o.entity_id, a.fts, o.fts
+           from batch a join settled o on o.entity_id > a.entity_id and o.fts @@ a.q
+         union all
+         select a.entity_id, o.entity_id, a.fts, o.fts
+           from settled a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
      ),
      pair as (
-         select a.entity_id as from_id, o.entity_id as to_id,
-                array(select x from unnest(tsvector_to_array(a.fts)) x
+         select from_id, to_id,
+                array(select x from unnest(tsvector_to_array(a_fts)) x
                        intersect
-                      select y from unnest(tsvector_to_array(o.fts)) y) as shared
-           from anchor a
-           join prose o
-             on o.entity_id > a.entity_id
-            and o.fts @@ to_tsquery('english', a.q)
-          where a.q is not null
+                      select y from unnest(tsvector_to_array(o_fts)) y) as shared
+           from judged
      )
      select from_id, to_id, 'related',
             format('both mention %s',
@@ -670,6 +739,79 @@ const SIMILAR_TEXT: &str = detection!(concat!(
       where cardinality(shared) >= ",
     similarity_floor!()
 ));
+
+/// The live prose items [`SIMILAR_TEXT`] has not compared with the text they
+/// have now: never compared, or changed since. Ordered, so a pass that gives
+/// up part-way has settled a prefix and the next one starts after it.
+const CHANGED_PROSE: &str = concat!(
+    "select p.entity_id
+       from sync.live_item p
+      where p.kind in ",
+    prose_kinds!(),
+    " and not exists (
+              select 1
+                from sync.similar_text_seen s
+               where s.entity_id = p.entity_id and s.digest = ",
+    digest_of!("p"),
+    ")
+      order by p.entity_id"
+);
+
+/// Forget the items that left the live prose corpus -- tombstoned, their
+/// source disabled, their kind no longer prose -- so one that comes back is
+/// compared again rather than trusted on verdicts taken while it was away.
+/// Run inside every batch's transaction, so the batch and the corpus it was
+/// judged against are one snapshot.
+const PRUNE_SEEN: &str = concat!(
+    "delete from sync.similar_text_seen s
+      where not exists (
+              select 1
+                from sync.live_item p
+               where p.entity_id = s.entity_id and p.kind in ",
+    prose_kinds!(),
+    ")"
+);
+
+/// Mark a batch settled: its items were compared with the text they have in
+/// this snapshot.
+const MARK_SEEN: &str = concat!(
+    "insert into sync.similar_text_seen (entity_id, digest, title_q)
+     select p.entity_id, ",
+    digest_of!("p"),
+    ", ",
+    title_query!("p.title"),
+    "
+       from sync.live_item p
+      where p.entity_id = any($1) and p.kind in ",
+    prose_kinds!(),
+    "
+     on conflict (entity_id) do update
+        set digest = excluded.digest, title_q = excluded.title_q"
+);
+
+/// How many changed items one [`SIMILAR_TEXT`] statement compares.
+///
+/// Each batch is its own statement and its own transaction, so a pass that
+/// times out keeps what its finished batches settled and the next pass goes
+/// on from there rather than from nothing. Measured on the #745 probe's
+/// corpus (a 108-word vocabulary, so every title matches nearly every
+/// document -- the worst case): a batch of 100 against 5,000 settled items
+/// judges about half a million pairs, ~15 s on a loaded machine, well inside
+/// the pass's statement timeout.
+pub const SIMILAR_TEXT_BATCH: usize = 100;
+
+/// What a rule reads on each pass.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Scope {
+    /// The whole mirror, every pass, in one statement taking the four driver
+    /// binds. The exact-key and source-relation rules: a join on a key is
+    /// cheap at any size the mirror reaches.
+    Mirror,
+    /// The prose items that changed since the last pass, in batches
+    /// ([`SIMILAR_TEXT`]'s fifth bind), each marked settled as it is
+    /// compared.
+    ChangedProse,
+}
 
 /// Every rule, in the order [`detect`] runs them.
 ///
@@ -682,42 +824,49 @@ pub const RULES: &[Rule] = &[
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: BRANCH_NAME_KEY,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "commit_message_key",
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: COMMIT_MESSAGE_KEY,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "build_parameter_key",
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: BUILD_PARAMETER_KEY,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "page_text_key",
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: PAGE_TEXT_KEY,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "monitor_url_host",
         class: RuleClass::ExactKey,
         origin: Origin::Suggested,
         sql: MONITOR_URL_HOST,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "source_recorded_relation",
         class: RuleClass::SourceRelation,
         origin: Origin::Source,
         sql: SOURCE_RECORDED_RELATION,
+        scope: Scope::Mirror,
     },
     Rule {
         name: "similar_text",
         class: RuleClass::Similarity,
         origin: Origin::Suggested,
         sql: SIMILAR_TEXT,
+        scope: Scope::ChangedProse,
     },
 ];
 
@@ -733,36 +882,144 @@ pub fn rule(name: &str) -> Option<&'static Rule> {
 /// rule's output can satisfy -- which is what makes a negative control mean
 /// anything.
 ///
+/// Takes anything a connection can be had from -- a pool, or a connection the
+/// caller opened. The app's pass runs on a connection of its own (#745), with
+/// a `statement_timeout` it sets there, so a pass never holds a connection the
+/// UI is waiting for.
+///
 /// # Errors
 ///
-/// [`CoreError::Db`] if the statement fails.
-pub async fn detect_rule(pool: &PgPool, rule: &Rule) -> Result<u64, CoreError> {
+/// [`CoreError::Db`] if a statement fails, a timeout included. A
+/// [`Scope::ChangedProse`] rule keeps the batches it finished before it.
+pub async fn detect_rule<'c, A>(conn: A, rule: &Rule) -> Result<u64, CoreError>
+where
+    A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
+{
+    detect_rule_batched(conn, rule, SIMILAR_TEXT_BATCH).await
+}
+
+/// [`detect_rule`] with the batch size of a [`Scope::ChangedProse`] rule
+/// spelled out, for the tests that hold batching to the same answer as one
+/// batch. A whole-mirror rule ignores it.
+///
+/// # Errors
+///
+/// As [`detect_rule`].
+#[doc(hidden)]
+pub async fn detect_rule_batched<'c, A>(
+    conn: A,
+    rule: &Rule,
+    batch: usize,
+) -> Result<u64, CoreError>
+where
+    A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
+{
+    let mut conn = conn.acquire().await?;
+    match rule.scope {
+        Scope::Mirror => {
+            let written = sqlx::query(rule.sql)
+                .bind(rule.origin.as_str())
+                .bind(DETECTOR)
+                .bind(rule.name)
+                .bind(rule.class.as_str())
+                .execute(&mut *conn)
+                .await?;
+            Ok(written.rows_affected())
+        }
+        Scope::ChangedProse => {
+            let changed: Vec<String> = sqlx::query_scalar(CHANGED_PROSE)
+                .fetch_all(&mut *conn)
+                .await?;
+            let mut written = 0;
+            for ids in changed.chunks(batch.max(1)) {
+                written += compare_batch(&mut *conn, rule, ids).await?;
+            }
+            Ok(written)
+        }
+    }
+}
+
+/// Compare one batch of changed items and mark it settled, as one snapshot.
+///
+/// `repeatable read`, so the corpus the batch is judged against, the text the
+/// batch is judged with and the digests [`MARK_SEEN`] records are the same
+/// text: a sync that rewrites an item mid-batch leaves it unsettled for the
+/// next pass rather than marked with text nobody compared.
+///
+/// The price of the snapshot is a serialization failure when a concurrent
+/// transaction commits a row this one would conflict with -- the user drawing
+/// the very pair, or a second knobas process's pass. The batch is retried a
+/// few times on that and nothing else.
+async fn compare_batch(
+    conn: &mut sqlx::PgConnection,
+    rule: &Rule,
+    ids: &[String],
+) -> Result<u64, CoreError> {
+    const ATTEMPTS: usize = 3;
+    let mut attempt = 1;
+    loop {
+        match compare_batch_once(conn, rule, ids).await {
+            Err(error)
+                if attempt < ATTEMPTS
+                    && error
+                        .as_database_error()
+                        .and_then(sqlx::error::DatabaseError::code)
+                        .is_some_and(|code| code == "40001") =>
+            {
+                attempt += 1;
+            }
+            outcome => return Ok(outcome?),
+        }
+    }
+}
+
+async fn compare_batch_once(
+    conn: &mut sqlx::PgConnection,
+    rule: &Rule,
+    ids: &[String],
+) -> Result<u64, sqlx::Error> {
+    use sqlx::Connection as _;
+    let mut tx = conn.begin().await?;
+    sqlx::query("set transaction isolation level repeatable read")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(PRUNE_SEEN).execute(&mut *tx).await?;
     let written = sqlx::query(rule.sql)
         .bind(rule.origin.as_str())
         .bind(DETECTOR)
         .bind(rule.name)
         .bind(rule.class.as_str())
-        .execute(pool)
-        .await?;
-    Ok(written.rows_affected())
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?
+        .rows_affected();
+    sqlx::query(MARK_SEEN).bind(ids).execute(&mut *tx).await?;
+    tx.commit().await?;
+    Ok(written)
 }
 
 /// Run every rule, returning how many proposals the pass wrote.
 ///
 /// Idempotent: a second pass over an unchanged mirror writes nothing, because
 /// every candidate it produces is already suppressed by a row it wrote the
-/// first time. A pass after a sync writes only what the new items justify, and
-/// resurrects nothing the user dismissed.
+/// first time -- and since #745 the similarity rule does not even look again:
+/// it compares only the prose that changed since it last compared it. A pass
+/// after a sync writes only what the new items justify, and resurrects
+/// nothing the user dismissed.
 ///
 /// Detection never creates a confirmed link and never writes to a source.
 ///
 /// # Errors
 ///
 /// [`CoreError::Db`] if a statement fails.
-pub async fn detect(pool: &PgPool) -> Result<u64, CoreError> {
+pub async fn detect<'c, A>(conn: A) -> Result<u64, CoreError>
+where
+    A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
+{
+    let mut conn = conn.acquire().await?;
     let mut written = 0;
     for rule in RULES {
-        written += detect_rule(pool, rule).await?;
+        written += detect_rule(&mut *conn, rule).await?;
     }
     Ok(written)
 }
