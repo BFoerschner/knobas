@@ -144,8 +144,8 @@ fn dead_url() -> String {
 ///
 /// Stating it, because #140 asked for the choice rather than only its result: a
 /// repository entity re-delivered on *every* run now passes both tests
-/// unnoticed. Delete `after.repo_updated_at = updated_at` from
-/// `sync::repository` and that is exactly what happens -- this filter drops the
+/// unnoticed. Delete `after.repo_fingerprint = Some(fingerprint)` from
+/// `sync::sync_repo` and that is exactly what happens -- this filter drops the
 /// item, and the cursor clause beside it only asks that a run which emitted
 /// something moved its position, which such a run does.
 ///

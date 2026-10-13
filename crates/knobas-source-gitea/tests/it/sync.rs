@@ -1125,7 +1125,7 @@ async fn an_incremental_run_returns_only_the_pull_request_that_moved() {
 
 /// Gitea timestamps have one-second resolution. Two pull requests updated in
 /// the same second must both be delivered once -- and neither of them again on
-/// the next poll, which is what `pulls_at_watermark` is for.
+/// the next poll, which is what `pulls_seen_at_watermark` is for.
 #[tokio::test]
 async fn two_pull_requests_on_the_same_second_are_delivered_once_each() {
     let mut state = State::tidewater();
@@ -1135,11 +1135,121 @@ async fn two_pull_requests_on_the_same_second_are_delivered_once_each() {
 
     let (items, cursor) = full(&*source).await;
     assert_eq!(ids(&items, "pr").len(), 2, "{items:?}");
-    assert!(cursor.contains("pulls_at_watermark"), "{cursor}");
+    assert!(cursor.contains("pulls_seen_at_watermark"), "{cursor}");
 
     let (again_items, again_cursor) = again(&*source, &cursor).await;
     assert!(again_items.is_empty(), "re-delivered {again_items:?}");
     assert_eq!(again_cursor, cursor);
+}
+
+/// Issue #764: a pull request merged in the **same second** the previous run
+/// read it keeps its `updated_at`, because Gitea stamps it to the second. The
+/// next incremental run re-reads the watermark second and must deliver the
+/// merge -- and the run after that, with nothing changed, must deliver nothing
+/// and hand back the cursor it was given (battery clause 2).
+#[tokio::test]
+async fn a_pull_request_merged_in_the_watermark_second_is_picked_up() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    // #144 is the newest, so it stands on the watermark (13:50:00). Merged
+    // within that second: state changes, `updated_at` does not.
+    let pulls = state
+        .pulls
+        .get_mut("tidewater/payout-service")
+        .expect("the fixture has pull requests");
+    let csv = pulls
+        .iter_mut()
+        .find(|p| p["number"] == 144)
+        .expect("the fixture has #144");
+    assert_eq!(csv["updated_at"], "2026-08-22T13:50:00Z");
+    csv["state"] = serde_json::json!("closed");
+    csv["merged"] = serde_json::json!(true);
+    fake.remount(&state).await;
+
+    let (items, moved) = again(&*source, &cursor).await;
+    assert_eq!(
+        ids(&items, "pr"),
+        vec!["gitea:tidewater/payout-service#144"],
+        "the merge in the watermark second is delivered: {items:?}"
+    );
+    assert_eq!(items.len(), 1, "only the merged pull request: {items:?}");
+    assert_eq!(items[0].payload["merged"], true);
+    assert_ne!(moved, cursor, "the run delivered something");
+
+    // Read again, unchanged: nothing written, the same bytes back.
+    let (idle, idle_cursor) = again(&*source, &moved).await;
+    assert!(idle.is_empty(), "an unchanged re-read emitted {idle:?}");
+    assert_eq!(idle_cursor, moved);
+}
+
+/// The same hole on the repository record: an edit inside the second the
+/// previous run read it leaves `updated_at` where it was.
+#[tokio::test]
+async fn a_repository_edited_in_the_second_it_was_read_is_picked_up() {
+    let mut state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    state.repos[0]["description"] = serde_json::json!("Payouts, now with SEPA retry");
+    fake.remount(&state).await;
+
+    let (items, moved) = again(&*source, &cursor).await;
+    assert_eq!(
+        ids(&items, "repo"),
+        vec!["gitea:tidewater/payout-service"],
+        "{items:?}"
+    );
+    assert_eq!(items.len(), 1, "only the repository changed: {items:?}");
+    assert_eq!(
+        items[0].payload["description"],
+        "Payouts, now with SEPA retry"
+    );
+
+    let (idle, idle_cursor) = again(&*source, &moved).await;
+    assert!(idle.is_empty(), "an unchanged re-read emitted {idle:?}");
+    assert_eq!(idle_cursor, moved);
+}
+
+/// #764 changed the cursor without a version bump. A cursor written before it
+/// -- `pulls_at_watermark` as a list of numbers, no fingerprints -- must still
+/// be a position: the next run re-delivers what sits on the watermarks once
+/// (the repository and #144 here), not the whole corpus, and is idle after.
+#[tokio::test]
+async fn a_cursor_from_before_the_fingerprints_is_still_a_position() {
+    let state = State::tidewater();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+
+    let mut legacy: serde_json::Value = serde_json::from_str(&cursor).expect("JSON");
+    let repo = legacy["repos"]["tidewater/payout-service"]
+        .as_object_mut()
+        .expect("the repository has a position");
+    assert!(repo.remove("repo_fingerprint").is_some());
+    assert!(repo.remove("pulls_seen_at_watermark").is_some());
+    repo.insert("pulls_at_watermark".to_owned(), serde_json::json!([144]));
+    let legacy = legacy.to_string();
+
+    let (items, upgraded) = again(&*source, &legacy).await;
+    let mut kinds: Vec<String> = items.iter().map(|i| i.entity.to_string()).collect();
+    kinds.sort();
+    assert_eq!(
+        kinds,
+        vec![
+            "gitea:tidewater/payout-service",
+            "gitea:tidewater/payout-service#144",
+        ],
+        "only what sits on a watermark comes again"
+    );
+    assert!(!upgraded.contains("\"pulls_at_watermark\""), "{upgraded}");
+
+    let (idle, idle_cursor) = again(&*source, &upgraded).await;
+    assert!(idle.is_empty(), "{idle:?}");
+    assert_eq!(idle_cursor, upgraded);
 }
 
 #[tokio::test]
@@ -1606,7 +1716,7 @@ async fn a_commit_on_two_branches_is_emitted_once() {
     assert_eq!(ids(&items, "commit").len(), 3, "{items:?}");
 }
 
-/// The carry the budget makes necessary, end to end. `pulls_at_watermark` holds
+/// The carry the budget makes necessary, end to end. `pulls_seen_at_watermark` holds
 /// the pull requests already delivered on the boundary second; a run whose
 /// budget stops before it re-observes them has to keep them anyway, or the run
 /// after it delivers them a second time.

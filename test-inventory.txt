@@ -1989,6 +1989,10 @@ knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::an_unusable_cursor_me
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::empty_fields_are_omitted
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::every_watermark_survives_the_round_trip
 knobas-source-gitea	lib/knobas_source_gitea	cursor::tests::serialisation_is_stable
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_boundary_cannot_be_forged_by_the_content_around_it
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_known_record_keeps_its_fingerprint
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::a_merge_inside_the_second_changes_the_fingerprint
+knobas-source-gitea	lib/knobas_source_gitea	fingerprint::tests::key_order_does_not_reach_the_fingerprint
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::a_branch_named_like_a_sha_is_still_a_branch
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::branch_names_may_contain_the_separators
 knobas-source-gitea	lib/knobas_source_gitea	keys::tests::keys_survive_entity_ref_parsing_under_any_instance_id
@@ -2055,6 +2059,7 @@ knobas-source-gitea	test/it	sync::a_cap_fires_at_exactly_the_boundary_it_names
 knobas-source-gitea	test/it	sync::a_changed_default_branch_re_emits_every_branch_and_walks_no_commit
 knobas-source-gitea	test/it	sync::a_commit_on_two_branches_is_emitted_once
 knobas-source-gitea	test/it	sync::a_credential_revoked_after_the_first_repository_raises
+knobas-source-gitea	test/it	sync::a_cursor_from_before_the_fingerprints_is_still_a_position
 knobas-source-gitea	test/it	sync::a_cursor_from_before_the_repository_payload_re_emits_branches_and_budgeted_commits
 knobas-source-gitea	test/it	sync::a_dead_token_against_a_publicly_readable_instance_still_fails
 knobas-source-gitea	test/it	sync::a_discussion_refused_by_a_dead_credential_fails_the_run
@@ -2076,10 +2081,12 @@ knobas-source-gitea	test/it	sync::a_moved_branch_deleted_mid_run_does_not_cost_t
 knobas-source-gitea	test/it	sync::a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not
 knobas-source-gitea	test/it	sync::a_new_commit_on_a_moved_branch_is_emitted_once
 knobas-source-gitea	test/it	sync::a_pull_request_deleted_mid_run_is_skipped_and_the_run_succeeds
+knobas-source-gitea	test/it	sync::a_pull_request_merged_in_the_watermark_second_is_picked_up
 knobas-source-gitea	test/it	sync::a_pull_request_whose_discussion_is_refused_is_still_indexed
 knobas-source-gitea	test/it	sync::a_refusal_that_ends_a_full_sync_names_the_repository
 knobas-source-gitea	test/it	sync::a_refusal_under_a_listed_repository_is_not_read_as_deleted
 knobas-source-gitea	test/it	sync::a_refused_repository_keeps_its_position_on_either_selection_path
+knobas-source-gitea	test/it	sync::a_repository_edited_in_the_second_it_was_read_is_picked_up
 knobas-source-gitea	test/it	sync::a_repository_listing_that_would_exceed_the_cap_fails_the_run
 knobas-source-gitea	test/it	sync::a_repository_that_cannot_have_pull_requests_is_walked_without_asking_for_them
 knobas-source-gitea	test/it	sync::a_revoked_token_fails_the_run_rather_than_syncing_a_subset
