@@ -980,9 +980,9 @@ Ruled 2026-10-13 by the deputy for Björn, in the PR #725 review. Comment:
 
 **If you disagree, the cost of reversing this is:** low. It is one arm in `knobas_core::write_queue::project`.
 
-As built (#706, merge review): `project` also takes the queued payload. `edit_writes` reads which fields the op carries and fails wide: a field is written unless its key is an explicit `null`. The narrowest projection then applies:
+As built (#706, merge review): `project` also takes the queued payload and the kind's declared state paths. `edit_writes` reads which fields the op carries and fails wide: a field is written unless its key is an explicit `null`. The narrowest projection then applies:
 - a title alone uses `title`;
 - a description uses `body_text`, which a retitle or a new comment also moves (a false hold, the safe direction);
-- a state change uses the whole record.
+- a state change uses the state the source **declares** for the kind (`KindPaths::state`, #666; Gitea's merged flag, then its `state` word).
 
-The state is the one place the ruling cannot be met. It lives only in the payload, and ADR-0007 keeps payload reads out of hold decisions, so a retitle still holds a queued Close until a source declares where its state lives. Pinned by `knobas-core`'s `an_edit_holds_only_on_what_it_would_overwrite` and `an_edit_read_that_misses_holds_on_the_whole_record`, and `knobas-sync`'s `a_title_edit_holds_on_a_retitle_and_not_on_a_close`.
+The declared state is the read ADR-0007 sends a payload read to, not a guess at a shape. So a retitle does not hold a queued Close, and somebody else closing, reopening or merging the pull request does. A declaration that resolves nothing falls back to the whole record, so a miss is a false hold. `knobas-sync` reads the paths from the registry's template descriptor by the entity's namespace, at the queue and at the flush alike. Pinned by `knobas-core`'s `an_edit_holds_only_on_what_it_would_overwrite`, `an_edit_read_that_misses_holds_on_the_whole_record` and `a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record`, and `knobas-sync`'s `a_title_edit_holds_on_a_retitle_and_not_on_a_close` and `a_close_holds_on_the_declared_state_and_not_on_a_retitle`.

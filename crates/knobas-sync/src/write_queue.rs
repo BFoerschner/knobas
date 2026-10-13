@@ -40,6 +40,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use knobas_core::activity;
 use knobas_core::entity::EntityRef;
+use knobas_core::payload::StatePath;
 use knobas_core::write_queue::{self as store, QueuedWrite, WaitReason, WriteState};
 use knobas_source::{Source, SourceError, WriteOp, WriteReceipt};
 
@@ -318,7 +319,8 @@ pub async fn queue(
     let target = store::target_of(&deps.pool, &entity).await?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let snapshot = store::project(&identifier, &payload, target.as_ref());
+    let state = declared_state(deps, &entity, &identifier, target.as_ref()).await?;
+    let snapshot = store::project(&identifier, &payload, target.as_ref(), &state);
 
     let queued = store::queue(
         &deps.pool,
@@ -487,7 +489,8 @@ pub async fn amend(
     let target = store::target_of(&deps.pool, &entity).await?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let snapshot = store::project(op.identifier(), &payload, target.as_ref());
+    let state = declared_state(deps, &entity, op.identifier(), target.as_ref()).await?;
+    let snapshot = store::project(op.identifier(), &payload, target.as_ref(), &state);
 
     let Some(amended) = store::amend(&deps.pool, id, payload, snapshot).await? else {
         return Ok(None);
@@ -519,6 +522,40 @@ pub async fn discard(deps: &SchedulerDeps, id: i64) -> Result<Option<QueuedWrite
     Ok(Some(discarded))
 }
 
+/// The state paths the target's source declares for the target's kind
+/// (`KindPaths::state`, #666), for the one op whose hold reads them: an
+/// `edit_pull_request` that closes or reopens holds on the declared state
+/// rather than the whole record (#706). Empty for every other op, for a
+/// target that is gone, and for a source whose adapter is not compiled in or
+/// declares nothing -- which `project` answers with the whole record.
+///
+/// The **template** descriptor, keyed by the entity's namespace (the source
+/// instance id), as `knobas-app`'s `declared_paths` reads it: where a source
+/// keeps its state is a property of the adapter kind, so this needs no
+/// secret and no built adapter, and the queue and the flush read it alike.
+async fn declared_state(
+    deps: &SchedulerDeps,
+    entity: &EntityRef,
+    op: &str,
+    target: Option<&store::Target>,
+) -> Result<Vec<StatePath>, FlushError> {
+    let Some(target) = target.filter(|_| op == "edit_pull_request") else {
+        return Ok(Vec::new());
+    };
+    let Some(source) = config::get(&deps.pool, &entity.namespace).await? else {
+        return Ok(Vec::new());
+    };
+    Ok(deps
+        .registry
+        .descriptors()
+        .into_iter()
+        .filter(|d| d.adapter_kind == source.adapter_kind)
+        .flat_map(|d| d.payload_paths)
+        .find(|paths| paths.kind == target.kind)
+        .map(|paths| paths.state)
+        .unwrap_or_default())
+}
+
 /// Attempt one write. `Ok(true)` if it was delivered, so the caller knows the
 /// entity's queue moved and its next write may be tried.
 ///
@@ -541,11 +578,9 @@ async fn attempt(
 
     // Hold detection: the target as it stands *now*, against the snapshot
     // taken when the write was queued.
-    let current = store::project(
-        &write.op,
-        &write.payload,
-        store::target_of(&deps.pool, &entity).await?.as_ref(),
-    );
+    let target = store::target_of(&deps.pool, &entity).await?;
+    let state = declared_state(deps, &entity, &write.op, target.as_ref()).await?;
+    let current = store::project(&write.op, &write.payload, target.as_ref(), &state);
     if current != write.target_snapshot {
         if let Some(held) = store::hold(&deps.pool, write.id, current).await? {
             announce(deps, "held", &held).await;

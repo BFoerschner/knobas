@@ -65,6 +65,7 @@ async fn queue_comment(pool: &sqlx::PgPool, entity: &EntityRef, body: &str) -> w
         "comment",
         &serde_json::Value::Null,
         wq::target_of(pool, entity).await.unwrap().as_ref(),
+        &[],
     );
     wq::queue(
         pool,
@@ -109,7 +110,8 @@ async fn a_queued_write_survives_a_restart() {
         wq::project(
             "comment",
             &serde_json::Value::Null,
-            wq::target_of(&restarted, &ticket).await.unwrap().as_ref()
+            wq::target_of(&restarted, &ticket).await.unwrap().as_ref(),
+            &[]
         ),
         "and it is the target as the mirror still records it"
     );
@@ -444,6 +446,7 @@ async fn a_write_survives_its_target_being_withdrawn() {
         "comment",
         &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
+        &[],
     );
     assert_ne!(
         now, write.target_snapshot,
@@ -496,7 +499,7 @@ async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
     wq::hold(
         &pool,
         write.id,
-        wq::project("comment", &serde_json::Value::Null, None),
+        wq::project("comment", &serde_json::Value::Null, None, &[]),
     )
     .await
     .unwrap()
@@ -543,6 +546,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
         "comment",
         &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
+        &[],
     );
     assert_ne!(moved, write.target_snapshot);
     wq::hold(&pool, write.id, moved).await.unwrap().unwrap();

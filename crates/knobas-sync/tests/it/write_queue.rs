@@ -96,27 +96,7 @@ impl Source for Fake {
     }
 
     fn descriptor(&self) -> SourceDescriptor {
-        SourceDescriptor {
-            id: self.id.clone(),
-            adapter_kind: "mock".to_owned(),
-            name: "Fake".to_owned(),
-            capabilities: Vec::new(),
-            adapter_version: "0".to_owned(),
-            auth_methods: vec![AuthMethod::Pat],
-            accepts_account: false,
-            write_ops: vec!["comment".to_owned()],
-            entity_kinds: vec![KindInfo {
-                id: "ticket".to_owned(),
-                label: "Ticket".to_owned(),
-                plural: "Tickets".to_owned(),
-                monogram: "TI".to_owned(),
-                full_sync_exhaustive: true,
-            }],
-            config_schema: serde_json::json!({"type": "object", "properties": {}}),
-            // Nothing declared: this stand-in has no payload shapes to
-            // read, so every path-driven read misses on it (#277).
-            payload_paths: Vec::new(),
-        }
+        fake_descriptor(&self.id)
     }
 
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
@@ -196,7 +176,7 @@ struct FakeRegistry {
 
 impl AdapterRegistry for FakeRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Vec::new()
+        vec![fake_descriptor("mock")]
     }
 
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
@@ -209,6 +189,43 @@ impl AdapterRegistry for FakeRegistry {
             interrupt: Arc::clone(&self.interrupt),
             pool: self.pool.clone(),
         }))
+    }
+}
+
+/// The fake's descriptor. It declares one payload path, a pull request's
+/// state in Gitea's shape (#666), which is what a queued close or reopen holds
+/// on (#706); nothing else here reads a declaration.
+fn fake_descriptor(id: &str) -> SourceDescriptor {
+    use knobas_core::payload::{KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    SourceDescriptor {
+        id: id.to_owned(),
+        adapter_kind: "mock".to_owned(),
+        name: "Fake".to_owned(),
+        capabilities: Vec::new(),
+        adapter_version: "0".to_owned(),
+        auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
+        write_ops: vec!["comment".to_owned()],
+        entity_kinds: vec![KindInfo {
+            id: "ticket".to_owned(),
+            label: "Ticket".to_owned(),
+            plural: "Tickets".to_owned(),
+            monogram: "TI".to_owned(),
+            full_sync_exhaustive: true,
+        }],
+        config_schema: serde_json::json!({"type": "object", "properties": {}}),
+        payload_paths: vec![KindPaths {
+            kind: "pr".to_owned(),
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("closed", Tone::Muted),
+                ],
+            }],
+            ..KindPaths::default()
+        }],
     }
 }
 
@@ -278,8 +295,12 @@ impl Harness {
                 // was opened from rather than by its title -- `UNCLAIMED_OPS`
                 // argues why that difference matters (#353).
                 WriteOp::CreatePullRequest { head, .. } => head.clone(),
-                // A pull request edit by the title it gives (#706).
-                WriteOp::EditPullRequest { title, .. } => title.clone().unwrap_or_default(),
+                // A pull request edit by the title it gives, else the state
+                // it sets (#706).
+                WriteOp::EditPullRequest { title, state, .. } => title
+                    .clone()
+                    .or_else(|| state.map(|s| s.as_str().to_owned()))
+                    .unwrap_or_default(),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -790,6 +811,53 @@ async fn a_title_edit_holds_on_a_retitle_and_not_on_a_close() {
         held.held_snapshot.as_ref().unwrap()["text"],
         "Bound the jitter"
     );
+}
+
+/// The ruling's own example through the queue (#706): a queued *Close* goes
+/// over a retitle, and holds on somebody else closing the pull request first.
+/// Both are read from the state the source **declares** for the kind (#666),
+/// the registry's template descriptor, looked up at the queue and again at
+/// the flush.
+#[tokio::test]
+async fn a_close_holds_on_the_declared_state_and_not_on_a_retitle() {
+    let h = harness().await;
+    let retitled = mirror_pull(&h, "o/r#3", "Bound the retry jitter", "open").await;
+    let closed = mirror_pull(&h, "o/r#4", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Unreachable);
+    let close = |entity: &EntityRef| WriteOp::EditPullRequest {
+        entity: entity.to_string(),
+        title: None,
+        body: None,
+        state: Some(knobas_source::PullRequestState::Closed),
+    };
+    let control = flusher::submit(&h.deps, &h.source, close(&retitled))
+        .await
+        .unwrap();
+    let conflicted = flusher::submit(&h.deps, &h.source, close(&closed))
+        .await
+        .unwrap();
+    assert_eq!(control.target_snapshot["text"], "open");
+
+    mirror_pull(&h, "o/r#3", "Bound the jitter", "open").await;
+    mirror_pull(&h, "o/r#4", "Bound the retry jitter", "closed").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["closed".to_owned()],
+        "only one close went"
+    );
+    assert_eq!(
+        h.reload(control.id).await.state,
+        WriteState::Sent,
+        "a retitle is not what a close overwrites"
+    );
+    let held = h.reload(conflicted.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "closed");
 }
 
 /// Story 22, at the flush loop rather than at the store: a stalled write

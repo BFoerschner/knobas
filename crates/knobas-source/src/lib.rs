@@ -772,7 +772,7 @@ pub enum WriteOp {
     ///
     /// Hold detection is per field (the deputy's ruling on #706): a title
     /// edit holds on a retitle, a description edit on the description, a
-    /// close or reopen on the whole record -- see
+    /// close or reopen on the state the source declares for the kind -- see
     /// `knobas_core::write_queue::project`.
     EditPullRequest {
         entity: String,

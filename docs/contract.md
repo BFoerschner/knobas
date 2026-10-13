@@ -11153,12 +11153,16 @@ From this commit on, each of the following requires an orchestrator decision **a
   **Hold detection: per field** (the deputy's ruling on #706, merge review): an edit holds only
   when what it would overwrite changed. A title alone holds on the normalised `title`; a
   description, with or without a title, on `body_text` (which a retitle or a new comment also
-  moves: false holds, the safe direction); a state change (*Close*, *Reopen*) on the whole
-  mirrored record, because the state lives only in the payload and a hold decision does not read
-  payload shapes (ADR-0007) -- so a retitle still holds a queued Close until a source declares
-  where its state lives. `knobas_core::write_queue::project` takes the queued payload for this,
-  and reads which fields the op carries in one statement (`edit_writes`) that fails wide: a field
-  is written unless its key is an explicit `null`. `PROJECTED_OPS` gains `edit_pull_request`;
+  moves: false holds, the safe direction); a state change (*Close*, *Reopen*) on the state the
+  source **declares** for the kind (`KindPaths::state`, #666, resolved by `resolve_state`), so a
+  retitle does not hold a queued Close and somebody else closing, reopening or merging it does.
+  A declaration that resolves nothing falls back to the whole mirrored record (a false hold,
+  never a missed one). `knobas_core::write_queue::project` takes the queued payload and the
+  kind's declared state paths for this; `write_queue::Target` gains `kind`; `knobas-sync` reads
+  the paths from the registry's template descriptor by the entity's namespace, at the queue and
+  at the flush alike. Which fields the op carries is read in one statement (`edit_writes`) that
+  fails wide: a field is written unless its key is an explicit `null`. `PROJECTED_OPS` gains
+  `edit_pull_request`;
   `knobas_sync::write_queue::target_entity` reads its
   `entity`; it is not in `UNCLAIMED_OPS` (what is left is the pull request as edited, which the
   next sync reads back).
@@ -11190,8 +11194,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   Pinned by: `knobas_source`'s `an_edit_crosses_as_only_the_fields_it_changes`,
   `write_op_round_trips` and `every_op_has_its_own_snake_case_identifier`; `knobas-core`'s
   `an_edit_holds_only_on_what_it_would_overwrite` and
-  `an_edit_read_that_misses_holds_on_the_whole_record`; `knobas-sync`'s
+  `an_edit_read_that_misses_holds_on_the_whole_record` and
+  `a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record`; `knobas-sync`'s
   `a_title_edit_holds_on_a_retitle_and_not_on_a_close`,
+  `a_close_holds_on_the_declared_state_and_not_on_a_retitle`,
   `every_write_op_has_a_stated_projection`, `every_write_op_says_whether_a_withdrawal_can_leave_one`
   and `every_op_points_at_the_entity_it_names`; `knobas-source-gitea`'s `tests/it/write.rs` (only
   the given fields in each `PATCH`, an empty edit and a repository refused before a request, the
