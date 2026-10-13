@@ -1402,6 +1402,7 @@ async fn update_branch_is_offered_where_the_head_is_behind() {
     assert_eq!(
         labels,
         [
+            "Submit review…",
             "Comment…",
             "Approve…",
             "Request changes…",
