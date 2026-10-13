@@ -181,6 +181,7 @@ knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backen
 knobas-app	lib/knobas_app	logging::tests::a_pool_timeout_is_logged_with_the_running_command
 knobas-app	lib/knobas_app	logging::tests::a_slow_command_is_logged_with_its_name
 knobas-app	lib/knobas_app	logging::tests::redact_leaves_ordinary_text_alone
+knobas-app	lib/knobas_app	logging::tests::redact_masks_scheme_words_quoted_values_and_options
 knobas-app	lib/knobas_app	logging::tests::secrets_are_redacted_before_they_reach_the_file
 knobas-app	lib/knobas_app	logging::tests::the_file_rotates_at_the_cap_and_keeps_the_newest
 knobas-app	lib/knobas_app	notify::tests::a_click_reaches_the_events_with_its_address_and_a_clear_does_not
