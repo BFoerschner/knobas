@@ -52,6 +52,21 @@ pub(crate) const PG_CTL: &str = if cfg!(windows) {
 /// queries; a larger pool only buys idle backends.
 const MAX_CONNECTIONS: u32 = 5;
 
+/// The `statement_timeout` every connection of the app's pool carries (#745).
+///
+/// Defence in depth: a statement that holds a UI connection for longer than
+/// this is cancelled by the server rather than starving every command behind
+/// it, which is what the 2026-10-13 hang was (a detection pass held all five
+/// for minutes). Thirty seconds is the pool's own acquire timeout -- a command
+/// that waits longer than that for a connection has already failed -- and far
+/// above any UI statement measured for #745: under five sources syncing at
+/// machine load 25, the slowest UI command in `just ui-pool-probe` took well
+/// under a second. The long statements knobas does run are elsewhere: sync
+/// runs and the detection pass on connections of their own, a backup in
+/// `pg_dump`, and migrations on a connection `migrate::run` takes out of the
+/// pool and clears the limit on.
+pub const UI_STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
+
 /// Upper bound for `initdb` / `pg_ctl` invocations. The crate default is 5s,
 /// which a cold `initdb` on a slow disk can exceed.
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
@@ -295,6 +310,23 @@ impl Connector {
         probe(&pool).await?;
         Ok(pool)
     }
+
+    /// The app's own pool: five connections, each carrying
+    /// [`UI_STATEMENT_TIMEOUT`] from its first packet.
+    ///
+    /// # Errors
+    /// [`sqlx::Error`] if the first connection fails.
+    pub async fn app_pool(&self) -> Result<PgPool, sqlx::Error> {
+        let options = self.options.clone().options([(
+            "statement_timeout",
+            format!("{}ms", UI_STATEMENT_TIMEOUT.as_millis()),
+        )]);
+        let pool = PgPoolOptions::new()
+            .max_connections(MAX_CONNECTIONS)
+            .connect_lazy_with(options);
+        probe(&pool).await?;
+        Ok(pool)
+    }
 }
 
 /// The password a connection URL carries, percent-decoded.
@@ -378,7 +410,7 @@ impl EmbeddedDb {
             tracing::info!("connecting to externally managed postgres");
             let connector = Connector::parse(url)?;
             return Ok(EmbeddedDb {
-                pool: connector.pool(MAX_CONNECTIONS).await?,
+                pool: connector.app_pool().await?,
                 connector,
                 postgresql: None,
                 stop_settings: None,
@@ -831,7 +863,7 @@ async fn start_managed(root_dir: &Path, mut settings: Settings) -> Result<Starte
 
     let url = postgresql.settings().url(DATABASE_NAME);
     let connector = Connector::parse(&url)?;
-    let pool = connector.pool(MAX_CONNECTIONS).await?;
+    let pool = connector.app_pool().await?;
 
     // We started it, so we stop it -- but the claim still goes through the
     // lock, so `owns_server` has exactly one meaning and a sibling that later
@@ -1019,7 +1051,7 @@ async fn adopt(
     let _ = admin.close().await;
 
     let connector = Connector::parse(&url)?;
-    let pool = connector.pool(MAX_CONNECTIONS).await.map_err(|source| {
+    let pool = connector.app_pool().await.map_err(|source| {
         unreachable(format!(
             "cannot connect to {DATABASE_NAME} on port {port}: {source}"
         ))

@@ -39,6 +39,7 @@ pub mod settings;
 pub mod sources;
 pub mod standup;
 pub mod start_work;
+pub mod suggestion_pass;
 pub mod time;
 
 pub use commands::app::{DbState, Lifecycle};
@@ -100,6 +101,10 @@ pub struct AppState {
     /// [`EmbeddedDb`]: knobas_db::EmbeddedDb
     pub pool: PgPool,
 
+    /// The suggestion detection pass (#745): one at a time, on a connection
+    /// of its own and never on [`pool`](Self::pool).
+    pub suggestions: suggestion_pass::SuggestionPass,
+
     /// The server this process started, until it is shut down.
     ///
     /// `Option` because shutdown *consumes* the handle: `EmbeddedDb::stop`
@@ -136,6 +141,7 @@ impl AppState {
     #[must_use]
     pub fn over_pool(pool: PgPool) -> Self {
         Self {
+            suggestions: suggestion_pass::SuggestionPass::beside(&pool),
             pool,
             db: Mutex::new(None),
         }
@@ -536,6 +542,10 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             Ok(db) => {
                 handle.state::<Lifecycle>().install(AppState {
                     pool: db.pool().clone(),
+                    suggestions: suggestion_pass::SuggestionPass::new(
+                        std::sync::Arc::new(sources::DbConnections(db.connector())),
+                        suggestion_pass::PASS_STATEMENT_TIMEOUT,
+                    ),
                     db: Mutex::new(Some(db)),
                 });
                 // Installed *before* the state moves to `ready`: a frontend

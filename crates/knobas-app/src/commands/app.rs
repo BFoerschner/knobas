@@ -152,6 +152,20 @@ impl Lifecycle {
     }
 }
 
+impl Lifecycle {
+    /// The suggestion pass, or the same refusal [`pool`](Self::pool) gives.
+    ///
+    /// # Errors
+    ///
+    /// As [`pool`](Self::pool).
+    pub fn suggestions(&self) -> Result<crate::suggestion_pass::SuggestionPass, IpcError> {
+        self.pool()?;
+        self.app_state()
+            .map(|state| state.suggestions.clone())
+            .ok_or_else(|| IpcError::not_ready("the database is still starting"))
+    }
+}
+
 /// Liveness probe. Answers as soon as the webview can call, which is now
 /// *before* the database is up -- so a successful `ping` says the backend is
 /// running and nothing about PostgreSQL. Ask [`app_status`] for that.

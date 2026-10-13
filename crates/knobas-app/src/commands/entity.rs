@@ -2060,16 +2060,25 @@ pub struct SuggestionPage {
 
 /// Run a detection pass, returning how many proposals it wrote.
 ///
-/// Idempotent and cheap to repeat, which is what lets the room call it rather
-/// than the user (#41 story 22): a pass over an unchanged mirror writes
-/// nothing, and a pass after a sync writes only what the new items justify.
-/// It never creates a confirmed link and never writes to a source.
+/// Idempotent, and cheap to repeat since #745: a pass over an unchanged mirror
+/// writes nothing and compares nothing, and a pass after a sync writes only
+/// what the new items justify. It never creates a confirmed link and never
+/// writes to a source.
+///
+/// Through the process's one [`SuggestionPass`]: a call while a pass runs is
+/// answered by the next pass rather than starting a third, and the pass runs
+/// on a connection of its own, never on the UI pool (#745).
+///
+/// [`SuggestionPass`]: crate::suggestion_pass::SuggestionPass
 ///
 /// # Errors
 ///
-/// [`Internal`](crate::IpcErrorCode::Internal) if a statement fails.
-pub async fn detect_suggestions_inner(pool: &PgPool) -> Result<u32, IpcError> {
-    let written = suggest::detect(pool).await?;
+/// [`Internal`](crate::IpcErrorCode::Internal) if a statement fails or runs
+/// past the pass's statement timeout.
+pub async fn detect_suggestions_inner(
+    pass: &crate::suggestion_pass::SuggestionPass,
+) -> Result<u32, IpcError> {
+    let written = pass.run().await?;
     // A pass that proposed more than four billion links is not a number the
     // frontend needs to be exact about.
     Ok(u32::try_from(written).unwrap_or(u32::MAX))
@@ -2183,8 +2192,7 @@ fn suggestion_id(link_id: &str) -> Result<Uuid, IpcError> {
 /// is still coming up, and whatever [`detect_suggestions_inner`] refuses with.
 #[tauri::command]
 pub async fn detect_suggestions(lifecycle: State<'_, Lifecycle>) -> Result<u32, IpcError> {
-    let pool = lifecycle.pool()?;
-    detect_suggestions_inner(&pool).await
+    detect_suggestions_inner(&lifecycle.suggestions()?).await
 }
 
 /// One page of a room's suggestion tray.

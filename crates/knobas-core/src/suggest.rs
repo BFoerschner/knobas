@@ -966,6 +966,17 @@ where
     A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
 {
     let mut conn = conn.acquire().await?;
+    run_rule(&mut conn, rule, batch).await
+}
+
+/// One rule on one connection. Concrete rather than generic over
+/// [`sqlx::Acquire`], so a caller can hold the future across a
+/// `tokio::spawn` -- the generic one is not `Send` for every lifetime.
+async fn run_rule(
+    conn: &mut sqlx::PgConnection,
+    rule: &Rule,
+    batch: usize,
+) -> Result<u64, CoreError> {
     match rule.scope {
         Scope::Mirror => {
             let written = sqlx::query(rule.sql)
@@ -983,7 +994,7 @@ where
                 .await?;
             let mut written = 0;
             for ids in changed.chunks(batch.max(1)) {
-                written += compare_batch(&mut *conn, rule, ids).await?;
+                written += compare_batch(conn, rule, ids).await?;
             }
             Ok(written)
         }
@@ -1068,9 +1079,19 @@ where
     A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
 {
     let mut conn = conn.acquire().await?;
+    detect_on(&mut conn).await
+}
+
+/// [`detect`] on a connection the caller holds -- the app's pass, which opens
+/// one of its own and sets its `statement_timeout` there (#745).
+///
+/// # Errors
+///
+/// As [`detect`].
+pub async fn detect_on(conn: &mut sqlx::PgConnection) -> Result<u64, CoreError> {
     let mut written = 0;
     for rule in RULES {
-        written += detect_rule(&mut *conn, rule).await?;
+        written += run_rule(conn, rule, SIMILAR_TEXT_BATCH).await?;
     }
     Ok(written)
 }

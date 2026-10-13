@@ -17,6 +17,7 @@ use knobas_app::commands::entity::{
     accept_suggestion_inner, create_link_inner, detect_suggestions_inner, dismiss_suggestion_inner,
     get_entity_inner, room_suggestions_inner,
 };
+use knobas_app::suggestion_pass::SuggestionPass;
 use sqlx::PgPool;
 
 /// The demo corpus in a database nothing else touches.
@@ -41,7 +42,9 @@ async fn demo() -> PgPool {
 async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
     let pool = demo().await;
 
-    let written = detect_suggestions_inner(&pool).await.unwrap();
+    let written = detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
     assert!(
         written > 0,
         "not one rule fires on the corpus knobas ships -- a rule keyed on a \
@@ -85,7 +88,12 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
     );
 
     // Idempotent on the real corpus too, not only on a hand-built one.
-    assert_eq!(detect_suggestions_inner(&pool).await.unwrap(), 0);
+    assert_eq!(
+        detect_suggestions_inner(&SuggestionPass::beside(&pool))
+            .await
+            .unwrap(),
+        0
+    );
 }
 
 /// Accepting moves a proposal out of the tray and into the links panel, and
@@ -93,7 +101,9 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
 #[tokio::test]
 async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
     let pool = demo().await;
-    detect_suggestions_inner(&pool).await.unwrap();
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let entry = page
         .rows
@@ -142,7 +152,9 @@ async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
 #[tokio::test]
 async fn dismissing_is_remembered_across_a_later_pass() {
     let pool = demo().await;
-    detect_suggestions_inner(&pool).await.unwrap();
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let entry = page
         .rows
@@ -163,7 +175,9 @@ async fn dismissing_is_remembered_across_a_later_pass() {
         .await
         .unwrap();
     assert_eq!(
-        detect_suggestions_inner(&pool).await.unwrap(),
+        detect_suggestions_inner(&SuggestionPass::beside(&pool))
+            .await
+            .unwrap(),
         0,
         "a dismissal survives a re-sync"
     );
@@ -208,7 +222,9 @@ async fn a_bad_suggestion_id_is_invalid_and_an_unknown_one_is_not_found() {
 #[tokio::test]
 async fn linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing() {
     let pool = demo().await;
-    detect_suggestions_inner(&pool).await.unwrap();
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     // A proposal whose relation is the one *Link to…* defaults to, since that
     // is the collision a user can actually walk into.
@@ -262,7 +278,9 @@ async fn linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing() {
 #[tokio::test]
 async fn drawing_the_reverse_of_a_proposal_empties_the_tray_row_and_keeps_the_users_direction() {
     let pool = demo().await;
-    detect_suggestions_inner(&pool).await.unwrap();
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let entry = page
         .rows
@@ -320,7 +338,9 @@ async fn drawing_the_reverse_of_a_proposal_empties_the_tray_row_and_keeps_the_us
 #[tokio::test]
 async fn the_tray_is_scoped_to_the_room_it_is_drawn_in() {
     let pool = demo().await;
-    detect_suggestions_inner(&pool).await.unwrap();
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
 
     let everywhere = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     let demo_room = room_suggestions_inner(&pool, &["mock".to_owned()], None, 500)

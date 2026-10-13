@@ -14,16 +14,17 @@
 //! and a machine-dependent load are not a gate test. The assertions are the
 //! ticket's: the UI pool always has a free connection, no UI command fails,
 //! none takes over a second. Sizes come from the environment (`HP_SOURCES`,
-//! `HP_ITEMS`, `HP_SECS`, `HP_PAGE_DELAY_MS`, `HP_UI_POOL`, `HP_TRAY`).
+//! `HP_ITEMS`, `HP_SECS`, `HP_PAGE_DELAY_MS`, `HP_TRAY`).
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use knobas_app::commands::entity::{
     create_note_inner, detect_suggestions_inner, get_entity_inner, room_suggestions_inner,
 };
 use knobas_app::commands::search::{launcher_home_inner, search_inner};
+use knobas_app::suggestion_pass::{PASS_STATEMENT_TIMEOUT, SuggestionPass};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem};
@@ -314,16 +315,24 @@ impl SyncEvents for Events {
 /// UI calls that failed, and UI calls that took over a second.
 static FAILED: AtomicUsize = AtomicUsize::new(0);
 static SLOW: AtomicUsize = AtomicUsize::new(0);
+/// The slowest UI call that succeeded: its time and its name.
+static SLOWEST: std::sync::Mutex<(u128, &str)> = std::sync::Mutex::new((0, ""));
 
 /// Time one UI call and print it when slow or failed, counting both.
 async fn timed<T, E: std::fmt::Display>(
     t0: Instant,
-    name: &str,
+    name: &'static str,
     f: impl std::future::Future<Output = Result<T, E>>,
 ) -> Option<T> {
     let start = Instant::now();
     let r = f.await;
     let ms = start.elapsed().as_millis();
+    if r.is_ok() {
+        let mut slowest = SLOWEST.lock().unwrap();
+        if ms > slowest.0 {
+            *slowest = (ms, name);
+        }
+    }
     match r {
         Ok(v) => {
             if ms > 1000 {
@@ -350,11 +359,12 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
     let items = env("HP_ITEMS", 1000);
     let secs = env("HP_SECS", 180);
     let page_delay = Duration::from_millis(env("HP_PAGE_DELAY_MS", 200));
-    let ui_pool_size = env("HP_UI_POOL", 5) as u32;
+    // The app's pool, statement timeout and all: five connections.
+    let ui_pool_size = 5;
     let mimic_tray = env("HP_TRAY", 1) == 1;
 
     let connector = knobas_db::test_util::scratch_database("hangprobe").await;
-    let ui = connector.pool(ui_pool_size).await.unwrap();
+    let ui = connector.app_pool().await.unwrap();
     let sync_pool = connector
         .pool(knobas_sync::scheduler::SYNC_POOL_SIZE)
         .await
@@ -412,6 +422,11 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
     .await
     .unwrap();
     let scheduler = Arc::new(scheduler);
+    // The app's pass: one per process, on connections of its own.
+    let pass = SuggestionPass::new(Arc::new(Conns(connector.clone())), PASS_STATEMENT_TIMEOUT);
+    // `jira0:JIRA0-5` exists once jira0's first run has landed; opening it
+    // before then is a correct not-found, not a failure of the pool.
+    let jira0_synced = Arc::new(AtomicBool::new(false));
 
     if env("HP_RULES_ONLY", 0) == 1 {
         let mut done = std::collections::HashSet::new();
@@ -441,18 +456,24 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
     // the sources view's re-list. Fire-and-forget, like `void refresh()`.
     let react = {
         let ui = ui.clone();
+        let pass = pass.clone();
+        let jira0_synced = Arc::clone(&jira0_synced);
         tokio::spawn(async move {
             while let Some(status) = rx.recv().await {
                 if status.running {
                     continue;
                 }
+                if status.source_id == "jira0" {
+                    jira0_synced.store(true, Ordering::Relaxed);
+                }
                 let ui1 = ui.clone();
+                let pass = pass.clone();
                 if mimic_tray {
                     tokio::spawn(async move {
                         // The pass itself is not a UI read: it is timed and
                         // printed, never counted against the one-second line.
                         let start = Instant::now();
-                        let pass = detect_suggestions_inner(&ui1).await;
+                        let pass = detect_suggestions_inner(&pass).await;
                         println!(
                             "[{:>6.1}] PASS detect_suggestions {} ms: {:?}",
                             t0.elapsed().as_secs_f32(),
@@ -487,6 +508,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
     // ten, the launcher board every five.
     let user = {
         let ui = ui.clone();
+        let jira0_synced = Arc::clone(&jira0_synced);
         tokio::spawn(async move {
             let mut tick = 0u64;
             loop {
@@ -505,24 +527,23 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                     ),
                 )
                 .await
+                    && tick.is_multiple_of(10)
                 {
-                    if tick % 10 == 0 {
-                        println!(
-                            "[{:>6.1}] search {q:?} -> {} groups",
-                            t0.elapsed().as_secs_f32(),
-                            serde_json::to_value(&r)
-                                .ok()
-                                .and_then(|v| v
-                                    .get("groups")
-                                    .and_then(|g| g.as_array().map(|a| a.len())))
-                                .unwrap_or(0)
-                        );
-                    }
+                    println!(
+                        "[{:>6.1}] search {q:?} -> {} groups",
+                        t0.elapsed().as_secs_f32(),
+                        serde_json::to_value(&r)
+                            .ok()
+                            .and_then(|v| v
+                                .get("groups")
+                                .and_then(|g| g.as_array().map(|a| a.len())))
+                            .unwrap_or(0)
+                    );
                 }
-                if tick % 2 == 0 {
+                if tick.is_multiple_of(2) && jira0_synced.load(Ordering::Relaxed) {
                     timed(t0, "get_entity", get_entity_inner(&ui, "jira0:JIRA0-5")).await;
                 }
-                if tick % 5 == 0 {
+                if tick.is_multiple_of(5) {
                     timed(t0, "launcher_home", launcher_home_inner(&ui)).await;
                     timed(
                         t0,
@@ -531,7 +552,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                     )
                     .await;
                 }
-                if tick % 10 == 0 {
+                if tick.is_multiple_of(10) {
                     timed(
                         t0,
                         "create_note",
@@ -623,6 +644,8 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
     .await
     .unwrap();
     let (failed, slow) = (FAILED.load(Ordering::Relaxed), SLOW.load(Ordering::Relaxed));
+    let slowest = *SLOWEST.lock().unwrap();
+    println!("END slowest UI call: {} {} ms", slowest.1, slowest.0);
     println!("END items={n_items} links={n_links} parent_declaration writes={decl_upd}");
     println!(
         "END ui_pool starved in {starved} of {samples} samples; {failed} UI calls failed, \
