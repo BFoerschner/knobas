@@ -103,6 +103,11 @@ pub struct State {
     /// Gitea 1.27.3, 2026-10-13: the discussion read answers **500** `issue
     /// does not exist` -- not a 404 -- and `GET /pulls/{index}` answers 404.
     pub vanished_pulls: BTreeSet<String>,
+    /// `owner/repo#index` or `owner/repo@branch` -> the status the confirming
+    /// read (`GET /pulls/{index}`, `GET /branches/{name}`) answers instead of
+    /// what the rest of the state implies: a transient server fault on the one
+    /// read that decides "deleted" (issue #724). Only a 404 there may skip.
+    pub confirm_status: BTreeMap<String, u16>,
 }
 
 pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
@@ -262,6 +267,7 @@ impl State {
             vanished_branches: BTreeSet::new(),
             history_missing: BTreeSet::new(),
             vanished_pulls: BTreeSet::new(),
+            confirm_status: BTreeMap::new(),
             discussion_status: BTreeMap::new(),
             discussion_total: BTreeMap::new(),
         }
@@ -531,6 +537,25 @@ impl Fake {
                 .mount(&self.server)
                 .await;
             }
+        }
+        // Ahead of the vanished items' own 404s, so a fault wins over them.
+        for (key, status) in &state.confirm_status {
+            let route = match (key.split_once('#'), key.split_once('@')) {
+                (Some((full_name, index)), _) => format!("/api/v1/repos/{full_name}/pulls/{index}"),
+                (None, Some((full_name, branch))) => format!(
+                    "/api/v1/repos/{full_name}/branches/{}",
+                    branch.replace('/', "%2F")
+                ),
+                _ => panic!("confirm key is owner/repo#index or owner/repo@branch"),
+            };
+            authed(Mock::given(method("GET")).and(path(route)))
+                .respond_with(
+                    ResponseTemplate::new(*status)
+                        .set_body_json(json!({ "message": "internal server error" })),
+                )
+                .with_priority(FORBIDDEN_PRIORITY - 1)
+                .mount(&self.server)
+                .await;
         }
         for key in &state.vanished_pulls {
             let (full_name, index) = key

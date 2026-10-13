@@ -1288,6 +1288,27 @@ async fn a_failed_discussion_read_of_a_pull_request_still_there_ends_the_run() {
     assert_eq!(error.status(), Some(500), "{error:?}");
 }
 
+/// A transient fault on both reads -- the discussion and the pull request
+/// that would confirm it gone -- is not "deleted": only the re-read's 404 may
+/// skip a pull request, so a still-existing one is never dropped for a 5xx and
+/// the run ends as it did before #724.
+#[tokio::test]
+async fn a_fault_on_the_confirming_read_never_skips_a_pull_request() {
+    let mut state = State::tidewater();
+    state
+        .discussion_status
+        .insert("tidewater/payout-service#142".to_owned(), 500);
+    state
+        .confirm_status
+        .insert("tidewater/payout-service#142".to_owned(), 503);
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert_eq!(error.status(), Some(500), "{error:?}");
+}
+
 // --------------------------------------------------------------- commits ----
 
 /// A branch deleted between the listing and its commit read is gone, not a
@@ -1341,6 +1362,27 @@ async fn a_missing_history_on_a_branch_still_there_ends_a_full_sync() {
     state
         .history_missing
         .insert("tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert_eq!(error.status(), Some(404), "{error:?}");
+}
+
+/// As for a pull request: a fault on the branch's own read is not "deleted",
+/// and a full sync ends on the commit read's 404 rather than skip a branch
+/// that may still be there.
+#[tokio::test]
+async fn a_fault_on_the_confirming_read_never_skips_a_branch() {
+    let mut state = State::tidewater();
+    state
+        .history_missing
+        .insert("tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned());
+    state.confirm_status.insert(
+        "tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned(),
+        503,
+    );
     let fake = Fake::start(&state).await;
     let source = source(fake.base_url(), serde_json::json!({}));
 

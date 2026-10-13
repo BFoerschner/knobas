@@ -342,6 +342,21 @@ holder giteaonlyholder gitea
 rc=$(session jvmbesidegitea teamcity STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
 check "a TeamCity session does not wait on the Gitea lock" "$rc" "0"
 touch "$scratch/giteaonlyholder.release"
+for ((i = 0; i < 100; i++)); do [ -L "$KNOBAS_LIVE_GITEA_LOCK" ] || break; sleep 0.1; done
+
+# A Gitea run killed outright (SIGKILL: no trap runs) leaves its link behind;
+# the next Gitea session takes it over instead of waiting out the 45 minutes.
+holder giteakilled gitea
+kill -9 "${pids[${#pids[@]} - 1]}"
+wait "${pids[${#pids[@]} - 1]}" 2>/dev/null || true
+checks=$((checks + 1))
+[ -L "$KNOBAS_LIVE_GITEA_LOCK" ] || fail "a killed Gitea holder leaves its lock behind" "no link"
+rc=$(session giteaheir gitea STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)
+out=$(cat "$scratch/giteaheir.out")
+check "a Gitea lock whose holder was killed is taken over" "$rc" "0"
+check "the takeover says the Gitea lock was stale and names the holder" "$out" "the Gitea lock was stale -- its holder 'giteakilled'"
+checks=$((checks + 1))
+[ ! -L "$KNOBAS_LIVE_GITEA_LOCK" ] || fail "the heir releases the Gitea lock" "$(readlink "$KNOBAS_LIVE_GITEA_LOCK")"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-lock-test: $failures of $checks checks failed" >&2
