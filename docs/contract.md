@@ -10854,7 +10854,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   compare (they union every enabled source's; a Gitea author is compared with the Gitea username
   only). After the settled rows are dropped: a `pr` whose declared reviewers include me (1), a
   `pr` I authored (2), any other `pr` (3), a `branch` I last committed to that no open `pr` of
-  the same source names as `head` under the same declared parent path (4), anything else (5). A
+  the same source names as `head` under the same declared parent path line (4), anything else
+  (5). The repo is matched by the path line (Gitea's `owner/name`), not by the name set
+  `sync.item_parent` keeps, whose bare `name` is shared across owners. A miss on either side (no
+  `head`, no parent) matches nothing, so the branch stays unproposed and drawn (ADR-0007). A
   row whose source has no username is 3 or 5. A room where no row has one is not grouped
   (`groups` `None`, and the order is exactly #680's). The open pull requests are read across the
   live corpus, not the room, so a context holding a branch without its pull request does not call

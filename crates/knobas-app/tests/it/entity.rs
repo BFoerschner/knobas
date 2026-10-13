@@ -1640,16 +1640,17 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
         ("ledger", "björn/sepa", "björn", 80),
         // Somebody else's.
         ("payout-service", "ana/wip", "ana", 4),
+        // Mine, named like my open pull request's head, whose repo misses:
+        // a miss ties it to nothing, so it stays unproposed and drawn.
+        ("", "björn/sepa", "björn", 90),
     ] {
         let key = format!("tidewater/{repo_name}@refs/heads/{branch}");
-        mirrored(
-            &pool,
-            &gitea,
-            "branch",
-            &key,
-            serde_json::json!({ "repository": repo(repo_name) }),
-        )
-        .await;
+        let payload = if repo_name.is_empty() {
+            serde_json::json!({})
+        } else {
+            serde_json::json!({ "repository": repo(repo_name) })
+        };
+        mirrored(&pool, &gitea, "branch", &key, payload).await;
         sqlx::query("update sync.item set title = $2 where entity_id = $1")
             .bind(format!("{gitea}:{key}"))
             .bind(branch)
@@ -1685,7 +1686,8 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
 /// A branch is matched to a pull request by the head the pull request
 /// declares and the repo both declare as parent, so a same-named branch in
 /// another repo is still unproposed, and a merged pull request proposes
-/// nothing any more.
+/// nothing any more. A branch whose repo misses is tied to no pull request
+/// (ADR-0007: the miss fails toward drawing it).
 #[tokio::test]
 async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
     use knobas_app::commands::entity::{AttentionGroup, GroupTally};
@@ -1703,6 +1705,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
             branch("payout-service", "björn/old"),
             branch("payout-service", "björn/spike"),
             branch("ledger", "björn/sepa"),
+            branch("", "björn/sepa"),
             branch("payout-service", "ana/wip"),
             branch("payout-service", "björn/sepa"),
         ],
@@ -1724,7 +1727,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
             },
             GroupTally {
                 group: AttentionGroup::MyBranches,
-                count: 3
+                count: 4
             },
             GroupTally {
                 group: AttentionGroup::OtherBranches,
@@ -1733,7 +1736,7 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
         ]),
         "every drawn row in exactly one group, the groups in draw order"
     );
-    assert_eq!(page.total, 8);
+    assert_eq!(page.total, 9);
 }
 
 /// A source with no configured identity draws the Code tile as it always
@@ -1757,6 +1760,7 @@ async fn a_code_tile_with_no_identity_draws_todays_order() {
             branch("payout-service", "björn/old"),
             branch("payout-service", "björn/spike"),
             branch("ledger", "björn/sepa"),
+            branch("", "björn/sepa"),
         ],
     );
     assert_eq!(page.groups, None, "nobody to group for");

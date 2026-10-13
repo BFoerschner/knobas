@@ -496,6 +496,15 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// declared `head` across the live corpus, not the room's: a context that
 /// holds a branch and not its pull request must not call the branch
 /// unproposed. Each is read once, `materialized`, as `ruled` is.
+///
+/// **The repo is matched by the path line**, each side's declared parent
+/// chain by its first names -- Gitea's `owner/name`, unique per instance --
+/// and not by every name it answers to as `sync.item_parent` keeps them: a
+/// repo's bare `name` is shared across owners, so the set would need the
+/// sorted-pairs key [`LIVE_LATEST`] builds, for a match the first name already
+/// makes. A miss on either side (no `head`, no parent) matches nothing, so
+/// the branch stays **unproposed** and drawn: the ADR-0007 miss fails toward
+/// showing a branch, never toward hiding it.
 const LIVE_ATTENTION: &str = concat!(
     tile_ruled!(
         concat!(
@@ -538,7 +547,7 @@ drawn as (
              when r.kind = 'branch' and r.author = r.me
                   and not exists (select 1 from open_head h
                                    where h.source_id = r.source_id and h.head = r.title
-                                     and h.path is not distinct from r.branch_path) then 4
+                                     and h.path = r.branch_path) then 4
              else 5
            end
          end as grp
