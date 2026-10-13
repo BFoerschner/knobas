@@ -3061,8 +3061,22 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
         .await
         .expect_err("Gitea merged past a required check that never reported");
     assert_eq!(refused.status(), Some(405), "{refused:?}");
+    // The refusal is the check's, not *"Please try again later"*: the adapter
+    // believed it rather than giving up on a wait.
     assert!(
-        started.elapsed() < std::time::Duration::from_secs(3),
+        refused
+            .to_string()
+            .contains("Not all required status checks successful"),
+        "{refused:?}"
+    );
+    // And it was not waited out. Waiting it out costs the adapter's whole
+    // merge patience (15 s, `write::MERGE_PATIENCE`); a refusal believed at
+    // once can still take a few seconds, because Gitea answers *"try again
+    // later"* while it checks the push behind the pull request (1--2.5 s
+    // measured in #721), which is waited out first. 3 s was the bound until
+    // #766's review, and a run took 3.9 s.
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(12),
         "a refusal that is not 'try again later' is not waited out: {:?}",
         started.elapsed()
     );
