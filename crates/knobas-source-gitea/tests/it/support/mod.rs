@@ -86,6 +86,14 @@ pub struct State {
     /// repository the listing offered and that was gone by the time the walk
     /// reached it.
     pub missing: BTreeSet<String>,
+    /// `missing` entries whose **first** `GET /repos/{owner}/{repo}` still
+    /// answers the record: a repository deleted after that read, between a
+    /// configured `repos[]` entry's selection and its walk (issue #728). Every
+    /// read after the first answers `missing`'s 404. A fake for the same
+    /// reason as the fields below (ADR-0013): the deletion falls between two
+    /// requests inside one `sync` call, which nothing opens on demand on the
+    /// pinned container.
+    pub read_once: BTreeSet<String>,
     /// Why a fake witnesses this and the three fields below (ADR-0013, "a
     /// fault the real instance cannot produce is witnessed by a fake"): the
     /// window is between two requests inside one `sync` call, and no seed, flag
@@ -109,8 +117,9 @@ pub struct State {
     /// Gitea 1.27.3, 2026-10-13: the discussion read answers **500** `issue
     /// does not exist` -- not a 404 -- and `GET /pulls/{index}` answers 404.
     pub vanished_pulls: BTreeSet<String>,
-    /// `owner/repo#index` or `owner/repo@branch` -> the status the confirming
-    /// read (`GET /pulls/{index}`, `GET /branches/{name}`) answers instead of
+    /// `owner/repo#index`, `owner/repo@branch` or `owner/repo` -> the status
+    /// the confirming read (`GET /pulls/{index}`, `GET /branches/{name}`,
+    /// `GET /repos/{owner}/{repo}`, issue #728) answers instead of
     /// what the rest of the state implies: a transient server fault on the one
     /// read that decides "deleted" (issue #724). Only a 404 there may skip.
     pub confirm_status: BTreeMap<String, u16>,
@@ -281,6 +290,7 @@ impl State {
             forbidden: BTreeSet::new(),
             revoked: BTreeSet::new(),
             missing: BTreeSet::new(),
+            read_once: BTreeSet::new(),
             vanished_branches: BTreeSet::new(),
             history_missing: BTreeSet::new(),
             vanished_pulls: BTreeSet::new(),
@@ -462,6 +472,21 @@ impl Fake {
             .await;
         }
 
+        for full_name in &state.read_once {
+            let record = state
+                .repos
+                .iter()
+                .find(|r| r["full_name"] == json!(full_name))
+                .expect("a read_once entry names a repository in the state")
+                .clone();
+            authed(Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}"))))
+                .respond_with(ResponseTemplate::new(200).set_body_json(record))
+                .up_to_n_times(1)
+                .with_priority(FORBIDDEN_PRIORITY - 1)
+                .mount(&self.server)
+                .await;
+        }
+
         // What Gitea 1.27.3 answers a repository that cannot have pull
         // requests -- the unit switched off, a pull mirror, or no commits yet
         // (`CanEnablePulls` is `!IsMirror && !IsEmpty`): `/pulls` is a bare
@@ -563,7 +588,9 @@ impl Fake {
                     "/api/v1/repos/{full_name}/branches/{}",
                     branch.replace('/', "%2F")
                 ),
-                _ => panic!("confirm key is owner/repo#index or owner/repo@branch"),
+                // A bare `owner/repo`: the repository's own read (#728).
+                (None, None) if key.contains('/') => format!("/api/v1/repos/{key}"),
+                _ => panic!("confirm key is owner/repo#index, owner/repo@branch or owner/repo"),
             };
             authed(Mock::given(method("GET")).and(path(route)))
                 .respond_with(
