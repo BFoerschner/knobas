@@ -381,7 +381,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("Branches", "feature/PAY-231-sepa-retry → main", None),
             (
                 "Mergeable",
-                "no: conflicts with main, or Gitea is still checking",
+                "no: Gitea is still checking whether this can merge, or it conflicts with main",
                 Some(Tone::Warn)
             ),
             ("Created", "2026-08-21 17:41 +00:00", None),
@@ -1132,14 +1132,14 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
     for (pull, reason) in [
         (
             not_mergeable,
-            "Conflicts with main, or Gitea is still checking",
+            "Gitea is still checking whether this can merge, or it conflicts with main",
         ),
-        (unknown, "Gitea has not said yet whether it can be merged"),
+        (unknown, "Gitea is still checking whether this can merge"),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
         // Not yet said is no fact to draw; the toolbar says why it waits.
-        if reason.starts_with("Gitea") {
+        if !reason.contains("conflicts") {
             assert_eq!(mergeable_fact(&view), None, "{view:#?}");
         }
         assert_eq!(
@@ -1189,7 +1189,7 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             pull: open_pull(),
             approvals: None,
             behind: false,
-            reason: "Conflicts with main, or Gitea is still checking",
+            reason: "Gitea is still checking whether this can merge, or it conflicts with main",
         },
         Case {
             what: "a work-in-progress title",
@@ -1224,7 +1224,8 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             pull: open_pull(),
             approvals: Some((2, true)),
             behind: true,
-            reason: "Conflicts with main, or Gitea is still checking; behind main, which its \
+            reason: "Gitea is still checking whether this can merge, or it conflicts with main; \
+                     behind main, which its \
                      protection forbids: update the branch; 1 of 2 required approvals",
         },
     ];
@@ -1243,8 +1244,12 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             "{}",
             case.what
         );
+        // The toolbar's sentence starts with a capital; the fact's reading
+        // does not, unless it starts with a name.
         let mut lower = case.reason.to_owned();
-        lower[..1].make_ascii_lowercase();
+        if !lower.starts_with("Gitea") {
+            lower[..1].make_ascii_lowercase();
+        }
         assert_eq!(
             mergeable_fact(&view),
             Some(Fact {
@@ -1354,6 +1359,238 @@ async fn a_stale_approval_counts_unless_the_protection_ignores_it() {
             "ignore_stale_approvals: {ignore_stale}"
         );
     }
+}
+
+/// `main` protected by a rule with `rule`'s fields (Gitea's
+/// `BranchProtection`), requiring no approvals.
+async fn protect_main_with(server: &MockServer, rule: Value) {
+    answer(
+        server,
+        format!("{REPO}/branches/main"),
+        200,
+        branch("main", true),
+    )
+    .await;
+    let mut protection = json!({ "rule_name": "main", "required_approvals": 0 });
+    protection
+        .as_object_mut()
+        .unwrap()
+        .extend(rule.as_object().unwrap().clone());
+    answer(
+        server,
+        format!("{REPO}/branch_protections/main"),
+        200,
+        protection,
+    )
+    .await;
+}
+
+/// Gitea's `block_on_rejected_reviews` (#721): a standing request for
+/// changes from an official reviewer -- not dismissed -- refuses the merge,
+/// and *Merge…* names who asked. One from a reviewer the protection does not
+/// count, or a dismissed one, does not; nor does any where the rule is off.
+#[tokio::test]
+async fn a_standing_request_for_changes_blocks_where_the_protection_says_so() {
+    let reviews = json!([
+        { "id": 1, "user": { "login": "priya.nair" }, "state": "APPROVED", "official": true },
+        { "id": 2, "user": { "login": "olu" }, "state": "REQUEST_CHANGES", "official": false },
+        { "id": 3, "user": { "login": "rae" }, "state": "REQUEST_CHANGES", "official": true,
+          "dismissed": true },
+        { "id": 4, "user": { "login": "lee" }, "state": "REQUEST_CHANGES", "official": true }
+    ]);
+    for (block, reason) in [(true, Some("Changes requested by lee")), (false, None)] {
+        let server = gitea(mergeable_pull(), reviews.clone()).await;
+        protect_main_with(&server, json!({ "block_on_rejected_reviews": block })).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            action(&view, "merge_pull_request").disabled.as_deref(),
+            reason,
+            "block_on_rejected_reviews: {block}"
+        );
+    }
+    // Only the dismissed and the unofficial ones: nothing stands.
+    let server = gitea(mergeable_pull(), json!([reviews[1], reviews[2]])).await;
+    protect_main_with(&server, json!({ "block_on_rejected_reviews": true })).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request").disabled, None);
+}
+
+/// Gitea's `block_on_official_review_requests` (#721): a review requested
+/// from an official reviewer and not yet given refuses the merge, and
+/// *Merge…* names who it waits for -- a team by its name. A request Gitea
+/// does not mark official does not count.
+#[tokio::test]
+async fn an_open_official_review_request_blocks_where_the_protection_says_so() {
+    let reviews = json!([
+        { "id": 1, "user": { "login": "jonas.becker" }, "state": "REQUEST_REVIEW",
+          "official": true },
+        { "id": 2, "team": { "name": "payments" }, "state": "REQUEST_REVIEW",
+          "official": true },
+        { "id": 3, "user": { "login": "olu" }, "state": "REQUEST_REVIEW", "official": false }
+    ]);
+    for (block, reason) in [
+        (true, Some("Review requested from jonas.becker, payments")),
+        (false, None),
+    ] {
+        let server = gitea(mergeable_pull(), reviews.clone()).await;
+        protect_main_with(
+            &server,
+            json!({ "block_on_official_review_requests": block }),
+        )
+        .await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            action(&view, "merge_pull_request").disabled.as_deref(),
+            reason,
+            "block_on_official_review_requests: {block}"
+        );
+    }
+    let server = gitea(mergeable_pull(), json!([reviews[2]])).await;
+    protect_main_with(
+        &server,
+        json!({ "block_on_official_review_requests": true }),
+    )
+    .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request").disabled, None);
+}
+
+/// Answer the head commit's combined status with `statuses` (Gitea's
+/// `CommitStatus`, its state in `status`).
+async fn head_statuses(server: &MockServer, statuses: Value) {
+    answer(
+        server,
+        format!("{REPO}/commits/{HEAD_SHA}/status"),
+        200,
+        json!({ "sha": HEAD_SHA, "statuses": statuses }),
+    )
+    .await;
+}
+
+fn status(context: &str, state: &str) -> Value {
+    json!({ "context": context, "status": state })
+}
+
+/// Gitea's required status checks (`enable_status_check`, its contexts
+/// glob patterns), as its `MergeRequiredContextsCommitStatus` decides them
+/// (#721): each required context must have reported on the head commit and
+/// every one matched must be a success; with no contexts named, every status
+/// reported must be, and at least one must have. *Merge…* names what failed,
+/// what is pending and what never reported.
+#[tokio::test]
+async fn required_status_checks_block_until_they_pass() {
+    let cases = [
+        (
+            "required and passed",
+            json!(["ci/build"]),
+            json!([status("ci/build", "success"), status("ci/lint", "failure")]),
+            None,
+        ),
+        (
+            "required and failed",
+            json!(["ci/build"]),
+            json!([status("ci/build", "failure")]),
+            Some("Required check ci/build failed"),
+        ),
+        (
+            "an error and a warning are failures too",
+            json!(["ci/*"]),
+            json!([status("ci/build", "error"), status("ci/lint", "warning")]),
+            Some("Required checks ci/build failed, ci/lint failed"),
+        ),
+        (
+            "never reported",
+            json!(["ci/build"]),
+            json!([]),
+            Some("Required check ci/build has not reported"),
+        ),
+        (
+            "a glob, one of its matches still pending",
+            json!(["ci/*"]),
+            json!([status("ci/build", "success"), status("ci/lint", "pending")]),
+            Some("Required check ci/lint is pending"),
+        ),
+        (
+            "a state Gitea sent null is pending, and a null context reads",
+            json!(["ci/build"]),
+            json!([{ "context": "ci/build", "status": null }, { "context": null, "status": "success" }]),
+            Some("Required check ci/build is pending"),
+        ),
+        (
+            "a skipped check passes",
+            json!(["ci/*"]),
+            json!([status("ci/build", "success"), status("ci/docs", "skipped")]),
+            None,
+        ),
+        (
+            "no contexts named: every status must pass",
+            json!([]),
+            json!([status("deploy", "success"), status("ci/lint", "error")]),
+            Some("Required check ci/lint failed"),
+        ),
+        (
+            "no contexts named and nothing reported",
+            json!([]),
+            json!([]),
+            Some("Required checks have not reported"),
+        ),
+    ];
+    for (what, contexts, statuses, reason) in cases {
+        let server = gitea(mergeable_pull(), json!([])).await;
+        protect_main_with(
+            &server,
+            json!({ "enable_status_check": true, "status_check_contexts": contexts }),
+        )
+        .await;
+        head_statuses(&server, statuses).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            action(&view, "merge_pull_request").disabled.as_deref(),
+            reason,
+            "{what}"
+        );
+        // *Checks* and *Merge…* are drawn from one read of the head's
+        // statuses, not one each.
+        let status_reads = paths(&server)
+            .await
+            .iter()
+            .filter(|p| **p == format!("{REPO}/commits/{HEAD_SHA}/status"))
+            .count();
+        assert_eq!(status_reads, 1, "{what}: the head's statuses read once");
+    }
+}
+
+/// Where the status check is off, or its statuses cannot be read, the checks
+/// decide nothing: a failing status on a check that is off is no blocker
+/// (#710's *Checks* still draws it), and a read Gitea refuses leaves
+/// *Merge…* enabled for Gitea's own refusal to say the rest (ADR-0004).
+#[tokio::test]
+async fn status_checks_off_or_unreadable_decide_nothing() {
+    let server = gitea(mergeable_pull(), json!([])).await;
+    protect_main_with(
+        &server,
+        json!({ "enable_status_check": false, "status_check_contexts": ["ci/build"] }),
+    )
+    .await;
+    head_statuses(&server, json!([status("ci/build", "failure")])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request").disabled, None);
+
+    let server = gitea(mergeable_pull(), json!([])).await;
+    protect_main_with(
+        &server,
+        json!({ "enable_status_check": true, "status_check_contexts": ["ci/build"] }),
+    )
+    .await;
+    answer(
+        &server,
+        format!("{REPO}/commits/{HEAD_SHA}/status"),
+        404,
+        json!({ "message": "not found" }),
+    )
+    .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(action(&view, "merge_pull_request").disabled, None);
 }
 
 /// *Delete branch after merge* is ticked where Gitea can delete the head: a

@@ -48,15 +48,18 @@ pub(super) async fn draw(
             // side by side (#703); the first to fail fails the view. Who the
             // token is goes beside them: the review actions are not offered
             // on its own pull requests (#705). So do landing's reads (#708)
-            // and the head commit's statuses (#710).
-            let (reviews, commits, comments, viewer, landing, checks) = tokio::try_join!(
+            // and the head commit's statuses (#710), which *Checks* draws and
+            // landing holds against the base's required checks (#721).
+            let (reviews, commits, comments, viewer, landing, statuses) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
                 at.landing(&pull),
-                at.checks(&pull),
+                at.statuses(&pull),
             )?;
+            let landing = landing.with_statuses(statuses.as_ref());
+            let checks = statuses.as_ref().and_then(super::checks::block_of);
             // The order the #701 ruling sets: what a reviewer says first,
             // then the maintenance (#706, *Update branch…* #708), *Merge…*
             // last.
@@ -72,8 +75,10 @@ pub(super) async fn draw(
         }
         Some(OVERVIEW) => {
             let pull = at.pull().await?;
-            let (reviews, landing, checks) =
-                tokio::try_join!(at.reviews(), at.landing(&pull), at.checks(&pull))?;
+            let (reviews, landing, statuses) =
+                tokio::try_join!(at.reviews(), at.landing(&pull), at.statuses(&pull))?;
+            let landing = landing.with_statuses(statuses.as_ref());
+            let checks = statuses.as_ref().and_then(super::checks::block_of);
             vec![overview(&pull, &reviews, &landing, checks)]
         }
         Some(FILES) => vec![at.files().await?],
@@ -241,11 +246,15 @@ impl PullView<'_> {
     }
 
     /// The head commit's own statuses (#710), by the sha the record names;
-    /// nothing where it names none. Never an error: a failed read is drawn
-    /// as a line (`checks`), so this sits in the `try_join!` as a success.
-    async fn checks(&self, pull: &Pull) -> Result<Option<Block>, SourceError> {
+    /// nothing where it names none. Never an error: a failed read is kept,
+    /// drawn as a line by *Checks* and deciding nothing for landing, so this
+    /// sits in the `try_join!` as a success.
+    async fn statuses(
+        &self,
+        pull: &Pull,
+    ) -> Result<Option<Result<Vec<super::checks::Status>, SourceError>>, SourceError> {
         Ok(match pull.head.as_ref().and_then(|h| h.sha.as_deref()) {
-            Some(sha) => super::checks::block(self.source, self.owner, self.repo, sha).await,
+            Some(sha) => Some(super::checks::read(self.source, self.owner, self.repo, sha).await),
             None => None,
         })
     }
@@ -585,6 +594,10 @@ struct Review {
     comments_count: u64,
     #[serde(default)]
     user: Option<UserRef>,
+    /// The team a review was requested from, where it was a team's
+    /// (#721: *Merge…* names who it waits for).
+    #[serde(default)]
+    team: Option<TeamRef>,
     #[serde(default)]
     state: Option<String>,
     #[serde(default)]
@@ -601,6 +614,13 @@ struct Review {
     /// As for [`Pull`]'s times, kept as text for [`when_of`].
     #[serde(default)]
     submitted_at: Option<String>,
+}
+
+/// Gitea's `Team`, the field a review request names it by.
+#[derive(Debug, serde::Deserialize)]
+struct TeamRef {
+    #[serde(default)]
+    name: Option<String>,
 }
 
 #[derive(Debug, serde::Deserialize)]

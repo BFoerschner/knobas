@@ -3,12 +3,15 @@
 //!
 //! **Mergeability is decided here and nowhere else**: [`blockers`] is what
 //! both *Merge…*'s disabled reason and the overview's fact are made from, so
-//! the two cannot disagree, and a refinement of one reason (#721, Gitea's
-//! *"Please try again later"* while it is still checking) is one edit.
+//! the two cannot disagree. Gitea's own merge check also refuses for what
+//! these do not read (signed commits, protected files, an owner's required
+//! workflows); its refusal says so at the write (ADR-0004).
 
 use knobas_source::SourceError;
 use knobas_source::view::{ActionField, ChoiceOption, Fact, FieldKind, Tone, ViewAction};
 
+use super::super::checks::Status;
+use super::super::login;
 use super::{Pull, PullView, Review};
 use crate::client::is_repo_scoped;
 
@@ -31,6 +34,46 @@ pub(super) struct Landing {
     /// The head is a branch of this repository that is not protected, so
     /// Gitea would delete it after the merge.
     head_deletable: bool,
+    /// The base's protection refuses a merge while an official reviewer's
+    /// request for changes stands (Gitea's `block_on_rejected_reviews`).
+    block_on_rejected: bool,
+    /// The base's protection refuses a merge while a review requested from
+    /// an official reviewer is open (`block_on_official_review_requests`).
+    block_on_requested: bool,
+    /// The base's required status checks (Gitea's `status_check_contexts`,
+    /// none for "every status reported"), where its protection enables them.
+    required_checks: Option<Vec<String>>,
+    /// Those against what the head reported, once the view's one status read
+    /// has answered ([`Landing::with_statuses`], #721).
+    checks: Option<Checks>,
+}
+
+/// The base's required status checks against the head commit's statuses.
+#[derive(Debug)]
+struct Checks {
+    /// Gitea's `status_check_contexts`: glob patterns, none for "every
+    /// status reported".
+    required: Vec<String>,
+    /// The latest status of each context reported on the head commit; a
+    /// state or context Gitea sent `null` reads as empty, and an empty state
+    /// is pending, as Gitea's own combination reads it.
+    reported: Vec<Status>,
+}
+
+impl Landing {
+    /// The head commit's statuses as the view read them for *Checks*
+    /// (`None` where the record names no head sha), held against the base's
+    /// required checks. A read that failed decides nothing: *Checks* says
+    /// why, and Gitea's own refusal at the write says the rest (ADR-0004).
+    pub(super) fn with_statuses(mut self, read: Option<&Result<Vec<Status>, SourceError>>) -> Self {
+        if let (Some(required), Some(Ok(reported))) = (self.required_checks.take(), read) {
+            self.checks = Some(Checks {
+                required,
+                reported: reported.clone(),
+            });
+        }
+        self
+    }
 }
 
 /// Gitea's `Branch`, the fields landing reads.
@@ -52,6 +95,14 @@ struct Protection {
     block_on_outdated_branch: bool,
     #[serde(default)]
     ignore_stale_approvals: bool,
+    #[serde(default)]
+    block_on_rejected_reviews: bool,
+    #[serde(default)]
+    block_on_official_review_requests: bool,
+    #[serde(default)]
+    enable_status_check: bool,
+    #[serde(default)]
+    status_check_contexts: Option<Vec<String>>,
 }
 
 /// A read Gitea refused or found nothing for is `None`: a base branch gone,
@@ -133,6 +184,12 @@ impl PullView<'_> {
                 if let Some(protection) = protection {
                     landing.block_on_outdated = protection.block_on_outdated_branch;
                     landing.ignore_stale = protection.ignore_stale_approvals;
+                    landing.block_on_rejected = protection.block_on_rejected_reviews;
+                    landing.block_on_requested = protection.block_on_official_review_requests;
+                    if protection.enable_status_check {
+                        landing.required_checks =
+                            Some(protection.status_check_contexts.unwrap_or_default());
+                    }
                 }
             }
         }
@@ -148,8 +205,11 @@ enum Blocker {
     /// Gitea has not answered `mergeable`: it has not checked yet.
     Unknown,
     /// Gitea said `mergeable: false` for a title it does not read as work in
-    /// progress: a conflict, or its check still running or failed -- the flag
-    /// does not say which.
+    /// progress: its check still running, a conflict, or a check that failed
+    /// -- the flag does not say which, and Gitea 1.27's API has nothing that
+    /// does (#721). Still checking is said first, because it is the common
+    /// case: for a second or two after a pull request opens or its head
+    /// moves, which is exactly when the reader is looking at it.
     Conflict,
     /// The title carries one of Gitea's default work-in-progress prefixes.
     WorkInProgress,
@@ -157,14 +217,22 @@ enum Blocker {
     Outdated,
     /// Fewer official approvals than the base's protection requires.
     Approvals { given: u64, required: u64 },
+    /// Required status checks that have not passed, each said as what it is:
+    /// `ci/build failed`, `ci/lint is pending`, `ci/docs has not reported`.
+    /// Empty where nothing is named and nothing has reported at all.
+    Checks(Vec<String>),
+    /// Official reviewers whose request for changes stands.
+    ChangesRequested(Vec<String>),
+    /// Official reviewers (or teams) a review is still requested from.
+    ReviewRequested(Vec<String>),
 }
 
 impl Blocker {
     /// The phrase, lowercase where the sentence it goes into is not.
     fn phrase(&self, base: &str) -> String {
         match self {
-            Blocker::Unknown => "Gitea has not said yet whether it can be merged".to_owned(),
-            Blocker::Conflict => format!("conflicts with {base}, or Gitea is still checking"),
+            Blocker::Unknown => STILL_CHECKING.to_owned(),
+            Blocker::Conflict => format!("{STILL_CHECKING}, or it conflicts with {base}"),
             Blocker::WorkInProgress => "marked work in progress in its title".to_owned(),
             Blocker::Outdated => {
                 format!("behind {base}, which its protection forbids: update the branch")
@@ -172,9 +240,19 @@ impl Blocker {
             Blocker::Approvals { given, required } => {
                 format!("{given} of {required} required approvals")
             }
+            Blocker::Checks(unmet) => match unmet.as_slice() {
+                [] => "required checks have not reported".to_owned(),
+                [one] => format!("required check {one}"),
+                many => format!("required checks {}", many.join(", ")),
+            },
+            Blocker::ChangesRequested(who) => format!("changes requested by {}", who.join(", ")),
+            Blocker::ReviewRequested(who) => format!("review requested from {}", who.join(", ")),
         }
     }
 }
+
+/// What *Merge…* says while Gitea works out whether it can merge (#721).
+const STILL_CHECKING: &str = "Gitea is still checking whether this can merge";
 
 /// Gitea's default `WORK_IN_PROGRESS_PREFIXES`, matched as it matches them:
 /// the start of the title, any case.
@@ -204,7 +282,115 @@ fn blockers(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<Blocker> 
             required: landing.required_approvals,
         });
     }
+    if let Some(unmet) = landing.checks.as_ref().and_then(unmet_checks) {
+        blockers.push(Blocker::Checks(unmet));
+    }
+    if landing.block_on_rejected {
+        let who = official_reviewers(reviews, "REQUEST_CHANGES");
+        if !who.is_empty() {
+            blockers.push(Blocker::ChangesRequested(who));
+        }
+    }
+    if landing.block_on_requested {
+        let who = official_reviewers(reviews, "REQUEST_REVIEW");
+        if !who.is_empty() {
+            blockers.push(Blocker::ReviewRequested(who));
+        }
+    }
     blockers
+}
+
+/// Who stands behind each official, undismissed review in `state` -- Gitea's
+/// `MergeBlockedByRejectedReview` and `MergeBlockedByOfficialReviewRequests`
+/// ask only whether one exists; the names are what the reader can act on.
+/// Gitea marks only a reviewer's latest review official, so an approval
+/// given after a request for changes takes it back.
+fn official_reviewers(reviews: &[Review], state: &str) -> Vec<String> {
+    reviews
+        .iter()
+        .filter(|r| r.official && !r.dismissed && r.state.as_deref() == Some(state))
+        .map(|r| {
+            login(r.user.as_ref())
+                .or_else(|| r.team.as_ref().and_then(|t| t.name.clone()))
+                .unwrap_or_else(|| "a reviewer".to_owned())
+        })
+        .collect()
+}
+
+/// What stands among the required checks, as Gitea's
+/// `MergeRequiredContextsCommitStatus` decides it (a `warning` fails a merge
+/// there, though *Checks* draws it as a warning): with no context named,
+/// every reported status must pass and at least one must have reported;
+/// otherwise each named pattern must match a reported context and every
+/// match must pass. `success` and `skipped` pass; `error`, `failure` and
+/// `warning` fail; anything else is pending. `None` where nothing stands.
+/// A pattern beyond `*` and `?` (Gitea's glob also has classes and
+/// alternatives) is not judged: the doubt leaves *Merge…* enabled and
+/// Gitea's refusal says the rest (ADR-0004).
+fn unmet_checks(checks: &Checks) -> Option<Vec<String>> {
+    let context = |status: &Status| status.context.clone().unwrap_or_default();
+    let verdict = |status: &Status| match status.status.as_deref().unwrap_or_default() {
+        "success" | "skipped" => None,
+        "error" | "failure" | "warning" => Some(format!("{} failed", context(status))),
+        _ => Some(format!("{} is pending", context(status))),
+    };
+    let mut unmet = Vec::new();
+    if checks.required.is_empty() {
+        if checks.reported.is_empty() {
+            return Some(unmet);
+        }
+        unmet.extend(checks.reported.iter().filter_map(verdict));
+    } else {
+        for pattern in &checks.required {
+            if pattern.contains(['[', '{', '\\']) {
+                continue;
+            }
+            let matched: Vec<&Status> = checks
+                .reported
+                .iter()
+                .filter(|s| glob_matches(pattern, &context(s)))
+                .collect();
+            if matched.is_empty() {
+                unmet.push(format!("{pattern} has not reported"));
+            }
+            for line in matched.into_iter().filter_map(verdict) {
+                if !unmet.contains(&line) {
+                    unmet.push(line);
+                }
+            }
+        }
+    }
+    (!unmet.is_empty()).then_some(unmet)
+}
+
+/// `pattern` against the whole of `text`: `*` any run of characters, `?`
+/// one, everything else itself -- Gitea's glob with no separators, as its
+/// status check compiles them.
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    let (p, t): (Vec<char>, Vec<char>) = (pattern.chars().collect(), text.chars().collect());
+    let (mut pi, mut ti) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while ti < t.len() {
+        match p.get(pi) {
+            Some('*') => {
+                star = Some((pi, ti));
+                pi += 1;
+            }
+            Some(&c) if c == '?' || c == t[ti] => {
+                pi += 1;
+                ti += 1;
+            }
+            _ => match star {
+                Some((sp, st)) => {
+                    pi = sp + 1;
+                    ti = st + 1;
+                    star = Some((sp, st + 1));
+                }
+                None => return false,
+            },
+        }
+    }
+    p[pi..].iter().all(|&c| c == '*')
 }
 
 fn is_wip(pull: &Pull) -> bool {
@@ -384,5 +570,33 @@ fn merge(pull: &Pull, reviews: &[Review], landing: &Landing) -> ViewAction {
         primary: true,
         disabled,
         ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glob_matches;
+
+    /// Gitea compiles a required context with no separators: `*` crosses
+    /// `/`, and the pattern covers the whole context.
+    #[test]
+    fn a_required_context_pattern_is_matched_whole() {
+        for (pattern, context, matches) in [
+            ("ci/build", "ci/build", true),
+            ("ci/build", "ci/build-2", false),
+            ("ci/*", "ci/build", true),
+            ("ci/*", "ci/build/linux", true),
+            ("*/lint", "ci/lint", true),
+            ("ci/?uild", "ci/build", true),
+            ("ci/*/linux", "ci/build/mac", false),
+            ("*", "", true),
+            ("ci", "ci/build", false),
+        ] {
+            assert_eq!(
+                glob_matches(pattern, context),
+                matches,
+                "{pattern} ~ {context}"
+            );
+        }
     }
 }
