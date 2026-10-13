@@ -2777,6 +2777,30 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             .any(|f| f.label == "State" && f.value == "merged"),
         "{facts:?}"
     );
+    // Nor *Close* or *Reopen* (#706): Gitea refuses a merged pull request's
+    // state, and says so when asked anyway; its title it still takes.
+    let edits: Vec<&str> = view
+        .actions
+        .iter()
+        .filter(|a| a.write_op == "edit_pull_request")
+        .map(|a| a.label.as_str())
+        .collect();
+    assert_eq!(edits, ["Edit…"], "{:#?}", view.actions);
+    let refused = source
+        .write(knobas_source::WriteOp::EditPullRequest {
+            entity: id.clone(),
+            title: None,
+            body: None,
+            state: Some(knobas_source::PullRequestState::Open),
+        })
+        .await
+        .expect_err("Gitea reopened a merged pull request");
+    assert_eq!(refused.status(), Some(412), "{refused:?}");
+    assert!(
+        matches!(&refused, SourceError::Protocol { message: m, .. }
+            if m.contains("it was already merged")),
+        "{refused:?}"
+    );
 
     assert_eq!(
         main_head().await,
@@ -2976,7 +3000,12 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
     let own_view = source.view(&own_id, None).await.unwrap().unwrap();
     assert_eq!(toolbar(&own_view, "Comment…").disabled, None);
     let labels: Vec<&str> = own_view.actions.iter().map(|a| a.label.as_str()).collect();
-    assert_eq!(labels, ["Comment…", "Merge…"], "{:#?}", own_view.actions);
+    assert_eq!(
+        labels,
+        ["Comment…", "Edit…", "Close", "Merge…"],
+        "{:#?}",
+        own_view.actions
+    );
     for (label, verdict, sentence) in [
         (
             "Approve…",
@@ -3199,4 +3228,168 @@ async fn a_branch_lives_from_its_views_new_branch_pull_request_and_delete() {
     );
     assert!(litter.branch_names().await.contains(&"main".to_owned()));
     println!("{branch}: created, proposed as #{number}, removed, deleted and tombstoned");
+}
+
+// -- edit, close and reopen from the pull request's view (issue #706) --------
+
+/// Workflow 8 of spec #701, against the real server: on a pull request this
+/// test opens, the toolbar's *Edit…* is prefilled with what Gitea holds; the
+/// adapter's `edit_pull_request` -- the call the write queue's flush makes --
+/// retitles it **without touching a description somebody else changed since**
+/// (only the fields given are sent, the #706 ruling), rewrites the
+/// description, closes it and reopens it; and each is read back, from the
+/// view and from the server.
+///
+/// Never a seeded pull request: it is opened here on a `knobas-` branch of its
+/// own, and [`Litter`] deletes it and the branch whether this passes or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_is_edited_closed_and_reopened_from_its_view() {
+    use knobas_source::{PullRequestState, WriteOp};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-edit-{stamp}");
+    litter.branch_off_main(&branch).await;
+    let title = format!("knobas edit check {stamp}");
+    let number = litter
+        .open_pull_as(&env.login().await, &branch, &title)
+        .await;
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let view = || async {
+        source
+            .view(&id, None)
+            .await
+            .expect("the view reads")
+            .expect("Gitea draws a pull request")
+    };
+    let record = || async {
+        http.get(format!("{api}/pulls/{number}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("read the pull request back")
+            .json::<serde_json::Value>()
+            .await
+            .expect("a pull request record")
+    };
+    let edits = |view: &knobas_source::view::SourceView| -> Vec<String> {
+        view.actions
+            .iter()
+            .filter(|a| a.write_op == "edit_pull_request")
+            .map(|a| a.label.clone())
+            .collect()
+    };
+    let state_of = |view: &knobas_source::view::SourceView| {
+        said(view, "overview")
+            .into_iter()
+            .find(|l| l.starts_with("State="))
+    };
+
+    // 1. Open: *Edit…* prefilled with what the server holds, then *Close*.
+    let before = view().await;
+    assert_eq!(edits(&before), ["Edit…", "Close"], "{:#?}", before.actions);
+    let edit = toolbar(&before, "Edit…");
+    let held = record().await;
+    assert_eq!(edit.fields[0].value.as_deref(), Some(title.as_str()));
+    assert_eq!(edit.fields[1].value.as_deref(), held["body"].as_str());
+    let close = toolbar(&before, "Close");
+    assert!(close.danger && close.confirm.is_some(), "{close:?}");
+
+    // 2. Somebody else rewrites the description after the view was read; the
+    //    reader then changes only the title. Their description survives.
+    let theirs = format!("rewritten in Gitea meanwhile, {stamp}");
+    let patched = http
+        .patch(format!("{api}/pulls/{number}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "body": theirs }))
+        .send()
+        .await
+        .expect("edit the description behind knobas' back");
+    assert!(patched.status().is_success(), "{}", patched.status());
+    let retitled = format!("knobas retitled {stamp}");
+    source
+        .write(WriteOp::EditPullRequest {
+            entity: id.clone(),
+            title: Some(retitled.clone()),
+            body: None,
+            state: None,
+        })
+        .await
+        .expect("Gitea takes a new title");
+    let now = record().await;
+    assert_eq!(now["title"], retitled.as_str(), "{now}");
+    assert_eq!(
+        now["body"],
+        theirs.as_str(),
+        "a title edit sent a description: {now}"
+    );
+    assert_eq!(
+        toolbar(&view().await, "Edit…").fields[0].value.as_deref(),
+        Some(retitled.as_str())
+    );
+
+    // 3. The description, read back from the overview.
+    let described = format!("described from the knobas toolbar, {stamp}");
+    source
+        .write(WriteOp::EditPullRequest {
+            entity: id.clone(),
+            title: None,
+            body: Some(described.clone()),
+            state: None,
+        })
+        .await
+        .expect("Gitea takes a new description");
+    assert!(
+        said(&view().await, "overview").contains(&described),
+        "{:#?}",
+        said(&view().await, "overview")
+    );
+    assert_eq!(record().await["title"], retitled.as_str());
+
+    // 4. Close: the state reads closed and the toolbar offers *Reopen*.
+    source
+        .write(WriteOp::EditPullRequest {
+            entity: id.clone(),
+            title: None,
+            body: None,
+            state: Some(PullRequestState::Closed),
+        })
+        .await
+        .expect("Gitea closes the pull request");
+    let closed = view().await;
+    assert_eq!(state_of(&closed).as_deref(), Some("State=closed"));
+    assert_eq!(edits(&closed), ["Edit…", "Reopen"], "{:#?}", closed.actions);
+    assert_eq!(record().await["state"], "closed");
+
+    // 5. Reopen: open again, and *Close* is back.
+    source
+        .write(WriteOp::EditPullRequest {
+            entity: id.clone(),
+            title: None,
+            body: None,
+            state: Some(PullRequestState::Open),
+        })
+        .await
+        .expect("Gitea reopens the pull request");
+    let reopened = view().await;
+    assert_eq!(state_of(&reopened).as_deref(), Some("State=open"));
+    assert_eq!(
+        edits(&reopened),
+        ["Edit…", "Close"],
+        "{:#?}",
+        reopened.actions
+    );
+    let last = record().await;
+    assert_eq!(last["state"], "open");
+    assert_eq!(last["body"], described.as_str(), "{last}");
+    println!("edited, closed and reopened #{number} from its view");
 }
