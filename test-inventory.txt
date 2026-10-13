@@ -1185,6 +1185,7 @@ knobas-core	test/it	projects::a_whitespace_only_project_key_contributes_nothing
 knobas-core	test/it	projects::every_project_the_corpus_shows_is_reported_once
 knobas-core	test/it	projects::one_key_in_two_sources_is_two_projects
 knobas-core	test/it	projects::teamcitys_own_two_words_read_as_well_as_jiras
+knobas-core	test/it	similar_text_incremental::a_batch_that_always_times_out_is_halved_then_its_item_skipped
 knobas-core	test/it	similar_text_incremental::a_pass_with_nothing_new_judges_nothing
 knobas-core	test/it	similar_text_incremental::incremental_passes_propose_what_the_whole_corpus_pass_proposed
 knobas-core	test/it	similar_text_perf::a_pass_with_nothing_new_takes_under_a_second_at_ten_thousand_items

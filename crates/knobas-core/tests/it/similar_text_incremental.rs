@@ -337,3 +337,76 @@ async fn a_pass_with_nothing_new_judges_nothing() {
         "only the changed item's pairs: {touched:?}"
     );
 }
+
+/// #755: a batch that can never finish must not wedge the rule. A stalled
+/// batch is halved and the pass gives up; at one item the item is settled
+/// without proposals and the pass moves on; a completed pass grows the batch
+/// back.
+#[tokio::test]
+async fn a_batch_that_always_times_out_is_halved_then_its_item_skipped() {
+    let pool = scratch().await;
+    let rule = suggest::rule("similar_text").unwrap();
+    apply(
+        &pool,
+        &Step::Write {
+            source: "jira",
+            keys: 0..8,
+            seed: 7,
+        },
+    )
+    .await;
+    let mut pacing = suggest::Pacing::new(8);
+    // Any batch holding K-2 never finishes.
+    pacing.stall = Some(Box::new(|ids| ids.iter().any(|id| id == "jira:K-2")));
+    let mut conn = pool.acquire().await.unwrap();
+
+    // Six prose items (the branches are not prose). A batch of 6 is halved to
+    // 3, then 3 to 1; each pass gives up on the batch and says so.
+    assert!(
+        suggest::detect_rule_paced(&mut conn, rule, &pacing)
+            .await
+            .is_err()
+    );
+    assert_eq!(pacing.batch(), 3);
+    assert!(
+        suggest::detect_rule_paced(&mut conn, rule, &pacing)
+            .await
+            .is_err()
+    );
+    assert_eq!(pacing.batch(), 1);
+
+    // At one item K-2 is skipped, the pass finishes, the rest was compared.
+    suggest::detect_rule_paced(&mut conn, rule, &pacing)
+        .await
+        .expect("the pass advances past the item");
+    assert_eq!(pacing.batch(), 2, "a completed pass grows the batch back");
+    let seen: Vec<String> =
+        sqlx::query_scalar("select entity_id from sync.similar_text_seen order by 1")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        seen.len(),
+        6,
+        "every item, the skipped one included, is settled"
+    );
+    let proposals = proposed(&pool).await;
+    assert!(!proposals.is_empty());
+    // The skipped item's own comparison never ran, so it is not paired with
+    // the items settled before it (K-0, K-1); a later item may still find it.
+    assert!(
+        proposals.iter().all(|(from, to, _)| {
+            !(from == "jira:K-2" && ["jira:K-0", "jira:K-1"].contains(&to.as_str()))
+                && !(to == "jira:K-2" && ["jira:K-0", "jira:K-1"].contains(&from.as_str()))
+        }),
+        "the skipped item was not compared with its predecessors: {proposals:?}"
+    );
+
+    // Nothing is left to compare, and the size recovers to its ceiling.
+    for _ in 0..3 {
+        suggest::detect_rule_paced(&mut conn, rule, &pacing)
+            .await
+            .unwrap();
+    }
+    assert_eq!(pacing.batch(), 8);
+}

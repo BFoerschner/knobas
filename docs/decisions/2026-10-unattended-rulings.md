@@ -1151,3 +1151,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low: `read_guarded` and `command_line_tools_installed` in `crates/knobas-app/src/checkout/working_tree.rs`.
 
 As built (#715): the decision seam `read_guarded` takes the shim path and a probe, and is tested with a fake git that leaves a marker when spawned. The dialog itself is unwitnessed: no Mac without the Command Line Tools is available here (ADR-0013). The probe is async, runs inside the read's 2 s budget (a probe that does not answer draws *failed*, is killed, and is asked again next read), and a `no` is kept for the process: installing the tools while knobas runs is noticed after a restart. A hung probe is witnessed by a unit test.
+
+## #755 — a similar_text batch that always times out must not block the rule
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #755.
+
+**The fork:** the incremental `similar_text` pass compares changed items in batches of 100 with a 120 s statement timeout. A batch that can never finish in that time (a worst-case corpus above ~40,000 items) is retried and cancelled by every pass, so the rule never advances. Options: leave it, or make the pass recover.
+
+**Ruling:** on a timed-out batch, halve the batch and retry on the next pass; at batch size 1, an item that still times out is marked settled with a warning log line naming it (it gets no similar-text proposals from its own comparison until its text changes). The batch size grows back after a pass that completes. No new setting.
+
+**Reasoning:** a rule that wedges on one batch silently stops proposing for the whole mirror; skipping one item costs a few proposals.
+
+**If you disagree, the cost of reversing this is:** low: `Pacing` and the `ChangedProse` arm of `run_rule` in `crates/knobas-core/src/suggest.rs`.
+
+As built (#755): `Pacing` keeps the batch size across passes (the app's `SuggestionPass` owns one). A timeout on a batch of n > 1 sets the size to n/2 and the pass fails as before; a timeout on a single item logs a warning with its id, settles it, and the pass goes on. A pass that completes doubles the size, up to 100. The skipped item is still found from the other side: a later changed item that matches it proposes the pair. The oracle test is unchanged.
