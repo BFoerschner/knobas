@@ -12,6 +12,15 @@
  * somewhere else passes each row in a few milliseconds and reads none of them;
  * a row read already, or being read, is not read again (`readAhead`'s own
  * rule). What a hover may cost is one read of the row the reader is looking at.
+ *
+ * **One read ahead at a time.** A reader stepping down a long list slower
+ * than the dwell would otherwise start a read a row, each a live view read
+ * against the five-connection UI pool the click itself needs. A dwell that
+ * ends while a read ahead is in flight waits for it, and only the latest such
+ * dwell does: the rows stepped over meanwhile are not read at all.
+ *
+ * **A mouse, not a finger.** A touch fires `pointerenter` when it lands,
+ * scrolling included; only a mouse pointer's arrival arms the dwell.
  */
 import { entityView, getEntity } from "../ipc/entity";
 import { readAhead } from "./view-read";
@@ -45,10 +54,33 @@ export interface Intent {
   leave(entityId?: string): void;
 }
 
-/** One reader's intent: at most one dwell armed at a time. */
-export function createIntent(read: (entityId: string) => unknown, dwellMs = DWELL_MS): Intent {
+/**
+ * One reader's intent: at most one dwell armed, at most one read in flight,
+ * and at most one waiting for it (the latest).
+ */
+export function createIntent(
+  read: (entityId: string) => Promise<unknown>,
+  dwellMs = DWELL_MS,
+): Intent {
   let timer: ReturnType<typeof setTimeout> | undefined;
   let armedFor: string | undefined;
+  let reading = false;
+  let waiting: string | undefined;
+  const start = (entityId: string) => {
+    if (reading) {
+      waiting = entityId;
+      return;
+    }
+    reading = true;
+    void read(entityId)
+      .catch(() => {})
+      .finally(() => {
+        reading = false;
+        const next = waiting;
+        waiting = undefined;
+        if (next !== undefined) start(next);
+      });
+  };
   const disarm = () => {
     if (timer !== undefined) clearTimeout(timer);
     timer = undefined;
@@ -61,7 +93,7 @@ export function createIntent(read: (entityId: string) => unknown, dwellMs = DWEL
       timer = setTimeout(() => {
         timer = undefined;
         armedFor = undefined;
-        void read(entityId);
+        start(entityId);
       }, dwellMs);
     },
     leave(entityId) {
@@ -74,12 +106,13 @@ export function createIntent(read: (entityId: string) => unknown, dwellMs = DWEL
 const intent = createIntent((entityId) => readAhead(entityId, getEntity, entityView));
 
 /**
- * `use:prefetch={{ entityId, kind }}` on a row that opens a detail. Pointer
- * enter and focus arm the dwell; pointer leave, blur and unmount disarm it.
+ * `use:prefetch={{ entityId, kind }}` on a row that opens a detail. A mouse
+ * pointer's enter and focus arm the dwell; pointer leave, blur and unmount disarm it.
  */
 export function prefetch(node: HTMLElement, target: { entityId: string; kind: string }) {
   let current = target;
-  const enter = () => {
+  const enter = (event: Event) => {
+    if (event instanceof PointerEvent && event.pointerType !== "mouse") return;
     if (prefetchable(current.entityId, current.kind)) intent.enter(current.entityId);
   };
   // Only this row's dwell: another row's is not this row's to cancel.

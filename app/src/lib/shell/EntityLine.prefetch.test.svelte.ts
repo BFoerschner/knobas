@@ -57,7 +57,7 @@ afterEach(() => vi.useRealTimers());
 
 test("resting the pointer on a row reads its detail ahead, once", () => {
   const screen = render({});
-  screen.button.dispatchEvent(new PointerEvent("pointerenter"));
+  screen.button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
   vi.advanceTimersByTime(DWELL_MS);
   expect(reads).toEqual(["gitea:tidewater/payout-service#7"]);
   screen.done();
@@ -65,8 +65,8 @@ test("resting the pointer on a row reads its detail ahead, once", () => {
 
 test("focus on a row reads it ahead too; leaving before the dwell reads nothing", () => {
   const screen = render({});
-  screen.button.dispatchEvent(new PointerEvent("pointerenter"));
-  screen.button.dispatchEvent(new PointerEvent("pointerleave"));
+  screen.button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  screen.button.dispatchEvent(new PointerEvent("pointerleave", { pointerType: "mouse" }));
   vi.advanceTimersByTime(DWELL_MS * 2);
   expect(reads).toEqual([]);
   screen.button.focus();
@@ -77,7 +77,15 @@ test("focus on a row reads it ahead too; leaving before the dwell reads nothing"
 
 test("a note's row is not read ahead: it opens through a read of its own", () => {
   const screen = render({ entity_id: "note:01J9", kind: "note", source_id: "note" });
-  screen.button.dispatchEvent(new PointerEvent("pointerenter"));
+  screen.button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "mouse" }));
+  vi.advanceTimersByTime(DWELL_MS * 2);
+  expect(reads).toEqual([]);
+  screen.done();
+});
+
+test("a finger landing on a row reads nothing ahead: a touch that scrolls lands on rows too", () => {
+  const screen = render({});
+  screen.button.dispatchEvent(new PointerEvent("pointerenter", { pointerType: "touch" }));
   vi.advanceTimersByTime(DWELL_MS * 2);
   expect(reads).toEqual([]);
   screen.done();

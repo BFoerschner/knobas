@@ -84,6 +84,24 @@ test("hovering a row again while its read is in flight, or after, reads nothing 
   expect(views).toEqual(["gitea:a/b#1"]);
 });
 
+test("stepping down a list slower than the dwell keeps one read in flight and reads only the latest row next", async () => {
+  const hover = intent();
+  // Five rows, each focused just past the dwell, while the first row's view
+  // read (300 ms) is still out.
+  for (const n of [1, 2, 3, 4, 5]) {
+    hover.enter(`gitea:a/b#${n}`);
+    vi.advanceTimersByTime(DWELL_MS + 10);
+  }
+  expect(views, "one read in flight, the rows after it waiting").toEqual(["gitea:a/b#1"]);
+  await vi.advanceTimersByTimeAsync(300);
+  expect(views, "the latest row, never the ones stepped over").toEqual([
+    "gitea:a/b#1",
+    "gitea:a/b#5",
+  ]);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(rows).toEqual(["gitea:a/b#1", "gitea:a/b#5"]);
+});
+
 test("a row losing focus does not cancel the dwell another row has since started", () => {
   const hover = intent();
   hover.enter("gitea:a/b#1");
