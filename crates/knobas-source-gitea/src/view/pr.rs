@@ -486,7 +486,7 @@ fn verdicts(reviews: &[Review]) -> Vec<Fact> {
         .map(|(who, state)| {
             let (value, tone) = match state.as_str() {
                 "APPROVED" => (format!("approved by {who}"), Some(Tone::Ok)),
-                "REQUEST_CHANGES" => (format!("changes requested by {who}"), Some(Tone::Err)),
+                "REQUEST_CHANGES" => (format!("changes requested by {who}"), Some(Tone::Warn)),
                 "REQUEST_REVIEW" => (format!("requested from {who}"), Some(Tone::Muted)),
                 "COMMENT" => (format!("commented by {who}"), None),
                 other => (

@@ -10939,7 +10939,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   a facts block with its author and time and a `Review` fact for its verdict (*approved* `ok`,
   *changes requested* `warn`, *commented* no tone, a dismissed one *…, dismissed* `muted`), then
   its body. Drafts (`PENDING`) and review requests are not drawn; the tab's count is what it
-  draws; equal instants keep Gitea's order, reviews first.
+  draws; equal instants keep Gitea's order, reviews first. The overview's standing verdict
+  *changes requested by …* is `warn` too (it was `err` since #662), so one verdict has one tone.
+  `GET /user` is read once per token and server for the life of the process, not once per view.
 
   **The IPC schema:** no command, event, migration or barrel moves. `WriteOpPayload` in
   `app/src/lib/ipc/sources.ts` gains `SubmitReview` and the `ReviewVerdict` and `ReviewComment`

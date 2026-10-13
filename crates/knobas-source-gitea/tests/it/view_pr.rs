@@ -290,7 +290,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("Review", "requested from jonas.becker", Some(Tone::Muted)),
             ("Review", "approved by olu", Some(Tone::Ok)),
             ("Review", "commented by sam", None),
-            ("Review", "changes requested by lee", Some(Tone::Err)),
+            ("Review", "changes requested by lee", Some(Tone::Warn)),
         ]
     );
     assert_eq!(
