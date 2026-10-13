@@ -62,6 +62,8 @@ pub struct SuggestionPass {
 struct Inner {
     connections: Arc<dyn RunConnections>,
     statement_timeout: Duration,
+    /// The similar_text batch size, kept between passes (#755).
+    pacing: knobas_core::suggest::Pacing,
     queue: Mutex<Queue>,
     /// The last pass that finished, and which requests it answered.
     finished: watch::Sender<Finished>,
@@ -106,6 +108,7 @@ impl SuggestionPass {
             inner: Arc::new(Inner {
                 connections,
                 statement_timeout,
+                pacing: knobas_core::suggest::Pacing::default(),
                 queue: Mutex::new(Queue::default()),
                 finished,
             }),
@@ -195,7 +198,7 @@ impl Inner {
             .bind(format!("{}ms", self.statement_timeout.as_millis()))
             .execute(&mut conn)
             .await?;
-        let outcome = knobas_core::suggest::detect_on(&mut conn).await;
+        let outcome = knobas_core::suggest::detect_paced(&mut conn, &self.pacing).await;
         // Closed rather than dropped, so the server sees a goodbye and not a
         // reset; a failure to say it changes nothing.
         let _ = conn.close().await;

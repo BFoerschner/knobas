@@ -853,6 +853,71 @@ const MARK_SEEN: &str = concat!(
 /// the pass's statement timeout.
 pub const SIMILAR_TEXT_BATCH: usize = 100;
 
+/// See [`Pacing::stall`].
+#[doc(hidden)]
+pub type Stall = Box<dyn Fn(&[String]) -> bool + Send + Sync>;
+
+/// How big the next `similar_text` batch is, kept across passes (#755).
+///
+/// A batch that runs past the statement timeout is halved and the pass gives
+/// up; the next pass retries with the smaller batch. A single item that still
+/// times out is settled without proposals and logged, so the rule advances
+/// past it. A pass that completes doubles the size back, up to its ceiling.
+/// No setting: the ruling of #755.
+pub struct Pacing {
+    batch: std::sync::atomic::AtomicUsize,
+    ceiling: usize,
+    /// Test hook: batches this answers `true` for time out as if the server
+    /// had cancelled them.
+    #[doc(hidden)]
+    pub stall: Option<Stall>,
+}
+
+impl Pacing {
+    /// Batches of up to `ceiling`, starting there.
+    #[must_use]
+    pub fn new(ceiling: usize) -> Self {
+        let ceiling = ceiling.max(1);
+        Self {
+            batch: std::sync::atomic::AtomicUsize::new(ceiling),
+            ceiling,
+            stall: None,
+        }
+    }
+
+    /// The size the next batch is cut to.
+    #[must_use]
+    pub fn batch(&self) -> usize {
+        self.batch.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn shrink_to(&self, size: usize) {
+        self.batch
+            .store(size.max(1), std::sync::atomic::Ordering::Relaxed);
+    }
+
+    fn recover(&self) {
+        let grown = self.batch().saturating_mul(2).min(self.ceiling);
+        self.batch
+            .store(grown, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl std::fmt::Debug for Pacing {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pacing")
+            .field("batch", &self.batch())
+            .field("ceiling", &self.ceiling)
+            .finish_non_exhaustive()
+    }
+}
+
+impl Default for Pacing {
+    fn default() -> Self {
+        Self::new(SIMILAR_TEXT_BATCH)
+    }
+}
+
 /// What a rule reads on each pass.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Scope {
@@ -968,7 +1033,22 @@ where
     A: sqlx::Acquire<'c, Database = sqlx::Postgres>,
 {
     let mut conn = conn.acquire().await?;
-    run_rule(&mut conn, rule, batch).await
+    run_rule(&mut conn, rule, &Pacing::new(batch)).await
+}
+
+/// [`detect_rule`] with the [`Pacing`] a caller keeps across passes, for the
+/// tests of #755.
+///
+/// # Errors
+///
+/// As [`detect_rule`].
+#[doc(hidden)]
+pub async fn detect_rule_paced(
+    conn: &mut sqlx::PgConnection,
+    rule: &Rule,
+    pacing: &Pacing,
+) -> Result<u64, CoreError> {
+    run_rule(conn, rule, pacing).await
 }
 
 /// One rule on one connection. Concrete rather than generic over
@@ -977,7 +1057,7 @@ where
 async fn run_rule(
     conn: &mut sqlx::PgConnection,
     rule: &Rule,
-    batch: usize,
+    pacing: &Pacing,
 ) -> Result<u64, CoreError> {
     match rule.scope {
         Scope::Mirror => {
@@ -995,12 +1075,47 @@ async fn run_rule(
                 .fetch_all(&mut *conn)
                 .await?;
             let mut written = 0;
-            for ids in changed.chunks(batch.max(1)) {
-                written += compare_batch(conn, rule, ids).await?;
+            let mut rest = changed.as_slice();
+            while !rest.is_empty() {
+                let n = pacing.batch().min(rest.len());
+                let ids = &rest[..n];
+                match compare_batch(conn, rule, ids, pacing).await {
+                    Ok(batch_written) => written += batch_written,
+                    Err(error) if is_timeout(&error) && n > 1 => {
+                        pacing.shrink_to(n / 2);
+                        tracing::warn!(
+                            batch = n,
+                            next = n / 2,
+                            "a similar_text batch ran past the statement limit; \
+                             the next pass retries it in smaller batches"
+                        );
+                        return Err(error.into());
+                    }
+                    Err(error) if is_timeout(&error) => {
+                        tracing::warn!(
+                            entity_id = %ids[0],
+                            "similar_text skips an item whose comparison runs past the \
+                             statement limit; it gets no similar-text proposals until its \
+                             text changes"
+                        );
+                        sqlx::query(MARK_SEEN).bind(ids).execute(&mut *conn).await?;
+                    }
+                    Err(error) => return Err(error.into()),
+                }
+                rest = &rest[n..];
             }
+            pacing.recover();
             Ok(written)
         }
     }
+}
+
+/// `query_canceled`: what the server answers when `statement_timeout` fires.
+fn is_timeout(error: &sqlx::Error) -> bool {
+    error
+        .as_database_error()
+        .and_then(sqlx::error::DatabaseError::code)
+        .is_some_and(|code| code == "57014")
 }
 
 /// Compare one batch of changed items and mark it settled, as one snapshot.
@@ -1018,11 +1133,17 @@ async fn compare_batch(
     conn: &mut sqlx::PgConnection,
     rule: &Rule,
     ids: &[String],
-) -> Result<u64, CoreError> {
+    pacing: &Pacing,
+) -> Result<u64, sqlx::Error> {
     const ATTEMPTS: usize = 3;
     let mut attempt = 1;
     loop {
-        match compare_batch_once(conn, rule, ids).await {
+        let outcome = if pacing.stall.as_ref().is_some_and(|stall| stall(ids)) {
+            stalled(conn).await
+        } else {
+            compare_batch_once(conn, rule, ids).await
+        };
+        match outcome {
             Err(error)
                 if attempt < ATTEMPTS
                     && error
@@ -1032,9 +1153,20 @@ async fn compare_batch(
             {
                 attempt += 1;
             }
-            outcome => return Ok(outcome?),
+            outcome => return outcome,
         }
     }
+}
+
+/// The server cancelling a statement, for [`Pacing::stall`].
+async fn stalled(conn: &mut sqlx::PgConnection) -> Result<u64, sqlx::Error> {
+    use sqlx::Connection as _;
+    let mut tx = conn.begin().await?;
+    sqlx::query("set local statement_timeout = '20ms'")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("select pg_sleep(5)").execute(&mut *tx).await?;
+    Ok(0)
 }
 
 async fn compare_batch_once(
@@ -1099,9 +1231,21 @@ where
 ///
 /// As [`detect`].
 pub async fn detect_on(conn: &mut sqlx::PgConnection) -> Result<u64, CoreError> {
+    detect_paced(conn, &Pacing::default()).await
+}
+
+/// [`detect_on`] with the batch size `pacing` keeps across passes (#755).
+///
+/// # Errors
+///
+/// As [`detect`].
+pub async fn detect_paced(
+    conn: &mut sqlx::PgConnection,
+    pacing: &Pacing,
+) -> Result<u64, CoreError> {
     let mut written = 0;
     for rule in RULES {
-        written += run_rule(conn, rule, SIMILAR_TEXT_BATCH).await?;
+        written += run_rule(conn, rule, pacing).await?;
     }
     Ok(written)
 }
