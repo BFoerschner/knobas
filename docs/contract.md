@@ -10827,6 +10827,7 @@ From this commit on, each of the following requires an orchestrator decision **a
   disabled with *Already merged*) and `just teamcity-live-seeded`'s
   `a_run_with_an_override_is_built_on_its_branch_and_synced_next` (the toolbar's *Run…* suggests
   1187's branch and offers its overrides).
+
 - **`crates/knobas-source/src/**`, `knobas_core::payload` and the IPC schema — issue #712
   (2026-10-13): `KindPaths.head`, and `EntityPage.groups`, the Code tile's "what needs me".**
   Spec #701, workflow 1, under its delegation of 2026-10-13; #712 asks for this entry if a
