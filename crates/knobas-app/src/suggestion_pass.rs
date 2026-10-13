@@ -9,7 +9,7 @@
 //! with a pool timeout: Björn's 2026-10-13 hang on Windows ("searches didn't
 //! find anything and it said there were no sources available anymore").
 //!
-//! Three things changed, and this module is two of them:
+//! Five things changed; this module is two of them:
 //!
 //! * **One pass at a time.** At most one pass runs, and at most one more is
 //!   owed behind it: every request that arrives while a pass runs is answered
@@ -26,8 +26,11 @@
 //!   logs it and gives up, and the next pass carries on from the batches the
 //!   last one finished (`similar_text` settles them one by one).
 //!
-//! The third is in `knobas_core::suggest`: `similar_text` compares only what
-//! changed since it last compared it, so a pass with nothing new costs a read.
+//! The others: `similar_text` (`knobas_core::suggest`) compares only what
+//! changed since it last compared it, so a pass with nothing new costs a read;
+//! the app's pool carries a statement timeout of its own
+//! (`knobas_db::embedded::UI_STATEMENT_TIMEOUT`); and the tray asks for a pass
+//! only when a sync run finishes, never on a room switch.
 
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;

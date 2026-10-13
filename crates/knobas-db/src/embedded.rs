@@ -63,8 +63,8 @@ const MAX_CONNECTIONS: u32 = 5;
 /// machine load 25, the slowest UI command in `just ui-pool-probe` took well
 /// under a second. The long statements knobas does run are elsewhere: sync
 /// runs and the detection pass on connections of their own, a backup in
-/// `pg_dump`, and migrations on a connection `migrate::run` takes out of the
-/// pool and clears the limit on.
+/// `pg_dump`, and migrations on the one-connection pool `migrate::run` opens
+/// for itself without the limit.
 pub const UI_STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Upper bound for `initdb` / `pg_ctl` invocations. The crate default is 5s,
@@ -323,6 +323,9 @@ impl Connector {
         )]);
         let pool = PgPoolOptions::new()
             .max_connections(MAX_CONNECTIONS)
+            // sqlx's default, spelled out: the statement limit above is
+            // argued from it.
+            .acquire_timeout(Duration::from_secs(30))
             .connect_lazy_with(options);
         probe(&pool).await?;
         Ok(pool)
