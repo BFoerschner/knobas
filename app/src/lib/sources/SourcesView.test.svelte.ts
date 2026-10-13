@@ -370,6 +370,7 @@ test("a sync:state event patches the matching row rather than re-listing", async
     last_outcome: null,
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
 
@@ -415,6 +416,7 @@ test("a finished run refreshes the row's sync columns, not just the diagnostics"
     last_outcome: "ok",
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
 
@@ -466,6 +468,7 @@ test("a list_sources overtaken by a later one does not write what it read", asyn
       last_outcome: "ok",
       next_run_at: null,
       backoff_until: null,
+      last_changed: null,
     });
   }
   await settle();
@@ -548,6 +551,7 @@ test("a credential fixed by hand is not reverted by a list_sources already in fl
     last_outcome: "error",
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
   expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
@@ -796,6 +800,7 @@ test("a row's Test result does not outlive a reload of the list", async () => {
     last_outcome: "ok",
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
   expect(rowFor("jira")!.querySelector(".test-res")).toBeNull();
@@ -1104,6 +1109,7 @@ test("a scheduler rejection landing mid-list is not written back to ok by that l
     last_outcome: "error",
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
   expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);
@@ -1178,6 +1184,7 @@ test("a credential fixed by hand outlives an older list_sources landing after it
     last_outcome: "error",
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
   await settle();
   expect(calls.listSources, "the terminal transition read the sources").toBe(listedSoFar + 1);

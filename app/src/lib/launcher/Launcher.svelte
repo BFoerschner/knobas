@@ -282,9 +282,11 @@
   );
 
   // Read the lists the first time a suggestible token is being typed, and
-  // not before: a reader who never types one never pays for the read.
+  // not before: a reader who never types one never pays for the read. An
+  // `under:` value is asked for as it is typed, because the engine answers
+  // the parents by prefix (#761); the session asks each value once.
   $effect(() => {
-    if (open && typing) void session.loadSuggestions();
+    if (open && typing) void session.loadSuggestions(typing.key === "under" ? typing.partial : "");
   });
 
   // A new keystroke is a new list, so the cursor starts on its first value.

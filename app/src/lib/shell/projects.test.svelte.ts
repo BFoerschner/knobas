@@ -18,7 +18,7 @@ function project(source_id: string, key: string): Project {
   return { source_id, key, name: `${key} project` };
 }
 
-function run(running: boolean): { payload: SourceSyncStatus } {
+function run(running: boolean, changed: boolean | null = null): { payload: SourceSyncStatus } {
   return {
     payload: {
       source_id: "jira",
@@ -29,6 +29,7 @@ function run(running: boolean): { payload: SourceSyncStatus } {
       last_outcome: running ? null : "ok",
       next_run_at: null,
       backoff_until: null,
+      last_changed: running ? null : changed,
     },
   };
 }
@@ -86,6 +87,41 @@ test("a finished sync run re-lists, a starting one does not, and a stopped store
 
   stop();
   expect(fire, "the teardown unlistened").toBeUndefined();
+});
+
+/**
+ * A run that wrote nothing cannot have moved a project, so it costs the
+ * census nothing (#759); one that wrote something, or one whose counts the
+ * event could not carry (`null`), re-lists.
+ */
+test("a finished run that changed nothing does not re-list", async () => {
+  let reads = 0;
+  let fire: ((event: { payload: SourceSyncStatus }) => void) | undefined;
+  const store = createProjects({
+    listProjects: () => {
+      reads += 1;
+      return Promise.resolve([project("jira", "PAY")]);
+    },
+    listen: (_event, handler) => {
+      fire = handler;
+      return Promise.resolve(() => {});
+    },
+  });
+  const stop = store.start();
+  await Promise.resolve();
+
+  fire?.(run(false, false));
+  await Promise.resolve();
+  expect(reads, "a run that wrote nothing").toBe(0);
+
+  fire?.(run(false, true));
+  await Promise.resolve();
+  expect(reads, "a run that wrote something").toBe(1);
+
+  fire?.(run(false, null));
+  await Promise.resolve();
+  expect(reads, "a run whose counts are unknown").toBe(2);
+  stop();
 });
 
 test("a read that fails keeps the rooms the switcher had rather than blanking them", async () => {

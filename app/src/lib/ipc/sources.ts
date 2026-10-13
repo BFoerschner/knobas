@@ -270,6 +270,13 @@ export interface SourceSyncStatus {
   next_run_at: string | null;
   /** Held off until this, after a failure. Never set by a 401 (P7). */
   backoff_until: string | null;
+  /**
+   * Whether the run `last_outcome` describes wrote anything to the mirror —
+   * upserted, deleted or swept a row (#759). null while no run has finished.
+   * `true` may be a run that rewrote items unchanged; `false` never hides one
+   * that changed something.
+   */
+  last_changed: boolean | null;
 }
 
 /** Where a run is — `knobas_sync::SyncPhase`. */

@@ -1057,6 +1057,7 @@ test("leaving the wizard by a room tab still gets the demo corpus its project ro
     last_outcome: null,
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
 
   await until(
@@ -1077,6 +1078,7 @@ function syncEnded(): void {
     last_outcome: null,
     next_run_at: null,
     backoff_until: null,
+    last_changed: null,
   });
 }
 

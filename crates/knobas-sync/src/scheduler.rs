@@ -161,6 +161,8 @@ select c.id as source_id,
        f.finished_at as last_finished_at,
        f.outcome     as last_outcome,
        c.backoff_until,
+       -- Whether that finished run wrote anything (#759); null with no run.
+       (f.upserted + f.deleted + f.swept) > 0 as last_changed,
        case
          when r.id is not null then null
          when not c.enabled then null
@@ -179,7 +181,7 @@ select c.id as source_id,
        order by started_at desc, id desc limit 1
   ) r on true
   left join lateral (
-      select id, finished_at, outcome from knobas.sync_run
+      select id, finished_at, outcome, upserted, deleted, swept from knobas.sync_run
        where source_id = c.id and finished_at is not null
        order by started_at desc, id desc limit 1
   ) f on true
@@ -197,6 +199,7 @@ struct StatusRow {
     last_outcome: Option<String>,
     backoff_until: Option<DateTime<Utc>>,
     next_run_at: Option<DateTime<Utc>>,
+    last_changed: Option<bool>,
 }
 
 impl From<StatusRow> for SourceSyncStatus {
@@ -210,6 +213,7 @@ impl From<StatusRow> for SourceSyncStatus {
             last_outcome: r.last_outcome.as_deref().map(run_log::outcome_from_db),
             next_run_at: r.next_run_at,
             backoff_until: r.backoff_until,
+            last_changed: r.last_changed,
         }
     }
 }
@@ -859,6 +863,7 @@ fn state_of_run(
                 // `last_outcome` is about the last run that had one.
                 last_finished_at: source.last_finished_at,
                 last_outcome: source.last_outcome,
+                last_changed: source.last_changed,
                 backoff_until: source.backoff_until,
                 // `next_run_at` is deliberately not taken from the source: it
                 // is the countdown, and a run in flight has nothing to count
@@ -876,6 +881,9 @@ fn state_of_run(
                 // would be offering a start time as if the run were still
                 // going. `last_finished_at` is this run's own time here.
                 last_finished_at: row.and_then(|r| r.finished_at).or(base.last_finished_at),
+                // This run's own counts. Without its row the event cannot say,
+                // and `None` is what a listener treats as "maybe" (#759).
+                last_changed: row.map(|r| r.upserted + r.deleted + r.swept > 0),
                 // Source-level, and both need `source_config`: when the next
                 // run is due, and how long a failing source is held off for.
                 next_run_at: source.next_run_at,
@@ -1957,6 +1965,7 @@ mod tests {
             last_outcome: Some(SyncOutcome::Unauthorized),
             next_run_at: Some(next),
             backoff_until: Some(backoff),
+            last_changed: Some(true),
         };
 
         let running = state_of_run("s", 7, Transition::Started, Some(&row), &source);
@@ -1971,6 +1980,11 @@ mod tests {
         );
         assert_eq!(running.last_outcome, Some(SyncOutcome::Unauthorized));
         assert_eq!(running.backoff_until, Some(backoff), "the source's");
+        assert_eq!(
+            running.last_changed,
+            Some(true),
+            "source-level, as `last_outcome` is: the last run that finished"
+        );
         assert_eq!(
             running.next_run_at, None,
             "a run in flight has nothing to count down to"
@@ -1998,6 +2012,27 @@ mod tests {
         );
         assert_eq!(ended.next_run_at, Some(next), "the source's countdown");
         assert_eq!(ended.backoff_until, Some(backoff));
+        assert_eq!(
+            ended.last_changed,
+            Some(false),
+            "this run's own counts, all zero -- not the source's earlier run (#759)"
+        );
+        let wrote = run_log::SyncRunRow {
+            swept: 1,
+            ..row.clone()
+        };
+        assert_eq!(
+            state_of_run(
+                "s",
+                7,
+                Transition::Ended(SyncOutcome::Ok),
+                Some(&wrote),
+                &source
+            )
+            .last_changed,
+            Some(true),
+            "a run that swept one row changed the mirror"
+        );
 
         // Without the row -- pruned, or the read failed -- the identity still
         // holds and the timestamp falls back to this process's clock.

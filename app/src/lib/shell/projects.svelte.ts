@@ -8,7 +8,8 @@
  * database can answer; what keeps it current afterwards is a **sync run
  * ending**, because that is the only event that says the mirror moved — a
  * project appears when its first item syncs and stops being offered when the
- * last one leaves, and until then nothing else would ever say so.
+ * last one leaves, and until then nothing else would ever say so. A run that
+ * wrote nothing (`last_changed: false`, #759) is no such signal.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
@@ -75,7 +76,10 @@ export function createProjects(ports?: ProjectsPorts): Projects {
           // A run that just *finished* is new material; the payload is coarse
           // by rule, so this is the only signal there is that the mirror
           // moved. Re-listing mid-run would only read a half-written corpus.
-          if (!live || event.payload.running) return;
+          // A run that wrote nothing cannot have moved a project (#759); a
+          // `null` is a run whose counts the event could not carry, and is
+          // read as "maybe".
+          if (!live || event.payload.running || event.payload.last_changed === false) return;
           void this.reseed();
         })
         .then((unlisten) => {

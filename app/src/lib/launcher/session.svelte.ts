@@ -75,8 +75,11 @@ export interface SessionPorts {
    * **Optional, and its absence is the switch**, as {@link
    * SessionPorts.resolveUrl}'s is: the two link pickers built on this class
    * pass none and draw no suggestions; the launcher passes it.
+   *
+   * `under` is the `under:` value being typed: the engine answers the
+   * parents by that prefix (#761).
    */
-  filterSuggestions?(): Promise<FilterSuggestions>;
+  filterSuggestions?(under?: string): Promise<FilterSuggestions>;
 }
 
 export interface SessionOptions extends SessionPorts {
@@ -139,13 +142,21 @@ export class Session {
   /**
    * The values the box can suggest, or `null` until they are read (#601).
    *
-   * Read **once per opening, and only when first needed** — the first time the
-   * box holds a `kind:`, `source:` or `under:` token being typed — so a reader
-   * who never types one never pays for the read, and a reopened launcher sees
-   * the values that exist then.
+   * Read **only when first needed** — the first time the box holds a
+   * `kind:`, `source:` or `under:` token being typed — so a reader who never
+   * types one never pays for the read, and a reopened launcher sees the
+   * values that exist then. The parents are asked again for each `under:`
+   * value typed (#761): the engine answers them by prefix, and the box
+   * narrows the last answer itself until the next one lands.
    */
   suggestions = $state<FilterSuggestions | null>(null);
-  #suggestionsAsked = false;
+  /** The `under:` prefix last asked for, or `null` before the first read. */
+  #suggestionsFor: string | null = null;
+  /** A read failed: nothing is asked again until the next opening. */
+  #suggestionsFailed = false;
+  /** Orders the reads, so a late answer to an older prefix is dropped. */
+  #suggestionsIssued = 0;
+  #suggestionsApplied = 0;
 
   constructor(options: SessionOptions) {
     this.#ports = options;
@@ -272,22 +283,33 @@ export class Session {
   }
 
   /**
-   * Read the suggestion lists, once per opening.
+   * Read the suggestion lists, with the parents for the `under:` prefix
+   * `under` (`""` for a token that is not an `under:` one).
    *
-   * A failure leaves {@link Session.suggestions} `null` for the rest of the
-   * opening and says nothing:
-   * suggestions are a help to typing, the query still runs without them, and
-   * the error line belongs to the query's own answer.
+   * Asked once per prefix: the same value typed again, or a `kind:` token
+   * after an empty `under:`, asks nothing. Newest request wins, the way
+   * {@link Session.run}'s counter makes it: an answer to an older prefix that
+   * lands after a newer one is dropped.
+   *
+   * A failure leaves {@link Session.suggestions} as it was for the rest of
+   * the opening and says nothing: suggestions are a help to typing, the query
+   * still runs without them, and the error line belongs to the query's own
+   * answer.
    */
-  async loadSuggestions(): Promise<void> {
+  async loadSuggestions(under = ""): Promise<void> {
     const read = this.#ports.filterSuggestions;
-    if (!read || this.#suggestionsAsked) return;
-    this.#suggestionsAsked = true;
+    if (!read || this.#suggestionsFailed || this.#suggestionsFor === under) return;
+    this.#suggestionsFor = under;
+    const id = ++this.#suggestionsIssued;
     try {
-      this.suggestions = await read();
+      const answer = await read(under);
+      if (id <= this.#suggestionsApplied) return;
+      this.#suggestionsApplied = id;
+      this.suggestions = answer;
     } catch {
       // Not asked again until the next opening: a read that failed once on
       // this keystroke would fail on the next one too.
+      this.#suggestionsFailed = true;
     }
   }
 
@@ -373,7 +395,8 @@ export class Session {
   dispose(): void {
     this.#cancel();
     // Read again on the next opening: the values that exist may have moved.
-    this.#suggestionsAsked = false;
+    this.#suggestionsFor = null;
+    this.#suggestionsFailed = false;
     this.suggestions = null;
     // Whatever else survives a close, this does not: it is a statement about
     // the query in the box, and the paste branch below empties the box. Left

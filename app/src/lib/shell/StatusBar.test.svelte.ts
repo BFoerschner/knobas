@@ -267,6 +267,7 @@ test("the cadence and the countdown come from the soonest scheduled source", asy
       last_outcome: "ok",
       next_run_at: "2026-08-25T12:09:00Z",
       backoff_until: null,
+      last_changed: null,
     },
     {
       source_id: "jira",
@@ -280,6 +281,7 @@ test("the cadence and the countdown come from the soonest scheduled source", asy
       // four minutes earlier.
       next_run_at: "2026-08-25T12:04:20Z",
       backoff_until: null,
+      last_changed: null,
     },
   ];
   const screen = render(true);
@@ -300,6 +302,7 @@ test("a source that is not scheduled contributes no countdown", async () => {
       // Null while a run is in flight (contract §2.3).
       next_run_at: null,
       backoff_until: null,
+      last_changed: null,
     },
   ];
   const screen = render(true);
@@ -326,6 +329,7 @@ test("a finished run re-reads the database numbers", async () => {
     last_outcome: "ok",
     next_run_at: "2026-08-25T12:14:00Z",
     backoff_until: null,
+    last_changed: null,
   });
   flushSync();
 

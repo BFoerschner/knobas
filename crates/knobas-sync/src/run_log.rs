@@ -125,6 +125,16 @@ pub struct SourceSyncStatus {
     /// `knobas.source_config.backoff_until` -- how long a failing source is
     /// held off for. Never set by a 401 (P7).
     pub backoff_until: Option<chrono::DateTime<chrono::Utc>>,
+    /// Whether the run [`last_outcome`](Self::last_outcome) describes wrote
+    /// anything to the mirror: its `upserted`, `deleted` or `swept` count is
+    /// above zero (#759). `None` while no run of the source has finished.
+    ///
+    /// What a listener that re-reads the mirror after a run keys on, so a run
+    /// that changed nothing costs it nothing. **An over-approximation, in the
+    /// safe direction**: `upserted` counts an item re-written unchanged, so
+    /// `true` may be a run that moved nothing, but `false` never hides a run
+    /// that did.
+    pub last_changed: Option<bool>,
 }
 
 impl SourceSyncStatus {
@@ -140,6 +150,7 @@ impl SourceSyncStatus {
             last_outcome: None,
             next_run_at: None,
             backoff_until: None,
+            last_changed: None,
         }
     }
 
@@ -155,6 +166,7 @@ impl SourceSyncStatus {
             last_outcome: Some(outcome),
             next_run_at: None,
             backoff_until: None,
+            last_changed: None,
         }
     }
 }
@@ -751,6 +763,7 @@ mod tests {
             last_outcome: Some(SyncOutcome::Ok),
             next_run_at: Some(chrono::Utc::now()),
             backoff_until: Some(chrono::Utc::now()),
+            last_changed: Some(true),
         };
 
         crate::mirror::assert_shape(
@@ -759,6 +772,7 @@ mod tests {
             &serde_json::to_value(&status).expect("a status serializes"),
             &[
                 "backoff_until",
+                "last_changed",
                 "last_finished_at",
                 "last_outcome",
                 "next_run_at",

@@ -301,7 +301,11 @@ export interface FilterSuggestions {
   kinds: KindSuggestion[];
   /** Every enabled source with at least one live row, ordered by id. */
   sources: SourceSuggestion[];
-  /** Every name a parent answers to, with its kind; a repo is listed under `owner/name` and `name`. */
+  /**
+   * The newest twenty names a parent answers to that start with the `under`
+   * prefix asked for, ignoring case, newest first, with their kind; a repo is
+   * listed under `owner/name` and `name` (#761).
+   */
   parents: ParentSuggestion[];
 }
 
@@ -328,7 +332,10 @@ export interface ParentSuggestion {
   kind: string;
 }
 
-/** The query box's suggestion lists (#601). */
-export function filterSuggestions(): Promise<FilterSuggestions> {
-  return invoke<FilterSuggestions>("filter_suggestions");
+/**
+ * The query box's suggestion lists (#601), the parents for the `under:` value
+ * being typed (#761).
+ */
+export function filterSuggestions(under = ""): Promise<FilterSuggestions> {
+  return invoke<FilterSuggestions>("filter_suggestions", { under });
 }

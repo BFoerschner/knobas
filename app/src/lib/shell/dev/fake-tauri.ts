@@ -3091,6 +3091,7 @@ function fakeStatus(source: (typeof FIXTURE_SOURCES)[number]) {
     last_outcome: source.last_run?.outcome ?? null,
     next_run_at: source.next_run_at,
     backoff_until: null,
+    last_changed: null,
   };
 }
 
