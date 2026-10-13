@@ -96,27 +96,7 @@ impl Source for Fake {
     }
 
     fn descriptor(&self) -> SourceDescriptor {
-        SourceDescriptor {
-            id: self.id.clone(),
-            adapter_kind: "mock".to_owned(),
-            name: "Fake".to_owned(),
-            capabilities: Vec::new(),
-            adapter_version: "0".to_owned(),
-            auth_methods: vec![AuthMethod::Pat],
-            accepts_account: false,
-            write_ops: vec!["comment".to_owned()],
-            entity_kinds: vec![KindInfo {
-                id: "ticket".to_owned(),
-                label: "Ticket".to_owned(),
-                plural: "Tickets".to_owned(),
-                monogram: "TI".to_owned(),
-                full_sync_exhaustive: true,
-            }],
-            config_schema: serde_json::json!({"type": "object", "properties": {}}),
-            // Nothing declared: this stand-in has no payload shapes to
-            // read, so every path-driven read misses on it (#277).
-            payload_paths: Vec::new(),
-        }
+        fake_descriptor(&self.id)
     }
 
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
@@ -196,7 +176,7 @@ struct FakeRegistry {
 
 impl AdapterRegistry for FakeRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Vec::new()
+        vec![fake_descriptor("mock")]
     }
 
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
@@ -209,6 +189,43 @@ impl AdapterRegistry for FakeRegistry {
             interrupt: Arc::clone(&self.interrupt),
             pool: self.pool.clone(),
         }))
+    }
+}
+
+/// The fake's descriptor. It declares one payload path, a pull request's
+/// state in Gitea's shape (#666), which is what a queued close or reopen holds
+/// on (#706); nothing else here reads a declaration.
+fn fake_descriptor(id: &str) -> SourceDescriptor {
+    use knobas_core::payload::{KindPaths, PayloadPath, StatePath, StateValue};
+    use knobas_core::tone::Tone;
+    SourceDescriptor {
+        id: id.to_owned(),
+        adapter_kind: "mock".to_owned(),
+        name: "Fake".to_owned(),
+        capabilities: Vec::new(),
+        adapter_version: "0".to_owned(),
+        auth_methods: vec![AuthMethod::Pat],
+        accepts_account: false,
+        write_ops: vec!["comment".to_owned()],
+        entity_kinds: vec![KindInfo {
+            id: "ticket".to_owned(),
+            label: "Ticket".to_owned(),
+            plural: "Tickets".to_owned(),
+            monogram: "TI".to_owned(),
+            full_sync_exhaustive: true,
+        }],
+        config_schema: serde_json::json!({"type": "object", "properties": {}}),
+        payload_paths: vec![KindPaths {
+            kind: "pr".to_owned(),
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("closed", Tone::Muted),
+                ],
+            }],
+            ..KindPaths::default()
+        }],
     }
 }
 
@@ -278,6 +295,12 @@ impl Harness {
                 // was opened from rather than by its title -- `UNCLAIMED_OPS`
                 // argues why that difference matters (#353).
                 WriteOp::CreatePullRequest { head, .. } => head.clone(),
+                // A pull request edit by the title it gives, else the state
+                // it sets (#706).
+                WriteOp::EditPullRequest { title, state, .. } => title
+                    .clone()
+                    .or_else(|| state.map(|s| s.as_str().to_owned()))
+                    .unwrap_or_default(),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -712,6 +735,131 @@ async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() 
     assert!(h.verbs().contains(&"held".to_owned()));
 }
 
+/// A pull request in the mirror with `title` and Gitea's `state`, the record
+/// an `edit_pull_request` holds against (#706).
+async fn mirror_pull(h: &Harness, key: &str, title: &str, state: &str) -> EntityRef {
+    let entity = EntityRef::new(&h.source, key);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1,'pr',$2)
+         on conflict (id) do nothing",
+    )
+    .bind(entity.to_string())
+    .bind(title)
+    .execute(h.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,'pr',$3,$3,$4)
+         on conflict (entity_id) do update
+            set title = excluded.title, body_text = excluded.body_text,
+                payload = excluded.payload",
+    )
+    .bind(entity.to_string())
+    .bind(&h.source)
+    .bind(title)
+    .bind(serde_json::json!({ "title": title, "state": state }))
+    .execute(h.pool())
+    .await
+    .unwrap();
+    entity
+}
+
+/// The deputy's ruling on #706 through the queue itself, not only through
+/// `project`: a title edit holds on a retitle and goes over a close. The
+/// payload has to reach the projection at the queue *and* at the flush --
+/// were either side to project without it, the two snapshots would differ in
+/// shape and the closed pull request's edit would hold too.
+#[tokio::test]
+async fn a_title_edit_holds_on_a_retitle_and_not_on_a_close() {
+    let h = harness().await;
+    let closed = mirror_pull(&h, "o/r#1", "Bound the retry jitter", "open").await;
+    let retitled = mirror_pull(&h, "o/r#2", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Unreachable);
+    let edit = |entity: &EntityRef, title: &str| WriteOp::EditPullRequest {
+        entity: entity.to_string(),
+        title: Some(title.to_owned()),
+        body: None,
+        state: None,
+    };
+    let control = flusher::submit(&h.deps, &h.source, edit(&closed, "mine"))
+        .await
+        .unwrap();
+    let conflicted = flusher::submit(&h.deps, &h.source, edit(&retitled, "also mine"))
+        .await
+        .unwrap();
+
+    // Somebody closes one and retitles the other, and a sync mirrors both.
+    mirror_pull(&h, "o/r#1", "Bound the retry jitter", "closed").await;
+    mirror_pull(&h, "o/r#2", "Bound the jitter", "open").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["mine".to_owned()],
+        "a close is not what a title edit overwrites"
+    );
+    assert_eq!(h.reload(control.id).await.state, WriteState::Sent);
+    let held = h.reload(conflicted.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    // The two titles, side by side.
+    assert_eq!(held.target_snapshot["text"], "Bound the retry jitter");
+    assert_eq!(
+        held.held_snapshot.as_ref().unwrap()["text"],
+        "Bound the jitter"
+    );
+}
+
+/// The ruling's own example through the queue (#706): a queued *Close* goes
+/// over a retitle, and holds on somebody else closing the pull request first.
+/// Both are read from the state the source **declares** for the kind (#666),
+/// the registry's template descriptor, looked up at the queue and again at
+/// the flush.
+#[tokio::test]
+async fn a_close_holds_on_the_declared_state_and_not_on_a_retitle() {
+    let h = harness().await;
+    let retitled = mirror_pull(&h, "o/r#3", "Bound the retry jitter", "open").await;
+    let closed = mirror_pull(&h, "o/r#4", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Unreachable);
+    let close = |entity: &EntityRef| WriteOp::EditPullRequest {
+        entity: entity.to_string(),
+        title: None,
+        body: None,
+        state: Some(knobas_source::PullRequestState::Closed),
+    };
+    let control = flusher::submit(&h.deps, &h.source, close(&retitled))
+        .await
+        .unwrap();
+    let conflicted = flusher::submit(&h.deps, &h.source, close(&closed))
+        .await
+        .unwrap();
+    assert_eq!(control.target_snapshot["text"], "open");
+
+    mirror_pull(&h, "o/r#3", "Bound the jitter", "open").await;
+    mirror_pull(&h, "o/r#4", "Bound the retry jitter", "closed").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["closed".to_owned()],
+        "only one close went"
+    );
+    assert_eq!(
+        h.reload(control.id).await.state,
+        WriteState::Sent,
+        "a retitle is not what a close overwrites"
+    );
+    let held = h.reload(conflicted.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    assert_eq!(held.held_snapshot.as_ref().unwrap()["text"], "closed");
+}
+
 /// Story 22, at the flush loop rather than at the store: a stalled write
 /// blocks its own successors and nothing else. The second comment on one
 /// ticket may not overtake the first, and a second ticket's write must not
@@ -947,6 +1095,12 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
                 .to_owned(),
         },
+        WriteOp::EditPullRequest {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            title: Some("Bound the retry jitter".to_owned()),
+            body: None,
+            state: Some(knobas_source::PullRequestState::Closed),
+        },
     ]
 }
 
@@ -980,7 +1134,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
             | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. } => op.identifier(),
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::EditPullRequest { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1189,6 +1344,10 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // nothing new, and the next sync reads the branch gone (#707).
             // Like a merge it is not taken back once sent.
             | WriteOp::DeleteBranch { .. }
+            // An edit, a close or a reopen changes a pull request the mirror
+            // holds: what is left is that pull request as edited, which the
+            // next sync reads back.
+            | WriteOp::EditPullRequest { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.

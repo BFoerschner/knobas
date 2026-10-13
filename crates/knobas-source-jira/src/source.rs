@@ -329,7 +329,8 @@ impl Source for JiraSource {
             | WriteOp::SetParameter { .. }
             | WriteOp::RunBuild { .. }
             | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::EditPullRequest { .. } => Err(SourceError::protocol(format!(
                 "the Jira adapter does not support {:?}",
                 op.identifier()
             ))),

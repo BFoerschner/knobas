@@ -839,7 +839,14 @@ async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
     let ops: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
     assert_eq!(
         ops,
-        ["Comment…", "Approve…", "Request changes…", "Merge…"],
+        [
+            "Comment…",
+            "Approve…",
+            "Request changes…",
+            "Edit…",
+            "Close",
+            "Merge…"
+        ],
         "{view:#?}"
     );
 }
@@ -863,9 +870,9 @@ async fn an_action_that_can_never_apply_is_not_offered() {
     merged["merged"] = json!(true);
     merged["mergeable"] = json!(true);
     for (pull, offered) in [
-        (own, &["Comment…", "Merge…"][..]),
-        (closed, &["Comment…"][..]),
-        (merged, &["Comment…"][..]),
+        (own, &["Comment…", "Edit…", "Close", "Merge…"][..]),
+        (closed, &["Comment…", "Edit…", "Reopen"][..]),
+        (merged, &["Comment…", "Edit…"][..]),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
@@ -1006,4 +1013,104 @@ async fn who_the_token_is_is_asked_again_after_a_failed_read() {
     let second = built(&server, AGAIN).view(PR, None).await.unwrap().unwrap();
     assert!(!offers(&second, "Approve…"), "{second:#?}");
     assert_eq!(asked_who(&server).await, 2);
+}
+
+// -- Edit…, Close and Reopen (issue #706) ------------------------------------
+
+/// *Edit…* as the toolbar draws it: the title one required line, the
+/// description a long text, both prefilled with what Gitea holds today, so
+/// the shell can send only what the reader changed (the #706 ruling).
+fn edit_action(title: &str, body: Option<&str>) -> ViewAction {
+    ViewAction {
+        fields: vec![
+            ActionField {
+                value: Some(title.to_owned()),
+                required: true,
+                ..ActionField::new(
+                    "title",
+                    "Title",
+                    FieldKind::Text {
+                        suggestions: vec![],
+                    },
+                )
+            },
+            ActionField {
+                value: body.map(str::to_owned),
+                ..ActionField::new("body", "Description", FieldKind::LongText)
+            },
+        ],
+        ..ViewAction::new("edit_pull_request", "Edit…")
+    }
+}
+
+/// *Close*: a danger, through its sentence, the state a fixed value.
+fn close_action() -> ViewAction {
+    ViewAction {
+        confirm: Some("Close feature/PAY-231-sepa-retry → main without merging it?".to_owned()),
+        danger: true,
+        values: [("state".to_owned(), "closed".to_owned())].into(),
+        ..ViewAction::new("edit_pull_request", "Close")
+    }
+}
+
+/// *Reopen*: nothing to ask and nothing destroyed, so it queues on the button.
+fn reopen_action() -> ViewAction {
+    ViewAction {
+        values: [("state".to_owned(), "open".to_owned())].into(),
+        ..ViewAction::new("edit_pull_request", "Reopen")
+    }
+}
+
+/// Workflow 8 of spec #701 (issue #706), per state. Open: *Edit…* and
+/// *Close*. Closed and not merged: *Edit…* and *Reopen*. Merged: *Edit…*
+/// alone -- Gitea takes a merged pull request's title and description but
+/// refuses its state (412, *it was already merged*), and no wait changes
+/// that, so neither *Close* nor *Reopen* is drawn (the #701 ruling).
+#[tokio::test]
+async fn a_pull_request_offers_edit_and_close_or_reopen_by_its_state() {
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    let mut merged = open_pull();
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    for (pull, state_action) in [
+        (open_pull(), Some(close_action())),
+        (closed, Some(reopen_action())),
+        (merged, None),
+    ] {
+        let server = gitea(pull, json!([])).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        let edits: Vec<ViewAction> = view
+            .actions
+            .iter()
+            .filter(|a| a.write_op == "edit_pull_request")
+            .cloned()
+            .collect();
+        no_fixed_value_is_a_field(&view);
+        let mut expected = vec![edit_action(
+            "SEPA retry with exponential backoff",
+            Some("Refs PAY-231\n\n<b>not markup</b>"),
+        )];
+        expected.extend(state_action);
+        assert_eq!(edits, expected, "{view:#?}");
+    }
+}
+
+/// The description is prefilled exactly as Gitea holds it -- trailing
+/// newline included -- or the shell would read an untouched one as changed
+/// and send it back; a pull request with none prefills nothing.
+#[tokio::test]
+async fn the_edit_is_prefilled_with_the_description_as_gitea_holds_it() {
+    let mut trailing = open_pull();
+    trailing["body"] = json!("Refs PAY-231\r\n");
+    let mut none = open_pull();
+    none["body"] = Value::Null;
+    for (pull, body) in [(trailing, Some("Refs PAY-231\r\n")), (none, None)] {
+        let server = gitea(pull, json!([])).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Edit…"),
+            edit_action("SEPA retry with exponential backoff", body)
+        );
+    }
 }

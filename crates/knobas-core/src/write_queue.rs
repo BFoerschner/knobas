@@ -34,6 +34,7 @@ use sqlx::PgPool;
 
 use crate::CoreError;
 use crate::entity::EntityRef;
+use crate::payload::{StatePath, resolve_state};
 
 crate::closed_vocabulary! {
     /// What the queue will do about a write next.
@@ -288,6 +289,9 @@ pub async fn get(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreErro
 #[derive(Clone, Debug, Serialize, sqlx::FromRow)]
 pub struct Target {
     pub entity_id: String,
+    /// The item's kind (`pr`): what a source's declared payload paths are
+    /// keyed by, which an `edit_pull_request`'s state hold reads (#706).
+    pub kind: String,
     pub title: String,
     /// The item's indexed text. Contract §4.1 makes every adapter build this
     /// from the item's title, description and **comment texts**, which is what
@@ -310,7 +314,7 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
     // Named columns, never `select *`: `sync.live_item` carries a `tsvector`
     // that must not wander into a `FromRow` (roadmap §4 gotcha 2).
     let row = sqlx::query_as::<_, Target>(
-        "select entity_id, title, body_text, item_updated_at, payload
+        "select entity_id, kind, title, body_text, item_updated_at, payload
            from sync.live_item
           where entity_id = $1",
     )
@@ -354,6 +358,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "run_build",
     "submit_review",
     "delete_branch",
+    "edit_pull_request",
 ];
 
 /// What `op` counts as its target having changed.
@@ -385,7 +390,9 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// `"merge_pull_request"`, `"submit_review"` and `"delete_branch"`, the ops
 /// that put a *judgement* onto a target whose current state is the whole
 /// reason for the judgement, and `"set_parameter"`, which overwrites a value.
-/// Any change to the target at all holds the write.
+/// Any change to the target at all holds the write. `"edit_pull_request"`
+/// takes this shape only when it changes the pull request's state; see
+/// **Per field** below.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -441,6 +448,40 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   cost is small because the record is quiet: it carries no timestamp
 ///   (`updated_at` is `None`) and nothing a build changes, so a sync does not
 ///   move it on its own, and a false hold is one *Apply anyway* away.
+///
+/// **Per field** -- `"edit_pull_request"` (issue #706), the one op whose
+/// projection depends on what it carries rather than on its name alone, and
+/// the reason `project` takes the queued `payload` at all. The op overwrites
+/// only the fields it was given (the shell sends only what the reader
+/// changed), and the deputy's ruling on #706 is that it holds only when what
+/// it would overwrite changed: someone retitling the pull request must not
+/// hold a queued *Close*. Each field gets the narrowest normalised value that
+/// still sees it change:
+///
+/// * **a state change** (*Close*, *Reopen*) takes the state the source
+///   **declares** for the kind (`KindPaths::state`, #666; Gitea's merged flag,
+///   then its `state` word), resolved by [`resolve_state`] -- the declared
+///   read ADR-0007 sends a payload read to, never a guess at a shape. So a
+///   retitle does not hold a queued Close, and somebody else closing,
+///   reopening or merging the pull request does. Where the declaration
+///   resolves nothing -- a source that declares no state, a record it does
+///   not recognise -- the projection is the **whole record** instead, so a
+///   miss is a false hold, never a missed one.
+/// * **a description** (with or without a title) takes `body_text`, which
+///   §4.1 builds from the title, the description and the comments: it moves
+///   when the description does, and a retitle or a new comment holds it too
+///   -- false holds, the safe direction. A close by somebody else does not.
+/// * **a title alone** takes `title`, a normalised field: only a retitle
+///   holds it.
+///
+/// What each field compares goes into the projection's `text`, one part per
+/// field, so the held panel shows the two sides of exactly what was compared.
+///
+/// Which fields the op carries is read from the queued payload -- knobas'
+/// own serde shape, so ADR-0007's requirements 2 and 3 bind it -- in one
+/// statement, [`edit_writes`], and the read **fails wide**: a field counts as
+/// written unless the payload says `null` for it in so many words, so a
+/// drifted shape projects the whole record rather than nothing.
 ///
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"run_build"`,
@@ -557,9 +598,23 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// `every_write_op_has_a_stated_projection` is what stops a new op resting on
 /// it silently: the op has to be listed, which means somebody wrote down which
 /// of the three shapes it gets and why.
+///
+/// `payload` is the queued write's own (`WriteOp`'s serde form) and `state`
+/// the target kind's declared state paths; only `"edit_pull_request"` reads
+/// either.
 #[must_use]
-pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
+pub fn project(
+    op: &str,
+    payload: &serde_json::Value,
+    target: Option<&Target>,
+    state: &[StatePath],
+) -> serde_json::Value {
     let live = target.is_some();
+    if op == "edit_pull_request"
+        && let Some(text) = edit_text(edit_writes(payload), target, state)
+    {
+        return serde_json::json!({ "op": op, "live": live, "text": text });
+    }
     match op {
         "comment" => serde_json::json!({
             "op": "comment",
@@ -588,6 +643,63 @@ pub fn project(op: &str, target: Option<&Target>) -> serde_json::Value {
             "item_updated_at": target.and_then(|t| t.item_updated_at),
             "payload": target.map(|t| &t.payload),
         }),
+    }
+}
+
+/// Which of a pull request's fields a queued `edit_pull_request` writes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct EditWrites {
+    title: bool,
+    body: bool,
+    state: bool,
+}
+
+/// The one statement that reads an `edit_pull_request`'s fields out of its
+/// queued payload (ADR-0007 requirement 2). It **fails wide** (requirement 3,
+/// pinned by `an_edit_read_that_misses_holds_on_the_whole_record`): a field is
+/// written unless its key is present and `null`. The queue stores
+/// `serde_json::to_value(&op)`, which spells every field, so a field left
+/// alone is always that explicit `null`; a renamed key or variant reads as
+/// written, which widens the projection to a false hold, never a missed one.
+/// What an `edit_pull_request` compares, one part per field it writes:
+/// `Some(None)` for a target that is gone (only `live` then differs), `None`
+/// for the whole-record fallback -- an edit that writes nothing, or a state
+/// change whose declared state resolves nothing.
+#[allow(clippy::option_option)]
+fn edit_text(
+    writes: EditWrites,
+    target: Option<&Target>,
+    state: &[StatePath],
+) -> Option<Option<String>> {
+    if !(writes.title || writes.body || writes.state) {
+        return None;
+    }
+    let Some(target) = target else {
+        return Some(None);
+    };
+    let mut parts = Vec::new();
+    if writes.state {
+        parts.push(resolve_state(&target.payload, state)?.text);
+    }
+    // `body_text` carries the title, so a description's part covers both.
+    if writes.body {
+        parts.push(target.body_text.clone());
+    } else if writes.title {
+        parts.push(target.title.clone());
+    }
+    Some(Some(parts.join("\n\n")))
+}
+
+fn edit_writes(payload: &serde_json::Value) -> EditWrites {
+    let written = |field: &str| {
+        !payload
+            .pointer(&format!("/EditPullRequest/{field}"))
+            .is_some_and(serde_json::Value::is_null)
+    };
+    EditWrites {
+        title: written("title"),
+        body: written("body"),
+        state: written("state"),
     }
 }
 
@@ -1130,6 +1242,7 @@ mod tests {
     fn a_comments_target_changes_when_its_text_does() {
         let target = |body: &str, payload: serde_json::Value| Target {
             entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
             title: "a payout fails".to_owned(),
             body_text: body.to_owned(),
             item_updated_at: None,
@@ -1144,18 +1257,18 @@ mod tests {
         );
 
         assert_eq!(
-            project("comment", Some(&before)),
-            project("comment", Some(&noise)),
+            project("comment", &serde_json::Value::Null, Some(&before), &[]),
+            project("comment", &serde_json::Value::Null, Some(&noise), &[]),
             "a change the op does not care about must not hold the write"
         );
         assert_ne!(
-            project("comment", Some(&before)),
-            project("comment", Some(&replied)),
+            project("comment", &serde_json::Value::Null, Some(&before), &[]),
+            project("comment", &serde_json::Value::Null, Some(&replied), &[]),
             "a new reply is exactly what a queued comment holds against"
         );
         assert_ne!(
-            project("comment", Some(&before)),
-            project("comment", None),
+            project("comment", &serde_json::Value::Null, Some(&before), &[]),
+            project("comment", &serde_json::Value::Null, None, &[]),
             "a target that is gone has changed"
         );
     }
@@ -1165,6 +1278,7 @@ mod tests {
     fn payload_differs() -> (Target, Target) {
         let target = |payload: serde_json::Value| Target {
             entity_id: "jira:PAY-231".to_owned(),
+            kind: "ticket".to_owned(),
             title: "a payout fails".to_owned(),
             body_text: "it does".to_owned(),
             item_updated_at: None,
@@ -1185,8 +1299,8 @@ mod tests {
         assert!(!PROJECTED_OPS.contains(&unlisted));
         let (before, after) = payload_differs();
         assert_ne!(
-            project(unlisted, Some(&before)),
-            project(unlisted, Some(&after)),
+            project(unlisted, &serde_json::Value::Null, Some(&before), &[]),
+            project(unlisted, &serde_json::Value::Null, Some(&after), &[]),
         );
     }
 
@@ -1218,13 +1332,13 @@ mod tests {
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
-                project(op, Some(&before)),
-                project(op, Some(&after)),
+                project(op, &serde_json::Value::Null, Some(&before), &[]),
+                project(op, &serde_json::Value::Null, Some(&after), &[]),
                 "{op}: a payload-only change is exactly the change it is about"
             );
             assert_ne!(
-                project(op, Some(&before)),
-                project(op, None),
+                project(op, &serde_json::Value::Null, Some(&before), &[]),
+                project(op, &serde_json::Value::Null, None, &[]),
                 "{op}: a target that is gone has changed"
             );
         }
@@ -1260,18 +1374,18 @@ mod tests {
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_eq!(
-                project(op, Some(&before)),
-                project(op, Some(&after)),
+                project(op, &serde_json::Value::Null, Some(&before), &[]),
+                project(op, &serde_json::Value::Null, Some(&after), &[]),
                 "{op}: a payload change is not something a create would overwrite"
             );
             assert_eq!(
-                project(op, Some(&before)),
-                project(op, Some(&renamed)),
+                project(op, &serde_json::Value::Null, Some(&before), &[]),
+                project(op, &serde_json::Value::Null, Some(&renamed), &[]),
                 "{op}: neither is a retitled or re-touched container"
             );
             assert_ne!(
-                project(op, Some(&before)),
-                project(op, None),
+                project(op, &serde_json::Value::Null, Some(&before), &[]),
+                project(op, &serde_json::Value::Null, None, &[]),
                 "{op}: a container that is gone must still hold the write"
             );
         }
@@ -1284,13 +1398,175 @@ mod tests {
     #[test]
     fn a_create_into_an_unmirrored_container_is_not_held() {
         assert_eq!(
-            project("create_ticket", None),
-            project("create_ticket", None)
+            project("create_ticket", &serde_json::Value::Null, None, &[]),
+            project("create_ticket", &serde_json::Value::Null, None, &[])
         );
         assert_eq!(
-            project("create_ticket", None)["live"],
+            project("create_ticket", &serde_json::Value::Null, None, &[])["live"],
             serde_json::json!(false)
         );
+    }
+
+    /// A queued `edit_pull_request` as the queue stores it: every field
+    /// spelled, the ones left alone `null`.
+    fn edit(title: Option<&str>, body: Option<&str>, state: Option<&str>) -> serde_json::Value {
+        serde_json::json!({ "EditPullRequest": {
+            "entity": "gitea:o/r#1", "title": title, "body": body, "state": state
+        } })
+    }
+
+    /// Gitea's pull request state as `knobas-source-gitea` declares it: the
+    /// merged flag first, then the state word.
+    fn gitea_pr_state() -> Vec<StatePath> {
+        use crate::payload::{PayloadPath, StateValue};
+        use crate::tone::Tone;
+        vec![
+            StatePath {
+                at: PayloadPath::of(["merged"]),
+                values: vec![StateValue::of(true, Tone::Ok).shown_as("merged")],
+            },
+            StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("open", Tone::Info),
+                    StateValue::of("closed", Tone::Muted),
+                ],
+            },
+        ]
+    }
+
+    /// A close whose declared state resolves nothing -- a record the
+    /// declaration does not recognise -- projects the whole record, so the
+    /// miss is a false hold (ADR-0007 requirement 3, for the state read).
+    #[test]
+    fn a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record() {
+        let (before, after) = payload_differs();
+        let close = edit(None, None, Some("closed"));
+        let projected = project(
+            "edit_pull_request",
+            &close,
+            Some(&before),
+            &gitea_pr_state(),
+        );
+        assert_eq!(projected["payload"], before.payload);
+        assert_ne!(
+            projected,
+            project("edit_pull_request", &close, Some(&after), &gitea_pr_state())
+        );
+    }
+
+    /// The deputy's ruling on #706, pinned: an edit holds only when what it
+    /// would overwrite changed. A pull request somebody else retitled,
+    /// re-described, commented on or closed is set beside each kind of edit.
+    #[test]
+    fn an_edit_holds_only_on_what_it_would_overwrite() {
+        let before = Target {
+            entity_id: "gitea:o/r#1".to_owned(),
+            kind: "pr".to_owned(),
+            title: "Bound the retry jitter".to_owned(),
+            body_text: "Bound the retry jitter\n\nas discussed".to_owned(),
+            item_updated_at: None,
+            payload: serde_json::json!({"title": "Bound the retry jitter", "state": "open"}),
+        };
+        let retitled = Target {
+            title: "Bound the jitter".to_owned(),
+            body_text: "Bound the jitter\n\nas discussed".to_owned(),
+            payload: serde_json::json!({"title": "Bound the jitter", "state": "open"}),
+            ..before.clone()
+        };
+        let redescribed = Target {
+            body_text: "Bound the retry jitter\n\nas agreed".to_owned(),
+            ..before.clone()
+        };
+        let closed = Target {
+            payload: serde_json::json!({"title": "Bound the retry jitter", "state": "closed"}),
+            ..before.clone()
+        };
+        let merged = Target {
+            payload: serde_json::json!({
+                "title": "Bound the retry jitter", "state": "closed", "merged": true
+            }),
+            ..before.clone()
+        };
+        // Gitea's declaration (#666), spelled here: `knobas-core` knows no
+        // adapter, it is handed the paths.
+        let declared = gitea_pr_state();
+        let held = |op: &serde_json::Value, after: Option<&Target>| {
+            project("edit_pull_request", op, Some(&before), &declared)
+                != project("edit_pull_request", op, after, &declared)
+        };
+
+        let title = edit(Some("t"), None, None);
+        assert!(
+            held(&title, Some(&retitled)),
+            "a title edit holds on a retitle"
+        );
+        assert!(
+            !held(&title, Some(&redescribed)),
+            "not on a new description"
+        );
+        assert!(!held(&title, Some(&closed)), "and not on a close");
+
+        let body = edit(None, Some("b"), None);
+        assert!(
+            held(&body, Some(&redescribed)),
+            "a description edit holds on a new description"
+        );
+        assert!(!held(&body, Some(&closed)), "not on a close");
+        // body_text carries the title too: a false hold, the safe direction.
+        assert!(held(&body, Some(&retitled)));
+
+        let close = edit(None, None, Some("closed"));
+        assert!(
+            held(&close, Some(&closed)),
+            "a close holds on a state change"
+        );
+        assert!(held(&close, Some(&merged)), "and on a merge");
+        // The ruling's own example: a retitle does not hold a queued Close.
+        assert!(!held(&close, Some(&retitled)), "not on a retitle");
+        assert!(!held(&close, Some(&redescribed)), "nor a new description");
+
+        // A source that declares no state: the whole record, so the same
+        // retitle holds -- a false hold, never a missed one.
+        assert_ne!(
+            project("edit_pull_request", &close, Some(&before), &[]),
+            project("edit_pull_request", &close, Some(&retitled), &[]),
+        );
+
+        for op in [&title, &body, &close] {
+            assert!(
+                held(op, None),
+                "a pull request that is gone has changed: {op}"
+            );
+            assert!(
+                !held(op, Some(&before)),
+                "nothing changed, nothing holds: {op}"
+            );
+        }
+    }
+
+    /// ADR-0007 requirement 3 for `edit_writes`: the read fails **wide**. A
+    /// payload whose shape it does not know -- a renamed variant, a missing
+    /// key, nothing at all -- projects the whole record, so a drift is a
+    /// false hold and never a missed one.
+    #[test]
+    fn an_edit_read_that_misses_holds_on_the_whole_record() {
+        let (before, after) = payload_differs();
+        let whole = project("transition", &serde_json::Value::Null, Some(&before), &[]);
+        for payload in [
+            serde_json::Value::Null,
+            serde_json::json!({ "EditPull": { "title": "t", "body": null, "state": null } }),
+            serde_json::json!({ "EditPullRequest": { "title": "t" } }),
+            edit(None, None, None),
+        ] {
+            let projected = project("edit_pull_request", &payload, Some(&before), &[]);
+            assert_eq!(projected["payload"], whole["payload"], "{payload}");
+            assert_ne!(
+                projected,
+                project("edit_pull_request", &payload, Some(&after), &[]),
+                "{payload}: a payload-only change must hold"
+            );
+        }
     }
 
     /// Every op the SPI defines is projected as exactly one of the three
@@ -1302,12 +1578,13 @@ mod tests {
     fn every_projected_op_has_one_of_the_three_shapes() {
         let (target, _) = payload_differs();
         for op in PROJECTED_OPS {
-            let keys: std::collections::BTreeSet<String> = project(op, Some(&target))
-                .as_object()
-                .expect("a projection is an object")
-                .keys()
-                .cloned()
-                .collect();
+            let keys: std::collections::BTreeSet<String> =
+                project(op, &serde_json::Value::Null, Some(&target), &[])
+                    .as_object()
+                    .expect("a projection is an object")
+                    .keys()
+                    .cloned()
+                    .collect();
             let shape: Vec<&str> = keys.iter().map(String::as_str).collect();
             assert!(
                 shape == ["live", "op", "text"]

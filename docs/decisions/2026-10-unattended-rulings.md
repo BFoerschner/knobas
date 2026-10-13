@@ -951,3 +951,38 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** trivial: one condition in `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`.
 
 As built (#707): `toolbar` in `crates/knobas-source-gitea/src/view/branch.rs`. A later cross-ticket ruling on #701 (2026-10-13) sets the rule this applies: an action is drawn disabled with a reason only where the entity can still reach the enabled state, and an action that can never apply is absent. So *Delete branch…* is absent on the default branch and disabled, with the reason, on a protected one. The same ruling message accepted a cut on the candidates the repository's *New pull request…* asks about (20 then; ten since review, to stay inside Gitea's burst of 20 per opening), which the head field's label names, and the live test deleting its own pull request through the API rather than closing it.
+
+## #706 — an edit sends only what the reader changed: the payload table sees the declared defaults
+
+Ruled 2026-10-13. Comment:
+<https://github.com/BFoerschner/knobas/issues/706#issuecomment-6144136147>
+
+**The fork:** the ticket asks that the `PATCH` carry only the fields given, and the #702 review (PR #716, noted on #706) found the shell's payload table takes `(entity, values, settings)` and never sees a field's declared `value`, so it cannot tell an untouched prefilled description from a changed one. `actionPayload` already holds the `ViewAction`.
+
+**Ruling:** to send only the changed fields, the shell's payload builder in `actions.ts` may receive the action's declared field defaults alongside the submitted values (a shell-only change, no contract change), and compare.
+
+**Reasoning:** the `PATCH` must not overwrite a description someone else edited since the view was read with an unchanged copy.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#706): each `PAYLOADS` entry takes a fourth argument, the dialog's `initialValues(action)`; `edit_pull_request`'s entry sends `title` and `body` only where they differ from it, comparing line ends as `\n` (a text area gives back `\n` for Gitea's `\r\n`), and answers `null` when nothing changed. `just gitea-live`'s `a_pull_request_is_edited_closed_and_reopened_from_its_view` witnesses the reason against the real server: a description changed behind knobas' back survives a title edit. Close and Reopen use #705's `ViewAction.values` ruling above (also posted on #706): `{state: closed}` and `{state: open}` on the one op.
+
+## #706 — a queued edit holds only on what it would overwrite
+
+Ruled 2026-10-13 by the deputy for Björn, in the PR #725 review. Comment:
+<https://github.com/BFoerschner/knobas/issues/706#issuecomment-6146187141>
+
+**The fork:** the implementer gave `edit_pull_request` the whole-record hold, which was a classification of its own and not a ruling. With that hold, someone retitling a pull request holds a queued *Close*.
+
+**Ruling:** the edit holds only when what it would overwrite changed. A title edit holds if the title changed, a description edit if the description changed, and a state change (Close or Reopen) if the state changed. If the queue's mechanism can only compare the whole record per op, the narrowest honest option it allows is used, and the reason is stated.
+
+**Reasoning:** a hold asks the reader to decide again. A hold over a change the write would not touch is noise they cannot learn anything from.
+
+**If you disagree, the cost of reversing this is:** low. It is one arm in `knobas_core::write_queue::project`.
+
+As built (#706, merge review): `project` also takes the queued payload and the kind's declared state paths. `edit_writes` reads which fields the op carries and fails wide: a field is written unless its key is an explicit `null`. The narrowest projection then applies:
+- a title alone uses `title`;
+- a description uses `body_text`, which a retitle or a new comment also moves (a false hold, the safe direction);
+- a state change uses the state the source **declares** for the kind (`KindPaths::state`, #666; Gitea's merged flag, then its `state` word).
+
+The declared state is the read ADR-0007 sends a payload read to, not a guess at a shape. So a retitle does not hold a queued Close, and somebody else closing, reopening or merging the pull request does. A declaration that resolves nothing falls back to the whole record, so a miss is a false hold. `knobas-sync` reads the paths from the registry's template descriptor by the entity's namespace, at the queue and at the flush alike. Pinned by `knobas-core`'s `an_edit_holds_only_on_what_it_would_overwrite`, `an_edit_read_that_misses_holds_on_the_whole_record` and `a_close_over_a_state_the_declaration_misses_holds_on_the_whole_record`, and `knobas-sync`'s `a_title_edit_holds_on_a_retitle_and_not_on_a_close` and `a_close_holds_on_the_declared_state_and_not_on_a_retitle`.

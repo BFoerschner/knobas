@@ -175,6 +175,9 @@ pub const WRITE_OP_SUBMIT_REVIEW: &str = "submit_review";
 /// See [`WRITE_OP_CREATE_BRANCH`]. Offered on a branch's view: absent on the
 /// default branch, disabled on a protected one (issue #707).
 pub const WRITE_OP_DELETE_BRANCH: &str = "delete_branch";
+/// See [`WRITE_OP_CREATE_BRANCH`]. A pull request's *Edit…*, *Close* and
+/// *Reopen*, one `PATCH` (issue #706).
+pub const WRITE_OP_EDIT_PULL_REQUEST: &str = "edit_pull_request";
 
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
@@ -195,8 +198,8 @@ pub fn descriptor_template() -> SourceDescriptor {
         // fields here would be asking for something nothing reads.
         accepts_account: false,
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
-        // source views added (issue #667, §10.8), the review the git
-        // workstation added (issue #705, §10.8), and the whole of what the
+        // source views added (issue #667, §10.8), the review and the edit the
+        // git workstation added (issues #705, #706, §10.8), and the whole of what the
         // action bar offers. The battery holds this and `Capability::Write`
         // to each other in both directions.
         write_ops: vec![
@@ -207,6 +210,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_MERGE_PULL_REQUEST.to_owned(),
             WRITE_OP_SUBMIT_REVIEW.to_owned(),
             WRITE_OP_DELETE_BRANCH.to_owned(),
+            WRITE_OP_EDIT_PULL_REQUEST.to_owned(),
         ],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
@@ -361,7 +365,8 @@ mod tests {
                 "approve",
                 "merge_pull_request",
                 "submit_review",
-                "delete_branch"
+                "delete_branch",
+                "edit_pull_request"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );

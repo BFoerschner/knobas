@@ -227,7 +227,8 @@ impl Source for TeamCitySource {
             | WriteOp::CreateMonitor { .. }
             | WriteOp::MergePullRequest { .. }
             | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::EditPullRequest { .. } => Err(SourceError::protocol(format!(
                 "the TeamCity adapter does not support {:?}",
                 op.identifier()
             ))),

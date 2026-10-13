@@ -499,6 +499,24 @@ impl GiteaClient {
         self.http.send(request).await
     }
 
+    /// `PATCH <base>/api/v1/<path>` with `body` as JSON, keeping the response:
+    /// [`Self::post`]'s twin for an edit (issue #706).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::post`].
+    pub(crate) async fn patch(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self
+            .http
+            .request(Method::PATCH, &format!("{API_ROOT}{path}"))
+            .json(body);
+        self.http.send(request).await
+    }
+
     /// One path segment of a write, refused unless it is a name Gitea could
     /// have issued -- the same guard the reads use, reachable from
     /// [`crate::write`].

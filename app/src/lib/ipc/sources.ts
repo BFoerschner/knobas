@@ -607,6 +607,9 @@ export type WaitReason = "unreachable" | "unauthorized";
 /** How a merge lands its commits — `knobas_source::MergeStyle`. */
 export type MergeStyle = "merge" | "rebase" | "squash";
 
+/** The state an edit puts a pull request in — `knobas_source::PullRequestState`. */
+export type PullRequestState = "open" | "closed";
+
 /** What a review says of a pull request — `knobas_source::ReviewVerdict`. */
 export type ReviewVerdict = "approve" | "request_changes" | "comment";
 
@@ -693,6 +696,14 @@ export type WriteOpPayload =
    * `knobas_source::WriteOp::DeleteBranch`.
    */
   | { DeleteBranch: { entity: string } }
+  /**
+   * Edit, close or reopen a pull request (#706). `entity` is the **pull
+   * request**; a field left `null` is not written, so only what the reader
+   * changed reaches the source. Mirrors `knobas_source::WriteOp::EditPullRequest`.
+   */
+  | {
+      EditPullRequest: { entity: string; title: string | null; body: string | null; state: PullRequestState | null };
+    }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {
