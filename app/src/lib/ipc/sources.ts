@@ -607,6 +607,21 @@ export type WaitReason = "unreachable" | "unauthorized";
 /** How a merge lands its commits — `knobas_source::MergeStyle`. */
 export type MergeStyle = "merge" | "rebase" | "squash";
 
+/** What a review says of a pull request — `knobas_source::ReviewVerdict`. */
+export type ReviewVerdict = "approve" | "request_changes" | "comment";
+
+/**
+ * One line comment of a review — `knobas_source::ReviewComment`: the file's
+ * path, the line number on `side` (`old` the file as it was, `new` as it
+ * becomes), and what it says.
+ */
+export interface ReviewComment {
+  path: string;
+  line: number;
+  side: "old" | "new";
+  body: string;
+}
+
 /** One override of a run (#669) -- `knobas_source::BuildParameter`. */
 export interface BuildParameter {
   name: string;
@@ -666,6 +681,12 @@ export type WriteOpPayload =
    * build alone. Mirrors `knobas_source::WriteOp::RunBuild`.
    */
   | { RunBuild: { entity: string; branch: string | null; parameters: BuildParameter[] } }
+  /**
+   * Review a pull request (#705). `entity` is the **pull request**; `verdict`
+   * is `knobas_source::ReviewVerdict`; `comments` the line comments that go
+   * with it, empty for a review of the whole change.
+   */
+  | { SubmitReview: { entity: string; verdict: ReviewVerdict; body: string; comments: ReviewComment[] } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

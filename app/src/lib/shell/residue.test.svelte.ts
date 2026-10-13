@@ -1045,6 +1045,7 @@ const CASES: Case[] = [
             danger: false,
             disabled: null,
             with_settings: false,
+            values: {},
           },
           onsubmit: () => Promise.resolve(true),
           onclose: () => {},

@@ -850,3 +850,33 @@ Ruled 2026-10-13 by the orchestrator, as deputy for Björn. Posted on #712.
 **If you disagree, the cost of reversing this is:** low. Removing the group is one `case` arm, one `AttentionGroup` variant and its TS mirror, one label, and two tests; nothing is stored or migrated.
 
 As built (#712): `AttentionGroup::Branches` (`branches` on the wire) in `crates/knobas-app/src/commands/entity.rs`, its label in `app/src/lib/shell/tile-groups.ts`, the shared count in `tile-count.ts`; witnessed by `a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room` and the Tile test of the same name. The §10.8 entry for #712 lists the variant.
+
+## #705 — a review whose words are required unless it approves: one action per verdict
+
+Ruled 2026-10-13. Comment:
+<https://github.com/BFoerschner/knobas/issues/705#issuecomment-6144135740>
+
+**The fork:** #702's form vocabulary cannot say *required unless approving*: `ActionField.required` is a plain bool, and the ticket asked for one *Review…* with a verdict choice and a body required unless approving. Options: (a) leave the body optional and let Gitea refuse a blank request for changes; (b) split the review into separate actions; (c) have the payload entry return `null` for that case.
+
+**Ruling:** **(b).** The pull request's toolbar gets **Comment…** (the existing `comment` op, body required), **Approve…** (`submit_review` with verdict `approve`, body optional) and **Request changes…** (`submit_review` with verdict `request_changes`, body required). No verdict choice field. `submit_review` keeps its `comment` verdict for #709, which adds **Submit review…** when line comments are pending.
+
+**Reasoning:** one action per verdict is clearer to read and faster by keyboard, and each form's `required` is then honest.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#705): Gitea's own rule agrees, measured on the live 1.27.3: a blank request for changes is a 422 (*review event REQUEST_CHANGES requires a body*).
+
+## #705 — two actions on one op: the source fixes a value the reader does not pick
+
+Ruled 2026-10-13. Comment:
+<https://github.com/BFoerschner/knobas/issues/705#issuecomment-6144469197> (also posted on #706).
+
+**The fork:** the ruling above makes *Approve…* and *Request changes…* two actions on `submit_review`, and #706 makes *Close* and *Reopen* two actions on `edit_pull_request`. The shell's payload table sees the entity and the dialog's values, nothing in a `ViewAction` says which verdict or state, and the shell must not read the label. Options: (A) `ViewAction` gains `values` — fixed answers the source sets, never drawn, merged under the dialog's values before the payload table sees them; (B) a one-option `choice` field; (C) split the verdicts across ops (`approve` for *Approve…*).
+
+**Ruling:** **(A)**, `values: BTreeMap<String, String>`, `#[serde(default)]`, a §10.8 entry on `ViewAction` signed off under #701's delegation. The dialog's own value wins only where the same name is also a field, and that overlap is better forbidden in a test. #707 adds `ViewAction.entity` at the same time; whichever lands second keeps both.
+
+**Reasoning:** the shell stays op-agnostic, each dialog's `required` stays honest, and #706 and #709 use the same mechanism.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#705): `ViewAction.values` in `crates/knobas-source/src/view.rs`; `actionPayload` spreads it under the dialog's values. Gitea's `tests/it/view_pr.rs` asserts no toolbar action fixes a name it also asks for.

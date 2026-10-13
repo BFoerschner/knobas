@@ -100,6 +100,21 @@ impl Env {
         .expect("the adapter builds")
     }
 
+    /// The login the token belongs to, read from Gitea's own `/user`: whose
+    /// pull requests the adapter may not approve (#705).
+    pub async fn login(&self) -> String {
+        let me: serde_json::Value = reqwest::Client::new()
+            .get(format!("{}/api/v1/user", self.url))
+            .header("Authorization", format!("token {}", self.token))
+            .send()
+            .await
+            .expect("GET /user")
+            .json()
+            .await
+            .expect("a user record");
+        me["login"].as_str().expect("a login").to_owned()
+    }
+
     /// Scoped to the one seeded repository these assertions are written for.
     pub fn one_repo(&self) -> Box<dyn Source> {
         self.source(serde_json::json!({ "repos": [self.full_name()] }))

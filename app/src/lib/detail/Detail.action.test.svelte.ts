@@ -143,6 +143,7 @@ function overview(state: string, mergeable: boolean): SourceView {
         danger: false,
         disabled: mergeable ? null : "Already merged",
         with_settings: false,
+        values: {},
       },
     ],
   };
@@ -234,5 +235,52 @@ test("a write that could not be queued says why, keeps the dialog, and re-reads 
   expect(calls).toEqual(["get_entity", "entity_view null", "submit_write"]);
   dialogButton("Cancel").click();
   flushSync();
+  screen.done();
+});
+
+// -- the review actions (#705) ------------------------------------------------
+
+/** The pull request's toolbar with *Request changes…*: one op, its verdict fixed. */
+function reviewable(): SourceView {
+  return {
+    ...overview("open", true),
+    actions: [
+      {
+        write_op: "submit_review",
+        label: "Request changes…",
+        fields: [{ name: "body", label: "Comment", kind: { type: "long_text" }, value: null, required: true, placeholder: null }],
+        confirm: null,
+        primary: false,
+        danger: false,
+        disabled: null,
+        with_settings: false,
+        values: { verdict: "request_changes" },
+      },
+    ],
+  };
+}
+
+test("Request changes… queues SubmitReview with the fixed verdict and the words typed, then re-reads", async () => {
+  writeOps = ["comment", "approve", "merge_pull_request", "submit_review"];
+  views = [reviewable()];
+  const screen = render();
+  const button = () =>
+    [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find(
+      (b) => b.textContent!.trim() === "Request changes…",
+    );
+  await vi.waitFor(() => expect(button()).toBeDefined());
+  button()!.click();
+  flushSync();
+  const words = document.querySelector<HTMLTextAreaElement>("[role=dialog] textarea")!;
+  words.value = "Bound the jitter.";
+  words.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Request changes").click();
+
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+  expect(queued).toEqual([
+    { SubmitReview: { entity: ID, verdict: "request_changes", body: "Bound the jitter.", comments: [] } },
+  ]);
+  await vi.waitFor(() => expect(calls.filter((c) => c === "entity_view null")).toHaveLength(2));
   screen.done();
 });

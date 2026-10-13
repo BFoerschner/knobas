@@ -23,6 +23,8 @@ use crate::support::{InFlight, TOKEN, instance};
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const PR: &str = "gitea:tidewater/payout-service#142";
 const HEAD_SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
+/// The account the token belongs to: not the pull request's author.
+const VIEWER: &str = "knobas";
 const FIRST_SHA: &str = "7be0e4c1d2e3f405162738495a6b7c8d9e0f1a2b";
 
 /// What `git diff` printed for the pull request: two files added.
@@ -73,16 +75,24 @@ fn open_pull() -> Value {
 /// for changes stands.
 fn reviews() -> Value {
     json!([
-        { "id": 1, "user": { "login": "priya.nair" }, "state": "REQUEST_CHANGES" },
-        { "id": 2, "user": { "login": "jonas.becker" }, "state": "REQUEST_REVIEW" },
-        { "id": 3, "user": { "login": "priya.nair" }, "state": "APPROVED" },
-        { "id": 4, "user": { "login": "olu" }, "state": "APPROVED" },
-        { "id": 5, "user": { "login": "olu" }, "state": "COMMENT" },
-        { "id": 6, "user": { "login": "kai" }, "state": "PENDING" },
-        { "id": 7, "user": { "login": "rae" }, "state": "APPROVED" },
-        { "id": 8, "user": { "login": "rae" }, "state": "REQUEST_CHANGES", "dismissed": true },
-        { "id": 9, "user": { "login": "sam" }, "state": "COMMENT" },
-        { "id": 10, "user": { "login": "lee" }, "state": "REQUEST_CHANGES" }
+        { "id": 1, "user": { "login": "priya.nair" }, "state": "REQUEST_CHANGES",
+          "submitted_at": "2026-08-22T09:00:00Z", "body": "Bound the jitter." },
+        { "id": 2, "user": { "login": "jonas.becker" }, "state": "REQUEST_REVIEW", "body": "" },
+        { "id": 3, "user": { "login": "priya.nair" }, "state": "APPROVED",
+          "submitted_at": "2026-08-22T11:00:00Z", "body": "" },
+        { "id": 4, "user": { "login": "olu" }, "state": "APPROVED",
+          "submitted_at": "2026-08-22T11:05:00Z" },
+        { "id": 5, "user": { "login": "olu" }, "state": "COMMENT",
+          "submitted_at": "2026-08-22T11:10:00Z", "body": "nit: name it `jitter_bound`" },
+        { "id": 6, "user": { "login": "kai" }, "state": "PENDING", "body": "draft" },
+        { "id": 7, "user": { "login": "rae" }, "state": "APPROVED",
+          "submitted_at": "2026-08-22T08:00:00Z" },
+        { "id": 8, "user": { "login": "rae" }, "state": "REQUEST_CHANGES", "dismissed": true,
+          "submitted_at": "2026-08-22T08:30:00Z" },
+        { "id": 9, "user": { "login": "sam" }, "state": "COMMENT",
+          "submitted_at": "2026-08-22T10:00:00+02:00" },
+        { "id": 10, "user": { "login": "lee" }, "state": "REQUEST_CHANGES",
+          "submitted_at": "2026-08-22T12:00:00Z" }
     ])
 }
 
@@ -174,6 +184,16 @@ async fn slow_gitea(pull: Value, reviews: Value, flight: Option<&Arc<InFlight>>)
         )
         .mount(&server)
         .await;
+    // Who the token is: the review actions are disabled on its own pull
+    // requests (#705).
+    get("/api/v1/user".to_owned())
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "login": VIEWER }))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
     get(format!("{REPO}/pulls/142.diff"))
         .respond_with(
             ResponseTemplate::new(200)
@@ -237,7 +257,7 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
             ("overview", "Overview", None, false),
             ("files", "Files", Some(2), true),
             ("commits", "Commits", Some(2), false),
-            ("conversation", "Conversation", Some(2), false),
+            ("conversation", "Conversation", Some(10), false),
         ]
     );
 
@@ -332,12 +352,64 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
     assert_eq!(
         drawn,
         [
+            "rae=2026-08-22 08:00 +00:00 Review=approved",
+            // 10:00 at +02:00 is 08:00 UTC: ordered by the instant, drawn
+            // with the offset the server sent; a tie keeps Gitea's order.
+            "sam=2026-08-22 10:00 +02:00 Review=commented",
+            "rae=2026-08-22 08:30 +00:00 Review=changes requested, dismissed",
+            "priya.nair=2026-08-22 09:00 +00:00 Review=changes requested",
+            "text(true): Bound the jitter.",
             "jonas.becker=2026-08-22 09:30 +00:00",
             "text(true): Should the jitter be bounded? <i>+/-20 %</i> feels wide.",
             "mara.lindqvist=2026-08-22 10:20 +00:00",
             "text(true): Bounded to +/-10 % in c90d11.",
+            "priya.nair=2026-08-22 11:00 +00:00 Review=approved",
+            "olu=2026-08-22 11:05 +00:00 Review=approved",
+            "olu=2026-08-22 11:10 +00:00 Review=commented",
+            "text(true): nit: name it `jitter_bound`",
+            "lee=2026-08-22 12:00 +00:00 Review=changes requested",
+        ],
+        "reviews among the comments, in time order; a draft and a review request are not \
+         part of the conversation"
+    );
+}
+
+/// Workflow 6 of spec #701 (issue #705): a review's verdict is its tone in
+/// *Conversation* -- an approval ok, a request for changes warn, a plain
+/// comment none, a dismissed one muted whatever it said.
+#[tokio::test]
+async fn a_reviews_verdict_is_its_tone_in_the_conversation() {
+    let server = gitea(open_pull(), reviews()).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    let verdicts: Vec<_> = section(&view, "conversation")
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            Block::Facts { facts } => facts.iter().find(|f| f.label == "Review"),
+            _ => None,
+        })
+        .map(|f| (f.value.as_str(), f.tone))
+        .collect();
+    assert_eq!(
+        verdicts,
+        [
+            ("approved", Some(Tone::Ok)),
+            ("commented", None),
+            ("changes requested, dismissed", Some(Tone::Muted)),
+            ("changes requested", Some(Tone::Warn)),
+            ("approved", Some(Tone::Ok)),
+            ("approved", Some(Tone::Ok)),
+            ("commented", None),
+            ("changes requested", Some(Tone::Warn)),
         ]
     );
+    // The tab read on its own reads the reviews too.
+    let alone = source(&server)
+        .view(PR, Some("conversation"))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(alone.sections[0], *section(&view, "conversation"));
 }
 
 /// The deferred *Files* tab, read on its own: exactly that section, from the
@@ -540,6 +612,42 @@ fn has_actions_block(view: &SourceView) -> bool {
         .any(|b| matches!(b, Block::Actions { .. }))
 }
 
+/// The toolbar's action for `write_op` -- found by op rather than by place,
+/// so the order the toolbar grows in (#705-#708) does not move these tests.
+fn action(view: &SourceView, write_op: &str) -> ViewAction {
+    no_fixed_value_is_a_field(view);
+    view.actions
+        .iter()
+        .find(|a| a.write_op == write_op)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {write_op} in the toolbar: {view:#?}"))
+}
+
+/// The toolbar's action labelled `label`: two actions share `submit_review`.
+fn labelled(view: &SourceView, label: &str) -> ViewAction {
+    no_fixed_value_is_a_field(view);
+    view.actions
+        .iter()
+        .find(|a| a.label == label)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {label} in the toolbar: {view:#?}"))
+}
+
+/// A fixed value is never also a field (the #705 ruling): the reader could
+/// otherwise type over what the source fixed, and which wins would be the
+/// shell's guess.
+fn no_fixed_value_is_a_field(view: &SourceView) {
+    for action in &view.actions {
+        for name in action.values.keys() {
+            assert!(
+                !action.fields.iter().any(|f| &f.name == name),
+                "{}: {name:?} is both fixed and asked for",
+                action.label
+            );
+        }
+    }
+}
+
 /// *Merge…* as the toolbar draws it: the entity's main write, a choice of the
 /// SPI's three styles with `merge` (Gitea's own default) first, the sentence
 /// naming what goes where; `disabled` is the one part that varies.
@@ -574,7 +682,11 @@ async fn an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar() {
     pull["mergeable"] = json!(true);
     let server = gitea(pull, json!([])).await;
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
-    assert_eq!(view.actions, [merge(None)], "{view:#?}");
+    assert_eq!(
+        action(&view, "merge_pull_request"),
+        merge(None),
+        "{view:#?}"
+    );
     assert!(!has_actions_block(&view), "{view:#?}");
     // The description still follows the facts.
     assert!(matches!(
@@ -582,7 +694,7 @@ async fn an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar() {
         Block::Text { .. }
     ));
     // Every style offered is one the SPI can carry.
-    let FieldKind::Choice { options } = &view.actions[0].fields[0].kind else {
+    let FieldKind::Choice { options } = &action(&view, "merge_pull_request").fields[0].kind else {
         unreachable!()
     };
     for option in options {
@@ -619,7 +731,11 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
-        assert_eq!(view.actions, [merge(Some(reason))], "{view:#?}");
+        assert_eq!(
+            action(&view, "merge_pull_request"),
+            merge(Some(reason)),
+            "{view:#?}"
+        );
         assert!(!has_actions_block(&view), "{view:#?}");
     }
 }
@@ -640,8 +756,8 @@ async fn a_section_read_carries_no_toolbar() {
 }
 
 /// A pull request's tabs are read side by side over its one record (#703):
-/// once the record is in, the overview's reviews, the commits and the
-/// conversation are in flight together. Read in turn, one is.
+/// once the record is in, the reviews, the commits, the comments and who the
+/// token is (#705) are in flight together. Read in turn, one is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     let flight = InFlight::new(Duration::from_millis(300));
@@ -652,5 +768,152 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 3, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 4, "the tabs' reads in flight at once");
+}
+
+// -- Comment… and the review actions (issue #705) ----------------------------
+
+/// *Comment…* as the toolbar draws it: a reply on the discussion, through the
+/// existing `comment` op, one required long text and nothing to confirm.
+fn comment_action() -> ViewAction {
+    ViewAction {
+        fields: vec![ActionField {
+            required: true,
+            ..ActionField::new("body", "Comment", FieldKind::LongText)
+        }],
+        ..ViewAction::new("comment", "Comment…")
+    }
+}
+
+/// Workflow 7 of spec #701: a pull request offers *Comment…* in its toolbar,
+/// whatever its state -- Gitea takes a reply on a closed or merged one too.
+#[tokio::test]
+async fn a_pull_request_offers_a_comment_in_its_toolbar_in_any_state() {
+    let mut merged = open_pull();
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    for pull in [open_pull(), closed, merged] {
+        let server = gitea(pull, json!([])).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(action(&view, "comment"), comment_action(), "{view:#?}");
+    }
+}
+
+/// *Approve…* and *Request changes…* as the toolbar draws them (the #705
+/// ruling: one action per verdict, the verdict a fixed value): an approval's
+/// words optional, a request for changes' required, as Gitea's own rule is.
+fn review_action(verdict: &str, disabled: Option<&str>) -> ViewAction {
+    let (label, required) = match verdict {
+        "approve" => ("Approve…", false),
+        _ => ("Request changes…", true),
+    };
+    ViewAction {
+        fields: vec![ActionField {
+            required,
+            ..ActionField::new("body", "Comment", FieldKind::LongText)
+        }],
+        disabled: disabled.map(str::to_owned),
+        values: [("verdict".to_owned(), verdict.to_owned())].into(),
+        ..ViewAction::new("submit_review", label)
+    }
+}
+
+/// Workflow 6 of spec #701: an open pull request somebody else opened offers
+/// *Approve…* and *Request changes…*, after *Merge…* and *Comment…*.
+#[tokio::test]
+async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
+    let server = gitea(open_pull(), json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(labelled(&view, "Approve…"), review_action("approve", None));
+    assert_eq!(
+        labelled(&view, "Request changes…"),
+        review_action("request_changes", None)
+    );
+    let ops: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
+    assert_eq!(
+        ops,
+        ["Merge…", "Comment…", "Approve…", "Request changes…"],
+        "{view:#?}"
+    );
+}
+
+/// Gitea refuses its author's approval and request for changes (*approve your
+/// own pull is not allowed*, *reject your own pull is not allowed*) and any
+/// review of a closed or merged pull request (*can't submit review for a
+/// closed or merged PR*), all 422s against the real server. So the actions
+/// are drawn disabled, saying why; *Comment…* stays.
+#[tokio::test]
+async fn a_review_gitea_would_refuse_is_drawn_disabled_saying_why() {
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    let mut merged = open_pull();
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    merged["user"]["login"] = json!(VIEWER);
+    for (pull, approve, request) in [
+        (
+            own,
+            "You opened this pull request: Gitea does not let its author approve it",
+            "You opened this pull request: Gitea does not let its author request changes",
+        ),
+        (
+            closed,
+            "Closed: Gitea takes no review on a closed pull request",
+            "Closed: Gitea takes no review on a closed pull request",
+        ),
+        (
+            merged,
+            "Already merged: Gitea takes no review on a merged pull request",
+            "Already merged: Gitea takes no review on a merged pull request",
+        ),
+    ] {
+        let server = gitea(pull, json!([])).await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            labelled(&view, "Approve…"),
+            review_action("approve", Some(approve))
+        );
+        assert_eq!(
+            labelled(&view, "Request changes…"),
+            review_action("request_changes", Some(request))
+        );
+        assert_eq!(action(&view, "comment").disabled, None);
+    }
+}
+
+/// Who the token is, is a read of its own, and a failed one does not cost the
+/// view: the review actions are drawn enabled and Gitea's refusal, should it
+/// come, is the write queue's to show (ADR-0004).
+#[tokio::test]
+async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
+    let server = MockServer::start().await;
+    let token = format!("token {TOKEN}");
+    let get = |p: String| {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .and(header("Authorization", token.as_str()))
+    };
+    let mut own = open_pull();
+    own["user"]["login"] = json!(VIEWER);
+    for (p, body) in [
+        (format!("{REPO}/pulls/142"), own),
+        (format!("{REPO}/pulls/142/reviews"), json!([])),
+        (format!("{REPO}/pulls/142/commits"), json!([])),
+        (format!("{REPO}/issues/142/comments"), json!([])),
+    ] {
+        get(p)
+            .respond_with(ResponseTemplate::new(200).set_body_json(body))
+            .mount(&server)
+            .await;
+    }
+    get("/api/v1/user".to_owned())
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({ "message": "gone" })))
+        .mount(&server)
+        .await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(labelled(&view, "Approve…"), review_action("approve", None));
 }

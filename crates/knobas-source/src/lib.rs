@@ -403,6 +403,7 @@ impl SourceError {
 /// | [`MergePullRequest`](Self::MergePullRequest) | `"merge_pull_request"` | source views (Gitea, #667) |
 /// | [`SetParameter`](Self::SetParameter) | `"set_parameter"` | source views (TeamCity, #668) |
 /// | [`RunBuild`](Self::RunBuild) | `"run_build"` | source views (TeamCity, #669) |
+/// | [`SubmitReview`](Self::SubmitReview) | `"submit_review"` | git workstation (Gitea, #705) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -706,6 +707,67 @@ pub enum WriteOp {
         branch: Option<String>,
         parameters: Vec<BuildParameter>,
     },
+    /// Identifier `"submit_review"`. Review a pull request: approve it,
+    /// request changes, or only comment, with a body and line comments (spec
+    /// #701 workflow 6, issue #705). `entity` is the **pull request**.
+    ///
+    /// [`Approve`](WriteOp::Approve) stays as the inbox's one-click sign-off;
+    /// this is the review a reader writes from the pull request's view.
+    /// `body` may be empty where the source allows it (an approval with no
+    /// words); a source that wants words for a verdict refuses with its own
+    /// sentence. `comments` are the line comments that go with the review,
+    /// empty for a review of the whole change (#709 fills them); absent on
+    /// the wire reads as empty.
+    ///
+    /// Whether the reader may give the verdict -- Gitea refuses an approval or
+    /// a request for changes from the pull request's own author -- is the
+    /// source's answer, drawn on the view's action as its `disabled` reason
+    /// and, where it changed between the offer and the flush, a refusal with
+    /// the source's sentence (ADR-0004).
+    ///
+    /// Hold detection takes the whole mirrored record, as for `Approve`: a
+    /// review is a judgement on one state of the pull request.
+    SubmitReview {
+        entity: String,
+        verdict: ReviewVerdict,
+        body: String,
+        #[serde(default)]
+        comments: Vec<ReviewComment>,
+    },
+}
+
+/// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
+/// Serialized as the snake_case word (`"request_changes"`); each adapter
+/// spells it its own way (Gitea's `event`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewVerdict {
+    /// The change may land.
+    Approve,
+    /// The change must change before it lands.
+    RequestChanges,
+    /// Words, and no verdict.
+    Comment,
+}
+
+/// One line comment of a [`SubmitReview`](WriteOp::SubmitReview): the file's
+/// path in the change, the line number on `side`, and what it says.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct ReviewComment {
+    pub path: String,
+    pub line: u64,
+    pub side: ReviewSide,
+    pub body: String,
+}
+
+/// Which side of a diff a [`ReviewComment`]'s `line` counts on: the file as it
+/// was (`old`, a removed or unchanged line's old number) or as it becomes
+/// (`new`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReviewSide {
+    Old,
+    New,
 }
 
 /// One parameter of a [`RunBuild`](WriteOp::RunBuild): its full name
@@ -811,6 +873,7 @@ impl WriteOp {
             WriteOp::MergePullRequest { .. } => "merge_pull_request",
             WriteOp::SetParameter { .. } => "set_parameter",
             WriteOp::RunBuild { .. } => "run_build",
+            WriteOp::SubmitReview { .. } => "submit_review",
         }
     }
 }
@@ -1234,6 +1297,17 @@ mod tests {
                     value: "9".into(),
                 }],
             },
+            WriteOp::SubmitReview {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                verdict: ReviewVerdict::RequestChanges,
+                body: "the jitter is unbounded".into(),
+                comments: vec![ReviewComment {
+                    path: "src/retry.rs".into(),
+                    line: 12,
+                    side: ReviewSide::New,
+                    body: "bound this".into(),
+                }],
+            },
         ];
         for op in &probes {
             match op {
@@ -1253,7 +1327,8 @@ mod tests {
                 | WriteOp::CreateMonitor { .. }
                 | WriteOp::MergePullRequest { .. }
                 | WriteOp::SetParameter { .. }
-                | WriteOp::RunBuild { .. } => {}
+                | WriteOp::RunBuild { .. }
+                | WriteOp::SubmitReview { .. } => {}
             }
         }
         probes
@@ -1355,6 +1430,56 @@ mod tests {
         );
     }
 
+    /// A review's wire shape (issue #705), pinned: the frontend builds it by
+    /// hand (`app/src/lib/detail/view/actions.ts`). The verdict and a line
+    /// comment's side are snake_case words, and a payload sent without
+    /// `comments` -- every review before #709 -- decodes as one with none.
+    #[test]
+    fn a_review_crosses_as_its_verdict_body_and_line_comments() {
+        for (verdict, word) in [
+            (ReviewVerdict::Approve, "approve"),
+            (ReviewVerdict::RequestChanges, "request_changes"),
+            (ReviewVerdict::Comment, "comment"),
+        ] {
+            let op = WriteOp::SubmitReview {
+                entity: "gitea:o/r#1".into(),
+                verdict,
+                body: "b".into(),
+                comments: vec![ReviewComment {
+                    path: "a.rs".into(),
+                    line: 3,
+                    side: ReviewSide::Old,
+                    body: "c".into(),
+                }],
+            };
+            assert_eq!(
+                serde_json::to_value(&op).unwrap(),
+                serde_json::json!({ "SubmitReview": {
+                    "entity": "gitea:o/r#1",
+                    "verdict": word,
+                    "body": "b",
+                    "comments": [{ "path": "a.rs", "line": 3, "side": "old", "body": "c" }]
+                } })
+            );
+        }
+        let back: WriteOp = serde_json::from_value(serde_json::json!({ "SubmitReview": {
+            "entity": "gitea:o/r#1", "verdict": "approve", "body": ""
+        } }))
+        .unwrap();
+        assert!(
+            matches!(&back, WriteOp::SubmitReview { verdict: ReviewVerdict::Approve, comments, .. }
+                if comments.is_empty()),
+            "{back:?}"
+        );
+        let odd = serde_json::from_value::<WriteOp>(serde_json::json!({ "SubmitReview": {
+            "entity": "gitea:o/r#1", "verdict": "APPROVED", "body": ""
+        } }));
+        assert!(
+            odd.is_err(),
+            "Gitea's spelling is the adapter's, not the SPI's: {odd:?}"
+        );
+    }
+
     /// The identifier is what a descriptor lists, what the queue stores in its
     /// `op` column and what hold detection dispatches on. Two variants sharing
     /// one would make a descriptor's declaration ambiguous and a queued row
@@ -1373,7 +1498,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 17, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 18, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

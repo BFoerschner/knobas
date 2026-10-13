@@ -713,19 +713,37 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
         assert!(titles.contains(&message), "{id}: {message:?} in {titles:?}");
     }
 
-    // Conversation.
+    // Conversation: the comments and, since #705, the reviews among them,
+    // each its author's facts (a review's with its verdict) and then its text.
     let conversation = &view.sections[3].blocks;
-    let said: Vec<(String, String)> = conversation
-        .chunks(2)
-        .map(|pair| match pair {
-            [Block::Facts { facts }, Block::Text { text, .. }] => {
-                (facts[0].label.clone(), text.clone())
+    let mut entries: Vec<(String, Option<String>, String)> = Vec::new();
+    for block in conversation {
+        match block {
+            Block::Facts { facts } => entries.push((
+                facts[0].label.clone(),
+                facts
+                    .iter()
+                    .find(|f| f.label == "Review")
+                    .map(|f| f.value.clone()),
+                String::new(),
+            )),
+            Block::Text { text, .. } => {
+                let last = entries
+                    .last_mut()
+                    .unwrap_or_else(|| panic!("{id}: text before its author: {conversation:#?}"));
+                assert!(last.2.is_empty(), "{id}: two texts for one entry");
+                last.2.clone_from(text);
             }
-            other => panic!("{id}: a comment is its author and then its text: {other:#?}"),
-        })
+            other => panic!("{id}: a conversation is facts and text: {other:#?}"),
+        }
+    }
+    let said: Vec<(String, String)> = entries
+        .iter()
+        .filter(|(_, verdict, _)| verdict.is_none())
+        .map(|(who, _, text)| (who.clone(), text.clone()))
         .collect();
-    for (who, text) in &said {
-        println!("  comment: {who}: {text}");
+    for (who, verdict, text) in &entries {
+        println!("  said: {who} {verdict:?}: {text}");
     }
     let bodies: Vec<String> = get(format!("issues/{number}/comments"))
         .await
@@ -737,7 +755,29 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
     assert_eq!(
         said.iter().map(|(_, t)| t.clone()).collect::<Vec<_>>(),
         bodies,
-        "{id}: the conversation is the server's, in order"
+        "{id}: the comments are the server's, in order"
+    );
+    let reviews: Vec<(String, String)> = get(format!("pulls/{number}/reviews"))
+        .await
+        .as_array()
+        .expect("a review listing")
+        .iter()
+        .filter(|r| !matches!(r["state"].as_str(), Some("PENDING" | "REQUEST_REVIEW")))
+        .map(|r| {
+            (
+                r["user"]["login"].as_str().unwrap_or_default().to_owned(),
+                r["body"].as_str().unwrap_or_default().trim_end().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        entries
+            .iter()
+            .filter(|(_, verdict, _)| verdict.is_some())
+            .map(|(who, _, text)| (who.clone(), text.clone()))
+            .collect::<Vec<_>>(),
+        reviews,
+        "{id}: the reviews are the server's, in order, among the comments (#705)"
     );
     let expected: Vec<(String, String)> = pr["comments"]
         .as_array()
@@ -2595,4 +2635,232 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         "the merge reached the default branch, which no cleanup takes back"
     );
     println!("merged #{number} ({head} into {base}) from its view; the next sync read it merged");
+}
+
+// -- comment and review from the pull request's view (issue #705) ------------
+
+/// What a view's *Conversation* and overview say, as lines: each facts block
+/// as `label=value` pairs, each text as its text.
+fn said(view: &knobas_source::view::SourceView, section: &str) -> Vec<String> {
+    use knobas_source::view::Block;
+    let section = view
+        .sections
+        .iter()
+        .find(|s| s.id == section)
+        .unwrap_or_else(|| panic!("no {section} in {view:#?}"));
+    section
+        .blocks
+        .iter()
+        .flat_map(|b| match b {
+            Block::Facts { facts } => facts
+                .iter()
+                .map(|f| format!("{}={}", f.label, f.value))
+                .collect(),
+            Block::Text { text, .. } => vec![text.clone()],
+            _ => vec![],
+        })
+        .collect()
+}
+
+/// The toolbar action labelled `label`.
+fn toolbar(view: &knobas_source::view::SourceView, label: &str) -> knobas_source::view::ViewAction {
+    view.actions
+        .iter()
+        .find(|a| a.label == label)
+        .cloned()
+        .unwrap_or_else(|| panic!("no {label} in the toolbar: {:#?}", view.actions))
+}
+
+/// Workflows 6 and 7 of spec #701, against the real server: on a pull request
+/// somebody else opened, the toolbar offers *Comment…*, *Approve…* and
+/// *Request changes…*; the adapter's `comment` and `submit_review` -- the
+/// calls the write queue's flush makes -- comment, request changes and
+/// approve; and the view, read again, shows each in *Conversation* and the
+/// standing verdict on the overview. On the token's own pull request the two
+/// verdicts are drawn disabled, and Gitea refuses them with its sentence.
+///
+/// Never a seeded pull request: both are opened here on `knobas-` branches of
+/// their own, and [`Litter`] deletes them, their reviews and the branches
+/// whether this passes or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
+    use knobas_source::{ReviewVerdict, WriteOp};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-review-{stamp}");
+    litter.branch_off_main(&branch).await;
+    let theirs = litter
+        .open_pull_as(
+            "jonas.becker",
+            &branch,
+            &format!("knobas review check {stamp}"),
+        )
+        .await;
+    let id = format!("gitea:{}#{theirs}", env.full_name());
+    let view = || async {
+        source
+            .view(&id, None)
+            .await
+            .expect("the view reads")
+            .expect("Gitea draws a pull request")
+    };
+
+    // 1. Somebody else's open pull request: all three offered, enabled.
+    let before = view().await;
+    for label in ["Comment…", "Approve…", "Request changes…"] {
+        let action = toolbar(&before, label);
+        assert_eq!(action.disabled, None, "{action:?}");
+    }
+    assert_eq!(
+        toolbar(&before, "Approve…")
+            .values
+            .get("verdict")
+            .map(String::as_str),
+        Some("approve")
+    );
+
+    // 2. A comment, then a request for changes, then an approval -- each read
+    //    back from the view.
+    let note = format!("a reply from the knobas toolbar, {stamp}");
+    source
+        .write(WriteOp::Comment {
+            entity: id.clone(),
+            body: note.clone(),
+        })
+        .await
+        .expect("the adapter comments");
+    let conversation = said(&view().await, "conversation");
+    assert!(conversation.contains(&note), "{conversation:#?}");
+
+    // Gitea keeps these times to the second, and *Conversation* orders by
+    // them: two things said within one second are a tie, which keeps Gitea's
+    // order of the two lists (reviews first) rather than the order they were
+    // written in. A reader does not write twice a second; this test would.
+    let next_second = || tokio::time::sleep(std::time::Duration::from_millis(1100));
+    next_second().await;
+    let words = format!("bound the jitter, {stamp}");
+    source
+        .write(WriteOp::SubmitReview {
+            entity: id.clone(),
+            verdict: ReviewVerdict::RequestChanges,
+            body: words.clone(),
+            comments: vec![],
+        })
+        .await
+        .expect("Gitea takes a request for changes from somebody else");
+    let after = view().await;
+    let conversation = said(&after, "conversation");
+    let at = conversation
+        .iter()
+        .position(|l| l == &words)
+        .unwrap_or_else(|| panic!("the review's words are not in Conversation: {conversation:#?}"));
+    assert_eq!(
+        conversation[at - 1],
+        "Review=changes requested",
+        "{conversation:#?}"
+    );
+    assert!(
+        said(&after, "overview").contains(&format!(
+            "Review=changes requested by {}",
+            env.login().await
+        )),
+        "{:#?}",
+        said(&after, "overview")
+    );
+
+    next_second().await;
+    source
+        .write(WriteOp::SubmitReview {
+            entity: id.clone(),
+            verdict: ReviewVerdict::Approve,
+            body: String::new(),
+            comments: vec![],
+        })
+        .await
+        .expect("Gitea takes an approval with no words from somebody else");
+    let after = view().await;
+    let conversation = said(&after, "conversation");
+    assert_eq!(
+        conversation.last().map(String::as_str),
+        Some("Review=approved"),
+        "the approval is the newest thing said: {conversation:#?}"
+    );
+    assert!(
+        said(&after, "overview").contains(&format!("Review=approved by {}", env.login().await)),
+        "the latest verdict is the standing one: {:#?}",
+        said(&after, "overview")
+    );
+    // Gitea marks a reviewer's earlier verdict dismissed when they give a new
+    // one, and the view says what the server says.
+    assert!(
+        conversation.contains(&"Review=changes requested, dismissed".to_owned()),
+        "{conversation:#?}"
+    );
+    let recorded = litter.reviews(theirs).await;
+    assert_eq!(
+        recorded.iter().map(|(s, _)| s.as_str()).collect::<Vec<_>>(),
+        ["REQUEST_CHANGES", "APPROVED"],
+        "{recorded:?}"
+    );
+
+    // 3. The token's own pull request: the verdicts are drawn disabled, and
+    //    Gitea refuses them with its own sentence when sent anyway.
+    let own_branch = format!("knobas-review-{stamp}-own");
+    litter.branch_off_main(&own_branch).await;
+    let me = env.login().await;
+    let own = litter
+        .open_pull_as(
+            &me,
+            &own_branch,
+            &format!("knobas own review check {stamp}"),
+        )
+        .await;
+    let own_id = format!("gitea:{}#{own}", env.full_name());
+    let own_view = source.view(&own_id, None).await.unwrap().unwrap();
+    assert_eq!(toolbar(&own_view, "Comment…").disabled, None);
+    for (label, verdict, sentence) in [
+        (
+            "Approve…",
+            ReviewVerdict::Approve,
+            "approve your own pull is not allowed",
+        ),
+        (
+            "Request changes…",
+            ReviewVerdict::RequestChanges,
+            "reject your own pull is not allowed",
+        ),
+    ] {
+        let action = toolbar(&own_view, label);
+        assert!(
+            action
+                .disabled
+                .as_deref()
+                .is_some_and(|r| r.starts_with("You opened this pull request")),
+            "{action:?}"
+        );
+        let refused = source
+            .write(WriteOp::SubmitReview {
+                entity: own_id.clone(),
+                verdict,
+                body: "my own".to_owned(),
+                comments: vec![],
+            })
+            .await;
+        let Err(error) = &refused else {
+            panic!("Gitea took {label} on the author's own pull request");
+        };
+        assert_eq!(error.status(), Some(422), "{error:?}");
+        assert!(
+            matches!(error, SourceError::Protocol { message: m, .. } if m.contains(sentence)),
+            "{error:?}"
+        );
+    }
+    println!("commented, requested changes and approved #{theirs} from its view; #{own} refused");
 }

@@ -838,6 +838,12 @@ export interface ViewAction {
   disabled: string | null;
   /** The dialog also offers this entity's own settings to change for this one write (#669). */
   with_settings: boolean;
+  /**
+   * Answers the source fixes, by name: never drawn, handed to the payload
+   * table under the dialog's values (#705). One op as two actions
+   * (`submit_review`'s *Approve…* and *Request changes…*, by `verdict`).
+   */
+  values: Record<string, string>;
 }
 
 /** One input of an action's dialog — `knobas_source::view::ActionField`. */
