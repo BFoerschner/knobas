@@ -21,6 +21,7 @@
 -->
 <script lang="ts">
   import type { EntityRow, MiniBoard } from "../ipc/entity";
+  import { prefetch } from "../detail/prefetch";
   import type { MiniBoardLayout } from "./contexts";
 
   let {
@@ -60,7 +61,7 @@
     <div class="col">
       <div class="col-h">
         <span>{column.status ?? NO_STATUS}</span>
-        <span>{column.cards.length}</span>
+        <span>{column.total}</span>
       </div>
       <div class="tile-b">
         {#each column.cards as card (card.entity_id)}
@@ -68,7 +69,11 @@
             Everything below is text: a key, a priority and a title are all
             whatever somebody typed into a ticket (roadmap §4 gotcha 7).
           -->
-          <button class="card" onclick={() => onopen({ kind: KIND, entity_id: card.entity_id })}>
+          <button
+            class="card"
+            use:prefetch={{ entityId: card.entity_id, kind: KIND }}
+            onclick={() => onopen({ kind: KIND, entity_id: card.entity_id })}
+          >
             <span class="k">
               <span class="mono">{card.key}</span>
               {#if card.priority}<span class="pr">{card.priority}</span>{/if}
@@ -76,6 +81,10 @@
             <span class="s">{card.title}</span>
           </button>
         {/each}
+        {#if column.total > column.cards.length}
+          <!-- The newest are drawn (#753); the header counts them all. -->
+          <p class="more">{column.total - column.cards.length} more</p>
+        {/if}
       </div>
     </div>
   {/each}

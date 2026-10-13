@@ -785,3 +785,88 @@ async fn the_status_select_still_offers_the_whole_sources_corpus() {
         "a room with nothing finished can still move a ticket to Done"
     );
 }
+
+/// **A capped board draws each column's newest cards and counts them all**
+/// (#753). The All room of a mirror with 15,000 tickets answered 2 MB and drew
+/// every card; the tile asks for the newest `per_column` of each column, and
+/// the column's `total` is what its header says. Three columns of different
+/// depths, so a cap applied to the board rather than per column, or a total
+/// counted after the cut, gives a different answer than this one.
+#[tokio::test]
+async fn a_capped_board_keeps_each_columns_newest_cards_and_counts_them_all() {
+    let pool = scratch().await;
+    for n in 0..5 {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some("To Do"), None).await;
+        touched(&pool, &id, &format!("2026-10-0{}T09:00:00Z", n + 1)).await;
+    }
+    ticket(&pool, "PAY-10", Some("In Progress"), None).await;
+    for n in 20..23 {
+        let id = ticket(&pool, &format!("PAY-{n}"), Some("Done"), None).await;
+        touched(&pool, &id, &format!("2026-09-0{}T09:00:00Z", n - 19)).await;
+    }
+
+    let board = mini_board::read_capped(&pool, None, &[], None, &declarations(), Some(2))
+        .await
+        .unwrap();
+    let shape: Vec<(Option<&str>, Vec<&str>, u32)> = board
+        .columns
+        .iter()
+        .map(|c| {
+            (
+                c.status.as_deref(),
+                c.cards.iter().map(|card| card.key.as_str()).collect(),
+                c.total,
+            )
+        })
+        .collect();
+    assert_eq!(
+        shape,
+        vec![
+            (Some("To Do"), vec!["PAY-4", "PAY-3"], 5),
+            (Some("In Progress"), vec!["PAY-10"], 1),
+            (Some("Done"), vec!["PAY-22", "PAY-21"], 3),
+        ]
+    );
+
+    // Uncapped, it is the board it always was: every card, and the total is
+    // the count of them.
+    let whole = mini_board::read(&pool, None, &[], None, &declarations())
+        .await
+        .unwrap();
+    for column in &whole.columns {
+        assert_eq!(column.total as usize, column.cards.len());
+    }
+    assert_eq!(whole.columns[0].cards.len(), 5);
+}
+
+/// **The board's statements are planned for their parameters every time**
+/// (#753). Kept as prepared statements, PostgreSQL moved them to a generic
+/// plan on their sixth execution, and an All room of 15,000 tickets went from
+/// 0.25 s to 6.6 s, every time after. What is pinned is the mechanism: after
+/// eight board reads on one connection, that connection holds no prepared
+/// statement of the board's.
+#[tokio::test]
+async fn the_boards_statements_are_never_kept_as_prepared_statements() {
+    let connector = knobas_db::test_util::scratch_database("mini_board").await;
+    let pool = connector.pool(1).await.expect("a one-connection pool");
+    ticket(&pool, "PAY-1", Some("To Do"), None).await;
+    for _ in 0..8 {
+        mini_board::read_capped(&pool, None, &[], None, &declarations(), Some(50))
+            .await
+            .unwrap();
+        mini_board::read(&pool, None, &[SOURCE.to_owned()], None, &declarations())
+            .await
+            .unwrap();
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "select count(*) from pg_prepared_statements where statement like '%status_paths%'",
+    )
+    .persistent(false)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept, 0,
+        "a board statement was kept, and goes generic on its sixth run"
+    );
+}

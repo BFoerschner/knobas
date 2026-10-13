@@ -199,6 +199,8 @@ a{color:var(--link);text-decoration:none}
 .board.columns{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(150px,1fr);overflow-x:auto}
 .col{background:var(--bg);min-width:0;display:flex;flex-direction:column}
 .col-h{display:flex;justify-content:space-between;align-items:center;height:22px;padding:0 8px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border-bottom:1px solid var(--hair)}
+/* A capped mini board column's foot (#753): how many of its tickets are not drawn. */
+.col .more{margin:0;padding:6px 8px;font:10px var(--mono);color:var(--faint)}
 .card{display:block;width:100%;text-align:left;padding:6px 8px;border-bottom:1px solid var(--hair);cursor:pointer;font-size:12px}
 .card:hover{background:var(--panel)}
 .card.sel{background:var(--raised)}

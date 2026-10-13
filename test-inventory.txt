@@ -685,6 +685,7 @@ knobas-app	test/it	protocol_ipc::publishing_a_date_twice_queues_one_page
 knobas-app	test/it	protocol_ipc::publishing_creates_the_page_and_links_it_both_ways
 knobas-app	test/it	protocol_ipc::publishing_with_no_target_refuses_rather_than_guessing
 knobas-app	test/it	protocol_ipc::the_stored_target_is_what_the_next_publish_uses
+knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on
 knobas-app	test/it	search_ipc::a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure
 knobas-app	test/it	search_ipc::a_property_value_and_a_url_are_what_a_reader_types
 knobas-app	test/it	search_ipc::a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither
@@ -1136,6 +1137,7 @@ knobas-core	test/it	inbox::the_five_existing_categories_are_untouched_by_the_six
 knobas-core	test/it	inbox::with_no_identity_only_the_rule_that_needs_none_produces_anything
 knobas-core	test/it	link_reads::only_the_exempt_modules_read_the_base_table
 knobas-core	test/it	link_reads::the_rule_actually_rejects_a_read_of_the_base_table
+knobas-core	test/it	mini_board::a_capped_board_keeps_each_columns_newest_cards_and_counts_them_all
 knobas-core	test/it	mini_board::a_derived_room_scopes_by_its_sources_and_all_work_by_nothing
 knobas-core	test/it	mini_board::a_disabled_sources_ticket_is_off_a_project_rooms_board
 knobas-core	test/it	mini_board::a_project_room_draws_only_that_projects_tickets
@@ -1147,6 +1149,7 @@ knobas-core	test/it	mini_board::an_unknown_or_empty_context_is_an_empty_board
 knobas-core	test/it	mini_board::cards_in_a_column_come_newest_first
 knobas-core	test/it	mini_board::identically_spelled_statuses_from_two_sources_share_a_column
 knobas-core	test/it	mini_board::only_the_contexts_live_ticket_members_are_on_a_stored_rooms_board
+knobas-core	test/it	mini_board::the_boards_statements_are_never_kept_as_prepared_statements
 knobas-core	test/it	mini_board::the_columns_are_the_observed_statuses_with_the_four_leading
 knobas-core	test/it	mini_board::the_mock_sources_flat_spelling_reads_as_well_as_jiras
 knobas-core	test/it	mini_board::the_offered_statuses_are_the_sources_corpus_not_the_rooms_columns

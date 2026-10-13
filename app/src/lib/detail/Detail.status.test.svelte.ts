@@ -123,8 +123,8 @@ const { kindRegistry } = await import("../shell/kind-registry.svelte");
  */
 const BOARD: MiniBoard = {
   columns: [
-    { status: "To Do", cards: [card("PAY-240")] },
-    { status: "In Progress", cards: [card("PAY-231")] },
+    { status: "To Do", cards: [card("PAY-240")], total: 1 },
+    { status: "In Progress", cards: [card("PAY-231")], total: 1 },
   ],
   sources: [{ source_id: "mock", statuses: ["To Do", "In Progress", "In Review", "Done"] }],
 };
@@ -397,8 +397,8 @@ test("a ticket in the terminal group shows No status, unselectable, and can stil
   board = () =>
     Promise.resolve({
       columns: [
-        { status: "To Do", cards: [card("PAY-240")] },
-        { status: null, cards: [card("PAY-231")] },
+        { status: "To Do", cards: [card("PAY-240")], total: 1 },
+        { status: null, cards: [card("PAY-231")], total: 1 },
       ],
       sources: [{ source_id: "mock", statuses: ["To Do"] }],
     });
@@ -455,7 +455,7 @@ test("opening another ticket never leaves the previous one's status on screen", 
   expect(screen.select(), "the previous ticket's select is still on screen").toBeNull();
 
   land({
-    columns: [{ status: "To Do", cards: [card("PAY-240")] }],
+    columns: [{ status: "To Do", cards: [card("PAY-240")], total: 1 }],
     sources: [{ source_id: "mock", statuses: ["To Do", "In Progress"] }],
   });
   await vi.waitFor(() => expect(screen.select()).not.toBeNull());
@@ -495,7 +495,7 @@ test("a slow board answer from the previous ticket is discarded, not shown", asy
   await vi.waitFor(() => expect(boardCalls).toHaveLength(2));
 
   second({
-    columns: [{ status: "To Do", cards: [card("PAY-240")] }],
+    columns: [{ status: "To Do", cards: [card("PAY-240")], total: 1 }],
     sources: [{ source_id: "mock", statuses: ["To Do", "In Progress"] }],
   });
   await vi.waitFor(() => expect(screen.select()?.value).toBe("To Do"));

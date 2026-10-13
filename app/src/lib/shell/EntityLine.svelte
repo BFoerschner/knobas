@@ -16,6 +16,7 @@
 -->
 <script lang="ts">
   import type { EntityRow } from "../ipc/entity";
+  import { prefetch } from "../detail/prefetch";
   import Monogram from "./Monogram.svelte";
   import StateChip from "./StateChip.svelte";
   import { kindRegistry } from "./kind-registry.svelte";
@@ -65,7 +66,14 @@
   );
 </script>
 
-<button class="row" class:g5w={showSource} class:g4w={!showSource} title={provenance} onclick={() => onopen(row)}>
+<button
+  class="row"
+  class:g5w={showSource}
+  class:g4w={!showSource}
+  title={provenance}
+  use:prefetch={{ entityId: row.entity_id, kind: row.kind }}
+  onclick={() => onopen(row)}
+>
   <Monogram text={kindMonogram(row.kind, declared)} label={kindSingular(row.kind, declared)} />
   <span class="k link">{key}</span>
   <span class="t"

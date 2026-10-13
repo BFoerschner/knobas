@@ -25,14 +25,19 @@ import type { MiniBoardLayout } from "./contexts";
  * the product bug the failed-read test exists to catch.
  */
 const calls: Pick<EntityFilter, "sources" | "context" | "project">[] = [];
+/** The per-column cap each read asked for, in order (#753). */
+const caps: (number | undefined)[] = [];
 let answer: () => Promise<MiniBoard> = () => Promise.resolve({ columns: [], sources: [] });
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => {
+  miniBoard: (filter: Pick<EntityFilter, "sources" | "context" | "project">, perColumn?: number) => {
     calls.push(filter);
+    caps.push(perColumn);
     return answer();
   },
   listEntities: () => Promise.resolve({ rows: [], total: 0 }),
+  getEntity: () => new Promise(() => {}),
+  entityView: () => new Promise(() => {}),
 }));
 
 const { default: Tile } = await import("./Tile.svelte");
@@ -55,7 +60,7 @@ function card(key: string, priority: string | null = null): MiniBoardCard {
 }
 
 function column(status: string | null, ...cards: MiniBoardCard[]): MiniBoardColumn {
-  return { status, cards };
+  return { status, cards, total: cards.length };
 }
 
 /** A promise plus the two handles that decide when it answers. */
@@ -90,6 +95,7 @@ function render(
     onopen,
     onlayout,
     onmaximise: vi.fn(),
+    maximised: false,
   });
   const app = mount(Tile, { target, props });
   flushSync();
@@ -151,6 +157,7 @@ function render(
 
 beforeEach(() => {
   calls.length = 0;
+  caps.length = 0;
   answer = () => Promise.resolve({ columns: [], sources: [] });
 });
 
@@ -673,4 +680,62 @@ test("the control is in the header before the read lands and after one that fail
     ["stacked", false],
   ]);
   failed.done();
+});
+
+/**
+ * A room of thousands of tickets is a board of its newest (#753): the read
+ * hands each column its newest cards and how many stand in it, and the column
+ * says both -- the header the whole count, the foot how many are not drawn.
+ * The tile's header counts the tickets, not the cards.
+ */
+test("a capped column counts every ticket in it and says how many it does not draw", async () => {
+  answer = () =>
+    Promise.resolve({
+      columns: [
+        { status: "To Do", cards: [card("PAY-2"), card("PAY-1")], total: 1200 },
+        column("Done", card("PAY-3")),
+      ],
+      sources: [],
+    });
+  const screen = render();
+  await vi.waitFor(() => expect(screen.columns()).toHaveLength(2));
+  flushSync();
+
+  expect(screen.columns()).toEqual([
+    ["To Do", "1200"],
+    ["Done", "1"],
+  ]);
+  expect(screen.cards()).toHaveLength(3);
+  const more = [...screen.target.querySelectorAll(".col")].map(
+    (col) => col.querySelector(".more")?.textContent?.trim() ?? null,
+  );
+  expect(more).toEqual(["1198 more", null]);
+  expect(screen.count()).toBe("1201");
+
+  screen.done();
+});
+
+/**
+ * The tile asks for fifty a column, and a maximised tile for five hundred
+ * (the list tiles' `PAGE` and `MAX_PAGE`), so a board is never a card per
+ * ticket. Maximising keeps the board drawn while the longer read is in
+ * flight: it is the same room, further down.
+ */
+test("the board asks for the newest fifty a column, five hundred maximised, and keeps its cards meanwhile", async () => {
+  answer = () => Promise.resolve({ columns: [column("To Do", card("PAY-1"))], sources: [] });
+  const screen = render();
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(1));
+  expect(caps).toEqual([50]);
+
+  const longer = deferred<MiniBoard>();
+  answer = () => longer.promise;
+  screen.props.maximised = true;
+  flushSync();
+  expect(caps).toEqual([50, 500]);
+  expect(screen.cards()).toHaveLength(1);
+
+  longer.resolve({ columns: [column("To Do", card("PAY-2"), card("PAY-1"))], sources: [] });
+  await vi.waitFor(() => expect(screen.cards()).toHaveLength(2));
+
+  screen.done();
 });

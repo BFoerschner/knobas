@@ -1029,6 +1029,55 @@ ui-pool-probe:
     fi
     exit "$status"
 
+# What the reader waits on (#753): `knobas-app`'s one ignored test in
+# `tests/it/responsiveness_probe.rs` -- three Jira-shaped sources of 5,000
+# tickets, 2,000 pages and 5,000 builds seeded into a scratch database, and the
+# seeded Gitea synced when `testenv/seed --env` answers -- then every read the
+# shell makes for the common interactions timed once cold and seven times warm
+# on the app's five-connection UI pool, one `RP` line each. A table for a PR
+# beside the load average, never a budget: it is red only when the read fails
+# or other than the one pinned test ran. Sizes: `RP_TICKETS`, `RP_PAGES`,
+# `RP_BUILDS`, `RP_RUNS`. Takes a gate slot and prints the head and the load
+# average before and after.
+# Time every read the common interactions make, against a seeded mirror.
+responsiveness-probe:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    expected=1
+    log=
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
+    hold_gate_slot responsiveness-probe
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-responsiveness-probe.XXXXXX")
+    mark() {
+        local when=$1 tree=clean
+        [ -z "$(git status --porcelain)" ] || tree=dirty
+        echo "responsiveness-probe: $when head=$(git rev-parse HEAD) tree=$tree" \
+             "load1=$(uptime | sed -E 's/.*load averages?:[[:space:]]*//; s/[,[:space:]].*//')" \
+             "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+    # The seeded Gitea's address and token, when there is a seed to read.
+    if [ -r testenv/seed-state.json ]; then eval "$(cd testenv && ./seed --env)"; fi
+    mark before
+    status=0
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test it responsiveness_probe \
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
+    mark after
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "responsiveness-probe: cargo exited $status; $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected is pinned." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
+    exit "$status"
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh

@@ -1059,7 +1059,7 @@ fn the_context_kinds_match_their_typescript_mirror() {
 }
 
 const MINI_BOARD_FIELDS: &[&str] = &["columns", "sources"];
-const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status"];
+const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status", "total"];
 const MINI_BOARD_CARD_FIELDS: &[&str] = &["entity_id", "key", "priority", "source_id", "title"];
 const SOURCE_STATUSES_FIELDS: &[&str] = &["source_id", "statuses"];
 
@@ -1084,6 +1084,7 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
                 title: "Retry failed SEPA payouts".to_owned(),
                 priority: None,
             }],
+            total: 1,
         }],
         sources: vec![knobas_core::mini_board::SourceStatuses {
             source_id: "mock".to_owned(),

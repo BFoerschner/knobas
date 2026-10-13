@@ -720,9 +720,26 @@ pub fn resolve_names_as_parent<'a>(
 #[macro_export]
 macro_rules! declared_string {
     ($decl:literal, $field:literal) => {
+        $crate::first_string_of!($crate::declared_candidates!($decl, $field))
+    };
+}
+
+/// [`declared_string!`]'s rule over a relation of candidates the statement
+/// already holds: `(segs, ord)` rows, the shape [`declared_candidates!`]
+/// yields (#753).
+///
+/// What a statement that reads one field for every row of a large set uses:
+/// it resolves the candidates once a source into a CTE of its own, and each
+/// row then walks its source's few paths rather than the whole declaration.
+/// The mini board's status over 15,000 tickets was about 17 µs a row through
+/// [`declared_string!`]. One spelling of the rule, which both macros share.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! first_string_of {
+    ($($candidates:tt)+) => {
         concat!(
             "(select nullif(btrim(i.payload #>> c.segs), '') from ",
-            $crate::declared_candidates!($decl, $field),
+            $($candidates)+,
             " c where jsonb_typeof(i.payload #> c.segs) = 'string' \
               and nullif(btrim(i.payload #>> c.segs), '') is not null \
               order by c.ord limit 1)"

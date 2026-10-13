@@ -680,7 +680,7 @@ function serveCorpus() {
       priority: null,
     }));
     return Promise.resolve({
-      columns: cards.length === 0 ? [] : [{ status: "To Do", cards }],
+      columns: cards.length === 0 ? [] : [{ status: "To Do", cards, total: cards.length }],
       sources: [],
     });
   };
@@ -1043,6 +1043,7 @@ test("a room hands its own layout to the mini board it draws", async () => {
             priority: null,
           },
         ],
+        total: 1,
       })),
       sources: [],
     });
@@ -1070,6 +1071,7 @@ function statusBoard(n: number): MiniBoard {
       cards: [
         { entity_id: `mock:S${at + 1}`, source_id: "mock", key: `PAY-${at + 1}`, title: `S${at + 1}`, priority: null },
       ],
+      total: 1,
     })),
     sources: [],
   };
@@ -1107,6 +1109,7 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
       columns: STATUSES.map((status) => ({
         status,
         cards: [{ entity_id: `mock:${status}`, source_id: "mock", key: status, title: status, priority: null }],
+        total: 1,
       })),
       sources: [],
     });

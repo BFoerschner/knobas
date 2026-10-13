@@ -65,7 +65,37 @@ use crate::entity::EntityRef;
 /// list decides *order*, never wording.
 const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 
-/// A ticket's status, at the path its own source declares (#277).
+/// Every source's declared ticket status candidates (#277), resolved once a
+/// statement (#753): the CTE `status_paths (source_id, segs, ord)`, which
+/// [`status_of_ticket!`] reads per row. Through [`crate::declared_string!`]
+/// each row walked the whole declaration, about 17 µs a ticket on the 15,000
+/// of an All room.
+///
+/// The candidates are [`crate::declared_candidates!`]'s own, over a relation
+/// aliased `i` that carries each declared source and the kind `ticket` -- the
+/// two columns that macro reads -- so the declaration is walked as it always
+/// was, once a source instead of once a row.
+macro_rules! status_paths {
+    ($decl:literal) => {
+        concat!(
+            "status_paths as materialized (
+               select i.source_id, c.segs, c.ord
+                 from (select d.source_id, 'ticket'::text as kind
+                         from jsonb_object_keys(case when jsonb_typeof(",
+            $decl,
+            "::jsonb) = 'object' then ",
+            $decl,
+            "::jsonb else '{}'::jsonb end) as d(source_id)) i
+                 cross join lateral ",
+            $crate::declared_candidates!($decl, "status_name"),
+            " c)"
+        )
+    };
+}
+
+/// A ticket's status, at the path its own source declares (#277), through
+/// `status_paths` ([`status_paths!`]): [`crate::declared_string!`]'s rule,
+/// [`crate::first_string_of!`] being the one spelling both share.
 ///
 /// **Failure direction (ADR-0007 requirement 3, unchanged by the growth): a
 /// miss is visible, never a guess.** A ticket whose source declares no status
@@ -74,12 +104,11 @@ const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 /// dropped or sorted into a column somebody inferred. Pinned by
 /// `a_ticket_with_no_recognizable_status_lands_in_the_terminal_group` in
 /// `knobas-core/tests/it/mini_board.rs`.
-///
-/// `$decl` is where the calling statement binds the declarations; each
-/// statement here binds them at the end of its own parameter list.
-macro_rules! status_read {
-    ($decl:literal) => {
-        $crate::declared_string!($decl, "status_name")
+macro_rules! status_of_ticket {
+    () => {
+        $crate::first_string_of!(
+            "(select p.segs, p.ord from status_paths p where p.source_id = i.source_id)"
+        )
     };
 }
 
@@ -117,12 +146,20 @@ macro_rules! priority_read {
 /// the predicate rather than matching some other room's -- absence, never a
 /// wrong room, which is [`crate::project`]'s stated failure direction reaching
 /// the board.
+///
+/// `$5` is the per-column cap (#753), `null` for none: each column keeps its
+/// newest `$5` cards, and every row carries `total`, how many its column holds
+/// before the cut. The status is read once a row (`materialized`) and the
+/// priority only for the rows kept: on a room of 15,000 tickets the uncapped
+/// board was 2 MB on the bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
-    "select i.entity_id, i.source_id, i.title, ",
-    status_read!("$4"),
-    " as status, ",
-    priority_read!("$4"),
-    " as priority
+    "with ",
+    status_paths!("$4"),
+    ",
+     scoped as materialized (
+       select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
+    status_of_ticket!(),
+    " as status
        from sync.live_item i
       where i.kind = 'ticket'
         and ($1::text[] is null or i.entity_id = any($1))
@@ -130,7 +167,20 @@ const CARDS: &str = concat!(
         and ($3::text is null or ",
     crate::project_key_read!("$4"),
     " = $3)
-      order by coalesce(i.item_updated_at, i.synced_at) desc, i.entity_id"
+     ),
+     ranked as (
+       select s.entity_id, s.at, s.status,
+              row_number() over (partition by s.status order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by s.status) as total
+         from scoped s
+     )
+     select i.entity_id, i.source_id, i.title, r.status, ",
+    priority_read!("$4"),
+    " as priority, r.total
+       from ranked r
+       join sync.item i on i.entity_id = r.entity_id
+      where $5::bigint is null or r.rn <= $5
+      order by r.at desc, r.entity_id"
 );
 
 /// Every status these sources' live ticket corpora show -- the select's
@@ -140,13 +190,19 @@ const CARDS: &str = concat!(
 /// answers for the tickets on it, and a source nothing in this room came from
 /// is not one the detail here can be asked about.
 const OBSERVED_STATUSES: &str = concat!(
-    "select distinct source_id, status
-       from (select i.source_id as source_id, ",
-    status_read!("$2"),
+    "with ",
+    status_paths!("$2"),
+    ",
+     observed as materialized (
+       select i.source_id, ",
+    status_of_ticket!(),
     " as status
-               from sync.live_item i
-              where i.kind = 'ticket'
-                and i.source_id = any($1)) observed
+         from sync.live_item i
+        where i.kind = 'ticket'
+          and i.source_id = any($1)
+     )
+     select distinct source_id, status
+       from observed
       where status is not null"
 );
 
@@ -176,8 +232,12 @@ pub struct MiniBoardColumn {
     /// recognizes. The words on screen for that group are the shell's ("No
     /// status"); what crosses the bridge is the absence itself.
     pub status: Option<String>,
-    /// Newest first.
+    /// Newest first: all of them, or the newest of them where the read was
+    /// capped ([`read_capped`]).
     pub cards: Vec<MiniBoardCard>,
+    /// How many tickets stand in this column, `cards` or not (#753). Equal to
+    /// `cards.len()` on an uncapped read; the header draws this one.
+    pub total: u32,
 }
 
 /// One ticket on the board.
@@ -214,6 +274,7 @@ struct CardRow {
     title: String,
     status: Option<String>,
     priority: Option<String>,
+    total: i64,
 }
 
 /// Which band of the board a column belongs to. **Declaration order is the
@@ -279,17 +340,43 @@ pub async fn read(
     project: Option<&str>,
     declarations: &crate::payload::Declarations,
 ) -> Result<MiniBoard, CoreError> {
+    read_capped(pool, ctx_id, sources, project, declarations, None).await
+}
+
+/// [`read`], with each column cut to its newest `per_column` cards (#753).
+///
+/// What the Tickets tile draws: a column header says how many tickets stand
+/// in it ([`MiniBoardColumn::total`]) and the column scrolls through the
+/// newest of them. The statuses offered ([`MiniBoard::sources`]) are the
+/// sources' whole corpora either way. `None` is [`read`].
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn read_capped(
+    pool: &PgPool,
+    ctx_id: Option<&str>,
+    sources: &[String],
+    project: Option<&str>,
+    declarations: &crate::payload::Declarations,
+    per_column: Option<u32>,
+) -> Result<MiniBoard, CoreError> {
     let members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
         None => None,
     };
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
+    // Planned for its parameters every time (#753): reused, the statement
+    // went to PostgreSQL's generic plan on its sixth execution and an All room
+    // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
     let rows: Vec<CardRow> = sqlx::query_as(CARDS)
+        .persistent(false)
         .bind(&members)
         .bind(&scope)
         .bind(project)
         .bind(&declared)
+        .bind(per_column.map(i64::from))
         .fetch_all(pool)
         .await?;
 
@@ -305,6 +392,7 @@ pub async fn read(
             columns.push(MiniBoardColumn {
                 status: row.status.clone(),
                 cards: Vec::new(),
+                total: u32::try_from(row.total).unwrap_or(u32::MAX),
             });
             columns.len() - 1
         });
@@ -340,6 +428,7 @@ async fn observed_statuses(
     }
     let ids: Vec<String> = sources.iter().cloned().collect();
     let rows: Vec<(String, String)> = sqlx::query_as(OBSERVED_STATUSES)
+        .persistent(false)
         .bind(&ids)
         .bind(declarations.as_param())
         .fetch_all(pool)

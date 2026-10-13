@@ -182,3 +182,33 @@ test("a failed ack is still reported after the re-read that follows it", async (
   expect(alerts.error).toContain("no open alert");
   expect(alerts.count, "and the list is the fresh one").toBe(1);
 });
+
+/**
+ * A *Sync all* is a burst of events (#753): while a read is in flight, any
+ * number of them make one more read after it, not one each. Each read is a
+ * connection of the UI pool the reader's own clicks wait on.
+ */
+test("a burst of events during a read makes one more read, not one per event", async () => {
+  const events = fakeListen();
+  let reads = 0;
+  let land!: () => void;
+  const alerts = createAlerts({
+    openAlerts: () => {
+      reads += 1;
+      return reads === 1
+        ? new Promise<OpenAlert[]>((resolve) => (land = () => resolve([])))
+        : Promise.resolve([]);
+    },
+    listen: events.listen,
+  });
+  const stop = alerts.start();
+  await vi.waitFor(() => expect(events.handlers.length).toBe(2));
+
+  for (let n = 0; n < 6; n++) events.fire();
+  expect(reads).toBe(1);
+  land();
+  await vi.waitFor(() => expect(reads).toBe(2));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(reads).toBe(2);
+  stop();
+});

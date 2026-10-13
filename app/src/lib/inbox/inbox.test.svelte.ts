@@ -630,3 +630,38 @@ test("an inbox that answered empty says 'Nothing needs you'", async () => {
   expect(view.text()).toContain("Nothing needs you");
   view.stop();
 });
+
+/**
+ * The inbox re-reads on `activity:new` and `sync:state`, three statements a
+ * read, and a *Sync all* is a burst of both (#753): while a read is in
+ * flight, the burst makes one more read after it, not one per event.
+ */
+test("a burst of events during a read makes one more read, not one per event", async () => {
+  const handlers: (() => void)[] = [];
+  let reads = 0;
+  let land!: () => void;
+  const store = createInbox({
+    inboxItems: () => Promise.resolve([]),
+    inboxCount: () => {
+      reads += 1;
+      return reads === 1 ? new Promise<number>((resolve) => (land = () => resolve(0))) : Promise.resolve(0);
+    },
+    snoozeInboxItem: () => Promise.resolve(),
+    completeInboxItem: () => Promise.resolve(),
+    ackAlert: () => Promise.resolve(),
+    listen: (_event, handler) => {
+      handlers.push(handler);
+      return Promise.resolve(() => {});
+    },
+  });
+  const stop = store.start();
+  await vi.waitFor(() => expect(handlers).toHaveLength(2));
+
+  for (let n = 0; n < 6; n++) for (const handler of handlers) handler();
+  expect(reads).toBe(1);
+  land();
+  await vi.waitFor(() => expect(reads).toBe(2));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(reads).toBe(2);
+  stop();
+});
