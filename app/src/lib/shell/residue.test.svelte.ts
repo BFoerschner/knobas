@@ -338,6 +338,7 @@ const App = (await import("../../App.svelte")).default;
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
+const ActionDialog = (await import("../detail/view/ActionDialog.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
 const TopStrip = (await import("./TopStrip.svelte")).default;
 const Room = (await import("./Room.svelte")).default;
@@ -1013,6 +1014,43 @@ const CASES: Case[] = [
       return { app: { ...app, __props: props } as unknown as Record<string, unknown> };
     },
     exercise: () => {},
+  },
+  {
+    /**
+     * A view action's dialog (#702). Its effect waits a tick to put the
+     * reader on the first field, so an unmount inside that tick must leave
+     * nothing armed.
+     */
+    name: "ActionDialog",
+    source: "lib/detail/view/ActionDialog.svelte",
+    open: (target) => ({
+      app: mount(ActionDialog, {
+        target,
+        props: {
+          action: {
+            write_op: "merge_pull_request",
+            label: "Merge…",
+            fields: [
+              {
+                name: "style",
+                label: "Style",
+                kind: { type: "choice", options: [{ value: "merge", label: "Merge commit" }] },
+                value: null,
+                required: true,
+                placeholder: null,
+              },
+            ],
+            confirm: "Merge?",
+            primary: true,
+            danger: false,
+            disabled: null,
+            with_settings: false,
+          },
+          onsubmit: () => Promise.resolve(true),
+          onclose: () => {},
+        },
+      }),
+    }),
   },
   {
     name: "Modal",
