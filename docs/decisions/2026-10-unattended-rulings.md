@@ -1150,4 +1150,4 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 
 **If you disagree, the cost of reversing this is:** low: `read_guarded` and `command_line_tools_installed` in `crates/knobas-app/src/checkout/working_tree.rs`.
 
-As built (#715): the decision seam `read_guarded` takes the shim path and a probe, and is tested with a fake git that leaves a marker when spawned. The dialog itself is unwitnessed: no Mac without the Command Line Tools is available here (ADR-0013).
+As built (#715): the decision seam `read_guarded` takes the shim path and a probe, and is tested with a fake git that leaves a marker when spawned. The dialog itself is unwitnessed: no Mac without the Command Line Tools is available here (ADR-0013). The probe is async, runs inside the read's 2 s budget (a probe that does not answer draws *failed*, is killed, and is asked again next read), and a `no` is kept for the process: installing the tools while knobas runs is noticed after a restart. A hung probe is witnessed by a unit test.

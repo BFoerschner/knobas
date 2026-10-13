@@ -82,7 +82,7 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
         search,
         path,
         Path::new(APPLE_SHIM),
-        &command_line_tools_installed,
+        command_line_tools_installed,
     )
     .await
 }
@@ -91,36 +91,54 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
 /// an install dialog instead of running (#715).
 const APPLE_SHIM: &str = "/usr/bin/git";
 
-/// Whether the Command Line Tools are installed, asked once per process.
-/// `xcode-select -p` only prints a path and never opens the dialog. Off macOS
-/// there is no shim, so the answer is yes.
-fn command_line_tools_installed() -> bool {
-    static ANSWER: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *ANSWER.get_or_init(|| {
-        !cfg!(target_os = "macos")
-            || std::process::Command::new("xcode-select")
-                .arg("-p")
-                .stdin(Stdio::null())
-                .stdout(Stdio::null())
-                .stderr(Stdio::null())
-                .status()
-                .is_ok_and(|status| status.success())
-    })
+/// Whether the Command Line Tools are installed, asked once per process once
+/// it has answered. `xcode-select -p` only prints a path and never opens the
+/// dialog. Off macOS there is no shim, so the answer is yes.
+///
+/// The answer is kept for the process, a `no` included: tools installed while
+/// knobas runs are noticed after a restart. A probe that has not answered is
+/// not kept (the caller abandons it, `kill_on_drop` ends it) and is asked
+/// again on the next read.
+async fn command_line_tools_installed() -> bool {
+    static ANSWER: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *ANSWER
+        .get_or_init(|| async {
+            !cfg!(target_os = "macos")
+                || tokio::process::Command::new("xcode-select")
+                    .arg("-p")
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .kill_on_drop(true)
+                    .status()
+                    .await
+                    .is_ok_and(|status| status.success())
+        })
+        .await
 }
 
 /// The decision seam: `probe` is asked only when the `git` found is `shim`,
-/// and a failing probe answers [`TreeRead::NoGit`] without spawning it.
+/// within [`TIMEOUT`], and a failing probe answers [`TreeRead::NoGit`] without
+/// spawning it.
 async fn read_guarded(
     search: &OsStr,
     path: &Path,
     shim: &Path,
-    probe: &(dyn Fn() -> bool + Sync),
+    probe: impl AsyncFnOnce() -> bool,
 ) -> TreeRead {
     let Some(git) = find_on(search, "git") else {
         return TreeRead::NoGit;
     };
-    if git == shim && !probe() {
-        return TreeRead::NoGit;
+    if git == shim {
+        match tokio::time::timeout(TIMEOUT, probe()).await {
+            Err(_) => {
+                return TreeRead::Failed {
+                    reason: format!("xcode-select did not answer within {} s", TIMEOUT.as_secs()),
+                };
+            }
+            Ok(false) => return TreeRead::NoGit,
+            Ok(true) => {}
+        }
     }
     if !path.is_dir() {
         return TreeRead::NotARepo;
@@ -324,7 +342,7 @@ mod tests {
     async fn the_shim_without_command_line_tools_is_not_spawned() {
         let (_bin, search, shim, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
-        let read = read_guarded(&search, work.path(), &shim, &|| false).await;
+        let read = read_guarded(&search, work.path(), &shim, async || false).await;
         assert_eq!(read, TreeRead::NoGit);
         assert!(!marker.exists(), "the shim was spawned");
     }
@@ -334,8 +352,21 @@ mod tests {
     async fn the_shim_with_command_line_tools_runs() {
         let (_bin, search, shim, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
-        read_guarded(&search, work.path(), &shim, &|| true).await;
+        read_guarded(&search, work.path(), &shim, async || true).await;
         assert!(marker.exists(), "git was not run");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn a_probe_that_hangs_does_not_hang_the_read() {
+        let (_bin, search, shim, marker) = marker_git();
+        let work = tempfile::tempdir().unwrap();
+        let read = read_guarded(&search, work.path(), &shim, async || {
+            std::future::pending::<bool>().await
+        })
+        .await;
+        assert!(matches!(read, TreeRead::Failed { .. }), "{read:?}");
+        assert!(!marker.exists(), "the shim was spawned");
     }
 
     #[cfg(unix)]
@@ -344,7 +375,7 @@ mod tests {
         let (_bin, search, _git, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
         let other = Path::new("/usr/bin/git");
-        read_guarded(&search, work.path(), other, &|| panic!("probed")).await;
+        read_guarded(&search, work.path(), other, async || panic!("probed")).await;
         assert!(marker.exists(), "git was not run");
     }
 
