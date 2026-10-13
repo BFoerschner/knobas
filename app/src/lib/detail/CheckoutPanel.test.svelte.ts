@@ -117,7 +117,7 @@ function view(over: Partial<CheckoutView> = {}): CheckoutView {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(entityId = REPO, onread?: (checkout: CheckoutView | null) => void) {
+function render(entityId = REPO, onread?: (entityId: string, checkout: CheckoutView | null) => void) {
   app = mount(CheckoutPanel, { target, props: onread ? { entityId, onread } : { entityId } });
   flushSync();
   return app;
@@ -458,11 +458,46 @@ test("the window regaining focus reads the checkout again, drawing over what it 
   expect(target.querySelector(".ctree")?.textContent?.trim()).toBe("on knobas-sepa-retry · clean");
 });
 
-test("the panel hands its detail nothing first, then what it read", async () => {
-  const handed: (CheckoutView | null)[] = [];
+test("the panel hands its detail nothing first, then what it read, each named by entity", async () => {
+  const handed: [string, CheckoutView | null][] = [];
   answer = standing(on());
-  render(REPO, (checkout) => handed.push(checkout));
+  render(REPO, (entityId, checkout) => handed.push([entityId, checkout]));
   await settle();
 
-  expect(handed).toEqual([null, answer]);
+  expect(handed).toEqual([
+    [REPO, null],
+    [REPO, answer],
+  ]);
+});
+
+test("a read that lands after the panel is gone is handed to nobody", async () => {
+  const handed: (CheckoutView | null)[] = [];
+  answer = standing(on());
+  render(REPO, (_, checkout) => handed.push(checkout));
+  // The detail moved on before git answered.
+  if (app) unmount(app);
+  app = undefined;
+  await settle();
+
+  expect(handed).toEqual([null]);
+});
+
+test("setting a path hands the detail the working tree the new path stands on", async () => {
+  const handed: (CheckoutView | null)[] = [];
+  answer = view();
+  afterWrite = standing(on({ changed: 1 }));
+  render(REPO, (_, checkout) => handed.push(checkout));
+  await settle();
+
+  button("Set path…").click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input");
+  if (!input) throw new Error("no path input");
+  input.value = "/Users/mara/src/payout-service";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+
+  expect(handed.at(-1)).toEqual(afterWrite);
 });

@@ -248,24 +248,27 @@ async fn the_read_writes_neither_the_index_nor_a_ref() {
 /// A git that does not answer is abandoned at the timeout, and the panel says
 /// so rather than waiting with it.
 ///
-/// The one stand-in in this file, and for the reason ADR-0013's 2026-09-07
-/// consequence gives (*"A fault the real instance cannot produce is witnessed
-/// by a fake, and only that"*): a real git hangs on a stalled network mount or
-/// a held lock, neither of which a temp dir can be made to do on demand. The
-/// stand-in is a shell script named `git` on the searched `PATH`.
+/// The real `git`, made slow by the repository's own configuration: a clean
+/// filter that sleeps, on a tracked file whose stat no longer matches the
+/// index, so `status` runs the filter to compare its content. ADR-0013 asks a
+/// fault the real program can be driven into to be witnessed by the real
+/// program, and git can be (a slow LFS filter, or any other, does the same).
 #[cfg(unix)]
 #[tokio::test]
 async fn a_git_that_does_not_answer_is_abandoned_at_the_timeout() {
-    use std::os::unix::fs::PermissionsExt;
-
     let dir = repo();
-    let bin = tempfile::tempdir().unwrap();
-    let stand_in = bin.path().join("git");
-    fs::write(&stand_in, "#!/bin/sh\nsleep 10\n").unwrap();
-    fs::set_permissions(&stand_in, fs::Permissions::from_mode(0o755)).unwrap();
+    git(
+        dir.path(),
+        &["config", "filter.slow.clean", "sleep 10; cat"],
+    );
+    let info = dir.path().join(".git").join("info");
+    fs::create_dir_all(&info).unwrap();
+    fs::write(info.join("attributes"), "a.txt filter=slow\n").unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(1100));
+    fs::write(dir.path().join("a.txt"), "one\n").unwrap();
 
     let started = std::time::Instant::now();
-    let answer = read_with(bin.path().as_os_str(), dir.path()).await;
+    let answer = read(dir.path()).await;
     let took = started.elapsed();
 
     assert_eq!(

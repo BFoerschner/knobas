@@ -20,10 +20,10 @@
     reachableTransitions,
     submitWrite,
     unlink,
-    type CheckoutView,
     type EntityDetail,
     type LinkEntry,
     type SourceView as SourceViewData,
+    type TreeRead,
     type ViewAction,
   } from "../ipc/entity";
   import { pendingWrites, type BuildParameter } from "../ipc/sources";
@@ -709,8 +709,12 @@
    */
   const hasCheckout = $derived(shownKind === "repo" || shownKind === "branch");
 
-  /** Where the checkout's working tree stands, as the panel last read it (#704). */
-  let localTree = $state<CheckoutView["tree"]>(null);
+  /**
+   * Where the checkout's working tree stands, as the panel last read it, and
+   * for which entity (#704). Drawn only while that entity is the one shown, so
+   * the previous detail's read never sits under this one's title.
+   */
+  let localTree = $state<{ entityId: string; tree: TreeRead | null } | null>(null);
 
   /**
    * The granted read (#177), for this ticket's source.
@@ -1180,7 +1184,16 @@
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
           {#if shownKind === "branch"}
-            <BranchCheckoutNote tree={localTree} branch={detail.row.title} />
+            <!--
+              A branch's title is its name: the Gitea adapter maps it so
+              (`map.rs`, pinned by its own test), and it is the only source
+              with branches. A source that titles a branch otherwise needs a
+              declared name to compare here.
+            -->
+            <BranchCheckoutNote
+              tree={localTree?.entityId === detail.row.entity_id ? localTree.tree : null}
+              branch={detail.row.title}
+            />
           {/if}
           {#if path}
             <div class="d-path">{path}</div>
@@ -1504,7 +1517,10 @@
         and *Open in browser* follow.
       -->
       {#if hasCheckout}
-        <CheckoutPanel entityId={detail.row.entity_id} onread={(read) => (localTree = read?.tree ?? null)} />
+        <CheckoutPanel
+          entityId={detail.row.entity_id}
+          onread={(entityId, read) => (localTree = { entityId, tree: read?.tree ?? null })}
+        />
       {/if}
 
       <LinksPanel

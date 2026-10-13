@@ -10719,12 +10719,12 @@ From this commit on, each of the following requires an orchestrator decision **a
   makes in a temp dir (clean, modified and staged and untracked, a rename, a conflict, detached,
   ahead and behind a local upstream, no commit yet, not a repository and a missing path, git
   missing from `PATH`, and `the_read_writes_neither_the_index_nor_a_ref`), and its eleventh,
-  `a_git_that_does_not_answer_is_abandoned_at_the_timeout` (the one stand-in, a script named
-  `git`, under ADR-0013's fault clause); `checkout_ipc.rs`'s
+  `a_git_that_does_not_answer_is_abandoned_at_the_timeout` (the real `git`, slowed by a clean
+  filter in the test repository's own configuration; no stand-in); `checkout_ipc.rs`'s
   `the_view_says_where_the_working_tree_stands`; `knobas_app::checkout`'s
   `the_view_serialises_the_keys_the_mirror_declares` and `working_tree`'s
   `the_read_serialises_as_the_mirror_declares`; on the rendered side `working-tree.test.ts`,
-  `BranchCheckoutNote.test.svelte.ts`, four new tests in
+  `BranchCheckoutNote.test.svelte.ts`, six new tests in
   `CheckoutPanel.test.svelte.ts` and `Detail.checkout.test.svelte.ts`.
 
 **`crates/knobas-sync/**` is NOT frozen — and stream F is expected to restructure it.**
