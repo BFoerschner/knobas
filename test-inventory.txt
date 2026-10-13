@@ -2007,6 +2007,8 @@ knobas-source-gitea	test/it	sync::a_dead_token_against_a_publicly_readable_insta
 knobas-source-gitea	test/it	sync::a_discussion_refused_by_a_dead_credential_fails_the_run
 knobas-source-gitea	test/it	sync::a_discussion_the_server_did_not_send_whole_ends_the_run
 knobas-source-gitea	test/it	sync::a_failed_discussion_read_of_a_pull_request_still_there_ends_the_run
+knobas-source-gitea	test/it	sync::a_fault_on_the_confirming_read_never_skips_a_branch
+knobas-source-gitea	test/it	sync::a_fault_on_the_confirming_read_never_skips_a_pull_request
 knobas-source-gitea	test/it	sync::a_forbidden_repository_is_fatal_during_a_full_sync
 knobas-source-gitea	test/it	sync::a_forbidden_repository_is_skipped_on_an_incremental_run
 knobas-source-gitea	test/it	sync::a_full_sync_emits_commits_under_their_object_ids
