@@ -1849,6 +1849,11 @@ async fn a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds() {
         !cursor.contains("elsewhere/unrelated"),
         "a repository confirmed gone holds no position: {cursor}"
     );
+    // Its own row is step 1 of the walk and was emitted before the 404, so the
+    // sweep after this run keeps it. The next cursor-less run, whose listing
+    // no longer offers it, retires it: the same residual as a repository
+    // deleted just after a full sync (module docs, "An incremental run
+    // reconciles nothing").
 }
 
 /// The same race on an incremental run: before #728 the repository was skipped
@@ -1864,9 +1869,15 @@ async fn a_listed_repository_deleted_mid_run_drops_out_of_an_incremental_cursor(
     assert!(cursor.contains("elsewhere/unrelated"), "{cursor}");
 
     state.missing.insert("elsewhere/unrelated".to_owned());
-    // Moved, so the run emits its row and writes a new cursor instead of
-    // handing back the old one byte-identical (interfaces §4.1).
-    state.repos.last_mut().unwrap()["updated_at"] = serde_json::json!("2026-08-21T09:00:00Z");
+    // The repository still there moves, so the run emits something and writes
+    // a new cursor instead of handing back the old one byte-identical
+    // (interfaces §4.1). Not the deleted one: its own row would be the only
+    // emission, and the test would lean on it.
+    state
+        .repos
+        .iter_mut()
+        .find(|r| r["full_name"] == "tidewater/payout-service")
+        .expect("tidewater fixture")["updated_at"] = serde_json::json!("2026-08-23T09:00:00Z");
     fake.remount(&state).await;
     let (_, next) = again(&*source, &cursor).await;
     assert!(!next.contains("elsewhere/unrelated"), "{next}");
