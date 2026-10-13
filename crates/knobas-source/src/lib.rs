@@ -770,8 +770,10 @@ pub enum WriteOp {
     /// (ADR-0004). Merging is [`MergePullRequest`](WriteOp::MergePullRequest)'s,
     /// which is why [`PullRequestState`] has no `merged`.
     ///
-    /// Hold detection takes the whole mirrored record: the op overwrites what
-    /// the reader saw, and a close is a judgement on the state they saw.
+    /// Hold detection is per field (the deputy's ruling on #706): a title
+    /// edit holds on a retitle, a description edit on the description, a
+    /// close or reopen on the whole record -- see
+    /// `knobas_core::write_queue::project`.
     EditPullRequest {
         entity: String,
         #[serde(default)]

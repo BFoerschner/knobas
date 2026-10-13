@@ -63,6 +63,7 @@ async fn mirror(pool: &sqlx::PgPool, entity: &EntityRef, title: &str, body: &str
 async fn queue_comment(pool: &sqlx::PgPool, entity: &EntityRef, body: &str) -> wq::QueuedWrite {
     let snapshot = wq::project(
         "comment",
+        &serde_json::Value::Null,
         wq::target_of(pool, entity).await.unwrap().as_ref(),
     );
     wq::queue(
@@ -107,6 +108,7 @@ async fn a_queued_write_survives_a_restart() {
         found.target_snapshot,
         wq::project(
             "comment",
+            &serde_json::Value::Null,
             wq::target_of(&restarted, &ticket).await.unwrap().as_ref()
         ),
         "and it is the target as the mirror still records it"
@@ -440,6 +442,7 @@ async fn a_write_survives_its_target_being_withdrawn() {
     assert_eq!(still_there.state, WriteState::Pending);
     let now = wq::project(
         "comment",
+        &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
     );
     assert_ne!(
@@ -490,10 +493,14 @@ async fn a_write_against_a_disabled_source_says_so_until_the_source_is_back() {
     // `sync.live_item` (migration 0012), so its projection reads not-live.
     let gone = wq::target_of(&pool, &ticket).await.unwrap();
     assert!(gone.is_none(), "a disabled source's target leaves the view");
-    wq::hold(&pool, write.id, wq::project("comment", None))
-        .await
-        .unwrap()
-        .unwrap();
+    wq::hold(
+        &pool,
+        write.id,
+        wq::project("comment", &serde_json::Value::Null, None),
+    )
+    .await
+    .unwrap()
+    .unwrap();
 
     let held = wq::get(&pool, write.id).await.unwrap().unwrap();
     assert_eq!(held.state, WriteState::Held);
@@ -534,6 +541,7 @@ async fn a_write_held_for_a_changed_target_does_not_claim_the_source_is_off() {
     .await;
     let moved = wq::project(
         "comment",
+        &serde_json::Value::Null,
         wq::target_of(&pool, &ticket).await.unwrap().as_ref(),
     );
     assert_ne!(moved, write.target_snapshot);

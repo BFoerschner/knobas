@@ -316,9 +316,9 @@ pub async fn queue(
     })?;
     let identifier = op.identifier().to_owned();
     let target = store::target_of(&deps.pool, &entity).await?;
-    let snapshot = store::project(&identifier, target.as_ref());
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
+    let snapshot = store::project(&identifier, &payload, target.as_ref());
 
     let queued = store::queue(
         &deps.pool,
@@ -485,9 +485,9 @@ pub async fn amend(
     let entity = EntityRef::parse(target_entity(&op))
         .map_err(|e| FlushError::NotConfigured(e.to_string()))?;
     let target = store::target_of(&deps.pool, &entity).await?;
-    let snapshot = store::project(op.identifier(), target.as_ref());
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
+    let snapshot = store::project(op.identifier(), &payload, target.as_ref());
 
     let Some(amended) = store::amend(&deps.pool, id, payload, snapshot).await? else {
         return Ok(None);
@@ -543,6 +543,7 @@ async fn attempt(
     // taken when the write was queued.
     let current = store::project(
         &write.op,
+        &write.payload,
         store::target_of(&deps.pool, &entity).await?.as_ref(),
     );
     if current != write.target_snapshot {

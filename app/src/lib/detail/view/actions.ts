@@ -64,10 +64,21 @@ function sameText(a: string, b: string): boolean {
 }
 
 /**
- * Whether a dialog with fields came back exactly as it was drawn (#706): an
- * *Edit…* pressed without a change, which builds no write and is no fault.
+ * The ops whose payload sends only what the reader changed, so a dialog sent
+ * back as drawn has nothing to write. Every other op's `null` is a payload
+ * that cannot be built, and stays an error even when the dialog is untouched
+ * (an *Approve…* with an unknown verdict, a *Merge…* with a style this build
+ * does not know).
+ */
+const SENDS_ONLY_CHANGES: ReadonlySet<string> = new Set(["edit_pull_request"]);
+
+/**
+ * Whether a dialog with fields came back exactly as it was drawn for an op
+ * that sends only changes (#706): an *Edit…* pressed without a change, which
+ * builds no write and is no fault.
  */
 export function answeredAsDrawn(action: ViewAction, values: ActionValues): boolean {
+  if (!SENDS_ONLY_CHANGES.has(action.write_op)) return false;
   const drawn = initialValues(action);
   return (
     action.fields.length > 0 && action.fields.every((f) => sameText(values[f.name] ?? "", drawn[f.name] ?? ""))

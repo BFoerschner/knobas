@@ -337,4 +337,9 @@ test("a dialog answered exactly as drawn is told apart from one that cannot be s
   expect(answeredAsDrawn(EDIT, { title: "SEPA retry!", body: "Refs PAY-231\r\n\r\nBounded." })).toBe(false);
   // Nothing to answer is not an answer left alone.
   expect(answeredAsDrawn(REOPEN, {})).toBe(false);
+  // Only an op that sends changes has "unchanged" to say: an untouched
+  // Approve… whose verdict this build cannot carry is a fault, not a no-op.
+  const approve = review("APPROVED", "Approve…", false);
+  expect(actionPayload(approve, "gitea:o/r#7", { body: "" })).toBeNull();
+  expect(answeredAsDrawn(approve, { body: "" })).toBe(false);
 });

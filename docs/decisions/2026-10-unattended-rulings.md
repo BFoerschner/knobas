@@ -966,3 +966,23 @@ Ruled 2026-10-13. Comment:
 **If you disagree, the cost of reversing this is:** low.
 
 As built (#706): each `PAYLOADS` entry takes a fourth argument, the dialog's `initialValues(action)`; `edit_pull_request`'s entry sends `title` and `body` only where they differ from it, comparing line ends as `\n` (a text area gives back `\n` for Gitea's `\r\n`), and answers `null` when nothing changed. `just gitea-live`'s `a_pull_request_is_edited_closed_and_reopened_from_its_view` witnesses the reason against the real server: a description changed behind knobas' back survives a title edit. Close and Reopen use #705's `ViewAction.values` ruling above (also posted on #706): `{state: closed}` and `{state: open}` on the one op.
+
+## #706 — a queued edit holds only on what it would overwrite
+
+Ruled 2026-10-13 by the deputy for Björn, in the PR #725 review. Comment:
+<https://github.com/BFoerschner/knobas/issues/706#issuecomment-6146187141>
+
+**The fork:** the implementer gave `edit_pull_request` the whole-record hold, which was a classification of its own and not a ruling. With that hold, someone retitling a pull request holds a queued *Close*.
+
+**Ruling:** the edit holds only when what it would overwrite changed. A title edit holds if the title changed, a description edit if the description changed, and a state change (Close or Reopen) if the state changed. If the queue's mechanism can only compare the whole record per op, the narrowest honest option it allows is used, and the reason is stated.
+
+**Reasoning:** a hold asks the reader to decide again. A hold over a change the write would not touch is noise they cannot learn anything from.
+
+**If you disagree, the cost of reversing this is:** low. It is one arm in `knobas_core::write_queue::project`.
+
+As built (#706, merge review): `project` also takes the queued payload. `edit_writes` reads which fields the op carries and fails wide: a field is written unless its key is an explicit `null`. The narrowest projection then applies:
+- a title alone uses `title`;
+- a description uses `body_text`, which a retitle or a new comment also moves (a false hold, the safe direction);
+- a state change uses the whole record.
+
+The state is the one place the ruling cannot be met. It lives only in the payload, and ADR-0007 keeps payload reads out of hold decisions, so a retitle still holds a queued Close until a source declares where its state lives. Pinned by `knobas-core`'s `an_edit_holds_only_on_what_it_would_overwrite` and `an_edit_read_that_misses_holds_on_the_whole_record`, and `knobas-sync`'s `a_title_edit_holds_on_a_retitle_and_not_on_a_close`.

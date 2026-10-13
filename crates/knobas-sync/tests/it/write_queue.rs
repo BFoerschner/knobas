@@ -278,6 +278,8 @@ impl Harness {
                 // was opened from rather than by its title -- `UNCLAIMED_OPS`
                 // argues why that difference matters (#353).
                 WriteOp::CreatePullRequest { head, .. } => head.clone(),
+                // A pull request edit by the title it gives (#706).
+                WriteOp::EditPullRequest { title, .. } => title.clone().unwrap_or_default(),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -710,6 +712,84 @@ async fn a_page_whose_version_moved_past_the_edit_holds_it_with_both_versions() 
         "the source is on; this is a target hold"
     );
     assert!(h.verbs().contains(&"held".to_owned()));
+}
+
+/// A pull request in the mirror with `title` and Gitea's `state`, the record
+/// an `edit_pull_request` holds against (#706).
+async fn mirror_pull(h: &Harness, key: &str, title: &str, state: &str) -> EntityRef {
+    let entity = EntityRef::new(&h.source, key);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1,'pr',$2)
+         on conflict (id) do nothing",
+    )
+    .bind(entity.to_string())
+    .bind(title)
+    .execute(h.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1,$2,'pr',$3,$3,$4)
+         on conflict (entity_id) do update
+            set title = excluded.title, body_text = excluded.body_text,
+                payload = excluded.payload",
+    )
+    .bind(entity.to_string())
+    .bind(&h.source)
+    .bind(title)
+    .bind(serde_json::json!({ "title": title, "state": state }))
+    .execute(h.pool())
+    .await
+    .unwrap();
+    entity
+}
+
+/// The deputy's ruling on #706 through the queue itself, not only through
+/// `project`: a title edit holds on a retitle and goes over a close. The
+/// payload has to reach the projection at the queue *and* at the flush --
+/// were either side to project without it, the two snapshots would differ in
+/// shape and the closed pull request's edit would hold too.
+#[tokio::test]
+async fn a_title_edit_holds_on_a_retitle_and_not_on_a_close() {
+    let h = harness().await;
+    let closed = mirror_pull(&h, "o/r#1", "Bound the retry jitter", "open").await;
+    let retitled = mirror_pull(&h, "o/r#2", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Unreachable);
+    let edit = |entity: &EntityRef, title: &str| WriteOp::EditPullRequest {
+        entity: entity.to_string(),
+        title: Some(title.to_owned()),
+        body: None,
+        state: None,
+    };
+    let control = flusher::submit(&h.deps, &h.source, edit(&closed, "mine"))
+        .await
+        .unwrap();
+    let conflicted = flusher::submit(&h.deps, &h.source, edit(&retitled, "also mine"))
+        .await
+        .unwrap();
+
+    // Somebody closes one and retitles the other, and a sync mirrors both.
+    mirror_pull(&h, "o/r#1", "Bound the retry jitter", "closed").await;
+    mirror_pull(&h, "o/r#2", "Bound the jitter", "open").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(
+        h.delivered(),
+        vec!["mine".to_owned()],
+        "a close is not what a title edit overwrites"
+    );
+    assert_eq!(h.reload(control.id).await.state, WriteState::Sent);
+    let held = h.reload(conflicted.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    // The two titles, side by side.
+    assert_eq!(held.target_snapshot["text"], "Bound the retry jitter");
+    assert_eq!(
+        held.held_snapshot.as_ref().unwrap()["text"],
+        "Bound the jitter"
+    );
 }
 
 /// Story 22, at the flush loop rather than at the store: a stalled write
