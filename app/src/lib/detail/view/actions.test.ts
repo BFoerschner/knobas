@@ -279,3 +279,54 @@ test("a branch is deleted as itself", () => {
   const remove = action("delete_branch", "Delete branch…", { danger: true, confirm: "Delete feature/x?" });
   expect(actionPayload(remove, BRANCH, {})).toEqual({ DeleteBranch: { entity: BRANCH } });
 });
+
+// --- edit_pull_request (#706) ---------------------------------------------
+
+const PR = "gitea:o/r#7";
+const EDIT = action("edit_pull_request", "Edit…", {
+  fields: [
+    field("title", { type: "text", suggestions: [] }, { value: "SEPA retry", required: true }),
+    field("body", { type: "long_text" }, { value: "Refs PAY-231\r\n\r\nBounded." }),
+  ],
+});
+const CLOSE = action("edit_pull_request", "Close", {
+  confirm: "Close feature/x → main without merging it?",
+  danger: true,
+  values: { state: "closed" },
+});
+const REOPEN = action("edit_pull_request", "Reopen", { values: { state: "open" } });
+
+test("an edit sends only the fields the reader changed from what was drawn", () => {
+  expect(actionPayload(EDIT, PR, { title: "SEPA retry, bounded", body: "Refs PAY-231\r\n\r\nBounded." })).toEqual({
+    EditPullRequest: { entity: PR, title: "SEPA retry, bounded", body: null, state: null },
+  });
+  expect(actionPayload(EDIT, PR, { title: "SEPA retry", body: "Refs PAY-231" })).toEqual({
+    EditPullRequest: { entity: PR, title: null, body: "Refs PAY-231", state: null },
+  });
+  expect(actionPayload(EDIT, PR, { title: "New", body: "" })).toEqual({
+    EditPullRequest: { entity: PR, title: "New", body: "", state: null },
+  });
+});
+
+test("a description the text area gave back with its line ends rewritten is not a change", () => {
+  // A text area holds `\n` whatever Gitea sent; an untouched `\r\n` body
+  // must not go back and overwrite somebody else's edit (#706 ruling).
+  expect(actionPayload(EDIT, PR, { title: "Retitled", body: "Refs PAY-231\n\nBounded." })).toEqual({
+    EditPullRequest: { entity: PR, title: "Retitled", body: null, state: null },
+  });
+});
+
+test("an edit that changes nothing, or blanks the title, builds nothing", () => {
+  expect(actionPayload(EDIT, PR, { title: "SEPA retry", body: "Refs PAY-231\r\n\r\nBounded." })).toBeNull();
+  expect(actionPayload(EDIT, PR, { title: "  ", body: "x" })).toBeNull();
+});
+
+test("Close and Reopen send only the state their action fixes", () => {
+  expect(actionPayload(CLOSE, PR, {})).toEqual({
+    EditPullRequest: { entity: PR, title: null, body: null, state: "closed" },
+  });
+  expect(actionPayload(REOPEN, PR, {})).toEqual({
+    EditPullRequest: { entity: PR, title: null, body: null, state: "open" },
+  });
+  expect(actionPayload({ ...REOPEN, values: { state: "merged" } }, PR, {})).toBeNull();
+});

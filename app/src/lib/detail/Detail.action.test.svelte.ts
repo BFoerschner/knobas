@@ -286,3 +286,68 @@ test("Request changes… queues SubmitReview with the fixed verdict and the word
   await vi.waitFor(() => expect(calls.filter((c) => c === "entity_view null")).toHaveLength(2));
   screen.done();
 });
+
+// -- Edit…, Close and Reopen (#706) -------------------------------------------
+
+/** The pull request's toolbar with its maintenance: one op, the state fixed. */
+function maintainable(): SourceView {
+  const plain = { primary: false, danger: false, disabled: null, with_settings: false, confirm: null, entity: null };
+  return {
+    ...overview("closed", false),
+    actions: [
+      {
+        ...plain,
+        write_op: "edit_pull_request",
+        label: "Edit…",
+        fields: [
+          { name: "title", label: "Title", kind: { type: "text", suggestions: [] }, value: "SEPA retry", required: true, placeholder: null },
+          { name: "body", label: "Description", kind: { type: "long_text" }, value: "Refs PAY-231\r\n", required: false, placeholder: null },
+        ],
+        values: {},
+      },
+      { ...plain, write_op: "edit_pull_request", label: "Reopen", fields: [], values: { state: "open" } },
+    ],
+  };
+}
+
+function toolbarButton(screen: ReturnType<typeof render>, label: string) {
+  return [...screen.target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.trim() === label);
+}
+
+test("Edit… is drawn prefilled and queues only the title the reader changed", async () => {
+  writeOps = ["comment", "edit_pull_request"];
+  views = [maintainable()];
+  const screen = render();
+  await vi.waitFor(() => expect(toolbarButton(screen, "Edit…")).toBeDefined());
+  toolbarButton(screen, "Edit…")!.click();
+  flushSync();
+  const title = document.querySelector<HTMLInputElement>("[role=dialog] input")!;
+  const body = document.querySelector<HTMLTextAreaElement>("[role=dialog] textarea")!;
+  expect(title.value).toBe("SEPA retry");
+  // The text area holds `\n` for Gitea's `\r\n`; that is not a change.
+  expect(body.value.replace(/\r\n/g, "\n")).toBe("Refs PAY-231\n");
+  title.value = "SEPA retry, bounded";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialogButton("Edit").click();
+
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+  expect(queued).toEqual([{ EditPullRequest: { entity: ID, title: "SEPA retry, bounded", body: null, state: null } }]);
+  screen.done();
+});
+
+test("Reopen queues on the button with the state its action fixes", async () => {
+  writeOps = ["comment", "edit_pull_request"];
+  views = [maintainable()];
+  const screen = render();
+  await vi.waitFor(() => expect(toolbarButton(screen, "Reopen")).toBeDefined());
+  toolbarButton(screen, "Reopen")!.click();
+  flushSync();
+  expect(document.querySelector("[role=dialog]")).toBeNull();
+  await vi.waitFor(() => expect(queued).toHaveLength(1));
+  expect(queued).toEqual([{ EditPullRequest: { entity: ID, title: null, body: null, state: "open" } }]);
+  await vi.waitFor(() =>
+    expect(toasts.items.map((t) => t.text)).toContain("Reopen queued for tidewater/payout-service#142"),
+  );
+  screen.done();
+});

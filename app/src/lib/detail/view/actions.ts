@@ -11,7 +11,7 @@
  * button this shell cannot queue would fail on press.
  */
 import type { ViewAction, Setting } from "../../ipc/entity";
-import type { BuildParameter, MergeStyle, ReviewVerdict, WriteOpPayload } from "../../ipc/sources";
+import type { BuildParameter, MergeStyle, PullRequestState, ReviewVerdict, WriteOpPayload } from "../../ipc/sources";
 
 /** What a dialog answers: each field's value, by its `name`. A flag is `"true"` or `"false"`. */
 export type ActionValues = Record<string, string>;
@@ -36,14 +36,56 @@ function filled(value: string | undefined): string | null {
   return trimmed === "" ? null : trimmed;
 }
 
+// -- edit_pull_request (#706) -------------------------------------------------
+
+/** Keyed by the union, as `MERGE_STYLES` is. */
+const PULL_REQUEST_STATES: Record<PullRequestState, true> = { open: true, closed: true };
+
+function isPullRequestState(word: string | undefined): word is PullRequestState {
+  return word !== undefined && Object.hasOwn(PULL_REQUEST_STATES, word);
+}
+
+/**
+ * The answer to `name` if the reader changed it from what was drawn, else
+ * `null`. Line ends are compared as `\n`: a text area gives back `\n` for the
+ * `\r\n` Gitea may hold, and that is not a change worth overwriting
+ * somebody else's edit with (the #706 ruling).
+ */
+function changedText(name: string, values: ActionValues, drawn: ActionValues): string | null {
+  const value = values[name];
+  if (value === undefined) return null;
+  const lines = (text: string) => text.replace(/\r\n/g, "\n");
+  return lines(value) === lines(drawn[name] ?? "") ? null : value;
+}
+
+/**
+ * An edit, a close or a reopen (#706): only the fields the reader changed
+ * from their declared prefill, so a new title never sends back a description
+ * somebody else edited since the view was read; the state is the action's
+ * fixed value. `null` for an edit that changes nothing, a blanked title, or
+ * a state the SPI cannot carry.
+ */
+function editPullRequest(entity: string, values: ActionValues, drawn: ActionValues): WriteOpPayload | null {
+  const title = changedText("title", values, drawn);
+  const body = changedText("body", values, drawn);
+  const word = values.state;
+  if (word !== undefined && !isPullRequestState(word)) return null;
+  const state = word ?? null;
+  if (title !== null && title.trim() === "") return null;
+  if (title === null && body === null && state === null) return null;
+  return { EditPullRequest: { entity, title, body, state } };
+}
+
 /**
  * The payload for one op, from the entity the write targets, the dialog's
- * values, and the entity's settings the reader changed for this one write
- * (an action with `with_settings`). `null` where the values cannot make one.
+ * values, the entity's settings the reader changed for this one write (an
+ * action with `with_settings`), and what each field was drawn with (its
+ * declared prefill, `initialValues`) for an op that sends only what changed.
+ * `null` where the values cannot make one.
  */
 const PAYLOADS: Record<
   string,
-  (entity: string, values: ActionValues, settings: BuildParameter[]) => WriteOpPayload | null
+  (entity: string, values: ActionValues, settings: BuildParameter[], drawn: ActionValues) => WriteOpPayload | null
 > = {
   merge_pull_request: (entity, values) =>
     isMergeStyle(values.style) ? { MergePullRequest: { entity, style: values.style } } : null,
@@ -79,6 +121,8 @@ const PAYLOADS: Record<
       : null;
   },
   delete_branch: (entity) => ({ DeleteBranch: { entity } }),
+  // Edit…, Close and Reopen (#706): one op, the state a fixed value.
+  edit_pull_request: (entity, values, _settings, drawn) => editPullRequest(entity, values, drawn),
 };
 
 /**
@@ -97,7 +141,7 @@ export function actionPayload(
   // The source's fixed answers lie under the dialog's (#705); a source never
   // fixes a name it also asks for, so the order only matters to a bad one.
   const answered = { ...action.values, ...values };
-  return PAYLOADS[action.write_op]?.(action.entity ?? entity, answered, settings) ?? null;
+  return PAYLOADS[action.write_op]?.(action.entity ?? entity, answered, settings, initialValues(action)) ?? null;
 }
 
 /**
