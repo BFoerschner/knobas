@@ -586,7 +586,8 @@ impl Fake {
                     branch.replace('/', "%2F")
                 ),
                 // A bare `owner/repo`: the repository's own read (#728).
-                _ => format!("/api/v1/repos/{key}"),
+                (None, None) if key.contains('/') => format!("/api/v1/repos/{key}"),
+                _ => panic!("confirm key is owner/repo#index, owner/repo@branch or owner/repo"),
             };
             authed(Mock::given(method("GET")).and(path(route)))
                 .respond_with(

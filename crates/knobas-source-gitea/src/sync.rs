@@ -380,12 +380,9 @@ pub(crate) async fn run(
                 next.repos.insert(selected.full_name.clone(), after);
             }
             Err(RepoError::Fatal(error)) => return Err(in_repository(&selected.full_name, error)),
-            // Listed a moment ago and deleted since (#728): not a hole, on
-            // either kind of run, once its own read says 404 as well. Ruling
-            // B4 as amended: a repository the user *configured* keeps the arms
-            // below, because a 404 there is a misconfiguration worth failing
-            // on. Its row, if step 1 emitted one, is the next sweep's to retire,
-            // as a deleted branch's is (#724); it holds no position here.
+            // Listed a moment ago and deleted since: ruling B4 as amended by
+            // #728 (module docs). It holds no position; its row is the next
+            // sweep's to retire.
             Err(RepoError::Skip(error))
                 if selected.listed
                     && error.status() == Some(404)
@@ -985,9 +982,10 @@ async fn fetch_comments(
 /// Whether the repository itself now answers 404. As [`pull_is_gone`]:
 /// anything else is "not shown to be gone".
 async fn repo_is_gone(source: &crate::GiteaSource, selected: &Selected) -> bool {
-    let Some((owner, name)) = selected.repo.owner_repo() else {
-        return false;
-    };
+    let (owner, name) = selected
+        .repo
+        .owner_repo()
+        .expect("selection checked the name");
     matches!(
         source.client.get_repo(owner, name).await,
         Err(error) if error.status() == Some(404)

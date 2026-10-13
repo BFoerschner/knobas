@@ -2026,6 +2026,7 @@ knobas-source-gitea	test/it	sync::a_forbidden_repository_is_skipped_on_an_increm
 knobas-source-gitea	test/it	sync::a_full_sync_emits_commits_under_their_object_ids
 knobas-source-gitea	test/it	sync::a_full_sync_emits_pull_requests_with_their_discussion
 knobas-source-gitea	test/it	sync::a_full_sync_emits_the_repository_and_every_branch
+knobas-source-gitea	test/it	sync::a_listed_repository_deleted_mid_run_drops_out_of_an_incremental_cursor
 knobas-source-gitea	test/it	sync::a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds
 knobas-source-gitea	test/it	sync::a_long_discussion_reaches_the_indexed_text_whole
 knobas-source-gitea	test/it	sync::a_missing_history_on_a_branch_still_there_ends_a_full_sync

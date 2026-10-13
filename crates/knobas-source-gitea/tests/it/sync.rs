@@ -1851,6 +1851,28 @@ async fn a_listed_repository_deleted_mid_run_is_skipped_and_the_run_succeeds() {
     );
 }
 
+/// The same race on an incremental run: before #728 the repository was skipped
+/// with its position kept, and if it was the only one, the run raised as
+/// "every repository refused". Confirmed gone, it is neither: the run
+/// succeeds and the cursor drops it, as the next listing would.
+#[tokio::test]
+async fn a_listed_repository_deleted_mid_run_drops_out_of_an_incremental_cursor() {
+    let mut state = State::tidewater().with_elsewhere();
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (_, cursor) = full(&*source).await;
+    assert!(cursor.contains("elsewhere/unrelated"), "{cursor}");
+
+    state.missing.insert("elsewhere/unrelated".to_owned());
+    // Moved, so the run emits its row and writes a new cursor instead of
+    // handing back the old one byte-identical (interfaces §4.1).
+    state.repos.last_mut().unwrap()["updated_at"] = serde_json::json!("2026-08-21T09:00:00Z");
+    fake.remount(&state).await;
+    let (_, next) = again(&*source, &cursor).await;
+    assert!(!next.contains("elsewhere/unrelated"), "{next}");
+    assert!(next.contains("tidewater/payout-service"), "{next}");
+}
+
 /// The control: a 5xx on the repository's own read -- the one that decides
 /// "deleted" -- is not "deleted", so the 404 under it stays a hole and a full
 /// sync ends on it, naming the repository.
@@ -1917,5 +1939,13 @@ async fn a_refusal_that_ends_a_full_sync_names_the_repository() {
         matches!(error, SourceError::Protocol { status: Some(404), message: ref m }
             if m.contains("elsewhere/unrelated") && m.contains("not found")),
         "{error:?}"
+    );
+    // Selection read it, and the walk is where it ended: the repository row is
+    // step 1 of that walk.
+    assert_eq!(
+        ids(&sink.0, "repo"),
+        vec!["gitea:elsewhere/unrelated"],
+        "{:?}",
+        sink.0
     );
 }
