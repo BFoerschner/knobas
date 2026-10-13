@@ -2610,14 +2610,14 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         .unwrap_or_else(|| panic!("the merged pull request did not come back with the next sync"));
     assert_eq!(pr.payload["merged"], true, "{}", pr.payload);
 
-    // 4. And the view stops offering what has happened: *Merge…* stays in the
-    //    toolbar, disabled, saying why.
+    // 4. And the view stops offering what has happened: a merged pull
+    //    request can never be merged again, so *Merge…* is gone from its
+    //    toolbar (the #701 ruling: disabled only where it can still apply).
     let view = source.view(&id, None).await.unwrap().unwrap();
-    let after = merge_of(&view).expect("the merged pull request's toolbar keeps Merge…");
-    assert_eq!(
-        after.disabled.as_deref(),
-        Some("Already merged"),
-        "{after:?}"
+    assert!(
+        merge_of(&view).is_none(),
+        "a merged pull request offers no Merge…: {:#?}",
+        view.actions
     );
     let Block::Facts { facts } = &view.sections[0].blocks[0] else {
         panic!("the overview opens on facts: {view:#?}");
@@ -2677,7 +2677,7 @@ fn toolbar(view: &knobas_source::view::SourceView, label: &str) -> knobas_source
 /// calls the write queue's flush makes -- comment, request changes and
 /// approve; and the view, read again, shows each in *Conversation* and the
 /// standing verdict on the overview. On the token's own pull request the two
-/// verdicts are drawn disabled, and Gitea refuses them with its sentence.
+/// verdicts are not offered, and Gitea refuses them with its sentence.
 ///
 /// Never a seeded pull request: both are opened here on `knobas-` branches of
 /// their own, and [`Litter`] deletes them, their reviews and the branches
@@ -2810,8 +2810,9 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
         "{recorded:?}"
     );
 
-    // 3. The token's own pull request: the verdicts are drawn disabled, and
-    //    Gitea refuses them with its own sentence when sent anyway.
+    // 3. The token's own pull request: the verdicts are not offered (the
+    //    #701 ruling), and Gitea refuses them with its own sentence when sent
+    //    anyway.
     let own_branch = format!("knobas-review-{stamp}-own");
     litter.branch_off_main(&own_branch).await;
     let me = env.login().await;
@@ -2825,6 +2826,8 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
     let own_id = format!("gitea:{}#{own}", env.full_name());
     let own_view = source.view(&own_id, None).await.unwrap().unwrap();
     assert_eq!(toolbar(&own_view, "Comment…").disabled, None);
+    let labels: Vec<&str> = own_view.actions.iter().map(|a| a.label.as_str()).collect();
+    assert_eq!(labels, ["Comment…", "Merge…"], "{:#?}", own_view.actions);
     for (label, verdict, sentence) in [
         (
             "Approve…",
@@ -2837,14 +2840,6 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
             "reject your own pull is not allowed",
         ),
     ] {
-        let action = toolbar(&own_view, label);
-        assert!(
-            action
-                .disabled
-                .as_deref()
-                .is_some_and(|r| r.starts_with("You opened this pull request")),
-            "{action:?}"
-        );
         let refused = source
             .write(WriteOp::SubmitReview {
                 entity: own_id.clone(),

@@ -2050,14 +2050,16 @@ knobas-source-gitea	test/it	view_pr::a_pull_request_past_the_commit_budget_says_
 knobas-source-gitea	test/it	view_pr::a_pull_request_view_is_overview_files_commits_and_conversation
 knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_verdicts
 knobas-source-gitea	test/it	view_pr::a_pull_requests_tabs_are_read_at_the_same_time
-knobas-source-gitea	test/it	view_pr::a_review_gitea_would_refuse_is_drawn_disabled_saying_why
 knobas-source-gitea	test/it	view_pr::a_reviews_verdict_is_its_tone_in_the_conversation
 knobas-source-gitea	test/it	view_pr::a_section_read_carries_no_toolbar
 knobas-source-gitea	test/it	view_pr::a_view_whose_viewer_cannot_be_read_still_offers_the_review
+knobas-source-gitea	test/it	view_pr::an_action_that_can_never_apply_is_not_offered
 knobas-source-gitea	test/it	view_pr::an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar
 knobas-source-gitea	test/it	view_pr::an_open_pull_request_offers_an_approval_and_a_request_for_changes
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
 knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
+knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_again_after_a_failed_read
+knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_once_per_token_and_server
 knobas-source-gitea	test/it	view_repo::a_branch_tip_at_gos_zero_time_shows_no_age
 knobas-source-gitea	test/it	view_repo::a_plain_readme_is_text_and_not_markdown
 knobas-source-gitea	test/it	view_repo::a_repo_view_is_its_overview_pull_requests_branches_and_commits

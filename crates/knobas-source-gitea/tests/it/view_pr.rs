@@ -195,7 +195,7 @@ async fn slow_gitea(
         )
         .mount(&server)
         .await;
-    // Who the token is: the review actions are disabled on its own pull
+    // Who the token is: the review actions are not offered on its own pull
     // requests (#705).
     get("/api/v1/user".to_owned())
         .respond_with(
@@ -714,22 +714,15 @@ async fn an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar() {
     }
 }
 
-/// Where Gitea would refuse, *Merge…* is still there, disabled, saying why
-/// (#702): an open pull request it says it cannot merge (a conflict, a
-/// work-in-progress title, a check still running), one it has not answered
-/// for, a closed one and a merged one.
+/// Where Gitea would refuse but the pull request can still get there, *Merge…*
+/// is still there, disabled, saying why (#702, and the #701 ruling): an open
+/// pull request it says it cannot merge (a conflict, a work-in-progress
+/// title, a check still running), and one it has not answered for.
 #[tokio::test]
 async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why() {
     let not_mergeable = open_pull();
     let mut unknown = open_pull();
     unknown.as_object_mut().unwrap().remove("mergeable");
-    let mut closed = open_pull();
-    closed["state"] = json!("closed");
-    closed["mergeable"] = json!(true);
-    let mut merged = open_pull();
-    merged["state"] = json!("closed");
-    merged["merged"] = json!(true);
-    merged["mergeable"] = json!(true);
     for (pull, reason) in [
         (
             not_mergeable,
@@ -737,8 +730,6 @@ async fn a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
              running",
         ),
         (unknown, "Gitea has not said yet whether this can be merged"),
-        (closed, "Closed: reopen it to merge"),
-        (merged, "Already merged"),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
@@ -818,7 +809,7 @@ async fn a_pull_request_offers_a_comment_in_its_toolbar_in_any_state() {
 /// *Approve…* and *Request changes…* as the toolbar draws them (the #705
 /// ruling: one action per verdict, the verdict a fixed value): an approval's
 /// words optional, a request for changes' required, as Gitea's own rule is.
-fn review_action(verdict: &str, disabled: Option<&str>) -> ViewAction {
+fn review_action(verdict: &str) -> ViewAction {
     let (label, required) = match verdict {
         "approve" => ("Approve…", false),
         _ => ("Request changes…", true),
@@ -828,27 +819,27 @@ fn review_action(verdict: &str, disabled: Option<&str>) -> ViewAction {
             required,
             ..ActionField::new("body", "Comment", FieldKind::LongText)
         }],
-        disabled: disabled.map(str::to_owned),
         values: [("verdict".to_owned(), verdict.to_owned())].into(),
         ..ViewAction::new("submit_review", label)
     }
 }
 
 /// Workflow 6 of spec #701: an open pull request somebody else opened offers
-/// *Approve…* and *Request changes…*, after *Merge…* and *Comment…*.
+/// *Approve…* and *Request changes…*: the toolbar reads *Comment…*, the two
+/// verdicts, and *Merge…* last (the #701 ruling).
 #[tokio::test]
 async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
     let server = gitea(open_pull(), json!([])).await;
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
-    assert_eq!(labelled(&view, "Approve…"), review_action("approve", None));
+    assert_eq!(labelled(&view, "Approve…"), review_action("approve"));
     assert_eq!(
         labelled(&view, "Request changes…"),
-        review_action("request_changes", None)
+        review_action("request_changes")
     );
     let ops: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
     assert_eq!(
         ops,
-        ["Merge…", "Comment…", "Approve…", "Request changes…"],
+        ["Comment…", "Approve…", "Request changes…", "Merge…"],
         "{view:#?}"
     );
 }
@@ -856,51 +847,36 @@ async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
 /// Gitea refuses its author's approval and request for changes (*approve your
 /// own pull is not allowed*, *reject your own pull is not allowed*) and any
 /// review of a closed or merged pull request (*can't submit review for a
-/// closed or merged PR*), all 422s against the real server. So the actions
-/// are drawn disabled, saying why; *Comment…* stays.
+/// closed or merged PR*), all 422s against the real server. None of those can
+/// change for this reader, so the verdicts are absent, not disabled (the #701
+/// ruling), and on a merged or closed pull request *Merge…* is too. *Comment…*
+/// stays: Gitea takes a reply in any state.
 #[tokio::test]
-async fn a_review_gitea_would_refuse_is_drawn_disabled_saying_why() {
+async fn an_action_that_can_never_apply_is_not_offered() {
     let mut own = open_pull();
     own["user"]["login"] = json!(VIEWER);
     let mut closed = open_pull();
     closed["state"] = json!("closed");
+    closed["mergeable"] = json!(true);
     let mut merged = open_pull();
     merged["state"] = json!("closed");
     merged["merged"] = json!(true);
-    merged["user"]["login"] = json!(VIEWER);
-    for (pull, approve, request) in [
-        (
-            own,
-            "You opened this pull request: Gitea does not let its author approve it",
-            "You opened this pull request: Gitea does not let its author request changes",
-        ),
-        (
-            closed,
-            "Closed: Gitea takes no review on a closed pull request",
-            "Closed: Gitea takes no review on a closed pull request",
-        ),
-        (
-            merged,
-            "Already merged: Gitea takes no review on a merged pull request",
-            "Already merged: Gitea takes no review on a merged pull request",
-        ),
+    merged["mergeable"] = json!(true);
+    for (pull, offered) in [
+        (own, &["Comment…", "Merge…"][..]),
+        (closed, &["Comment…"][..]),
+        (merged, &["Comment…"][..]),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
-        assert_eq!(
-            labelled(&view, "Approve…"),
-            review_action("approve", Some(approve))
-        );
-        assert_eq!(
-            labelled(&view, "Request changes…"),
-            review_action("request_changes", Some(request))
-        );
+        let labels: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
+        assert_eq!(labels, offered, "{view:#?}");
         assert_eq!(action(&view, "comment").disabled, None);
     }
 }
 
 /// Who the token is, is a read of its own, and a failed one does not cost the
-/// view: the review actions are drawn enabled and Gitea's refusal, should it
+/// view: the review actions are offered and Gitea's refusal, should it
 /// come, is the write queue's to show (ADR-0004).
 #[tokio::test]
 async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
@@ -935,7 +911,7 @@ async fn a_view_whose_viewer_cannot_be_read_still_offers_the_review() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(labelled(&view, "Approve…"), review_action("approve", None));
+    assert_eq!(labelled(&view, "Approve…"), review_action("approve"));
 }
 
 /// A server answering a pull request's whole view to any token, and `/user`
@@ -965,6 +941,11 @@ async fn gitea_for_viewers(pull: Value, viewers: &[(&str, &str)]) -> MockServer 
     server
 }
 
+/// Whether the toolbar offers an action labelled `label`.
+fn offers(view: &SourceView, label: &str) -> bool {
+    view.actions.iter().any(|a| a.label == label)
+}
+
 /// The adapter against `server`, authenticating with `token`.
 fn built(server: &MockServer, token: &str) -> Box<dyn Source> {
     knobas_source_gitea::build(instance(server.uri(), token, json!({}))).expect("builds")
@@ -992,10 +973,7 @@ async fn who_the_token_is_is_asked_once_per_token_and_server() {
     let server = gitea_for_viewers(own, &[(ONCE, VIEWER), ("another-token", "olu")]).await;
     for _ in 0..3 {
         let view = built(&server, ONCE).view(PR, None).await.unwrap().unwrap();
-        assert_eq!(
-            labelled(&view, "Approve…").disabled.as_deref(),
-            Some("You opened this pull request: Gitea does not let its author approve it")
-        );
+        assert!(!offers(&view, "Approve…"), "{view:#?}");
     }
     assert_eq!(asked_who(&server).await, 1, "three views, one GET /user");
 
@@ -1004,11 +982,7 @@ async fn who_the_token_is_is_asked_once_per_token_and_server() {
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(
-        labelled(&view, "Approve…").disabled,
-        None,
-        "olu did not open it"
-    );
+    assert!(offers(&view, "Approve…"), "olu did not open it");
     assert_eq!(asked_who(&server).await, 2);
 }
 
@@ -1028,11 +1002,8 @@ async fn who_the_token_is_is_asked_again_after_a_failed_read() {
         .mount(&server)
         .await;
     let first = built(&server, AGAIN).view(PR, None).await.unwrap().unwrap();
-    assert_eq!(labelled(&first, "Approve…").disabled, None);
+    assert!(offers(&first, "Approve…"), "{first:#?}");
     let second = built(&server, AGAIN).view(PR, None).await.unwrap().unwrap();
-    assert!(
-        labelled(&second, "Approve…").disabled.is_some(),
-        "{second:#?}"
-    );
+    assert!(!offers(&second, "Approve…"), "{second:#?}");
     assert_eq!(asked_who(&server).await, 2);
 }

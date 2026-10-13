@@ -10,28 +10,32 @@ use knobas_source::view::{ActionField, FieldKind, ViewAction};
 
 use super::{Pull, login};
 
-/// The toolbar's conversation actions, after *Merge…*: what `viewer` -- the
+/// The toolbar's conversation actions, first in it: what `viewer` -- the
 /// token's own login, `None` where it could not be read -- may say on `pull`.
+///
+/// *Comment…* always. The two verdicts only where Gitea could ever take them
+/// from this account, each a 422 against the real server otherwise: on an
+/// open pull request (*can't submit review for a closed or merged PR*) that
+/// `viewer` did not open (*approve your own pull is not allowed*, *reject your
+/// own pull is not allowed*). Neither can change for this reader, so the
+/// actions are absent rather than disabled (the #701 ruling: disabled only
+/// where the entity can still reach the enabled state). A closed pull request
+/// is reviewed after a reopen, which is its own action. Where the viewer could
+/// not be read the verdicts are offered, and Gitea's refusal, should it come,
+/// is the write queue's to show (ADR-0004).
 pub(super) fn actions(pull: &Pull, viewer: Option<&str>) -> Vec<ViewAction> {
-    vec![
-        comment(),
-        review(
-            pull,
-            viewer,
-            ReviewVerdict::Approve,
-            "Approve…",
-            false,
-            "You opened this pull request: Gitea does not let its author approve it",
-        ),
-        review(
-            pull,
-            viewer,
+    let mut actions = vec![comment()];
+    let open = !pull.merged && pull.state.as_deref() == Some("open");
+    let own = viewer.is_some() && login(pull.user.as_ref()).as_deref() == viewer;
+    if open && !own {
+        actions.push(review(ReviewVerdict::Approve, "Approve…", false));
+        actions.push(review(
             ReviewVerdict::RequestChanges,
             "Request changes…",
             true,
-            "You opened this pull request: Gitea does not let its author request changes",
-        ),
-    ]
+        ));
+    }
+    actions
 }
 
 /// *Comment…*: a reply on the discussion, through the `comment` op, in any
@@ -46,30 +50,8 @@ fn comment() -> ViewAction {
     }
 }
 
-/// A review with `verdict`, labelled `label`, its words `required` or not,
-/// drawn disabled where Gitea would refuse it, each a 422 against the real
-/// server: any review of a closed or merged pull request (*can't submit review
-/// for a closed or merged PR*), and its author's approval or request for
-/// changes (*approve your own pull is not allowed*, *reject your own pull is
-/// not allowed*), which says `own_reason`.
-fn review(
-    pull: &Pull,
-    viewer: Option<&str>,
-    verdict: ReviewVerdict,
-    label: &str,
-    required: bool,
-    own_reason: &str,
-) -> ViewAction {
-    let own = viewer.is_some() && login(pull.user.as_ref()).as_deref() == viewer;
-    let disabled = if pull.merged {
-        Some("Already merged: Gitea takes no review on a merged pull request".to_owned())
-    } else if pull.state.as_deref() != Some("open") {
-        Some("Closed: Gitea takes no review on a closed pull request".to_owned())
-    } else if own {
-        Some(own_reason.to_owned())
-    } else {
-        None
-    };
+/// A review with `verdict`, labelled `label`, its words `required` or not.
+fn review(verdict: ReviewVerdict, label: &str, required: bool) -> ViewAction {
     // The SPI's own word for the verdict, as the shell's payload reads it
     // (`ReviewVerdict`'s snake_case serde form, pinned in `knobas_source`).
     let word = match verdict {
@@ -82,7 +64,6 @@ fn review(
             required,
             ..ActionField::new("body", "Comment", FieldKind::LongText)
         }],
-        disabled,
         values: [("verdict".to_owned(), word.to_owned())].into(),
         ..ViewAction::new(crate::WRITE_OP_SUBMIT_REVIEW, label)
     }

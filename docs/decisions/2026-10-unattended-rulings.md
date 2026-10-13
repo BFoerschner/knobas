@@ -880,3 +880,18 @@ Ruled 2026-10-13. Comment:
 **If you disagree, the cost of reversing this is:** low.
 
 As built (#705): `ViewAction.values` in `crates/knobas-source/src/view.rs`; `actionPayload` spreads it under the dialog's values. Gitea's `tests/it/view_pr.rs` asserts no toolbar action fixes a name it also asks for.
+
+## #701 — disabled or absent: an action that can never apply is not drawn
+
+Ruled 2026-10-13. Comment:
+<https://github.com/BFoerschner/knobas/issues/701#issuecomment-6145023285>
+
+**The fork:** #702 made every action the source does not offer right now a disabled button with its reason, never absent. On a merged pull request that drew three dead buttons (*Merge…*, *Approve…*, *Request changes…*) beside one live *Comment…*, and on the reader's own pull request two that no wait would ever enable.
+
+**Ruling:** for every ticket under spec #701, an action is drawn **disabled with its reason** only when the entity can still reach a state where it is enabled (conflicts, behind base, approvals missing, nothing ahead yet, a write in flight). An action that can **never** apply to this entity is **absent**: *Merge*, *Approve* and *Request changes* on a merged or closed pull request, *Approve* and *Request changes* on the viewer's own pull request, *Delete* on the default branch. Toolbar order on a pull request: *Comment…*, *Approve…*, *Request changes…*, then maintenance (#706, #708), then *Merge…* last. Amends the #716 reading of ADR-0020 rule 4; the PR that lands this records it there.
+
+**Reasoning:** three dead buttons beside one live one is the noise #660 set out to remove; a disabled button earns its place only by telling the reader what to fix.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#705): `view/pr.rs`'s `merge_action` answers `None` on a merged or closed pull request and keeps the two `mergeable` reasons; `view/pr/review.rs` offers the verdicts only on an open pull request the token did not open. ADR-0020 rule 4 and CONTEXT.md's *Source view* carry the amendment, and #705's §10.8 entry notes it on #702's.

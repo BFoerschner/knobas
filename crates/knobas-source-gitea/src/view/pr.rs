@@ -44,18 +44,20 @@ pub(super) async fn draw(
     let sections = match section {
         None => {
             let pull = at.pull().await?;
-            actions.push(merge_action(&pull));
             // Each tab is its own reads over the one record, so they are read
             // side by side (#703); the first to fail fails the view. Who the
-            // token is goes beside them: the review actions are disabled on
-            // its own pull requests (#705).
+            // token is goes beside them: the review actions are not offered
+            // on its own pull requests (#705).
             let (reviews, commits, comments, viewer) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
             )?;
+            // The order the #701 ruling sets: what a reviewer says first,
+            // *Merge…* last.
             actions.extend(review::actions(&pull, viewer.as_deref()));
+            actions.extend(merge_action(&pull));
             vec![
                 overview(&pull, &reviews),
                 files_stub(&pull),
@@ -336,7 +338,11 @@ fn files_stub(pull: &Pull) -> ViewSection {
 /// *Merge…*, the pull request's main write, in the toolbar (issues #667,
 /// #702): enabled when Gitea would merge it now -- open, not merged, and
 /// Gitea answered `mergeable: true` -- and otherwise disabled with the reason,
-/// so the reader learns why rather than looking for the button.
+/// so the reader learns why rather than looking for the button. On a merged or
+/// closed pull request it is not offered at all (`None`): the #701 ruling
+/// draws a disabled action only where the entity can still reach the state
+/// that enables it, and a closed pull request merges only after a reopen,
+/// which is its own action.
 ///
 /// Gitea's flag already says *no* for a conflict, a work-in-progress title and
 /// a mergeability check still running, which are the 405s a merge would get;
@@ -345,27 +351,24 @@ fn files_stub(pull: &Pull) -> ViewSection {
 /// words, `merge` first because it is Gitea's own default. Whether the account
 /// may merge is not asked: that is a refusal the write queue shows with
 /// Gitea's sentence (ADR-0004).
-fn merge_action(pull: &Pull) -> ViewAction {
+fn merge_action(pull: &Pull) -> Option<ViewAction> {
+    if pull.merged || pull.state.as_deref() != Some("open") {
+        return None;
+    }
     let head = pull.head.as_ref().and_then(|b| b.r#ref.as_deref());
     let base = pull.base.as_ref().and_then(|b| b.r#ref.as_deref());
     let confirm = match (head, base) {
         (Some(head), Some(base)) => format!("Merge {head} into {base}?"),
         _ => "Merge this pull request?".to_owned(),
     };
-    let disabled = if pull.merged {
-        Some("Already merged".to_owned())
-    } else if pull.state.as_deref() != Some("open") {
-        Some("Closed: reopen it to merge".to_owned())
-    } else {
-        match pull.mergeable {
-            Some(true) => None,
-            Some(false) => Some(format!(
-                "Not mergeable into {}: a conflict, a work-in-progress title or a check still \
-                 running",
-                base.unwrap_or("its base")
-            )),
-            None => Some("Gitea has not said yet whether this can be merged".to_owned()),
-        }
+    let disabled = match pull.mergeable {
+        Some(true) => None,
+        Some(false) => Some(format!(
+            "Not mergeable into {}: a conflict, a work-in-progress title or a check still \
+             running",
+            base.unwrap_or("its base")
+        )),
+        None => Some("Gitea has not said yet whether this can be merged".to_owned()),
     };
     let options = knobas_source::MergeStyle::ALL
         .iter()
@@ -378,7 +381,7 @@ fn merge_action(pull: &Pull) -> ViewAction {
             ChoiceOption::new(style.as_str(), label)
         })
         .collect();
-    ViewAction {
+    Some(ViewAction {
         fields: vec![ActionField {
             required: true,
             ..ActionField::new("style", "Style", FieldKind::Choice { options })
@@ -387,7 +390,7 @@ fn merge_action(pull: &Pull) -> ViewAction {
         primary: true,
         disabled,
         ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
-    }
+    })
 }
 
 /// State, author, `head → base`, whether it can be merged, its times.
