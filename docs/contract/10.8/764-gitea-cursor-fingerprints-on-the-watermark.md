@@ -8,8 +8,10 @@
 
   **The cursor.** `RepoCursor.pulls_at_watermark: Vec<u64>` becomes
   `pulls_seen_at_watermark: BTreeMap<u64, String>`, number to the fingerprint of the listing record
-  as delivered, less the repository records it embeds in `base.repo` and `head.repo`, which move
-  on any push into the repository (`fingerprint.rs`, FNV-1a over a canonical encoding, the
+  as delivered, less what Gitea moves without the pull request changing: the repository records
+  embedded in `base.repo` and `head.repo` (reduced to their `full_name`), `base.sha` (the base
+  branch's current tip, on closed pull requests too), and embedded users' `last_login` and
+  follow/star counters (`fingerprint.rs`'s `of_pull`; FNV-1a over a canonical encoding, the
   algorithm Jira's #345 persists). `RepoCursor` gains `repo_fingerprint: Option<String>`, the repository record's. The
   walk already re-read the watermark second (it stops only below the mark), so the overlap is the
   exact second, not a window; a pull request on it is skipped only when its fingerprint matches.
