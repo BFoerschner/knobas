@@ -152,6 +152,14 @@ pub(crate) async fn read(
     let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
         .bind(under)
         .bind(PARENT_SUGGESTIONS)
+        // The unnamed statement, planned with the prefix in hand every time.
+        // A named one is planned generically from its sixth execution in a
+        // session, and a generic plan cannot see how narrow the prefix range
+        // is: `under:j` went from 50 ms cold to 313 ms warm on the
+        // responsiveness probe. The launcher's search has the same remedy
+        // for the same reason (`sql::query_as_with`). Pinned by
+        // `the_parents_statement_is_never_a_named_prepared_statement`.
+        .persistent(false)
         .fetch_all(pool)
         .await?;
     let enabled: Vec<&str> = vocab

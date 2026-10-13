@@ -650,3 +650,53 @@ async fn a_parent_is_offered_by_the_prefix_typed_newest_first() {
         "the repo's other name, `owner/name`, by its own prefix"
     );
 }
+
+/// The parents' statement is never a named prepared statement (#761).
+///
+/// A named one is planned generically from its sixth execution in a session,
+/// and a generic plan cannot see how narrow the prefix range is: on the
+/// responsiveness probe `under:j` went from 50 ms cold to 313 ms warm. The
+/// unnamed statement is planned with the prefix in hand every time, the
+/// launcher's own search statement's remedy (`sql::query_as_with`).
+#[tokio::test]
+async fn the_parents_statement_is_never_a_named_prepared_statement() {
+    let _ = pool().await;
+    // One connection, so the statements counted are the ones this read made.
+    let one = knobas_db::test_util::test_connector()
+        .await
+        .pool(1)
+        .await
+        .unwrap();
+    let searcher = Searcher::declaring(one.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
+    // The parents' statement is the one statement that ranges up to the
+    // highest code point; nothing else in this read spells `chr(1114111)`.
+    let named = || async {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from pg_prepared_statements where statement like '%chr(1114111)%'",
+        )
+        .persistent(false)
+        .fetch_one(&one)
+        .await
+        .unwrap()
+    };
+
+    // Positive control: a persistent statement with the marker is counted.
+    sqlx::query("select chr(1114111)")
+        .fetch_one(&one)
+        .await
+        .unwrap();
+    let control = named().await;
+    assert_eq!(control, 1, "the detector does not see a named statement");
+
+    for prefix in ["", "s", "sx"] {
+        searcher.filter_suggestions(prefix).await.unwrap();
+    }
+    assert_eq!(
+        named().await,
+        control,
+        "the parents' statement was left in pg_prepared_statements, so it is \
+         planned generically from its sixth execution"
+    );
+}
