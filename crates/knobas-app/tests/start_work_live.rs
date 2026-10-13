@@ -1592,6 +1592,46 @@ async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_th
         "the comments arrived out of order: {at_first:?} then {at_second:?}"
     );
 
+    // -- And with the first one's echo in between ---------------------------
+    // The pair above is sent by one flush, before any re-sync can land. So
+    // here the second is queued as a row the moment the first has settled --
+    // against a mirror the first's re-sync has not yet reached -- and tried
+    // only after that re-sync has landed: the echo a whole-record hold
+    // would trip on. (The tick is held off, so the flush below is the only
+    // sender.) If the re-sync wins the race to the queueing, this proves less
+    // and still passes; it never fails on the product's account.
+    let (third_words, fourth_words) = (
+        format!("third, whose echo lands first, {pid}"),
+        format!("fourth, queued before that echo, {pid}"),
+    );
+    let third = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        comment_on(&back_to_back, &third_words),
+    )
+    .await
+    .expect("the third comment is queued");
+    assert_eq!(settled(&state, third.id).await.state, WriteState::Sent);
+    let fourth_op: knobas_source::WriteOp =
+        serde_json::from_value(comment_on(&back_to_back, &fourth_words)).expect("a write op");
+    let fourth = knobas_sync::write_queue::queue(state.scheduler.deps(), GITEA, fourth_op)
+        .await
+        .expect("the fourth comment is queued");
+    sync(&state, GITEA).await;
+    knobas_sync::write_queue::flush_source(state.scheduler.deps(), GITEA)
+        .await
+        .expect("the flush runs");
+    let fourth_row = settled(&state, fourth.id).await;
+    assert_eq!(
+        fourth_row.state,
+        WriteState::Sent,
+        "a comment held on the echo of the one before it: {fourth_row:?}"
+    );
+    let view = view_text(&state, &back_to_back).await;
+    assert!(
+        view.find(&third_words).is_some() && view.find(&third_words) < view.find(&fourth_words),
+        "the third and fourth comments are not both there, in order: {view}"
+    );
+
     // -- A merge between the queueing and the send holds the second --------
     // The first lands; the second is queued against an open pull request
     // (and not flushed: `queue` is the row alone); then the pull request is
