@@ -36,7 +36,7 @@
   import { createLatestChange } from "./latest-change.svelte";
   import { ago } from "./time";
   import WriteQueue from "./WriteQueue.svelte";
-  import { createWriteQueue, decisionsIn } from "./write-queue.svelte";
+  import { createWriteQueue, decisionsIn, openWriteQueue, writeQueuePanel } from "./write-queue.svelte";
 
   let {
     lifecycle,
@@ -50,8 +50,6 @@
   const latest = createLatestChange();
   const queue = createWriteQueue();
 
-  /** Whether the queue panel is open. */
-  let queueOpen = $state(false);
 
   // svelte-ignore state_referenced_locally
   // Read once: a fixed clock is a test's decision and never changes after
@@ -292,7 +290,7 @@
   <button
     class="pend"
     class:on={decisionsIn(queue.counts) > 0}
-    onclick={() => (queueOpen = true)}
+    onclick={openWriteQueue}
     title="Writes knobas still owes a source. Open to see what is queued."
   >
     pending writes {queue.counts.pending}
@@ -303,8 +301,8 @@
   <span>{clock}</span>
 </footer>
 
-{#if queueOpen}
-  <WriteQueue {queue} {now} onclose={() => (queueOpen = false)} />
+{#if writeQueuePanel.open}
+  <WriteQueue {queue} {now} onclose={() => (writeQueuePanel.open = false)} />
 {/if}
 
 <style>

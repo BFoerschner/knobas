@@ -37,6 +37,18 @@ import {
   type WriteState,
 } from "../ipc/sources";
 
+/**
+ * Whether the queue panel is open. Module-level for one reason: a toast about
+ * a write the queue refused or held (#752) offers *Open write queue*, and a
+ * toast is raised far from the status bar that draws the panel.
+ */
+export const writeQueuePanel = $state<{ open: boolean }>({ open: false });
+
+/** Open the queue panel, from wherever a write's outcome was told. */
+export function openWriteQueue(): void {
+  writeQueuePanel.open = true;
+}
+
 /** Nothing owed, and nothing asked yet — the counts before the first read. */
 const NONE: QueueCounts = { pending: 0, held: 0, refused: 0 };
 

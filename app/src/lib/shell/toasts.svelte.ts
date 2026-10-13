@@ -21,6 +21,11 @@ export interface ToastSpec {
   text: string;
   tone?: "plain" | "err";
   action?: ToastAction;
+  /**
+   * More buttons after {@link action}, in order: a write the queue refused
+   * offers both *Open write queue* and *Edit and resend* (#752).
+   */
+  more?: ToastAction[];
   /** How long before it dismisses itself. */
   ms?: number;
 }

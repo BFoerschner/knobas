@@ -63,6 +63,7 @@
     settingMarks = {},
     onsetting = () => Promise.resolve(false),
     summary,
+    said = [],
   }: {
     entityId: string;
     view: SourceView;
@@ -93,6 +94,13 @@
      * the builds of the commit this stands at (#732).
      */
     summary?: Snippet;
+    /**
+     * Words on their way to the discussion (#752): a comment or review queued
+     * and not yet settled, drawn muted at the end of the view's **last tab**
+     * -- where a discussion sits, and a place the shell can find without
+     * naming a section (ADR-0020). Each goes when the queue settles it.
+     */
+    said?: { id: number; verdict: string | null; text: string; mark: string }[];
   } = $props();
 
   /** The open tab, by section id. The first section until the reader picks. */
@@ -100,6 +108,9 @@
   const current = $derived(
     view.sections.find((section) => section.id === picked) ?? view.sections[0] ?? null,
   );
+
+  /** Whether the open tab is the last, where words on their way are drawn. */
+  const onLastTab = $derived(current !== null && current === view.sections[view.sections.length - 1]);
 
   /**
    * Where each tab is, by tab id, and the places it was before, newest last
@@ -439,6 +450,21 @@
           {@render blocks(shown.blocks)}
         {/key}
       {/if}
+      {#if onLastTab && placeOf(current) === current.id && shown?.state !== "failed"}
+        {#each said as item (item.id)}
+          <div class="sv-block sv-sending" aria-label="Sending">
+            <FactsBlock
+              facts={[
+                { label: "You", value: item.mark, tone: null },
+                ...(item.verdict ? [{ label: "Review", value: item.verdict, tone: null }] : []),
+              ]}
+            />
+            {#if item.text}
+              <TextBlock text={item.text} markdown={true} {onopenurl} />
+            {/if}
+          </div>
+        {/each}
+      {/if}
     </div>
   </div>
 {/if}
@@ -548,5 +574,16 @@
 
   .sv-note.fail {
     color: var(--fail);
+  }
+
+  /*
+    Words on their way (#752): the discussion's own facts-then-text, stepped
+    back, with a hairline in the colour of something moving on its left. It
+    becomes the real entry, in place, when the queue settles it.
+  */
+  .sv-sending {
+    opacity: 0.6;
+    padding-left: 10px;
+    border-left: 1px solid var(--link);
   }
 </style>
