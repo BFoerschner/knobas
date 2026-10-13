@@ -607,6 +607,9 @@ export type WaitReason = "unreachable" | "unauthorized";
 /** How a merge lands its commits — `knobas_source::MergeStyle`. */
 export type MergeStyle = "merge" | "rebase" | "squash";
 
+/** How a head is brought up to date with its base — `knobas_source::UpdateStyle`. */
+export type UpdateStyle = "merge" | "rebase";
+
 /** The state an edit puts a pull request in — `knobas_source::PullRequestState`. */
 export type PullRequestState = "open" | "closed";
 
@@ -669,8 +672,16 @@ export type WriteOpPayload =
   /**
    * Merge a pull request (#667). `entity` is the **pull request**; `style` is
    * `knobas_source::MergeStyle`, and a word outside the three does not decode.
+   * `delete_branch` deletes the head branch once merged (#708); absent reads
+   * as `false`.
    */
-  | { MergePullRequest: { entity: string; style: MergeStyle } }
+  | { MergePullRequest: { entity: string; style: MergeStyle; delete_branch: boolean } }
+  /**
+   * Bring a pull request's head up to date with its base (#708). `entity` is
+   * the **pull request**; `style` is `knobas_source::UpdateStyle`. Mirrors
+   * `knobas_source::WriteOp::UpdatePullRequestBranch`.
+   */
+  | { UpdatePullRequestBranch: { entity: string; style: UpdateStyle } }
   /**
    * Set a build configuration's parameter (#668). `entity` is the
    * **configuration**; `name` the parameter's full name. On an inherited

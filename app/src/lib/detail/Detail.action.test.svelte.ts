@@ -195,7 +195,7 @@ test("Merge… queues MergePullRequest with the style picked, then the view is r
   dialogButton("Merge").click();
 
   await vi.waitFor(() => expect(screen.text()).toContain("merged"));
-  expect(queued).toEqual([{ MergePullRequest: { entity: ID, style: "rebase" } }]);
+  expect(queued).toEqual([{ MergePullRequest: { entity: ID, style: "rebase", delete_branch: false } }]);
   expect(calls).toEqual([
     "get_entity",
     "entity_view null",
