@@ -922,6 +922,7 @@ knobas-app	test/it	wiring::the_opener_plugin_is_registered
 knobas-app	test/it	wiring::the_stranded_timer_sweep_runs_before_the_database_is_announced_ready
 knobas-app	test/it	wiring::the_window_may_ask_about_permission_and_nothing_else_about_notifications
 knobas-app	test/it	wiring::the_window_may_open_http_urls_and_only_http_urls
+knobas-app	test/it	wiring::the_window_may_open_the_log_folder_and_no_other_path
 knobas-app	test/it	working_tree::a_clean_tree_names_its_branch_and_head_and_nothing_to_do
 knobas-app	test/it	working_tree::a_detached_head_has_no_branch_and_keeps_its_commit
 knobas-app	test/it	working_tree::a_directory_that_is_not_a_repository_says_so

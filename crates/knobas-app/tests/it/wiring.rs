@@ -64,6 +64,25 @@ fn the_window_may_open_http_urls_and_only_http_urls() {
     );
 }
 
+/// *Show logs* (#747) may open the log folder and nothing else on disk.
+#[test]
+fn the_window_may_open_the_log_folder_and_no_other_path() {
+    let capability = capability();
+    let opener = capability["permissions"]
+        .as_array()
+        .expect("permissions is a list")
+        .iter()
+        .find(|entry| entry["identifier"] == "opener:allow-open-path")
+        .expect("`opener:allow-open-path` is not granted, so Show logs is denied at run time");
+    let allowed: Vec<&str> = opener["allow"]
+        .as_array()
+        .expect("the grant carries a scope")
+        .iter()
+        .filter_map(|entry| entry["path"].as_str())
+        .collect();
+    assert_eq!(allowed, vec!["$APPLOG", "$APPLOG/**"]);
+}
+
 /// `opener:default` is deliberately *not* used.
 ///
 /// It bundles `allow-reveal-item-in-dir` -- a file-manager call knobas never
@@ -90,6 +109,7 @@ fn no_grant_reaches_further_than_the_app_does() {
         vec![
             "core:default",
             "opener:allow-open-url",
+            "opener:allow-open-path",
             "notification:allow-is-permission-granted",
             "notification:allow-request-permission",
         ],
