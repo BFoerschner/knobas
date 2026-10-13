@@ -88,7 +88,7 @@ test("a listing draws each entry with its size, and opens what can be opened", (
   });
   const rows = [...target.querySelectorAll<HTMLElement>(".tb-row")];
   expect(rows.map((r) => r.dataset.kind)).toEqual(["dir", "file", "symlink", "submodule"]);
-  expect(rows[1]!.textContent).toContain("12.5 KB");
+  expect(rows[1]!.textContent).toContain("13 KB");
   expect(rows[0]!.querySelector(".tb-size")?.textContent?.trim() ?? "").toBe("");
   // A submodule is another repository: named, not opened.
   expect(rows[3]!.querySelector("button")).toBeNull();
@@ -162,7 +162,7 @@ test("a binary file says so with its size, and draws no lines", () => {
   const { target, urls } = file({ binary: true, text: "", size: 2_048, path: "logo.png", language: null });
   expect(target.querySelector(".fb-code")).toBeNull();
   const note = target.querySelector(".fb-note")!;
-  expect(note.textContent).toContain("Binary file, 2.0 KB");
+  expect(note.textContent).toContain("Binary file, 2 KB");
   note.querySelector("button")!.click();
   expect(urls).toHaveLength(1);
 });

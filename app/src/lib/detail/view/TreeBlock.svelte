@@ -6,7 +6,7 @@
 -->
 <script lang="ts">
   import type { Crumb, TreeEntry } from "../../ipc/entity";
-  import { sizeOf } from "./bytes";
+  import { formatBytes as sizeOf } from "../../sources/diagnostics";
   import Trail from "./Trail.svelte";
 
   let {

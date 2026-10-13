@@ -14,7 +14,7 @@
 -->
 <script lang="ts">
   import type { Crumb } from "../../ipc/entity";
-  import { sizeOf } from "./bytes";
+  import { formatBytes as sizeOf } from "../../sources/diagnostics";
   import MarkdownText from "./MarkdownText.svelte";
   import Trail from "./Trail.svelte";
 
