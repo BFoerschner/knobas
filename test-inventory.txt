@@ -539,6 +539,7 @@ knobas-app	test/it	entity::a_project_narrows_the_room_within_its_sources
 knobas-app	test/it	entity::a_project_room_shows_a_configuration_only_project
 knobas-app	test/it	entity::a_relations_case_does_not_split_its_group
 knobas-app	test/it	entity::a_rooms_lines_carry_the_state_their_adapter_declares
+knobas-app	test/it	entity::a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room
 knobas-app	test/it	entity::a_tombstoned_entity_is_absent_unless_asked_for
 knobas-app	test/it	entity::a_tombstoned_entity_is_still_readable_and_says_so
 knobas-app	test/it	entity::activity_can_be_scoped_to_one_entity

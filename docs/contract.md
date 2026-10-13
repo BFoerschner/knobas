@@ -10843,7 +10843,7 @@ From this commit on, each of the following requires an orchestrator decision **a
 
   **The row shape.** `EntityPage` gains `groups: Option<Vec<GroupTally>>`, `GroupTally { group:
   AttentionGroup, count }`, `AttentionGroup` one of `review_requested`, `my_pull_requests`,
-  `open_pull_requests`, `my_branches`, `other_branches` (snake case). `Some` only under
+  `open_pull_requests`, `my_branches`, `branches`, `other_branches` (snake case). `Some` only under
   `attention`, in a room where some drawn row's source has a configured username; the non-empty
   groups in draw order, the rows arriving group by group (so a page from offset 0 is cut by the
   counts). `EntityRow` is unchanged, so `knobas_search::EntityRow` stays its wire twin. Mirrored in
@@ -10854,8 +10854,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   compare (they union every enabled source's; a Gitea author is compared with the Gitea username
   only). After the settled rows are dropped: a `pr` whose declared reviewers include me (1), a
   `pr` I authored (2), any other `pr` (3), a `branch` I last committed to that no open `pr` of
-  the same source names as `head` under the same declared parent path line (4), anything else
-  (5). The repo is matched by the path line (Gitea's `owner/name`), not by the name set
+  the same source names as `head` under the same declared parent path line (4), a `branch` whose
+  source has no username (5, `branches`; ruled 2026-10-13 on #712, so a source without identity
+  keeps its branches drawn in a mixed room), anything else (6). The repo is matched by the path line (Gitea's `owner/name`), not by the name set
   `sync.item_parent` keeps, whose bare `name` is shared across owners. A miss on either side (no
   `head`, no parent) matches nothing, so the branch stays unproposed and drawn (ADR-0007). A
   row whose source has no username is 3 or 5. A room where no row has one is not grouped
@@ -10872,13 +10873,15 @@ From this commit on, each of the following requires an orchestrator decision **a
   **The tile.** `Tile.svelte` draws each group under a muted `.lab` header with its count
   (`.tile-g`, `app.css`), drops a group with no row on the page, and draws `other_branches`
   only maximised; a tile those alone fill says how many it keeps back. The header reads *2 to
-  review · 1 mine · 5 open · 3 branches* (other branches not counted).
+  review · 1 mine · 5 open · 3 branches*: `my_branches` and `branches` share the branches
+  segment, and other branches are not counted.
 
   Pinned by: `tests/it/entity.rs`'s
   `the_code_tile_draws_what_needs_me_first_in_four_groups` and
-  `a_code_tile_with_no_identity_draws_todays_order`; `entity_mirror.rs`'s
+  `a_code_tile_with_no_identity_draws_todays_order` and
+  `a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room`; `entity_mirror.rs`'s
   `the_entity_page_shape_matches_its_typescript_mirror` and `sources_mirror.rs`'s `KindPaths`
-  keys; `knobas-core`'s `the_field_names_the_sql_macros_use_are_the_serialized_ones`; five new
+  keys; `knobas-core`'s `the_field_names_the_sql_macros_use_are_the_serialized_ones`; six new
   tests in `Tile.test.svelte.ts`. Witnessed against the real server by `just gitea-live`'s
   `the_shapes_the_fake_only_assumes_are_certified_here`: the seeded *SEPA retry* pull request's
   declared head names exactly one mirrored branch of its repo, and every seeded branch has an

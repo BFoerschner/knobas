@@ -592,3 +592,50 @@ test("a group past the page's end draws no header", async () => {
 
   screen.done();
 });
+
+/**
+ * In a room mixing a source with an identity and one without (ruled
+ * 2026-10-13 on #712), the identity-less source's branches are drawn on the
+ * grid's tile under their own header, and the header counts them with my
+ * branches as the branches the tile draws.
+ */
+test("a source without identity keeps its branches on the grid's Code tile", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [
+        codeRow("PR-1", "pr"),
+        codeRow("spike", "branch"),
+        codeRow("anon-1", "branch"),
+        codeRow("anon-2", "branch"),
+        codeRow("theirs", "branch"),
+      ],
+      total: 5,
+      tally: [
+        { kind: "pr", tone: "info", count: 1 },
+        { kind: "branch", tone: null, count: 4 },
+      ],
+      groups: [
+        { group: "my_pull_requests", count: 1 },
+        { group: "my_branches", count: 1 },
+        { group: "branches", count: 2 },
+        { group: "other_branches", count: 1 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(4));
+  flushSync();
+
+  const heads = [...screen.target.querySelectorAll(".tile-g")].map((h) =>
+    (h.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
+  expect(heads).toEqual([
+    "My pull requests 1",
+    "My branches without a pull request 1",
+    "Branches 2",
+  ]);
+  expect(screen.text()).toContain("Title of anon-2");
+  expect(screen.text()).not.toContain("Title of theirs");
+  expect(screen.count()).toBe("1 mine · 3 branches");
+
+  screen.done();
+});

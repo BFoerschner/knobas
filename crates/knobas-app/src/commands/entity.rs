@@ -244,6 +244,11 @@ pub enum AttentionGroup {
     /// Branches whose last commit is mine and that no open pull request of
     /// the same repo is opened from (its declared `head`).
     MyBranches,
+    /// Branches of a source with no configured identity, in a room where
+    /// another source has one (ruled 2026-10-13 on #712): nobody can say
+    /// whose they are, so they are not hidden as somebody else's. The tile
+    /// draws them as it drew every branch before, newest first.
+    Branches,
     /// Every other branch: somebody else's, or one an open pull request
     /// already stands for. The tile draws these only maximised.
     OtherBranches,
@@ -462,7 +467,7 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
                   from (select kind, tone, count(*) as n from drawn group by kind, tone) t) as tally,
                (select jsonb_agg(jsonb_build_object(
                          'group', (array['review_requested', 'my_pull_requests', 'open_pull_requests',
-                                         'my_branches', 'other_branches'])[g.grp],
+                                         'my_branches', 'branches', 'other_branches'])[g.grp],
                          'count', g.n) order by g.grp)
                   from (select grp, count(*) as n from drawn where grp is not null group by grp) g) as groups
           from drawn d
@@ -485,7 +490,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// `me` is each row's own source's configured username (`config.username`,
 /// the one [`identity_of`] unions for the inbox), blank read as none. A row
 /// whose source has none can be nobody's: its pull requests are other open
-/// ones and its branches other branches. A room where **no** row has one is
+/// ones and its branches [`AttentionGroup::Branches`], drawn and not kept
+/// for the maximised tile, so that source keeps what it showed before
+/// (ruled 2026-10-13 on #712). A room where **no** row has one is
 /// not grouped at all (`grp` is `null` throughout), which is the order the
 /// tile drew before.
 ///
@@ -548,7 +555,8 @@ drawn as (
                   and not exists (select 1 from open_head h
                                    where h.source_id = r.source_id and h.head = r.title
                                      and h.path = r.branch_path) then 4
-             else 5
+             when r.kind = 'branch' and r.me is null then 5
+             else 6
            end
          end as grp
     from ruled r

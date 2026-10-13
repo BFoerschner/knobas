@@ -32,6 +32,7 @@ const LABEL: Record<AttentionGroup, string> = {
   my_pull_requests: "My pull requests",
   open_pull_requests: "Other open pull requests",
   my_branches: "My branches without a pull request",
+  branches: "Branches",
   other_branches: "Other branches",
 };
 

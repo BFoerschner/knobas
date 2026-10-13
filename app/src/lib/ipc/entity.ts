@@ -153,6 +153,7 @@ export type AttentionGroup =
   | "my_pull_requests"
   | "open_pull_requests"
   | "my_branches"
+  | "branches"
   | "other_branches";
 
 /** How many rows one group holds — `GroupTally`. */

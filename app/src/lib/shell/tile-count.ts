@@ -42,14 +42,21 @@ export interface CountWords {
 
 /**
  * What each Code-tile group is counted as in the header (#712): *2 to review ·
- * 3 mine · 5 open · 4 branches*. Other branches are not counted: the grid's
- * tile does not draw them, and the header counts what needs me.
+ * 3 mine · 5 open · 4 branches*. My branches and the branches of a source with
+ * no identity share the one *branches* segment: both are the branches the
+ * grid's tile draws. Other branches are not counted: the grid's tile does not
+ * draw them, and the header counts what needs me.
  */
 const GROUP_COUNT: Partial<Record<AttentionGroup, (n: number) => string>> = {
   review_requested: (n) => `${n} to review`,
   my_pull_requests: (n) => `${n} mine`,
   open_pull_requests: (n) => `${n} open`,
   my_branches: (n) => `${n} ${n === 1 ? "branch" : "branches"}`,
+};
+
+/** The groups whose count is folded into another group's segment. */
+const COUNTED_AS: Partial<Record<AttentionGroup, AttentionGroup>> = {
+  branches: "my_branches",
 };
 
 /** The header count of a tile reading `kinds` in `order`, for this page. */
@@ -60,7 +67,12 @@ export function tileCount(
   words: CountWords,
 ): string {
   if (order === "attention" && page.groups) {
-    const segments = page.groups.flatMap(({ group, count }) => {
+    const counts = new Map<AttentionGroup, number>();
+    for (const { group, count } of page.groups) {
+      const as = COUNTED_AS[group] ?? group;
+      counts.set(as, (counts.get(as) ?? 0) + count);
+    }
+    const segments = [...counts].flatMap(([group, count]) => {
       const phrase = GROUP_COUNT[group];
       return phrase && count > 0 ? [phrase(count)] : [];
     });

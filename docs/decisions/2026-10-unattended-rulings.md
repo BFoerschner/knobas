@@ -833,3 +833,20 @@ Ruled 2026-10-13 by the orchestrator, the author of #683, under Björn's #660 de
 **If you disagree, the cost of reversing this is:** low before release. Removing `clone_urls` is one optional config field, one query and a pure function in `sources/crud.rs`, and its tests. A stored config that carries the key would then be refused by `deny_unknown_fields`, so a reversal after users configure it needs a tolerant parse for one release. Going to A again means re-landing the forward and agent change in step with main, as one merge.
 
 As built (#683): `GiteaConfig::clone_urls`, declared through the SPI's `knobas_source::clone_urls` (the key, its grammar and `canonical_repo_url`, moved there in review so the app reads only what an adapter's `config_schema` declares), and `crud::clone_addresses`. The §10.8 entry and the §4.2 table cell are in `docs/contract.md`. `teamcity_seeded_live.rs` configures `clone_urls: ["http://gitea:3000"]`.
+
+## #712 — a source without identity in a mixed room: its branches stay drawn
+
+Ruled 2026-10-13 by the orchestrator, as deputy for Björn. Posted on #712.
+
+**The fork:** #712 groups the Code tile by "what needs me", with "me" taken per source from its configured username. The issue says a source with no identity draws today's order. In a room where one source has a username and another does not, the implementer's first build put the identity-less source's pull requests under *Other open pull requests* and its branches under *Other branches*, which the grid's tile hides until it is maximised. That source's branches disappeared from the grid.
+
+**Ruling:** branches of a source with no configured identity are not hidden. They are drawn in a visible group, *Branches*, after *My branches without a pull request* and before *Other branches*, in the order that source drew them before (loudest tone, then newest). Its pull requests stay under *Other open pull requests*, which is visible. The header counts these branches in its *branches* segment with my unproposed branches.
+
+**Reasoning:**
+
+- **"A source with no identity draws today's order" has to hold inside a mixed room too.** Hiding is a claim that the branch is somebody else's, and with no identity nobody can make that claim. ADR-0007's miss direction is the same: when the answer is unknown, fail toward showing.
+- **One more group is cheaper than a second rule.** The read already groups by source identity row by row; a sixth value in the same `case` keeps one statement and one wire shape.
+
+**If you disagree, the cost of reversing this is:** low. Removing the group is one `case` arm, one `AttentionGroup` variant and its TS mirror, one label, and two tests; nothing is stored or migrated.
+
+As built (#712): `AttentionGroup::Branches` (`branches` on the wire) in `crates/knobas-app/src/commands/entity.rs`, its label in `app/src/lib/shell/tile-groups.ts`, the shared count in `tile-count.ts`; witnessed by `a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room` and the Tile test of the same name. The §10.8 entry for #712 lists the variant.

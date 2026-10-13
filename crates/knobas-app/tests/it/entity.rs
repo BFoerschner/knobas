@@ -1775,6 +1775,100 @@ async fn a_code_tile_with_no_identity_draws_todays_order() {
     assert_eq!(page.groups, None, "nobody to group for");
 }
 
+/// A room mixing a source with an identity and one without (ruled
+/// 2026-10-13 on #712): the identity-less source's branches are nobody's to
+/// call mine or somebody else's, so they are drawn in their own visible
+/// group, newest first as every branch was before, and not kept for the
+/// maximised tile. Its pull requests are other open ones.
+#[tokio::test]
+async fn a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let pool = seeded().await;
+    let mine = configured_as(&pool, Some("björn")).await;
+    let anon = configured_as(&pool, None).await;
+    let repo =
+        serde_json::json!({ "full_name": "tidewater/payout-service", "name": "payout-service" });
+    let pr = serde_json::json!({
+        "state": "open",
+        "merged": false,
+        "head": { "ref": "elsewhere" },
+        "base": { "repo": repo },
+        "requested_reviewers": [],
+    });
+    for source in [&mine, &anon] {
+        let key = "tidewater/payout-service#1";
+        mirrored(&pool, source, "pr", key, pr.clone()).await;
+        dated(&pool, &format!("{source}:{key}"), 1).await;
+        authored(&pool, &format!("{source}:{key}"), "björn").await;
+    }
+    for (source, branch, author, minutes) in [
+        (&mine, "björn/spike", "björn", 30),
+        (&mine, "ana/wip", "ana", 2),
+        (&anon, "björn/x", "björn", 10),
+        (&anon, "ana/y", "ana", 5),
+    ] {
+        let key = format!("tidewater/payout-service@refs/heads/{branch}");
+        mirrored(
+            &pool,
+            source,
+            "branch",
+            &key,
+            serde_json::json!({ "repository": repo }),
+        )
+        .await;
+        sqlx::query("update sync.item set title = $2 where entity_id = $1")
+            .bind(format!("{source}:{key}"))
+            .bind(branch)
+            .execute(&pool)
+            .await
+            .unwrap();
+        dated(&pool, &format!("{source}:{key}"), minutes).await;
+        authored(&pool, &format!("{source}:{key}"), author).await;
+    }
+
+    let page = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: vec![mine.clone(), anon.clone()],
+            kinds: vec!["pr".to_owned(), "branch".to_owned()],
+            order: EntityOrder::Attention,
+            ..all()
+        },
+        50,
+        0,
+        &builtin_declarations(&pool).await,
+    )
+    .await
+    .unwrap();
+
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    let branch =
+        |source: &str, name: &str| format!("{source}:tidewater/payout-service@refs/heads/{name}");
+    assert_eq!(
+        ids,
+        [
+            format!("{mine}:tidewater/payout-service#1"),
+            format!("{anon}:tidewater/payout-service#1"),
+            branch(&mine, "björn/spike"),
+            branch(&anon, "ana/y"),
+            branch(&anon, "björn/x"),
+            branch(&mine, "ana/wip"),
+        ],
+    );
+    let group = |group, count| GroupTally { group, count };
+    assert_eq!(
+        page.groups,
+        Some(vec![
+            group(AttentionGroup::MyPullRequests, 1),
+            group(AttentionGroup::OpenPullRequests, 1),
+            group(AttentionGroup::MyBranches, 1),
+            group(AttentionGroup::Branches, 2),
+            group(AttentionGroup::OtherBranches, 1),
+        ]),
+        "the identity-less source's branches are drawn, not hidden as somebody else's"
+    );
+}
+
 /// The Builds tile's read (#680): one row per build configuration, its
 /// **latest** build, failing first, then running, then succeeded. A newer
 /// success of one configuration does not hide another configuration's
