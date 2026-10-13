@@ -80,14 +80,34 @@ select s.id from unnest($1::text[]) s(id)
 pub const PARENT_SUGGESTIONS: i64 = 20;
 
 /// The newest [`PARENT_SUGGESTIONS`] `(name, kind)`s a parent answers to whose
-/// name starts with `$1`, ignoring case: [`crate::under::parent_names!`], the
-/// fragment `under:`'s own lookup reads, so a suggested name is one `under:`
-/// knows and every name it knows is offered for its own prefix (#615).
+/// name starts with `$1`, ignoring case (#761, the deputy's ruling of
+/// 2026-10-14). Before it, every parent name the mirror had was shipped once
+/// per opening and narrowed in the webview -- 274-430 ms and 680 KB on the
+/// 22,000-item responsiveness probe (#753), most of it ticket keys nobody
+/// typed.
 ///
-/// **By prefix, per keystroke** (#761, the deputy's ruling of 2026-10-14):
-/// before it, every parent name the mirror had was shipped once per opening
-/// and narrowed in the webview -- 274-430 ms and 680 KB on the 22,000-item
-/// responsiveness probe (#753), most of it ticket keys nobody typed.
+/// Two steps, so the cost does not hang on the planner's statistics:
+///
+/// 1. **Rank** every `(name, kind)` with the prefix by the newest mirrored
+///    item that names it -- `sync.item_parent` joined to `sync.item` alone,
+///    and every asset by its own time -- sorted. The `offset 0` keeps step 2
+///    from being pushed beneath the sort.
+/// 2. **Offer** them in that order while [`crate::under::parent_names!`] --
+///    the fragment `under:`'s own lookup reads -- has the same name and kind,
+///    up to the limit. So an offered name is one `under:` knows (#615); and
+///    since step 1's rows are a superset of that fragment's, every name it
+///    knows is ranked, and is offered for a prefix specific enough.
+///
+/// Joining every row to `sync.live_item` before ranking was 58 ms at the
+/// probe's size with fresh statistics and 306 ms without (the join to
+/// `knobas.source_config` on two columns is underestimated a hundredfold and
+/// the planner picks nested loops); this shape is 40-51 ms either way.
+///
+/// **What the ranking concedes**: a name is ranked by its newest item, live or
+/// not. A name whose newest item was withdrawn, or sits in a turned-off
+/// source, while an older live one still answers to it, is offered a little
+/// higher than its live items alone would put it. It is still offered only
+/// when a live item answers to it.
 ///
 /// The range on `~>=~` / `~<~` is the one `item_parent_name_prefix_idx`
 /// (migration `0032`, `text_pattern_ops`) serves, in byte order whatever the
@@ -95,23 +115,26 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// it -- a `like $1 || '%'` would not. The upper bound appends the highest code
 /// point, so a name that continues the prefix with U+10FFFF itself falls
 /// outside it; that is a private-use character no source spells a parent
-/// with. `starts_with` is the exact test, and what the asset arm, which has no
-/// such index, is filtered by. `lower` on both sides, in SQL: the same
-/// lowering `under::KNOWN_SQL` compares with, so what is offered for a prefix
-/// is what `under:` then knows.
-///
-/// One row per `(name, kind)`, dated by its newest row. A name the trim
-/// leaves empty, or a row without a kind, is not offered.
+/// with. `starts_with` is the exact test. `lower` on both sides, in SQL: the
+/// lowering `under::KNOWN_SQL` compares with. A name the trim leaves empty, or
+/// a row without a kind, is not offered.
 const PARENTS_SQL: &str = concat!(
-    "select p.name, p.kind from ",
+    "select g.name, g.kind from ( \
+       select p.name, p.kind, max(p.at) as top from ( \
+         select ip.name, ip.kind, coalesce(i.item_updated_at, i.synced_at) as at \
+           from sync.item_parent ip join sync.item i on i.entity_id = ip.entity_id \
+         union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
+        where lower(p.name) ~>=~ lower($1) \
+          and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
+          and starts_with(lower(p.name), lower($1)) \
+          and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
+        group by p.name, p.kind \
+        order by top desc nulls last, p.name, p.kind \
+       offset 0) g \
+     where exists (select 1 from ",
     crate::under::parent_names!(),
-    " p where lower(p.name) ~>=~ lower($1) \
-        and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
-        and starts_with(lower(p.name), lower($1)) \
-        and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-      group by p.name, p.kind \
-      order by max(p.at) desc nulls last, p.name, p.kind \
-      limit $2"
+    " k where lower(k.name) = lower(g.name) and k.name = g.name and k.kind = g.kind) \
+     limit $2"
 );
 
 /// Read the three lists against `vocab`, the parents for the prefix `under`

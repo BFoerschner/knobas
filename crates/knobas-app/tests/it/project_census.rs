@@ -212,6 +212,24 @@ async fn the_census_is_the_walk_after_every_change() {
             .contains(&row(&a, "PAY", Some("Pay Ops")))
     );
 
+    // A re-sync that moves only the time: the payload is the same, so no
+    // project is recomputed, and the stored time must still follow.
+    upsert(
+        &pool,
+        &a,
+        &[(
+            "PAY-2",
+            "2026-06-01T00:00:00Z",
+            in_project("PAY", Some("Payouts")),
+        )],
+    )
+    .await;
+    assert!(
+        census(&pool, &both, "a time-only update")
+            .await
+            .contains(&row(&a, "PAY", Some("Payouts")))
+    );
+
     // A tombstone: its name no longer vouches. `OPS` loses its only item.
     for id in [format!("{a}:PAY-1"), format!("{a}:OPS-1")] {
         sqlx::query("update knobas.entity set deleted_at = now() where id = $1")

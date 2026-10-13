@@ -45,9 +45,12 @@
 -- `payload_paths`, the project fields included. Which adapter a source is
 -- configured with is matched when the rows are read (`s.kind =
 -- p.adapter_kind`), so there is still no trigger on `knobas.source_config`.
--- **When** an item was updated is not stored: the census reads it off
--- `sync.live_item` at read time, so a re-sync that changes only a timestamp
--- needs no recompute and cannot leave a stale one.
+-- `at` is the item's `coalesce(item_updated_at, synced_at)`, the time the
+-- census orders names by, copied so the census can walk an index in that
+-- order and stop at each project's first live row instead of joining every
+-- row to `sync.live_item`. The update trigger refreshes it on every update
+-- that moves either column, whatever else changed (a re-sync stamps
+-- `synced_at`), so it cannot go stale.
 --
 -- **The failure direction is a miss** (ADR-0007): a key path that leads to
 -- nothing, or to a value that is not a non-blank string, stores no row, so the
@@ -63,6 +66,7 @@
 --
 -- * **A write to `sync.item`**: the rows a statement inserted, and the rows an
 --   update changed `source_id`, `kind` or `payload` of. A delete cascades.
+--   Any other updated row whose time moved has `at` rewritten in place.
 -- * **A change to `sync.parent_declaration`**: every item of a kind the
 --   changed rows' old or new declarations give a project key. A truncate
 --   recomputes all.
@@ -80,10 +84,14 @@ create table sync.item_project (
   adapter_kind text not null,
   source_id    text not null,
   key          text not null,
-  name         text
+  name         text,
+  at           timestamptz
 );
-create index item_project_project_idx on sync.item_project (source_id, key);
-create index item_project_entity_idx  on sync.item_project (entity_id);
+-- The census's: per project and adapter, the rows in the order that picks
+-- the name, so each project is answered by its first live row.
+create index item_project_census_idx on sync.item_project
+  (source_id, key, adapter_kind, (name is null), at desc, name);
+create index item_project_entity_idx on sync.item_project (entity_id);
 
 create index item_parent_name_prefix_idx on sync.item_parent (lower(name) text_pattern_ops);
 
@@ -120,8 +128,9 @@ create function sync.resolve_item_projects(ids text[]) returns void
 language plpgsql as $fn$
 begin
   delete from sync.item_project p using unnest(ids) as u(id) where p.entity_id = u.id;
-  insert into sync.item_project (entity_id, adapter_kind, source_id, key, name)
-  select i.entity_id, a.adapter_kind, i.source_id, r.key, r.name
+  insert into sync.item_project (entity_id, adapter_kind, source_id, key, name, at)
+  select i.entity_id, a.adapter_kind, i.source_id, r.key, r.name,
+         coalesce(i.item_updated_at, i.synced_at)
     from unnest(ids) as u(id)
     join sync.item i on i.entity_id = u.id
     join sync.project_adapters() as a on i.kind = any(a.reached)
@@ -180,6 +189,12 @@ begin
   perform sync.resolve_item_parents(ids);
   perform sync.resolve_item_revisions(ids);
   perform sync.resolve_item_projects(ids);
+  -- Every other updated row keeps its project and gets its new time.
+  update sync.item_project p
+     set at = coalesce(n.item_updated_at, n.synced_at)
+    from new_rows n
+   where p.entity_id = n.entity_id
+     and p.at is distinct from coalesce(n.item_updated_at, n.synced_at);
   return null;
 end
 $fn$;

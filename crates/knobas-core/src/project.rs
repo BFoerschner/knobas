@@ -123,29 +123,42 @@ pub struct Project {
 ///
 /// `sync.live_item` and never `sync.item`, which is what keeps a tombstoned
 /// item -- and, since migration `0012`, every item of a source the user turned
-/// off -- from vouching for a project the live corpus no longer shows. The
-/// item's time is read there too, at read time, so a re-sync that only moves a
-/// timestamp needs nothing recomputed.
+/// off -- from vouching for a project the live corpus no longer shows.
 ///
-/// `distinct on` rather than a `group by` over all three columns: one project
-/// is one row however its items disagree. A project renamed upstream leaves
-/// older items carrying the older name and an item may carry the key with no
-/// name at all, and either would otherwise split one project into two rooms
-/// holding the same work. The `order by` decides which name wins -- a readable
-/// one over none, then the newest -- so a rename shows the new name and a
-/// nameless item erases nothing. Its trailing `p.name` only breaks a tie
-/// between two names recorded at the same instant, and exists so the answer
-/// does not depend on which row PostgreSQL reached first.
+/// One row per project however its items disagree. A project renamed
+/// upstream leaves older items carrying the older name and an item may carry
+/// the key with no name at all, and either would otherwise split one project
+/// into two rooms holding the same work. The order decides which name wins --
+/// a readable one over none, then the newest (`at`, the item's
+/// `coalesce(item_updated_at, synced_at)`, kept on the row by the trigger) --
+/// so a rename shows the new name and a nameless item erases nothing. The
+/// trailing `p.name` only breaks a tie between two names recorded at the same
+/// instant, and exists so the answer does not depend on which row PostgreSQL
+/// reached first.
+///
+/// **Shaped so it cannot grow with the mirror** (#759): the distinct projects
+/// first, then for each one a `limit 1` walk of `item_project_census_idx` in
+/// exactly that order, which stops at the project's first live row. Joining
+/// every row to `sync.live_item` and sorting was 57 ms at 22,000 items with
+/// fresh statistics and 220 ms without. The outer `coalesce(s.enabled,
+/// true)` is `sync.live_item`'s own source test, repeated so a turned-off
+/// source's projects are skipped before their rows are walked; the view stays
+/// the rule.
 ///
 /// `knobas-app`'s `tests/it/project_census.rs` holds this to the walk it
 /// replaced after every change the trigger follows.
 const PROJECTS: &str = "\
-select distinct on (p.source_id, p.key) p.source_id, p.key, p.name
-  from sync.item_project p
-  join sync.live_item i on i.entity_id = p.entity_id
-  join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind
- order by p.source_id, p.key, (p.name is null),
-          coalesce(i.item_updated_at, i.synced_at) desc, p.name";
+select pr.source_id, pr.key, w.name
+  from (select distinct p.source_id, p.key, p.adapter_kind from sync.item_project p) pr
+  join knobas.source_config s on s.id = pr.source_id and s.kind = pr.adapter_kind
+ cross join lateral (
+   select p.name from sync.item_project p
+     join sync.live_item i on i.entity_id = p.entity_id
+    where p.source_id = pr.source_id and p.key = pr.key and p.adapter_kind = pr.adapter_kind
+    order by (p.name is null), p.at desc, p.name
+    limit 1) w
+ where coalesce(s.enabled, true)
+ order by pr.source_id, pr.key";
 
 /// The projects the live corpus shows, ordered by source then key.
 ///

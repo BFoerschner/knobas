@@ -26,7 +26,7 @@ use sqlx::PgPool;
 use crate::SearchError;
 use crate::query::Parsed;
 
-/// Every `(name, kind, at)` a parent answers to, as a table expression -- the one
+/// Every `(name, kind)` a parent answers to, as a table expression -- the one
 /// place the parent arms are put together, read by [`KNOWN_SQL`] here and by
 /// `crate::suggest`'s `PARENTS_SQL`, so what `under:` knows and what the box
 /// offers for it cannot drift apart (#615).
@@ -54,17 +54,12 @@ use crate::query::Parsed;
 /// asset arm is the name `corpus::estate_subtree!` starts its walk from, and a
 /// reader's `lower(name)` filter reaches it as `lower(a.name)`, the same
 /// spelling: change one and the other must follow.
-///
-/// `at` is when the row's item last changed (its source's update time, else
-/// when it was mirrored), or the asset's own update time: what "newest" means
-/// when the box offers the newest parents for a prefix (#761).
 macro_rules! parent_names {
     () => {
-        "(select ip.name, ip.kind, coalesce(i.item_updated_at, i.synced_at) as at \
-           from sync.item_parent ip \
+        "(select ip.name, ip.kind from sync.item_parent ip \
            join sync.live_item i on i.entity_id = ip.entity_id \
            join knobas.source_config s on s.id = i.source_id and s.kind = ip.adapter_kind \
-         union all select a.name, 'asset', a.updated_at from knobas.asset a)"
+         union all select a.name, 'asset' from knobas.asset a)"
     };
 }
 pub(crate) use parent_names;
