@@ -21,6 +21,7 @@
 -->
 <script lang="ts">
   import type { EntityRow, MiniBoard } from "../ipc/entity";
+  import { prefetch } from "../detail/prefetch";
   import type { MiniBoardLayout } from "./contexts";
 
   let {
@@ -68,7 +69,11 @@
             Everything below is text: a key, a priority and a title are all
             whatever somebody typed into a ticket (roadmap §4 gotcha 7).
           -->
-          <button class="card" onclick={() => onopen({ kind: KIND, entity_id: card.entity_id })}>
+          <button
+            class="card"
+            use:prefetch={{ entityId: card.entity_id, kind: KIND }}
+            onclick={() => onopen({ kind: KIND, entity_id: card.entity_id })}
+          >
             <span class="k">
               <span class="mono">{card.key}</span>
               {#if card.priority}<span class="pr">{card.priority}</span>{/if}

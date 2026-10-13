@@ -36,6 +36,8 @@ vi.mock("../ipc/entity", () => ({
     return answer();
   },
   listEntities: () => Promise.resolve({ rows: [], total: 0 }),
+  getEntity: () => new Promise(() => {}),
+  entityView: () => new Promise(() => {}),
 }));
 
 const { default: Tile } = await import("./Tile.svelte");

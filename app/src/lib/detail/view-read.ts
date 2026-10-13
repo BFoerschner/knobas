@@ -133,11 +133,39 @@ export const HOLD_MS = PLACEHOLDER_MS;
  * panel's own to say. An entity drawn moments ago settles at once: the panel
  * draws it from memory and reads it again itself.
  */
-export async function readAhead(
+export function readAhead(
   entityId: string,
   read: (entityId: string) => Promise<EntityDetail>,
   readView: (entityId: string) => Promise<SourceView | null>,
   memory: ViewMemory = viewMemory,
+): Promise<void> {
+  // One read ahead per entity at a time (#753): a hover and then the swap
+  // that opens it, or two hovers, wait on the first rather than reading twice.
+  const reading = inFlight(memory);
+  const already = reading.get(entityId);
+  if (already !== undefined) return already;
+  const settled = readAheadOnce(entityId, read, readView, memory).finally(() =>
+    reading.delete(entityId),
+  );
+  reading.set(entityId, settled);
+  return settled;
+}
+
+const flights = new WeakMap<ViewMemory, Map<string, Promise<void>>>();
+function inFlight(memory: ViewMemory): Map<string, Promise<void>> {
+  let reading = flights.get(memory);
+  if (reading === undefined) {
+    reading = new Map();
+    flights.set(memory, reading);
+  }
+  return reading;
+}
+
+async function readAheadOnce(
+  entityId: string,
+  read: (entityId: string) => Promise<EntityDetail>,
+  readView: (entityId: string) => Promise<SourceView | null>,
+  memory: ViewMemory,
 ): Promise<void> {
   if (memory.recall(entityId) !== null) return;
   const loan: Loan = { row: read(entityId), view: readView(entityId), since: Date.now() };
