@@ -1612,7 +1612,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 19, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 20, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also
