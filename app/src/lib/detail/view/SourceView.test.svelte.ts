@@ -904,6 +904,19 @@ function tree(section: string | null): Promise<View | null> {
         url: null,
       },
     ],
+    "file:README.md": [
+      {
+        type: "file",
+        trail: [top, { name: "README.md", section: "file:README.md" }],
+        path: "README.md",
+        text: "read me\n",
+        language: null,
+        size: 8,
+        truncated: false,
+        binary: false,
+        url: null,
+      },
+    ],
     "file:src/main.rs": [
       {
         type: "file",
@@ -1148,5 +1161,24 @@ test("another entity's view starts the tab at its own section, with nothing to g
   await vi.waitFor(() => expect(entry(screen.panel(), "README.md")).toBeDefined());
   expect(screen.panel().querySelector(".tr-back")).toBeNull();
   expect(reads.at(-1)).toEqual(["gitea:tidewater/ledger", "files"]);
+  screen.done();
+});
+
+test("an entry clicked while the next place is read goes there, and Back skips the place never shown", async () => {
+  answer = (section) => (section === "files:src" ? new Promise(() => {}) : tree(section));
+  const screen = render(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+  entry(screen.panel(), "src").click();
+  flushSync();
+  // src never answers; the top is still drawn, and the reader picks again.
+  entry(screen.panel(), "README.md").click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tr-back")).not.toBeNull());
+  screen.panel().querySelector<HTMLButtonElement>(".tr-back")?.click();
+  flushSync();
+  expect(entry(screen.panel(), "README.md"), "back at the top, not at src").toBeDefined();
+  expect(screen.panel().querySelector(".tr-back"), "and nothing further back").toBeNull();
   screen.done();
 });

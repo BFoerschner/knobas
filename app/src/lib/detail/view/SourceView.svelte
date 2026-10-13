@@ -204,8 +204,13 @@
     if (!tab) return;
     const from = placeOf(tab);
     if (from === section) return;
-    steps[tab.id] = [...(steps[tab.id] ?? []), from];
-    leftFrom[tab.id] = from;
+    // A step taken from a place still being read (the reader clicked in the
+    // place held on screen) leaves one never shown: not a step to go back to,
+    // and not what stays drawn while the next is read.
+    if (shown?.state === "read") {
+      steps[tab.id] = [...(steps[tab.id] ?? []), from];
+      leftFrom[tab.id] = from;
+    }
     at[tab.id] = section;
   }
 

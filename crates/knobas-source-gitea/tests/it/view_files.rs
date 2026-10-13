@@ -426,6 +426,41 @@ async fn a_file_over_the_byte_cap_is_cut_at_a_line_within_it() {
     assert!(drawn.url.is_some(), "the rest is on Gitea");
 }
 
+/// A cut file whose answer carried no length -- Gitea behind a proxy that
+/// compresses, which `reqwest` undoes and so drops the header -- takes its
+/// size from the file's own `contents` entry, never from the bytes read.
+#[tokio::test]
+async fn a_cut_file_without_a_length_asks_gitea_its_size() {
+    use std::io::Write as _;
+    let server = gitea().await;
+    let line = format!("{}\n", "y".repeat(996));
+    let text = line.repeat(3_000);
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::fast());
+    gz.write_all(text.as_bytes()).unwrap();
+    let body = gz.finish().unwrap();
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/raw/big.txt")))
+        .and(query_param("ref", "main"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .insert_header("Content-Encoding", "gzip")
+                .set_body_bytes(body),
+        )
+        .mount(&server)
+        .await;
+    listing(
+        &server,
+        "big.txt",
+        "main",
+        entry("big.txt", "big.txt", "file", text.len() as u64),
+    )
+    .await;
+    let drawn = file(read(&server, ENTITY, "file:big.txt").await);
+    assert!(drawn.truncated);
+    assert_eq!(drawn.text, line.repeat(1_003));
+    assert_eq!(drawn.size, text.len() as u64, "the whole file's size");
+}
+
 /// A file with a NUL byte is binary: no text, its size, its page.
 #[tokio::test]
 async fn a_binary_file_says_so_with_its_size() {

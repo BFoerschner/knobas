@@ -11099,8 +11099,9 @@ From this commit on, each of the following requires an orchestrator decision **a
      *Back* (drawn on the trail only when there is a step to go back to) walks those, switching
      tabs keeps the place, each place is read once per view (a view read again after a write
      drops them, as it drops deferred reads), and another entity starts every tab at its own
-     section. While the next place is read, the last stays drawn, dimmed after 300 ms, rather
-     than a placeholder line. The steps are not the router's history: a tab is not an address
+     section. While the next place is read (or the same one again, after a write), what the tab
+     drew stays drawn, dimmed only past the panel's 400 ms placeholder threshold (#703), rather
+     than a placeholder line; a read answered for a view or entity since left is dropped. The steps are not the router's history: a tab is not an address
      (#697), so neither is a step inside one.
 
   **Gitea** draws a deferred *Files* tab last on a repository's view (at its default branch;
@@ -11111,7 +11112,9 @@ From this commit on, each of the following requires an orchestrator decision **a
   The overview's README lookup now reads the same route at the default branch. A file is `GET /repos/{o}/{r}/raw/{path}?ref=`, read in chunks and abandoned past
   1,000,000 bytes, kept to whole lines within 1 MB and 10,000 lines (`truncated` past either),
   `binary` for a NUL in its first 8,000 bytes (git's test), `size` the bytes read or, where it
-  was cut, Gitea's `Content-Length`. Paths go into the route one escaped segment at a time, and
+  was cut, Gitea's `Content-Length`, and where a cut answer has none (a compressing proxy;
+  `reqwest` drops it when it decodes) the file's own `GET /repos/{o}/{r}/contents/{path}?ref=`
+  entry's. Paths go into the route one escaped segment at a time, and
   an empty, `.` or `..` segment is refused with `SourceError::Protocol` before anything is sent.
 
   Mirrored in `app/src/lib/ipc/entity.ts` (`ViewBlock`'s two arms, `Crumb`, `TreeEntry`,

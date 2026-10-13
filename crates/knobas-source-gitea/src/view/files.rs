@@ -199,13 +199,25 @@ async fn file(
     } else {
         capped(&raw.bytes, raw.cut)
     };
+    let size = match raw.size {
+        Some(size) => size,
+        // Cut, and the answer had no length (a compressing proxy): the
+        // file's own entry says, rather than the megabyte that was read.
+        None => {
+            let listed: Listed = source
+                .client
+                .contents_entry_as(owner, repo, path, at)
+                .await?;
+            listed.size
+        }
+    };
     let url = page(record, at, path);
     Ok(Block::File {
         trail: trail(at, path, true),
         path: path.to_owned(),
         text,
         language: language_of(path).map(str::to_owned),
-        size: raw.size,
+        size,
         truncated,
         binary,
         url,

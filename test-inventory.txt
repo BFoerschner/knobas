@@ -2060,6 +2060,7 @@ knobas-source-gitea	test/it	view_branch::the_default_branch_shows_no_compare
 knobas-source-gitea	test/it	view_branch::the_diff_tab_reads_the_compares_diff
 knobas-source-gitea	test/it	view_files::a_binary_file_says_so_with_its_size
 knobas-source-gitea	test/it	view_files::a_branch_reads_its_tree_at_the_branch
+knobas-source-gitea	test/it	view_files::a_cut_file_without_a_length_asks_gitea_its_size
 knobas-source-gitea	test/it	view_files::a_directory_over_the_entry_cap_is_cut_at_it
 knobas-source-gitea	test/it	view_files::a_file_is_read_raw_at_the_ref
 knobas-source-gitea	test/it	view_files::a_file_over_the_byte_cap_is_cut_at_a_line_within_it

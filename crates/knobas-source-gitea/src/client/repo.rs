@@ -209,12 +209,25 @@ impl GiteaClient {
         dir: &str,
         at: &str,
     ) -> Result<Vec<T>, SourceError> {
-        let mut route = format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?);
-        if !dir.is_empty() {
-            route.push('/');
-            route.push_str(&escaped_path(dir)?);
-        }
-        self.get_json(&route, &[("ref", at.to_owned())]).await
+        self.get_json(&contents_path(owner, repo, dir)?, &[("ref", at.to_owned())])
+            .await
+    }
+
+    /// `GET /repos/{o}/{r}/contents/{file}?ref={at}` -- one file's own entry
+    /// at a ref (its size, among others): what a cut [`Self::raw_capped`]
+    /// read asks when Gitea's answer did not say how long the file is.
+    pub(crate) async fn contents_entry_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+    ) -> Result<T, SourceError> {
+        self.get_json(
+            &contents_path(owner, repo, file)?,
+            &[("ref", at.to_owned())],
+        )
+        .await
     }
 
     /// `GET /repos/{o}/{r}/raw/{file}?ref={at}` -- one file's bytes at a ref,
@@ -253,10 +266,13 @@ impl GiteaClient {
                 break;
             }
         }
+        // Only where the body is not compressed: `reqwest` undoes a gzip
+        // answer and then has no length to give, so a cut read without one
+        // leaves the size to its caller.
         let size = if cut {
-            length.unwrap_or(bytes.len() as u64)
+            length
         } else {
-            bytes.len() as u64
+            Some(bytes.len() as u64)
         };
         Ok(RawFile { bytes, cut, size })
     }
@@ -300,8 +316,18 @@ pub(crate) struct RawFile {
     /// The file is longer than the cap and was not read to its end.
     pub(crate) cut: bool,
     /// The whole file's size: what was read, or where it was cut, what Gitea
-    /// said its length was (what was read where it did not say).
-    pub(crate) size: u64,
+    /// said its length was; `None` for a cut read whose answer did not say.
+    pub(crate) size: Option<u64>,
+}
+
+/// `/repos/{o}/{r}/contents[/{path}]`, `path` empty for the top directory.
+fn contents_path(owner: &str, repo: &str, path: &str) -> Result<String, SourceError> {
+    let mut route = format!("/repos/{}/{}/contents", segment(owner)?, segment(repo)?);
+    if !path.is_empty() {
+        route.push('/');
+        route.push_str(&escaped_path(path)?);
+    }
+    Ok(route)
 }
 
 /// A path in a tree as path segments, each [`escaped`]: `src/lib` stays two
