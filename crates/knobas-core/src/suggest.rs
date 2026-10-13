@@ -897,7 +897,7 @@ impl Pacing {
     }
 
     fn recover(&self) {
-        let grown = (self.batch() * 2).min(self.ceiling);
+        let grown = self.batch().saturating_mul(2).min(self.ceiling);
         self.batch
             .store(grown, std::sync::atomic::Ordering::Relaxed);
     }
