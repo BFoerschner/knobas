@@ -38,7 +38,11 @@
   **`knobas-db`.** `Connector::app_pool()` is the app's pool, its connections carrying
   `UI_STATEMENT_TIMEOUT` (30 s) from the first packet; the three places `EmbeddedDb` built its pool
   use it. `migrate::run` runs on a one-connection pool of its own with no limit, so a long
-  migration is not cancelled and the cleared limit never enters the app pool.
+  migration is not cancelled and the cleared limit never enters the app pool. Two app-pool callers
+  that grow with the mirror lift the limit for themselves (review, 2026-10-13): `knobas_sync::stats::reindex_fts`
+  runs on a connection detached from the pool, and `knobas_search::Searcher::declaring` sets it
+  `local` to its transaction (the declarations' recompute: 7.6 s at 100,000 items). No signature
+  changes.
 
   **Frontend.** `SuggestionTray.svelte` asks for a pass only on a finished sync run; opening the
   tray, switching rooms and a link changing elsewhere read.

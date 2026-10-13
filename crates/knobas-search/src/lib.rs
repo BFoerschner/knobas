@@ -225,6 +225,15 @@ impl Searcher {
             return Ok(searcher);
         }
         let mut tx = searcher.pool.begin().await?;
+        // A changed declaration recomputes `sync.item_parent` for every item
+        // of its adapter kinds, in this transaction: 7.6 s at 100,000 items
+        // on a loaded machine (#745 review). The app's pool cancels a
+        // statement after thirty seconds, and a slower machine would have
+        // every search retry the recompute and be cancelled with it, so the
+        // limit is lifted for this transaction alone (`local` ends with it).
+        sqlx::query("set local statement_timeout = 0")
+            .execute(&mut *tx)
+            .await?;
         sqlx::query(
             "insert into sync.parent_declaration (adapter_kind, payload_paths)
              select * from unnest($1::text[], $2::jsonb[])

@@ -64,7 +64,13 @@ const MAX_CONNECTIONS: u32 = 5;
 /// under a second. The long statements knobas does run are elsewhere: sync
 /// runs and the detection pass on connections of their own, a backup in
 /// `pg_dump`, and migrations on the one-connection pool `migrate::run` opens
-/// for itself without the limit.
+/// for itself without the limit. Two app-pool callers grow with the mirror and
+/// lift the limit for themselves: the *Re-index* rebuild
+/// (`knobas_sync::stats::reindex_fts`, on a connection taken out of the pool)
+/// and a change to the adapters' declarations (`Searcher::declaring`, `set
+/// local` in its transaction), 7.6 s at 100,000 items in the #745 review.
+/// Every other app-pool caller measured there stays under a second at that
+/// size: a source's purge 0.74 s for 33,000 items, `db_stats` 72 ms.
 pub const UI_STATEMENT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Upper bound for `initdb` / `pg_ctl` invocations. The crate default is 5s,

@@ -92,13 +92,27 @@ pub const FTS_INDEX: &str = "sync.item_fts_idx";
 /// autocommit is what makes this legal. The alternative would lock the mirror
 /// against every search for the length of the rebuild.
 ///
+/// **No statement timeout** (#745). The app's pool cancels any statement after
+/// thirty seconds, and a rebuild of a large mirror's index may legitimately
+/// take longer; a cancelled `REINDEX CONCURRENTLY` also leaves an invalid
+/// `_ccnew` index behind that every write then maintains. So the rebuild runs
+/// on a connection taken out of the pool, its limit cleared, and closed after:
+/// the cleared limit never goes back to a UI command.
+///
 /// # Errors
 /// [`sqlx::Error`] if the rebuild fails.
 pub async fn reindex_fts(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(sqlx::AssertSqlSafe(format!(
+    use sqlx::Connection as _;
+    let mut conn = pool.acquire().await?.detach();
+    sqlx::query("set statement_timeout = 0")
+        .execute(&mut conn)
+        .await?;
+    let outcome = sqlx::query(sqlx::AssertSqlSafe(format!(
         "reindex index concurrently {FTS_INDEX}"
     )))
-    .execute(pool)
-    .await?;
+    .execute(&mut conn)
+    .await;
+    let _ = conn.close().await;
+    outcome?;
     Ok(())
 }

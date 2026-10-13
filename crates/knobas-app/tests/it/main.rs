@@ -41,6 +41,7 @@ mod suggestion_pass;
 mod suggestions_ipc;
 mod time_ipc;
 mod ui_pool_probe;
+mod ui_statement_limit;
 mod url_resolve;
 mod week_ipc;
 mod wiring;
