@@ -1026,7 +1026,13 @@ fn edit_action(title: &str, body: Option<&str>) -> ViewAction {
             ActionField {
                 value: Some(title.to_owned()),
                 required: true,
-                ..ActionField::new("title", "Title", FieldKind::Text { suggestions: vec![] })
+                ..ActionField::new(
+                    "title",
+                    "Title",
+                    FieldKind::Text {
+                        suggestions: vec![],
+                    },
+                )
             },
             ActionField {
                 value: body.map(str::to_owned),
@@ -1040,9 +1046,7 @@ fn edit_action(title: &str, body: Option<&str>) -> ViewAction {
 /// *Close*: a danger, through its sentence, the state a fixed value.
 fn close_action() -> ViewAction {
     ViewAction {
-        confirm: Some(
-            "Close feature/PAY-231-sepa-retry → main without merging it?".to_owned(),
-        ),
+        confirm: Some("Close feature/PAY-231-sepa-retry → main without merging it?".to_owned()),
         danger: true,
         values: [("state".to_owned(), "closed".to_owned())].into(),
         ..ViewAction::new("edit_pull_request", "Close")
