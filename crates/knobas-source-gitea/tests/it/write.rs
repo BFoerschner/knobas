@@ -476,25 +476,80 @@ async fn an_update_gitea_refuses_or_aimed_wrong_is_a_refusal() {
     assert!(untouched.received_requests().await.unwrap().is_empty());
 }
 
-/// A pull request Gitea will not merge -- a conflict, a work-in-progress
-/// title, a merge already made -- is a **405**, and it reaches the queue as a
-/// `Protocol` refusal carrying Gitea's own sentence, never retried (ADR-0004).
-#[tokio::test]
-async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
-    let server = refusing(405, "Please try again later").await;
-    let error = source(&server)
+/// The merge, as the queue's flush makes it.
+async fn merge_142(server: &MockServer) -> Result<(), SourceError> {
+    source(server)
         .write(WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
         })
         .await
-        .expect_err("the server refused");
-    assert_eq!(error.status(), Some(405), "{error:?}");
-    assert!(
-        matches!(&error, SourceError::Protocol { message: m, .. } if m.contains("Please try again later")),
-        "{error:?}"
-    );
+        .map(|_| ())
+}
+
+/// Answer the merge POST with Gitea's 405 envelope saying `message`, at most
+/// `times` times where given.
+async fn merge_refused(server: &MockServer, message: &str, times: Option<u64>) {
+    let mock = Mock::given(method("POST"))
+        .and(path("/api/v1/repos/tidewater/payout-service/pulls/142/merge"))
+        .respond_with(ResponseTemplate::new(405).set_body_json(json!({
+            "message": message,
+            "url": "https://gitea.example/api/swagger"
+        })));
+    match times {
+        Some(n) => mock.up_to_n_times(n).with_priority(1).mount(server).await,
+        None => mock.mount(server).await,
+    }
+}
+
+/// Issue #721: Gitea answers a merge **405** *"Please try again later"* while
+/// it is still working out whether the pull request can merge -- for a second
+/// or two after it was opened or its head moved, even after it has already
+/// answered `mergeable: true` (measured live: 3 merges in 5 sent at once). So
+/// that answer is tried again, and the merge lands once Gitea has looked.
+#[tokio::test]
+async fn a_merge_gitea_is_still_checking_is_tried_again_until_it_lands() {
+    let server = MockServer::start().await;
+    merge_refused(&server, "Please try again later", Some(2)).await;
+    Mock::given(method("POST"))
+        .and(path("/api/v1/repos/tidewater/payout-service/pulls/142/merge"))
+        .respond_with(ResponseTemplate::new(200))
+        .with_priority(2)
+        .mount(&server)
+        .await;
+
+    merge_142(&server)
+        .await
+        .expect("the merge lands once Gitea has checked");
+    assert_eq!(server.received_requests().await.unwrap().len(), 3);
+}
+
+/// Every other 405 is Gitea's refusal of this merge -- a work-in-progress
+/// title, a merge already made, an account that may not merge -- and it
+/// reaches the queue at once as a `Protocol` refusal carrying Gitea's own
+/// sentence, sent once and never again (ADR-0004).
+#[tokio::test]
+async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
+    for sentence in [
+        "Work in progress PRs cannot be merged",
+        "The PR is already merged",
+        "User not allowed to merge PR",
+    ] {
+        let server = MockServer::start().await;
+        merge_refused(&server, sentence, None).await;
+        let error = merge_142(&server).await.expect_err("the server refused");
+        assert_eq!(error.status(), Some(405), "{error:?}");
+        assert!(
+            matches!(&error, SourceError::Protocol { message: m, .. } if m.contains(sentence)),
+            "{error:?}"
+        );
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "{sentence}: a refusal is not asked twice"
+        );
+    }
 }
 
 /// A merge is aimed at a **pull request**: a repository's id is refused before

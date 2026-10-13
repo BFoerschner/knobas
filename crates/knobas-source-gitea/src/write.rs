@@ -30,6 +30,8 @@
 //! issue of the same index, which is why `crate::client::issue_comments` reads
 //! it from there too.
 
+use std::time::Duration;
+
 use serde_json::json;
 
 use knobas_source::{
@@ -164,11 +166,10 @@ pub(crate) async fn approve(
 /// *Merge* button does without the reader typing anything.
 ///
 /// Gitea answers **405** for every pull request it will not merge -- a
-/// conflict, a work-in-progress title, one already merged, and *"Please try
-/// again later"* while it is still computing mergeability -- and that arrives
-/// as a `Protocol` refusal carrying its sentence, never retried (ADR-0004).
-/// The view offers the action only where Gitea said mergeable, which is what
-/// keeps the last of those rare.
+/// work-in-progress title, one already merged, an account that may not --
+/// and that arrives as a `Protocol` refusal carrying its sentence, never
+/// retried (ADR-0004). The one exception is [`still_checking`]: *"Please try
+/// again later"* is tried again for up to [`MERGE_PATIENCE`] (#721).
 ///
 /// # Errors
 ///
@@ -187,7 +188,63 @@ pub(crate) async fn merge(
         GiteaClient::path_segment(repo)?
     );
     let body = json!({ "Do": style.as_str(), "delete_branch_after_merge": delete_branch });
-    client.post(&path, &body).await.map(|_| ())
+    patiently(MERGE_PATIENCE, || async {
+        client.post(&path, &body).await.map(|_| ())
+    })
+    .await
+}
+
+/// How long a merge keeps asking while Gitea answers [`still_checking`].
+/// Measured on 1.27.3 (#721): a pull request opened a moment ago reads
+/// `mergeable: true`, then Gitea's check of the push behind it runs and the
+/// merge is refused for 1--2.5 s. Several times that, so a busy server is
+/// waited for too; past it, the answer is believed.
+pub(crate) const MERGE_PATIENCE: Duration = Duration::from_secs(15);
+
+/// The longest single wait between two merge attempts.
+const MERGE_WAIT_CAP: Duration = Duration::from_secs(2);
+
+/// Gitea's *"Please try again later"*: its 405 to a merge of a pull request
+/// whose recorded state is not *mergeable* (`ErrNotMergeableState` in
+/// `services/pull/check.go`). That state is *checking* for a moment after the
+/// pull request or its head moved -- the case worth waiting out -- and is
+/// also *conflict* or *error* for good, which the same sentence cannot tell
+/// apart; [`MERGE_PATIENCE`] is what keeps those a refusal in the end
+/// rather than a write that waits forever (story 19). Matched on the status
+/// **and** the sentence: every other 405 is a refusal the first time.
+pub(crate) fn still_checking(error: &SourceError) -> bool {
+    matches!(
+        error,
+        SourceError::Protocol { status: Some(405), message } if message.contains("Please try again later")
+    )
+}
+
+/// Run `attempt` until it does anything but [`still_checking`], waiting
+/// `knobas-http`'s own exponential backoff (capped at [`MERGE_WAIT_CAP`])
+/// between tries, for at most `patience` of waiting; then the last answer is
+/// the answer.
+pub(crate) async fn patiently<F, Fut>(patience: Duration, mut attempt: F) -> Result<(), SourceError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), SourceError>>,
+{
+    let mut waited = Duration::ZERO;
+    let mut tries: u32 = 0;
+    loop {
+        let result = attempt().await;
+        match &result {
+            Err(error) if still_checking(error) && waited < patience => {
+                tries += 1;
+                let wait = knobas_http::retry::backoff(tries)
+                    .min(MERGE_WAIT_CAP)
+                    .min(patience - waited);
+                tracing::debug!(tries, ?wait, "gitea is still checking the merge");
+                tokio::time::sleep(wait).await;
+                waited += wait;
+            }
+            _ => return result,
+        }
+    }
 }
 
 /// Bring a pull request's head up to date with its base (#708): Gitea's
@@ -388,4 +445,60 @@ pub(crate) async fn edit_pull_request(
         .patch(&path, &serde_json::Value::Object(fields))
         .await
         .map(|_| ())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::cell::Cell;
+    use std::time::{Duration, Instant};
+
+    use knobas_source::SourceError;
+
+    use super::{patiently, still_checking};
+
+    fn refused(message: &str) -> SourceError {
+        SourceError::Protocol {
+            status: Some(405),
+            message: format!("HTTP 405 Method Not Allowed: {message}"),
+        }
+    }
+
+    /// The same sentence is also Gitea's answer for a pull request that
+    /// conflicts, for good (#721): patience runs out, and then Gitea's 405 is
+    /// the answer -- a refusal the queue records, not a write that waits
+    /// forever.
+    #[tokio::test]
+    async fn a_merge_still_refused_when_patience_runs_out_is_a_refusal() {
+        let tries = Cell::new(0);
+        let started = Instant::now();
+        let result = patiently(Duration::from_millis(600), || {
+            tries.set(tries.get() + 1);
+            async { Err(refused("Please try again later")) }
+        })
+        .await;
+        let error = result.expect_err("Gitea never stopped refusing");
+        assert!(still_checking(&error), "{error:?}");
+        assert_eq!(error.status(), Some(405));
+        // 250 ms, 350 ms (what was left): three asks in 600 ms of waiting.
+        assert_eq!(tries.get(), 3);
+        assert!(started.elapsed() >= Duration::from_millis(600));
+        assert!(started.elapsed() < Duration::from_secs(5));
+    }
+
+    /// Only Gitea's *"Please try again later"* 405 is waited out: the same
+    /// sentence on another status, and another 405, are not.
+    #[test]
+    fn only_the_405_still_checking_is_waited_out() {
+        assert!(still_checking(&refused("Please try again later")));
+        assert!(!still_checking(&refused(
+            "Work in progress PRs cannot be merged"
+        )));
+        assert!(!still_checking(&SourceError::Protocol {
+            status: Some(409),
+            message: "HTTP 409 Conflict: Please try again later".to_owned(),
+        }));
+        assert!(!still_checking(&SourceError::Unreachable(
+            "Please try again later".to_owned()
+        )));
+    }
 }
