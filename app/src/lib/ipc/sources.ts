@@ -621,9 +621,12 @@ export type ReviewVerdict = "approve" | "request_changes" | "comment";
 export interface ReviewComment {
   path: string;
   line: number;
-  side: "old" | "new";
+  side: ReviewSide;
   body: string;
 }
+
+/** Which side of a diff a line number counts on — `knobas_source::ReviewSide`. */
+export type ReviewSide = "old" | "new";
 
 /** One override of a run (#669) -- `knobas_source::BuildParameter`. */
 export interface BuildParameter {

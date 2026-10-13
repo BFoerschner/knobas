@@ -157,7 +157,10 @@ async fn a_commit_view_is_its_overview_and_its_diff() {
     let diff = section(&view, "diff");
     assert_eq!(diff.title, "Diff");
     assert_eq!(diff.count, Some(2), "files changed");
-    let Block::Diff { files, truncated } = &diff.blocks[0] else {
+    let Block::Diff {
+        files, truncated, ..
+    } = &diff.blocks[0]
+    else {
         panic!("the diff tab is a diff: {diff:#?}");
     };
     assert!(!truncated);

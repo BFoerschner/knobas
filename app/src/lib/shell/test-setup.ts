@@ -9,7 +9,11 @@
  */
 import { afterAll, afterEach, expect } from "vitest";
 
+// First: it must run before any module that looks for a storage is evaluated.
+import "./test-no-storage";
+
 import { viewMemory } from "../detail/view-read";
+import { pendingComments } from "../detail/view/pending-comments.svelte";
 import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
 
 /**
@@ -18,6 +22,9 @@ import { settleRejections, takeUnhandled, watchRejections } from "./unhandled";
  * entity the previous one left drawn.
  */
 afterEach(() => viewMemory.clear());
+
+/** The pending line comments (#709) are a module singleton too. */
+afterEach(() => pendingComments.forget());
 
 /**
  * The zone is pinned in `vite.config.ts`; this is what makes the pin a fact

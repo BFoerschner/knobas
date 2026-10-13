@@ -46,6 +46,53 @@ pub struct DiffFile {
     pub hunks: Vec<Hunk>,
     /// Some of this file's lines were cut by a cap.
     pub truncated: bool,
+    /// The review conversations on this file's lines (issue #709): what a
+    /// source that keeps line comments read for it, in the order the file
+    /// reads -- empty from the parser, which knows only the text. Absent on
+    /// the wire reads as empty, so a diff drawn before #709 decodes.
+    #[serde(default)]
+    pub threads: Vec<LineThread>,
+}
+
+/// One conversation on one line of a file's diff (issue #709, `CONTEXT.md`
+/// **Line thread**): the comments a review left there, oldest first.
+///
+/// `line` counts on `side`, as a [`ReviewComment`](crate::ReviewComment)'s
+/// does: the file as it was (`old`) or as it becomes (`new`). The shell draws
+/// the thread under the line holding that number on that side.
+///
+/// **Outdated is the source's answer** (ADR-0007): the line is no longer in
+/// this diff as it was when the comment was made -- gone, or another text in
+/// its place since a later push. An outdated thread is drawn muted at the end
+/// of its file, never on a line it was not written about.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LineThread {
+    pub side: crate::ReviewSide,
+    pub line: u32,
+    pub outdated: bool,
+    pub comments: Vec<LineComment>,
+}
+
+/// A [`LineThread`] on a file the diff no longer holds (issue #709): written
+/// on `path` in an earlier round, which a later push reverted or dropped.
+/// Outdated by definition -- there is no line left to be on -- and drawn in
+/// the diff's own outdated list, never dropped.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FileThread {
+    pub path: String,
+    pub thread: LineThread,
+}
+
+/// One comment of a [`LineThread`]. Source text, like every string of a view:
+/// `body` is the source's Markdown, drawn legibly and never as markup
+/// (ADR-0020 rule 5).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LineComment {
+    /// Who wrote it, as the source names them (a login).
+    pub author: String,
+    pub body: String,
+    /// When, as the source's RFC 3339 instant; `None` where it sent none.
+    pub at: Option<String>,
 }
 
 /// One `@@` hunk.
@@ -289,6 +336,7 @@ impl FileBuilder {
             deletions: self.deletions,
             hunks: self.hunks,
             truncated: self.truncated,
+            threads: Vec::new(),
         }
     }
 }

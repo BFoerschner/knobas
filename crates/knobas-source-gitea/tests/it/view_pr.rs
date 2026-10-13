@@ -9,9 +9,10 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use knobas_source::ReviewSide;
 use knobas_source::view::{
-    ActionField, Block, ChoiceOption, DiffChange, Fact, FieldKind, SourceView, Tone, ViewAction,
-    ViewRow, ViewSection,
+    ActionField, Block, ChoiceOption, Commenting, DiffChange, Fact, FieldKind, FileThread,
+    LineComment, LineComments, LineThread, SourceView, Tone, ViewAction, ViewRow, ViewSection,
 };
 use knobas_source::{Source, SourceError};
 use serde_json::{Value, json};
@@ -440,10 +441,23 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
         ("files", false, Some(2)),
         "the deferred read answers with the blocks, not another stub"
     );
-    let Block::Diff { files, truncated } = &files.blocks[0] else {
+    let Block::Diff {
+        files,
+        truncated,
+        commentable,
+        ..
+    } = &files.blocks[0]
+    else {
         panic!("the files tab is a diff: {view:#?}");
     };
     assert!(!truncated);
+    // An open pull request's diff takes line comments, sent as a review (#709).
+    assert_eq!(
+        commentable,
+        &Some(Commenting {
+            write_op: "submit_review".into()
+        })
+    );
     let summary: Vec<_> = files
         .iter()
         .map(|f| (f.path.as_str(), f.change, f.additions, f.deletions))
@@ -455,7 +469,285 @@ async fn the_files_tab_is_read_on_its_own_from_the_pull_requests_diff() {
             ("docs/backoff.md", DiffChange::Added, 1, 0),
         ]
     );
-    assert_eq!(paths(&server).await, [format!("{REPO}/pulls/142.diff")]);
+    // The diff, and beside it what places the line comments (#709): the pull
+    // request's state and its reviews. No review here has line comments, so
+    // none is asked for them.
+    let mut asked = paths(&server).await;
+    asked.sort();
+    assert_eq!(
+        asked,
+        [
+            format!("{REPO}/pulls/142"),
+            format!("{REPO}/pulls/142.diff"),
+            format!("{REPO}/pulls/142/reviews"),
+        ]
+    );
+}
+
+// -- line comments on the diff (issue #709) ----------------------------------
+
+/// A pull request that changes one line of one file: old line 2 removed, new
+/// line 2 added in its place, lines 1 and 3 kept.
+const CHANGED_DIFF: &str = "diff --git a/src/sepa/retry.rs b/src/sepa/retry.rs
+index 1111111..2222222 100644
+--- a/src/sepa/retry.rs
++++ b/src/sepa/retry.rs
+@@ -1,3 +1,3 @@
+ pub fn backoff() -> u64 {
+-    30
++    30 + jitter()
+ }
+";
+
+/// One of Gitea's `PullReviewComment`s, as `/reviews/{id}/comments` answers it
+/// (shape taken from the real 1.27.3 server, #709): `position` is the new
+/// side's line and `original_position` the old side's, the other `0`;
+/// `diff_hunk` is the diff up to and including the commented line, as it was
+/// when the comment was made.
+fn line_comment(who: &str, at: &str, new: u32, old: u32, hunk_tail: &str, body: &str) -> Value {
+    json!({
+        "user": { "login": who },
+        "created_at": at,
+        "path": "src/sepa/retry.rs",
+        "position": new,
+        "original_position": old,
+        "diff_hunk": format!("@@ -1,3 +1,3 @@\n pub fn backoff() -> u64 {{\n{hunk_tail}"),
+        "body": body,
+    })
+}
+
+/// A Gitea answering the *Files* tab of `pull`: [`CHANGED_DIFF`], and three
+/// reviews -- Priya's request for changes with two line comments, Olu's
+/// comment with four (one on a file the diff no longer holds), and Kai's draft (`PENDING`), whose comment is nobody's
+/// yet -- whose comments are answered by review id.
+async fn gitea_with_line_comments(pull: Value) -> MockServer {
+    let server = MockServer::start().await;
+    let get = |p: String| {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .and(header("Authorization", format!("token {TOKEN}").as_str()))
+    };
+    let reviews = json!([
+        { "id": 21, "user": { "login": "priya.nair" }, "state": "REQUEST_CHANGES",
+          "submitted_at": "2026-08-22T09:00:00Z", "body": "", "comments_count": 2 },
+        { "id": 22, "user": { "login": "jonas.becker" }, "state": "APPROVED",
+          "submitted_at": "2026-08-22T09:10:00Z", "body": "", "comments_count": 0 },
+        { "id": 23, "user": { "login": "olu" }, "state": "COMMENT",
+          "submitted_at": "2026-08-22T11:00:00Z", "body": "", "comments_count": 4 },
+        { "id": 24, "user": { "login": "kai" }, "state": "PENDING", "body": "",
+          "comments_count": 1 }
+    ]);
+    let mut on_dropped_file = line_comment(
+        "olu",
+        "2026-08-22T11:00:00Z",
+        7,
+        0,
+        "+    loop {}",
+        "A second retry loop?",
+    );
+    on_dropped_file["path"] = json!("src/sepa/legacy.rs");
+    let by_review = [
+        (
+            21,
+            json!([
+                line_comment(
+                    "priya.nair",
+                    "2026-08-22T09:00:00Z",
+                    2,
+                    0,
+                    "-    30\n+    30 + jitter()",
+                    "Bound the jitter."
+                ),
+                line_comment(
+                    "priya.nair",
+                    "2026-08-22T09:00:00Z",
+                    0,
+                    2,
+                    "-    30",
+                    "Why drop the <b>constant</b>?"
+                ),
+            ]),
+        ),
+        (
+            23,
+            json!([
+                // A reply on Priya's line, later.
+                line_comment(
+                    "olu",
+                    "2026-08-22T11:00:00Z",
+                    2,
+                    0,
+                    "-    30\n+    30 + jitter()",
+                    "Agreed: `±10 %`."
+                ),
+                // Written on a new line 3 that read `    35`; it reads `}` now.
+                line_comment(
+                    "olu",
+                    "2026-08-22T11:00:00Z",
+                    3,
+                    0,
+                    "-    30\n+    35",
+                    "Why 35?"
+                ),
+                // A line the diff no longer has at all.
+                line_comment(
+                    "olu",
+                    "2026-08-22T11:00:00Z",
+                    40,
+                    0,
+                    "+    gone",
+                    "And this?"
+                ),
+                // A file a later push dropped from the pull request.
+                on_dropped_file,
+            ]),
+        ),
+        (
+            24,
+            json!([line_comment(
+                "kai",
+                "2026-08-22T12:00:00Z",
+                1,
+                0,
+                "",
+                "draft"
+            )]),
+        ),
+    ];
+    get(format!("{REPO}/pulls/142"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(pull))
+        .mount(&server)
+        .await;
+    get(format!("{REPO}/pulls/142/reviews"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(reviews))
+        .mount(&server)
+        .await;
+    get(format!("{REPO}/pulls/142.diff"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(CHANGED_DIFF))
+        .mount(&server)
+        .await;
+    for (id, comments) in by_review {
+        get(format!("{REPO}/pulls/142/reviews/{id}/comments"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(comments))
+            .mount(&server)
+            .await;
+    }
+    server
+}
+
+fn said(author: &str, at: &str, body: &str) -> LineComment {
+    LineComment {
+        author: author.into(),
+        body: body.into(),
+        at: Some(at.into()),
+    }
+}
+
+/// Workflow 6 of spec #701 (#709): the *Files* tab places each review's line
+/// comments on the line they were written on, by side -- a removed line's on
+/// the old side, an added line's on the new -- one thread per line with the
+/// replies in time order. A comment whose line is gone from the diff, or holds
+/// another text since a later push, is outdated: drawn apart, never on a line
+/// it was not written about. One on a file the diff no longer holds is
+/// outdated too and kept in the diff's own list, never dropped. A draft
+/// review's comments are nobody's yet, and a review with none is not asked
+/// for them.
+#[tokio::test]
+async fn line_comments_sit_on_their_lines_and_outdated_ones_apart() {
+    let server = gitea_with_line_comments(open_pull()).await;
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, gone, .. } = &view.sections[0].blocks[0] else {
+        panic!("the files tab is a diff: {view:#?}");
+    };
+    assert_eq!(
+        gone,
+        &[FileThread {
+            path: "src/sepa/legacy.rs".into(),
+            thread: LineThread {
+                side: ReviewSide::New,
+                line: 7,
+                outdated: true,
+                comments: vec![said("olu", "2026-08-22T11:00:00Z", "A second retry loop?")],
+            },
+        }],
+        "{view:#?}"
+    );
+    assert_eq!(
+        files[0].threads,
+        [
+            LineThread {
+                side: ReviewSide::Old,
+                line: 2,
+                outdated: false,
+                comments: vec![said(
+                    "priya.nair",
+                    "2026-08-22T09:00:00Z",
+                    "Why drop the <b>constant</b>?"
+                )],
+            },
+            LineThread {
+                side: ReviewSide::New,
+                line: 2,
+                outdated: false,
+                comments: vec![
+                    said("priya.nair", "2026-08-22T09:00:00Z", "Bound the jitter."),
+                    said("olu", "2026-08-22T11:00:00Z", "Agreed: `±10 %`."),
+                ],
+            },
+            LineThread {
+                side: ReviewSide::New,
+                line: 3,
+                outdated: true,
+                comments: vec![said("olu", "2026-08-22T11:00:00Z", "Why 35?")],
+            },
+            LineThread {
+                side: ReviewSide::New,
+                line: 40,
+                outdated: true,
+                comments: vec![said("olu", "2026-08-22T11:00:00Z", "And this?")],
+            },
+        ],
+        "{view:#?}"
+    );
+    let asked = paths(&server).await;
+    for unasked in [22, 24] {
+        assert!(
+            !asked.contains(&format!("{REPO}/pulls/142/reviews/{unasked}/comments")),
+            "review {unasked} was asked for line comments: {asked:?}"
+        );
+    }
+}
+
+/// Gitea takes no review of a closed or merged pull request (*can't submit
+/// review for a closed or merged PR*), so its diff takes no line comments
+/// (#709) -- and still shows those it has.
+#[tokio::test]
+async fn a_closed_pull_requests_diff_shows_its_comments_and_takes_none() {
+    let mut closed = open_pull();
+    closed["state"] = json!("closed");
+    let mut merged = open_pull();
+    merged["state"] = json!("closed");
+    merged["merged"] = json!(true);
+    for pull in [closed, merged] {
+        let server = gitea_with_line_comments(pull).await;
+        let view = source(&server)
+            .view(PR, Some("files"))
+            .await
+            .unwrap()
+            .unwrap();
+        let Block::Diff {
+            files, commentable, ..
+        } = &view.sections[0].blocks[0]
+        else {
+            panic!("a diff: {view:#?}");
+        };
+        assert_eq!(commentable, &None, "{view:#?}");
+        assert_eq!(files[0].threads.len(), 4, "{view:#?}");
+    }
 }
 
 /// A pull request nobody has reviewed draws no review facts at all -- not a
@@ -820,13 +1112,29 @@ fn review_action(verdict: &str) -> ViewAction {
             ..ActionField::new("body", "Comment", FieldKind::LongText)
         }],
         values: [("verdict".to_owned(), verdict.to_owned())].into(),
+        // The pending line comments go with a verdict (#709).
+        line_comments: LineComments::Sends,
         ..ViewAction::new("submit_review", label)
     }
 }
 
+/// *Submit review…* as the toolbar draws it (#709): the reader's pending line
+/// comments as a review that only comments, its words optional, drawn only
+/// while there are comments to send, and then first and filled.
+fn submit_review_action() -> ViewAction {
+    ViewAction {
+        fields: vec![ActionField::new("body", "Comment", FieldKind::LongText)],
+        values: [("verdict".to_owned(), "comment".to_owned())].into(),
+        line_comments: LineComments::Requires,
+        primary: true,
+        ..ViewAction::new("submit_review", "Submit review…")
+    }
+}
+
 /// Workflow 6 of spec #701: an open pull request somebody else opened offers
-/// *Approve…* and *Request changes…*: the toolbar reads *Comment…*, the two
-/// verdicts, and *Merge…* last (the #701 ruling).
+/// *Approve…* and *Request changes…*: the toolbar reads *Submit review…*
+/// (#709, first, which the shell draws only with pending line comments),
+/// *Comment…*, the two verdicts, and *Merge…* last (the #701 ruling).
 #[tokio::test]
 async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
     let server = gitea(open_pull(), json!([])).await;
@@ -836,10 +1144,12 @@ async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
         labelled(&view, "Request changes…"),
         review_action("request_changes")
     );
+    assert_eq!(labelled(&view, "Submit review…"), submit_review_action());
     let ops: Vec<_> = view.actions.iter().map(|a| a.label.as_str()).collect();
     assert_eq!(
         ops,
         [
+            "Submit review…",
             "Comment…",
             "Approve…",
             "Request changes…",
@@ -857,7 +1167,9 @@ async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
 /// closed or merged PR*), all 422s against the real server. None of those can
 /// change for this reader, so the verdicts are absent, not disabled (the #701
 /// ruling), and on a merged or closed pull request *Merge…* is too. *Comment…*
-/// stays: Gitea takes a reply in any state.
+/// stays: Gitea takes a reply in any state. *Submit review…* (#709) stays on
+/// the author's own open pull request -- Gitea takes a review that only
+/// comments from anyone -- and goes with the state.
 #[tokio::test]
 async fn an_action_that_can_never_apply_is_not_offered() {
     let mut own = open_pull();
@@ -870,7 +1182,10 @@ async fn an_action_that_can_never_apply_is_not_offered() {
     merged["merged"] = json!(true);
     merged["mergeable"] = json!(true);
     for (pull, offered) in [
-        (own, &["Comment…", "Edit…", "Close", "Merge…"][..]),
+        (
+            own,
+            &["Submit review…", "Comment…", "Edit…", "Close", "Merge…"][..],
+        ),
         (closed, &["Comment…", "Edit…", "Reopen"][..]),
         (merged, &["Comment…", "Edit…"][..]),
     ] {
@@ -1113,4 +1428,135 @@ async fn the_edit_is_prefilled_with_the_description_as_gitea_holds_it() {
             edit_action("SEPA retry with exponential backoff", body)
         );
     }
+}
+
+/// The reviews' line comments are read side by side (#709, as #703 reads the
+/// tabs): Gitea answers them one review at a time, and four reviewed rounds
+/// read in turn would cost four round trips on top of the diff's. The diff,
+/// the record and the reviews are three reads at once; four reviews' comments
+/// at once are the fourth.
+#[tokio::test]
+async fn the_reviews_line_comments_are_read_at_the_same_time() {
+    let flight = InFlight::new(Duration::from_millis(300));
+    let server = MockServer::start().await;
+    flight.watch(&server).await;
+    let held = |body: ResponseTemplate| body.set_delay(flight.delay());
+    let reviews: Vec<Value> = (31..=34)
+        .map(|id| {
+            json!({ "id": id, "user": { "login": "olu" }, "state": "COMMENT",
+                    "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 1 })
+        })
+        .collect();
+    for (p, answer) in [
+        (
+            format!("{REPO}/pulls/142"),
+            ResponseTemplate::new(200).set_body_json(open_pull()),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews"),
+            ResponseTemplate::new(200).set_body_json(json!(reviews)),
+        ),
+        (
+            format!("{REPO}/pulls/142.diff"),
+            ResponseTemplate::new(200).set_body_string(CHANGED_DIFF),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(held(answer))
+            .mount(&server)
+            .await;
+    }
+    for id in 31..=34 {
+        Mock::given(method("GET"))
+            .and(path(format!("{REPO}/pulls/142/reviews/{id}/comments")))
+            .respond_with(held(ResponseTemplate::new(200).set_body_json(json!([
+                line_comment(
+                    "olu",
+                    "2026-08-22T11:00:00Z",
+                    2,
+                    0,
+                    "-    30\n+    30 + jitter()",
+                    &format!("round {id}")
+                )
+            ]))))
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    assert_eq!(files[0].threads[0].comments.len(), 4, "{view:#?}");
+    assert_eq!(
+        flight.most(),
+        4,
+        "the four reviews' comments in flight at once"
+    );
+}
+
+/// A file the cap cut (#709): a comment on a line past the cut is not called
+/// outdated -- the line may be there, unshown -- while one on a shown line
+/// still sits on it.
+#[tokio::test]
+async fn a_comment_past_a_files_cut_is_not_called_outdated() {
+    let lines = knobas_source::diff::MAX_LINES_PER_FILE + 100;
+    let mut diff = format!(
+        "diff --git a/big.txt b/big.txt\nnew file mode 100644\nindex 0000000..1111111\n\
+         --- /dev/null\n+++ b/big.txt\n@@ -0,0 +1,{lines} @@\n"
+    );
+    for n in 1..=lines {
+        diff.push_str(&format!("+line {n}\n"));
+    }
+    let server = MockServer::start().await;
+    let reviews = json!([{ "id": 41, "user": { "login": "olu" }, "state": "COMMENT",
+                           "submitted_at": "2026-08-22T11:00:00Z", "comments_count": 2 }]);
+    let comment = |line: usize| {
+        json!({ "user": { "login": "olu" }, "created_at": "2026-08-22T11:00:00Z",
+                "path": "big.txt", "position": line, "original_position": 0,
+                "diff_hunk": format!("@@ -0,0 +1,{line} @@\n+line {line}"), "body": format!("on {line}") })
+    };
+    for (p, answer) in [
+        (
+            format!("{REPO}/pulls/142"),
+            ResponseTemplate::new(200).set_body_json(open_pull()),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews"),
+            ResponseTemplate::new(200).set_body_json(reviews),
+        ),
+        (
+            format!("{REPO}/pulls/142.diff"),
+            ResponseTemplate::new(200).set_body_string(diff),
+        ),
+        (
+            format!("{REPO}/pulls/142/reviews/41/comments"),
+            ResponseTemplate::new(200).set_body_json(json!([comment(3), comment(lines)])),
+        ),
+    ] {
+        Mock::given(method("GET"))
+            .and(path(p))
+            .respond_with(answer)
+            .mount(&server)
+            .await;
+    }
+    let view = source(&server)
+        .view(PR, Some("files"))
+        .await
+        .unwrap()
+        .unwrap();
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    assert!(files[0].truncated, "the fixture is past the cap");
+    let threads: Vec<(u32, bool)> = files[0]
+        .threads
+        .iter()
+        .map(|t| (t.line, t.outdated))
+        .collect();
+    assert_eq!(threads, [(3, false), (lines as u32, false)]);
 }

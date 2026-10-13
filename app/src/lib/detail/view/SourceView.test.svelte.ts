@@ -78,7 +78,7 @@ const VIEW: View = {
         },
       ],
     },
-    { id: "diff", title: "Diff", count: 2, deferred: false, blocks: [{ type: "diff", files: [], truncated: false }] },
+    { id: "diff", title: "Diff", count: 2, deferred: false, blocks: [{ type: "diff", files: [], truncated: false, commentable: null, gone: [] }] },
     log("log", true),
   ],
   actions: [],
@@ -260,6 +260,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     with_settings: false,
     values: {},
     entity: null,
+    line_comments: "none",
     ...more,
   };
 }
@@ -1181,4 +1182,52 @@ test("an entry clicked while the next place is read goes there, and Back skips t
   expect(entry(screen.panel(), "README.md"), "back at the top, not at src").toBeDefined();
   expect(screen.panel().querySelector(".tr-back"), "and nothing further back").toBeNull();
   screen.done();
+});
+
+// -- a diff that takes line comments (#709) ------------------------------------
+
+function commentableDiff(op: string): View {
+  return {
+    sections: [
+      {
+        id: "files",
+        title: "Files",
+        count: 1,
+        deferred: false,
+        blocks: [
+          {
+            type: "diff",
+            truncated: false,
+            commentable: { write_op: op },
+            gone: [],
+            files: [
+              {
+                path: "src/retry.rs",
+                old_path: null,
+                change: "modified",
+                additions: 1,
+                deletions: 0,
+                truncated: false,
+                hunks: [{ header: "@@ -1 +1,2 @@", lines: [{ kind: "add", old: null, new: 2, text: "jitter" }] }],
+                threads: [],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+    actions: [],
+  };
+}
+
+test("a diff offers to comment only through an op the source declares and the shell can queue", () => {
+  const declared = render(commentableDiff("submit_review"), ["submit_review"]);
+  expect(declared.target.querySelector(".df-add")?.getAttribute("aria-label")).toBe("Comment on line 2");
+  declared.done();
+  const undeclared = render(commentableDiff("submit_review"), ["comment"]);
+  expect(undeclared.target.querySelector(".df-add")).toBeNull();
+  undeclared.done();
+  const unknown = render(commentableDiff("launch_rocket"), ["launch_rocket"]);
+  expect(unknown.target.querySelector(".df-add")).toBeNull();
+  unknown.done();
 });

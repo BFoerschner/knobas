@@ -35,6 +35,29 @@ impl GiteaClient {
         Ok(reviews.unwrap_or_default())
     }
 
+    /// `GET /repos/{o}/{r}/pulls/{n}/reviews/{id}/comments` -- one review's
+    /// line comments (#709). Gitea 1.27 has no listing of a pull request's
+    /// line comments across its reviews, so the *Files* tab asks each review
+    /// that says it has some. Unpaged, as Gitea serves it.
+    pub(crate) async fn pull_review_comments(
+        &self,
+        owner: &str,
+        repo: &str,
+        number: u64,
+        review: u64,
+    ) -> Result<Vec<Value>, SourceError> {
+        let comments: Option<Vec<Value>> = self
+            .get_json(
+                &format!(
+                    "{}/reviews/{review}/comments",
+                    pulls_path(owner, repo, number)?
+                ),
+                &[],
+            )
+            .await?;
+        Ok(comments.unwrap_or_default())
+    }
+
     /// `GET /repos/{o}/{r}/pulls/{n}/commits`, one page, with the server's
     /// own count of them all. `verification` and `files` default to on, as on
     /// `/commits`, and are turned off for the same reason.

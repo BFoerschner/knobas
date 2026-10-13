@@ -91,6 +91,8 @@ const DRAWN: SourceView = {
         {
           type: "diff",
           truncated: false,
+          commentable: null,
+          gone: [],
           files: [
             {
               path: "src/retry.rs",
@@ -100,6 +102,7 @@ const DRAWN: SourceView = {
               deletions: 0,
               truncated: false,
               hunks: [{ header: "@@ -1 +1,2 @@", lines: [{ kind: "add", old: null, new: 2, text: "jitter" }] }],
+              threads: [],
             },
           ],
         },

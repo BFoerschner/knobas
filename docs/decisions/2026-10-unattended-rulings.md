@@ -1000,3 +1000,44 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on 
 **If you disagree, the cost of reversing this is:** low. Point `_live_lock_select gitea` at the JVM lock's path; the recipes do not change.
 
 As built (#724): `live_lock_hold <recipe> [jvm|gitea]` and `live_session gitea` in `testenv/live-lib.sh`; `gitea-live`, `gitea-live-capped` and `start-work-live` take it. A TeamCity run, which brings Gitea up for its VCS roots, takes no Gitea lock, so `gitea-live-capped` still caps Gitea under a TeamCity run.
+## #709 — *Submit review…*: absent with nothing pending, first and primary with its count
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #709.
+
+**The fork:** the implementer put *Submit review…* (a review that is only the pending line comments) after *Comment…*, among the review actions, and drew it only while comments are pending. The #701 toolbar ruling does not name it.
+
+**Ruling:** it is **absent** while no line comment is pending (comments are started from a diff line's `+`, not the toolbar). When present it is the **first** toolbar item, **primary**, with its count: *Submit review… (n), Comment…, Approve…, Request changes…, Edit…, Close/Reopen, Merge…*.
+
+**Reasoning:** with comments pending, sending them is the next thing to do, and the reader should find it where the eye starts.
+
+**If you disagree, the cost of reversing this is:** trivial: the order and `primary` in `actions` in `crates/knobas-source-gitea/src/view/pr/review.rs`.
+
+As built (#709, merge-manager fix on PR #726): `review::actions` pushes it first with `primary: true`; `offeredActions` in `app/src/lib/detail/view/actions.ts` drops a `requires` action while nothing is pending.
+
+## #709 — the per-line `+`: one tab stop per file
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #709.
+
+**The fork:** every line of a commentable diff had a focusable `+`, so a long diff was hundreds of tab stops. Options: hover-only (unreachable by keyboard), one stop per line (as built), or one stop per file.
+
+**Ruling:** one tab stop per file's line list, a **roving tabindex**: Up and Down move the line focus, Enter or `c` opens the editor on the focused line. The `+` stays visible on hover and on the focused line.
+
+**Reasoning:** keyboard reachability without making Tab useless across the rest of the panel.
+
+**If you disagree, the cost of reversing this is:** low: one `tabindex` expression and a key handler in `DiffBlock.svelte`.
+
+As built (#709, merge-manager fix on PR #726): `rover`, `firstRow` and `roveKey` in `app/src/lib/detail/view/DiffBlock.svelte`; Escape and a saved comment hand the focus back to the line's `+`.
+
+## #709 — a comment on a file the diff no longer holds: kept, in an Outdated list
+
+Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation. Posted on #709.
+
+**The fork:** a review comment whose path is no longer in the pull request's diff (a later push dropped or reverted the file) had no file card to sit in, and the adapter left it out.
+
+**Ruling:** it is **not dropped**. It goes to an "Outdated" list at the end of the *Files* tab (path, line, thread), as outdated comments on present files already do at the end of their file.
+
+**Reasoning:** a reviewer's words are never silently lost; outdated is a place, not a deletion.
+
+**If you disagree, the cost of reversing this is:** low: one optional field on `Block::Diff` and the list in `DiffBlock.svelte`.
+
+As built (#709, merge-manager fix on PR #726): `Block::Diff.gone: Vec<FileThread { path, thread }>` (`#[serde(default)]`, in the §10.8 entry), filled by `threads::place` in `crates/knobas-source-gitea/src/view/pr/threads.rs`; `DiffBlock.svelte` draws it after the last file, together with any pending comment on such a file, closed unless one is pending.

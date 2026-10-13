@@ -20,6 +20,7 @@ use crate::source::GiteaSource;
 
 mod maintain;
 mod review;
+mod threads;
 
 const OVERVIEW: &str = "overview";
 const FILES: &str = "files";
@@ -120,20 +121,47 @@ impl PullView<'_> {
             .collect())
     }
 
+    /// The diff, its reviews' line comments on their lines, and whether the
+    /// reader may add more (#709): the pull request's state and its reviews
+    /// are read beside the diff, then each review that has line comments, all
+    /// at once.
     async fn files(&self) -> Result<ViewSection, SourceError> {
-        let text = self
-            .source
-            .client
-            .pull_diff(self.owner, self.repo, self.number)
-            .await?;
-        let (files, truncated) = knobas_source::diff::parse_view(&text);
+        let (pull, text, reviews) = tokio::try_join!(
+            self.pull(),
+            self.source
+                .client
+                .pull_diff(self.owner, self.repo, self.number),
+            self.reviews(),
+        )?;
+        let (mut files, truncated) = knobas_source::diff::parse_view(&text);
+        let commented = threads::with_comments(&reviews);
+        let reads = commented
+            .iter()
+            .map(|&(id, _)| {
+                self.source
+                    .client
+                    .pull_review_comments(self.owner, self.repo, self.number, id)
+            })
+            .collect();
+        let answers = threads::all(reads).await?;
+        let written = commented
+            .iter()
+            .zip(answers)
+            .flat_map(|(&(_, review), raw)| threads::written(review, raw))
+            .collect();
+        let gone = threads::place(&mut files, written);
         Ok(ViewSection {
             id: FILES.to_owned(),
             title: "Files".to_owned(),
             count: Some(files.len() as u64),
             // The read the stub deferred: these are its blocks, now.
             deferred: false,
-            blocks: vec![Block::Diff { files, truncated }],
+            blocks: vec![Block::Diff {
+                files,
+                truncated,
+                commentable: review::commenting(&pull),
+                gone,
+            }],
         })
     }
 
@@ -560,6 +588,12 @@ struct PullRepo {
 
 #[derive(Debug, serde::Deserialize)]
 struct Review {
+    /// What its line comments are read by (#709).
+    #[serde(default)]
+    id: Option<u64>,
+    /// How many line comments Gitea counts on it: none is no read.
+    #[serde(default)]
+    comments_count: u64,
     #[serde(default)]
     user: Option<UserRef>,
     #[serde(default)]

@@ -2082,6 +2082,8 @@ knobas-source-gitea	test/it	view_files::a_path_that_walks_out_is_refused
 knobas-source-gitea	test/it	view_files::a_repo_view_has_a_deferred_files_tab
 knobas-source-gitea	test/it	view_files::the_top_directory_lists_directories_first
 knobas-source-gitea	test/it	view_pr::a_closed_pull_request_reads_closed_and_a_merged_one_merged
+knobas-source-gitea	test/it	view_pr::a_closed_pull_requests_diff_shows_its_comments_and_takes_none
+knobas-source-gitea	test/it	view_pr::a_comment_past_a_files_cut_is_not_called_outdated
 knobas-source-gitea	test/it	view_pr::a_head_in_another_repository_is_named_with_it
 knobas-source-gitea	test/it	view_pr::a_pull_request_gitea_would_not_merge_offers_a_disabled_merge_saying_why
 knobas-source-gitea	test/it	view_pr::a_pull_request_offers_a_comment_in_its_toolbar_in_any_state
@@ -2097,8 +2099,10 @@ knobas-source-gitea	test/it	view_pr::an_action_that_can_never_apply_is_not_offer
 knobas-source-gitea	test/it	view_pr::an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar
 knobas-source-gitea	test/it	view_pr::an_open_pull_request_offers_an_approval_and_a_request_for_changes
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
+knobas-source-gitea	test/it	view_pr::line_comments_sit_on_their_lines_and_outdated_ones_apart
 knobas-source-gitea	test/it	view_pr::the_edit_is_prefilled_with_the_description_as_gitea_holds_it
 knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
+knobas-source-gitea	test/it	view_pr::the_reviews_line_comments_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_again_after_a_failed_read
 knobas-source-gitea	test/it	view_pr::who_the_token_is_is_asked_once_per_token_and_server
 knobas-source-gitea	test/it	view_repo::a_branch_gone_since_the_listing_is_not_offered_and_the_view_opens
@@ -2159,6 +2163,7 @@ knobas-source-gitea	test/live_gitea	a_synced_commit_carries_its_repo_and_is_foun
 knobas-source-gitea	test/live_gitea	an_op_gitea_does_not_declare_never_reaches_the_real_server
 knobas-source-gitea	test/live_gitea	approving_your_own_pull_request_is_refused_by_the_server
 knobas-source-gitea	test/live_gitea	etag_support_probe
+knobas-source-gitea	test/live_gitea	line_comments_are_sent_with_a_review_and_drawn_on_their_lines
 knobas-source-gitea	test/live_gitea	passes_the_contract_battery_against_the_real_container
 knobas-source-gitea	test/live_gitea	pull_requests_come_back_newest_updated_first
 knobas-source-gitea	test/live_gitea	repositories_gitea_refuses_pull_requests_for_do_not_end_a_full_sync

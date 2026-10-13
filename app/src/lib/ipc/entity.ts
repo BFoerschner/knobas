@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 // write-back is an operation on an entity, which is why `submitWrite` is here;
 // what it hands over and what comes back are the queue's, and a second
 // declaration of either would be two shapes for one wire format.
-import type { QueuedWrite, WriteOpPayload, WriteState } from "./sources";
+import type { QueuedWrite, ReviewSide, WriteOpPayload, WriteState } from "./sources";
 // A day is a day wherever it is asked for: the digest takes the same
 // `DayWindow` the timesheet does rather than declaring a second shape for one
 // wire format, which is the rule the import above follows for the queue's.
@@ -849,6 +849,20 @@ export interface ViewAction {
    * branch's *New branch…* names its repository. `null` targets the view's.
    */
   entity: string | null;
+  /**
+   * Whether it sends the reader's pending line comments (#709): `sends` when
+   * there are some, `requires` only then (drawn only while there are some).
+   */
+  line_comments: LineComments;
+}
+
+/** What an action does with the pending line comments — `knobas_source::view::LineComments`. */
+export type LineComments = "none" | "sends" | "requires";
+
+/** How a reader comments on a diff's lines (#709) — `knobas_source::view::Commenting`. */
+export interface Commenting {
+  /** The op the comments are sent through (`submit_review`). */
+  write_op: string;
 }
 
 /** One input of an action's dialog — `knobas_source::view::ActionField`. */
@@ -916,6 +930,34 @@ export interface DiffFile {
   hunks: Hunk[];
   /** Some of its lines were cut by a cap. */
   truncated: boolean;
+  /** The review conversations on its lines (#709), in the file's order, the outdated last. */
+  threads: LineThread[];
+}
+
+/**
+ * One conversation on one line (#709) — `knobas_source::view::LineThread`.
+ * `line` counts on `side`; an `outdated` one is no longer on a line of this
+ * diff as written (the source's answer) and is drawn apart.
+ */
+export interface LineThread {
+  side: ReviewSide;
+  line: number;
+  outdated: boolean;
+  comments: LineComment[];
+}
+
+/** A thread on a file the diff no longer holds (#709) — `knobas_source::view::FileThread`. Always outdated. */
+export interface FileThread {
+  path: string;
+  thread: LineThread;
+}
+
+/** One comment of a thread. `body` is the source's Markdown, never rendered as markup. */
+export interface LineComment {
+  author: string;
+  body: string;
+  /** RFC 3339, as the source sent it. */
+  at: string | null;
 }
 
 /**
@@ -927,7 +969,7 @@ export type ViewBlock =
   | { type: "facts"; facts: Fact[] }
   | { type: "text"; text: string; markdown: boolean }
   | { type: "entities"; title: string | null; rows: ViewRow[] }
-  | { type: "diff"; files: DiffFile[]; truncated: boolean }
+  | { type: "diff"; files: DiffFile[]; truncated: boolean; commentable: Commenting | null; gone: FileThread[] }
   | { type: "log"; text: string; truncated: boolean }
   | {
       type: "settings";

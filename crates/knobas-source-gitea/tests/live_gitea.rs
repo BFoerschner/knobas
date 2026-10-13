@@ -409,7 +409,10 @@ async fn a_seeded_commits_view_carries_the_diff_the_seed_pushed() {
         }
 
         let diff = &view.sections[1];
-        let Block::Diff { files, truncated } = &diff.blocks[0] else {
+        let Block::Diff {
+            files, truncated, ..
+        } = &diff.blocks[0]
+        else {
             panic!("{id}'s diff tab is a diff: {diff:#?}");
         };
         assert!(!truncated);
@@ -623,7 +626,10 @@ async fn a_seeded_pull_requests_view_carries_its_files_commits_and_discussion() 
         .await
         .expect("the files tab reads")
         .expect("drawn");
-    let Block::Diff { files, truncated } = &files_view.sections[0].blocks[0] else {
+    let Block::Diff {
+        files, truncated, ..
+    } = &files_view.sections[0].blocks[0]
+    else {
         panic!("{id}'s files tab is a diff: {files_view:#?}");
     };
     assert!(!truncated);
@@ -970,7 +976,10 @@ async fn a_seeded_branchs_view_reads_ahead_with_its_seeded_commits() {
         .await
         .expect("the diff tab reads")
         .expect("drawn");
-    let Block::Diff { files, truncated } = &diff.sections[0].blocks[0] else {
+    let Block::Diff {
+        files, truncated, ..
+    } = &diff.sections[0].blocks[0]
+    else {
         panic!("{diff:#?}");
     };
     assert!(!truncated);
@@ -3000,12 +3009,23 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
     let own_view = source.view(&own_id, None).await.unwrap().unwrap();
     assert_eq!(toolbar(&own_view, "Comment…").disabled, None);
     let labels: Vec<&str> = own_view.actions.iter().map(|a| a.label.as_str()).collect();
+    // *Submit review…* stays (#709): Gitea takes a review that only comments
+    // from the author, and the shell draws it only with comments pending.
     assert_eq!(
         labels,
-        ["Comment…", "Edit…", "Close", "Merge…"],
+        ["Submit review…", "Comment…", "Edit…", "Close", "Merge…"],
         "{:#?}",
         own_view.actions
     );
+    source
+        .write(WriteOp::SubmitReview {
+            entity: own_id.clone(),
+            verdict: ReviewVerdict::Comment,
+            body: format!("the author's own note, {stamp}"),
+            comments: vec![],
+        })
+        .await
+        .expect("Gitea takes a comment-only review from the pull request's author");
     for (label, verdict, sentence) in [
         (
             "Approve…",
@@ -3392,4 +3412,229 @@ async fn a_pull_request_is_edited_closed_and_reopened_from_its_view() {
     assert_eq!(last["state"], "open");
     assert_eq!(last["body"], described.as_str(), "{last}");
     println!("edited, closed and reopened #{number} from its view");
+}
+
+// -- line comments on a pull request's diff (issue #709) ---------------------
+
+/// Write `README.md` on `branch` as `content` (pre-encoded base64), through
+/// Gitea's contents endpoint: an edit of a file `main` has, so the diff has a
+/// removed line and an added one.
+async fn rewrite_readme(http: &reqwest::Client, env: &Env, branch: &str, content: &str) {
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let auth = format!("token {}", env.token);
+    let now: serde_json::Value = http
+        .get(format!("{api}/contents/README.md?ref={branch}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read README.md")
+        .json()
+        .await
+        .expect("a contents record");
+    let sha = now["sha"].as_str().expect("README.md has a blob sha");
+    let wrote = http
+        .put(format!("{api}/contents/README.md"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": branch, "content": content, "sha": sha,
+            "message": format!("{branch}: README for the line-comment check"),
+        }))
+        .send()
+        .await
+        .expect("write README.md");
+    assert!(
+        wrote.status().is_success(),
+        "contents: {}",
+        wrote.text().await.unwrap_or_default()
+    );
+}
+
+/// Workflow 6 of spec #701 (#709), against the real server: on a pull request
+/// opened here, a review with two line comments -- one on a removed line (the
+/// old side), one on an added line (the new side) -- is sent through the
+/// adapter's `submit_review`, the call the write queue's flush makes, and the
+/// *Files* tab read again draws each on its line. A later push that rewrites
+/// the added line leaves its comment outdated, and the removed line's where it
+/// was.
+///
+/// Never a seeded pull request: it is opened on a `knobas-` branch of its
+/// own, and [`Litter`] deletes both whether this passes or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
+    use knobas_source::view::{Block, DiffFile, DiffLineKind, LineComments, SourceView};
+    use knobas_source::{ReviewComment, ReviewSide, ReviewVerdict, WriteOp};
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-line-comments-{stamp}");
+    litter.branch_off_main(&branch).await;
+    // "# payout-service\nreviewed from knobas\nRust\n"
+    rewrite_readme(
+        &http,
+        &env,
+        &branch,
+        "IyBwYXlvdXQtc2VydmljZQpyZXZpZXdlZCBmcm9tIGtub2JhcwpSdXN0Cg==",
+    )
+    .await;
+    let number = litter
+        .open_pull_as(
+            "jonas.becker",
+            &branch,
+            &format!("knobas line comment check {stamp}"),
+        )
+        .await;
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let files = || async {
+        let view = source
+            .view(&id, Some("files"))
+            .await
+            .expect("the files tab reads")
+            .expect("Gitea draws a pull request");
+        let Some(Block::Diff {
+            files, commentable, ..
+        }) = view.sections[0].blocks.first().cloned()
+        else {
+            panic!("the files tab is a diff: {view:#?}");
+        };
+        let readme = files
+            .into_iter()
+            .find(|f| f.path == "README.md")
+            .unwrap_or_else(|| panic!("README.md is not in the diff: {view:#?}"));
+        (readme, commentable)
+    };
+
+    // 1. The diff takes comments, and has a removed and an added line.
+    let (readme, commentable) = files().await;
+    assert_eq!(
+        commentable.map(|c| c.write_op).as_deref(),
+        Some("submit_review"),
+        "an open pull request's diff takes line comments"
+    );
+    let first = |file: &DiffFile, kind: DiffLineKind| {
+        file.hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .find(|l| l.kind == kind)
+            .cloned()
+            .unwrap_or_else(|| panic!("no {kind:?} line in {file:#?}"))
+    };
+    let removed = first(&readme, DiffLineKind::Del)
+        .old
+        .expect("an old number");
+    let added = first(&readme, DiffLineKind::Add).new.expect("a new number");
+    assert!(readme.threads.is_empty(), "{readme:#?}");
+    let toolbar: SourceView = source.view(&id, None).await.unwrap().unwrap();
+    let submit = toolbar
+        .actions
+        .iter()
+        .find(|a| a.label == "Submit review…")
+        .unwrap_or_else(|| panic!("no Submit review… in {:#?}", toolbar.actions));
+    assert_eq!(submit.line_comments, LineComments::Requires);
+    assert_eq!(
+        submit.values.get("verdict").map(String::as_str),
+        Some("comment")
+    );
+
+    // 2. One review, two line comments, one per side -- Gitea 1.27 takes
+    //    them as `old_position` / `new_position` line numbers.
+    let on_old = format!("why drop this line? {stamp}");
+    let on_new = format!("say what reviewed it, {stamp}");
+    source
+        .write(WriteOp::SubmitReview {
+            entity: id.clone(),
+            verdict: ReviewVerdict::Comment,
+            body: String::new(),
+            comments: vec![
+                ReviewComment {
+                    path: "README.md".into(),
+                    line: u64::from(removed),
+                    side: ReviewSide::Old,
+                    body: on_old.clone(),
+                },
+                ReviewComment {
+                    path: "README.md".into(),
+                    line: u64::from(added),
+                    side: ReviewSide::New,
+                    body: on_new.clone(),
+                },
+            ],
+        })
+        .await
+        .expect("Gitea takes a review of line comments");
+
+    // 3. Read back on their lines, by side, as the token's own words.
+    let me = env.login().await;
+    let (readme, _) = files().await;
+    // Each thread as its side, line, whether outdated, and (author, words).
+    type Placed = (ReviewSide, u32, bool, Vec<(String, String)>);
+    let placed: Vec<Placed> = readme
+        .threads
+        .iter()
+        .map(|t| {
+            (
+                t.side,
+                t.line,
+                t.outdated,
+                t.comments
+                    .iter()
+                    .map(|c| (c.author.clone(), c.body.clone()))
+                    .collect(),
+            )
+        })
+        .collect();
+    println!("placed: {placed:?}");
+    assert_eq!(
+        placed,
+        [
+            (
+                ReviewSide::Old,
+                removed,
+                false,
+                vec![(me.clone(), on_old.clone())]
+            ),
+            (
+                ReviewSide::New,
+                added,
+                false,
+                vec![(me.clone(), on_new.clone())]
+            ),
+        ],
+        "{readme:#?}"
+    );
+    assert!(
+        readme.threads.iter().all(|t| t.comments[0].at.is_some()),
+        "Gitea dates its comments: {readme:#?}"
+    );
+
+    // 4. A push rewrites the added line: its comment is about a line the diff
+    //    no longer holds as it was, so it is outdated; the removed line is
+    //    still the removed line.
+    // "# payout-service\nreviewed again from knobas\nRust\n"
+    rewrite_readme(
+        &http,
+        &env,
+        &branch,
+        "IyBwYXlvdXQtc2VydmljZQpyZXZpZXdlZCBhZ2FpbiBmcm9tIGtub2JhcwpSdXN0Cg==",
+    )
+    .await;
+    let (readme, _) = files().await;
+    let state: Vec<(ReviewSide, bool)> = readme
+        .threads
+        .iter()
+        .map(|t| (t.side, t.outdated))
+        .collect();
+    println!("after the push: {state:?}");
+    assert_eq!(
+        state,
+        [(ReviewSide::Old, false), (ReviewSide::New, true)],
+        "{readme:#?}"
+    );
+    println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated");
 }
