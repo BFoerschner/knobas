@@ -20,6 +20,7 @@
     reachableTransitions,
     submitWrite,
     unlink,
+    type CheckoutView,
     type EntityDetail,
     type LinkEntry,
     type SourceView as SourceViewData,
@@ -34,6 +35,7 @@
   import { openExternal } from "../shell/open-external";
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
+  import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
@@ -707,6 +709,9 @@
    */
   const hasCheckout = $derived(shownKind === "repo" || shownKind === "branch");
 
+  /** Where the checkout's working tree stands, as the panel last read it (#704). */
+  let localTree = $state<CheckoutView["tree"]>(null);
+
   /**
    * The granted read (#177), for this ticket's source.
    *
@@ -1174,6 +1179,9 @@
             {key}
           </span>
           <h2 id={titleId}>{detail.row.title}</h2>
+          {#if shownKind === "branch"}
+            <BranchCheckoutNote tree={localTree} branch={detail.row.title} />
+          {/if}
           {#if path}
             <div class="d-path">{path}</div>
           {/if}
@@ -1496,7 +1504,7 @@
         and *Open in browser* follow.
       -->
       {#if hasCheckout}
-        <CheckoutPanel entityId={detail.row.entity_id} />
+        <CheckoutPanel entityId={detail.row.entity_id} onread={(read) => (localTree = read?.tree ?? null)} />
       {/if}
 
       <LinksPanel

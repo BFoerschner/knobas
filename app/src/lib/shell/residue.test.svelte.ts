@@ -104,6 +104,7 @@ const CHECKOUT = {
   found_by: "scan" as const,
   clones_root: "/Users/mara/src",
   clone_command: "git clone https://gitea.example.com/tidewater/payout-service",
+  tree: null,
 };
 
 /** What `checkout_commands` answers for both checkout cases (#501). */

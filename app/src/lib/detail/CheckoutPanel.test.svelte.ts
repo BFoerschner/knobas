@@ -21,7 +21,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { toasts } from "../shell/toasts.svelte";
-import type { CheckoutCommand, CheckoutView } from "../ipc/entity";
+import type { CheckoutCommand, CheckoutView, TreeRead, WorkingTreeState } from "../ipc/entity";
 
 const reads: string[] = [];
 const writes: { entityId: string; path: string | null }[] = [];
@@ -109,6 +109,7 @@ function view(over: Partial<CheckoutView> = {}): CheckoutView {
     found_by: "nothing",
     clones_root: "/Users/mara/src",
     clone_command: `git clone ${URL}`,
+    tree: null,
     ...over,
   };
 }
@@ -116,8 +117,8 @@ function view(over: Partial<CheckoutView> = {}): CheckoutView {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(entityId = REPO) {
-  app = mount(CheckoutPanel, { target, props: { entityId } });
+function render(entityId = REPO, onread?: (checkout: CheckoutView | null) => void) {
+  app = mount(CheckoutPanel, { target, props: onread ? { entityId, onread } : { entityId } });
   flushSync();
   return app;
 }
@@ -399,4 +400,69 @@ test("a second detail re-reads the commands, so a changed template is not stale"
   button("Open in VS Code").click();
   await settle();
   expect(toasts.items.at(-1)?.text).toContain("code {path}");
+});
+
+// -- the working tree (#704, ADR-0021) ---------------------------------------
+
+/** One reading of a working tree, on `knobas-sepa-retry`. */
+function on(over: Partial<WorkingTreeState> = {}): TreeRead {
+  return {
+    status: "read",
+    branch: "knobas-sepa-retry",
+    head: "0123456789abcdef0123456789abcdef01234567",
+    upstream: "origin/knobas-sepa-retry",
+    ahead: 0,
+    behind: 0,
+    changed: 0,
+    untracked: 0,
+    conflicted: 0,
+    ...over,
+  };
+}
+
+function standing(tree: TreeRead): CheckoutView {
+  return view({ path: "/Users/mara/src/payout-service", found_by: "scan", tree });
+}
+
+test("the line under the path says where the working tree stands, in the warn tone for changes", async () => {
+  answer = standing(on({ changed: 3, ahead: 2 }));
+  render();
+  await settle();
+
+  const line = target.querySelector(".ctree");
+  expect(line?.textContent?.trim()).toBe("on knobas-sepa-retry · 3 changed · 2 to push");
+  expect(line?.classList.contains("amber")).toBe(true);
+});
+
+test("a path that is no repository says so under the path", async () => {
+  answer = standing({ status: "not_a_repo" });
+  render();
+  await settle();
+
+  expect(target.querySelector(".ctree")?.textContent?.trim()).toBe("not a git working tree");
+});
+
+test("the window regaining focus reads the checkout again, drawing over what it showed", async () => {
+  answer = standing(on({ changed: 3, ahead: 2 }));
+  render();
+  await settle();
+  expect(reads).toEqual([REPO]);
+
+  answer = standing(on());
+  window.dispatchEvent(new FocusEvent("focus"));
+  // Between the two reads the old line stays: no *Reading…* flash.
+  expect(text()).not.toContain("Reading");
+  await settle();
+
+  expect(reads).toEqual([REPO, REPO]);
+  expect(target.querySelector(".ctree")?.textContent?.trim()).toBe("on knobas-sepa-retry · clean");
+});
+
+test("the panel hands its detail nothing first, then what it read", async () => {
+  const handed: (CheckoutView | null)[] = [];
+  answer = standing(on());
+  render(REPO, (checkout) => handed.push(checkout));
+  await settle();
+
+  expect(handed).toEqual([null, answer]);
 });
