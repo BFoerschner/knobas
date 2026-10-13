@@ -1400,7 +1400,8 @@ async fn a_synced_commit_carries_its_repo_and_is_found_by_under() {
     for commit in &commits {
         assert_eq!(
             commit.payload["repository"],
-            serde_json::json!({ "full_name": full_name, "name": bare }),
+            // With its default branch since #718: the seed's is `main`.
+            serde_json::json!({ "full_name": full_name, "name": bare, "default_branch": "main" }),
             "commit {} carries the repository it sits in",
             commit.entity
         );
