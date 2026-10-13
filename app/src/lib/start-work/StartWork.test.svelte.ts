@@ -486,3 +486,16 @@ test("a repository read that answers with none says so", async () => {
   expect(screen.text()).toContain("No repository has been mirrored");
   screen.done();
 });
+
+test("a repository read that answers with none is asked once, not on every answer", async () => {
+  let asked = 0;
+  reposRead = () => {
+    asked += 1;
+    return Promise.resolve({ rows: [], total: 0 });
+  };
+  const screen = render();
+  await settle();
+  await settle();
+  expect(asked).toBe(1);
+  screen.done();
+});

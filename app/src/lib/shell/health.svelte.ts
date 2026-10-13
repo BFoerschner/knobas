@@ -322,6 +322,7 @@ export function createHealth(ports?: HealthPorts): Health {
         if (phase !== "ready") phase = "failed";
         const wait = retryMs;
         retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+        stopRetrying();
         retryTimer = setTimeout(() => {
           retryTimer = undefined;
           void this.reseed();
