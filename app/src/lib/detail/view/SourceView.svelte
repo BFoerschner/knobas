@@ -36,6 +36,7 @@
     type ViewSection,
   } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
+  import { PLACEHOLDER_MS } from "../view-read";
   import type { BuildParameter } from "../../ipc/sources";
   import ActionButtons from "./ActionButtons.svelte";
   import { offeredActions, type ActionValues } from "./actions";
@@ -113,16 +114,28 @@
     const now = entityId;
     if (now === seenEntity) return;
     seenEntity = now;
+    generation++;
     untrack(() => {
       at = {};
       steps = {};
       leftFrom = {};
+      kept = {};
     });
   });
 
   /** A section's own read, by id: in flight, failed, or answered. */
   type Read = { state: "reading" } | { state: "failed"; message: string } | { state: "read"; blocks: ViewBlock[] };
   let reads = $state<Record<string, Read>>({});
+  /**
+   * The reads of the view that was, kept only to be drawn (dimmed) while the
+   * same places are read again, so a write's re-read does not blank a tab.
+   */
+  let kept = $state<Record<string, Read>>({});
+  /**
+   * Bumped whenever the reads are dropped (another view, another entity): a
+   * read answered for the generation before is not this one's to land.
+   */
+  let generation = 0;
 
   /**
    * A view read again (after a write, #667) drops the deferred tabs it read
@@ -135,7 +148,11 @@
     const before = seenView;
     seenView = now;
     if (before === null || before === now) return;
-    untrack(() => (reads = {}));
+    generation++;
+    untrack(() => {
+      kept = reads;
+      reads = {};
+    });
   });
 
   /**
@@ -154,10 +171,11 @@
 
   function read(id: string) {
     const entity = entityId;
+    const mine = generation;
     reads[id] = { state: "reading" };
     entityView(entity, id)
       .then((answer) => {
-        if (entity !== entityId) return;
+        if (entity !== entityId || mine !== generation) return;
         const blocks = answer?.sections.find((s) => s.id === id)?.blocks;
         reads[id] =
           blocks === undefined
@@ -165,7 +183,7 @@
             : { state: "read", blocks };
       })
       .catch((rejection: unknown) => {
-        if (entity !== entityId) return;
+        if (entity !== entityId || mine !== generation) return;
         reads[id] = { state: "failed", message: ipcErrorMessage(rejection) };
       });
   }
@@ -245,14 +263,23 @@
   });
 
   /**
-   * While a step inside the tab is read, the place it left stays drawn, so a
-   * quick read swaps one listing for the next with no line between them; a
-   * slow one dims it (`.busy`, after a delay) rather than blanking the tab.
+   * While a place is read, what the tab drew before stays drawn: the place it
+   * left for this one, or this same place as the view before a re-read had
+   * it. So a quick read swaps one listing for the next with no line between
+   * them; a slow one dims it (`.busy`, after {@link PLACEHOLDER_MS}, the
+   * panel's one rule for when waiting is worth saying, #703) rather than
+   * blanking the tab.
    */
   const held = $derived.by((): ViewBlock[] | null => {
     if (!current || shown?.state !== "reading") return null;
     const from = leftFrom[current.id];
-    const before = from === undefined ? undefined : reads[from];
+    const place = readsFor(current);
+    const candidates = [
+      from === undefined ? undefined : reads[from],
+      place === null ? undefined : kept[place],
+      from === undefined ? undefined : kept[from],
+    ];
+    const before = candidates.find((read) => read?.state === "read");
     return before?.state === "read" ? offered(before.blocks) : null;
   });
 
@@ -363,13 +390,14 @@
       role="tabpanel"
       id="sv-panel-{uid}"
       aria-labelledby="sv-tab-{uid}-{view.sections.indexOf(current)}"
+      style:--sv-wait="{PLACEHOLDER_MS}ms"
     >
       {#if held}
         <div class="sv-held busy" aria-busy="true">
           {@render blocks(held)}
         </div>
       {:else if shown?.state === "reading"}
-        <p class="sv-note">Reading from {sourceName}…</p>
+        <p class="sv-note sv-wait">Reading from {sourceName}…</p>
       {:else if shown?.state === "failed"}
         <p class="sv-note fail">
           Could not read this tab: {shown.message}
@@ -447,9 +475,25 @@
     border-bottom: 1px solid var(--hair);
   }
 
-  /* Dimmed only once a read takes long enough to notice. */
+  /*
+    Dimmed, or said, only once a read takes long enough to notice: the
+    panel's placeholder threshold (#703), so a 150 ms read flickers nothing.
+  */
   .sv-held.busy {
-    animation: sv-dim 0.12s 0.3s both;
+    animation: sv-dim 0.12s var(--sv-wait) both;
+  }
+
+  .sv-wait {
+    animation: sv-show 0s var(--sv-wait) both;
+  }
+
+  @keyframes sv-show {
+    from {
+      visibility: hidden;
+    }
+    to {
+      visibility: visible;
+    }
   }
 
   @keyframes sv-dim {

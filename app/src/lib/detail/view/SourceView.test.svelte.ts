@@ -1049,3 +1049,104 @@ test("while the next place is read, the last one stays drawn and busy, with no l
   expect(screen.panel().querySelector("[aria-busy=true]")).toBeNull();
   screen.done();
 });
+
+/** The view mounted with props a test can change, as the detail changes them. */
+function live(view: View, entityId = "gitea:tidewater/payout-service") {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const props = $state({
+    entityId,
+    view,
+    webUrl: null,
+    sourceName: "Tidewater Git",
+    writeOps: [] as string[],
+    onnavigate: () => {},
+    onopenurl: () => {},
+    onaction: () => Promise.resolve(true),
+  });
+  const app = mount(SourceView, { target, props });
+  flushSync();
+  return {
+    props,
+    tabs: () => [...target.querySelectorAll<HTMLButtonElement>("[role=tab]")],
+    panel: () => target.querySelector<HTMLElement>("[role=tabpanel]")!,
+    done: () => {
+      unmount(app);
+      target.remove();
+    },
+  };
+}
+
+async function walkToSrc(screen: ReturnType<typeof live>) {
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+  entry(screen.panel(), "src").click();
+  flushSync();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+}
+
+test("a view read again keeps the tab's place, and holds it drawn while it is read again", async () => {
+  answer = tree;
+  const screen = live(REPO_VIEW);
+  await walkToSrc(screen);
+
+  let release: () => void = () => {};
+  answer = (section) =>
+    new Promise((resolve) => {
+      release = () => void tree(section).then(resolve);
+    });
+  const before = reads.length;
+  screen.props.view = { ...REPO_VIEW };
+  flushSync();
+  expect(reads.slice(before), "the place, read afresh").toEqual([["gitea:tidewater/payout-service", "files:src"]]);
+  expect(screen.panel().textContent, "no line in place of what was drawn").not.toContain("Reading from");
+  expect(entry(screen.panel(), "main.rs"), "src, still drawn").toBeDefined();
+  expect(screen.panel().querySelector("[aria-busy=true]")).not.toBeNull();
+
+  release();
+  await vi.waitFor(() => expect(screen.panel().querySelector("[aria-busy=true]")).toBeNull());
+  expect(entry(screen.panel(), "main.rs")).toBeDefined();
+  screen.done();
+});
+
+test("a read answered after the view was read again does not land over the fresh one", async () => {
+  answer = tree;
+  const screen = live(REPO_VIEW);
+  screen.tabs()[1]!.click();
+  flushSync();
+  await vi.waitFor(() => expect(screen.panel().querySelector(".tb-row")).not.toBeNull());
+
+  let late: () => void = () => {};
+  answer = (section) =>
+    new Promise((resolve) => {
+      late = () => resolve({ sections: [{ id: section!, title: "Files", count: null, deferred: false, blocks: [{ type: "text", text: "stale", markdown: false }] }], actions: [] });
+    });
+  entry(screen.panel(), "src").click();
+  flushSync();
+  const stale = late;
+
+  answer = tree;
+  screen.props.view = { ...REPO_VIEW };
+  flushSync();
+  await vi.waitFor(() => expect(entry(screen.panel(), "main.rs")).toBeDefined());
+  stale();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(screen.panel().textContent).not.toContain("stale");
+  screen.done();
+});
+
+test("another entity's view starts the tab at its own section, with nothing to go back to", async () => {
+  answer = tree;
+  const screen = live(REPO_VIEW);
+  await walkToSrc(screen);
+
+  screen.props.entityId = "gitea:tidewater/ledger";
+  screen.props.view = { ...REPO_VIEW };
+  flushSync();
+  await vi.waitFor(() => expect(entry(screen.panel(), "README.md")).toBeDefined());
+  expect(screen.panel().querySelector(".tr-back")).toBeNull();
+  expect(reads.at(-1)).toEqual(["gitea:tidewater/ledger", "files"]);
+  screen.done();
+});
