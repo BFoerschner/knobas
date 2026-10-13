@@ -51,6 +51,8 @@
 check:
     #!/usr/bin/env bash
     set -euo pipefail
+    # A stale section 10.8 index fails the gate before anything slow runs (#737).
+    python3 -I scripts/contract-index.py --check
     front_log= cargo_log= front_pid= cargo_pid=
     cargo_recipes=(fmt shell test-layout witness-unit clippy clippy-libs inventory test)
     descendants() {
@@ -418,6 +420,7 @@ pre-gate:
     before=$(snapshot)
     env -u RUSTUP_TOOLCHAIN cargo fmt --all
     just inventory-update
+    just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
     (cd app && npx svelte-check --tsconfig ./tsconfig.json)
@@ -1686,3 +1689,7 @@ estate-live:
     fi
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test estate_live \
       -- --ignored --nocapture --test-threads=1
+
+# Move loose section 10.8 entries into docs/contract/10.8/ and regenerate the index (#737).
+contract-index:
+    python3 -I scripts/contract-index.py
