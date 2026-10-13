@@ -1547,7 +1547,8 @@ async fn required_status_checks_block_until_they_pass() {
 }
 
 /// Where the status check is off, or its statuses cannot be read, the checks
-/// decide nothing: off is never asked, and a read Gitea refuses leaves
+/// decide nothing: a failing status on a check that is off is no blocker
+/// (#710's *Checks* still draws it), and a read Gitea refuses leaves
 /// *Merge…* enabled for Gitea's own refusal to say the rest (ADR-0004).
 #[tokio::test]
 async fn status_checks_off_or_unreadable_decide_nothing() {
@@ -1560,10 +1561,6 @@ async fn status_checks_off_or_unreadable_decide_nothing() {
     head_statuses(&server, json!([status("ci/build", "failure")])).await;
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
     assert_eq!(action(&view, "merge_pull_request").disabled, None);
-    assert!(
-        !paths(&server).await.iter().any(|p| p.ends_with("/status")),
-        "a check that is off is not read"
-    );
 
     let server = gitea(mergeable_pull(), json!([])).await;
     protect_main_with(

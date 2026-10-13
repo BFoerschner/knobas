@@ -63,29 +63,6 @@ impl GiteaClient {
         .await
     }
 
-    /// `GET /repos/{o}/{r}/commits/{ref}/status` -- the combined status:
-    /// the latest status of each context reported on the commit `reference`
-    /// names, a sha or a branch name (one escaped segment, as for
-    /// [`Self::branch_as`]). Landing reads the head's against the base's
-    /// required checks (#721); #710's checks read the same.
-    pub(crate) async fn combined_status_as<T: serde::de::DeserializeOwned>(
-        &self,
-        owner: &str,
-        repo: &str,
-        reference: &str,
-    ) -> Result<T, SourceError> {
-        self.get_json(
-            &format!(
-                "/repos/{}/{}/commits/{}/status",
-                segment(owner)?,
-                segment(repo)?,
-                escaped(reference)?
-            ),
-            &[],
-        )
-        .await
-    }
-
     /// `DELETE /repos/{o}/{r}/branches/{branch}` (#707): the one delete this
     /// adapter makes, the name one escaped segment as for [`Self::branch_as`].
     ///
@@ -114,7 +91,8 @@ impl GiteaClient {
     /// status: the latest status of each context reported on the commit
     /// `reference` names, a sha or a branch name (one escaped segment, as
     /// for [`Self::branch_as`]). A branch's view asks by its name so the read
-    /// goes beside the one that learns its tip.
+    /// goes beside the one that learns its tip. A pull request's landing
+    /// asks by the head's sha, for the base's required checks (#721).
     pub(crate) async fn combined_status_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
