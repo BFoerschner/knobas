@@ -739,7 +739,8 @@ async fn sync_now_answers_before_the_run_and_reports_it_on_the_event() {
 ///
 /// * the command answers with the write **as queued**, before the attempt --
 ///   which is why the state it comes back with is `pending` and not `sent`;
-/// * the queue then delivers it, so the row settles as `sent`;
+/// * the queue then delivers it in the background (#752), so the row settles
+///   as `sent` shortly after the answer;
 /// * a sync run for that source follows. knobas has no per-entity read -- the
 ///   whole of the read direction is `Source::sync` -- so "refresh the mirror
 ///   for the affected entity" is an *incremental* run of its source, which is
@@ -823,16 +824,25 @@ async fn a_submitted_write_is_queued_delivered_and_followed_by_a_re_read() {
     );
     let id = queued["id"].as_i64().expect("a queue id");
 
-    let settled: Option<String> =
-        sqlx::query_scalar("select state from knobas.write_queue where id = $1")
+    // Delivered **after** the command answered, since #752: the send runs in
+    // the background, so the row settles a moment later rather than before
+    // the answer.
+    let mut settled: Option<String> = None;
+    for _ in 0..200 {
+        settled = sqlx::query_scalar("select state from knobas.write_queue where id = $1")
             .bind(id)
             .fetch_one(&pool)
             .await
             .unwrap();
+        if settled.as_deref() != Some("pending") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
     assert_eq!(
         settled.as_deref(),
         Some("sent"),
-        "the queue delivers a write a source can take, before the command returns"
+        "the queue delivers a write a source can take, in the background"
     );
 
     // The re-read is asked for after the write lands and runs on its own task.
