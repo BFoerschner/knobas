@@ -170,6 +170,10 @@ a{color:var(--link);text-decoration:none}
    lose to it. Hover is `.btn.ghost`'s, which is also `.seg-b`'s. */
 .tile-h .acts .tile-max{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
 .tile-b{overflow:auto;flex:1;min-height:0}
+/* The Code tile's groups (#712): a muted label and its count over each run. */
+.tile-g{display:flex;align-items:baseline;gap:8px;padding:10px 12px 4px}
+.tile-grp:first-child .tile-g{padding-top:6px}
+.tile-g .cnt{font:500 11px var(--mono);color:var(--faint)}
 .empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
 .empty .btn{margin-top:8px}
 

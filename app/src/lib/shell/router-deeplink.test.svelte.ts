@@ -32,6 +32,7 @@ const PAGE: EntityPage = {
   ],
   total: 1,
   tally: null,
+  groups: null,
 };
 
 const DETAIL: EntityDetail = {

@@ -135,6 +135,31 @@ export interface EntityPage {
    * plain orders (#680).
    */
   tally: KindTally[] | null;
+  /**
+   * Under `attention`, in a room where some row's source has a configured
+   * identity, the Code tile's non-empty groups in draw order with their counts
+   * (#712); the rows arrive group by group. `null` otherwise, and the tile
+   * then draws one list as before.
+   */
+  groups: GroupTally[] | null;
+}
+
+/**
+ * Which Code-tile group a row is drawn under — `AttentionGroup` (#712): what
+ * needs me first, in this order.
+ */
+export type AttentionGroup =
+  | "review_requested"
+  | "my_pull_requests"
+  | "open_pull_requests"
+  | "my_branches"
+  | "branches"
+  | "other_branches";
+
+/** How many rows one group holds — `GroupTally`. */
+export interface GroupTally {
+  group: AttentionGroup;
+  count: number;
 }
 
 /** How many rows of one kind, in one tone, a tile order drew — `KindTally`. */

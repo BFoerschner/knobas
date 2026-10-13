@@ -512,7 +512,9 @@ knobas-app	test/it	demo_delete_during_load::a_source_deleted_during_a_demo_load_
 knobas-app	test/it	entity::a_birth_line_is_written_even_when_no_born_link_could_be_drawn
 knobas-app	test/it	entity::a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one
 knobas-app	test/it	entity::a_born_link_survives_the_notes_first_autosave
+knobas-app	test/it	entity::a_branch_whose_pull_request_is_outside_the_room_stays_proposed
 knobas-app	test/it	entity::a_builds_configuration_is_the_parent_its_own_adapter_says_it_names
+knobas-app	test/it	entity::a_code_tile_with_no_identity_draws_todays_order
 knobas-app	test/it	entity::a_commits_room_line_and_detail_carry_its_repo_as_the_path
 knobas-app	test/it	entity::a_confluence_space_is_a_project_room_and_a_jira_project_is_another
 knobas-app	test/it	entity::a_disabled_sources_entity_opens_with_the_marker_until_reenabled
@@ -538,6 +540,7 @@ knobas-app	test/it	entity::a_project_narrows_the_room_within_its_sources
 knobas-app	test/it	entity::a_project_room_shows_a_configuration_only_project
 knobas-app	test/it	entity::a_relations_case_does_not_split_its_group
 knobas-app	test/it	entity::a_rooms_lines_carry_the_state_their_adapter_declares
+knobas-app	test/it	entity::a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room
 knobas-app	test/it	entity::a_tombstoned_entity_is_absent_unless_asked_for
 knobas-app	test/it	entity::a_tombstoned_entity_is_still_readable_and_says_so
 knobas-app	test/it	entity::activity_can_be_scoped_to_one_entity
@@ -554,6 +557,7 @@ knobas-app	test/it	entity::returns_the_row_its_source_and_the_raw_payload
 knobas-app	test/it	entity::saving_a_note_writes_no_activity_line_however_much_it_reconciles
 knobas-app	test/it	entity::the_builds_tile_draws_each_configurations_latest_build_failing_first
 knobas-app	test/it	entity::the_code_tile_draws_open_pull_requests_first_and_no_settled_one
+knobas-app	test/it	entity::the_code_tile_draws_what_needs_me_first_in_four_groups
 knobas-app	test/it	entity::the_detail_carries_the_entitys_own_activity
 knobas-app	test/it	entity::the_recency_window_is_bound_as_a_parameter
 knobas-app	test/it	entity::the_source_filter_selects_a_room

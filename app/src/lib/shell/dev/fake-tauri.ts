@@ -2166,7 +2166,7 @@ function listEntities(args: Record<string, unknown>) {
   const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
   // The fixture has no link graph, so a context's membership is honestly
   // empty — the same answer `context_members` gives.
-  if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null };
+  if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null, groups: null };
 
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
   if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
@@ -2190,7 +2190,7 @@ function listEntities(args: Record<string, unknown>) {
         count: mirrored.filter((row) => row.kind === kind).length,
       }))
     : null;
-  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally };
+  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally, groups: null };
 }
 
 /* ----------------------------------------------------------------- notes */

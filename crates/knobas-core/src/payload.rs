@@ -222,6 +222,13 @@ pub struct KindPaths {
     /// state, which draws no chip.
     #[serde(default)]
     pub state: Vec<StatePath>,
+    /// The branch a pull request is opened **from**, by the name the branch's
+    /// own record is titled with (#712): Gitea's `head.ref`. What tells a
+    /// room's Code tile which branches already have an open pull request, so
+    /// a branch nobody has proposed yet is drawn as one. Empty for every kind
+    /// that is not a proposal, and a miss leaves a branch unproposed.
+    #[serde(default)]
+    pub head: Vec<PayloadPath>,
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -302,6 +309,7 @@ pub mod field {
     pub const PROJECT_NAME: &str = "project_name";
     pub const PARENT: &str = "parent";
     pub const STATE: &str = "state";
+    pub const HEAD: &str = "head";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -318,6 +326,7 @@ pub mod field {
         PROJECT_NAME,
         PARENT,
         STATE,
+        HEAD,
     ];
 }
 

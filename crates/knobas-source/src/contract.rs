@@ -698,13 +698,14 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 6] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 7] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
             (field::PROJECT_KEY, &paths.project_key, Wanted::Text),
             (field::PROJECT_NAME, &paths.project_name, Wanted::Text),
             (field::MERGED, &paths.merged, Wanted::Flag),
+            (field::HEAD, &paths.head, Wanted::Text),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants

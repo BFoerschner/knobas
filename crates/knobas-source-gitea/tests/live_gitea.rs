@@ -1391,6 +1391,47 @@ async fn the_shapes_the_fake_only_assumes_are_certified_here() {
         assert!(chips.iter().all(|(_, c)| c.is_some()), "{chips:?}");
     }
 
+    // The head a pull request declares (#712) names a mirrored branch of its
+    // own repo by that branch's title: what the Code tile matches to tell a
+    // branch nobody has proposed from one an open pull request stands for.
+    // The wiremock fixture writes `head.ref` and titles branches by name
+    // because the adapter's own author wrote both; only the real server can
+    // say the two spellings meet.
+    {
+        use knobas_core::payload::{parent_path, resolve_parents, resolve_string};
+        let declared = knobas_source_gitea::descriptor_template().payload_paths;
+        let paths_of = |kind: &str| {
+            declared
+                .iter()
+                .find(|paths| paths.kind == kind)
+                .unwrap_or_else(|| panic!("{kind} declares its paths"))
+                .clone()
+        };
+        let (pr_paths, branch_paths) = (paths_of("pr"), paths_of("branch"));
+        let sepa_head = resolve_string(&sepa.payload, &pr_paths.head)
+            .expect("the SEPA retry pull request declares the branch it is opened from");
+        let sepa_repo = parent_path(&resolve_parents(&sepa.payload, &pr_paths.parent));
+        let branches = of_kind(&items, "branch");
+        let proposed: Vec<String> = branches
+            .iter()
+            .filter(|b| {
+                b.title == sepa_head
+                    && parent_path(&resolve_parents(&b.payload, &branch_paths.parent)) == sepa_repo
+            })
+            .map(|b| b.entity.to_string())
+            .collect();
+        println!("LIVE SEPA retry head {sepa_head:?} in {sepa_repo:?} -> branches {proposed:?}");
+        assert_eq!(
+            proposed.len(),
+            1,
+            "the declared head names exactly one mirrored branch of the pull request's repo"
+        );
+        assert!(
+            branches.iter().all(|b| b.author.is_some()),
+            "every seeded branch has a last committer, which is what `mine` compares"
+        );
+    }
+
     // The author is the source's word for who did it, not knobas's.
     assert!(
         prs.iter().all(|i| i.author.is_some()),
