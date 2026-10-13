@@ -44,5 +44,5 @@
   tray, switching rooms and a link changing elsewhere read.
 
   **Not here:** logging every pool acquire timeout with the command's name is #747's (the same
-  requirement, in its ticket), which builds the app's log; nothing in this change would conflict
-  with it.
+  requirement, in its ticket); it landed with the app's log (`knobas-app/src/logging.rs`) before
+  this change, which adds nothing beside it.
