@@ -7,13 +7,16 @@
 //! read raw); `tests/live_gitea.rs` re-asserts them
 //! (`the_seeded_repos_view_lists_its_pull_requests_and_branches`).
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use knobas_source::Source;
 use knobas_source::view::{Block, SourceView, Tone, ViewRow, ViewSection};
 use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{InFlight, TOKEN, instance};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const ENTITY: &str = "gitea:tidewater/payout-service";
@@ -78,6 +81,10 @@ struct Served {
     pulls: Option<Value>,
     /// `None` answers `/commits` 409, as an empty repository's is.
     commits: Option<Value>,
+    /// Holds every answer and counts the requests in flight; none by default.
+    flight: Option<Arc<InFlight>>,
+    /// A route answered 500 instead, by its path under the repository.
+    failing: Option<&'static str>,
 }
 
 impl Default for Served {
@@ -132,6 +139,8 @@ impl Default for Served {
                     "2026-07-21T16:00:00Z"
                 ),
             ])),
+            flight: None,
+            failing: None,
         }
     }
 }
@@ -140,8 +149,27 @@ async fn gitea(served: Served) -> MockServer {
     let server = MockServer::start().await;
     let token = format!("token {TOKEN}");
     let authed = |m: wiremock::MockBuilder| m.and(header("Authorization", token.as_str()));
-    let ok = |body: Value| ResponseTemplate::new(200).set_body_json(body);
-    let not_found = || ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" }));
+    if let Some(flight) = &served.flight {
+        flight.watch(&server).await;
+    }
+    let delay = served.flight.as_ref().map_or(Duration::ZERO, |f| f.delay());
+    let ok = |body: Value| {
+        ResponseTemplate::new(200)
+            .set_body_json(body)
+            .set_delay(delay)
+    };
+    let not_found = || {
+        ResponseTemplate::new(404)
+            .set_body_json(json!({ "message": "not found" }))
+            .set_delay(delay)
+    };
+    if let Some(route) = served.failing {
+        // Mounted first, so it answers before the route's own mock.
+        authed(Mock::given(method("GET")).and(path(format!("{REPO}{route}"))))
+            .respond_with(ResponseTemplate::new(500).set_body_json(json!({ "message": "boom" })))
+            .mount(&server)
+            .await;
+    }
 
     authed(Mock::given(method("GET")).and(path(REPO)))
         .respond_with(ok(served.record))
@@ -153,7 +181,11 @@ async fn gitea(served: Served) -> MockServer {
         .await;
     if let Some((name, text)) = served.readme {
         authed(Mock::given(method("GET")).and(path(format!("{REPO}/raw/{name}"))))
-            .respond_with(ResponseTemplate::new(200).set_body_string(text))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_string(text)
+                    .set_delay(delay),
+            )
             .mount(&server)
             .await;
     }
@@ -195,7 +227,8 @@ async fn gitea(served: Served) -> MockServer {
         Some(listing) => commits.respond_with(ok(listing)),
         None => commits.respond_with(
             ResponseTemplate::new(409)
-                .set_body_json(json!({ "message": "Git Repository is empty." })),
+                .set_body_json(json!({ "message": "Git Repository is empty." }))
+                .set_delay(delay),
         ),
     }
     .mount(&server)
@@ -392,6 +425,7 @@ async fn an_empty_repo_draws_an_overview_and_no_failure() {
         branches: Value::Null,
         pulls: None,
         commits: None,
+        ..Served::default()
     })
     .await;
     let view = source(&server)
@@ -463,4 +497,43 @@ async fn a_branch_tip_at_gos_zero_time_shows_no_age() {
         .map(|r| r.meta.as_deref())
         .collect();
     assert_eq!(metas, [Some("09479f8509")]);
+}
+
+/// The sections are read side by side, not one after another (#703): once
+/// the record is in, the four sections' first reads -- the listing, the open
+/// pull requests, the branches and the commits -- are in flight together.
+/// Read in turn, one is.
+#[tokio::test]
+async fn a_repo_views_sections_are_read_at_the_same_time() {
+    let flight = InFlight::new(Duration::from_millis(300));
+    let server = gitea(Served {
+        flight: Some(Arc::clone(&flight)),
+        ..Served::default()
+    })
+    .await;
+    let view = source(&server)
+        .view(ENTITY, None)
+        .await
+        .expect("reads")
+        .expect("a repository draws a view");
+    assert_eq!(view.sections.len(), 4);
+    assert_eq!(flight.most(), 4, "the sections' reads in flight at once");
+}
+
+/// A section that cannot be read still fails the whole view, as it did when
+/// they were read in turn (#703): the detail then says *Showing the mirror*.
+#[tokio::test]
+async fn a_section_that_fails_fails_the_view() {
+    for route in ["/branches", "/commits", "/pulls", "/contents"] {
+        let server = gitea(Served {
+            failing: Some(route),
+            ..Served::default()
+        })
+        .await;
+        let read = source(&server).view(ENTITY, None).await;
+        assert!(
+            read.is_err(),
+            "{route} answered 500 and the view was {read:?}"
+        );
+    }
 }

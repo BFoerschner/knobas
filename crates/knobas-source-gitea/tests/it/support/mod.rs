@@ -17,6 +17,9 @@
 #![allow(dead_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, Source};
@@ -781,4 +784,63 @@ pub fn instance(base_url: String, token: &str, config: Value) -> SourceInstance 
 /// The adapter under test, built against the fake.
 pub fn source(base_url: String, config: Value) -> Box<dyn Source> {
     knobas_source_gitea::build(instance(base_url, TOKEN, config)).expect("the adapter builds")
+}
+
+/// How many of a fake's requests are in flight at once (#703): the witness
+/// that a view reads its sections side by side, which does not depend on how
+/// fast the machine is.
+///
+/// Every answer is held for [`InFlight::delay`], so a request is in flight
+/// for at least that long, and a client that waits for each answer before
+/// its next request cannot have two arrive within it: read one after another,
+/// [`InFlight::most`] is exactly 1. Arrivals are counted together only within
+/// half the delay, so a busy machine can make side-by-side reads look fewer
+/// but never makes reads in turn look side by side.
+pub struct InFlight {
+    delay: Duration,
+    arrivals: Mutex<Vec<Instant>>,
+    most: AtomicUsize,
+}
+
+impl InFlight {
+    pub fn new(delay: Duration) -> Arc<Self> {
+        Arc::new(Self {
+            delay,
+            arrivals: Mutex::new(Vec::new()),
+            most: AtomicUsize::new(0),
+        })
+    }
+
+    /// How long every answer of the fake watched is held.
+    pub fn delay(&self) -> Duration {
+        self.delay
+    }
+
+    /// The most requests that were in flight at the same time.
+    pub fn most(&self) -> usize {
+        self.most.load(Ordering::SeqCst)
+    }
+
+    /// Watch every request `server` gets. Mounted before the fake's own mocks:
+    /// it is the first one wiremock asks, once per request, and it never
+    /// answers.
+    pub async fn watch(self: &Arc<Self>, server: &MockServer) {
+        let flight = Arc::clone(self);
+        Mock::given(move |_: &wiremock::Request| {
+            flight.arrive();
+            false
+        })
+        .respond_with(ResponseTemplate::new(500))
+        .with_priority(1)
+        .mount(server)
+        .await;
+    }
+
+    fn arrive(&self) {
+        let now = Instant::now();
+        let mut arrivals = self.arrivals.lock().expect("not poisoned");
+        arrivals.retain(|at| now.duration_since(*at) < self.delay / 2);
+        arrivals.push(now);
+        self.most.fetch_max(arrivals.len(), Ordering::SeqCst);
+    }
 }

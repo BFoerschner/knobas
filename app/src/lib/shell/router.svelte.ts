@@ -454,7 +454,12 @@ export function createRouter(): Router {
     // one: opening a ticket from `src:jira` and pressing Esc has to land back
     // in `src:jira`, not in `all`.
     if (next.view === "room") state.ctx = next.ctx;
-    state.route = next;
+    // The same address read again -- `go()`'s eager read and then the
+    // webview's `hashchange` for it -- keeps the route it has. A new object
+    // for the same place re-ran everything that follows the route: the room
+    // started its hold over (#703) and the open detail read its row and view
+    // a second time.
+    if (JSON.stringify(next) !== JSON.stringify(state.route)) state.route = next;
   }
 
   read();

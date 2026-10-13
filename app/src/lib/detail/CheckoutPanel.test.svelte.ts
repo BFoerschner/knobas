@@ -22,6 +22,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { toasts } from "../shell/toasts.svelte";
 import type { CheckoutCommand, CheckoutView, TreeRead, WorkingTreeState } from "../ipc/entity";
+import { PLACEHOLDER_MS } from "./view-read";
 
 const reads: string[] = [];
 const writes: { entityId: string; path: string | null }[] = [];
@@ -270,14 +271,48 @@ test("a branch draws its repository's checkout, and its override is keyed on the
 });
 
 test("a read that fails leaves the panel quiet rather than shouting over the item", async () => {
-  refuseRead = true;
-  render();
-  await settle();
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    refuseRead = true;
+    render();
+    await settle();
+    vi.advanceTimersByTime(PLACEHOLDER_MS);
+    flushSync();
 
-  // Still the reading line, and no error banner: the detail is worth drawing
-  // without a checkout, and a toast about one nobody asked to see is noise.
-  expect(text()).toContain("Reading…");
-  expect(text()).not.toContain("No checkout");
+    // Still the reading line, and no error banner: the detail is worth drawing
+    // without a checkout, and a toast about one nobody asked to see is noise.
+    expect(text()).toContain("Reading…");
+    expect(text()).not.toContain("No checkout");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+/**
+ * Opening a repo flickered (#703): the section said *Reading…* for the
+ * moment the scan took and then the path. A prompt answer is drawn with no
+ * line before it; only a read past the placeholder's threshold says so.
+ */
+test("a checkout read that answers promptly is drawn with no reading line before it", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+  try {
+    let land!: () => void;
+    const gate = new Promise<void>((resolve) => (land = resolve));
+    const prompt = view({ path: "/Users/mara/src/payout-service", found_by: "scan" });
+    // A promise where the answer goes: the mock resolves to what it settles to.
+    answer = gate.then(() => prompt) as unknown as CheckoutView;
+    render();
+    vi.advanceTimersByTime(PLACEHOLDER_MS - 1);
+    flushSync();
+    expect(text(), "nothing said while the read is prompt").not.toContain("Reading…");
+
+    land();
+    await gate;
+    await settle();
+    expect(text()).toContain("/Users/mara/src/payout-service");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 // -- the open buttons (#501) -------------------------------------------------

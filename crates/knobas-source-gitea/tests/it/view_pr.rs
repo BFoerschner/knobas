@@ -6,6 +6,9 @@
 //! (`a_seeded_pull_requests_view_carries_its_files_commits_and_discussion`),
 //! and on disagreement this fake is what is wrong.
 
+use std::sync::Arc;
+use std::time::Duration;
+
 use knobas_source::view::{
     ActionField, Block, ChoiceOption, DiffChange, Fact, FieldKind, SourceView, Tone, ViewAction,
     ViewRow, ViewSection,
@@ -15,7 +18,7 @@ use serde_json::{Value, json};
 use wiremock::matchers::{header, method, path, query_param};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
-use crate::support::{TOKEN, instance};
+use crate::support::{InFlight, TOKEN, instance};
 
 const REPO: &str = "/api/v1/repos/tidewater/payout-service";
 const PR: &str = "gitea:tidewater/payout-service#142";
@@ -118,7 +121,17 @@ fn comments() -> Value {
 /// A Gitea that answers every read the view makes, with `pull` as the
 /// pull request's record and `reviews` as its reviews.
 async fn gitea(pull: Value, reviews: Value) -> MockServer {
+    slow_gitea(pull, reviews, None).await
+}
+
+/// [`gitea`], with `flight` holding every answer and counting the requests in
+/// flight.
+async fn slow_gitea(pull: Value, reviews: Value, flight: Option<&Arc<InFlight>>) -> MockServer {
     let server = MockServer::start().await;
+    if let Some(flight) = flight {
+        flight.watch(&server).await;
+    }
+    let delay = flight.map_or(Duration::ZERO, |f| f.delay());
     let token = format!("token {TOKEN}");
     let get = |p: String| {
         Mock::given(method("GET"))
@@ -126,11 +139,19 @@ async fn gitea(pull: Value, reviews: Value) -> MockServer {
             .and(header("Authorization", token.as_str()))
     };
     get(format!("{REPO}/pulls/142"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(pull))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(pull)
+                .set_delay(delay),
+        )
         .mount(&server)
         .await;
     get(format!("{REPO}/pulls/142/reviews"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(reviews))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(reviews)
+                .set_delay(delay),
+        )
         .mount(&server)
         .await;
     get(format!("{REPO}/pulls/142/commits"))
@@ -140,16 +161,25 @@ async fn gitea(pull: Value, reviews: Value) -> MockServer {
         .respond_with(
             ResponseTemplate::new(200)
                 .insert_header("X-Total-Count", "2")
-                .set_body_json(pr_commits()),
+                .set_body_json(pr_commits())
+                .set_delay(delay),
         )
         .mount(&server)
         .await;
     get(format!("{REPO}/issues/142/comments"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(comments()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(comments())
+                .set_delay(delay),
+        )
         .mount(&server)
         .await;
     get(format!("{REPO}/pulls/142.diff"))
-        .respond_with(ResponseTemplate::new(200).set_body_string(DIFF))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_string(DIFF)
+                .set_delay(delay),
+        )
         .mount(&server)
         .await;
     server
@@ -607,4 +637,20 @@ async fn a_section_read_carries_no_toolbar() {
         .unwrap()
         .unwrap();
     assert!(view.actions.is_empty(), "{view:#?}");
+}
+
+/// A pull request's tabs are read side by side over its one record (#703):
+/// once the record is in, the overview's reviews, the commits and the
+/// conversation are in flight together. Read in turn, one is.
+#[tokio::test]
+async fn a_pull_requests_tabs_are_read_at_the_same_time() {
+    let flight = InFlight::new(Duration::from_millis(300));
+    let server = slow_gitea(open_pull(), reviews(), Some(&flight)).await;
+    let view = source(&server)
+        .view(PR, None)
+        .await
+        .expect("reads")
+        .expect("a pull request draws a view");
+    assert_eq!(view.sections.len(), 4);
+    assert_eq!(flight.most(), 3, "the tabs' reads in flight at once");
 }

@@ -17,6 +17,15 @@ import type { EntityDetail, SourceView } from "../ipc/entity";
 /** How long the panel waits for a view before drawing the mirror's body. */
 export const VIEW_PATIENCE_MS = 1500;
 
+/**
+ * How long a read is waited on in silence before the panel says it is
+ * reading (#703). Under it the body keeps its place, empty, and a view that
+ * lands is drawn with no line before it: a line drawn for the 150 ms a local
+ * Gitea takes and then swapped for the tabs was the flicker on opening a
+ * repo. Over it, the line is honest news.
+ */
+export const PLACEHOLDER_MS = 400;
+
 /** How many entities are remembered for back and forward. */
 export const REMEMBERED = 20;
 
@@ -26,6 +35,26 @@ export interface Recalled {
   view: SourceView | null | undefined;
 }
 
+/**
+ * An entity's two reads, started ahead of its panel by {@link readAhead} and
+ * lent to the panel that mounts for it, so nothing is read twice (#703).
+ */
+export interface Loan {
+  row: Promise<EntityDetail>;
+  view: Promise<SourceView | null>;
+  /** When the reads started (`Date.now()`): the panel's waits count from here. */
+  since: number;
+}
+
+/**
+ * How long reads made ahead are lent. A panel mounts within
+ * {@link HOLD_MS} (the placeholder's threshold) of them, so twice that is
+ * room to spare; one that was never mounted (the reader moved on) leaves a
+ * loan nobody may take later, or a later opening would draw an answer it
+ * never asked for and read nothing.
+ */
+export const LOAN_MS = 2 * PLACEHOLDER_MS;
+
 export interface ViewMemory {
   /** The entity as last drawn, or `null`. Counts as a use. */
   recall(entityId: string): Recalled | null;
@@ -33,13 +62,18 @@ export interface ViewMemory {
   keep(entityId: string, held: Recalled): void;
   /** Whether this source answered `None` for this kind this session. */
   drawsNothing(sourceId: string, kind: string): boolean;
-  /** Clear both memories. Tests start from an empty session. */
+  /** Lend an entity's reads made ahead to the panel that opens it next. */
+  lend(entityId: string, loan: Loan): void;
+  /** Take the reads made ahead for this entity, if they are fresh; once. */
+  borrow(entityId: string): Loan | null;
+  /** Clear every memory. Tests start from an empty session. */
   clear(): void;
 }
 
 export function createViewMemory(limit = REMEMBERED): ViewMemory {
   const seen = new Map<string, Recalled>();
   const nothing = new Set<string>();
+  const loans = new Map<string, Loan>();
   const pair = (sourceId: string, kind: string) => `${sourceId}\u0000${kind}`;
   return {
     recall(entityId) {
@@ -60,9 +94,19 @@ export function createViewMemory(limit = REMEMBERED): ViewMemory {
     drawsNothing(sourceId, kind) {
       return nothing.has(pair(sourceId, kind));
     },
+    lend(entityId, loan) {
+      loans.set(entityId, loan);
+    },
+    borrow(entityId) {
+      const loan = loans.get(entityId);
+      loans.delete(entityId);
+      if (loan === undefined || Date.now() - loan.since > LOAN_MS) return null;
+      return loan;
+    },
     clear() {
       seen.clear();
       nothing.clear();
+      loans.clear();
     },
   };
 }
@@ -71,30 +115,52 @@ export function createViewMemory(limit = REMEMBERED): ViewMemory {
 export const viewMemory = createViewMemory();
 
 /**
- * How long a detail opened from another waits for its row before it is
- * mounted anyway (#693). Under it, the panel being left stays drawn and the
- * next one arrives whole; over it, the next one is mounted and says it is
- * reading, because a frozen panel is worse than an honest one.
+ * How long a detail opened from another waits for its row and view before it
+ * is mounted anyway (#693, #703). Under it, the panel being left stays drawn
+ * and the next one arrives whole; over it, the next one is mounted and says
+ * it is reading, because a frozen panel is worse than an honest one. It is
+ * the placeholder's threshold: holding longer would only delay a line the
+ * next panel then draws at once.
  */
-export const HOLD_MS = 150;
+export const HOLD_MS = PLACEHOLDER_MS;
 
 /**
- * Read an entity's row ahead of mounting its panel, into the memory the
- * panel recalls from (#693). Settles either way: a failed read is the
- * panel's own to say, when it reads again.
+ * Read an entity's row and view ahead of mounting its panel (#693, #703):
+ * both are lent to the panel, which draws from them rather than reading
+ * again, and kept in the memory it recalls from once they answer. Settles
+ * when the row has answered and, unless its source is remembered as drawing
+ * nothing for its kind, the view too; either way, since a failed read is the
+ * panel's own to say. An entity drawn moments ago settles at once: the panel
+ * draws it from memory and reads it again itself.
  */
 export async function readAhead(
   entityId: string,
   read: (entityId: string) => Promise<EntityDetail>,
+  readView: (entityId: string) => Promise<SourceView | null>,
   memory: ViewMemory = viewMemory,
 ): Promise<void> {
   if (memory.recall(entityId) !== null) return;
+  const loan: Loan = { row: read(entityId), view: readView(entityId), since: Date.now() };
+  // The panel attaches its own handlers; these keep a rejection nobody else
+  // awaited from going unhandled.
+  loan.row.catch(() => {});
+  loan.view.catch(() => {});
+  memory.lend(entityId, loan);
+  let detail: EntityDetail;
   try {
-    const detail = await read(entityId);
-    if (memory.recall(entityId) === null) memory.keep(entityId, { detail, view: undefined });
+    detail = await loan.row;
   } catch {
-    // The panel reads again and says why.
+    return;
   }
+  let view: SourceView | null | undefined = undefined;
+  if (!memory.drawsNothing(detail.source.id, detail.row.kind)) {
+    try {
+      view = await loan.view;
+    } catch {
+      // Drawn as the row alone; the panel says why the view is not there.
+    }
+  }
+  if (memory.recall(entityId) === null) memory.keep(entityId, { detail, view });
 }
 
 /**

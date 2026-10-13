@@ -59,12 +59,18 @@ pub(super) async fn draw(
 ) -> Result<SourceView, SourceError> {
     let record: RepoRecord = source.client.repo_as(owner, repo).await?;
     let sections = match section {
-        None => vec![
-            overview(source, &record, owner, repo).await?,
-            pulls(source, &record, owner, repo).await?,
-            branches(source, &record, owner, repo).await?,
-            commits(source, &record, owner, repo).await?,
-        ],
+        // Side by side over the one record (#703): each section is its own
+        // reads, and one after another they were most of the wait. The first
+        // to fail fails the view, as it did in turn.
+        None => {
+            let (overview, pulls, branches, commits) = tokio::try_join!(
+                overview(source, &record, owner, repo),
+                pulls(source, &record, owner, repo),
+                branches(source, &record, owner, repo),
+                commits(source, &record, owner, repo),
+            )?;
+            vec![overview, pulls, branches, commits]
+        }
         Some(OVERVIEW) => vec![overview(source, &record, owner, repo).await?],
         Some(PULLS) => vec![pulls(source, &record, owner, repo).await?],
         Some(BRANCHES) => vec![branches(source, &record, owner, repo).await?],

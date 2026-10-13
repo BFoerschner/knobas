@@ -2031,6 +2031,7 @@ knobas-source-gitea	test/it	view::a_foreign_id_is_refused
 knobas-source-gitea	test/it	view::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view_branch::a_branch_gitea_does_not_have_is_an_error
 knobas-source-gitea	test/it	view_branch::a_branch_with_no_pull_request_says_so
+knobas-source-gitea	test/it	view_branch::a_branchs_reads_are_made_at_the_same_time
 knobas-source-gitea	test/it	view_branch::a_feature_branch_reads_ahead_and_behind_its_default_branch
 knobas-source-gitea	test/it	view_branch::behind_falls_back_to_the_reverse_compare_without_a_count
 knobas-source-gitea	test/it	view_branch::behind_is_read_as_a_count_not_as_the_reverse_compare
@@ -2042,6 +2043,7 @@ knobas-source-gitea	test/it	view_pr::a_pull_request_gitea_would_not_merge_offers
 knobas-source-gitea	test/it	view_pr::a_pull_request_past_the_commit_budget_says_what_it_left_out
 knobas-source-gitea	test/it	view_pr::a_pull_request_view_is_overview_files_commits_and_conversation
 knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_verdicts
+knobas-source-gitea	test/it	view_pr::a_pull_requests_tabs_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_pr::a_section_read_carries_no_toolbar
 knobas-source-gitea	test/it	view_pr::an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar
 knobas-source-gitea	test/it	view_pr::an_unknown_tab_and_a_refused_read_are_errors
@@ -2049,7 +2051,9 @@ knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_p
 knobas-source-gitea	test/it	view_repo::a_branch_tip_at_gos_zero_time_shows_no_age
 knobas-source-gitea	test/it	view_repo::a_plain_readme_is_text_and_not_markdown
 knobas-source-gitea	test/it	view_repo::a_repo_view_is_its_overview_pull_requests_branches_and_commits
+knobas-source-gitea	test/it	view_repo::a_repo_views_sections_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_repo::a_repo_without_a_readme_draws_no_readme_block
+knobas-source-gitea	test/it	view_repo::a_section_that_fails_fails_the_view
 knobas-source-gitea	test/it	view_repo::an_empty_repo_draws_an_overview_and_no_failure
 knobas-source-gitea	test/it	view_repo::one_section_is_read_on_its_own
 knobas-source-gitea	test/it	view_rows::a_branchs_commits_stop_at_250_and_say_so

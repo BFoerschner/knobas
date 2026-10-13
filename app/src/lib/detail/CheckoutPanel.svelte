@@ -42,6 +42,7 @@
   } from "../ipc/entity";
   import { latestRead } from "../shell/latest-read";
   import { push } from "../shell/toasts.svelte";
+  import { PLACEHOLDER_MS } from "./view-read";
   import { treeLine } from "./working-tree";
 
   let {
@@ -84,6 +85,9 @@
    */
   const read = latestRead<CheckoutView>();
 
+  /** Whether the read has taken long enough to say so (#703). */
+  let slow = $state(false);
+
   /**
    * Set once the panel is gone. A read still in flight then lands nowhere: the
    * detail has moved on, and handing it this answer would put an old repo's
@@ -115,8 +119,11 @@
     const id = entityId;
     checkout = null;
     editing = false;
+    slow = false;
+    const placeholder = setTimeout(() => (slow = true), PLACEHOLDER_MS);
     onread?.(id, null);
     load(id);
+    return () => clearTimeout(placeholder);
   });
 
   /**
@@ -233,7 +240,8 @@
   </div>
 
   {#if !checkout}
-    <p class="muted">Reading…</p>
+    <!-- Silent, at its height, for the moment a prompt read takes (#703). -->
+    <p class="muted">{slow ? "Reading…" : "\u00a0"}</p>
   {:else if checkout.path}
     <p class="cpath">{checkout.path}</p>
     {#if checkout.tree}
