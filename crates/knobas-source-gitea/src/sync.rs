@@ -936,6 +936,15 @@ async fn fetch_comments(
     ))
 }
 
+/// Whether the branch itself now answers 404. As [`pull_is_gone`]: anything
+/// else is "not shown to be gone".
+async fn branch_is_gone(source: &crate::GiteaSource, at: RepoRef<'_>, branch: &str) -> bool {
+    matches!(
+        source.client.branch_as::<Value>(at.owner, at.name, branch).await,
+        Err(error) if error.status() == Some(404)
+    )
+}
+
 /// Whether the pull request itself now answers 404. Any other answer, failures
 /// included, is "not shown to be gone": the caller then treats the read that
 /// failed as it would have without asking.
@@ -1006,11 +1015,14 @@ async fn commits(
                 Ok(batch) => batch,
                 // Listed a moment ago and gone now (#724): a merge with
                 // delete-branch on a busy repository. Gitea answers `404
-                // object does not exist` for the ref. Its row came from the
-                // listing; the next run that does not list it tombstones it.
-                // Not a hole, so not a skip of the repository, and not fatal
-                // on a full sync.
-                Err(error) if error.status() == Some(404) => {
+                // object does not exist` for the ref, and the branch's own
+                // read -- what decides it, as for a pull request -- 404 too.
+                // Its row came from the listing; the next run that does not
+                // list it tombstones it. Not a hole, so not a skip of the
+                // repository, and not fatal on a full sync.
+                Err(error)
+                    if error.status() == Some(404) && branch_is_gone(source, at, &branch).await =>
+                {
                     tracing::info!(
                         repository = %at.full_name,
                         %branch,

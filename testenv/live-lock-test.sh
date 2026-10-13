@@ -298,7 +298,7 @@ check "the guard's refusal names the product that is up" "$out" "knobas-jira is 
 checks=$((checks + 1))
 [ ! -L "$KNOBAS_LIVE_LOCK" ] || fail "a refused session gives the lock back" "$(readlink "$KNOBAS_LIVE_LOCK")"
 
-# Gitea is not a JVM product: its session neither takes nor waits on the lock.
+# Gitea is not a JVM product: its session neither takes nor waits on the JVM lock.
 holder gitearun
 : >"$STUB_LOG"
 rc=$(session giteaonly gitea STUB_RUNNING="" KNOBAS_LIVE_LOCK_WAIT=1)

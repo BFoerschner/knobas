@@ -1332,6 +1332,23 @@ async fn a_branch_deleted_mid_run_is_skipped_and_the_run_succeeds() {
     );
 }
 
+/// The control: a 404 on the commit read of a branch that still reads is not
+/// "deleted" -- the branch's own read is what decides that -- so a full sync
+/// ends on it, as it did before #724, rather than mirroring a hole.
+#[tokio::test]
+async fn a_missing_history_on_a_branch_still_there_ends_a_full_sync() {
+    let mut state = State::tidewater();
+    state
+        .history_missing
+        .insert("tidewater/payout-service@feature/PAY-231-sepa-retry".to_owned());
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+
+    let mut sink = VecSink(Vec::new());
+    let error = source.sync(None, &mut sink).await.unwrap_err();
+    assert_eq!(error.status(), Some(404), "{error:?}");
+}
+
 /// The same race on an incremental run: the branch moved, then vanished before
 /// its new commits were read. The run succeeds and the rest of the repository
 /// is not given up for it -- before #724 the 404 skipped the whole repository.

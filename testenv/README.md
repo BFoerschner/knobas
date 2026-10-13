@@ -376,7 +376,9 @@ gitea-live` would delete the branch out from under it. The failure mode is a
 mid-run 401 or a vanished branch, neither of which reads as "somebody else is
 in here". For the three Gitea recipes the tooling enforces it since #724: they
 queue on the Gitea lock (*Live products, on demand*). Kuma and a bare `./seed`
-take no lock.
+take no lock, and neither does a TeamCity run -- so **`just gitea-live-capped`
+still wants the environment claimed** while a TeamCity run may be cloning from
+the Gitea it caps.
 
 ## What the seed **cannot** reproduce — read this before writing assertions
 

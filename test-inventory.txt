@@ -2013,6 +2013,7 @@ knobas-source-gitea	test/it	sync::a_full_sync_emits_commits_under_their_object_i
 knobas-source-gitea	test/it	sync::a_full_sync_emits_pull_requests_with_their_discussion
 knobas-source-gitea	test/it	sync::a_full_sync_emits_the_repository_and_every_branch
 knobas-source-gitea	test/it	sync::a_long_discussion_reaches_the_indexed_text_whole
+knobas-source-gitea	test/it	sync::a_missing_history_on_a_branch_still_there_ends_a_full_sync
 knobas-source-gitea	test/it	sync::a_moved_branch_deleted_mid_run_does_not_cost_the_rest_of_the_repository
 knobas-source-gitea	test/it	sync::a_moved_branch_head_is_re_emitted_and_an_untouched_one_is_not
 knobas-source-gitea	test/it	sync::a_new_commit_on_a_moved_branch_is_emitted_once

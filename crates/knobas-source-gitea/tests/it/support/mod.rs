@@ -90,8 +90,14 @@ pub struct State {
     /// by the time the walk reads them: deleted between the two requests, as a
     /// merge with delete-branch does on a busy repository (issue #724). Their
     /// commit read answers what Gitea 1.27.3 answers for a ref that no longer
-    /// exists, measured 2026-10-13: `404 object does not exist [id: <branch>]`.
+    /// exists, measured 2026-10-13: `404 object does not exist [id: <branch>]`,
+    /// and so does the branch's own read, `GET /branches/{name}`: `404 not
+    /// found`.
     pub vanished_branches: BTreeSet<String>,
+    /// `owner/repo@branch` entries whose commit read answers that same 404
+    /// while the branch itself still reads: the control for
+    /// `vanished_branches`, a 404 that is not "the branch is gone".
+    pub history_missing: BTreeSet<String>,
     /// `owner/repo#index` pull requests the listing still offers but that were
     /// deleted before their discussion was read (issue #724). Measured on
     /// Gitea 1.27.3, 2026-10-13: the discussion read answers **500** `issue
@@ -254,6 +260,7 @@ impl State {
             revoked: BTreeSet::new(),
             missing: BTreeSet::new(),
             vanished_branches: BTreeSet::new(),
+            history_missing: BTreeSet::new(),
             vanished_pulls: BTreeSet::new(),
             discussion_status: BTreeMap::new(),
             discussion_total: BTreeMap::new(),
@@ -550,6 +557,22 @@ impl Fake {
             .await;
         }
         for key in &state.vanished_branches {
+            let (full_name, branch) = key
+                .split_once('@')
+                .expect("vanished branch key is owner/repo@branch");
+            let wire = branch.replace('/', "%2F");
+            authed(
+                Mock::given(method("GET"))
+                    .and(path(format!("/api/v1/repos/{full_name}/branches/{wire}"))),
+            )
+            .respond_with(
+                ResponseTemplate::new(404).set_body_json(json!({ "message": "not found" })),
+            )
+            .with_priority(FORBIDDEN_PRIORITY)
+            .mount(&self.server)
+            .await;
+        }
+        for key in state.vanished_branches.iter().chain(&state.history_missing) {
             let (full_name, branch) = key
                 .split_once('@')
                 .expect("vanished branch key is owner/repo@branch");

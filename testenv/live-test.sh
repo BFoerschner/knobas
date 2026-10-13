@@ -159,8 +159,8 @@ check_eq "a TeamCity run leaves nothing up it did not start" \
 
 # A TeamCity run takes no Gitea lock (that one serialises Gitea runs, #724), so
 # a `just gitea-live` from another worktree may start using the Gitea a
-# TeamCity run brought up. If the TeamCity
-# run then stopped "what it started", that run would lose Gitea mid-suite. The
+# TeamCity run brought up. If the TeamCity run then stopped "what it
+# started", that run would lose Gitea mid-suite. The
 # rule: a run stops only its own product, never one it merely needed.
 #
 # Witnessed whole, through `live_session`: a stateful docker stub whose `ps`

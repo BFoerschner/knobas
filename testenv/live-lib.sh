@@ -149,9 +149,6 @@ live_is_jvm() {
 # behind a 20-minute Atlassian run would serialise what never collided. A
 # TeamCity run starts and seeds Gitea without it; the seed writes nothing to a
 # seeded Gitea. One shell holds at most one of the two.
-LIVE_LOCK=${KNOBAS_LIVE_LOCK:-${TMPDIR:-/tmp}/knobas-live-jvm.lock}
-LIVE_LOCK_LABEL="JVM lock"
-LIVE_LOCK_HOLDER_VAR=KNOBAS_LIVE_LOCK_HOLDER
 LIVE_LOCK_MINE=""
 # Set while this shell is inside a reclaim, so an interrupt there removes the
 # reclaim lock itself instead of leaving it to the minute-old sweep.
@@ -184,6 +181,7 @@ _live_lock_select() {
     *) echo "live: no lock named '$1' (jvm or gitea)" >&2; return 1 ;;
   esac
 }
+_live_lock_select jvm
 
 # live_lock_hold <recipe> [<jvm|gitea>] -- return once this shell holds the
 # lock (the JVM one unless named; or runs under a parent that does); return 1,
@@ -291,8 +289,8 @@ live_lock_traps() {
 # time any run that started it ends -- a TeamCity run that brought it up for
 # its VCS roots, which takes no Gitea lock, or a `just gitea-live` -- another
 # worktree's run may be using it, and stopping it would pull it out from under
-# that run mid-suite. Gitea is light (~130 MB)
-# and stays up; only `just live-down gitea` stops it.
+# that run mid-suite. Gitea is light (~130 MB) and stays up; only `just
+# live-down gitea` stops it.
 live_to_put_back() {
   [ "$1" = gitea ] || live_is_up "$1" || echo "$1"
 }
@@ -403,8 +401,9 @@ _live_restore() {
 # live_session <product> [<recipe>] -- for a recipe: hold the JVM lock (as
 # <recipe>) for the whole run of a JVM product, the Gitea lock for a Gitea one
 # (#724); bring the product up, export what `./seed --env` prints, and arm
-# EXIT, INT and TERM to put the product back as this found it. A product that was already up -- `just live-up jira` before a
-# run of `just jira-live` -- is left up; one this started is stopped. Gitea,
+# EXIT, INT and TERM to put the product back as this found it. A product that
+# was already up -- `just live-up jira` before a run of `just jira-live` -- is
+# left up; one this started is stopped. Gitea,
 # started by a Gitea run or for a TeamCity one, is the exception: it stays up
 # (#698, `live_to_put_back`).
 #
