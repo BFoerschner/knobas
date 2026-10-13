@@ -60,13 +60,22 @@ struct CombinedStatus {
     statuses: Option<Vec<CommitStatus>>,
 }
 
-/// Gitea's `CommitStatus`: its state is spelled `status`.
+/// Gitea's `CommitStatus`: its state is spelled `status`. Either may come
+/// `null`; an absent state is pending, as Gitea's own combination reads it.
 #[derive(Debug, serde::Deserialize)]
 struct CommitStatus {
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     context: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     status: String,
+}
+
+fn null_as_default<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::Deserialize;
+    Ok(Option::<String>::deserialize(deserializer)?.unwrap_or_default())
 }
 
 /// Gitea's `Branch`, the fields landing reads.
@@ -326,7 +335,8 @@ fn official_reviewers(reviews: &[Review], state: &str) -> Vec<String> {
 }
 
 /// What stands among the required checks, as Gitea's
-/// `MergeRequiredContextsCommitStatus` decides it: with no context named,
+/// `MergeRequiredContextsCommitStatus` decides it (a `warning` fails a merge
+/// there, though *Checks* draws it as a warning): with no context named,
 /// every reported status must pass and at least one must have reported;
 /// otherwise each named pattern must match a reported context and every
 /// match must pass. `success` and `skipped` pass; `error`, `failure` and

@@ -1511,6 +1511,12 @@ async fn required_status_checks_block_until_they_pass() {
             Some("Required check ci/lint is pending"),
         ),
         (
+            "a state Gitea sent null is pending, and a null context reads",
+            json!(["ci/build"]),
+            json!([{ "context": "ci/build", "status": null }, { "context": null, "status": "success" }]),
+            Some("Required check ci/build is pending"),
+        ),
+        (
             "a skipped check passes",
             json!(["ci/*"]),
             json!([status("ci/build", "success"), status("ci/docs", "skipped")]),

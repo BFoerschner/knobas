@@ -167,9 +167,11 @@ pub(crate) async fn approve(
 ///
 /// Gitea answers **405** for every pull request it will not merge -- a
 /// work-in-progress title, one already merged, an account that may not --
-/// and that arrives as a `Protocol` refusal carrying its sentence, never
-/// retried (ADR-0004). The one exception is [`still_checking`]: *"Please try
-/// again later"* is tried again for up to [`MERGE_PATIENCE`] (#721).
+/// and that arrives as a `Protocol` refusal carrying its sentence (ADR-0004),
+/// which the queue records rather than retries. The one exception is
+/// [`still_checking`]: *"Please try again later"* is tried again here, beside
+/// `knobas-http`'s own retry of a busy server, for up to [`MERGE_PATIENCE`]
+/// of waiting (#721).
 ///
 /// # Errors
 ///
@@ -199,7 +201,7 @@ pub(crate) async fn merge(
 /// `mergeable: true`, then Gitea's check of the push behind it runs and the
 /// merge is refused for 1--2.5 s. Several times that, so a busy server is
 /// waited for too; past it, the answer is believed.
-pub(crate) const MERGE_PATIENCE: Duration = Duration::from_secs(15);
+const MERGE_PATIENCE: Duration = Duration::from_secs(15);
 
 /// The longest single wait between two merge attempts.
 const MERGE_WAIT_CAP: Duration = Duration::from_secs(2);
@@ -212,7 +214,7 @@ const MERGE_WAIT_CAP: Duration = Duration::from_secs(2);
 /// apart; [`MERGE_PATIENCE`] is what keeps those a refusal in the end
 /// rather than a write that waits forever (story 19). Matched on the status
 /// **and** the sentence: every other 405 is a refusal the first time.
-pub(crate) fn still_checking(error: &SourceError) -> bool {
+fn still_checking(error: &SourceError) -> bool {
     matches!(
         error,
         SourceError::Protocol { status: Some(405), message } if message.contains("Please try again later")
@@ -223,7 +225,7 @@ pub(crate) fn still_checking(error: &SourceError) -> bool {
 /// `knobas-http`'s own exponential backoff (capped at [`MERGE_WAIT_CAP`])
 /// between tries, for at most `patience` of waiting; then the last answer is
 /// the answer.
-pub(crate) async fn patiently<F, Fut>(patience: Duration, mut attempt: F) -> Result<(), SourceError>
+async fn patiently<F, Fut>(patience: Duration, mut attempt: F) -> Result<(), SourceError>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = Result<(), SourceError>>,
