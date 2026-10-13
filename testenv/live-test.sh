@@ -196,6 +196,18 @@ for a in "$@"; do
 done
 STUB
 chmod +x "$shared/bin/docker"
+# The host's view of Gitea (#722): answers unless $STUB_CURL_DEAD holds a
+# count of probes still to fail, which each failing probe counts down.
+cat >"$shared/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+dead=$(cat "${STUB_CURL_DEAD:-/nonexistent}" 2>/dev/null || echo 0)
+if [ "${dead:-0}" -gt 0 ]; then
+  echo $((dead - 1)) >"$STUB_CURL_DEAD"
+  exit 7
+fi
+exit 0
+STUB
+chmod +x "$shared/bin/curl"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed-gitea.sh"
 printf '#!/usr/bin/env bash\nexit 0\n' >"$shared/testenv/seed"
 # The TeamCity seed is where the other worktree's Gitea run turns up.
@@ -278,6 +290,48 @@ checks=$((checks + 1))
 if grep -E '(^| )(stop|down|rm|kill)( .*)? (knobas-)?gitea( |$)' "$shared/docker.log" >/dev/null; then
   fail "a Gitea run that started Gitea does not stop it" "$(cat "$shared/docker.log")"
 fi
+
+# A Gitea that comes up healthy inside but unreachable from the host (#722):
+# the OrbStack port forward a recreate kills. The session heals it with stop +
+# up -- never restart, never a second recreate -- and goes on; the probes are
+# all that is stubbed, and they answer only once Gitea was stopped and upped.
+: >"$shared/state"
+: >"$shared/docker.log"
+echo 3 >"$shared/curl.dead"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-heal
+) >"$shared/heal.out" 2>&1 || rc=$?
+check_eq "a Gitea session whose port forward died heals and runs" "0" "$rc"
+check_contains "the session says why it stops Gitea" \
+  "$(cat "$shared/heal.out")" "does not answer (the OrbStack port forward a recreate kills); stop + up"
+check_eq "the heal is up, stop, up -- no restart, no recreate" \
+  "up stop up" "$(grep -oE ' (up|stop|restart|--force-recreate)( |$)' "$shared/docker.log" | tr -d ' ' | tr '\n' ' ' | sed 's/ $//')"
+check_eq "Gitea is up after the heal" "knobas-gitea" "$(cat "$shared/state")"
+
+# And one that stays dead is a failed session, not a suite run against nothing.
+: >"$shared/state"
+: >"$shared/docker.log"
+echo 99 >"$shared/curl.dead"
+rc=0
+# shellcheck disable=SC2030,SC2031  # likewise its own subshell
+(
+  export PATH="$shared/bin:$PATH" STUB_STATE="$shared/state" STUB_LOG="$shared/docker.log"
+  export STUB_CURL_DEAD="$shared/curl.dead" KNOBAS_LIVE_GITEA_PROBES=3 KNOBAS_LIVE_GITEA_PROBE_POLL=0
+  # shellcheck source=testenv/live-lib.sh disable=SC1091
+  . "$here/live-lib.sh"
+  LIVE_TESTENV=$shared/testenv
+  live_session gitea gitea-dead
+) >"$shared/dead.out" 2>&1 || rc=$?
+checks=$((checks + 1))
+[ "$rc" != 0 ] || fail "a Gitea the host cannot reach after stop + up fails the session" "$(cat "$shared/dead.out")"
+check_contains "and says so" "$(cat "$shared/dead.out")" "still does not answer after stop + up"
 
 if [ "$failures" -gt 0 ]; then
   echo "live-test: $failures of $checks checks failed" >&2

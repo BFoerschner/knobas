@@ -3969,3 +3969,229 @@ async fn a_commits_statuses_are_drawn_as_its_checks() {
         "{overview:#?}"
     );
 }
+
+/// The testenv's admin, as `testenv/seed-gitea.sh` creates it. Gitea mints an
+/// access token only over basic auth, so the read-only token below needs it;
+/// it is the fixed local development account, never a real credential.
+const TESTENV_ADMIN: (&str, &str) = ("knobas", "knobas-dev");
+
+/// Issue #722, against the real server: a 403 that refuses **the write** is a
+/// refusal carrying Gitea's sentence, and the source stays healthy; the one
+/// 403 that refuses **the token** -- a token without the write scope -- still
+/// waits for a new one. Every sentence the adapter's 403 reading
+/// (`client::forbidden_refusal`) depends on is measured here.
+///
+/// * the seeded pull mirror (`knobas/ops-runbooks-mirror`, seed section 4b):
+///   its commit view offers *New branch…* disabled, and a branch created on
+///   it anyway, through the adapter, is refused with *Git Repository is a
+///   mirror.* while `test_connection` still passes;
+/// * a scratch repository of the account's own (`knobas-live-refusals`):
+///   Gitea's sentences for deleting a protected branch and the default one,
+///   read off the wire -- the adapter's delete never sends these, its
+///   pre-reads refuse them first (#707);
+/// * a read-only token (`knobas-live-readonly`): its write is `Unauthorized`
+///   with the 403, though `GET /user` answers it -- which is why an
+///   authenticated read is not the signal.
+///
+/// The scratch repository and the token are removed before the run (a killed
+/// run leaves them) and again before anything is asserted.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_403_refusing_the_write_is_a_refusal_and_the_token_stays_good() {
+    use knobas_source::WriteOp;
+
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1", env.url);
+    let me = env.login().await;
+    let mirror = format!("{me}/ops-runbooks-mirror");
+    let scratch = "knobas-live-refusals";
+    let token_name = "knobas-live-readonly";
+    let (admin, password) = TESTENV_ADMIN;
+
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{me}/{scratch}"))
+            .header("Authorization", &auth)
+            .send()
+            .await;
+        let _ = http
+            .delete(format!("{api}/users/{admin}/tokens/{token_name}"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await;
+    };
+    remove().await;
+
+    // -- the mirror ----------------------------------------------------------
+    let record: serde_json::Value = http
+        .get(format!("{api}/repos/{mirror}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the mirror")
+        .json()
+        .await
+        .expect("the mirror's record -- seed section 4b creates it");
+    assert_eq!(record["mirror"], true, "the seeded mirror is one: {record}");
+    let default = record["default_branch"].as_str().expect("a default branch");
+    let tip: serde_json::Value = http
+        .get(format!("{api}/repos/{mirror}/branches/{default}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("GET the mirror's default branch")
+        .json()
+        .await
+        .expect("a branch record");
+    let sha = tip["commit"]["id"].as_str().expect("a tip").to_owned();
+
+    let source = env.source(serde_json::json!({ "repos": [mirror] }));
+    let view = source
+        .view(&format!("gitea:{mirror}@{sha}"), None)
+        .await
+        .expect("the commit view reads")
+        .expect("Gitea draws a commit");
+    let new = view
+        .actions
+        .iter()
+        .find(|a| a.write_op == "create_branch")
+        .expect("a mirror's commit shows New branch…");
+    println!("LIVE mirror commit New branch…: {new:?}");
+
+    let refused = source
+        .write(WriteOp::CreateBranch {
+            entity: format!("gitea:{mirror}"),
+            name: "knobas-mirror-refusal".to_owned(),
+            from_ref: default.to_owned(),
+        })
+        .await;
+    println!("LIVE create_branch on a mirror: {refused:?}");
+    let healthy = source.test_connection().await;
+
+    // -- the scratch repository: protected and default branch ---------------
+    let created = http
+        .post(format!("{api}/user/repos"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": scratch, "auto_init": true, "default_branch": "main" }))
+        .send()
+        .await
+        .expect("POST /user/repos")
+        .status()
+        .as_u16();
+    let mut setup = vec![created];
+    for (path, body) in [
+        (
+            "branches",
+            serde_json::json!({ "new_branch_name": "keep", "old_ref_name": "main" }),
+        ),
+        (
+            "branch_protections",
+            serde_json::json!({ "rule_name": "keep" }),
+        ),
+    ] {
+        setup.push(
+            http.post(format!("{api}/repos/{me}/{scratch}/{path}"))
+                .header("Authorization", &auth)
+                .json(&body)
+                .send()
+                .await
+                .expect("set up the scratch repository")
+                .status()
+                .as_u16(),
+        );
+    }
+    let mut said = Vec::new();
+    for branch in ["keep", "main"] {
+        let response = http
+            .delete(format!("{api}/repos/{me}/{scratch}/branches/{branch}"))
+            .header("Authorization", &auth)
+            .send()
+            .await
+            .expect("DELETE a branch");
+        let status = response.status().as_u16();
+        let body: serde_json::Value = response.json().await.unwrap_or_default();
+        said.push((
+            status,
+            body["message"].as_str().unwrap_or_default().to_owned(),
+        ));
+    }
+
+    // -- a read-only token ---------------------------------------------------
+    let minted: serde_json::Value = http
+        .post(format!("{api}/users/{admin}/tokens"))
+        .basic_auth(admin, Some(password))
+        .json(&serde_json::json!({
+            "name": token_name,
+            "scopes": ["read:repository", "read:user"]
+        }))
+        .send()
+        .await
+        .expect("mint a read-only token")
+        .json()
+        .await
+        .expect("the token record");
+    let readonly = minted["sha1"].as_str().unwrap_or_default().to_owned();
+    let narrow = env.source_with(&readonly, serde_json::json!({ "repos": [env.full_name()] }));
+    let narrow_reads = narrow.test_connection().await;
+    let narrow_write = narrow
+        .write(WriteOp::CreateBranch {
+            entity: format!("gitea:{}", env.full_name()),
+            name: "knobas-scope-refusal".to_owned(),
+            from_ref: "main".to_owned(),
+        })
+        .await;
+    println!("LIVE create_branch with a read-only token: {narrow_write:?}");
+
+    remove().await;
+
+    assert_eq!(
+        new.disabled.as_deref(),
+        Some("A mirror: its branches come from upstream"),
+        "{new:?}"
+    );
+    assert!(
+        matches!(&refused, Err(SourceError::Protocol { status: Some(403), message })
+                 if message.contains("Git Repository is a mirror.")),
+        "a branch on a mirror is refused with Gitea's sentence, not a dead token: {refused:?}"
+    );
+    assert!(
+        healthy.is_ok(),
+        "the source stays healthy after the refusal: {healthy:?}"
+    );
+    assert_eq!(
+        setup,
+        vec![201, 201, 201],
+        "the scratch repository's set-up"
+    );
+    assert_eq!(
+        said,
+        vec![
+            (403, "branch protected".to_owned()),
+            (
+                403,
+                "can not delete default or pull request target branch".to_owned()
+            ),
+        ],
+        "Gitea's sentences for a protected and a default branch's delete"
+    );
+    assert!(
+        !readonly.is_empty(),
+        "a read-only token was minted: {minted}"
+    );
+    assert!(
+        narrow_reads.is_ok(),
+        "the premise: an authenticated read passes on a read-only token: {narrow_reads:?}"
+    );
+    assert!(
+        matches!(
+            narrow_write,
+            Err(SourceError::Unauthorized { status: Some(403) })
+        ),
+        "a token without the write scope still waits for a new one: {narrow_write:?}"
+    );
+}

@@ -232,6 +232,30 @@ find_pr_by_title() {  # find_pr_by_title <repo> <title> -> index or empty
 person_field() { jqf ".people[] | select(.id==\"$1\") | .$2"; }
 
 # --------------------------------------------------------------------------
+# 4b. A pull mirror (#722): knobas/ops-runbooks-mirror, of tidewater/ops-runbooks
+#    on this same Gitea, which Gitea refuses every branch write on with a 403
+#    ("Git Repository is a mirror.") -- the refusal `tests/live_gitea.rs`
+#    witnesses. Under the admin's own account, not the organisation, so no
+#    owner-scoped assertion on `tidewater` sees it; not `knobas-`-prefixed,
+#    so no litter sweep takes it. The clone address is the container's own
+#    port (docker-compose.yml's ALLOW_LOCALNETWORKS lets Gitea import from
+#    it), and `mirror_interval` 0 turns the periodic sync off: nothing reads
+#    the mirror's content, only that it is one.
+# --------------------------------------------------------------------------
+MIRROR=ops-runbooks-mirror
+api "$ADMIN" GET "/repos/$ADMIN_USER/$MIRROR"
+if [ "$API_STATUS" = "200" ]; then
+  [ "$(printf '%s' "$API_BODY" | jq -r .mirror)" = "true" ] \
+    || die "$ADMIN_USER/$MIRROR exists and is not a mirror; delete it and seed again"
+else
+  api "$ADMIN" POST /repos/migrate "$(jq -n --arg o "$ADMIN_USER" --arg n "$MIRROR" \
+        --arg a "http://127.0.0.1:3000/$ORG/ops-runbooks.git" \
+        '{clone_addr:$a, repo_owner:$o, repo_name:$n, mirror:true, mirror_interval:"0", service:"git"}')"
+  expect "mirror $ORG/ops-runbooks as $ADMIN_USER/$MIRROR" 201
+  say "created the mirror $ADMIN_USER/$MIRROR"
+fi
+
+# --------------------------------------------------------------------------
 # 5. Branches named by the fixture. `default` is main, which auto_init made.
 # --------------------------------------------------------------------------
 jqf '.branches[] | select(.state != "default") | [.repo, .name] | @tsv' \

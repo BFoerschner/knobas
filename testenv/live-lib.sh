@@ -319,6 +319,43 @@ _live_licences() {
   fi
 }
 
+# Where this machine's Gitea answers from the host, which is what every live
+# suite, the seed and Björn's own app talk to.
+LIVE_GITEA_URL=${KNOBAS_GITEA_URL:-http://127.0.0.1:3000}
+
+# _live_gitea_answers -- whether the host reaches Gitea, asked a few times:
+# a container that is healthy inside can still be unreachable from the host.
+_live_gitea_answers() {
+  local i
+  for ((i = 0; i < ${KNOBAS_LIVE_GITEA_PROBES:-10}; i++)); do
+    curl -fsS -m 3 -o /dev/null "$LIVE_GITEA_URL/api/healthz" 2>/dev/null && return 0
+    sleep "${KNOBAS_LIVE_GITEA_PROBE_POLL:-1}"
+  done
+  return 1
+}
+
+# _live_gitea_up -- `up` Gitea, and heal the one way it comes up unreachable.
+#
+# `up -d --wait` recreates the container whenever docker-compose.yml changed
+# its service (#722 did, for the seeded mirror), and on OrbStack a recreate
+# can leave the host's port forward dead: `--wait` passes on the container's
+# own healthcheck while 127.0.0.1:3000 answers nothing. `stop` + `up` heals
+# it; `restart` and another recreate do not (measured 2026-09-06). This runs
+# inside the Gitea lock a `just gitea-live` holds (#724), so no other Gitea
+# run is mid-suite when it stops the container -- and with the forward dead,
+# nobody on the host could be using it anyway.
+_live_gitea_up() {
+  _live_compose up -d --wait gitea
+  _live_gitea_answers && return 0
+  echo "live: gitea: the container is up but $LIVE_GITEA_URL does not answer (the OrbStack port forward a recreate kills); stop + up" >&2
+  _live_compose stop gitea
+  _live_compose up -d --wait gitea
+  _live_gitea_answers || {
+    echo "live: gitea: $LIVE_GITEA_URL still does not answer after stop + up" >&2
+    return 1
+  }
+}
+
 # _live_start <product> -- start one product (not its needs) and seed it.
 # Every seed is idempotent, so starting a product that is already up is a
 # re-check that writes nothing.
@@ -327,7 +364,7 @@ _live_start() {
   echo "live: $product: up and seeded ..."
   case $product in
     gitea)
-      _live_compose up -d --wait gitea
+      _live_gitea_up || return 1
       (cd "$LIVE_TESTENV" && ./seed-gitea.sh) ;;
     teamcity)
       _live_compose --profile real-teamcity up -d teamcity teamcity-agent
@@ -349,7 +386,7 @@ _live_start() {
 live_up() {
   local p
   live_guard "$1" || return 1
-  for p in $(live_needs "$1"); do _live_start "$p"; done
+  for p in $(live_needs "$1"); do _live_start "$p" || return 1; done
 }
 
 # live_down <product> -- this product only; what it needed stays as it is.
@@ -430,7 +467,7 @@ live_session() {
   LIVE_PUT_BACK=$(live_to_put_back "$1")
   local need kept
   kept=$(live_left_up "$1")
-  live_up "$1"
+  live_up "$1" || exit 1
   eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
   if [ -n "$LIVE_PUT_BACK" ]; then
     echo "live: $1 is up for this run; $LIVE_PUT_BACK will be stopped at its end"
