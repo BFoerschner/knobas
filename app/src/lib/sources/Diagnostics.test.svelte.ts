@@ -26,11 +26,13 @@ let stats: DbStats = {
   newest_synced_at: "2026-08-25T11:56:00Z",
 };
 let statsFail: unknown = null;
+/** Holds or fails the run read (#746). */
+let runsRead: (() => Promise<SyncRunRow[]>) | null = null;
 
 vi.mock("../ipc/sources", () => ({
   listSyncRuns: (sourceId: string | null, limit: number) => {
     calls.listSyncRuns.push({ sourceId, limit });
-    return Promise.resolve(runs);
+    return runsRead ? runsRead() : Promise.resolve(runs);
   },
   dbStats: () => (statsFail ? Promise.reject(statsFail) : Promise.resolve(stats)),
   reindexFts: () => {
@@ -224,4 +226,30 @@ test("refresh re-reads both the stats and the log", async () => {
   button("Refresh")!.click();
   await settle();
   expect(calls.listSyncRuns.length).toBe(before + 1);
+});
+
+// -- #746: a sync log that is being read, or failed to read, is not empty ------
+
+test("a sync log that never answers does not say 'No sync runs yet'", async () => {
+  vi.useFakeTimers();
+  try {
+    runsRead = () => new Promise(() => {});
+    render();
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(target.textContent).toContain("Reading the sync log");
+    expect(target.textContent).not.toContain("No sync runs");
+  } finally {
+    vi.useRealTimers();
+    runsRead = null;
+  }
+});
+
+test("a rejected sync log read shows the reason, not 'No sync runs yet'", async () => {
+  runsRead = () => Promise.reject({ code: "internal", message: "log table is locked" });
+  render();
+  await settle();
+  expect(target.textContent).toContain("log table is locked");
+  expect(target.textContent).not.toContain("No sync runs");
+  runsRead = null;
 });

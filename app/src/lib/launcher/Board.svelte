@@ -14,7 +14,7 @@
 <script lang="ts">
   import type { LauncherHome } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
-  import { isActionable } from "../shell/health.svelte";
+  import { isActionable, type HealthPhase } from "../shell/health.svelte";
   import { sourceMonogram } from "../shell/monogram";
   import Monogram from "../shell/Monogram.svelte";
   import { ago } from "../shell/time";
@@ -24,6 +24,7 @@
   let {
     home,
     sources,
+    reading: readingProp,
     rows,
     selected,
     renaming,
@@ -35,6 +36,13 @@
     ondelete,
   }: {
     home: LauncherHome;
+    /**
+     * Whether `sources` has been read (#746). An empty list is "none
+     * configured" only when `phase` is `ready`; while the shell's seed waits
+     * or has failed it is the absence of an answer, and the strip says that
+     * instead of making the claim.
+     */
+    reading?: { phase: HealthPhase; error: string | null; retry: () => void } | undefined;
     /**
      * The credential health the strip draws — the launcher's, which is the
      * live `source:health` store when the shell supplies one and the board's
@@ -74,6 +82,8 @@
     onrename: (id: string, label: string | null) => void;
     ondelete: (id: string) => void;
   } = $props();
+
+  const reading = $derived(readingProp ?? { phase: "ready" as const, error: null, retry: () => {} });
 
   /** Recent rows start after the lists in the flat selectable list. */
   const recentFrom = $derived(home.smart_lists.length);
@@ -240,8 +250,18 @@
 <!-- The count and the gate read the same list the strip does, not the copy the
      board arrived with — a header saying "2" over one line is the same lie in
      a smaller place. -->
-<div class="secl"><span class="lab">Sources</span><span class="n">{sources.length}</span></div>
-{#if sources.length === 0}
+<div class="secl">
+  <span class="lab">Sources</span>{#if reading.phase === "ready" || sources.length > 0}<span class="n">{sources.length}</span>{/if}
+</div>
+{#if sources.length === 0 && reading.phase === "loading"}
+  <p class="none">Reading the sources…</p>
+{:else if sources.length === 0 && reading.phase === "failed"}
+  <p class="none err">Could not read the sources{reading.error ? `: ${reading.error}` : "."}</p>
+  <button class="pfx" onclick={() => reading.retry()}>
+    <span class="nm">Retry</span>
+    <span class="s">Read the sources again.</span>
+  </button>
+{:else if sources.length === 0}
   <p class="none">No source is configured yet.</p>
 {:else}
   <div class="strip">
@@ -401,6 +421,28 @@
     color: var(--muted);
     font-size: 12px;
     line-height: 1.5;
+  }
+  .none.err {
+    color: var(--fail);
+  }
+  .pfx {
+    display: grid;
+    grid-template-columns: 160px 1fr;
+    gap: 8px;
+    align-items: baseline;
+    width: 100%;
+    text-align: left;
+    padding: 7px 12px;
+    font-size: 12px;
+    color: var(--muted);
+    border-bottom: 1px solid var(--hair);
+  }
+  .pfx:hover {
+    background: var(--raised);
+    color: var(--text);
+  }
+  .pfx .nm {
+    color: var(--text);
   }
   .strip {
     display: flex;

@@ -2023,3 +2023,105 @@ test("free-text keys open nothing, and the read is never asked for them", async 
   // these is a value being typed, and the read is not made for any of them.
   expect(filterSuggestions).toHaveBeenCalledTimes(0);
 });
+
+/* ── #746: a read that is waiting or failed is never an empty state ───── */
+
+function typeInBox(raw: string) {
+  const input = target.querySelector("input")!;
+  input.value = raw;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+}
+
+test("a supplied source list that is still being read is not 'No source is configured'", async () => {
+  const retry = vi.fn();
+  open({ sources: [], sourcesRead: { phase: "loading", error: null, retry } });
+  await settle();
+  expect(target.textContent).not.toContain("No source is configured yet");
+  expect(target.textContent).toContain("Reading the sources");
+});
+
+test("a failed source read says why and offers a retry, never 'No source is configured'", async () => {
+  const retry = vi.fn();
+  open({ sources: [], sourcesRead: { phase: "failed", error: "the keychain is locked", retry } });
+  await settle();
+  expect(target.textContent).not.toContain("No source is configured yet");
+  expect(target.textContent).toContain("Could not read the sources");
+  expect(target.textContent).toContain("the keychain is locked");
+  const button = [...target.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith("Retry"));
+  button!.click();
+  expect(retry).toHaveBeenCalledTimes(1);
+});
+
+test("a ready, empty source read still says no source is configured", async () => {
+  open({ sources: [], sourcesRead: { phase: "ready", error: null, retry: () => {} } });
+  await settle();
+  expect(target.textContent).toContain("No source is configured yet");
+});
+
+test("a /source token is not 'no source matches' while the sources are unread", async () => {
+  const unknown = (raw: string) =>
+    response({
+      interpreted: { ...response().interpreted, text: raw, unknown_tokens: ["/cf"] },
+    });
+  open({
+    sources: [],
+    sourcesRead: { phase: "failed", error: "down", retry: () => {} },
+    ports: { launcherHome: async () => HOME, search: async () => unknown("x") },
+  });
+  await settle();
+  typeInBox("/cf x");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(target.textContent).toContain("/cf");
+  expect(target.textContent).not.toContain("no source matches");
+});
+
+test("a launcher_home that is rejected shows the reason and a retry, not an empty board", async () => {
+  let fail = true;
+  open({
+    ports: {
+      search: async () => response(),
+      launcherHome: async () => {
+        if (fail) throw { code: "internal", message: "database is busy" };
+        return HOME;
+      },
+    },
+  });
+  await settle();
+  expect(target.textContent).toContain("database is busy");
+  expect(target.textContent).not.toContain("Nothing has been synced yet");
+  expect(target.textContent).not.toContain("No source is configured yet");
+  fail = false;
+  [...target.querySelectorAll("button")].find((b) => b.textContent?.trim().startsWith("Retry"))!.click();
+  await settle();
+  expect(target.textContent).toContain("Reconcile mandates");
+});
+
+test("a search that never answers says Searching, never 'Nothing in the mirror matches'", async () => {
+  open({
+    ports: { launcherHome: async () => HOME, search: () => new Promise<never>(() => {}) },
+  });
+  await settle();
+  typeInBox("sepa");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(target.textContent).toContain("Searching");
+  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+});
+
+test("a rejected search shows the reason, never 'Nothing in the mirror matches'", async () => {
+  open({
+    ports: {
+      launcherHome: async () => HOME,
+      search: async () => {
+        throw { code: "internal", message: "index is rebuilding" };
+      },
+    },
+  });
+  await settle();
+  typeInBox("sepa");
+  await new Promise((resolve) => setTimeout(resolve, 120));
+  await settle();
+  expect(target.textContent).toContain("index is rebuilding");
+  expect(target.textContent).not.toContain("Nothing in the mirror matches");
+});

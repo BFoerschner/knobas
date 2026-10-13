@@ -728,3 +728,45 @@ test("a failed refresh reports the failure without claiming nothing is owed", as
   expect(queue.counts.held).toBe(1);
   expect(queue.rows).toHaveLength(1);
 });
+
+// -- #746: an unread or failed queue is not an empty one -----------------------
+
+async function renderUnread() {
+  const queue = createWriteQueue();
+  const target = document.createElement("div");
+  document.body.append(target);
+  const app = mount(WriteQueuePanel, { target, props: { queue, now: NOW, onclose: () => {} } });
+  flushSync();
+  return {
+    queue,
+    text: () => (target.textContent ?? "").replace(/\s+/g, " "),
+    done: () => {
+      unmount(app);
+      target.remove();
+    },
+  };
+}
+
+test("a queue that has not been read never says 'Nothing is queued'", async () => {
+  vi.useFakeTimers();
+  try {
+    const screen = await renderUnread();
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(screen.text()).toContain("Reading the queue");
+    expect(screen.text()).not.toContain("Nothing is queued");
+    screen.done();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a queue whose first read failed shows the reason, not 'Nothing is queued'", async () => {
+  const screen = await renderUnread();
+  reject = { code: "internal", message: "database is busy" };
+  await screen.queue.refresh();
+  flushSync();
+  expect(screen.text()).toContain("database is busy");
+  expect(screen.text()).not.toContain("Nothing is queued");
+  screen.done();
+});

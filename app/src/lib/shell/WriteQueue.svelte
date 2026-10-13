@@ -30,6 +30,7 @@
   import { clockReading, dayKey, dayLabel, durationReading } from "../time/day";
   import { minutesOf } from "../time/week";
   import Modal from "./Modal.svelte";
+  import { patience } from "./patience.svelte";
   import { ago } from "./time";
   import {
     demandOf,
@@ -51,6 +52,8 @@
     now?: Date;
     onclose: () => void;
   } = $props();
+
+  const wait = patience(() => !queue.answered && queue.error === null);
 
   /** The row whose edit box is open, if any. One at a time. */
   let editing = $state<number | null>(null);
@@ -157,7 +160,13 @@
       <p class="wq-error" role="alert">{queue.error}</p>
     {/if}
 
-    {#if queue.rows.length === 0}
+    {#if queue.rows.length === 0 && !queue.answered}
+      <!-- Unread, or the read failed (the reason is above): neither is an
+           empty queue. -->
+      {#if queue.error === null && wait.slow}
+        <div class="empty">Reading the queue…</div>
+      {/if}
+    {:else if queue.rows.length === 0}
       <div class="empty">
         Nothing is queued. Every edit you have made has reached its source.
       </div>

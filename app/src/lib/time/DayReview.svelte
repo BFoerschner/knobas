@@ -49,6 +49,7 @@
     type TimerTarget,
   } from "../ipc/time";
   import { latestRead } from "../shell/latest-read";
+  import { patience } from "../shell/patience.svelte";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { targetReading } from "../shell/timer";
   import {
@@ -130,6 +131,12 @@
 
   let rows = $state<DayBlock[]>([]);
   /**
+   * The day `rows` was read for (#746). `rows` being `[]` is "nothing tracked"
+   * only for the day that was read; before the first read, or for a day not
+   * yet read, it is the absence of an answer.
+   */
+  let readFor = $state<string | null>(null);
+  /**
    * This day reaches back past what retention has swept (#337).
    *
    * Not derived from the strip, and it could not be: a day past the horizon
@@ -175,6 +182,7 @@
   let assignForm = $state({ kind: "label" as TimerTarget["kind"], value: "" });
 
   const segments = $derived(segmentsOf(rows));
+  const wait = patience(() => readFor !== key && failure === null);
 
   /** Minutes over the rows a predicate keeps. */
   function total(kind: "manual" | "passive"): number {
@@ -221,6 +229,7 @@
     await readDay(() => io.dayBlocks(from.toISOString(), to.toISOString()), {
       ok: (listed) => {
         rows = listed.blocks;
+        readFor = on;
         pastHorizon = listed.past_horizon;
         failure = null;
       },
@@ -449,7 +458,11 @@
       <p class="horizon">{horizonNote("this day")}</p>
     {/if}
 
-    {#if segments.length === 0 && !failure}
+    {#if segments.length === 0 && !failure && readFor !== key}
+      {#if wait.slow}
+        <p class="empty">Reading the day…</p>
+      {/if}
+    {:else if segments.length === 0 && !failure}
       <p class="empty">
         Nothing tracked on this day. ⌘T starts the timer on whatever is in front of you, and
         every stretch it runs lands here.

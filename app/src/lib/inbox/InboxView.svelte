@@ -25,6 +25,7 @@
   import { openExternal } from "../shell/open-external";
   import type { Router } from "../shell/router.svelte";
   import { ago } from "../shell/time";
+  import { patience } from "../shell/patience.svelte";
   import { push } from "../shell/toasts.svelte";
   import { drawable } from "./actions";
   import { addressOf } from "./address";
@@ -183,6 +184,9 @@
     );
   }
 
+  /** No answer yet and no failure: the empty stream below is not a fact (#746). */
+  const wait = patience(() => !inbox.answered && inbox.error === null);
+
   const stream = $derived(inContext(inbox.stream));
   const snoozed = $derived(inContext(inbox.snoozed));
 </script>
@@ -212,7 +216,13 @@
       <p class="empty fail">{inbox.error}</p>
     {/if}
 
-    {#if stream.length === 0}
+    {#if stream.length === 0 && !inbox.answered}
+      <!-- Unread or failed (the reason is above): neither is "nothing needs
+           you". Silent under the placeholder threshold, as the detail is. -->
+      {#if inbox.error === null && wait.slow}
+        <p class="empty">Reading the inbox…</p>
+      {/if}
+    {:else if stream.length === 0}
       <p class="empty">
         {#if ctxFilter === ""}
           Nothing needs you. Review requests, mentions, failed builds on your work, new

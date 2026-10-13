@@ -594,3 +594,39 @@ test("the subject of a key is everything after the first colon", () => {
   expect(subjectOf("review_request:gitea:acme/payouts#144")).toBe("gitea:acme/payouts#144");
   expect(subjectOf("credential_expiry:jira")).toBe("jira");
 });
+
+// -- #746: an unread or failed inbox is not an empty one ----------------------
+
+test("an inbox that has not answered never says 'Nothing needs you'", async () => {
+  vi.useFakeTimers();
+  try {
+    const inbox = createInbox();
+    const view = await draw(inbox);
+    expect(view.text()).not.toContain("Nothing needs you");
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(view.text()).toContain("Reading the inbox");
+    expect(view.text()).not.toContain("Nothing needs you");
+    view.stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("an inbox whose first read failed shows the reason, not 'Nothing needs you'", async () => {
+  reject = { code: "internal", message: "the database went away" };
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+  expect(view.text()).toContain("the database went away");
+  expect(view.text()).not.toContain("Nothing needs you");
+  view.stop();
+});
+
+test("an inbox that answered empty says 'Nothing needs you'", async () => {
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+  expect(view.text()).toContain("Nothing needs you");
+  view.stop();
+});

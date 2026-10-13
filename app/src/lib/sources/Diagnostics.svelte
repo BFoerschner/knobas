@@ -10,6 +10,7 @@
   import { dbStats, listSyncRuns, reindexFts, type DbStats, type SyncRunRow } from "../ipc/sources";
   import { ipcErrorMessage } from "../ipc";
   import Modal from "../shell/Modal.svelte";
+  import { patience } from "../shell/patience.svelte";
   import { push } from "../shell/toasts.svelte";
   import SyncRunList from "./SyncRunList.svelte";
   import { formatBytes } from "./diagnostics";
@@ -32,6 +33,9 @@
   let runs = $state<SyncRunRow[]>([]);
   let stats = $state<DbStats | null>(null);
   let runsError = $state<string | null>(null);
+  /** Whether the log has been read (#746): `[]` is "no runs" only after this. */
+  let runsRead = $state(false);
+  const wait = patience(() => !runsRead && runsError === null);
   let confirming = $state(false);
   let reindexing = $state(false);
 
@@ -41,6 +45,7 @@
       listSyncRuns(sourceId, LIMIT)
         .then((rows) => {
           runs = rows;
+          runsRead = true;
           runsError = null;
         })
         .catch((cause) => {
@@ -101,7 +106,7 @@
 
 <div class="tile-h">
   <span class="lab">Sync log</span>
-  <span class="cnt">{runs.length}</span>
+  {#if runsRead}<span class="cnt">{runs.length}</span>{/if}
 </div>
 
 {#if runsError}
@@ -109,6 +114,10 @@
     <p>Could not read the sync log.</p>
     <p class="mono fail">{runsError}</p>
   </div>
+{:else if !runsRead}
+  {#if wait.slow}
+    <div class="empty"><p>Reading the sync log…</p></div>
+  {/if}
 {:else}
   <SyncRunList {runs} {now} />
 {/if}
