@@ -161,6 +161,15 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             value: "contract battery probe".into(),
             base: None,
         },
+        // A review would be a verdict on somebody's pull request. The target
+        // is no pull request's address -- it has no `#<number>` -- so an
+        // adapter that attempted it anyway is refused on the id's shape.
+        crate::WriteOp::SubmitReview {
+            entity: target.clone(),
+            verdict: crate::ReviewVerdict::Comment,
+            body: "contract battery probe".into(),
+            comments: vec![],
+        },
         // A run would be a real build on somebody's agent. The target is no
         // build configuration's address, so an adapter that attempted it
         // anyway is refused on the id's shape before a request leaves.

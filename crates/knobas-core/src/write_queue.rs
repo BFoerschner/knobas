@@ -352,6 +352,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "merge_pull_request",
     "set_parameter",
     "run_build",
+    "submit_review",
 ];
 
 /// What `op` counts as its target having changed.
@@ -379,10 +380,11 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// -- the safe direction, and the only one available without teaching this
 /// module every source's payload shape.
 ///
-/// **The whole mirrored record** -- `"transition"`, `"approve"` and
-/// `"merge_pull_request"`, the ops that put a *judgement* onto a target whose
-/// current state is the whole reason for the judgement, and `"set_parameter"`,
-/// which overwrites a value. Any change to the target at all holds the write.
+/// **The whole mirrored record** -- `"transition"`, `"approve"`,
+/// `"merge_pull_request"` and `"submit_review"`, the ops that put a
+/// *judgement* onto a target whose current state is the whole reason for the
+/// judgement, and `"set_parameter"`, which overwrites a value. Any change to
+/// the target at all holds the write.
 ///
 /// * `"transition"` is the conservative choice **and it was a choice**
 ///   (issue #43). What one would rather compare is the status alone, and there
@@ -413,6 +415,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   the base unread. Somebody else merging or closing it first changes the
 ///   record too, and holds the write rather than sending a merge Gitea would
 ///   refuse.
+/// * `"submit_review"` for `"approve"`'s reason exactly (issue #705): a
+///   review -- an approval, a request for changes, or words on the change --
+///   is a reading of one state of the pull request, and a push or another
+///   reviewer's verdict after the reader wrote it is a reason to look again.
 /// * `"set_parameter"` by analogy with `"merge_pull_request"`, and with a
 ///   limit worth stating (issue #668). The op **overwrites** a build
 ///   configuration's parameter, so it belongs with the ops that replace
@@ -1199,6 +1205,7 @@ mod tests {
             "update_page",
             "merge_pull_request",
             "set_parameter",
+            "submit_review",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(

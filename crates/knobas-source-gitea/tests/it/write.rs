@@ -345,3 +345,129 @@ async fn a_merge_aimed_at_a_repository_is_refused_before_a_request() {
     );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+/// Workflow 6 of spec #701 (issue #705): a review goes to the pull request's
+/// `reviews` endpoint with the verdict as Gitea's `event` -- `APPROVED`,
+/// `REQUEST_CHANGES`, `COMMENT` -- and its body, and never without an event,
+/// which would file a `PENDING` draft nobody sees.
+#[tokio::test]
+async fn a_review_carries_its_verdict_as_gitea_event_and_its_body() {
+    use knobas_source::ReviewVerdict;
+    for (verdict, event, words) in [
+        (ReviewVerdict::Approve, "APPROVED", ""),
+        (
+            ReviewVerdict::RequestChanges,
+            "REQUEST_CHANGES",
+            "bound the jitter",
+        ),
+        (ReviewVerdict::Comment, "COMMENT", "why 30 s?"),
+    ] {
+        let server = accepting().await;
+        source(&server)
+            .write(WriteOp::SubmitReview {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                verdict,
+                body: words.to_owned(),
+                comments: vec![],
+            })
+            .await
+            .expect("a declared op is performed");
+
+        let (verb, path, body) = only_request(&server).await;
+        assert_eq!(verb, "POST");
+        assert_eq!(
+            path,
+            "/api/v1/repos/tidewater/payout-service/pulls/142/reviews"
+        );
+        assert_eq!(
+            body,
+            json!({ "event": event, "body": words, "comments": [] }),
+            "{event}"
+        );
+    }
+}
+
+/// A line comment is Gitea's `CreatePullReviewComment`: the path, the body,
+/// and the line number on the side it is on, the other side `0` (#709 fills
+/// these from the *Files* tab; the mapping is the adapter's either way).
+#[tokio::test]
+async fn a_reviews_line_comments_land_on_the_side_they_name() {
+    use knobas_source::{ReviewComment, ReviewSide, ReviewVerdict};
+    let server = accepting().await;
+    source(&server)
+        .write(WriteOp::SubmitReview {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            verdict: ReviewVerdict::Comment,
+            body: String::new(),
+            comments: vec![
+                ReviewComment {
+                    path: "src/retry.rs".to_owned(),
+                    line: 12,
+                    side: ReviewSide::New,
+                    body: "bound this".to_owned(),
+                },
+                ReviewComment {
+                    path: "src/old.rs".to_owned(),
+                    line: 4,
+                    side: ReviewSide::Old,
+                    body: "why drop it?".to_owned(),
+                },
+            ],
+        })
+        .await
+        .expect("a declared op is performed");
+    let (_, _, body) = only_request(&server).await;
+    assert_eq!(
+        body["comments"],
+        json!([
+            { "path": "src/retry.rs", "body": "bound this", "new_position": 12, "old_position": 0 },
+            { "path": "src/old.rs", "body": "why drop it?", "new_position": 0, "old_position": 4 }
+        ])
+    );
+}
+
+/// Gitea refuses an approval, or a request for changes, from the pull
+/// request's own author with a **422** and a sentence that says so. It
+/// reaches the queue as a `Protocol` refusal carrying that sentence, never
+/// retried (ADR-0004); the view already draws the action disabled, so this is
+/// the window where the author changed between offer and flush.
+#[tokio::test]
+async fn a_review_of_ones_own_pull_request_is_refused_with_gitea_sentence() {
+    let server = refusing(422, "approve your own pull is not allowed").await;
+    let error = source(&server)
+        .write(WriteOp::SubmitReview {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            verdict: knobas_source::ReviewVerdict::Approve,
+            body: String::new(),
+            comments: vec![],
+        })
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(422), "{error:?}");
+    assert!(
+        matches!(&error, SourceError::Protocol { message: m, .. }
+            if m.contains("approve your own pull is not allowed")),
+        "{error:?}"
+    );
+}
+
+/// A review is given on a **pull request**: a repository's id is refused
+/// before a request leaves.
+#[tokio::test]
+async fn a_review_aimed_at_a_repository_is_refused_before_a_request() {
+    let server = refusing(500, "must not be reached").await;
+    let error = source(&server)
+        .write(WriteOp::SubmitReview {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            verdict: knobas_source::ReviewVerdict::Comment,
+            body: "x".to_owned(),
+            comments: vec![],
+        })
+        .await
+        .expect_err("a repository is not a pull request");
+    assert!(
+        matches!(error, SourceError::Protocol { status: None, .. }),
+        "{error:?}"
+    );
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

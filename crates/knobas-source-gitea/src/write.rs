@@ -1,5 +1,6 @@
 //! The four writes M2 ratified for Gitea -- branch, pull request, comment,
-//! approval -- and the merge the source views added (issue #667).
+//! approval -- the merge the source views added (issue #667), and the review
+//! a pull request's toolbar writes (issue #705).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the Jira adapter's is:
 //! knobas has one outbound write path, and
@@ -18,6 +19,7 @@
 //! | comment | `POST /repos/{o}/{r}/issues/{index}/comments` | `{"body":…}` |
 //! | approval | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":"APPROVED","body":…}` |
 //! | merge | `POST /repos/{o}/{r}/pulls/{index}/merge` | `{"Do":…}` |
+//! | review | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":…,"body":…,"comments":[…]}` |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -26,7 +28,7 @@
 
 use serde_json::json;
 
-use knobas_source::{MergeStyle, SourceError};
+use knobas_source::{MergeStyle, ReviewComment, ReviewSide, ReviewVerdict, SourceError};
 
 use crate::client::GiteaClient;
 
@@ -175,6 +177,63 @@ pub(crate) async fn merge(
     );
     client
         .post(&path, &json!({ "Do": style.as_str() }))
+        .await
+        .map(|_| ())
+}
+
+// -- submit_review (issue #705) ----------------------------------------------
+
+/// Review a pull request: approve it, request changes, or only comment, with
+/// line comments (spec #701 workflow 6).
+///
+/// `event` is Gitea's spelling of the verdict -- `APPROVED`,
+/// `REQUEST_CHANGES`, `COMMENT` -- and is always sent: a `POST .../reviews`
+/// without one files a `PENDING` draft that nobody sees (see [`approve`]).
+/// A line comment is Gitea's `CreatePullReviewComment`: its line number goes
+/// in `new_position` or `old_position` by the side it is on, the other `0`.
+///
+/// Gitea refuses an approval or a request for changes from the pull
+/// request's own author with a **422** (*approve your own pull is not
+/// allowed*), and a request for changes with no words likewise; both arrive
+/// as `Protocol` refusals carrying its sentence, never retried (ADR-0004).
+///
+/// # Errors
+///
+/// As [`create_branch`].
+pub(crate) async fn submit_review(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    verdict: ReviewVerdict,
+    body: &str,
+    comments: &[ReviewComment],
+) -> Result<(), SourceError> {
+    let path = format!(
+        "/repos/{}/{}/pulls/{index}/reviews",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?
+    );
+    let event = match verdict {
+        ReviewVerdict::Approve => "APPROVED",
+        ReviewVerdict::RequestChanges => "REQUEST_CHANGES",
+        ReviewVerdict::Comment => "COMMENT",
+    };
+    let comments: Vec<serde_json::Value> = comments
+        .iter()
+        .map(|c| {
+            let (new, old) = match c.side {
+                ReviewSide::New => (c.line, 0),
+                ReviewSide::Old => (0, c.line),
+            };
+            json!({ "path": c.path, "body": c.body, "new_position": new, "old_position": old })
+        })
+        .collect();
+    client
+        .post(
+            &path,
+            &json!({ "event": event, "body": body, "comments": comments }),
+        )
         .await
         .map(|_| ())
 }

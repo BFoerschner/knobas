@@ -258,6 +258,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     danger: false,
     disabled: null,
     with_settings: false,
+    values: {},
     ...more,
   };
 }

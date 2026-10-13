@@ -132,7 +132,8 @@ pub enum Block {
 /// descriptor does not declare.
 ///
 /// An action with no fields, no sentence, no `with_settings` and not
-/// `danger` queues on the button, with no dialog.
+/// `danger` queues on the button, with no dialog; its fixed `values` go with
+/// it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ViewAction {
     /// The [`WriteOp`](crate::WriteOp) identifier the action queues.
@@ -165,6 +166,14 @@ pub struct ViewAction {
     /// #669).
     #[serde(default)]
     pub with_settings: bool,
+    /// Answers the source fixes, by the name the op's payload reads them
+    /// under: never drawn, handed to the shell's payload table with the
+    /// dialog's values (issue #705). What lets one op be two actions --
+    /// *Approve…* and *Request changes…* are both `submit_review`, told apart
+    /// by `verdict` -- without the shell reading the label. A name here is
+    /// never also a field's.
+    #[serde(default)]
+    pub values: std::collections::BTreeMap<String, String>,
 }
 
 impl ViewAction {
@@ -181,6 +190,7 @@ impl ViewAction {
             danger: false,
             disabled: None,
             with_settings: false,
+            values: std::collections::BTreeMap::new(),
         }
     }
 }
@@ -386,6 +396,10 @@ mod tests {
                 primary: true,
                 with_settings: true,
                 ..ViewAction::new("merge_pull_request", "Merge…")
+            },
+            ViewAction {
+                values: [("verdict".to_owned(), "approve".to_owned())].into(),
+                ..ViewAction::new("submit_review", "Approve…")
             },
             ViewAction {
                 confirm: Some("Delete feature/x?".into()),
@@ -611,7 +625,8 @@ mod tests {
             "primary": true,
             "danger": false,
             "disabled": "Not mergeable",
-            "with_settings": false
+            "with_settings": false,
+            "values": {}
         });
         let action = ViewAction {
             fields: vec![
@@ -665,6 +680,17 @@ mod tests {
             }))
             .unwrap(),
             ViewAction::new("run_build", "Run")
+        );
+        // Fixed answers the source sets (#705): an object of names to text,
+        // never drawn, so one op can be two actions (*Approve…*, *Request
+        // changes…*).
+        let approve = ViewAction {
+            values: [("verdict".to_owned(), "approve".to_owned())].into(),
+            ..ViewAction::new("submit_review", "Approve…")
+        };
+        assert_eq!(
+            serde_json::to_value(&approve).unwrap()["values"],
+            serde_json::json!({ "verdict": "approve" })
         );
         assert_eq!(
             serde_json::from_value::<ActionField>(serde_json::json!({

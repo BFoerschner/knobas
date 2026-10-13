@@ -26,6 +26,7 @@ function action(write_op: string, label: string, more: Partial<ViewAction> = {})
     danger: false,
     disabled: null,
     with_settings: false,
+    values: {},
     ...more,
   };
 }
@@ -188,4 +189,52 @@ test("a secret is sent only when the reader typed a value; a value the source wo
   expect(changedParameters(values, { "env.SEPA_SANDBOX_KEY": "typed", "vcs.mirror": "https://other.example/p.git" })).toEqual([
     { name: "env.SEPA_SANDBOX_KEY", value: "typed" },
   ]);
+});
+
+// -- Comment… and the review actions (#705) ----------------------------------
+
+const COMMENT = action("comment", "Comment…", {
+  fields: [field("body", { type: "long_text" }, { required: true })],
+});
+
+test("Comment… is queued as Comment with the words typed, and nothing without words", () => {
+  expect(actionPayload(COMMENT, "gitea:o/r#7", { body: "bounded in c90d11\n" })).toEqual({
+    Comment: { entity: "gitea:o/r#7", body: "bounded in c90d11\n" },
+  });
+  expect(actionPayload(COMMENT, "gitea:o/r#7", { body: "  \n" })).toBeNull();
+  expect(actionPayload(COMMENT, "gitea:o/r#7", {})).toBeNull();
+});
+
+function review(verdict: string, label: string, required: boolean): ViewAction {
+  return action("submit_review", label, {
+    fields: [field("body", { type: "long_text" }, { required })],
+    values: { verdict },
+  });
+}
+
+test("Approve… and Request changes… queue SubmitReview with the verdict the source fixed", () => {
+  expect(actionPayload(review("approve", "Approve…", false), "gitea:o/r#7", { body: "" })).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "approve", body: "", comments: [] },
+  });
+  expect(
+    actionPayload(review("request_changes", "Request changes…", true), "gitea:o/r#7", { body: "bound it" }),
+  ).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "request_changes", body: "bound it", comments: [] },
+  });
+  // The label is the reader's; the verdict is read from the fixed value alone.
+  expect(actionPayload(review("approve", "Request changes…", true), "gitea:o/r#7", { body: "x" })).toMatchObject({
+    SubmitReview: { verdict: "approve" },
+  });
+});
+
+test("a verdict the SPI cannot carry, or none, builds nothing", () => {
+  expect(actionPayload(review("APPROVED", "Approve…", false), "gitea:o/r#7", { body: "" })).toBeNull();
+  expect(actionPayload(action("submit_review", "Review…"), "gitea:o/r#7", { body: "x" })).toBeNull();
+});
+
+test("the fixed values lie under the dialog's: a value the reader gave under the same name wins", () => {
+  const both = action("submit_review", "Review…", { values: { verdict: "comment", body: "fixed" } });
+  expect(actionPayload(both, "gitea:o/r#7", { body: "typed" })).toEqual({
+    SubmitReview: { entity: "gitea:o/r#7", verdict: "comment", body: "typed", comments: [] },
+  });
 });

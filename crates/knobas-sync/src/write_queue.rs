@@ -203,7 +203,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::CreateMonitor { entity, .. }
         | WriteOp::MergePullRequest { entity, .. }
         | WriteOp::SetParameter { entity, .. }
-        | WriteOp::RunBuild { entity, .. } => entity,
+        | WriteOp::RunBuild { entity, .. }
+        | WriteOp::SubmitReview { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -901,6 +902,15 @@ mod tests {
                     parameters: Vec::new(),
                 },
                 "teamcity:buildType:Payout_Build",
+            ),
+            (
+                WriteOp::SubmitReview {
+                    entity: "gitea:tidewater/ledger#143".to_owned(),
+                    verdict: knobas_source::ReviewVerdict::Approve,
+                    body: "b".to_owned(),
+                    comments: vec![],
+                },
+                "gitea:tidewater/ledger#143",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

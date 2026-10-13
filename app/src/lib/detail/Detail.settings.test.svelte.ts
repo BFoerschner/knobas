@@ -536,6 +536,7 @@ function runnable(): SourceView {
         danger: false,
         disabled: null,
         with_settings: true,
+        values: {},
       },
     ],
   };

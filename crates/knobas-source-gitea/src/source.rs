@@ -1,6 +1,10 @@
 //! The `Source` implementation: what the sync engine and *Test connection*
 //! hold.
 
+use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher;
+use std::sync::{Mutex, OnceLock, PoisonError};
+
 use knobas_source::instance::{SourceInstance, validate_instance_id};
 use knobas_source::{
     ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
@@ -19,6 +23,22 @@ pub struct GiteaSource {
     display_name: String,
     pub(crate) config: GiteaConfig,
     pub(crate) client: GiteaClient,
+    /// Which token on which server this is, for [`Self::viewer`]'s cache: a
+    /// hash of the instance id, the base URL and the secret, never the secret.
+    viewer_key: u64,
+}
+
+/// Who each token is, by [`GiteaSource::viewer_key`], for the life of the
+/// process (issue #705).
+///
+/// The app builds a source for every view it reads, so a cache on the
+/// instance would last one read; this one outlives them. A login is cached
+/// only once Gitea answered it. A user renamed in Gitea leaves the old login
+/// here until restart, which only leaves the review actions enabled on their
+/// own pull requests, and Gitea's refusal then says why (ADR-0004).
+fn viewers() -> &'static Mutex<HashMap<u64, String>> {
+    static VIEWERS: OnceLock<Mutex<HashMap<u64, String>>> = OnceLock::new();
+    VIEWERS.get_or_init(Default::default)
 }
 
 /// Build an adapter for one configured source (ruling P6).
@@ -46,6 +66,12 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         ))
     })?;
     let config = GiteaConfig::from_json(&instance.config)?;
+    let viewer_key = {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        (&instance.id, &instance.base_url, &instance.secret).hash(&mut hasher);
+        hasher.finish()
+    };
     let credential = client::credential(instance.auth, instance.secret.as_deref())?;
     let client = GiteaClient::new(&instance.base_url, &config, credential)?;
     Ok(Box::new(GiteaSource {
@@ -53,10 +79,36 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         display_name: instance.display_name,
         config,
         client,
+        viewer_key,
     }))
 }
 
 impl GiteaSource {
+    /// The login the token belongs to, or `None` where Gitea would not say.
+    ///
+    /// Asked once per token and server for the life of the process
+    /// ([`viewers`]): every whole pull request view wants it (#705), and one
+    /// `GET /user` per view, read-ahead included, would be a request spent on
+    /// an answer that does not change. A failed read is not cached, and is not
+    /// the view's failure: the review actions stay enabled and Gitea's
+    /// refusal, should it come, is the write queue's to show (ADR-0004).
+    pub(crate) async fn viewer(&self) -> Option<String> {
+        if let Some(login) = viewers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(&self.viewer_key)
+        {
+            return Some(login.clone());
+        }
+        let user = self.client.current_user().await.ok()?;
+        let login = user.login.filter(|l| !l.trim().is_empty())?;
+        viewers()
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(self.viewer_key, login.clone());
+        Some(login)
+    }
+
     /// The key half of an entity id this source owns, parsed into Gitea's own
     /// key grammar.
     ///
@@ -167,8 +219,9 @@ impl Source for GiteaSource {
         crate::sync::run(self, cursor, sink).await
     }
 
-    /// Perform one of the four writes M2 ratified for Gitea, or the merge the
-    /// source views added (#667), or refuse.
+    /// Perform one of the four writes M2 ratified for Gitea, the merge the
+    /// source views added (#667), or the review the pull request's toolbar
+    /// writes (#705), or refuse.
     ///
     /// The match unpacks and hands values to [`crate::write`], which never
     /// names `WriteOp`: knobas has one outbound write path and
@@ -216,6 +269,17 @@ impl Source for GiteaSource {
             WriteOp::MergePullRequest { entity, style } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
                 write::merge(&self.client, &owner, &repo, index, *style).await?;
+                Ok(WriteReceipt::none())
+            }
+            WriteOp::SubmitReview {
+                entity,
+                verdict,
+                body,
+                comments,
+            } => {
+                let (owner, repo, index) = self.pull_of(entity)?;
+                write::submit_review(&self.client, &owner, &repo, index, *verdict, body, comments)
+                    .await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::Transition { .. }
@@ -315,7 +379,8 @@ mod tests {
                 "create_pull_request",
                 "comment",
                 "approve",
-                "merge_pull_request"
+                "merge_pull_request",
+                "submit_review"
             ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly

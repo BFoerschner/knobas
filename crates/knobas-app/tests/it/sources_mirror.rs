@@ -685,6 +685,12 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
                 value: "9".to_owned(),
             }],
         },
+        knobas_source::WriteOp::SubmitReview {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            verdict: knobas_source::ReviewVerdict::RequestChanges,
+            body: "bound the jitter".to_owned(),
+            comments: vec![],
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -705,6 +711,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::MergePullRequest { .. } => "MergePullRequest",
             knobas_source::WriteOp::SetParameter { .. } => "SetParameter",
             knobas_source::WriteOp::RunBuild { .. } => "RunBuild",
+            knobas_source::WriteOp::SubmitReview { .. } => "SubmitReview",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

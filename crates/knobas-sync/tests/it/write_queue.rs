@@ -937,6 +937,12 @@ fn write_op_probes() -> Vec<WriteOp> {
                 value: "9".to_owned(),
             }],
         },
+        WriteOp::SubmitReview {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            verdict: knobas_source::ReviewVerdict::RequestChanges,
+            body: "bound the jitter".to_owned(),
+            comments: vec![],
+        },
     ]
 }
 
@@ -968,7 +974,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::CreateMonitor { .. }
             | WriteOp::MergePullRequest { .. }
             | WriteOp::SetParameter { .. }
-            | WriteOp::RunBuild { .. } => op.identifier(),
+            | WriteOp::RunBuild { .. }
+            | WriteOp::SubmitReview { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1170,6 +1177,9 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // A merge changes a pull request the mirror holds: what is left
             // is that pull request, merged, which the next sync reads back.
             | WriteOp::MergePullRequest { .. }
+            // A review lands on a pull request the mirror holds: what is left
+            // is the review on it, which the next sync and the view read back.
+            | WriteOp::SubmitReview { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.
