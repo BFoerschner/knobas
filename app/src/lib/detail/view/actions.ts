@@ -54,8 +54,24 @@ function isPullRequestState(word: string | undefined): word is PullRequestState 
 function changedText(name: string, values: ActionValues, drawn: ActionValues): string | null {
   const value = values[name];
   if (value === undefined) return null;
+  return sameText(value, drawn[name] ?? "") ? null : value;
+}
+
+/** Two answers that differ at most in their line ends (`\r\n` against `\n`). */
+function sameText(a: string, b: string): boolean {
   const lines = (text: string) => text.replace(/\r\n/g, "\n");
-  return lines(value) === lines(drawn[name] ?? "") ? null : value;
+  return lines(a) === lines(b);
+}
+
+/**
+ * Whether a dialog with fields came back exactly as it was drawn (#706): an
+ * *Edit…* pressed without a change, which builds no write and is no fault.
+ */
+export function answeredAsDrawn(action: ViewAction, values: ActionValues): boolean {
+  const drawn = initialValues(action);
+  return (
+    action.fields.length > 0 && action.fields.every((f) => sameText(values[f.name] ?? "", drawn[f.name] ?? ""))
+  );
 }
 
 /**

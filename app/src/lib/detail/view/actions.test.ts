@@ -9,6 +9,7 @@ import type { ActionField, Setting, ViewAction } from "../../ipc/entity";
 import {
   actionName,
   actionPayload,
+  answeredAsDrawn,
   changedParameters,
   initialValues,
   missingFields,
@@ -329,4 +330,11 @@ test("Close and Reopen send only the state their action fixes", () => {
     EditPullRequest: { entity: PR, title: null, body: null, state: "open" },
   });
   expect(actionPayload({ ...REOPEN, values: { state: "merged" } }, PR, {})).toBeNull();
+});
+
+test("a dialog answered exactly as drawn is told apart from one that cannot be sent", () => {
+  expect(answeredAsDrawn(EDIT, { title: "SEPA retry", body: "Refs PAY-231\n\nBounded." })).toBe(true);
+  expect(answeredAsDrawn(EDIT, { title: "SEPA retry!", body: "Refs PAY-231\r\n\r\nBounded." })).toBe(false);
+  // Nothing to answer is not an answer left alone.
+  expect(answeredAsDrawn(REOPEN, {})).toBe(false);
 });

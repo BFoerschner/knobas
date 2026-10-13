@@ -793,6 +793,18 @@ pub enum PullRequestState {
     Closed,
 }
 
+impl PullRequestState {
+    /// The word on the wire, which is also what a view's action fixes as
+    /// its `state` value.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            PullRequestState::Open => "open",
+            PullRequestState::Closed => "closed",
+        }
+    }
+}
+
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
 /// Serialized as the snake_case word (`"request_changes"`); each adapter
 /// spells it its own way (Gitea's `event`).
@@ -1592,6 +1604,10 @@ mod tests {
             merged.is_err(),
             "merging is merge_pull_request's, never an edit's: {merged:?}"
         );
+        // The word a view's action fixes is the word the wire carries.
+        for state in [PullRequestState::Open, PullRequestState::Closed] {
+            assert_eq!(serde_json::to_value(state).unwrap(), state.as_str());
+        }
     }
 
     /// The identifier is what a descriptor lists, what the queue stores in its

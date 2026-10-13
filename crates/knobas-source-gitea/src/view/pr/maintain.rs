@@ -3,6 +3,7 @@
 //! `edit_pull_request`, one `PATCH`; close and reopen are told apart by the
 //! state they fix ([`ViewAction::values`], the #705 ruling), never by label.
 
+use knobas_source::PullRequestState;
 use knobas_source::view::{ActionField, FieldKind, ViewAction};
 
 use super::Pull;
@@ -24,7 +25,7 @@ pub(super) fn actions(pull: &Pull) -> Vec<ViewAction> {
     }
     match pull.state.as_deref() {
         Some("open") => actions.push(close(pull)),
-        Some("closed") => actions.push(state("Reopen", "open")),
+        Some("closed") => actions.push(set_state("Reopen", PullRequestState::Open)),
         _ => {}
     }
     actions
@@ -69,15 +70,15 @@ fn close(pull: &Pull) -> ViewAction {
     ViewAction {
         confirm: Some(confirm),
         danger: true,
-        ..state("Close", "closed")
+        ..set_state("Close", PullRequestState::Closed)
     }
 }
 
-/// The action labelled `label` that puts the pull request in `state`, the
-/// SPI's word (`knobas_source::PullRequestState`'s serde form).
-fn state(label: &str, state: &str) -> ViewAction {
+/// The action labelled `label` that puts the pull request in `state`, fixed
+/// as the SPI's word for it.
+fn set_state(label: &str, state: PullRequestState) -> ViewAction {
     ViewAction {
-        values: [("state".to_owned(), state.to_owned())].into(),
+        values: [("state".to_owned(), state.as_str().to_owned())].into(),
         ..ViewAction::new(crate::WRITE_OP_EDIT_PULL_REQUEST, label)
     }
 }

@@ -46,7 +46,7 @@
   import StorageBody from "./StorageBody.svelte";
   import SourceView from "./view/SourceView.svelte";
   import { PLACEHOLDER_MS, sameAnswer, VIEW_PATIENCE_MS, viewMemory, type Loan } from "./view-read";
-  import { actionName, actionPayload, type ActionValues } from "./view/actions";
+  import { actionName, actionPayload, answeredAsDrawn, type ActionValues } from "./view/actions";
   import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
@@ -267,6 +267,12 @@
   ): Promise<boolean> {
     const name = actionName(action.label);
     const payload = actionPayload(action, entityId, values, changed);
+    // An edit sent back unchanged has nothing to write, and that is no fault
+    // (#706): the dialog closes and says so.
+    if (payload === null && answeredAsDrawn(action, values)) {
+      push({ text: `Nothing changed, so no ${name.toLowerCase()} was queued` });
+      return true;
+    }
     if (payload === null) {
       push({ text: `Could not queue the ${name.toLowerCase()}: knobas cannot send it`, tone: "err" });
       return false;

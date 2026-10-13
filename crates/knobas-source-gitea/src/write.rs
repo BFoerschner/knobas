@@ -360,11 +360,7 @@ pub(crate) async fn edit_pull_request(
         fields.insert("body".to_owned(), json!(body));
     }
     if let Some(state) = state {
-        let word = match state {
-            PullRequestState::Open => "open",
-            PullRequestState::Closed => "closed",
-        };
-        fields.insert("state".to_owned(), json!(word));
+        fields.insert("state".to_owned(), json!(state.as_str()));
     }
     if fields.is_empty() {
         return Err(SourceError::protocol(format!(

@@ -353,3 +353,19 @@ test("Reopen queues on the button with the state its action fixes", async () => 
   );
   screen.done();
 });
+
+test("Edit… sent back unchanged queues nothing, closes, and says so without an error", async () => {
+  writeOps = ["comment", "edit_pull_request"];
+  views = [maintainable()];
+  const screen = render();
+  await vi.waitFor(() => expect(toolbarButton(screen, "Edit…")).toBeDefined());
+  toolbarButton(screen, "Edit…")!.click();
+  flushSync();
+  dialogButton("Edit").click();
+  await vi.waitFor(() => expect(document.querySelector("[role=dialog]")).toBeNull());
+  expect(queued).toEqual([]);
+  expect(toasts.items.map((t) => [t.text, t.tone ?? null])).toEqual([
+    ["Nothing changed, so no edit was queued", null],
+  ]);
+  screen.done();
+});
