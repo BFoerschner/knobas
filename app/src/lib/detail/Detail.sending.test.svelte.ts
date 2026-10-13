@@ -53,7 +53,7 @@ function row(
 }
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: (payload: WriteOpPayload) => {
     calls.push("submit_write");
     queued.push(payload);
@@ -146,6 +146,7 @@ function pull(): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   };
 }
 

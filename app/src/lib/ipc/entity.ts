@@ -409,6 +409,14 @@ export interface EntityDetail {
    * on.
    */
   builds: EntityRow[];
+  /**
+   * A ticket's status as its source declares it (#760), or `null` — for
+   * anything that is not a ticket, for a ticket whose record carries none (the
+   * board's "No status" group), and for a withdrawn ticket. The status select
+   * shows it as the ticket's current one; it is the board's own rule, read
+   * once in `get_entity`, so the panel never reads a card list to find it.
+   */
+  status: string | null;
 }
 
 /**
@@ -1516,6 +1524,15 @@ export function miniBoard(
     project: filter.project,
     perColumn: perColumn ?? null,
   });
+}
+
+/**
+ * The statuses one source's live ticket corpus shows, in the board's order —
+ * `source_statuses` (#760). The ticket detail's fallback offer when the
+ * workflow cannot be read ({@link reachableTransitions}); asked only then.
+ */
+export function sourceStatuses(sourceId: string): Promise<string[]> {
+  return invoke<string[]>("source_statuses", { sourceId });
 }
 
 /** One project a source's live corpus shows — `Project` (ADR-0010, #208). */

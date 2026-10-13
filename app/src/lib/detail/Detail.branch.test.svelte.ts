@@ -19,7 +19,7 @@ const queued: WriteOpPayload[] = [];
 let view: SourceView;
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: (payload: WriteOpPayload) => {
     queued.push(payload);
     return Promise.resolve({ id: 1 });
@@ -90,6 +90,7 @@ function branch(): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   };
 }
 

@@ -921,6 +921,16 @@ pub struct EntityDetail {
     /// [`DETAIL_BUILDS`]. Empty for a kind that declares no commit, which is
     /// every kind but code, and for a commit nothing mirrored ran on.
     pub builds: Vec<EntityRow>,
+    /// A ticket's status as its source declares it (#760), read once beside
+    /// the row by the rule the mini board reads it by
+    /// ([`declared_string!`](knobas_core::declared_string)); the ticket detail's
+    /// select shows it as the ticket's current one.
+    ///
+    /// `None` for anything that is not a ticket, for a ticket whose source
+    /// declares no status or whose record does not carry it (the board's
+    /// terminal group, "No status"), and for a withdrawn ticket or a disabled
+    /// source's, which the board does not draw either.
+    pub status: Option<String>,
 }
 
 /// How many history lines the detail view is given up front.
@@ -1003,6 +1013,9 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        "#,
     knobas_core::declared_string!("$2", "commit"),
     r#" as commit,
+       "#,
+    knobas_core::declared_string!("$2", "status_name"),
+    r#" as status,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -1044,6 +1057,14 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
     let adapter_kind: Option<String> = row.get("adapter_kind");
 
     let kind: String = row.get("kind");
+    // The board draws live tickets only (`sync.live_item`); the detail opens
+    // withdrawn ones too, and says nothing of a status the board would not.
+    let status: Option<String> = row.get("status");
+    let status = status.filter(|_| {
+        kind == "ticket"
+            && row.get::<Option<DateTime<Utc>>, _>("deleted_at").is_none()
+            && row.get::<bool, _>("source_enabled")
+    });
     let kind_info = kind_info_for(adapter_kind.as_deref(), &kind);
 
     // The builds of the commit this entity stands at, asked only when it
@@ -1092,6 +1113,7 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         links: knobas_core::link::entries_of(pool, &entity).await?,
         activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
         builds,
+        status,
     })
 }
 
@@ -3425,6 +3447,27 @@ pub async fn mini_board(
         per_column,
     )
     .await?)
+}
+
+/// The statuses one source's live ticket corpus shows (#760): the ticket
+/// detail's fallback offer when the workflow cannot be read (#179, #498).
+///
+/// Asked only then. It used to come out of a whole [`mini_board`] read of the
+/// ticket's source on every open (133-137 ms and 725 KB at 5,000 tickets);
+/// the current status is [`EntityDetail::status`] now.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up; a query failure is `Internal`.
+#[tauri::command]
+pub async fn source_statuses(
+    lifecycle: State<'_, Lifecycle>,
+    source_id: String,
+) -> Result<Vec<String>, IpcError> {
+    let pool = lifecycle.pool()?;
+    let declarations = declared_paths(&pool).await?;
+    Ok(knobas_core::mini_board::source_statuses(&pool, &source_id, &declarations).await?)
 }
 
 // -- the projects a corpus shows (#208) -------------------------------------

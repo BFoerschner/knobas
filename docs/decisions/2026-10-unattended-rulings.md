@@ -1183,3 +1183,17 @@ Ruled 2026-10-13 by the deputy for Björn, under the #701 delegation, at the mer
 **If you disagree, the cost of reversing this is:** low. For 1, `STATE_HELD_OPS` and `added` in `crates/knobas-core/src/write_queue.rs`. For 2, the `replaces` argument of `queueAction` in `app/src/lib/detail/Detail.svelte`.
 
 As built (#752, PR #757): `project` gives the three ops `{op, live, text: <declared state>}` where the kind declares a state (Gitea pull requests), `{op, live}` where it declares none (Jira tickets, Gitea issues), and the whole record where a declaration resolves nothing (ADR-0007's false-hold direction). `knobas-sync`'s `declared_state` looks the paths up for every op `reads_declared_state` names. A comment queued before this change and still pending after it holds once, because its stored snapshot has the old shape. `CONTEXT.md`'s **Held write** says what *changed* means for each kind of write; ADR-0012 says nothing about holds and is unchanged. Pinned by `a_write_that_adds_holds_only_on_the_declared_state` (core), `two_comments_back_to_back_on_one_pull_request_both_go_in_order` (the queue), and `Edit and resend replaces the refused write` (the detail).
+
+## #760 — the ticket detail reads its status with the ticket, and its fallback offer on its own
+
+Ruled 2026-10-14 by the deputy for Björn, under the #701 delegation. Posted on #760.
+
+**The fork:** opening a ticket read `mini_board` for its whole source (133-137 ms and 725 KB at 5,000 tickets) to learn its current status and the statuses the source's corpus shows. `per_column` (#753) cannot answer it, because a capped board need not hold the ticket's card. Options: a card-less board read, or the status with the ticket and the corpus offer as a read of its own.
+
+**Ruling:** as proposed. `EntityDetail.status` is the ticket's declared `status_name`, read once in `get_entity_inner`'s statement through the declared path; the observed-status offer is a dedicated small read of the source's distinct declared statuses by the board's own rule, never the card list. Additive IPC field, one §10.8 file.
+
+**Reasoning:** the current status is a fact about one ticket and belongs with it; the offer is a fact about a source and a card list is the wrong thing to read to learn it.
+
+**If you disagree, the cost of reversing this is:** low: `EntityDetail.status` and the `source_statuses` command, and the two effects in `app/src/lib/detail/Detail.svelte`.
+
+As built (#760): the corpus offer is asked only when the workflow read has failed, since that is the only time it is shown (#498). `status` is `None` for a withdrawn ticket and a disabled source's, as the board draws neither. `source_statuses` is `OBSERVED_STATUSES` for one source, planned per execution like the board's.

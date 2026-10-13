@@ -40,7 +40,7 @@ const handlers: (() => void)[] = [];
 let unlistened = 0;
 
 vi.mock("../ipc/entity", () => ({
-  miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
+  sourceStatuses: () => Promise.resolve([]),
   submitWrite: (payload: WriteOpPayload) => {
     calls.push("submit_write");
     if (submitFails) return Promise.reject({ code: "invalid", message: "no such op", source_id: null });
@@ -161,6 +161,7 @@ function config(): EntityDetail {
     links: [],
     activity: [],
     builds: [],
+    status: null,
   } as EntityDetail;
 }
 
