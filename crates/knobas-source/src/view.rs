@@ -663,7 +663,8 @@ mod tests {
                 suggestions: vec![]
             }
         );
-        let view: SourceView = serde_json::from_value(serde_json::json!({ "sections": [] })).unwrap();
+        let view: SourceView =
+            serde_json::from_value(serde_json::json!({ "sections": [] })).unwrap();
         assert!(view.actions.is_empty());
         assert_eq!(
             serde_json::to_value(SourceView {

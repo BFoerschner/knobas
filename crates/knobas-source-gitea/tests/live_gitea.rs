@@ -2533,7 +2533,11 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
     //    toolbar, disabled, saying why.
     let view = source.view(&id, None).await.unwrap().unwrap();
     let after = merge_of(&view).expect("the merged pull request's toolbar keeps Merge…");
-    assert_eq!(after.disabled.as_deref(), Some("Already merged"), "{after:?}");
+    assert_eq!(
+        after.disabled.as_deref(),
+        Some("Already merged"),
+        "{after:?}"
+    );
     let Block::Facts { facts } = &view.sections[0].blocks[0] else {
         panic!("the overview opens on facts: {view:#?}");
     };

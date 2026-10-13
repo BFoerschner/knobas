@@ -26,8 +26,8 @@
 use chrono::{DateTime, Utc};
 use knobas_source::SourceError;
 use knobas_source::view::{
-    ActionField, Block, CommitHint, Fact, FieldKind, Setting, SourceView, Tone, ViewAction, ViewRow,
-    ViewSection,
+    ActionField, Block, CommitHint, Fact, FieldKind, Setting, SourceView, Tone, ViewAction,
+    ViewRow, ViewSection,
 };
 
 use crate::client::{FAILED_TESTS, HttpRest};

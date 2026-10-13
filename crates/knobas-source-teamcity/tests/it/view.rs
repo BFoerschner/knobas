@@ -408,7 +408,13 @@ async fn a_configuration_with_no_builds_still_offers_a_run() {
     let actions: Vec<_> = view
         .actions
         .iter()
-        .map(|a| (a.write_op.as_str(), &a.fields[0].kind, a.disabled.as_deref()))
+        .map(|a| {
+            (
+                a.write_op.as_str(),
+                &a.fields[0].kind,
+                a.disabled.as_deref(),
+            )
+        })
         .collect();
     assert_eq!(
         actions,
