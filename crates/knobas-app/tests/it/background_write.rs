@@ -288,11 +288,21 @@ async fn two_writes_queued_back_to_back_are_sent_in_order() {
         mut heard,
     } = fixture("background_write_order").await;
 
-    let first = knobas_app::sources::write_queue::submit_in_background(&state, comment("first"))
+    // Bounded, so a submit that waited for the held adapter fails here rather
+    // than hanging the binary.
+    let submit = |body: &'static str| {
+        tokio::time::timeout(
+            PATIENCE,
+            knobas_app::sources::write_queue::submit_in_background(&state, comment(body)),
+        )
+    };
+    let first = submit("first")
         .await
+        .expect("answered while the adapter was held")
         .expect("the first is queued");
-    let second = knobas_app::sources::write_queue::submit_in_background(&state, comment("second"))
+    let second = submit("second")
         .await
+        .expect("answered while the adapter was held")
         .expect("the second is queued");
 
     gate.add_permits(2);
