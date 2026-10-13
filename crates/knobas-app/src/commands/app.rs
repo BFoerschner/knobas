@@ -142,12 +142,28 @@ impl Lifecycle {
         match self.app_state() {
             // A `PgPool` is a handle: cloning it shares the same connections.
             Some(state) => Ok(state.pool.clone()),
-            None => Err(IpcError::not_ready(match self.get() {
-                DbState::Failed { message } => {
-                    format!("the database did not start: {message}")
-                }
-                _ => "the database is still starting".to_owned(),
-            })),
+            None => Err(self.not_ready()),
+        }
+    }
+
+    /// The refusal for a call that beat bring-up, or followed a failed one.
+    fn not_ready(&self) -> IpcError {
+        IpcError::not_ready(match self.get() {
+            DbState::Failed { message } => format!("the database did not start: {message}"),
+            _ => "the database is still starting".to_owned(),
+        })
+    }
+
+    /// The suggestion pass (#745), or the same refusal [`pool`](Self::pool)
+    /// gives while there is no database.
+    ///
+    /// # Errors
+    ///
+    /// As [`pool`](Self::pool).
+    pub fn suggestions(&self) -> Result<crate::suggestion_pass::SuggestionPass, IpcError> {
+        match self.app_state() {
+            Some(state) => Ok(state.suggestions.clone()),
+            None => Err(self.not_ready()),
         }
     }
 }

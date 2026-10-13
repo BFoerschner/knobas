@@ -677,6 +677,11 @@ export interface SuggestionPage {
  * resurrects nothing that was dismissed. This is what makes detection something
  * a surface calls rather than something the user asks for.
  *
+ * One pass at a time, on a connection of its own (#745): a call made while a
+ * pass runs resolves when the *next* pass does, and that one pass answers
+ * every call that waited for it. It can therefore take a while; it never holds
+ * a connection another command needs.
+ *
  * It never creates a confirmed link, and nothing it writes reaches a source.
  */
 export function detectSuggestions(): Promise<number> {

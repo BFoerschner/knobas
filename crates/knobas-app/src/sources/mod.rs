@@ -57,7 +57,7 @@ fn secret_store(profile: &crate::Profile) -> Arc<dyn SecretStore> {
 /// for `knobas-db`'s type from anywhere but one of those two crates, and
 /// neither may depend on the other. See `RunConnections` for why a run must not
 /// take a pooled connection (interfaces §10.6(c)).
-struct DbConnections(knobas_db::embedded::Connector);
+pub(crate) struct DbConnections(pub(crate) knobas_db::embedded::Connector);
 
 #[async_trait::async_trait]
 impl knobas_sync::scheduler::RunConnections for DbConnections {

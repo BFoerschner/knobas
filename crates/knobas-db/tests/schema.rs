@@ -1949,3 +1949,33 @@ async fn zero_twenty_seven_reaches_a_row_mirrored_before_it() {
     );
     assert_eq!(synced_after, synced_before, "and nothing wrote it again");
 }
+
+/// The app's pool cancels a statement that runs past thirty seconds (#745).
+///
+/// Every connection of [`knobas_db::embedded::Connector::app_pool`] carries
+/// the limit from its first packet. `migrate::run` over that very pool clears
+/// the limit for itself on a pool of its own, and the app pool's connections
+/// still carry theirs afterwards: the cleared limit did not leak back in.
+#[tokio::test]
+async fn the_app_pool_carries_a_statement_timeout_that_a_migration_leaves_in_place() {
+    let connector = knobas_db::test_util::scratch_database("app_pool").await;
+    let pool = connector.app_pool().await.unwrap();
+    let limit = || async {
+        sqlx::query_scalar::<_, String>("show statement_timeout")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    assert_eq!(limit().await, "30s");
+    assert_eq!(
+        knobas_db::embedded::UI_STATEMENT_TIMEOUT,
+        std::time::Duration::from_secs(30)
+    );
+
+    migrate::run(&pool).await.unwrap();
+    assert_eq!(
+        limit().await,
+        "30s",
+        "the pool's connections keep their limit"
+    );
+}

@@ -27,6 +27,7 @@ import type { SuggestionEntry, SuggestionPage } from "../ipc/entity";
 const calls: string[] = [];
 let reads: (() => Promise<SuggestionPage>)[] = [];
 let answered: (() => Promise<void>) | null = null;
+let detected: (() => Promise<number>) | null = null;
 
 vi.mock("../ipc/entity", () => ({
   // The ticket detail's status select (#179) reads the granted board and
@@ -36,10 +37,12 @@ vi.mock("../ipc/entity", () => ({
   submitWrite: () => Promise.reject(new Error("no write in this test")),
   detectSuggestions: () => {
     calls.push("detect");
-    return Promise.resolve(0);
+    return detected ? detected() : Promise.resolve(0);
   },
   roomSuggestions: (sources: string[], ctx: string | null, limit: number) => {
-    calls.push(`read ${JSON.stringify(sources)} ${JSON.stringify(ctx)} ${limit}`);
+    calls.push(
+      `read ${JSON.stringify(sources)} ${JSON.stringify(ctx)} ${limit}`,
+    );
     const next = reads.shift() ?? (() => Promise.resolve(page([])));
     return next();
   },
@@ -74,7 +77,12 @@ function emit(name: string, payload: unknown) {
 
 const { default: SuggestionTray } = await import("./SuggestionTray.svelte");
 
-function entry(over: Partial<SuggestionEntry["link"]> & { fromTitle?: string; toTitle?: string } = {}): SuggestionEntry {
+function entry(
+  over: Partial<SuggestionEntry["link"]> & {
+    fromTitle?: string;
+    toTitle?: string;
+  } = {},
+): SuggestionEntry {
   const { fromTitle, toTitle, ...link } = over;
   return {
     link: {
@@ -135,17 +143,19 @@ beforeEach(() => {
   opened.length = 0;
   reads = [];
   answered = null;
+  detected = null;
   for (const name of Object.keys(listeners)) delete listeners[name];
   document.body.innerHTML = "";
 });
 
-test("runs a detection pass before its first read, scoped to the room", async () => {
+test("opening the tray reads the room and starts no detection pass", async () => {
   reads = [() => Promise.resolve(page([entry()]))];
   const { target, app } = render(["gitea"]);
   await settle();
 
-  expect(calls[0]).toBe("detect");
-  expect(calls[1]).toBe('read ["gitea"] null 50');
+  // #745: a pass on every room switch held the UI's connections for minutes
+  // while five sources synced. The room changed; the mirror did not.
+  expect(calls).toEqual(['read ["gitea"] null 50']);
   unmount(app);
   target.remove();
 });
@@ -215,7 +225,9 @@ test("an empty tray keeps its heading and draws no rows", async () => {
   const { target, app } = render();
   await settle();
 
-  expect(target.querySelector(".cnt")?.textContent?.trim()).toBe("none waiting");
+  expect(target.querySelector(".cnt")?.textContent?.trim()).toBe(
+    "none waiting",
+  );
   expect(target.querySelectorAll(".row.sug").length).toBe(0);
 
   unmount(app);
@@ -227,11 +239,16 @@ test("an empty tray keeps its heading and draws no rows", async () => {
  * are the same picture and only one of them is true.
  */
 test("a failed read says so instead of rendering empty", async () => {
-  reads = [() => Promise.reject({ code: "internal", message: "the database went away" })];
+  reads = [
+    () =>
+      Promise.reject({ code: "internal", message: "the database went away" }),
+  ];
   const { target, app } = render();
   await settle();
 
-  expect(target.querySelector(".fail")?.textContent).toContain("the database went away");
+  expect(target.querySelector(".fail")?.textContent).toContain(
+    "the database went away",
+  );
 
   unmount(app);
   target.remove();
@@ -251,7 +268,6 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
   await settle();
 
   expect(calls).toEqual([
-    "detect",
     "read [] null 50",
     "accept 00000000-0000-0000-0000-000000000001",
     "read [] null 50",
@@ -259,7 +275,7 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
   expect(
     calls.filter((call) => call === "detect").length,
     "answering a proposal must not re-scan the mirror",
-  ).toBe(1);
+  ).toBe(0);
   expect(target.querySelectorAll(".row.sug").length).toBe(0);
 
   unmount(app);
@@ -267,7 +283,10 @@ test("accepting answers the proposal and then re-reads, rather than splicing it 
 });
 
 test("dismissing answers the proposal and then re-reads", async () => {
-  reads = [() => Promise.resolve(page([entry()])), () => Promise.resolve(page([]))];
+  reads = [
+    () => Promise.resolve(page([entry()])),
+    () => Promise.resolve(page([])),
+  ];
   const { target, app } = render();
   await settle();
 
@@ -291,7 +310,9 @@ test("either end of a proposal opens", async () => {
   const { target, app } = render();
   await settle();
 
-  const ends = [...target.querySelectorAll<HTMLButtonElement>(".row.sug .open")];
+  const ends = [
+    ...target.querySelectorAll<HTMLButtonElement>(".row.sug .open"),
+  ];
   expect(ends.length).toBe(2);
   for (const end of ends) end.click();
 
@@ -333,7 +354,10 @@ test("a withdrawn end is marked rather than hidden", async () => {
 test("a proposal cannot be answered twice while its write is in flight", async () => {
   let release!: () => void;
   answered = () => new Promise<void>((resolve) => (release = resolve));
-  reads = [() => Promise.resolve(page([entry()])), () => Promise.resolve(page([]))];
+  reads = [
+    () => Promise.resolve(page([entry()])),
+    () => Promise.resolve(page([])),
+  ];
   const { target, app } = render();
   await settle();
 
@@ -380,10 +404,96 @@ test("a link mutation elsewhere re-reads the tray; an unrelated line does not", 
   emit("activity:new", { verb: "linked", entity_id: "mock:PAY-231" });
   await settle();
   expect(calls.filter((c) => c.startsWith("read")).length).toBe(readsSoFar + 1);
+  expect(calls, "a link written elsewhere is a read, not a pass").not.toContain(
+    "detect",
+  );
   expect(
     target.querySelector(".row.sug"),
     "the withdrawn proposal must not still be drawn",
   ).toBeNull();
+
+  unmount(app);
+  target.remove();
+});
+
+test("switching rooms re-reads and starts no detection pass", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  let sources = $state(["gitea"]);
+  const app = mount(SuggestionTray, {
+    target,
+    props: {
+      get sources() {
+        return sources;
+      },
+      onopen: () => {},
+    },
+  });
+  flushSync();
+  await settle();
+
+  sources = ["jira"];
+  flushSync();
+  await settle();
+
+  expect(calls).toEqual(['read ["gitea"] null 50', 'read ["jira"] null 50']);
+  unmount(app);
+  target.remove();
+});
+
+test("a finished sync run asks for a pass and then reads what it proposed", async () => {
+  const { target, app } = render();
+  await settle();
+  calls.length = 0;
+
+  // A run starting is no new material; one finishing is.
+  emit("sync:state", { source_id: "jira", running: true });
+  await settle();
+  expect(calls).toEqual([]);
+
+  emit("sync:state", { source_id: "jira", running: false });
+  await settle();
+  expect(calls).toEqual(["detect", "read [] null 50"]);
+
+  unmount(app);
+  target.remove();
+});
+
+test("a pass that gave up is a muted line over the rows, and the next pass clears it", async () => {
+  reads = [
+    () => Promise.resolve(page([entry()])),
+    () => Promise.resolve(page([entry()])),
+    () => Promise.resolve(page([entry()])),
+  ];
+  const { target, app } = render();
+  await settle();
+
+  // #745: the backend cancels a pass that runs past its limit, and the next
+  // one carries on. What is drawn is still right, so it stays drawn.
+  detected = () =>
+    Promise.reject({
+      code: "internal",
+      message: "the suggestion pass ran past its 120s limit and stopped",
+    });
+  emit("sync:state", { source_id: "jira", running: false });
+  await settle();
+  expect(target.querySelector(".pass-note")?.textContent).toContain(
+    "ran past its 120s limit",
+  );
+  expect(
+    target.querySelector(".fail"),
+    "a pass that gave up is not a failed tray",
+  ).toBeNull();
+  expect(target.querySelectorAll(".row.sug").length).toBe(1);
+
+  detected = null;
+  emit("sync:state", { source_id: "jira", running: false });
+  await settle();
+  expect(
+    target.querySelector(".pass-note"),
+    "the next finished pass clears the line",
+  ).toBeNull();
+  expect(target.querySelectorAll(".row.sug").length).toBe(1);
 
   unmount(app);
   target.remove();
