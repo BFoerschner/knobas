@@ -394,10 +394,11 @@ async fn a_batch_that_always_times_out_is_halved_then_its_item_skipped() {
     assert!(!proposals.is_empty());
     // The skipped item's own comparison never ran, so it is not paired with
     // the items settled before it (K-0, K-1); a later item may still find it.
+    let earlier = ["jira:K-0", "jira:K-1"];
     assert!(
         proposals.iter().all(|(from, to, _)| {
-            !(from == "jira:K-2" && ["jira:K-0", "jira:K-1"].contains(&to.as_str()))
-                && !(to == "jira:K-2" && ["jira:K-0", "jira:K-1"].contains(&from.as_str()))
+            let paired = |a: &str, b: &str| a == "jira:K-2" && earlier.contains(&b);
+            !paired(from, to) && !paired(to, from)
         }),
         "the skipped item was not compared with its predecessors: {proposals:?}"
     );

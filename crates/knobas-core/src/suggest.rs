@@ -853,6 +853,10 @@ const MARK_SEEN: &str = concat!(
 /// the pass's statement timeout.
 pub const SIMILAR_TEXT_BATCH: usize = 100;
 
+/// See [`Pacing::stall`].
+#[doc(hidden)]
+pub type Stall = Box<dyn Fn(&[String]) -> bool + Send + Sync>;
+
 /// How big the next `similar_text` batch is, kept across passes (#755).
 ///
 /// A batch that runs past the statement timeout is halved and the pass gives
@@ -866,7 +870,7 @@ pub struct Pacing {
     /// Test hook: batches this answers `true` for time out as if the server
     /// had cancelled them.
     #[doc(hidden)]
-    pub stall: Option<Box<dyn Fn(&[String]) -> bool + Send + Sync>>,
+    pub stall: Option<Stall>,
 }
 
 impl Pacing {
