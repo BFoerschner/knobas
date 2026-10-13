@@ -584,3 +584,89 @@ test("the last day is singular and amber, not '1 days'", () => {
 test("a malformed stamp says nothing rather than NaN", () => {
   expect(expiryNote("whenever", NOW)).toBeNull();
 });
+
+/* ── #746: a read that is waiting or failed is not an empty store ─────── */
+
+test("the store is loading until the first read answers, never ready-and-empty", async () => {
+  const events = fakeListen();
+  const never = new Promise<CredentialHealth[]>(() => {});
+  const health = createHealth({ credentialHealth: () => never, listen: events.listen });
+  const stop = health.start();
+  expect(health.phase).toBe("loading");
+  void health.reseed();
+  await Promise.resolve();
+  expect(health.phase).toBe("loading");
+  expect(health.all).toEqual([]);
+  stop();
+});
+
+test("a rejected read is failed with its reason, and ready once a retry lands", async () => {
+  vi.useFakeTimers();
+  try {
+    const events = fakeListen();
+    const credentialHealth = vi
+      .fn<() => Promise<CredentialHealth[]>>()
+      .mockRejectedValueOnce({ code: "internal", message: "keychain is locked" })
+      .mockResolvedValue([row("gitea", "ok")]);
+    const health = createHealth({ credentialHealth, listen: events.listen });
+    const stop = health.start();
+    await health.reseed();
+    expect(health.phase).toBe("failed");
+    expect(health.error).toContain("keychain is locked");
+    expect(health.all).toEqual([]);
+
+    // The retry is the store's own: nobody has to call reseed again.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(credentialHealth).toHaveBeenCalledTimes(2);
+    expect(health.phase).toBe("ready");
+    expect(health.error).toBeNull();
+    expect(health.get("gitea")?.state).toBe("ok");
+    stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("retries back off, and stop() ends them", async () => {
+  vi.useFakeTimers();
+  try {
+    const events = fakeListen();
+    const credentialHealth = vi.fn<() => Promise<CredentialHealth[]>>().mockRejectedValue(new Error("down"));
+    const health = createHealth({ credentialHealth, listen: events.listen });
+    const stop = health.start();
+    await health.reseed();
+    expect(credentialHealth).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(credentialHealth).toHaveBeenCalledTimes(2);
+    // The second wait is longer than the first.
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(credentialHealth).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(credentialHealth).toHaveBeenCalledTimes(3);
+    stop();
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(credentialHealth).toHaveBeenCalledTimes(3);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a failure after a good read keeps what is known and stays ready", async () => {
+  vi.useFakeTimers();
+  try {
+    const events = fakeListen();
+    const credentialHealth = vi
+      .fn<() => Promise<CredentialHealth[]>>()
+      .mockResolvedValueOnce([row("gitea", "ok")])
+      .mockRejectedValue(new Error("down"));
+    const health = createHealth({ credentialHealth, listen: events.listen });
+    const stop = health.start();
+    await health.reseed();
+    await health.reseed();
+    expect(health.phase).toBe("ready");
+    expect(health.get("gitea")?.state).toBe("ok");
+    stop();
+  } finally {
+    vi.useRealTimers();
+  }
+});

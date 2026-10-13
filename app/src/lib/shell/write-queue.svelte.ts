@@ -288,6 +288,12 @@ export interface WriteQueue {
   readonly rows: QueuedWrite[];
   /** Set when the last read or action failed, so the panel can say so. */
   readonly error: string | null;
+  /**
+   * Whether a read has ever succeeded (#746): `rows` being `[]` means "nothing
+   * is queued" only after this; before it, it is the list the store was built
+   * with.
+   */
+  readonly answered: boolean;
   /** True while an action is in flight, so a button cannot be double-fired. */
   readonly busy: boolean;
   refresh(): Promise<void>;
@@ -303,7 +309,8 @@ export function createWriteQueue(): WriteQueue {
     rows: QueuedWrite[];
     error: string | null;
     busy: boolean;
-  }>({ counts: NONE, rows: [], error: null, busy: false });
+    answered: boolean;
+  }>({ counts: NONE, rows: [], error: null, busy: false, answered: false });
 
   async function refresh(): Promise<void> {
     try {
@@ -313,6 +320,7 @@ export function createWriteQueue(): WriteQueue {
       state.counts = counts;
       state.rows = rows;
       state.error = null;
+      state.answered = true;
     } catch (error) {
       // The counts are left where they were rather than zeroed: a failed read
       // is not evidence that nothing is owed, and a badge that blinked to zero
@@ -351,6 +359,9 @@ export function createWriteQueue(): WriteQueue {
     },
     get error() {
       return state.error;
+    },
+    get answered() {
+      return state.answered;
     },
     get busy() {
       return state.busy;

@@ -22,6 +22,7 @@
     happened yet.
 -->
 <script lang="ts">
+  import { ipcErrorMessage } from "../ipc";
   import { getEntity, type EntityDetail } from "../ipc/entity";
   import { listEntities } from "../ipc/entity";
   import {
@@ -57,6 +58,9 @@
   let ticket = $state<EntityDetail | null>(null);
   /** The repositories the reader may choose between (story 5). */
   let repos = $state<{ entity_id: string; title: string }[]>([]);
+  /** Why the repository read failed, or `null`; `reposRead` once it answered (#746). */
+  let reposError = $state<string | null>(null);
+  let reposRead = $state(false);
   let chosen = $state<string>("");
   /** The step whose proposal is open for editing. One at a time. */
   let editing = $state<number | null>(null);
@@ -83,29 +87,43 @@
    * says which repo its work belongs in — so the reader picks, which is story 5
    * exactly rather than a gap in the proposal.
    */
+  async function readRepos() {
+    reposError = null;
+    try {
+      const page = await listEntities(
+        {
+          sources: [],
+          kinds: ["repo"],
+          updated_within_days: null,
+          context: null,
+          project: null,
+          order: "title_asc",
+          include_deleted: false,
+        },
+        200,
+        0,
+      );
+      repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
+      chosen = repos[0]?.entity_id ?? "";
+      reposRead = true;
+    } catch (cause) {
+      // Not "none mirrored": the read failed, and that is a different fact.
+      // `repos` is left alone: reassigning an empty list to itself re-runs the
+      // effect that reads it, and a failing read would loop.
+      reposError = ipcErrorMessage(cause);
+    }
+  }
+
+  /**
+   * Asked once. The effect reads `repos`, and a read that answers with none
+   * assigns a fresh empty list, which re-runs it: against a mirror with no
+   * repository that was a read loop, one per answer.
+   */
+  let reposAsked = false;
   $effect(() => {
-    if (flow.steps.length > 0 || repos.length > 0) return;
-    void (async () => {
-      try {
-        const page = await listEntities(
-          {
-            sources: [],
-            kinds: ["repo"],
-            updated_within_days: null,
-            context: null,
-            project: null,
-            order: "title_asc",
-            include_deleted: false,
-          },
-          200,
-          0,
-        );
-        repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
-        chosen = repos[0]?.entity_id ?? "";
-      } catch {
-        repos = [];
-      }
-    })();
+    if (flow.steps.length > 0 || repos.length > 0 || reposAsked) return;
+    reposAsked = true;
+    void readRepos();
   });
 
   /** The step the sequence is on — the only one that may be acted upon. */
@@ -187,7 +205,12 @@
         Nothing has been proposed yet. Choose the repository the branch and the pull request go
         in — a ticket does not say which, so this is yours to pick.
       </p>
-      {#if repos.length === 0}
+      {#if reposError !== null}
+        <p class="sw-note fail">Could not read the repositories: {reposError}</p>
+        <button class="btn sm" onclick={() => void readRepos()}>Retry</button>
+      {:else if !reposRead}
+        <p class="sw-note">Reading the repositories…</p>
+      {:else if repos.length === 0}
         <p class="sw-note">
           No repository has been mirrored yet. Add a source that syncs repositories, then come
           back.

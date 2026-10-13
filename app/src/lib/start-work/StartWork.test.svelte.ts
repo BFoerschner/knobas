@@ -35,6 +35,9 @@ function record<T>(command: string, args: unknown, value: T): Promise<T> {
   return Promise.resolve(value);
 }
 
+/** Replaces the repository read, to hold it in flight or fail it (#746). */
+let reposRead: (() => Promise<unknown>) | null = null;
+
 vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
@@ -56,6 +59,7 @@ vi.mock("../ipc/entity", () => ({
   // opens over. Not what this file is about, so it answers with nothing.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   listEntities: () =>
+    reposRead?.() ??
     record("list_entities", null, {
       rows: [
         {
@@ -190,6 +194,7 @@ beforeEach(() => {
   calls.length = 0;
   flow = [];
   reject = null;
+  reposRead = null;
   document.body.replaceChildren();
 });
 
@@ -452,4 +457,32 @@ test("editing one field keeps the op it is a field of", () => {
   expect(after.CreatePullRequest!.head).toBe(
     "feature/PAY-231-payout-dashboard-latency",
   );
+});
+
+// -- #746: repositories being read, or failed to read, are not "none mirrored" -
+
+test("a repository read that never answers does not say 'No repository has been mirrored'", async () => {
+  reposRead = () => new Promise(() => {});
+  const screen = render();
+  await settle();
+  expect(screen.text()).toContain("Reading the repositories");
+  expect(screen.text()).not.toContain("No repository has been mirrored");
+  screen.done();
+});
+
+test("a rejected repository read shows the reason, not 'No repository has been mirrored'", async () => {
+  reposRead = () => Promise.reject({ code: "internal", message: "database is busy" });
+  const screen = render();
+  await settle();
+  expect(screen.text()).toContain("database is busy");
+  expect(screen.text()).not.toContain("No repository has been mirrored");
+  screen.done();
+});
+
+test("a repository read that answers with none says so", async () => {
+  reposRead = () => Promise.resolve({ rows: [], total: 0 });
+  const screen = render();
+  await settle();
+  expect(screen.text()).toContain("No repository has been mirrored");
+  screen.done();
 });

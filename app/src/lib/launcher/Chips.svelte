@@ -17,8 +17,20 @@
   import type { CredentialHealth } from "../ipc/sources";
   import { isActionable } from "../shell/health.svelte";
 
-  let { interpreted, sources }: { interpreted: ParsedQuery; sources: CredentialHealth[] } =
-    $props();
+  let {
+    interpreted,
+    sources,
+    sourcesRead = true,
+  }: {
+    interpreted: ParsedQuery;
+    sources: CredentialHealth[];
+    /**
+     * Whether the source list has been read (#746). "No source matches /cf" is
+     * a claim about that list; before it has answered, the chip says only that
+     * the sources are not read yet.
+     */
+    sourcesRead?: boolean;
+  } = $props();
 
   /** The prefix chip, in the words the `?` card uses. */
   const PREFIX_LABEL: Record<string, string> = {
@@ -44,7 +56,9 @@
    */
   function reason(token: string): string {
     const key = token.split(":")[0]?.toLowerCase() ?? "";
-    if (token.startsWith("/")) return `no source matches ${token}`;
+    if (token.startsWith("/")) {
+      return sourcesRead ? `no source matches ${token}` : "the sources have not been read yet";
+    }
     if (key === "env" || key === "health") return "the estate arrives with assets";
     if (key === "type" || key === "kind") return "no such kind, or no value yet";
     if (key === "updated") return "not a duration — try today, 7d, 2w";

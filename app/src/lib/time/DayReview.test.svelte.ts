@@ -66,6 +66,8 @@ function render(
     onchanged?: () => void;
     /** The day reaches back past what retention swept (#337). */
     pastHorizon?: boolean;
+    /** Replaces the day read, to hold it in flight or fail it (#746). */
+    dayBlocks?: () => Promise<{ blocks: DayBlock[]; past_horizon: boolean }>;
   } = {},
 ) {
   const updates: Update[] = [];
@@ -94,6 +96,7 @@ function render(
       ports: {
         dayBlocks: (from: string, to: string) => {
           asked.push([from, to]);
+          if (over.dayBlocks) return over.dayBlocks();
           return Promise.resolve({
             blocks: listed,
             past_horizon: over.pastHorizon ?? false,
@@ -812,4 +815,25 @@ test("a day past the horizon still draws the blocks it was already offered", asy
   expect(strip()).toEqual(["block"]);
   expect(text()).toContain("what was open — not tracked");
   expect(button("Assign…"), "the block is still the reader's to claim").toBeTruthy();
+});
+
+// -- #746: a day that is being read, or failed to read, is not an empty day ----
+
+test("a day read that never answers does not say 'Nothing tracked on this day'", async () => {
+  vi.useFakeTimers();
+  try {
+    render([], { dayBlocks: () => new Promise(() => {}) });
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(text()).toContain("Reading the day");
+    expect(text()).not.toContain("Nothing tracked on this day");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a rejected day read shows the reason, not 'Nothing tracked on this day'", async () => {
+  render([], { dayBlocks: () => Promise.reject({ code: "internal", message: "database is busy" }) });
+  await vi.waitFor(() => expect(text()).toContain("database is busy"));
+  expect(text()).not.toContain("Nothing tracked on this day");
 });

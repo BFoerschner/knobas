@@ -952,6 +952,7 @@
   <Launcher
     bind:open={launcherOpen}
     sources={health.all}
+    sourcesRead={{ phase: health.phase, error: health.error, retry: () => void health.reseed() }}
     {openEntity}
     onlink={(targetId, targetTitle) => {
       // Guarded because the prop outlives one keystroke: the chain is only

@@ -74,12 +74,14 @@
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
   import type { LauncherRow } from "./rows";
+  import type { HealthPhase } from "../shell/health.svelte";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
 
   let {
     open = $bindable(false),
     sources,
+    sourcesRead,
     actions = [],
     onnavigate,
     onclose,
@@ -102,6 +104,13 @@
      * `health` below.
      */
     sources?: CredentialHealth[] | undefined;
+    /**
+     * How the shell's read of `sources` stands (#746). Omitted, the list is
+     * taken as read. An empty `sources` is "none configured" only when `phase`
+     * is `ready`; while it waits or has failed the board and the chips say
+     * so, and `retry` is offered.
+     */
+    sourcesRead?: { phase: HealthPhase; error: string | null; retry: () => void } | undefined;
     /** Extras appended to `>` — things only the shell knows it can offer. */
     actions?: LauncherAction[];
     onnavigate: (hash: string) => void;
@@ -225,6 +234,8 @@
    * because a live subscription is fresher than a per-opening fetch.
    */
   const health = $derived(sources ?? session.home?.sources ?? []);
+  /** Whether the list above is an answer, for the claims drawn from it. */
+  const sourcesPhase = $derived(sourcesRead?.phase ?? "ready");
 
   let box = $state<ReturnType<typeof QueryBox> | null>(null);
 
@@ -736,12 +747,20 @@
       {/if}
 
       {#if interpreted}
-        <Chips {interpreted} sources={health} />
+        <Chips {interpreted} sources={health} sourcesRead={sourcesPhase === "ready"} />
       {/if}
 
       <div class="rlist" role="listbox" tabindex="-1" aria-label="Results">
         {#if session.error}
           <p class="none err">{session.error}</p>
+          <!-- A board that failed to load has nothing else to offer; a failed
+               search is retried by typing. -->
+          {#if !session.home}
+            <button class="pfx" onclick={() => void session.loadHome()}>
+              <span class="nm">Retry</span>
+              <span class="s">Read the board again.</span>
+            </button>
+          {/if}
         {:else if session.mode === "url"}
           <!--
             A pasted link. A hit never draws: the effect above navigates on the
@@ -764,6 +783,7 @@
             <Board
               home={session.home}
               sources={health}
+              reading={sourcesRead}
               rows={session.rows}
               selected={session.selected}
               {renaming}

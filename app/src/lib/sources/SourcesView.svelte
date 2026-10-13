@@ -68,6 +68,7 @@
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
+  import { patience } from "../shell/patience.svelte";
   import { push } from "../shell/toasts.svelte";
   import AddSource from "./AddSource.svelte";
   import { failedReport } from "./connection";
@@ -93,6 +94,13 @@
   } = $props();
 
   let sources = $state<SourceSummary[]>([]);
+  /**
+   * Whether a `list_sources` has answered (#746). `sources` being `[]` means
+   * "none configured" only after this; before it, it is the absence of an
+   * answer, and the view says it is reading instead of inviting an add.
+   */
+  let loaded = $state(false);
+  const wait = patience(() => !loaded && error === null);
   let error = $state<string | null>(null);
   /** Live sync status per source id, from `sync:state`. */
   let statuses = $state<Record<string, SourceSyncStatus>>({});
@@ -136,6 +144,7 @@
     return read(listSources, {
       ok: (rows) => {
         sources = rows;
+        loaded = true;
         error = null;
         // A re-list is a newer fact about every row than a test result was.
         tests = {};
@@ -333,7 +342,7 @@
 
 <div class="view">
   <div class="room-bar">
-    <h1>Sources <span class="k">{sources.length}</span></h1>
+    <h1>Sources {#if loaded}<span class="k">{sources.length}</span>{/if}</h1>
     <span class="acts">
       {#if sources.length > 0}
         <button class="btn sm" onclick={() => void all()}>Sync all</button>
@@ -350,6 +359,12 @@
         <p class="mono fail">{error}</p>
         <button class="btn" onclick={() => void load()}>Retry</button>
       </div>
+    {:else if !loaded}
+      <!-- Silent under the placeholder threshold (#703's rule): the wait is
+           not an empty list, and a line for a local answer would flicker. -->
+      {#if wait.slow}
+        <div class="empty"><p>Reading the sources…</p></div>
+      {/if}
     {:else}
       {#if sources.length > 0}
         <div class="src hd" aria-hidden="true">

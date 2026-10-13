@@ -21,7 +21,7 @@
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
-import { EVENTS } from "../ipc";
+import { EVENTS, ipcErrorMessage } from "../ipc";
 import { credentialHealth as realCredentialHealth, type AuthState, type CredentialHealth } from "../ipc/sources";
 
 /**
@@ -101,7 +101,23 @@ export interface HealthPorts {
 }
 
 /** The live credential health of every source knobas knows about. */
+/**
+ * What the store knows about its own seed (#746). An empty store is a claim
+ * ("no source is configured") only in `ready`; in `loading` and `failed` it
+ * is the absence of an answer, and every surface that says "no source" from
+ * it must say so instead.
+ */
+export type HealthPhase = "loading" | "ready" | "failed";
+
+/** The first retry waits this long; each next one doubles, up to {@link RETRY_MAX_MS}. */
+export const RETRY_MIN_MS = 1_000;
+export const RETRY_MAX_MS = 30_000;
+
 export interface Health {
+  /** Whether the seed has answered; see {@link HealthPhase}. */
+  readonly phase: HealthPhase;
+  /** Why the last seed failed, or `null`. */
+  readonly error: string | null;
   /** Every source, by `source_id`, so the strip's order never jitters. */
   readonly all: CredentialHealth[];
   /** The ones a person has to act on. */
@@ -241,12 +257,27 @@ export function createHealth(ports?: HealthPorts): Health {
   const state = $state<{ by: Record<string, CredentialHealth> }>({ by: {} });
 
   let live = false;
+  let phase = $state<HealthPhase>("loading");
+  let error = $state<string | null>(null);
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let retryMs = RETRY_MIN_MS;
+
+  function stopRetrying() {
+    if (retryTimer !== undefined) clearTimeout(retryTimer);
+    retryTimer = undefined;
+  }
 
   function apply(next: CredentialHealth) {
     state.by = { ...state.by, [next.source_id]: next };
   }
 
   return {
+    get phase() {
+      return phase;
+    },
+    get error() {
+      return error;
+    },
     get all() {
       return Object.values(state.by).sort((a, b) => a.source_id.localeCompare(b.source_id));
     },
@@ -271,18 +302,30 @@ export function createHealth(ports?: HealthPorts): Health {
       state.by = by;
     },
     async reseed() {
+      stopRetrying();
       try {
         const rows = await io.credentialHealth();
         if (!live) return;
         this.replace(rows);
-      } catch {
-        // The keychain being locked answers `internal`, and that is not a
-        // reason to take the window down — the subscription still delivers.
-        //
-        // It is no longer where a `not_ready` goes to die: the shell calls
-        // this only once the lifecycle says the database is up, so a rejection
-        // here is a real fault rather than the ordinary boot race it used to
-        // be mistaken for.
+        phase = "ready";
+        error = null;
+        retryMs = RETRY_MIN_MS;
+      } catch (cause) {
+        // A failed seed is not an empty store (#746): say so, with the
+        // reason, and try again by ourselves. The scheduler emits
+        // `source:health` on a change only, so a steady install that missed
+        // its one seed would otherwise stay blank for the session.
+        if (!live) return;
+        error = ipcErrorMessage(cause);
+        // A good read earlier still stands; only a store that never had one
+        // is failed.
+        if (phase !== "ready") phase = "failed";
+        const wait = retryMs;
+        retryMs = Math.min(retryMs * 2, RETRY_MAX_MS);
+        retryTimer = setTimeout(() => {
+          retryTimer = undefined;
+          void this.reseed();
+        }, wait);
       }
     },
     start() {
@@ -321,6 +364,7 @@ export function createHealth(ports?: HealthPorts): Health {
 
       return () => {
         live = false;
+        stopRetrying();
         off?.();
         off = undefined;
       };

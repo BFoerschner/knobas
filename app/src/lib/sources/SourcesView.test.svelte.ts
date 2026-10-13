@@ -1236,6 +1236,28 @@ test("listSources failing renders an error panel, not an empty list", async () =
   expect(rows().length).toBe(1);
 });
 
+test("a list_sources that never answers is never 'No sources': silent first, then a reading line (#746)", async () => {
+  vi.useFakeTimers();
+  try {
+    answerList = () => new Promise<SourceSummary[]>(() => {});
+    render();
+    await settle();
+    // Under the placeholder threshold: nothing is claimed and nothing flickers.
+    expect(text()).not.toContain("No sources");
+    expect(text()).not.toContain("Reading the sources");
+    await vi.advanceTimersByTimeAsync(400);
+    flushSync();
+    expect(text()).toContain("Reading the sources");
+    expect(text()).not.toContain("No sources");
+    expect(text()).not.toContain("Could not read");
+    // The count is a claim too: a loading view has none to show.
+    expect(target.querySelector("h1 .k")).toBeNull();
+    expect(button("Sync all")).toBeUndefined();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
 test("no sources at all invites adding one, and says nothing about failure", async () => {
   sources = [];
   render();
