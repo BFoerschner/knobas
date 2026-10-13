@@ -2098,6 +2098,7 @@ knobas-source-gitea	test/it	view_pr::a_pull_request_with_no_reviews_shows_no_ver
 knobas-source-gitea	test/it	view_pr::a_pull_requests_tabs_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_pr::a_reviews_verdict_is_its_tone_in_the_conversation
 knobas-source-gitea	test/it	view_pr::a_section_read_carries_no_toolbar
+knobas-source-gitea	test/it	view_pr::a_stale_approval_counts_unless_the_protection_ignores_it
 knobas-source-gitea	test/it	view_pr::a_view_whose_viewer_cannot_be_read_still_offers_the_review
 knobas-source-gitea	test/it	view_pr::an_action_that_can_never_apply_is_not_offered
 knobas-source-gitea	test/it	view_pr::an_open_mergeable_pull_request_offers_a_merge_in_its_toolbar

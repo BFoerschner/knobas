@@ -11339,7 +11339,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   still checking* (the flag does not tell the two apart; #721 refines the second); a head behind
   a base whose protection sets `block_on_outdated_branch` (*behind {base}, which its protection
   forbids: update the branch*); fewer official, undismissed approvals than the base branch's
-  `required_approvals` (*{n} of {m} required approvals*). The overview's fact reads *yes*
+  `required_approvals`, a `stale` one left out where the protection sets
+  `ignore_stale_approvals`, as Gitea's own count does (*{n} of {m} required approvals*). The overview's fact reads *yes*
   (untoned; *yes, behind {base}* where the head is behind but that is allowed) or *no: …* toned
   warn. On a closed or merged pull request neither *Merge…* nor *Update branch…* is offered (the
   #701 ruling: absent where nothing can make them apply), which the ticket's *disabled with
@@ -11377,7 +11378,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   `what_does_not_stand_in_the_way_leaves_the_merge_enabled`,
   `a_merge_deletes_its_branch_by_default_only_where_it_can`,
   `update_branch_is_offered_where_the_head_is_behind`,
-  `the_overview_read_alone_says_the_same_mergeability`); the frontend's `actions.test.ts`.
+  `the_overview_read_alone_says_the_same_mergeability`,
+  `a_stale_approval_counts_unless_the_protection_ignores_it`); the frontend's `actions.test.ts`.
   Witnessed against the real server by `just gitea-live`'s
   `a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_branch` (on a pull request
   the test opens: a commit pushed to its base through the contents API, *Update branch…*
