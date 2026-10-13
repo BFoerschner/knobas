@@ -1598,8 +1598,11 @@ async fn authored(pool: &PgPool, entity: &str, author: &str) {
 
 /// A repo of pull requests and branches by `björn` and by others, each dated
 /// so that recency alone would draw them in another order than the groups
-/// do. Returns the source and the Code tile's page of it.
-async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::entity::EntityPage) {
+/// do. Returns the source and the Code tile's page of it, read over `kinds`.
+async fn code_room(
+    username: Option<&str>,
+    kinds: &[&str],
+) -> (String, knobas_app::commands::entity::EntityPage) {
     let pool = seeded().await;
     let gitea = configured_as(&pool, username).await;
     let repo =
@@ -1672,7 +1675,7 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
         &pool,
         &EntityFilter {
             sources: vec![gitea.clone()],
-            kinds: vec!["pr".to_owned(), "branch".to_owned()],
+            kinds: kinds.iter().map(|&k| k.to_owned()).collect(),
             order: EntityOrder::Attention,
             ..all()
         },
@@ -1698,7 +1701,7 @@ async fn code_room(username: Option<&str>) -> (String, knobas_app::commands::ent
 #[tokio::test]
 async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
     use knobas_app::commands::entity::{AttentionGroup, GroupTally};
-    let (gitea, page) = code_room(Some("björn")).await;
+    let (gitea, page) = code_room(Some("björn"), &["pr", "branch"]).await;
 
     let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
     let pr = |n: u32| format!("{gitea}:tidewater/payout-service#{n}");
@@ -1747,12 +1750,42 @@ async fn the_code_tile_draws_what_needs_me_first_in_four_groups() {
     assert_eq!(page.total, 10);
 }
 
+/// A room that holds a branch and not the pull request opened from it does
+/// not call the branch unproposed (#712): the open pull requests are read
+/// across the live corpus, not the room.
+#[tokio::test]
+async fn a_branch_whose_pull_request_is_outside_the_room_stays_proposed() {
+    use knobas_app::commands::entity::{AttentionGroup, GroupTally};
+    let (gitea, page) = code_room(Some("björn"), &["branch"]).await;
+
+    let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
+    let branch = |repo: &str, name: &str| format!("{gitea}:tidewater/{repo}@refs/heads/{name}");
+    assert_eq!(
+        ids.last(),
+        Some(&branch("payout-service", "björn/sepa")),
+        "my open pull request's branch is not mine-and-unproposed: {ids:?}"
+    );
+    assert_eq!(
+        page.groups,
+        Some(vec![
+            GroupTally {
+                group: AttentionGroup::MyBranches,
+                count: 4
+            },
+            GroupTally {
+                group: AttentionGroup::OtherBranches,
+                count: 2
+            },
+        ]),
+    );
+}
+
 /// A source with no configured identity draws the Code tile as it always
 /// did (#680): open pull requests first, newest first, then branches by
 /// recency, and no groups at all.
 #[tokio::test]
 async fn a_code_tile_with_no_identity_draws_todays_order() {
-    let (gitea, page) = code_room(None).await;
+    let (gitea, page) = code_room(None, &["pr", "branch"]).await;
 
     let ids: Vec<String> = page.rows.iter().map(|r| r.entity_id.clone()).collect();
     let pr = |n: u32| format!("{gitea}:tidewater/payout-service#{n}");

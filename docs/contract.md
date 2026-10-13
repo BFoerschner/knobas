@@ -10850,16 +10850,18 @@ From this commit on, each of the following requires an orchestrator decision **a
   `app/src/lib/ipc/entity.ts` as `GroupTally` and `AttentionGroup`.
 
   **The rule** (`LIVE_ATTENTION`, one statement, still unnamed). "Me" is the row's **own
-  source's** `config.username`, blank as none, compared case-sensitively as the inbox and standup
+  source's** `config.username`, trimmed, blank as none, compared case-sensitively as the inbox and standup
   compare (they union every enabled source's; a Gitea author is compared with the Gitea username
   only). After the settled rows are dropped: a `pr` whose declared reviewers include me (1), a
   `pr` I authored (2), any other `pr` (3), a `branch` I last committed to that no open `pr` of
   the same source names as `head` under the same declared parent path line (4), a `branch` whose
   source has no username (5, `branches`; ruled 2026-10-13 on #712, so a source without identity
-  keeps its branches drawn in a mixed room), anything else (6). The repo is matched by the path line (Gitea's `owner/name`), not by the name set
-  `sync.item_parent` keeps, whose bare `name` is shared across owners. A miss on either side (no
-  `head`, no parent) matches nothing, so the branch stays unproposed and drawn (ADR-0007). A
-  row whose source has no username is 3 or 5. A room where no row has one is not grouped
+  keeps its branches drawn in a mixed room), anything else (6). The repo is matched by the path
+  line (Gitea's `owner/name`), not by the name set `sync.item_parent` keeps, whose bare `name` is
+  shared across owners. A miss on either side (no `head`, no parent) matches nothing, so the
+  branch stays unproposed and drawn (ADR-0007). A pull request whose state misses counts as
+  open, as the tile draws it, so the branch it names is drawn as that pull request. A row whose
+  source has no username is 3 or 5. A room where no row has one is not grouped
   (`groups` `None`, and the order is exactly #680's). The open pull requests are read across the
   live corpus, not the room, so a context holding a branch without its pull request does not call
   the branch unproposed. Whether I reviewed since the last push is not asked: the mirror holds

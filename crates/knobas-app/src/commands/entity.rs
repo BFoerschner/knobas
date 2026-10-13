@@ -225,8 +225,8 @@ pub struct KindTally {
 /// Which of the Code tile's groups a row is drawn under (#712): what needs
 /// me first. Under [`EntityOrder::Attention`], in this order.
 ///
-/// "Me" is the row's **own source's** configured username, compared
-/// case-sensitively as the inbox and the standup compare it. A pull request
+/// "Me" is the row's **own source's** configured username, trimmed, and
+/// compared case-sensitively as the inbox and the standup compare it. A pull request
 /// and a branch are knobas' own words (`0001_init.sql`), and the inbox's
 /// review rule names `pr` the same way.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -403,7 +403,10 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// machine), against 25 ms for the whole `updated_desc` page. The path
 /// line is drawn for the page alone ([`tile_page!`]), and
 /// [`EntityOrder::LatestPerParent`] reads the state of each group's newest
-/// row only.
+/// row only. [`EntityOrder::Attention`]'s groups (#712) are the exception
+/// that pays: the reviewers are walked for a pull request whose source has
+/// a username, and the path line for a branch, because those are the rows
+/// the groups match; the Code tile's room holds only those two kinds.
 ///
 /// `materialized`, so the rule's column is computed once a row. Inlined, the
 /// CTE's column is an expression, and PostgreSQL evaluated it once for each
@@ -444,7 +447,8 @@ with ruled as materialized (
 /// 1-based [`AttentionGroup`] or `null`): the rows by group, then loudest
 /// tone first, then newest first, with the set's total, its [`KindTally`]
 /// and its [`GroupTally`]s beside every row. `null` groups are the whole set
-/// of an ungrouped read, which then orders exactly as before #712. The page is cut first and joined back to `sync.item`
+/// of an ungrouped read, which then orders exactly as before #712. The page
+/// is cut first and joined back to `sync.item`
 /// for the rest of each row, so the path line is drawn for the page's rows
 /// and no others.
 ///
@@ -518,7 +522,7 @@ const LIVE_ATTENTION: &str = concat!(
             ",\n         ",
             knobas_core::declared_state!("$8"),
             " as state, i.author, i.title, me.me,
-         coalesce((select true from ",
+         i.kind = 'pr' and me.me is not null and coalesce((select true from ",
             knobas_core::declared_list!("$8", "reviewers"),
             " v where v.value = me.me limit 1), false) as asked,
          case when i.kind = 'branch' then ",

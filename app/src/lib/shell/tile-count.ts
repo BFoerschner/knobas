@@ -19,7 +19,8 @@
  * Under `attention` with groups (#712), the groups instead: *2 to review · 3
  * mine · 5 open · 4 branches*.
  *
- * Driven by tones and declarations; no kind or adapter is named here.
+ * Driven by tones and declarations; no adapter is named here, and no kind
+ * but in the group phrases the backend's groups are already about.
  */
 import type { AttentionGroup, EntityOrder, EntityPage } from "../ipc/entity";
 
