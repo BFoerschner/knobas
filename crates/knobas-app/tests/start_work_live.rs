@@ -1667,7 +1667,7 @@ async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_th
     // watermark second out of the next read; a merge landing in that same
     // second is not mirrored by any later incremental run (measured: the
     // mirror still said "open" after five seconds of re-syncs, 3 runs in 4).
-    // That is the sync's to witness, not this test's -- filed on the PR.
+    // That is the sync's to witness, not this test's -- filed as #764.
     tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
     // Gitea computes mergeability on its own time, and a loaded machine can
     // outlast one call's five seconds: a few calls, and then say so if the
