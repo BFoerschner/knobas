@@ -232,9 +232,10 @@ pub struct KindTally {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AttentionGroup {
-    /// Open pull requests whose declared reviewers include me. Gitea keeps a
-    /// reviewer in that list until they review; whether they reviewed since
-    /// the last push is not in the mirror, so it is not asked.
+    /// Open pull requests whose declared reviewers include me (Gitea's
+    /// `requested_reviewers`, as the inbox reads it). Whether I reviewed
+    /// since the last push is not in the mirror -- it holds no reviews and
+    /// no push times -- so #712's clause asking it is dropped.
     ReviewRequested,
     /// Open pull requests I opened.
     MyPullRequests,
