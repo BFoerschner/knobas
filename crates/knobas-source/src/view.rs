@@ -34,6 +34,18 @@ pub struct SourceView {
     pub actions: Vec<ViewAction>,
 }
 
+impl SourceView {
+    /// A view of `sections` with no toolbar: what a section read answers, and
+    /// any view whose entity offers no action.
+    #[must_use]
+    pub fn new(sections: Vec<ViewSection>) -> Self {
+        Self {
+            sections,
+            actions: Vec::new(),
+        }
+    }
+}
+
 /// One tab of a view.
 ///
 /// A **deferred** section is expensive to read -- a pull request's files, a
@@ -182,6 +194,7 @@ pub struct ActionField {
     pub name: String,
     /// The field's label, in the reader's language.
     pub label: String,
+    /// How it asks: one line, several, one of a few, or a checkbox.
     pub kind: FieldKind,
     /// What the field starts with: a text's prefill, a choice's preselected
     /// option (`None` picks the first), a flag's `"true"` (`None` or anything
@@ -236,11 +249,14 @@ pub enum FieldKind {
 /// `label` the reader sees.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ChoiceOption {
+    /// What the op takes when this option is picked (`"squash"`).
     pub value: String,
+    /// What the reader sees (`"Squash"`).
     pub label: String,
 }
 
 impl ChoiceOption {
+    /// The option whose answer is `value`, shown as `label`.
     #[must_use]
     pub fn new(value: impl Into<String>, label: impl Into<String>) -> Self {
         Self {

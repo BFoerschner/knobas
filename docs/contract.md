@@ -10359,7 +10359,10 @@ From this commit on, each of the following requires an orchestrator decision **a
   a button per action, a dialog with the options as a radio group and the sentence as text. The
   detail queues the write through `submitWrite`, then re-reads the mirror and the view, so a
   merged pull request stops offering *Merge…*; `SourceView` drops the deferred tabs of the view
-  that was.
+  that was. *Superseded in part by #702's entry below (2026-10-13): `ActionsBlock.svelte` became
+  `ActionButtons.svelte` and `ActionDialog.svelte`, the dialog draws declared fields, and a merged
+  pull request keeps *Merge…* in its toolbar, disabled with the reason `Already merged`, rather than
+  dropping it.*
 
   Pinned by: `knobas_source`'s `every_op_has_its_own_snake_case_identifier`,
   `write_op_round_trips`, `a_merge_style_is_its_lowercase_word_and_nothing_else_decodes`,
@@ -10673,6 +10676,8 @@ From this commit on, each of the following requires an orchestrator decision **a
   the op: a branch field with a `datalist`, each value an input prefilled as drawn, a secret empty
   in a password field, *N changed* in the footer. `SourceView` hands it the values of the view's
   settings blocks whose `entity` is the view's own; `Detail` queues the payload as for any action.
+  *Superseded in part by #702's entry below (2026-10-13): `ActionDialog.svelte` draws that form
+  from the action's declared `branch` field and its `with_settings`, not from `actionForm`.*
 
   Pinned by: `knobas_source`'s `a_run_crosses_as_its_branch_and_its_overrides_in_order`,
   `every_op_has_its_own_snake_case_identifier` and `write_op_round_trips`; `knobas-core`'s
@@ -10743,7 +10748,8 @@ From this commit on, each of the following requires an orchestrator decision **a
      Some(section))`) answers the section alone and leaves `actions` empty: the toolbar comes with
      the whole view. `Block::Actions` stays in the vocabulary for an action that belongs to one
      section, and **an action is in one place or the other**; the shell drops from a block any
-     action the toolbar already draws (same `write_op` and `label`).
+     action the toolbar already draws (same `write_op` and `label`). `SourceView::new(sections)` is a view
+     with no toolbar.
   2. `ViewAction { write_op: String, label: String, fields: Vec<ActionField>, confirm:
      Option<String>, primary: bool, danger: bool, disabled: Option<String>, with_settings: bool }`
      — `fields`, `primary`, `danger`, `disabled` and `with_settings` `#[serde(default)]`.

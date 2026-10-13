@@ -65,7 +65,6 @@
       class:sm={size === "sm"}
       class:pri={action.primary && !action.danger && action.disabled === null}
       class:danger={action.danger}
-      class:off={action.disabled !== null}
       type="button"
       aria-disabled={action.disabled !== null || sending || undefined}
       aria-describedby={action.disabled !== null ? `ab-${uid}-${index}` : undefined}
@@ -95,15 +94,5 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
-  }
-
-  /* `.btn:disabled`'s look, kept focusable so the reason stays reachable. */
-  .btn.off {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  .btn.off:hover {
-    background: transparent;
   }
 </style>

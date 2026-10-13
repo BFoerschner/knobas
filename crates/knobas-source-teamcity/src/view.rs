@@ -898,10 +898,7 @@ async fn build(
             blocks,
         });
     }
-    Ok(SourceView {
-        sections,
-        actions: Vec::new(),
-    })
+    Ok(SourceView::new(sections))
 }
 
 fn build_type_id(record: &BuildRecord) -> Option<&str> {

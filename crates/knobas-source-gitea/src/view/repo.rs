@@ -75,10 +75,7 @@ pub(super) async fn draw(
             )));
         }
     };
-    Ok(SourceView {
-        sections,
-        actions: Vec::new(),
-    })
+    Ok(SourceView::new(sections))
 }
 
 async fn overview(

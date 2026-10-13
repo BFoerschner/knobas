@@ -557,6 +557,15 @@ test("a danger action always asks, with its sentence and its write in the error 
   screen.done();
 });
 
+test("a danger action the source sent without a sentence still asks before it writes", () => {
+  const screen = render(withToolbar(action("merge_pull_request", "Close…", { danger: true })), ["merge_pull_request"]);
+  button(toolbar(screen.target)!, "Close…")!.click();
+  flushSync();
+  expect(queued).toEqual([]);
+  expect(dialog().textContent).toContain("This cannot be undone from knobas.");
+  screen.done();
+});
+
 test("an actions block still draws in its own section, and never repeats a toolbar action", () => {
   const block = render(withActionsBlock(MERGE), ["merge_pull_request"]);
   expect(button(block.panel(), "Merge…")).toBeDefined();

@@ -91,10 +91,7 @@ async fn commit(
             )));
         }
     };
-    Ok(SourceView {
-        sections,
-        actions: Vec::new(),
-    })
+    Ok(SourceView::new(sections))
 }
 
 async fn commit_overview(

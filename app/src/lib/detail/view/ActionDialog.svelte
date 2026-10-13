@@ -15,6 +15,7 @@
   behind.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
   import type { ActionField, Setting, ViewAction } from "../../ipc/entity";
   import type { BuildParameter } from "../../ipc/sources";
   import Modal from "../../shell/Modal.svelte";
@@ -34,11 +35,13 @@
     onclose: () => void;
   } = $props();
 
-  // Read once: the dialog mounts afresh for each opening.
-  const initial = (() => {
-    const a = action;
-    return { values: initialValues(a), offered: a.with_settings ? settings : [] };
-  })();
+  // Read once, on purpose: the dialog mounts afresh for each opening, so the
+  // values start from the action as it was when pressed and never reset
+  // under the reader's typing. `untrack` says so to the rune compiler.
+  const initial = untrack(() => ({
+    values: initialValues(action),
+    offered: action.with_settings ? settings : [],
+  }));
 
   let values = $state<ActionValues>(initial.values);
   /** The settings this dialog offers, as drawn when it opened. */
@@ -77,14 +80,14 @@
   }
 
   /** Enter in a one-line field sends, as the button would; in a text area it takes Cmd/Ctrl. */
-  function enter(event: KeyboardEvent, multiline = false) {
+  function sendOnEnter(event: KeyboardEvent, multiline = false) {
     if (event.key !== "Enter" || (multiline && !(event.metaKey || event.ctrlKey))) return;
     event.preventDefault();
     void send();
   }
 
   /** Left and right move the pick, as a radio group does. */
-  function key(event: KeyboardEvent, field: ActionField, index: number) {
+  function movePick(event: KeyboardEvent, field: ActionField, index: number) {
     if (field.kind.type !== "choice") return;
     const options = field.kind.options;
     const to =
@@ -106,6 +109,9 @@
     <div class="ad" bind:this={form}>
       {#if action.confirm}
         <p class="ad-q" class:danger={action.danger}>{action.confirm}</p>
+      {:else if action.danger}
+        <!-- A danger always asks (spec #701); a source that sent no sentence gets the shell's. -->
+        <p class="ad-q danger">This cannot be undone from knobas.</p>
       {/if}
       {#each action.fields as field (field.name)}
         {@const bad = missing.includes(field.name)}
@@ -134,7 +140,7 @@
                 autocomplete="off"
                 spellcheck="false"
                 bind:value={values[field.name]}
-                onkeydown={(event) => enter(event)}
+                onkeydown={(event) => sendOnEnter(event)}
               />
               {#if field.kind.suggestions.length > 0}
                 <datalist id="{id(field)}-sug">
@@ -152,7 +158,7 @@
                 placeholder={field.placeholder ?? undefined}
                 aria-invalid={bad || undefined}
                 bind:value={values[field.name]}
-                onkeydown={(event) => enter(event, true)}
+                onkeydown={(event) => sendOnEnter(event, true)}
               ></textarea>
             {:else if field.kind.type === "choice" && field.kind.options.length > 4}
               <select
@@ -187,7 +193,7 @@
                     aria-checked={on}
                     tabindex={on ? 0 : -1}
                     onclick={() => (values[field.name] = option.value)}
-                    onkeydown={(event) => key(event, field, index)}
+                    onkeydown={(event) => movePick(event, field, index)}
                   >
                     {option.label}
                   </button>
@@ -216,7 +222,7 @@
                   autocomplete="off"
                   spellcheck="false"
                   bind:value={drafts[setting.name]}
-                  onkeydown={(event) => enter(event)}
+                  onkeydown={(event) => sendOnEnter(event)}
                 />
               {:else}
                 <span class="ad-pv">{setting.value}</span>
