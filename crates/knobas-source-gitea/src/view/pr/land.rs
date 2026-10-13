@@ -25,6 +25,9 @@ pub(super) struct Landing {
     required_approvals: u64,
     /// The base's protection refuses a merge of a head that is behind.
     block_on_outdated: bool,
+    /// The base's protection does not count an approval given before the
+    /// head last moved (Gitea's `ignore_stale_approvals`).
+    ignore_stale: bool,
     /// The head is a branch of this repository that is not protected, so
     /// Gitea would delete it after the merge.
     head_deletable: bool,
@@ -41,12 +44,14 @@ struct BranchRecord {
     effective_branch_protection_name: Option<String>,
 }
 
-/// Gitea's `BranchProtection`, the one field landing reads that the branch
+/// Gitea's `BranchProtection`, the fields landing reads that the branch
 /// record does not carry.
 #[derive(Debug, serde::Deserialize)]
 struct Protection {
     #[serde(default)]
     block_on_outdated_branch: bool,
+    #[serde(default)]
+    ignore_stale_approvals: bool,
 }
 
 /// A read Gitea refused or found nothing for is `None`: a base branch gone,
@@ -125,7 +130,10 @@ impl PullView<'_> {
                         .branch_protection_as::<Protection>(self.owner, self.repo, &rule)
                         .await,
                 )?;
-                landing.block_on_outdated = protection.is_some_and(|p| p.block_on_outdated_branch);
+                if let Some(protection) = protection {
+                    landing.block_on_outdated = protection.block_on_outdated_branch;
+                    landing.ignore_stale = protection.ignore_stale_approvals;
+                }
             }
         }
         Ok(landing)
@@ -189,7 +197,7 @@ fn blockers(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<Blocker> 
     if landing.block_on_outdated && landing.behind == Some(true) {
         blockers.push(Blocker::Outdated);
     }
-    let given = official_approvals(reviews);
+    let given = official_approvals(reviews, landing.ignore_stale);
     if given < landing.required_approvals {
         blockers.push(Blocker::Approvals {
             given,
@@ -208,13 +216,21 @@ fn is_wip(pull: &Pull) -> bool {
     })
 }
 
-/// The approvals Gitea counts against a protection: approving reviews it
-/// marks `official` (from a reviewer the protection names, and only each
-/// reviewer's latest) and has not dismissed.
-fn official_approvals(reviews: &[Review]) -> u64 {
+/// The approvals Gitea counts against a protection (its
+/// `GetGrantedApprovalsCount`): approving reviews it marks `official` (from a
+/// reviewer the protection names, and only each reviewer's latest), not
+/// dismissed, and not `stale` where the protection ignores stale approvals.
+/// A protection the token may not read counts a stale one, so the doubt
+/// leaves *Merge…* enabled and Gitea's refusal says the rest (ADR-0004).
+fn official_approvals(reviews: &[Review], ignore_stale: bool) -> u64 {
     reviews
         .iter()
-        .filter(|r| r.official && !r.dismissed && r.state.as_deref() == Some("APPROVED"))
+        .filter(|r| {
+            r.official
+                && !r.dismissed
+                && !(ignore_stale && r.stale)
+                && r.state.as_deref() == Some("APPROVED")
+        })
         .count() as u64
 }
 

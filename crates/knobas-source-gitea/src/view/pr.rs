@@ -571,6 +571,10 @@ struct Review {
     /// Counted against a protection's required approvals (#708).
     #[serde(default)]
     official: bool,
+    /// Given before the head last moved; not counted where the protection
+    /// ignores stale approvals (#708).
+    #[serde(default)]
+    stale: bool,
     #[serde(default)]
     body: Option<String>,
     /// As for [`Pull`]'s times, kept as text for [`when_of`].

@@ -1310,6 +1310,41 @@ async fn what_does_not_stand_in_the_way_leaves_the_merge_enabled() {
     assert_eq!(action(&view, "merge_pull_request").disabled, None);
 }
 
+/// An approval given before the head last moved is `stale`. Gitea counts it
+/// unless the base's protection ignores stale approvals, so knobas does too:
+/// the same review leaves *Merge…* enabled under one protection and short of
+/// its approvals under the other.
+#[tokio::test]
+async fn a_stale_approval_counts_unless_the_protection_ignores_it() {
+    let stale = json!([
+        { "id": 1, "user": { "login": "priya.nair" }, "state": "APPROVED", "official": true,
+          "stale": true }
+    ]);
+    for (ignore_stale, reason) in [(false, None), (true, Some("0 of 1 required approvals"))] {
+        let server = gitea(mergeable_pull(), stale.clone()).await;
+        let mut main = branch("main", true);
+        main["required_approvals"] = json!(1);
+        answer(&server, format!("{REPO}/branches/main"), 200, main).await;
+        answer(
+            &server,
+            format!("{REPO}/branch_protections/main"),
+            200,
+            json!({
+                "rule_name": "main",
+                "required_approvals": 1,
+                "ignore_stale_approvals": ignore_stale,
+            }),
+        )
+        .await;
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        assert_eq!(
+            action(&view, "merge_pull_request").disabled.as_deref(),
+            reason,
+            "ignore_stale_approvals: {ignore_stale}"
+        );
+    }
+}
+
 /// *Delete branch after merge* is ticked where Gitea can delete the head: a
 /// branch of the same repository that is not protected. A protected head, a
 /// head in a fork, and a head branch already gone draw it unticked.
