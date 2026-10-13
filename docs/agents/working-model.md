@@ -143,6 +143,18 @@ This is the same failure the "commit before going idle" rule addresses, arriving
 
 **Before every `just check`, run `just pre-gate` (rule, 2026-10-13, #736 — from the #701 wave's timing).** About a third of that wave's gate re-runs failed on mechanical misses, and the merge-managers' time went to rebase conflicts in files every PR appends to. `just pre-gate` takes about a minute and does what a gate would have complained about: `cargo fmt --all` (the formatter itself; `just fmt` only checks), `just inventory-update`, the `$effect` cleanup table (`residue.test.svelte.ts`: a new component with an effect must be in it), the write-op count (`every_op_has_its_own_snake_case_identifier`: a new `WriteOp` variant needs its probe in `every_write_op` and the count bumped) and svelte-check; it prints what it changed, so you commit exactly that and then run `just check` once. The conflicts are removed at the source: `.gitattributes` gives `test-inventory.txt` and `docs/decisions/2026-10-unattended-rulings.md` `merge=union`, so two PRs appending to either rebase without a conflict (the union keeps every line; `inventory-update` restores the sort, and `scripts/append-only-merge-test.sh`, run by `just witness-unit`, scripts the rebase). `docs/contract.md` is deliberately left out: only §10.8 is appended to, its other sections are edited in place, and a union merge of an edited line keeps both versions; two PRs appending to §10.8 still conflict and a human resolves it, which keeps its single-writer rule checkable. Splitting §10.8 into one file per entry is a contract-process change, ticketed as #737.
 
+**Loop efficiency rules (Björn, 2026-10-13, #737; from the #701 wave's timing).**
+
+- **Tickets that touch the same code are bundled** into one ticket for one agent; tickets with no overlap run in parallel.
+- **The ticket rules on its foreseeable forks up front**, so the implementer is not stopped for a ruling the ticket could have given.
+- **The implementer runs the code review on the Standards axis only.** The merge-manager owns the Spec axis and the deep review.
+- **The merge-manager skips the READY TO MERGE stop when the queue is empty.** A live suite that is green on the exact merged head is not re-run.
+- **Mutation checks: 3 to 6 mutants** on the load-bearing logic, not one per helper.
+- **A live test that writes reuses the shared cleanup guard** (`Litter` in `live_gitea.rs` for Gitea) instead of writing a new one.
+- **Model choice:** Sonnet for small mechanical tickets and their merge-managers; Opus for tracers, frozen-surface and UI-heavy work; at most three Opus agents at once.
+- **A rebase that conflicts in many places is squashed first** and resolved once.
+- **§10.8 entries are one file each** under `docs/contract/10.8/` (see `docs/contract.md` §10.8); a PR adds a file and runs `just contract-index`, it never appends to `docs/contract.md`.
+
 **Branching model (decided 2026-08-24): trunk-based with short-lived task branches.** What actually keeps parallel features from breaking each other is not the branches — it's three structural rules; the branches just carry the work:
 
 1. **Streams own disjoint code.** The milestone streams are cut along crate/module boundaries (one crate per adapter, one component region per frontend surface), so concurrent PRs rarely touch the same files. Cross-cutting surfaces — the `Source` trait, the migrations directory, the IPC schema — are frozen and **single-writer (orchestrator)**; migrations are the #1 real-world collision source and are therefore requested from the orchestrator, never added inside a stream.
