@@ -939,6 +939,52 @@ builds-perf:
     fi
     exit "$status"
 
+# The UI pool under a syncing estate (#745): `knobas-app`'s one ignored test in
+# `tests/it/ui_pool_probe.rs` -- five slow sources syncing through the real
+# scheduler for three minutes while a frontend loop searches, opens, lists and
+# notes on a five-connection pool, `pg_stat_activity` sampled every second.
+# Red when the UI pool ran out of free connections in any sample, or any UI
+# call failed or took over a second. Like `builds-perf` it takes a gate slot,
+# prints the head and the load average before and after, and goes red when
+# other than the one pinned test ran. Sizes: `HP_SOURCES`, `HP_ITEMS`,
+# `HP_SECS` in the environment (defaults 5, 1000, 180).
+# Run the UI-pool starvation probe: five sources syncing, three minutes.
+ui-pool-probe:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    expected=1
+    log=
+    # shellcheck source=scripts/gate-slot.sh disable=SC1091
+    . ./scripts/gate-slot.sh
+    cleanup() { [ -z "$log" ] || rm -f "$log"; }
+    trap 'cleanup; release_slot' EXIT
+    trap 'cleanup; release_slot; trap - INT; kill -INT $$' INT
+    trap 'cleanup; release_slot; trap - TERM; kill -TERM $$' TERM
+    hold_gate_slot ui-pool-probe
+    log=$(mktemp "${TMPDIR:-/tmp}/knobas-ui-pool-probe.XXXXXX")
+    mark() {
+        local when=$1 tree=clean
+        [ -z "$(git status --porcelain)" ] || tree=dirty
+        echo "ui-pool-probe: $when head=$(git rev-parse HEAD) tree=$tree" \
+             "load1=$(uptime | sed -E 's/.*load averages?:[[:space:]]*//; s/[,[:space:]].*//')" \
+             "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    }
+    mark before
+    status=0
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test it ui_pool_probe \
+      -- --ignored --nocapture --test-threads=1 2>&1 | tee "$log" || status=$?
+    mark after
+    ran=$(awk '/^test result:/ { for (i = 1; i < NF; i++) {
+                   if ($(i+1) == "passed;") p += $i
+                   if ($(i+1) == "failed;") f += $i } }
+               END { print p + f }' "$log")
+    echo "ui-pool-probe: cargo exited $status; $ran of $expected pinned tests ran"
+    if [ "$ran" -ne "$expected" ]; then
+        echo "error: $ran tests ran under --ignored, $expected is pinned." >&2
+        [ "$status" -ne 0 ] || status=1
+    fi
+    exit "$status"
+
 # Install app/ dependencies if they are missing or older than the lockfile.
 #
 # `npm ci` deletes and reinstalls node_modules wholesale: right on a fresh

@@ -39,6 +39,7 @@ mod start_work;
 mod status_move;
 mod suggestions_ipc;
 mod time_ipc;
+mod ui_pool_probe;
 mod url_resolve;
 mod week_ipc;
 mod wiring;

@@ -891,6 +891,7 @@ knobas-app	test/it	time_ipc::the_schema_refuses_a_target_that_is_both_halves_or_
 knobas-app	test/it	time_ipc::the_three_rules_are_tried_in_the_order_the_spec_states
 knobas-app	test/it	time_ipc::todays_last_logged_ticket_is_the_third_rule
 knobas-app	test/it	time_ipc::with_passive_attribution_off_the_beat_still_stamps_and_nothing_is_recorded
+knobas-app	test/it	ui_pool_probe::the_ui_pool_keeps_a_free_connection_while_five_sources_sync
 knobas-app	test/it	url_resolve::a_different_query_and_an_unknown_host_both_miss
 knobas-app	test/it	url_resolve::a_fragment_a_trailing_slash_and_a_shouted_host_still_resolve
 knobas-app	test/it	url_resolve::a_row_with_no_address_is_unreachable_by_paste
