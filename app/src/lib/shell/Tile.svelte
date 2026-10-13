@@ -30,6 +30,7 @@
   import { kindRegistry } from "./kind-registry.svelte";
   import { kindLabel, kindSingular, type TileSpec } from "./kinds";
   import { tileCount } from "./tile-count";
+  import { hiddenCount, tileGroups } from "./tile-groups";
 
   let {
     spec,
@@ -262,9 +263,24 @@
       : null;
   });
 
+  /**
+   * The Code tile's groups (#712), or `null` for one list: what needs me
+   * first, each under a muted header with its count. Other branches wait for
+   * the maximised tile, and `hidden` says how many it is keeping back so a
+   * tile they alone fill does not read as an empty room.
+   */
+  const groups = $derived(page ? tileGroups(page, maximised) : null);
+  const hidden = $derived(page ? hiddenCount(page.groups, maximised) : 0);
+
   /** Whether the read has answered at all — the "Reading…" state. */
   const answered = $derived(isMiniBoard ? board !== null : page !== null);
-  const nothing = $derived(isMiniBoard ? board?.columns.length === 0 : page?.rows.length === 0);
+  const nothing = $derived(
+    isMiniBoard
+      ? board?.columns.length === 0
+      : groups
+        ? groups.length === 0
+        : page?.rows.length === 0,
+  );
 
   /**
    * What an empty tile says.
@@ -340,9 +356,32 @@
     {:else if !answered}
       <div class="empty"><p class="muted">Reading…</p></div>
     {:else if nothing}
-      <div class="empty"><p>{empty}</p></div>
+      <div class="empty">
+        {#if hidden > 0}
+          <p>Nothing here needs you.</p>
+          <p class="muted">
+            {hidden} other {hidden === 1 ? "branch" : "branches"} · Maximise to see {hidden === 1
+              ? "it"
+              : "them"}
+          </p>
+        {:else}
+          <p>{empty}</p>
+        {/if}
+      </div>
     {:else if board}
       <MiniBoardBody {board} {layout} {onopen} />
+    {:else if groups}
+      {#each groups as group (group.group)}
+        <section class="tile-grp" aria-label={group.label}>
+          <div class="tile-g">
+            <span class="lab">{group.label}</span>
+            <span class="cnt">{group.count}</span>
+          </div>
+          {#each group.rows as row (row.entity_id)}
+            <EntityLine {row} {onopen} showSource={sources.length !== 1} />
+          {/each}
+        </section>
+      {/each}
     {:else if page}
       {#each page.rows as row (row.entity_id)}
         <EntityLine {row} {onopen} showSource={sources.length !== 1} />

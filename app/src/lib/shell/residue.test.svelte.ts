@@ -81,7 +81,7 @@ const ROW: EntityRow = {
   state: null,
 };
 
-const PAGE: EntityPage = { rows: [ROW], total: 1, tally: null };
+const PAGE: EntityPage = { rows: [ROW], total: 1, tally: null, groups: null };
 
 const DETAIL: EntityDetail = {
   row: ROW,

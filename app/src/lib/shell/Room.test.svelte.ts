@@ -24,7 +24,7 @@ import { CAPTURED_FROM, CAPTURED_IN } from "../detail/relations";
 /** A plain function, not a `vi.fn` — see the note in `Tile.test.svelte.ts`. */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
 let answer: (filter: EntityFilter) => Promise<EntityPage> = () =>
-  Promise.resolve({ rows: [], total: 0, tally: null });
+  Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
 let board: (filter: Pick<EntityFilter, "sources" | "context" | "project">) => Promise<MiniBoard> =
   () => Promise.resolve({ columns: [], sources: [] });
 
@@ -306,7 +306,7 @@ beforeEach(() => {
   entity = notInMirror;
   sourceView = () => Promise.resolve(null);
   viewReads.length = 0;
-  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
   board = () => Promise.resolve({ columns: [], sources: [] });
   assets = () => Promise.resolve([]);
   roots = () => Promise.resolve([]);
@@ -329,8 +329,9 @@ test("draws one tile per bucket present, and one per open kind", async () => {
             rows: [row("ticket", "PAY-1"), row("page", "ENG-1"), row("incident", "INC-1")],
             total: 3,
             tally: null,
+            groups: null,
           }
-        : { rows: [], total: 0, tally: null },
+        : { rows: [], total: 0, tally: null, groups: null },
     );
 
   const screen = render("#/ctx/all");
@@ -352,8 +353,8 @@ test("the room bar carries the unpaged total", async () => {
   answer = (filter) =>
     Promise.resolve(
       filter.kinds.length === 0
-        ? { rows: [row("ticket", "PAY-1")], total: 412, tally: null }
-        : { rows: [], total: 0, tally: null },
+        ? { rows: [row("ticket", "PAY-1")], total: 412, tally: null, groups: null }
+        : { rows: [], total: 0, tally: null, groups: null },
     );
 
   const screen = render("#/ctx/all");
@@ -369,7 +370,7 @@ test("the room bar carries the unpaged total", async () => {
  * a test that checked only the first.
  */
 test("a source room filters by its source and is named after it", async () => {
-  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null, groups: null });
 
   const screen = render("#/ctx/src:jira");
   await vi.waitFor(() => expect(screen.tiles()).toEqual(["Tickets", "Assets"]));
@@ -413,7 +414,7 @@ test("a rejected survey shows its message", async () => {
  * detail view knows what it is before it has fetched anything.
  */
 test("opening a row navigates to that entity's address", async () => {
-  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null, groups: null });
 
   const screen = render("#/ctx/src:jira");
   await vi.waitFor(() => expect(screen.target.querySelector(".row")).not.toBeNull());
@@ -433,8 +434,8 @@ test("the tile grid sizes itself with a modifier class", async () => {
   answer = (filter) =>
     Promise.resolve(
       filter.kinds.length === 0
-        ? { rows: [row("ticket", "T"), row("page", "P"), row("build", "B")], total: 3, tally: null }
-        : { rows: [], total: 0, tally: null },
+        ? { rows: [row("ticket", "T"), row("page", "P"), row("build", "B")], total: 3, tally: null, groups: null }
+        : { rows: [], total: 0, tally: null, groups: null },
     );
 
   const screen = render("#/ctx/all");
@@ -459,7 +460,7 @@ test("the tile grid sizes itself with a modifier class", async () => {
  */
 test("New note writes the note first and opens it", async () => {
   written.length = 0;
-  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("ticket", "PAY-1")], total: 1, tally: null, groups: null });
   const screen = render("#/ctx/all");
   await settle();
 
@@ -493,7 +494,7 @@ test("New note writes the note first and opens it", async () => {
  */
 async function bornWithFrom(hash: string, openADetail: boolean) {
   born.length = 0;
-  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("incident", "INC-1")], total: 1, tally: null, groups: null });
   const screen = render("#/ctx/all");
   await settle();
   screen.relist([...CONTEXTS, storedContext(STORED), storedContext(PROMOTED)]);
@@ -600,7 +601,7 @@ test("New note over a detail in a derived room is born linked only to it", async
  * purpose, so a room that sent a note there would draw the not-found panel.
  */
 test("a note address opens the note view rather than the mirror's detail", async () => {
-  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
   for (const hash of ["#/note/note:new", "#/entity/note:new"]) {
     const screen = render(hash);
     await settle();
@@ -667,6 +668,7 @@ function serveCorpus() {
       rows: items.map((item) => row(item.kind, item.key)),
       total: items.length,
       tally: null,
+      groups: null,
     });
   };
   board = (filter) => {
@@ -1025,8 +1027,8 @@ test("a room hands its own layout to the mini board it draws", async () => {
   answer = (filter) =>
     Promise.resolve(
       filter.kinds.length === 0 || filter.kinds.includes("ticket")
-        ? { rows: [row("ticket", "PAY-231")], total: 1, tally: null }
-        : { rows: [], total: 0, tally: null },
+        ? { rows: [row("ticket", "PAY-231")], total: 1, tally: null, groups: null }
+        : { rows: [], total: 0, tally: null, groups: null },
     );
   board = () =>
     Promise.resolve({
@@ -1078,8 +1080,8 @@ function ticketsEverywhere() {
   answer = (filter) =>
     Promise.resolve(
       filter.kinds.length === 0 || filter.kinds.includes("ticket")
-        ? { rows: [row("ticket", "PAY-231")], total: 1, tally: null }
-        : { rows: [], total: 0, tally: null },
+        ? { rows: [row("ticket", "PAY-231")], total: 1, tally: null, groups: null }
+        : { rows: [], total: 0, tally: null, groups: null },
     );
 }
 

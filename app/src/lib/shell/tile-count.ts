@@ -16,9 +16,12 @@
  *   parent where the kind is grouped under one, else the kind itself. *2
  *   failing · 7 build configurations*.
  *
+ * Under `attention` with groups (#712), the groups instead: *2 to review · 3
+ * mine · 5 open · 4 branches*.
+ *
  * Driven by tones and declarations; no kind or adapter is named here.
  */
-import type { EntityOrder, EntityPage } from "../ipc/entity";
+import type { AttentionGroup, EntityOrder, EntityPage } from "../ipc/entity";
 
 /** Whether `order` is one of the two tile orders, whose page carries a `tally`. */
 export function isTileOrder(order: EntityOrder): boolean {
@@ -37,13 +40,32 @@ export interface CountWords {
   groupedUnder(kind: string): string | null;
 }
 
+/**
+ * What each Code-tile group is counted as in the header (#712): *2 to review ·
+ * 3 mine · 5 open · 4 branches*. Other branches are not counted: the grid's
+ * tile does not draw them, and the header counts what needs me.
+ */
+const GROUP_COUNT: Partial<Record<AttentionGroup, (n: number) => string>> = {
+  review_requested: (n) => `${n} to review`,
+  my_pull_requests: (n) => `${n} mine`,
+  open_pull_requests: (n) => `${n} open`,
+  my_branches: (n) => `${n} ${n === 1 ? "branch" : "branches"}`,
+};
+
 /** The header count of a tile reading `kinds` in `order`, for this page. */
 export function tileCount(
   order: EntityOrder,
   kinds: string[],
-  page: Pick<EntityPage, "total" | "tally">,
+  page: Pick<EntityPage, "total" | "tally"> & Partial<Pick<EntityPage, "groups">>,
   words: CountWords,
 ): string {
+  if (order === "attention" && page.groups) {
+    const segments = page.groups.flatMap(({ group, count }) => {
+      const phrase = GROUP_COUNT[group];
+      return phrase && count > 0 ? [phrase(count)] : [];
+    });
+    return segments.length === 0 ? "0" : segments.join(" · ");
+  }
   const tally = page.tally;
   if (!tally || !isTileOrder(order)) {
     return String(page.total);

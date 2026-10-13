@@ -29,7 +29,7 @@ import type { TileSpec } from "./kinds";
  */
 const calls: { filter: EntityFilter; limit: number; offset: number }[] = [];
 let answer: () => Promise<EntityPage> = () =>
-  Promise.resolve({ rows: [], total: 0, tally: null });
+  Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
 
 vi.mock("../ipc/entity", () => ({
   listEntities: (filter: EntityFilter, limit: number, offset: number) => {
@@ -97,12 +97,12 @@ function render(sources: string[] = [], spec: TileSpec = SPEC) {
 
 beforeEach(() => {
   calls.length = 0;
-  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
 });
 
 test("draws a row per item and the unpaged total in the header", async () => {
   answer = () =>
-    Promise.resolve({ rows: [row("PAY-1"), row("PAY-2"), row("PAY-3")], total: 17, tally: null });
+    Promise.resolve({ rows: [row("PAY-1"), row("PAY-2"), row("PAY-3")], total: 17, tally: null, groups: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(3));
   flushSync();
@@ -136,7 +136,7 @@ test("a rejected read renders its message rather than an empty tile", async () =
 
 /** An empty tile says which kind of nothing it is. */
 test("an empty read gets the tile's own sentence", async () => {
-  answer = () => Promise.resolve({ rows: [], total: 0, tally: null });
+  answer = () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.text()).toContain("No page in this room yet"));
   screen.done();
@@ -151,7 +151,7 @@ test("an empty read gets the tile's own sentence", async () => {
  * this room at all.
  */
 test("a new room does not leave the old room's rows on screen", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null, groups: null });
   const screen = render([]);
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
 
@@ -163,7 +163,7 @@ test("a new room does not leave the old room's rows on screen", async () => {
   expect(screen.rows(), "the previous room's rows are still on screen").toHaveLength(0);
   expect(screen.count()).toBe("");
 
-  pending.resolve({ rows: [row("GT-9")], total: 1, tally: null });
+  pending.resolve({ rows: [row("GT-9")], total: 1, tally: null, groups: null });
   await vi.waitFor(() => expect(screen.text()).toContain("Title of GT-9"));
   expect(calls[1]?.filter).toMatchObject({ sources: ["gitea"] });
 
@@ -188,10 +188,10 @@ test("a slow answer from the previous room is discarded, not rendered", async ()
   screen.props.sources = ["gitea"];
   flushSync();
 
-  second.resolve({ rows: [row("NEW-1")], total: 1, tally: null });
+  second.resolve({ rows: [row("NEW-1")], total: 1, tally: null, groups: null });
   await vi.waitFor(() => expect(screen.text()).toContain("Title of NEW-1"));
 
-  first.resolve({ rows: [row("OLD-1")], total: 99, tally: null });
+  first.resolve({ rows: [row("OLD-1")], total: 99, tally: null, groups: null });
   await first.promise;
   flushSync();
 
@@ -209,7 +209,7 @@ test("a slow rejection from the previous room does not blank the new one", async
   const screen = render([]);
   flushSync();
 
-  answer = () => Promise.resolve({ rows: [row("NEW-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("NEW-1")], total: 1, tally: null, groups: null });
   screen.props.sources = ["gitea"];
   flushSync();
   await vi.waitFor(() => expect(screen.text()).toContain("Title of NEW-1"));
@@ -249,6 +249,7 @@ test("a key containing a colon is shown whole", async () => {
       ],
       total: 1,
       tally: null,
+      groups: null,
     });
 
   const screen = render();
@@ -262,7 +263,7 @@ test("a key containing a colon is shown whole", async () => {
 
 /** Clicking a row hands the row back; the room decides where that goes. */
 test("a row reports which entity was opened", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null, groups: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
 
@@ -279,7 +280,7 @@ test("a row reports which entity was opened", async () => {
  * mini board (#245): a list tile's header offers no layout to choose.
  */
 test("a list tile's header carries no layout control", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null, groups: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
@@ -301,7 +302,7 @@ test("a list tile's header carries no layout control", async () => {
  * label reads are one string, so neither can drift from the other.
  */
 test("the header offers Maximise, asks the room, and reads Restore once maximised", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null, groups: null });
   const screen = render();
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
   flushSync();
@@ -331,7 +332,7 @@ test("the header offers Maximise, asks the room, and reads Restore once maximise
  * every source, so there the column is what tells two rows apart.
  */
 test("a one-source room drops the source column and All work keeps it", async () => {
-  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null });
+  answer = () => Promise.resolve({ rows: [row("PAY-1")], total: 1, tally: null, groups: null });
   const scoped = render(["mock"]);
   await vi.waitFor(() => expect(scoped.rows()).toHaveLength(1));
   flushSync();
@@ -372,6 +373,7 @@ test("the Code tile asks for attention and counts open pull requests and branche
         { kind: "branch", tone: null, count: 5 },
         { kind: "pr", tone: "info", count: 3 },
       ],
+      groups: null,
     });
   const screen = render([], CODE);
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(3));
@@ -396,7 +398,7 @@ test("a maximised tile keeps its order and shows more rows", async () => {
     { kind: "branch", tone: null, count: 3 },
   ];
   const longer = deferred<EntityPage>();
-  answer = () => Promise.resolve({ rows: first, total: 4, tally });
+  answer = () => Promise.resolve({ rows: first, total: 4, tally, groups: null });
   const screen = render([], CODE);
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(2));
   flushSync();
@@ -409,7 +411,7 @@ test("a maximised tile keeps its order and shows more rows", async () => {
   expect(calls[1]!.limit).toBeGreaterThan(calls[0]!.limit);
   expect(screen.rows(), "the rows on screen stay while the longer page loads").toHaveLength(2);
 
-  longer.resolve({ rows: more, total: 4, tally });
+  longer.resolve({ rows: more, total: 4, tally, groups: null });
   await vi.waitFor(() => expect(screen.rows()).toHaveLength(4));
   flushSync();
   const titles = screen.rows().map((r) => r.textContent ?? "");
@@ -417,6 +419,146 @@ test("a maximised tile keeps its order and shows more rows", async () => {
     expect(titles[i]).toContain(`Title of ${key}`),
   );
   expect(screen.count()).toBe("1 open pull request · 3 branches");
+
+  screen.done();
+});
+
+/**
+ * The Code tile answers "what needs me" first (#712): the backend's groups
+ * draw as muted headers with their counts, in the order they came, and the
+ * header counts them in so many words. A group with no row is not drawn.
+ */
+test("the Code tile draws its groups under headers and counts them", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [
+        codeRow("PR-2", "pr"),
+        codeRow("PR-3", "pr"),
+        codeRow("PR-4", "pr"),
+        codeRow("PR-1", "pr"),
+        codeRow("spike", "branch"),
+        codeRow("theirs", "branch"),
+      ],
+      total: 6,
+      tally: [
+        { kind: "pr", tone: "info", count: 4 },
+        { kind: "branch", tone: null, count: 2 },
+      ],
+      groups: [
+        { group: "review_requested", count: 2 },
+        { group: "my_pull_requests", count: 1 },
+        { group: "open_pull_requests", count: 1 },
+        { group: "my_branches", count: 1 },
+        { group: "other_branches", count: 1 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(5));
+  flushSync();
+
+  const heads = [...screen.target.querySelectorAll(".tile-g")].map((h) =>
+    (h.textContent ?? "").replace(/\s+/g, " ").trim(),
+  );
+  expect(heads).toEqual([
+    "Review requested 2",
+    "My pull requests 1",
+    "Other open pull requests 1",
+    "My branches without a pull request 1",
+  ]);
+  // Each group's rows sit under its own header.
+  const groups = [...screen.target.querySelectorAll(".tile-grp")];
+  expect(groups.map((g) => g.querySelectorAll(".row").length)).toEqual([
+    2, 1, 1, 1,
+  ]);
+  expect(groups[0]?.textContent).toContain("Title of PR-3");
+  expect(groups[3]?.textContent).toContain("Title of spike");
+  expect(
+    screen.text(),
+    "other branches wait for the maximised tile",
+  ).not.toContain("Title of theirs");
+  expect(screen.count()).toBe("2 to review · 1 mine · 1 open · 1 branch");
+
+  screen.done();
+});
+
+/** An empty group is not drawn, and the count leaves it out too. */
+test("the Code tile hides an empty group", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [codeRow("PR-1", "pr"), codeRow("spike", "branch")],
+      total: 2,
+      tally: [
+        { kind: "pr", tone: "info", count: 1 },
+        { kind: "branch", tone: null, count: 1 },
+      ],
+      groups: [
+        { group: "open_pull_requests", count: 1 },
+        { group: "my_branches", count: 1 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(2));
+  flushSync();
+
+  expect(screen.text()).not.toContain("Review requested");
+  expect(screen.text()).not.toContain("My pull requests");
+  expect(screen.count()).toBe("1 open · 1 branch");
+
+  screen.done();
+});
+
+/** Maximised, the tile draws every other branch too, under its own header. */
+test("a maximised Code tile shows the other branches", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [
+        codeRow("PR-1", "pr"),
+        codeRow("theirs", "branch"),
+        codeRow("old", "branch"),
+      ],
+      total: 3,
+      tally: [
+        { kind: "pr", tone: "info", count: 1 },
+        { kind: "branch", tone: null, count: 2 },
+      ],
+      groups: [
+        { group: "my_pull_requests", count: 1 },
+        { group: "other_branches", count: 2 },
+      ],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(1));
+  flushSync();
+
+  screen.props.maximised = true;
+  flushSync();
+  await vi.waitFor(() => expect(screen.rows()).toHaveLength(3));
+  flushSync();
+  const heads = [...screen.target.querySelectorAll(".tile-g")].map(
+    (h) => h.textContent ?? "",
+  );
+  expect(heads.at(-1)).toContain("Other branches");
+  expect(screen.text()).toContain("Title of theirs");
+
+  screen.done();
+});
+
+/**
+ * A room whose rows only another person's branches fill is not an empty
+ * room: the tile says the branches are there and how to see them.
+ */
+test("a Code tile with only other branches says so rather than looking empty", async () => {
+  answer = () =>
+    Promise.resolve({
+      rows: [codeRow("theirs", "branch")],
+      total: 1,
+      tally: [{ kind: "branch", tone: null, count: 1 }],
+      groups: [{ group: "other_branches", count: 1 }],
+    });
+  const screen = render([], CODE);
+  await vi.waitFor(() => expect(screen.text()).toContain("1 other branch"));
+  flushSync();
+  expect(screen.rows()).toHaveLength(0);
 
   screen.done();
 });
