@@ -36,7 +36,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
-  import BuildsPanel from "./BuildsPanel.svelte";
+  import BuildsSummary from "./BuildsSummary.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
   import HistoryPanel from "./HistoryPanel.svelte";
   import LinkDialog from "./LinkDialog.svelte";
@@ -143,6 +143,8 @@
 
   /** The view, once one was drawn. */
   let sourceView = $state<SourceViewData | null>(null);
+  /** The entity whose builds list is open (#732); another entity's starts closed. */
+  let buildsOpenFor = $state<string | null>(null);
   /** Why the view could not be read, when it could not. */
   let viewFailure = $state<string | null>(null);
   /** Whether the reader opened *Raw*; its projection is drawn only then. */
@@ -1324,8 +1326,27 @@
         </p>
       {/if}
 
+      <!--
+        The builds of the commit this stands at (#710), as one line (#732):
+        between the view's toolbar and its tabs, where whether the code is
+        green is asked, and under the header where there is no view (yet, or
+        at all). The mirror's rows, drawn whatever the view did; absent where
+        nothing ran on the commit. Its list stays open per entity, so the
+        view landing does not close it.
+      -->
+      {#snippet buildsLine()}
+        {#if detail}
+          <BuildsSummary
+            builds={detail.builds}
+            onopen={onnavigate}
+            bind:open={() => buildsOpenFor === detail?.row.entity_id, (open) => (buildsOpenFor = open ? (detail?.row.entity_id ?? null) : null)}
+          />
+        {/if}
+      {/snippet}
+
       {#if sourceView}
         <SourceView
+          summary={buildsLine}
           entityId={detail.row.entity_id}
           view={sourceView}
           webUrl={webUrl}
@@ -1337,6 +1358,8 @@
           {settingMarks}
           onsetting={saveSetting}
         />
+      {:else}
+        {@render buildsLine()}
       {/if}
 
       <!--
@@ -1548,13 +1571,6 @@
           <PayloadView {fields} />
         </div>
       {/if}
-
-      <!--
-        The builds of the commit this stands at (#710), first of the panels:
-        whether it is green is the next thing asked of code. The mirror's rows,
-        drawn whatever the view did; absent where nothing ran on the commit.
-      -->
-      <BuildsPanel builds={detail.builds} onopen={onnavigate} />
 
       <!--
         Where this repo's clone is on this disk (#499). Above the links because

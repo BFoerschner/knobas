@@ -197,7 +197,7 @@ The line-by-line difference between two versions of a set of files, as a source 
 _Avoid_: patch (the text the server sends, before it is parsed), changeset, delta
 
 **Checks**:
-Whether the commit a pull request, a branch or a commit stands at is green, from two places drawn apart. The source's own **commit statuses** (Gitea's combined status: a context, its state, a description, a page) are a block of the [source view](#source-view)'s *Overview*, live. The **builds of a commit** are the [mirror](#mirror)'s: the build rows whose declared revision (the commits a build ran on) is the sha the code row declares as its commit, both [declared paths](#declared-path), drawn by the shell in the detail's *Builds* panel whether or not the view answered. Both are drawn failing first, and neither draws anything where nothing reported. (#710)
+Whether the commit a pull request, a branch or a commit stands at is green, from two places drawn apart. The source's own **commit statuses** (Gitea's combined status: a context, its state, a description, a page) are a block of the [source view](#source-view)'s *Overview*, live. The **builds of a commit** are the [mirror](#mirror)'s: the build rows whose declared revision (the commits a build ran on) is the sha the code row declares as its commit, both [declared paths](#declared-path), drawn by the shell as the detail's *Builds* line, between the view's toolbar and its tabs and under the header where there is no view, whether or not the view answered. Both are drawn failing first, and neither draws anything where nothing reported. (#710, #732)
 _Avoid_: CI status (one source's word), pipeline, check run (GitHub's)
 
 **Line thread**:

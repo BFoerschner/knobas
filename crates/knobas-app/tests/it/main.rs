@@ -15,6 +15,8 @@ mod adapter_to_mirror;
 mod assets_ipc;
 mod backup;
 mod backup_ipc;
+mod builds_of_a_commit;
+mod builds_of_a_commit_perf;
 mod capture_ipc;
 mod checkout_ipc;
 mod config_schema_mirror;
