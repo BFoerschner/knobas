@@ -29,7 +29,7 @@
 //! test of its own beside the registration loop, whose `not_ready` marker only
 //! means anything for a command that asks for a pool.
 
-use tauri::{Emitter, State};
+use tauri::State;
 
 use knobas_core::asset::AssetType;
 
@@ -49,9 +49,7 @@ fn announce<R: tauri::Runtime>(
     lines: Vec<knobas_core::activity::ActivityRow>,
 ) {
     for line in lines {
-        if let Err(error) = app.emit(crate::events::ACTIVITY_NEW, &line) {
-            tracing::warn!(%error, verb = %line.verb, "an asset activity line was not announced");
-        }
+        crate::events::emit(app, None, crate::events::ACTIVITY_NEW, &line);
     }
 }
 

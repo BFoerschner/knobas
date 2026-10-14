@@ -79,12 +79,61 @@ pub mod events {
     /// `main` window by label and not broadcast: the capture window is closing
     /// and has no use for it.
     pub const CAPTURE_OPEN_NOTE: &str = "capture:open-note";
+
+    /// Send `payload` to the frontend as `name` -- to every window, or to the
+    /// one labelled `target` -- from the main thread, whichever thread asks.
+    ///
+    /// Every emit in this crate goes through here; the test
+    /// `only_events_emit_names_the_emitter` keeps it that way.
+    ///
+    /// Why the hop: with Tauri's `tracing` feature on (#747), an `emit` holds
+    /// Tauri's webview-list lock while it evaluates its script *synchronously*
+    /// -- it posts the script to the main thread and waits for the answer. An
+    /// IPC request the main thread is serving in that moment wants the same
+    /// lock first. Neither moves, and the window freezes for good: on
+    /// 2026-10-14 a gitea sync finishing seven seconds after launch did exactly
+    /// that, mid-burst of the frontend's first invokes. On the main thread the
+    /// same `emit` runs its script inline and has nobody to wait for.
+    ///
+    /// Best effort, like every emit here always was: the payload is serialized
+    /// on the caller's thread, and a failure at either end is logged and
+    /// dropped -- an event nobody hears does not fail an operation that already
+    /// landed. Order is kept: the event loop runs queued tasks first in, first
+    /// out.
+    pub(crate) fn emit<R: tauri::Runtime>(
+        app: &tauri::AppHandle<R>,
+        target: Option<&'static str>,
+        name: &'static str,
+        payload: impl serde::Serialize,
+    ) {
+        let payload = match serde_json::to_value(payload) {
+            Ok(payload) => payload,
+            Err(error) => {
+                tracing::warn!(event = name, %error, "an event payload did not serialize");
+                return;
+            }
+        };
+        let handle = app.clone();
+        let sent = app.run_on_main_thread(move || {
+            use tauri::Emitter;
+            let emitted = match target {
+                Some(label) => handle.emit_to(label, name, payload),
+                None => handle.emit(name, payload),
+            };
+            if let Err(error) = emitted {
+                tracing::debug!(event = name, %error, "nothing was listening for this event");
+            }
+        });
+        if let Err(error) = sent {
+            tracing::debug!(event = name, %error, "the event loop has gone; event dropped");
+        }
+    }
 }
 
 use std::sync::{Mutex, PoisonError};
 
 use sqlx::PgPool;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 /// Points knobas at an already-running PostgreSQL instead of starting its own.
 ///
@@ -586,9 +635,7 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
 fn set_db_state<R: tauri::Runtime>(handle: &tauri::AppHandle<R>, state: DbState) {
     tracing::info!(?state, "database lifecycle");
     handle.state::<Lifecycle>().set(state.clone());
-    if let Err(error) = handle.emit(events::DB_STATE, state) {
-        tracing::debug!(%error, "nobody is listening to db:state yet");
-    }
+    events::emit(handle, None, events::DB_STATE, state);
 }
 
 /// Stop the embedded server, once.
@@ -777,5 +824,43 @@ mod tests {
                 "{name:?} is missing from app/src/lib/ipc/index.ts"
             );
         }
+    }
+
+    /// Every emit hops to the main thread through `events::emit`, because one
+    /// that does not can freeze the window for good (see that function). Tauri
+    /// cannot emit without its emitter trait in scope, so naming the trait is
+    /// the necessary condition: exactly one file may, exactly once.
+    ///
+    /// The count of one is also the scan's own witness -- a walk that read
+    /// nothing would find zero, and fail.
+    #[test]
+    fn only_events_emit_names_the_emitter() {
+        // Spelled in two halves so this test is not itself a hit.
+        let needle = concat!("Emit", "ter");
+        let src = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut stack = vec![src.clone()];
+        let mut hits = Vec::new();
+        while let Some(dir) = stack.pop() {
+            for entry in std::fs::read_dir(&dir).expect("src is readable") {
+                let path = entry.expect("a directory entry").path();
+                if path.is_dir() {
+                    stack.push(path);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let text = std::fs::read_to_string(&path).expect("a source file");
+                    for (n, line) in text.lines().enumerate() {
+                        if line.contains(needle) {
+                            let file = path.strip_prefix(&src).expect("under src");
+                            hits.push(format!("{}:{}", file.display(), n + 1));
+                        }
+                    }
+                }
+            }
+        }
+        assert_eq!(
+            hits.len(),
+            1,
+            "emit through crate::events::emit only: {hits:?}"
+        );
+        assert!(hits[0].starts_with("lib.rs:"), "{hits:?}");
     }
 }

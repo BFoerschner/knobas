@@ -13,7 +13,6 @@
 use knobas_core::activity::ActivityRow;
 use knobas_sync::config::CredentialHealth;
 use knobas_sync::scheduler::{SourceSyncStatus, SyncEvents};
-use tauri::Emitter;
 
 pub struct TauriEvents<R: tauri::Runtime> {
     app: tauri::AppHandle<R>,
@@ -24,10 +23,8 @@ impl<R: tauri::Runtime> TauriEvents<R> {
         TauriEvents { app }
     }
 
-    fn emit<T: serde::Serialize + Clone>(&self, name: &str, payload: T) {
-        if let Err(error) = self.app.emit(name, payload) {
-            tracing::debug!(event = name, %error, "nothing was listening for this event");
-        }
+    fn emit<T: serde::Serialize>(&self, name: &'static str, payload: T) {
+        crate::events::emit(&self.app, None, name, payload);
     }
 }
 

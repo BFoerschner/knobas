@@ -34,7 +34,7 @@ use knobas_core::entity::EntityRef;
 use knobas_core::link::{LinkEntry, LinkRow, Origin};
 use knobas_core::suggest::{self, SuggestionEntry};
 use sqlx::{PgPool, Row};
-use tauri::{Emitter, State};
+use tauri::State;
 use uuid::Uuid;
 
 use crate::{IpcError, Lifecycle};
@@ -1643,13 +1643,7 @@ async fn record_link_activity_with(
 /// does -- the write hands its row back precisely so it does not have to guess
 /// which of the table's rows is its own.
 fn announce<R: tauri::Runtime>(app: &tauri::AppHandle<R>, row: ActivityRow) {
-    if let Err(error) = app.emit(crate::events::ACTIVITY_NEW, row) {
-        tracing::debug!(
-            event = crate::events::ACTIVITY_NEW,
-            %error,
-            "nothing was listening for this event"
-        );
-    }
+    crate::events::emit(app, None, crate::events::ACTIVITY_NEW, row);
 }
 
 /// Draw a link between two entities, and announce it.
@@ -3446,13 +3440,7 @@ fn announce_context<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     row: &knobas_core::context::ContextRow,
 ) {
-    if let Err(error) = app.emit(crate::events::CONTEXTS_CHANGED, row) {
-        tracing::debug!(
-            event = crate::events::CONTEXTS_CHANGED,
-            %error,
-            "nothing was listening for this event"
-        );
-    }
+    crate::events::emit(app, None, crate::events::CONTEXTS_CHANGED, row);
 }
 
 // -- the mini board (#177) --------------------------------------------------

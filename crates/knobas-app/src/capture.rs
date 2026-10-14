@@ -64,7 +64,7 @@ use std::sync::{Mutex, PoisonError};
 
 use serde::Serialize;
 use sqlx::PgPool;
-use tauri::{Emitter, Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
+use tauri::{Manager, Runtime, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::Shortcut;
 
 use crate::IpcError;
@@ -390,7 +390,8 @@ pub fn open_window<R: Runtime>(app: &tauri::AppHandle<R>) {
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if there is no main window --
 /// which on macOS is a reader who closed it and left the application running;
 /// [`Internal`](crate::IpcErrorCode::Internal) if the window will not come
-/// forward or the event will not send.
+/// forward. The event itself is best effort, like every emit
+/// ([`crate::events::emit`]).
 pub fn reveal_note<R: Runtime>(app: &tauri::AppHandle<R>, note_id: &str) -> Result<(), IpcError> {
     let main = app
         .get_webview_window(MAIN_LABEL)
@@ -398,8 +399,13 @@ pub fn reveal_note<R: Runtime>(app: &tauri::AppHandle<R>, note_id: &str) -> Resu
     main.unminimize().map_err(IpcError::internal)?;
     main.show().map_err(IpcError::internal)?;
     main.set_focus().map_err(IpcError::internal)?;
-    app.emit_to(MAIN_LABEL, crate::events::CAPTURE_OPEN_NOTE, note_id)
-        .map_err(IpcError::internal)
+    crate::events::emit(
+        app,
+        Some(MAIN_LABEL),
+        crate::events::CAPTURE_OPEN_NOTE,
+        note_id,
+    );
+    Ok(())
 }
 
 /// Bring the main window forward: what a second launch asks of the first

@@ -7,7 +7,7 @@
 
 use std::sync::{Arc, Mutex, PoisonError};
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 use crate::{AppState, IpcError, Profile};
 
@@ -240,13 +240,12 @@ async fn counts(pool: &sqlx::PgPool) -> Result<(u32, bool), sqlx::Error> {
 ///
 /// # Errors
 ///
-/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the emit
-/// fails, which means the webview this was called from has gone.
+/// None any more: the replay is best effort, like every emit
+/// ([`crate::events::emit`]). The `Result` is the frozen IPC shape.
 #[tauri::command]
 pub fn frontend_ready<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Result<(), IpcError> {
     let state = app.state::<Lifecycle>().get();
-    app.emit(crate::events::DB_STATE, state)
-        .map_err(IpcError::internal)?;
+    crate::events::emit(&app, None, crate::events::DB_STATE, state);
     Ok(())
 }
 

@@ -247,6 +247,7 @@ knobas-app	lib/knobas_app	start_work::tests::a_held_write_fails_its_step_rather_
 knobas-app	lib/knobas_app	start_work::tests::a_refusal_carries_what_the_source_said
 knobas-app	lib/knobas_app	start_work::tests::a_write_the_source_could_not_take_leaves_the_step_queued
 knobas-app	lib/knobas_app	start_work::tests::only_a_delivered_write_succeeds_its_step
+knobas-app	lib/knobas_app	tests::only_events_emit_names_the_emitter
 knobas-app	lib/knobas_app	tests::the_event_names_match_their_typescript_mirror
 knobas-app	lib/knobas_app	tests::the_main_window_is_declared_visible_and_run_does_not_show_it
 knobas-app	lib/knobas_app	tests::the_window_may_not_be_narrower_than_the_stylesheet_floor

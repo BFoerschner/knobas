@@ -21,7 +21,7 @@
 //! timer's own** -- issue #278 is explicit that the shell learns through the
 //! signal it already watches, and `crate::time`'s module docs give the reason.
 
-use tauri::{Emitter, State};
+use tauri::State;
 
 use crate::time::{self, Block, RunningTimer, TimerTarget};
 use crate::{IpcError, Lifecycle};
@@ -34,9 +34,7 @@ fn announce<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     line: knobas_core::activity::ActivityRow,
 ) {
-    if let Err(error) = app.emit(crate::events::ACTIVITY_NEW, &line) {
-        tracing::warn!(%error, verb = %line.verb, "an activity line was not announced");
-    }
+    crate::events::emit(app, None, crate::events::ACTIVITY_NEW, &line);
 }
 
 /// The timer that is running, or `null`.

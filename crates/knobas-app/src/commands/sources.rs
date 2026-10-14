@@ -615,15 +615,12 @@ pub async fn discard_write<R: tauri::Runtime>(
 /// A webview that is not listening is not a failure of the operation that just
 /// succeeded -- the credential is stored either way, and `credential_health()`
 /// is the authoritative read.
-fn emit<R: tauri::Runtime, T: serde::Serialize + Clone>(
+fn emit<R: tauri::Runtime, T: serde::Serialize>(
     app: &tauri::AppHandle<R>,
-    name: &str,
+    name: &'static str,
     payload: T,
 ) {
-    use tauri::Emitter;
-    if let Err(error) = app.emit(name, payload) {
-        tracing::debug!(event = name, %error, "nothing was listening for this event");
-    }
+    crate::events::emit(app, None, name, payload);
 }
 
 #[cfg(test)]
