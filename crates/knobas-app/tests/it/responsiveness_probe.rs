@@ -83,6 +83,17 @@ const WORDS: &[&str] = &[
     "manifest",
     "audit",
 ];
+/// How many synthetic words (`w42`, `w43`, ...) the text draws on beside
+/// [`WORDS`]: `just suggest-perf`'s vocabulary of 4,000 (#770).
+///
+/// Until #770 the text drew on the 42 words alone, so every two documents
+/// shared five lexemes and `similar_text` had to propose every pair of the
+/// 17,000 prose items -- about 144 million proposals, hours of inserts in
+/// either planner state, and a corpus no install has. With 4,000 more words
+/// two documents share about half a lexeme on average, and the named words
+/// stay in the text for the search readings to find.
+const SYNTHETIC: u64 = 4_000;
+
 const STATUSES: &[&str] = &["Open", "In Progress", "In Review", "Blocked", "Done"];
 
 struct Rng(u64);
@@ -96,9 +107,14 @@ impl Rng {
     fn pick<'a>(&mut self, from: &[&'a str]) -> &'a str {
         from[(self.next() % from.len() as u64) as usize]
     }
+    /// `n` words of [`WORDS`] and [`SYNTHETIC`] more, drawn evenly.
     fn words(&mut self, n: usize) -> String {
+        let vocabulary = WORDS.len() as u64 + SYNTHETIC;
         (0..n)
-            .map(|_| self.pick(WORDS))
+            .map(|_| match self.next() % vocabulary {
+                i if i < WORDS.len() as u64 => WORDS[i as usize].to_owned(),
+                i => format!("w{i}"),
+            })
             .collect::<Vec<_>>()
             .join(" ")
     }
@@ -186,7 +202,7 @@ impl Source for Synthetic {
                 entity: knobas_core::entity::EntityRef::new(id, &entity_key),
                 kind: self.kind.into(),
                 title: rng.words(6),
-                body_text: rng.words(60),
+                body_text: rng.words(40),
                 author: Some("mara".into()),
                 updated_at: Some(now - chrono::Duration::minutes(i as i64)),
                 payload,
@@ -449,14 +465,32 @@ async fn what_the_reader_waits_on() {
         "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} in {} s",
         seeded.elapsed().as_secs()
     );
-    // The suggestion pass has run once, as it would have after a sync.
+    // Analyzed before the pass as well as after it: a real install's
+    // autovacuum analyzes within about a minute of the first sync, so the pass
+    // that follows a sync plans against statistics (#770). Again after, so the
+    // reads plan against the links the pass wrote.
+    if analyzed {
+        sqlx::query("analyze").execute(pool).await.unwrap();
+    }
+    // The suggestion pass has run once, as it would have after a sync. Timed,
+    // with what it wrote, because whether it finishes in both states is what
+    // #770 measured: before it, the pass died in its first exact-key rule on
+    // tables never analyzed.
     let pass = knobas_app::suggestion_pass::SuggestionPass::new(
         std::sync::Arc::new(Conns(connector.clone())),
         knobas_app::suggestion_pass::PASS_STATEMENT_TIMEOUT,
     );
-    let _ = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
-    // After the pass, not before: it is not a read the table times, and on
-    // analyzed tables its inserts ran for over fifteen minutes.
+    let passed = Instant::now();
+    let outcome = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
+    let proposals: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    println!(
+        "RP-PASS analyzed={analyzed} ms={} outcome={:?} proposals={proposals}",
+        passed.elapsed().as_millis(),
+        outcome.map_err(|error| error.message)
+    );
     if analyzed {
         sqlx::query("analyze").execute(pool).await.unwrap();
     }
