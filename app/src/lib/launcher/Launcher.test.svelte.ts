@@ -2055,6 +2055,58 @@ test("under: asks the engine for the value being typed and draws its answer (#76
   expect(asked).toEqual(["", "tide", ""]);
 });
 
+test("typing several under: values reads the kinds and the sources once (#768)", async () => {
+  // The parents alone answer a keystroke: an engine that read the kinds and
+  // the sources again would hand them back, so this one hands back none, and
+  // the lists drawn after them can only be the opening's.
+  const asked: [string | undefined, boolean | undefined][] = [];
+  const filterSuggestions = vi.fn(async (under?: string, parentsOnly?: boolean) => {
+    asked.push([under, parentsOnly]);
+    return parentsOnly ? { kinds: [], sources: [], parents: SUGGESTIONS.parents } : SUGGESTIONS;
+  });
+  open({
+    ports: { launcherHome: async () => HOME, search: async () => response(), filterSuggestions },
+  });
+  await settle();
+
+  await typeInto("under:");
+  await typeInto("under:t");
+  await typeInto("under:ti");
+  await typeInto("under:tide");
+  expect(asked).toEqual([
+    ["", false],
+    ["t", true],
+    ["ti", true],
+    ["tide", true],
+  ]);
+  expect(offered()).toEqual(["tidewater/payout-service · repo"]);
+
+  // The kinds are still the opening's, and asking for them reads nothing.
+  await typeInto("under:tide kind:");
+  expect(offered()).toEqual(["commit · Commit", "repo · Repository", "ticket · Ticket"]);
+  expect(asked.filter(([, parentsOnly]) => parentsOnly === false)).toHaveLength(1);
+});
+
+test("a second under: value typed while the opening's read is in flight reads no kinds either (#768)", async () => {
+  let land!: (v: FilterSuggestions) => void;
+  const filterSuggestions = vi.fn((_under?: string, parentsOnly?: boolean) =>
+    parentsOnly
+      ? Promise.resolve({ kinds: [], sources: [], parents: SUGGESTIONS.parents })
+      : new Promise<FilterSuggestions>((resolve) => (land = resolve)),
+  );
+  open({
+    ports: { launcherHome: async () => HOME, search: async () => response(), filterSuggestions },
+  });
+  await settle();
+  await typeInto("under:");
+  await typeInto("under:t");
+  land(SUGGESTIONS);
+  await settle();
+  expect(filterSuggestions.mock.calls.map(([, parentsOnly]) => parentsOnly)).toEqual([false, true]);
+  await typeInto("under:t kind:");
+  expect(offered()).toEqual(["commit · Commit", "repo · Repository", "ticket · Ticket"]);
+});
+
 test("an older under: answer that lands late does not replace a newer one", async () => {
   const pending = new Map<string, (v: FilterSuggestions) => void>();
   const filterSuggestions = vi.fn(

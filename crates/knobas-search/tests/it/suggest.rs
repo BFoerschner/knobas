@@ -474,6 +474,82 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     }
 }
 
+/// Withdraw an item's entity, as a sync that no longer sees it does.
+async fn withdraw(pool: &sqlx::PgPool, entity: &str) {
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(entity)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A withdrawn item vouches for neither its kind nor its source (#768, which
+/// reads `sync.live_item`'s liveness without the view), and a live row
+/// *behind* a withdrawn newer one still does: the probe walks past it.
+#[tokio::test]
+async fn a_withdrawn_item_vouches_for_neither_its_kind_nor_its_source() {
+    let pool = pool().await;
+    let t = token();
+    let gone_source = format!("a-gone-{t}");
+    let walked_source = format!("b-walked-{t}");
+    source(&pool, &gone_source, true).await;
+    source(&pool, &walked_source, true).await;
+    let gone_kind = format!("gone-kind-{t}");
+    let walked_kind = format!("walked-kind-{t}");
+
+    // Only withdrawn rows: nothing to offer.
+    let only = item(&pool, &gone_source, &gone_kind, "x", serde_json::json!({})).await;
+    withdraw(&pool, &only).await;
+    // A live row, then a newer withdrawn one on top of it.
+    item(
+        &pool,
+        &walked_source,
+        &walked_kind,
+        "old",
+        serde_json::json!({}),
+    )
+    .await;
+    let newer = item(
+        &pool,
+        &walked_source,
+        &walked_kind,
+        "new",
+        serde_json::json!({}),
+    )
+    .await;
+    withdraw(&pool, &newer).await;
+
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
+    let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
+    assert!(!kinds.contains(&gone_kind.as_str()), "{kinds:?}");
+    assert!(kinds.contains(&walked_kind.as_str()), "{kinds:?}");
+    assert_eq!(sources_of(&suggestions, &t), [walked_source.as_str()]);
+}
+
+/// `parents_only` (#768) answers the parents and reads nothing else: the same
+/// parents the full read gives, with `kinds` and `sources` empty.
+#[tokio::test]
+async fn the_parents_alone_are_the_parents_of_the_full_read_without_its_lists() {
+    let pool = pool().await;
+    let t = token();
+    let name = format!("alone-{t}");
+    commit(&pool, "gitea", "tidewater", &name).await;
+
+    let searcher = searcher(&pool).await;
+    let full = searcher.filter_suggestions(&name).await.unwrap();
+    let alone = searcher.filter_parent_suggestions(&name).await.unwrap();
+    assert!(
+        !full.kinds.is_empty() && !full.sources.is_empty(),
+        "{full:?}"
+    );
+    assert!(
+        alone.kinds.is_empty() && alone.sources.is_empty(),
+        "{alone:?}"
+    );
+    assert_eq!(alone.parents, full.parents);
+    assert_eq!(alone.parents, [parent(&name, "repo")]);
+}
+
 /// Whether `under:` knows `name`, asked the way the box asks: the spelling a
 /// picked suggestion is typed with, and no unknown token in the answer.
 async fn under_knows(searcher: &Searcher, name: &str) -> bool {
