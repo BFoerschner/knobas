@@ -502,8 +502,8 @@ test("a repository read that answers with none is asked once, not on every answe
 
 /**
  * #779: *Run* answers before the first send lands, so the stepper is free at
- * once. It says the flow runs on behind it, offers no second *Run* meanwhile,
- * draws each step as it lands, and goes back to the footer once it stops.
+ * once. It says the flow runs on behind it, offers no second *Run* and no
+ * *Skip* or *Edit* meanwhile, draws each step as it lands, and goes back to the footer once it stops.
  */
 test("Run frees the stepper on the answer, and each step is drawn as it lands", async () => {
   vi.useFakeTimers();
@@ -516,6 +516,10 @@ test("Run frees the stepper on the answer, and each step is drawn as it lands", 
     expect(screen.text()).toContain("Running behind you");
     expect(screen.button("Run the sequence")).toBeNull();
     expect(screen.button("Continue")).toBeNull();
+    // The first step still reads as pending while the run looks at the
+    // source before it sends: it is not the reader's to skip or edit.
+    expect(screen.button("Skip")?.disabled).toBe(true);
+    expect(screen.button("Edit")?.disabled).toBe(true);
 
     flow = sequence(["running", "pending", "pending", "pending"]);
     await vi.advanceTimersByTimeAsync(800);
