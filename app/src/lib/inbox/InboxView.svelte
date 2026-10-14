@@ -100,16 +100,18 @@
       // only a write that will not go on its own is told again -- with the
       // box reopened on what was typed, for a reply.
       const key = entry.item.key;
-      followWrite(write, {
-        name: form.label,
-        resend:
-          form.kind === "text"
-            ? () => {
+      followWrite(
+        write,
+        form.kind === "text"
+          ? {
+              name: form.label,
+              resend: () => {
                 commenting = key;
                 draft = body;
-              }
-            : undefined,
-      });
+              },
+            }
+          : { name: form.label },
+      );
       // Not awaited (#752): the write is queued and its send is behind the
       // reader; the inbox re-reads on the `activity:new` its settle writes.
       void inbox.refresh();
