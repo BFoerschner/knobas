@@ -42,6 +42,10 @@
   meanwhile answers the flow and starts nothing, and a run on its way out takes a step a retry or skip
   made pending meanwhile. A run that ends in an error marks the step it was on
   `failed` with the reason. The stepper re-reads `start_work_flow` while the flow moves.
+  **One new refusal:** `start_work_skip` and `start_work_amend` answer `conflict` for a step that
+  is `pending` or `running` while a background run of its ticket is going, because the run may
+  already have read it and will send its old proposal anyway (merge review of #788). A `failed` or
+  `queued` step, where a run stopped, is not refused.
   `start_work::run`, `retry` and `skip` keep the awaited path for the battery and
   `start_work_live.rs`.
 
@@ -54,4 +58,5 @@
   the source's write is held on a semaphore, then the address and the link once it is released),
   `the_ticket_read_refuses_a_write_that_files_no_ticket`, and `tests/it/start_work.rs`'s
   `run_answers_before_the_first_send_and_the_steps_land_behind_it` and
-  `a_refusal_behind_the_answer_stops_the_flow_where_it_happened`.
+  `a_refusal_behind_the_answer_stops_the_flow_where_it_happened` and
+  `a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited`.
