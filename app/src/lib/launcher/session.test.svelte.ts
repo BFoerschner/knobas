@@ -437,3 +437,30 @@ test("an answer to a query the reader has pasted over is dropped", async () => {
   expect(session.response).toBeNull();
   expect(session.mode).toBe("url");
 });
+
+test("a closed launcher forgets the kept kinds and sources, so a reopening reads them again (#768)", async () => {
+  const lists = (kinds: string[]) => ({
+    kinds: kinds.map((kind) => ({ kind, label: kind })),
+    sources: [],
+    parents: [],
+  });
+  let kinds = ["ticket"];
+  const filterSuggestions = vi.fn(async (_under?: string, parentsOnly?: boolean) =>
+    parentsOnly ? lists([]) : lists(kinds),
+  );
+  const session = new Session({
+    ...ports(async (q) => answer(q.raw)),
+    filterSuggestions,
+  } as never);
+
+  await session.loadSuggestions("");
+  await session.loadSuggestions("t");
+  expect(filterSuggestions.mock.calls.map(([, p]) => p)).toEqual([false, true]);
+  expect(session.suggestions?.kinds.map((k) => k.kind)).toEqual(["ticket"]);
+
+  session.dispose();
+  kinds = ["ticket", "commit"];
+  await session.loadSuggestions("");
+  expect(filterSuggestions.mock.calls.map(([, p]) => p)).toEqual([false, true, false]);
+  expect(session.suggestions?.kinds.map((k) => k.kind)).toEqual(["ticket", "commit"]);
+});
