@@ -166,6 +166,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
   }
 
   async function refresh(): Promise<void> {
+    const seen = answers;
     try {
       // All three together: a badge reading 4 over a list of three rows is the
       // two reads having been taken at different moments.
@@ -176,7 +177,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
       ]);
       // An answer made while this read was out is drawn already, and the
       // read after the last one in flight is the one that replaces it (#775).
-      if (inFlight > 0) return;
+      // A read that started before an answer was drawn or landed is older
+      // than that read, whichever of the two comes back first.
+      if (inFlight > 0 || seen !== answers) return;
       state.stream = stream;
       state.snoozed = snoozed;
       state.count = count;
@@ -192,6 +195,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
 
   /** Answers written and not yet answered; the re-read waits for the last. */
   let inFlight = 0;
+  /** Bumped when an answer is drawn and when it lands: a read from before either is stale. */
+  let answers = 0;
   /** Why an answer of the batch in flight failed, said once the batch is re-read. */
   let refusal: string | null = null;
 
@@ -208,6 +213,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
    */
   async function act(draw: () => void, run: () => Promise<void>): Promise<void> {
     draw();
+    answers += 1;
     inFlight += 1;
     state.busy = true;
     try {
@@ -218,6 +224,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
       // which the re-read below fixes.
       refusal = ipcErrorMessage(error);
     }
+    answers += 1;
     inFlight -= 1;
     if (inFlight > 0) return;
     state.busy = false;

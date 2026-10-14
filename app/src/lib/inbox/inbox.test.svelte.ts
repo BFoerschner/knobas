@@ -788,3 +788,28 @@ test("a re-read that lands while an answer is out does not draw the row back", a
   expect(inbox.stream).toEqual([]);
   expect(inbox.count).toBe(0);
 });
+
+test("a re-read taken while an answer was out cannot draw the row back after the answer's own re-read", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  let releaseAnswer!: () => void;
+  hold = new Promise((resolve) => (releaseAnswer = resolve));
+  const done = inbox.complete("review_request:gitea:acme/payouts#144");
+  // An event's re-read, taken before the backend saw the answer, and slow.
+  let releaseRead!: () => void;
+  hold = new Promise((resolve) => (releaseRead = resolve));
+  const early = inbox.refresh();
+  // The answer lands, and its own re-read draws the backend's empty stream.
+  stream = [];
+  count = 0;
+  releaseAnswer();
+  await done;
+  expect(inbox.stream).toEqual([]);
+  // The early read comes back last, with the row it saw: it is older, so it is dropped.
+  releaseRead();
+  await early;
+  expect(inbox.stream).toEqual([]);
+  expect(inbox.count).toBe(0);
+});
