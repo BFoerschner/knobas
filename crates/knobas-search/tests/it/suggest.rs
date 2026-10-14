@@ -159,14 +159,22 @@ fn typed_under(name: &str) -> String {
     }
 }
 
-/// The parents whose name carries this test's token, sorted.
-fn parents_of(suggestions: &FilterSuggestions, t: &str) -> Vec<ParentSuggestion> {
-    let mut out: Vec<ParentSuggestion> = suggestions
-        .parents
-        .iter()
-        .filter(|p| p.name.contains(t))
-        .cloned()
-        .collect();
+/// The parents offered for each of `prefixes` whose name carries this test's
+/// token, together, sorted and once each.
+///
+/// Asked per prefix because that is how the box asks since #761: the engine
+/// answers the newest parents that start with what was typed, and this file's
+/// tests share one database, so an unprefixed ask would answer with whichever
+/// test seeded last.
+async fn parents_of(searcher: &Searcher, prefixes: &[String], t: &str) -> Vec<ParentSuggestion> {
+    let mut out: Vec<ParentSuggestion> = Vec::new();
+    for prefix in prefixes {
+        for p in searcher.filter_suggestions(prefix).await.unwrap().parents {
+            if p.name.contains(t) && !out.contains(&p) {
+                out.push(p);
+            }
+        }
+    }
     out.sort_by(|a, b| a.name.cmp(&b.name).then(a.kind.cmp(&b.kind)));
     out
 }
@@ -230,7 +238,20 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     )
     .await;
 
-    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
+    let parents = parents_of(
+        &searcher(&pool).await,
+        &[
+            owner.clone(),
+            spaced.clone(),
+            lonely.clone(),
+            name.clone(),
+            format!("ghost{t}"),
+            format!("gone-{t}"),
+        ],
+        &t,
+    )
+    .await;
 
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
     for kind in ["commit", "monitor", "repo"] {
@@ -252,7 +273,7 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     assert_eq!(sources, [("gitea", "Gitea"), ("kuma", "Uptime Kuma")]);
 
     assert_eq!(
-        parents_of(&suggestions, &t),
+        parents,
         [
             parent(&spaced, "repo"),
             parent(&format!("{owner}/{spaced}"), "repo"),
@@ -263,12 +284,10 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
         ],
     );
     assert!(
-        parents_of(&suggestions, &t)
-            .iter()
-            .any(|p| typed_under(&p.name).contains('"')),
+        parents.iter().any(|p| typed_under(&p.name).contains('"')),
         "no offered parent has a space in its name, so the quoted spelling goes unprobed"
     );
-    for p in parents_of(&suggestions, &t) {
+    for p in &parents {
         leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
     for k in &suggestions.kinds {
@@ -287,16 +306,16 @@ async fn a_parent_only_its_children_name_is_still_offered() {
     let name = format!("unmirrored-{t}");
     commit(&pool, "gitea", &owner, &name).await;
 
-    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
+    let parents = parents_of(&searcher(&pool).await, &[owner.clone(), name.clone()], &t).await;
 
     assert_eq!(
-        parents_of(&suggestions, &t),
+        parents,
         [
             parent(&format!("{owner}/{name}"), "repo"),
             parent(&name, "repo"),
         ],
     );
-    for p in parents_of(&suggestions, &t) {
+    for p in parents {
         leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
 }
@@ -344,17 +363,28 @@ async fn every_asset_is_offered_by_its_name_and_leads_somewhere() {
     .await
     .unwrap();
 
-    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
+    // Lowercased where the name is not: the prefix ignores case.
+    let parents = parents_of(
+        &searcher(&pool).await,
+        &[
+            format!("hel1-{t}"),
+            format!("vm-{t}"),
+            format!("lone rack {t}"),
+        ],
+        &t,
+    )
+    .await;
 
     assert_eq!(
-        parents_of(&suggestions, &t),
+        parents,
         [
             parent(&format!("Lone Rack {t}"), "asset"),
             parent(&format!("hel1-{t}"), "asset"),
             parent(&format!("vm-{t}"), "asset"),
         ],
     );
-    for p in parents_of(&suggestions, &t) {
+    for p in parents {
         leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
     let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
@@ -419,7 +449,7 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     )
     .await;
 
-    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
     assert_eq!(sources_of(&suggestions, &t), [synced.as_str()]);
     for s in &suggestions.sources {
         leads_somewhere(&searcher(&pool).await, &format!("source:{}", s.id)).await;
@@ -434,7 +464,7 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     )
     .await;
 
-    let suggestions = searcher(&pool).await.filter_suggestions().await.unwrap();
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
     assert_eq!(
         sources_of(&suggestions, &t),
         [synced.as_str(), unsynced.as_str()]
@@ -492,10 +522,20 @@ async fn under_knows_exactly_the_names_the_box_offers() {
     asset(&pool, &format!("asset:rack-{t}"), None, &rack).await;
 
     let searcher = searcher(&pool).await;
-    let offered: Vec<String> = parents_of(&searcher.filter_suggestions().await.unwrap(), &t)
-        .into_iter()
-        .map(|p| p.name)
-        .collect();
+    let offered: Vec<String> = parents_of(
+        &searcher,
+        &[
+            owner.clone(),
+            unmirrored.clone(),
+            lonely.clone(),
+            rack.clone(),
+        ],
+        &t,
+    )
+    .await
+    .into_iter()
+    .map(|p| p.name)
+    .collect();
 
     // Every name the seed's parents answer to, one shape or two per arm.
     let mut parents = vec![
@@ -531,4 +571,134 @@ async fn under_knows_exactly_the_names_the_box_offers() {
     // The seed reaches every shape, so neither direction was asked of an
     // empty set, and the decoys were not known.
     assert_eq!(known, parents);
+}
+
+/// `under:` is answered by prefix, per keystroke (#761): the newest
+/// [`knobas_search::PARENT_SUGGESTIONS`] parents whose name starts with what
+/// was typed, ignoring case -- never every parent the mirror has, and never
+/// a name that only contains it.
+#[tokio::test]
+async fn a_parent_is_offered_by_the_prefix_typed_newest_first() {
+    let pool = pool().await;
+    let t = token();
+    // Twenty-five repos, each a day newer than the last, so the newest twenty
+    // are the ones numbered 05 to 24. Inserted newest first and dated after
+    // the insert, so the order holds only if the parent rows take the time
+    // the update moved (`sync.item_parent.at`), not the order they synced in.
+    for n in (0..25).rev() {
+        let name = format!("{t}-r{n:02}");
+        let id = item(
+            &pool,
+            "gitea",
+            "repo",
+            &format!("Owner{t}/{name}"),
+            serde_json::json!({ "full_name": format!("Owner{t}/{name}"), "name": name }),
+        )
+        .await;
+        sqlx::query(
+            "update sync.item set item_updated_at = timestamptz '2026-01-01' + make_interval(days => $2)
+              where entity_id = $1",
+        )
+        .bind(id)
+        .bind(n)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let searcher = searcher(&pool).await;
+    let offered = |prefix: String| {
+        let searcher = &searcher;
+        async move {
+            searcher
+                .filter_suggestions(&prefix)
+                .await
+                .unwrap()
+                .parents
+                .into_iter()
+                .map(|p| p.name)
+                .collect::<Vec<String>>()
+        }
+    };
+
+    let newest: Vec<String> = (5..25).rev().map(|n| format!("{t}-r{n:02}")).collect();
+    assert_eq!(
+        offered(t.to_uppercase()).await,
+        newest,
+        "the newest twenty, newest first, whatever the case typed"
+    );
+    assert_eq!(
+        offered(format!("{t}-r0")).await,
+        (0..10)
+            .rev()
+            .map(|n| format!("{t}-r{n:02}"))
+            .collect::<Vec<_>>(),
+        "a longer prefix reaches the older ones"
+    );
+    assert_eq!(
+        offered(format!("{t}-r03")).await,
+        [format!("{t}-r03")],
+        "a parent typed by prefix is still offered"
+    );
+    assert!(
+        offered("-r03".to_owned())
+            .await
+            .iter()
+            .all(|n| !n.contains(&t)),
+        "a name that only contains what was typed is not offered"
+    );
+    assert_eq!(
+        offered(format!("owner{t}/{t}-r1")).await.len(),
+        10,
+        "the repo's other name, `owner/name`, by its own prefix"
+    );
+}
+
+/// The parents' statement is never a named prepared statement (#761).
+///
+/// A named one is planned generically from its sixth execution in a session,
+/// and a generic plan cannot see how narrow the prefix range is: on the
+/// responsiveness probe `under:j` went from 50 ms cold to 313 ms warm. The
+/// unnamed statement is planned with the prefix in hand every time, the
+/// launcher's own search statement's remedy (`sql::query_as_with`).
+#[tokio::test]
+async fn the_parents_statement_is_never_a_named_prepared_statement() {
+    let _ = pool().await;
+    // One connection, so the statements counted are the ones this read made.
+    let one = knobas_db::test_util::test_connector()
+        .await
+        .pool(1)
+        .await
+        .unwrap();
+    let searcher = Searcher::declaring(one.clone(), [knobas_source_gitea::descriptor_template()])
+        .await
+        .unwrap();
+    // The parents' statement is the one statement that ranges up to the
+    // highest code point; nothing else in this read spells `chr(1114111)`.
+    let named = || async {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from pg_prepared_statements where statement like '%chr(1114111)%'",
+        )
+        .persistent(false)
+        .fetch_one(&one)
+        .await
+        .unwrap()
+    };
+
+    // Positive control: a persistent statement with the marker is counted.
+    sqlx::query("select chr(1114111)")
+        .fetch_one(&one)
+        .await
+        .unwrap();
+    let control = named().await;
+    assert_eq!(control, 1, "the detector does not see a named statement");
+
+    for prefix in ["", "s", "sx"] {
+        searcher.filter_suggestions(prefix).await.unwrap();
+    }
+    assert_eq!(
+        named().await,
+        control,
+        "the parents' statement was left in pg_prepared_statements, so it is \
+         planned generically from its sixth execution"
+    );
 }

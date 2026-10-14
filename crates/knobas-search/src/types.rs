@@ -534,8 +534,9 @@ mod tests {
 /// **Only values that exist right now**, so a picked suggestion never leads
 /// to an empty result or an unknown token: the kinds the corpus has live rows
 /// of, the enabled sources that have a live row, and the parents the
-/// mirror and the estate declare. Read once per launcher opening and narrowed
-/// by the box as the reader types, so the keystroke path pays nothing for it.
+/// mirror and the estate declare. The kinds and sources are read once per
+/// launcher opening and narrowed by the box; the parents are asked again per
+/// keystroke of an `under:` value, by prefix (#761).
 /// Free-text keys (`author:`, `updated:`) get no suggestions and have no list
 /// here.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -545,9 +546,10 @@ pub struct FilterSuggestions {
     /// Every enabled source with at least one live row, ordered by id -- the
     /// sources `source:` resolves that lead somewhere (#614).
     pub sources: Vec<SourceSuggestion>,
-    /// Every name a parent answers to, with the parent's kind, ordered by
-    /// name and kind. A parent with two names (a Gitea repo's `owner/name`
-    /// and `name`) is listed once per name.
+    /// The newest [`crate::PARENT_SUGGESTIONS`] names a parent answers to that
+    /// start with the prefix asked for, ignoring case, each with the parent's
+    /// kind, newest first (#761). A parent with two names (a Gitea repo's
+    /// `owner/name` and `name`) is listed once per name that has the prefix.
     pub parents: Vec<ParentSuggestion>,
 }
 

@@ -468,14 +468,25 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
             unknown_tokens: response.interpreted.unknown_tokens,
         });
     }
-    let parents = knobas_app::commands::search::filter_suggestions_inner(pool)
-        .await
-        .unwrap()
-        .parents
-        .into_iter()
-        .filter(|parent| parent.name.contains(t))
-        .map(|parent| (parent.name, parent.kind))
-        .collect();
+    // Asked per prefix, as the box asks since #761.
+    let mut parents = Vec::new();
+    for prefix in [
+        format!("own/pay-{t}"),
+        format!("pay-{t}"),
+        format!("ghost-{t}"),
+    ] {
+        parents.extend(
+            knobas_app::commands::search::filter_suggestions_inner(pool, &prefix)
+                .await
+                .unwrap()
+                .parents
+                .into_iter()
+                .filter(|parent| parent.name.contains(t))
+                .map(|parent| (parent.name, parent.kind)),
+        );
+    }
+    parents.sort();
+    parents.dedup();
     UnderAnswers {
         queries: answers,
         parents,

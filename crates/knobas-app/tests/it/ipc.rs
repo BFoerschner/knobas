@@ -548,6 +548,16 @@ async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
         .pool(4)
         .await
         .expect("a pool onto this test's own database");
+    // A scheduled run of the mock that finished having written nothing: the
+    // source-level status says `last_changed: false` for it, and the load's
+    // emit must not repeat that for a load that wrote the corpus (#759).
+    sqlx::query(
+        "insert into knobas.sync_run (source_id, trigger, finished_at, outcome)
+         values ('mock', 'schedule', now(), 'ok')",
+    )
+    .execute(&pool)
+    .await
+    .expect("an earlier run of the mock that wrote nothing");
     let demo = knobas_app::Profile::from_args(
         vec![knobas_app::DEMO_FLAG.to_owned()],
         std::path::Path::new("/tmp/knobas-test"),
@@ -581,6 +591,12 @@ async fn demo_load_ends_with_a_terminal_sync_state_for_the_mock() {
             )
         });
     assert_eq!(terminal["source_id"], serde_json::json!("mock"));
+    assert_eq!(
+        terminal["last_changed"],
+        serde_json::json!(true),
+        "the load's own counts, not the earlier run's zeros -- the projects store \
+         skips a `false` (#759): {terminal:?}"
+    );
     assert_eq!(
         seen.iter()
             .filter(|s| s["running"] == serde_json::json!(true))

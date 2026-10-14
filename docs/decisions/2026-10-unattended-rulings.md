@@ -1210,3 +1210,30 @@ Ruled 2026-10-14 by the deputy for Björn, under the #701 delegation. Posted in 
 **If you disagree, the cost of reversing this is:** low: `pulls` and step 1 of `sync_repo` in `crates/knobas-source-gitea/src/sync.rs`, and two cursor fields.
 
 As built (#764): the exact second, not a window — the walk already re-read it (it stops only below the mark); what was wrong was the identity it compared. The sink does **not** skip identical payloads (it rewrites every item, and battery clause 2 asks the adapter for an empty idle run), so the no-op is the adapter's: the cursor holds number → fingerprint of the listing record for the pull requests on the watermark (`pulls_seen_at_watermark`), and a fingerprint for the repository record (`repo_fingerprint`). Renamed rather than retyped, so no cursor version bump; a cursor from before re-emits the repository and the watermark's pull requests once. Commits (immutable, keyed by object id) and branches (head ids) were not affected. TeamCity's watermark is a build id, not a timestamp: not affected. Jira already fingerprints a two-minute overlap (#345), which also covers JQL's minute resolution: not affected. §10.8 entry: `docs/contract/10.8/764-gitea-cursor-fingerprints-on-the-watermark.md`.
+## #759 — the project census walks every mirrored item on every finished sync
+
+Ruled 2026-10-14 by the deputy for Björn. Posted on #759.
+
+**The fork:** `list_projects` walked every live item through the declared project paths (341–461 ms on the 22,000-item probe) and was re-read after every finished sync. Options: (1) store the project key the way #688 stored the parent key, kept by the item triggers (a migration and a §10.8 entry); (2) re-read only after a run that changed something, with no migration.
+
+**Ruling:** both (1) and (2). Store the project key in `sync.item_project`, kept by the item triggers (ADR-0019's pattern, a migration and a §10.8 file), and have the projects store re-read only after a run that changed something. Bundled with #761 into one agent and one migration.
+
+**Reasoning:** both turn a census walk into a stored, indexed read, and (2) removes the re-read after every no-op run.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#759, migration `0032`): `sync.item_project` also keeps the item's time (`at`), which the update trigger rewrites whenever it moves. The census reads each project's first live row off an ordered index, so it does not depend on the planner's statistics: 401 ms before, 6 ms after. The `sync:state` payload carried no run counts, so (2) needed a signal: `SourceSyncStatus.last_changed`, from the finished run's upserted, deleted and swept counts. The store skips only an explicit `false`.
+
+## #761 — the launcher's value suggestions ship every parent name
+
+Ruled 2026-10-14 by the deputy for Björn. Posted on #761.
+
+**The fork:** `filter_suggestions` shipped every parent name in the mirror (274–430 ms, 680 KB). Options: answer `parents` by prefix per keystroke, the newest 20, through an index on `sync.item_parent`'s name (a §10.8 change to `FilterSuggestions`' meaning); or cap the list at the newest N with no IPC change.
+
+**Ruling:** the prefix answer, not the cap: `parents` answered by the engine per keystroke, newest 20 by prefix, through an index on `sync.item_parent`'s name. §10.8 file for the changed `FilterSuggestions` meaning. Bundled with #759 (one agent, one migration).
+
+**Reasoning:** the launcher already sends a request per keystroke, and a cap would still ship hundreds of names nobody typed.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#761): `filter_suggestions` takes an optional `under`. A name is ranked by the newest mirrored item that names it, and offered only while `under:`'s own lookup knows it. The statement is unnamed, so every prefix gets a custom plan, and the ranking reads the item's time off `sync.item_parent.at` (added by the merge review: joining `sync.item` for it was 260 ms on tables never analyzed). `under:` with nothing typed answers in 44 ms, `under:pay` in 12 ms, about 1 KB each. Known concession: a name whose newest item was withdrawn ranks a little higher than its live items alone would put it.

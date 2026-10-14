@@ -11,13 +11,13 @@
 //! shared database would let one test's fixture decide another's answer.
 
 use knobas_core::entity::EntityRef;
-use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
+use knobas_core::payload::{KindPaths, PayloadPath};
 use knobas_core::project::{self, Project};
 use sqlx::PgPool;
 
-/// What the two sources in this file declare about where they keep a project
-/// (#277) -- the census is path-driven now, so a fixture's source has to have
-/// said where its own spelling is, the way its adapter's descriptor does.
+/// What the three sources in this file declare about where they keep a
+/// project (#277) -- the census is path-driven, so a fixture's source has to
+/// have said where its own spelling is, the way its adapter's descriptor does.
 ///
 /// Jira's `fields.project`, and TeamCity's two: a **build** names its project
 /// on the `buildType` it ran, and a build **configuration**'s record *is* that
@@ -25,12 +25,15 @@ use sqlx::PgPool;
 /// as `case when i.kind = 'build_config'` is exactly this -- two per-kind
 /// declarations, and no other kind can reach the top-level path.
 ///
-/// **Per instance, not per adapter kind**: `jira` and `jira-eu` are two
-/// configured Jiras, and each declares its own, because a declaration is
-/// keyed by the source id that is also the entity namespace. That is what
-/// `knobas_app::sources::declared_paths` does with one adapter template and
-/// two rows of `knobas.source_config`.
-fn declarations() -> Declarations {
+/// **Stored, as bring-up stores them** (#759, migration `0032`): the census
+/// reads `sync.item_project`, which the database keeps from
+/// `sync.parent_declaration`, and counts a row only while the item's source is
+/// configured with the row's adapter kind. So [`scratch`] writes each source
+/// here as an adapter kind of its own name and configures the source with it
+/// -- `jira` and `jira-eu` are two configured Jiras, each with its own
+/// declaration, the way `knobas_app::sources::declared_paths` gives one
+/// adapter template to two rows of `knobas.source_config`.
+fn declarations() -> Vec<(&'static str, Vec<KindPaths>)> {
     let jira = || {
         vec![KindPaths {
             kind: "ticket".to_owned(),
@@ -39,10 +42,10 @@ fn declarations() -> Declarations {
             ..KindPaths::default()
         }]
     };
-    Declarations::empty()
-        .with("jira", jira())
-        .with("jira-eu", jira())
-        .with(
+    vec![
+        ("jira", jira()),
+        ("jira-eu", jira()),
+        (
             "teamcity",
             vec![
                 KindPaths {
@@ -58,16 +61,29 @@ fn declarations() -> Declarations {
                     ..KindPaths::default()
                 },
             ],
-        )
+        ),
+    ]
 }
 
 /// A migrated, empty database of this test's own.
 async fn scratch() -> PgPool {
-    knobas_db::test_util::scratch_database("projects")
+    let pool = knobas_db::test_util::scratch_database("projects")
         .await
         .pool(4)
         .await
-        .expect("a pool onto this test's own database")
+        .expect("a pool onto this test's own database");
+    for (source, paths) in declarations() {
+        configure(&pool, source, true).await;
+        sqlx::query(
+            "insert into sync.parent_declaration (adapter_kind, payload_paths) values ($1, $2)",
+        )
+        .bind(source)
+        .bind(sqlx::types::Json(paths))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    pool
 }
 
 /// A Jira Data Center issue's shape, as far as this read cares: the `project`
@@ -150,17 +166,15 @@ async fn tombstone(pool: &PgPool, id: &str) {
         .unwrap();
 }
 
-/// A configuration row for a source, turned on or off.
-///
-/// `sync.item` has no foreign key to `knobas.source_config` -- `run_once`
-/// mirrors unconfigured sources -- so most fixtures here have no row at all,
-/// and migration `0012`'s `coalesce(s.enabled, true)` leaves those visible.
-/// This is what the *user turning a source off* looks like.
+/// A configuration row for a source, turned on or off, under the adapter kind
+/// of its own name ([`declarations`]). Called with `false`, this is what the
+/// *user turning a source off* looks like.
 async fn configure(pool: &PgPool, source: &str, enabled: bool) {
     sqlx::query(
         "insert into knobas.source_config
              (id, kind, display_name, base_url, auth_kind, enabled)
-         values ($1, $1, $1, 'http://localhost', 'pat', $2)",
+         values ($1, $1, $1, 'http://localhost', 'pat', $2)
+         on conflict (id) do update set enabled = excluded.enabled",
     )
     .bind(source)
     .bind(enabled)
@@ -219,7 +233,7 @@ async fn every_project_the_corpus_shows_is_reported_once() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -259,7 +273,7 @@ async fn teamcitys_own_two_words_read_as_well_as_jiras() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -291,7 +305,7 @@ async fn a_build_configurations_own_top_level_words_are_read_for_its_kind() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -342,7 +356,7 @@ async fn a_build_configuration_with_no_readable_project_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![], "none of the five is a project");
 }
@@ -373,7 +387,7 @@ async fn a_build_configuration_with_no_readable_name_is_reported_by_its_key() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -415,7 +429,7 @@ async fn a_build_and_its_configuration_are_one_project() {
     .await;
     touched(&pool, &build, "2026-08-01T09:00:00Z").await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -454,7 +468,7 @@ async fn a_top_level_project_id_on_any_other_kind_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -486,7 +500,7 @@ async fn a_project_key_that_is_not_a_string_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![], "neither shape is a project");
 }
@@ -519,7 +533,7 @@ async fn a_renamed_project_stays_one_project_under_its_newest_name() {
     touched(&pool, &new, "2026-08-15T09:00:00Z").await;
     touched(&pool, &nameless, "2026-08-30T09:00:00Z").await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payouts"))]);
 }
@@ -539,7 +553,7 @@ async fn a_blank_project_key_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![]);
 }
@@ -560,7 +574,7 @@ async fn a_whitespace_only_project_key_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![]);
 }
@@ -590,7 +604,7 @@ async fn a_record_with_no_project_at_all_contributes_nothing() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -622,7 +636,7 @@ async fn a_project_with_no_readable_name_is_reported_by_its_key() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),
@@ -654,7 +668,7 @@ async fn a_tombstoned_item_contributes_no_project() {
     .await;
     tombstone(&pool, &withdrawn).await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payout"))]);
 }
@@ -685,7 +699,7 @@ async fn a_disabled_source_shows_no_projects() {
     .await;
     configure(&pool, "teamcity", false).await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(rows(&projects), vec![("jira", "PAY", Some("Payout"))]);
 
@@ -693,14 +707,14 @@ async fn a_disabled_source_shows_no_projects() {
         .execute(&pool)
         .await
         .unwrap();
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
     assert_eq!(
         rows(&projects),
         vec![
             ("jira", "PAY", Some("Payout")),
             ("teamcity", "Payout", Some("Payout pipeline")),
         ],
-        "nothing was stored about the disabled source, so re-enabling it is enough"
+        "the stored rows count again the moment the source is on, with nothing recomputed"
     );
 }
 
@@ -726,7 +740,7 @@ async fn one_key_in_two_sources_is_two_projects() {
     )
     .await;
 
-    let projects = project::list(&pool, &declarations()).await.unwrap();
+    let projects = project::list(&pool).await.unwrap();
 
     assert_eq!(
         rows(&projects),

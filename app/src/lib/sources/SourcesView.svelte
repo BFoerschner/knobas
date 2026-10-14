@@ -229,6 +229,7 @@
         last_outcome: statuses[sourceId]?.last_outcome ?? null,
         next_run_at: null,
         backoff_until: null,
+        last_changed: statuses[sourceId]?.last_changed ?? null,
       },
     };
   }

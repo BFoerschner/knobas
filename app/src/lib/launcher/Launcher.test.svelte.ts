@@ -2024,6 +2024,56 @@ test("free-text keys open nothing, and the read is never asked for them", async 
   expect(filterSuggestions).toHaveBeenCalledTimes(0);
 });
 
+test("under: asks the engine for the value being typed and draws its answer (#761)", async () => {
+  // The engine answers parents by prefix: what it was asked for is what the
+  // list may offer, so a list built from the opening's first read would show
+  // names this one never returned.
+  const asked: (string | undefined)[] = [];
+  const filterSuggestions = vi.fn(async (under?: string) => {
+    asked.push(under);
+    return {
+      ...SUGGESTIONS,
+      parents: SUGGESTIONS.parents.filter((p) =>
+        p.name.toLowerCase().startsWith((under ?? "").toLowerCase()),
+      ),
+    };
+  });
+  open({
+    ports: { launcherHome: async () => HOME, search: async () => response(), filterSuggestions },
+  });
+  await settle();
+
+  await typeInto("under:");
+  expect(asked).toEqual([""]);
+  await typeInto("under:tide");
+  expect(asked).toEqual(["", "tide"]);
+  expect(offered()).toEqual(["tidewater/payout-service · repo"]);
+
+  // The same value is not asked twice, and kind: needs no prefix.
+  await typeInto("under:tide ");
+  await typeInto("under:tide kind:");
+  expect(asked).toEqual(["", "tide", ""]);
+});
+
+test("an older under: answer that lands late does not replace a newer one", async () => {
+  const pending = new Map<string, (v: FilterSuggestions) => void>();
+  const filterSuggestions = vi.fn(
+    (under?: string) =>
+      new Promise<FilterSuggestions>((resolve) => pending.set(under ?? "", resolve)),
+  );
+  open({
+    ports: { launcherHome: async () => HOME, search: async () => response(), filterSuggestions },
+  });
+  await settle();
+  await typeInto("under:r");
+  await typeInto("under:ru");
+  pending.get("ru")!({ ...SUGGESTIONS, parents: [{ name: "Runbooks Overview", kind: "page" }] });
+  await settle();
+  pending.get("r")!({ ...SUGGESTIONS, parents: [{ name: "rust", kind: "repo" }] });
+  await settle();
+  expect(offered()).toEqual(["Runbooks Overview · page"]);
+});
+
 /* ── #746: a read that is waiting or failed is never an empty state ───── */
 
 function typeInBox(raw: string) {

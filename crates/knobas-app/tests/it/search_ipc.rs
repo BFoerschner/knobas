@@ -1971,7 +1971,7 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     .await
     .unwrap();
 
-    let v = serde_json::to_value(filter_suggestions_inner(&pool).await.unwrap()).unwrap();
+    let v = serde_json::to_value(filter_suggestions_inner(&pool, "").await.unwrap()).unwrap();
 
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
@@ -1991,19 +1991,28 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
             .any(|s| s["id"] == "gitea" && s["display_name"] == "Gitea"),
         "{v}"
     );
-    let mut ours: Vec<(String, String)> = v["parents"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .filter(|p| p["name"].as_str().unwrap().contains(&t))
-        .map(|p| {
-            (
-                p["name"].as_str().unwrap().to_owned(),
-                p["kind"].as_str().unwrap().to_owned(),
-            )
-        })
-        .collect();
+    // The parents by prefix, as the box asks for them since #761: one ask
+    // per name this test seeded, each answered in the same wire shape.
+    let mut ours: Vec<(String, String)> = Vec::new();
+    for prefix in [format!("o/{t}"), t.clone()] {
+        let v =
+            serde_json::to_value(filter_suggestions_inner(&pool, &prefix).await.unwrap()).unwrap();
+        ours.extend(
+            v["parents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter(|p| p["name"].as_str().unwrap().contains(&t))
+                .map(|p| {
+                    (
+                        p["name"].as_str().unwrap().to_owned(),
+                        p["kind"].as_str().unwrap().to_owned(),
+                    )
+                }),
+        );
+    }
     ours.sort();
+    ours.dedup();
     assert_eq!(
         ours,
         [

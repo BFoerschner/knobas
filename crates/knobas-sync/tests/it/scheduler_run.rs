@@ -536,6 +536,7 @@ async fn status_reports_running_then_the_finished_shape() {
         running.next_run_at.is_none(),
         "a run in flight has no next time to count down to"
     );
+    assert_eq!(running.last_changed, None, "no run of it has finished yet");
 
     let result = knobas_sync::scheduler::execute_run(
         &h.deps,
@@ -565,6 +566,26 @@ async fn status_reports_running_then_the_finished_shape() {
         done.next_run_at.unwrap() > chrono::Utc::now(),
         "interval runs from the finish"
     );
+    assert!(
+        result.counts.upserted > 0,
+        "the fixture source writes items"
+    );
+    assert_eq!(
+        done.last_changed,
+        Some(true),
+        "a run that wrote items (#759)"
+    );
+    // The same run, as one that wrote nothing: what a listener skips on.
+    sqlx::query("update knobas.sync_run set upserted = 0, deleted = 0, swept = 0 where id = $1")
+        .bind(run_id)
+        .execute(&h.deps.pool)
+        .await
+        .unwrap();
+    let idle = knobas_sync::scheduler::status_for(&h.deps.pool, &h.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(idle.last_changed, Some(false), "a run that wrote nothing");
 
     assert!(
         knobas_sync::scheduler::status_all(&h.deps.pool)

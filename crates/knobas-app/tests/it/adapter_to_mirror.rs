@@ -587,13 +587,10 @@ async fn a_teamcity_project_survives_its_builds_through_its_configurations() {
     );
 
     let census = || async {
-        let declarations = knobas_app::sources::paths::declared_paths(
-            &pool,
-            &knobas_app::sources::Registry::builtin(),
-        )
-        .await
-        .expect("what the configured sources declare");
-        knobas_core::project::list(&pool, &declarations)
+        // `list_projects` itself: it stores the running binary's
+        // declarations on its way in, and the census reads what the database
+        // resolved from them (#759).
+        knobas_app::commands::entity::list_projects_inner(&pool)
             .await
             .unwrap()
             .into_iter()

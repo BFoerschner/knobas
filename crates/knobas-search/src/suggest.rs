@@ -12,7 +12,8 @@
 //!   resolves (a disabled one is nameable by nothing, #200), that have at
 //!   least one live row: one configured but not synced yet would lead to an
 //!   empty result (the deputy's ruling of 2026-10-12 on #614);
-//! * **parents** -- every name a parent answers to, with its kind: the names
+//! * **parents** -- the newest names a parent answers to that start with the
+//!   prefix being typed (#761), with their kind: the names
 //!   live items declare for their parents and the names mirrored records
 //!   answer to as one, read through the **same two `knobas_core::payload`
 //!   reads** `under:` resolves through (the deputy's ruling of 2026-10-11 on
@@ -21,8 +22,10 @@
 //!   to its name, and `under:` returns the asset itself, so even a leaf leads
 //!   somewhere -- as a mirrored repo nothing sits in yet does).
 //!
-//! One read per launcher opening, never per keystroke: the box narrows the
-//! lists itself as the reader types, so the hot path pays nothing for them.
+//! Read once per launcher opening for the kinds and sources, which are small,
+//! and again per keystroke of an `under:` value for the parents, which are
+//! not: the mirror holds a parent name per ticket key, so the engine answers a
+//! prefix rather than shipping every name to be narrowed in the webview.
 //!
 //! [`KindCatalog`]: crate::KindCatalog
 
@@ -67,17 +70,90 @@ select s.id from unnest($1::text[]) s(id)
    order by i.item_updated_at desc nulls last
    limit 1) l";
 
-/// Every `(name, kind)` a parent answers to: [`crate::under::parent_names!`],
-/// the fragment `under:`'s own lookup reads, so a suggested name is one
-/// `under:` knows and every name it knows is suggested (#615).
+/// How many parents one prefix is answered with (#761): the newest this many
+/// whose name starts with what was typed.
+///
+/// The box draws at most eight of them (`SUGGESTION_LIMIT` in
+/// `app/src/lib/launcher/suggest.ts`) and narrows the last answer itself while
+/// the next one is in flight, so twenty leave it something to narrow without
+/// shipping the mirror.
+pub const PARENT_SUGGESTIONS: i64 = 20;
+
+/// The newest [`PARENT_SUGGESTIONS`] `(name, kind)`s a parent answers to whose
+/// name starts with `$1`, ignoring case (#761, the deputy's ruling of
+/// 2026-10-14). Before it, every parent name the mirror had was shipped once
+/// per opening and narrowed in the webview -- 274-430 ms and 680 KB on the
+/// 22,000-item responsiveness probe (#753), most of it ticket keys nobody
+/// typed.
+///
+/// Two steps, so the cost does not hang on the planner's statistics:
+///
+/// 1. **Rank** every `(name, kind)` with the prefix by the newest mirrored
+///    item that names it -- `sync.item_parent` alone, which carries its
+///    item's time (`at`, migration `0032`), and every asset by its own time --
+///    sorted. Grouped in byte order (`collate "C"`): the grouping is only an
+///    identity, and a broad prefix groups tens of thousands of rows, which
+///    the database's collation compares several times slower. The `offset 0`
+///    keeps step 2 from being pushed beneath the sort.
+/// 2. **Offer** them in that order while [`crate::under::parent_names!`] --
+///    the fragment `under:`'s own lookup reads -- has the same name and kind,
+///    up to the limit. So an offered name is one `under:` knows (#615); and
+///    since step 1's rows are a superset of that fragment's, every name it
+///    knows is ranked, and is offered for a prefix specific enough. A
+///    `lateral ... limit 1` and not an `exists`: PostgreSQL turns an `exists`
+///    into a semi join that builds the whole fragment (30,890 rows on the
+///    probe, 28-175 ms), while a lateral is a few index probes per candidate,
+///    in rank order, stopped by the outer limit. The outer `order by` is the
+///    subquery's own, so it adds no sort above the loop. The probe compares
+///    in the database's collation again (`collate "default"`), which is what
+///    `item_parent_name_idx` is built in.
+///
+/// Joining every row to `sync.live_item` before ranking was 58 ms at the
+/// probe's size with fresh statistics and 306 ms without (the join to
+/// `knobas.source_config` on two columns is underestimated a hundredfold and
+/// the planner picks nested loops). Joining each row to `sync.item` for its
+/// time instead was 33 ms for an empty prefix with statistics and 260 ms on
+/// tables never analyzed, for the same reason. This shape measured 27 ms for
+/// an empty prefix, 20 ms for `j`, 3 ms for `jira0-1` and 1 ms for `pay` on
+/// the probe, never analyzed and analyzed alike, and under a generic plan.
+///
+/// **What the ranking concedes**: a name is ranked by its newest item, live or
+/// not. A name whose newest item was withdrawn, or sits in a turned-off
+/// source, while an older live one still answers to it, is offered a little
+/// higher than its live items alone would put it. It is still offered only
+/// when a live item answers to it.
+///
+/// The range on `~>=~` / `~<~` is the one `item_parent_name_prefix_idx`
+/// (migration `0032`, `text_pattern_ops`) serves, in byte order whatever the
+/// database's collation, and it is a parameter range, so a generic plan keeps
+/// it -- a `like $1 || '%'` would not. The upper bound appends the highest code
+/// point, so a name that continues the prefix with U+10FFFF itself falls
+/// outside it; that is a private-use character no source spells a parent
+/// with. `starts_with` is the exact test. `lower` on both sides, in SQL: the
+/// lowering `under::KNOWN_SQL` compares with. A name the trim leaves empty, or
+/// a row without a kind, is not offered.
 const PARENTS_SQL: &str = concat!(
-    "select distinct p.name, p.kind from ",
+    "select g.name, g.kind from ( \
+       select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
+         select ip.name, ip.kind, ip.at from sync.item_parent ip \
+         union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
+        where lower(p.name) ~>=~ lower($1) \
+          and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
+          and starts_with(lower(p.name), lower($1)) \
+          and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
+        group by p.name collate \"C\", p.kind \
+        order by top desc nulls last, p.name collate \"C\", p.kind \
+       offset 0) g \
+     cross join lateral (select 1 from ",
     crate::under::parent_names!(),
-    " p where nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-     order by p.name, p.kind"
+    " k where lower(k.name) = lower(g.name collate \"default\") \
+        and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
+     order by g.top desc nulls last, g.name, g.kind \
+     limit $2"
 );
 
-/// Read the three lists against `vocab`.
+/// Read the three lists against `vocab`, the parents for the prefix `under`
+/// (empty for none).
 ///
 /// # Errors
 ///
@@ -85,9 +161,22 @@ const PARENTS_SQL: &str = concat!(
 pub(crate) async fn read(
     pool: &PgPool,
     vocab: &Vocabulary,
+    under: &str,
 ) -> Result<FilterSuggestions, SearchError> {
     let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
-    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL).fetch_all(pool).await?;
+    let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
+        .bind(under)
+        .bind(PARENT_SUGGESTIONS)
+        // The unnamed statement, planned with the prefix in hand every time.
+        // A named one is planned generically from its sixth execution in a
+        // session, and a generic plan cannot see how narrow the prefix range
+        // is: `under:j` went from 50 ms cold to 313 ms warm on the
+        // responsiveness probe. The launcher's search has the same remedy
+        // for the same reason (`sql::query_as_with`). Pinned by
+        // `the_parents_statement_is_never_a_named_prepared_statement`.
+        .persistent(false)
+        .fetch_all(pool)
+        .await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()

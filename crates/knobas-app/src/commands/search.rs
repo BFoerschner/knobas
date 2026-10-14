@@ -202,8 +202,12 @@ pub async fn delete_smart_list(
 /// mirror's and the estate's parents answer to, each with its kind. Only
 /// values that exist right now.
 ///
-/// Read once per launcher opening -- the box narrows the lists itself as the
-/// reader types -- so the keystroke path never waits on it.
+/// `under` is the `under:` value being typed (#761): the parents are the
+/// newest [`knobas_search::PARENT_SUGGESTIONS`] whose name starts with it,
+/// ignoring case -- the newest outright when it is absent or empty. The box
+/// reads the lists once per opening and asks again per keystroke of an
+/// `under:` value, narrowing the last answer itself while the next is in
+/// flight.
 ///
 /// # Errors
 ///
@@ -211,8 +215,9 @@ pub async fn delete_smart_list(
 #[tauri::command]
 pub async fn filter_suggestions(
     lifecycle: State<'_, Lifecycle>,
+    under: Option<String>,
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
-    filter_suggestions_inner(&lifecycle.pool()?).await
+    filter_suggestions_inner(&lifecycle.pool()?, under.as_deref().unwrap_or("")).await
 }
 
 /// The launcher's engine, reading what the compiled-in adapters declare about
@@ -287,8 +292,9 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
 /// See [`filter_suggestions`].
 pub async fn filter_suggestions_inner(
     pool: &PgPool,
+    under: &str,
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
-    Ok(searcher(pool).await?.filter_suggestions().await?)
+    Ok(searcher(pool).await?.filter_suggestions(under).await?)
 }
 
 /// [`smart_lists`], against a pool.

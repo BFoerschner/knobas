@@ -3512,18 +3512,21 @@ pub async fn list_projects(
 /// re-type the two lines it contains -- which is a test that goes on passing
 /// after the command stops doing this. Pinned by
 /// `a_confluence_space_is_a_project_room_and_a_jira_project_is_another` in
-/// `tests/it/entity.rs`, which dies when the declarations stop being resolved
+/// `tests/it/entity.rs`, which dies when the declarations stop being stored
 /// here.
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
-/// failure or a source listing that fails.
+/// failure or a declaration write that fails.
 pub async fn list_projects_inner(
     pool: &PgPool,
 ) -> Result<Vec<knobas_core::project::Project>, IpcError> {
-    let declarations = declared_paths(pool).await?;
-    Ok(knobas_core::project::list(pool, &declarations).await?)
+    // The declarations' stored copy, written first as every search command
+    // writes it (one read when nothing changed): the census reads
+    // `sync.item_project`, which the database resolves from it (#759).
+    crate::commands::search::searcher(pool).await?;
+    Ok(knobas_core::project::list(pool).await?)
 }
 
 // -- the standup digest (#288) ----------------------------------------------

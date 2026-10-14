@@ -249,7 +249,18 @@ pub async fn demo_load_announced(
     if !matches!(result, Err(DemoError::Db(_))) {
         let source_id = MockSource::new().descriptor().id;
         match status_for(pool, &source_id).await {
-            Ok(Some(status)) => events.sync_state(status),
+            Ok(Some(mut status)) => {
+                // This load's own counts, not the source's last logged run's:
+                // a scheduled mock run that wrote nothing would otherwise say
+                // `false` for a load that wrote the whole corpus, and the
+                // projects store skips a `false` (#759). A failed load says
+                // `None`, which a listener reads as "maybe".
+                status.last_changed = result
+                    .as_ref()
+                    .ok()
+                    .map(|r| r.upserted + r.deleted + r.swept > 0);
+                events.sync_state(status);
+            }
             Ok(None) => tracing::warn!(source_id, "the demo source has no status row to announce"),
             Err(error) => {
                 tracing::warn!(source_id, %error, "reading sync status for the event failed");
