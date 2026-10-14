@@ -66,6 +66,18 @@ pub fn migrations_hash(dir: &Path) -> String {
     hex(&hasher)
 }
 
+/// A hash of the suggestion pass's code: the file `suggest` and every
+/// migration (`migrations`, as [`migrations_hash`] gives it), so a change to
+/// either names an after-pass snapshot that does not exist.
+pub fn pass_code_hash(suggest: &Path, migrations: &str) -> String {
+    let mut hasher = DefaultHasher::new();
+    std::fs::read(suggest)
+        .unwrap_or_else(|error| panic!("read {}: {error}", suggest.display()))
+        .hash(&mut hasher);
+    migrations.hash(&mut hasher);
+    hex(&hasher)
+}
+
 /// A hash of the probe's seed parameters, as `name=value` text.
 pub fn seed_hash(params: &[(&str, String)]) -> String {
     let mut hasher = DefaultHasher::new();
@@ -79,6 +91,12 @@ pub fn seed_hash(params: &[(&str, String)]) -> String {
 /// The snapshot's directory name for `state`.
 pub fn name(migrations: &str, seed: &str, state: State) -> String {
     format!("m{migrations}-p{seed}-{}", state.suffix())
+}
+
+/// The after-pass snapshot's directory name: the seed key plus the pass code
+/// `pass` (see [`pass_code_hash`]), kept per statistics state.
+pub fn passed_name(migrations: &str, seed: &str, pass: &str, state: State) -> String {
+    format!("m{migrations}-p{seed}-c{pass}-passed-{}", state.suffix())
 }
 
 /// Whether the snapshot directory `name` belongs to the migrations `current`.
@@ -240,6 +258,31 @@ mod tests {
         assert_eq!(p("5000", "4000"), p("5000", "4000"));
         assert_ne!(p("5000", "4000"), p("500", "4000"));
         assert_ne!(p("5000", "4000"), p("5000", "0"));
+    }
+
+    #[test]
+    fn a_change_to_the_pass_code_or_the_migrations_names_another_after_pass_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("suggest.rs");
+        std::fs::write(&file, "fn pass() {}\n").unwrap();
+        let before = pass_code_hash(&file, "m1");
+        assert_eq!(before, pass_code_hash(&file, "m1"));
+        assert_ne!(before, pass_code_hash(&file, "m2"));
+        std::fs::write(&file, "fn pass() {} \n").unwrap(); // whitespace only
+        let after = pass_code_hash(&file, "m1");
+        assert_ne!(before, after);
+        let name = |pass: &str| passed_name("m", "s", pass, State::Analyzed);
+        assert_ne!(name(&before), name(&after));
+        assert_ne!(
+            passed_name("m", "s", &before, State::Analyzed),
+            passed_name("m", "s", &before, State::NeverAnalyzed)
+        );
+        assert_ne!(name(&before), name_of_base());
+        assert!(of_migrations(&name(&before), "m"));
+    }
+
+    fn name_of_base() -> String {
+        name("m", "s", State::Analyzed)
     }
 
     #[test]
