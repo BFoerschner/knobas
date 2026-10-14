@@ -712,6 +712,15 @@ drawn as (
     tile_page!(),
 );
 
+/// [`EntityOrder::LatestPerParent`]'s statement, for the plan test
+/// (`tests/it/read_plans.rs`, #778). It binds what [`list_entities_inner`]
+/// binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_latest_per_parent() -> &'static str {
+    LIVE_LATEST
+}
+
 /// The statement this filter reads through. Six constants, one `match`.
 ///
 /// # Errors

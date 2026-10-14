@@ -32,6 +32,7 @@ mod inbox_ipc;
 mod ipc;
 mod project_census;
 mod protocol_ipc;
+mod read_plans;
 mod responsiveness_probe;
 mod search_ipc;
 mod sources_crud;

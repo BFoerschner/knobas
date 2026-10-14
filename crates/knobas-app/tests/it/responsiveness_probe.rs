@@ -133,10 +133,11 @@ impl Rng {
 }
 
 /// A synthetic source of one adapter's shape: `kind` items, `count` of them.
-struct Synthetic {
-    descriptor: SourceDescriptor,
-    kind: &'static str,
-    count: u64,
+/// `read_plans.rs` seeds its mirror with these too.
+pub(crate) struct Synthetic {
+    pub(crate) descriptor: SourceDescriptor,
+    pub(crate) kind: &'static str,
+    pub(crate) count: u64,
 }
 
 #[async_trait::async_trait]

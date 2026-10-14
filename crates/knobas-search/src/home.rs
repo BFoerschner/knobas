@@ -84,6 +84,15 @@ macro_rules! recent_sql {
 
 const RECENT_SQL: &str = recent_sql!("");
 
+/// The board's newest-of-each-kind statement, for `knobas-app`'s plan test
+/// (`tests/it/read_plans.rs`, #778): `$1` the kinds, `$2` the limit, `$3` the
+/// declarations.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_recent() -> &'static str {
+    RECENT_SQL
+}
+
 /// The same statement, planned rather than run.
 ///
 /// `analyze false` so it is a plan and not an execution, `costs false` so the

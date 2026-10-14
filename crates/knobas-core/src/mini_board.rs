@@ -188,6 +188,14 @@ const CARDS: &str = concat!(
       order by r.at desc, r.entity_id"
 );
 
+/// The board's card statement, for `knobas-app`'s plan test
+/// (`tests/it/read_plans.rs`, #778). It binds what [`read_capped`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statement() -> &'static str {
+    CARDS
+}
+
 /// Every status these sources' live ticket corpora show -- the select's
 /// offer (#179), not the room's columns.
 ///

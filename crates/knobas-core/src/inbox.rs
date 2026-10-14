@@ -689,6 +689,15 @@ const ALL_RULES: &str = all_rules!();
 /// second `where` to get wrong.
 const COUNT_ALL: &str = concat!("select count(*) as n from (", all_rules!(), ") counted");
 
+/// Each rule's statement, shelved, named by its category, for `knobas-app`'s
+/// plan test (`tests/it/read_plans.rs`, #778). Each binds what [`items`]
+/// binds; the stream and its count are these unioned.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statements() -> Vec<(Category, &'static str)> {
+    RULES.iter().map(|rule| (rule.category, rule.sql)).collect()
+}
+
 /// One named detection rule.
 ///
 /// Separate, named and independently runnable, the shape `suggest::Rule` has

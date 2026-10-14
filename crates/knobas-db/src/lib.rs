@@ -11,6 +11,8 @@ pub mod embedded;
 pub mod migrate;
 
 #[cfg(feature = "test-util")]
+pub mod plan_shape;
+#[cfg(feature = "test-util")]
 pub mod test_util;
 
 pub use embedded::{DATABASE_NAME, DbConfig, DbError, EmbeddedDb, PG_VERSION_REQ};
