@@ -1333,3 +1333,17 @@ Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #790.
 **If you disagree, the cost of reversing this is:** low. One start-up pass and two small store functions; no migration, no IPC change.
 
 As built (#790): `start_work::interrupt_stranded` runs in bring-up after the migrations and stores the step as `failed` with that reason, so no stored state changed and no §10.8 entry is needed. It skips a ticket with a live run. The existing retry already reads the mirror before it writes (`perform`), which is the adoption; it needed no change.
+
+## #785 — inbox reads ≤ 30 ms
+
+Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #785.
+
+**The fork:** #778 left two inbox costs. The `failed_build` rule made two lookups per failed build that scan per row whatever the statistics: 195 ms on the probe when every build is the reader's, and the inbox opens, and re-reads after each answer, on it. The stream and snoozed statement read about 70 ms never analyzed, probably a generic plan after the fifth run.
+
+**Ruling:** done means every inbox statement is ≤ 30 ms on the 22k probe in both statistics states, including the all-builds-mine case. `failed_build`'s per-build lookups become index lookups (correlated by key, or a lateral with `offset 0`); if an index is missing, a migration plus a §10.8 file, without asking. Stream and snoozed: confirm the generic-plan cause with `EXPLAIN (GENERIC_PLAN)` or `plan_cache_mode`, and fix it with `.persistent(false)` or a plan-robust shape. Answers unchanged, proved by the existing inbox tests plus one all-builds-mine case. Plan tests in `read_plans.rs`. Measure on 2–3k items first, then the full 22k probe once. Self-merge unless a migration is added.
+
+**Reasoning:** the inbox is read on open and after every answer, so its cost is paid on each interaction.
+
+**If you disagree, the cost of reversing this is:** low. No migration and no IPC change; every change is inside `knobas_core::inbox`.
+
+As built (#785): the generic plan was confirmed. Under `plan_cache_mode = force_generic_plan` the shelf read 41 ms against 17 ms custom, and in the probe's order the shelf runs after the stream's executions of the same statement. `items` and `count` are now `.persistent(false)`. The pin is `the_inbox_statements_are_never_kept_as_prepared_statements`. Forks decided by the implementer: the per-build lookups are **gone rather than indexed**, which needs no migration. Nothing indexes a build's configuration (`buildTypeId` lives in the payload), so an index lookup per build would have needed one. Instead, the newest finished green of each source and configuration is a window over the builds, and a red build is resolved when that time is later than its own. The confirmed links are two uncorrelated `in` sets, one per direction, hashed once. Both answer the same question the correlated subqueries did, checked against the old statement on a mirror of every resolving and non-resolving case. Measured, the rule alone went from 185 ms to 8–10 ms on the probe's 5,000 builds. That left the stream at about 36 ms all-mine, because the mention rule ran its expression on all 17,000 prose items. The mention rule now looks for the username with `strpos` before the expression, which every match contains, and that brought the stream to about 26–28 ms. The window costs the reader with no identity about 5 ms more than before: it sorts every build, where the old rule stopped at the author test.

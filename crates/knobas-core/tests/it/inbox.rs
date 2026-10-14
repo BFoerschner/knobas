@@ -1448,3 +1448,339 @@ async fn the_five_existing_categories_are_untouched_by_the_sixth() {
         "and the count is the same statement, counted"
     );
 }
+
+/// The failed-build rule as it read before #785, through `sync.live_item`, per
+/// build: the oracle the reshaped rule is held to. Kept verbatim in its
+/// predicates, so this test compares two statements and not a statement with
+/// a second reading of it.
+const FAILED_BUILD_BEFORE_785: &str = "
+    select i.entity_id
+      from sync.live_item i
+     where i.kind = 'build'
+       and i.payload->>'status' = 'FAILURE'
+       and coalesce(i.payload->>'state', 'finished') = 'finished'
+       and (   i.author = any($1)
+            or exists (
+                  select 1
+                    from knobas.confirmed_link l
+                    join sync.live_item mine
+                      on mine.entity_id = case when l.from_id = i.entity_id
+                                               then l.to_id else l.from_id end
+                   where (l.from_id = i.entity_id or l.to_id = i.entity_id)
+                     and mine.author = any($1)))
+       and not exists (
+             select 1
+               from sync.live_item newer
+              where newer.kind = 'build'
+                and newer.source_id = i.source_id
+                and newer.payload->>'status' = 'SUCCESS'
+                and coalesce(newer.payload->>'state', 'finished') = 'finished'
+                and coalesce(newer.payload->>'buildTypeId',
+                             newer.payload->'buildType'->>'id')
+                  = coalesce(i.payload->>'buildTypeId',
+                             i.payload->'buildType'->>'id')
+                and coalesce(i.payload->>'buildTypeId',
+                             i.payload->'buildType'->>'id') is not null
+                and coalesce(newer.item_updated_at, newer.synced_at)
+                  > coalesce(i.item_updated_at, i.synced_at))
+     order by 1";
+
+/// **Every build mine, and the answer unchanged** (#785). The reshaped rule
+/// reads the newer green build of a configuration once per statement rather
+/// than once per failed build, and the confirmed links once rather than per
+/// build; on a mirror where every build is the reader's -- the case that read
+/// 195 ms -- it must name exactly the builds the per-build statement named.
+///
+/// The mirror holds each way a red build is resolved or not: a later green of
+/// the same configuration in the same source and not in another source, a
+/// green that is only running, a green that is older, a tombstoned green, a
+/// green of a turned-off source, the configuration spelled under `buildType`,
+/// a build with no configuration, and a build reached only through a
+/// confirmed link in either direction, a link to itself and a proposal.
+#[tokio::test]
+async fn every_build_mine_names_what_the_per_build_statement_named() {
+    let pool = &scratch().await;
+    source(pool, "teamcity", None, true).await;
+    source(pool, "teamcity2", None, true).await;
+    source(pool, "offci", None, false).await;
+    let mut n = 0;
+    let mut row = |source: &'static str,
+                   status: &'static str,
+                   state: &'static str,
+                   config: Option<&'static str>,
+                   nested: bool,
+                   author: Option<&'static str>,
+                   hours: i64| {
+        n += 1;
+        let mut payload = serde_json::json!({ "status": status, "state": state });
+        match (config, nested) {
+            (Some(c), false) => payload["buildTypeId"] = c.into(),
+            (Some(c), true) => payload["buildType"] = serde_json::json!({ "id": c }),
+            (None, _) => {}
+        }
+        (
+            source,
+            format!("build:{n}"),
+            author,
+            payload,
+            now() - Duration::hours(hours),
+        )
+    };
+    let mut rows = Vec::new();
+    // Twelve configurations, red and green interleaved, all mine.
+    for k in 0..60_i64 {
+        let config =
+            ["A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"][(k % 12) as usize];
+        let status = if k % 5 == 0 || k % 7 == 0 {
+            "FAILURE"
+        } else {
+            "SUCCESS"
+        };
+        rows.push(row(
+            "teamcity",
+            status,
+            "finished",
+            Some(config),
+            k % 3 == 0,
+            Some(ME),
+            100 - k,
+        ));
+    }
+    // Red builds whose only newer green is running, older, in another source,
+    // tombstoned, or in a turned-off source.
+    let running = rows.len();
+    rows.push(row(
+        "teamcity",
+        "FAILURE",
+        "finished",
+        Some("Run"),
+        false,
+        Some(ME),
+        10,
+    ));
+    rows.push(row(
+        "teamcity",
+        "SUCCESS",
+        "running",
+        Some("Run"),
+        false,
+        Some(ME),
+        1,
+    ));
+    rows.push(row(
+        "teamcity",
+        "SUCCESS",
+        "finished",
+        Some("Old"),
+        false,
+        Some(ME),
+        20,
+    ));
+    let older = rows.len();
+    rows.push(row(
+        "teamcity",
+        "FAILURE",
+        "finished",
+        Some("Old"),
+        false,
+        Some(ME),
+        10,
+    ));
+    let elsewhere = rows.len();
+    rows.push(row(
+        "teamcity",
+        "FAILURE",
+        "finished",
+        Some("Other"),
+        false,
+        Some(ME),
+        10,
+    ));
+    rows.push(row(
+        "teamcity2",
+        "SUCCESS",
+        "finished",
+        Some("Other"),
+        false,
+        Some(ME),
+        1,
+    ));
+    let tombstoned = rows.len();
+    rows.push(row(
+        "teamcity",
+        "FAILURE",
+        "finished",
+        Some("Gone"),
+        false,
+        Some(ME),
+        10,
+    ));
+    let gone = rows.len();
+    rows.push(row(
+        "teamcity",
+        "SUCCESS",
+        "finished",
+        Some("Gone"),
+        false,
+        Some(ME),
+        1,
+    ));
+    let off = rows.len();
+    rows.push(row(
+        "offci",
+        "FAILURE",
+        "finished",
+        Some("Off"),
+        false,
+        Some(ME),
+        10,
+    ));
+    rows.push(row(
+        "offci",
+        "SUCCESS",
+        "finished",
+        Some("Off"),
+        false,
+        Some(ME),
+        1,
+    ));
+    // No configuration: nothing can resolve it.
+    let unconfigured = rows.len();
+    rows.push(row(
+        "teamcity",
+        "FAILURE",
+        "finished",
+        None,
+        false,
+        Some(ME),
+        10,
+    ));
+    rows.push(row(
+        "teamcity",
+        "SUCCESS",
+        "finished",
+        None,
+        false,
+        Some(ME),
+        1,
+    ));
+    // Somebody else's, reached only by a link.
+    let linked = rows.len();
+    for _ in 0..4 {
+        rows.push(row(
+            "teamcity",
+            "FAILURE",
+            "finished",
+            Some("Link"),
+            false,
+            Some(THEM),
+            10,
+        ));
+    }
+    let mut ids = Vec::new();
+    for (source, key, author, payload, updated) in rows {
+        ids.push(
+            item(
+                pool,
+                Mirrored {
+                    source,
+                    kind: "build",
+                    key: &key,
+                    author,
+                    body: "",
+                    payload,
+                    updated,
+                },
+            )
+            .await,
+        );
+    }
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&ids[gone])
+        .execute(pool)
+        .await
+        .unwrap();
+    let mine = ticket(pool, "PAY-1", Some(ME), None, "", days_ago(1)).await;
+    let theirs = ticket(pool, "PAY-2", Some(THEM), None, "", days_ago(1)).await;
+    link(pool, &ids[linked], &mine, true).await;
+    link(pool, &mine, &ids[linked + 1], true).await;
+    link(pool, &ids[linked + 2], &mine, false).await;
+    link(pool, &ids[linked + 3], &ids[linked + 3], true).await;
+    link(pool, &ids[linked + 3], &theirs, true).await;
+
+    let before: Vec<String> = sqlx::query_scalar(FAILED_BUILD_BEFORE_785)
+        .bind(me())
+        .fetch_all(pool)
+        .await
+        .unwrap();
+    let rule = inbox::rule(Category::FailedBuild).unwrap();
+    let mut after: Vec<String> =
+        inbox::items_from(pool, rule, &me(), now(), Shelf::Stream, &declarations())
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|i| i.entity_id.unwrap())
+            .collect();
+    after.sort();
+    assert_eq!(after, before);
+    // Worked by hand from the mirror above, so the comparison cannot pass by
+    // both statements naming nothing.
+    for (what, i, wanted) in [
+        ("the newest red of H, never green again", 55, true),
+        ("a red of A that A's next green resolved", 0, false),
+        ("a red whose re-run is still running", running, true),
+        ("a red with only an older green", older, true),
+        ("a red whose green is in another source", elsewhere, true),
+        ("a red whose green is tombstoned", tombstoned, true),
+        ("a red of a turned-off source", off, false),
+        ("a red with no configuration", unconfigured, true),
+        ("a red linked from me", linked, true),
+        ("a red linked to me", linked + 1, true),
+        ("a red only proposed to me", linked + 2, false),
+        (
+            "a red linked to itself and somebody else",
+            linked + 3,
+            false,
+        ),
+    ] {
+        assert_eq!(after.contains(&ids[i]), wanted, "{what}: {after:?}");
+    }
+}
+
+/// **The stream, the shelf and the count are planned for their values every
+/// time** (#785). Kept as one prepared statement, the stream and the snoozed
+/// shelf shared it, and from its sixth execution PostgreSQL ran its generic
+/// plan: on the probe's 22,000 items never analyzed the shelf read 70 ms
+/// against 12 for the stream's custom plan. What is pinned is the mechanism,
+/// the board's (#753): after eight reads of each on one connection, it holds
+/// no prepared statement of the inbox's.
+#[tokio::test]
+async fn the_inbox_statements_are_never_kept_as_prepared_statements() {
+    let pool = knobas_db::test_util::scratch_database("inbox")
+        .await
+        .pool(1)
+        .await
+        .expect("a one-connection pool");
+    build(&pool, "build:1", "FAILURE", "A", Some(ME), days_ago(1)).await;
+    for _ in 0..8 {
+        for shelf in [Shelf::Stream, Shelf::Snoozed] {
+            inbox::items(&pool, &me(), now(), shelf, &declarations())
+                .await
+                .unwrap();
+        }
+        inbox::count(&pool, &me(), now(), &declarations())
+            .await
+            .unwrap();
+    }
+    let kept: i64 = sqlx::query_scalar(
+        "select count(*) from pg_prepared_statements where statement like '%candidate (category%'",
+    )
+    .persistent(false)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        kept, 0,
+        "an inbox statement was kept, and goes generic on its sixth run"
+    );
+}

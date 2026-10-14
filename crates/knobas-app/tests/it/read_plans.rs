@@ -1,5 +1,5 @@
-//! The reads #778 reshaped plan without leaning on row estimates, with and
-//! without planner statistics.
+//! The reads #778 and #785 reshaped plan without leaning on row estimates,
+//! with and without planner statistics.
 //!
 //! On the probe's 22,000 items never analyzed -- a fresh install until its
 //! first analyze -- the *All* room's builds tile took 6.8 s, the inbox's
@@ -7,7 +7,9 @@
 //! 225 ms, against 15-70 ms analyzed (#775's timings). Each was planned from
 //! `knobas.entity` through `sync.live_item`, estimated at 0.5 % of its rows,
 //! and the builds tile then joined its CTEs by nested loops, re-aggregating
-//! once per build. This asserts the shapes those plans had are gone, through
+//! once per build. #785 added the inbox's `failed_build` rule, whose lookups
+//! walked the builds per red build whatever the statistics. This asserts the
+//! shapes those plans had are gone, through
 //! `knobas_db::plan_shape` (#770's checker, and `driven_from` for the read
 //! driven from `knobas.entity`), on one mirror in both states.
 //!
@@ -26,20 +28,25 @@ use crate::responsiveness_probe::Synthetic;
 /// declared state; `status_paths`, one row per source and status candidate.
 const SMALL: &[&str] = &["source_config", "grouped", "status_paths"];
 
-/// The inbox rules whose whole statement #778 reshaped. Not here, and why:
+/// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
+/// and why: `credential_expiry` and `alert`, unchanged. They read the
+/// configured sources and the open alerts, a handful of rows each.
 ///
-/// * `failed_build`: its scan was reshaped, but two lookups it makes per
-///   failed build were not, and the checker sees both: the newer green build
-///   of the same configuration walks every build of the kind
-///   (`item_kind_updated_idx`, no key for the configuration), and on an
-///   analyzed, empty `knobas.link` the confirmed-link lookup is a scan per
-///   row. Both are quadratic in the failed builds whatever the statistics
-///   say; they are a follow-up of their own.
-/// * `credential_expiry` and `alert`: unchanged. They read the configured
-///   sources and the open alerts, a handful of rows each.
+/// `failed_build` joined in #785: its newer green build of the same
+/// configuration was a walk of every build of the kind per failed build
+/// (`item_kind_updated_idx`, no key for the configuration), and its
+/// confirmed-link lookup a scan of `knobas.link` per build on an analyzed,
+/// empty table. Both are read once per statement now. The rules are bound
+/// with an identity that owns every item, so each of the mirror's red builds
+/// reaches both: the case that read 195 ms on the probe.
+///
+/// The stream itself is these unioned with the two rules left out, so it is
+/// not planned here; that it is planned for its values on every read is
+/// `knobas-core`'s `the_inbox_statements_are_never_kept_as_prepared_statements`.
 const RESHAPED_RULES: &[knobas_core::inbox::Category] = &[
     knobas_core::inbox::Category::ReviewRequest,
     knobas_core::inbox::Category::Mention,
+    knobas_core::inbox::Category::FailedBuild,
     knobas_core::inbox::Category::NewAssignment,
 ];
 
