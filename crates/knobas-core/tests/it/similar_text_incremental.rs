@@ -497,6 +497,7 @@ async fn a_pass_with_nothing_new_judges_nothing() {
     .await;
     let first = suggest::detect_rule(&pool, rule).await.unwrap();
     assert!(first > 10, "the corpus proposes something ({first})");
+    let first_pairs = proposed(&pool).await;
 
     sqlx::query("delete from knobas.link where rule = 'similar_text'")
         .execute(&pool)
@@ -530,6 +531,14 @@ async fn a_pass_with_nothing_new_judges_nothing() {
     let touched = proposed(&pool).await;
     assert!(!touched.is_empty(), "the changed item's pairs were judged");
     let judged = |id: &String| id == "jira:K-2" || rankers.contains(id);
+    // The loosening must leave something out, or the check below could not
+    // fail: a pair the first pass proposed with neither end judged again.
+    assert!(
+        first_pairs
+            .iter()
+            .any(|(from, to, _)| !judged(from) && !judged(to)),
+        "every proposal touches the changed item or a ranker of it, so the check is empty"
+    );
     assert!(
         touched
             .iter()
