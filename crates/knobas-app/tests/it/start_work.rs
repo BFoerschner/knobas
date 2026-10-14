@@ -100,6 +100,11 @@ struct Fake {
     next_write_id: Mutex<i64>,
     /// When set, every dispatch waits for a permit: a send held open (#779).
     gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+    /// When set, every branch read waits for a permit: a run held while the
+    /// step it is about to take is still pending (#779).
+    look_gate: Option<std::sync::Arc<tokio::sync::Semaphore>>,
+    /// How many branch reads have begun.
+    looks: Mutex<usize>,
 }
 
 impl Fake {
@@ -114,7 +119,15 @@ impl Fake {
             log: Mutex::new(Recorded::default()),
             next_write_id: Mutex::new(1),
             gate: None,
+            look_gate: None,
+            looks: Mutex::new(0),
         }
+    }
+
+    /// Every branch read waits on `gate` for a permit before it answers.
+    fn looking_through(mut self, gate: &std::sync::Arc<tokio::sync::Semaphore>) -> Self {
+        self.look_gate = Some(std::sync::Arc::clone(gate));
+        self
     }
 
     /// Every dispatch waits on `gate` for a permit before it answers.
@@ -252,6 +265,10 @@ impl Steps for Fake {
         repo: &EntityRef,
         name: &str,
     ) -> Result<Option<String>, knobas_app::IpcError> {
+        *self.looks.lock().unwrap() += 1;
+        if let Some(gate) = &self.look_gate {
+            gate.acquire().await.expect("the gate stays open").forget();
+        }
         Ok(self
             .branches
             .lock()
@@ -1457,4 +1474,61 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
     })
     .await;
     assert_eq!(&fake.ops()[..2], ["create_branch", "create_branch"]);
+}
+
+/// **One run per ticket behind the answer.** The first run is held while the
+/// branch step it is about to take is still pending -- the one moment a second
+/// loop over the same flow would be handed the same step. A second *Run* then
+/// must start nothing: the branch is dispatched once, not twice.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
+    let pool = corpus("start_work_behind_once").await;
+    let flow = planned(&pool).await;
+    let branch = proposed_branch(&flow);
+    let look = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let fake = std::sync::Arc::new(
+        Fake::new()
+            .revealing_on_refresh(&branch)
+            .looking_through(&look),
+    );
+
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
+        .await
+        .expect("the run starts");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while *fake.looks.lock().unwrap() == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the run never looked"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    let held = start_work::flow(&pool, &ticket())
+        .await
+        .expect("the flow reads");
+    assert_eq!(
+        outcome(&held, Step::CreateBranch),
+        StepOutcome::Pending,
+        "held before it ran"
+    );
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
+    )
+    .await
+    .expect("a second ask answers at once")
+    .expect("a second ask reads the flow");
+    // Let a second loop, if one was started, reach the same read.
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    look.add_permits(10);
+    read_until(&pool, |f| {
+        f.iter().all(|step| step.outcome == StepOutcome::Succeeded)
+    })
+    .await;
+    assert_eq!(
+        fake.ops(),
+        ["create_branch", "create_pull_request", "transition"],
+        "the branch once: one loop took the flow"
+    );
 }

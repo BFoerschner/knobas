@@ -450,7 +450,9 @@ pub async fn ready_skip(pool: &PgPool, step_id: i64) -> Result<EntityRef, IpcErr
     Ok(ticket)
 }
 
-/// The tickets whose flow is running behind a command's answer (#779).
+/// The tickets whose flow is running behind a command's answer (#779), each
+/// with the database it is in: one process can hold more than one -- the
+/// test binaries do, one scratch database per test.
 fn running_behind() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
     static RUNNING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
         std::sync::OnceLock::new();
@@ -462,8 +464,13 @@ fn running_behind() -> &'static std::sync::Mutex<std::collections::HashSet<Strin
 struct Behind(String);
 
 impl Behind {
-    fn claim(ticket: &EntityRef) -> Option<Self> {
-        let key = ticket.to_string();
+    fn claim(pool: &PgPool, ticket: &EntityRef) -> Option<Self> {
+        let database = pool
+            .connect_options()
+            .get_database()
+            .unwrap_or_default()
+            .to_owned();
+        let key = format!("{database}/{ticket}");
         let fresh = running_behind()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -509,7 +516,7 @@ pub async fn run_in_background<S: Steps + 'static>(
     steps: std::sync::Arc<S>,
     ticket: &EntityRef,
 ) -> Result<Vec<FlowStep>, IpcError> {
-    if let Some(claim) = Behind::claim(ticket) {
+    if let Some(claim) = Behind::claim(pool, ticket) {
         let (pool, ticket) = (pool.clone(), ticket.clone());
         tokio::spawn(async move {
             let _claim = claim;
