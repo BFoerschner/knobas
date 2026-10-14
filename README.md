@@ -47,7 +47,7 @@ calls that arrive during a pass share the next one.
 </picture>
 
 The diagrams are hand-written SVG, one file per theme, checked against the code
-at `3c6f09be`. Nothing regenerates them, so update both themes when the code
+at `3c3bb715`. Nothing regenerates them, so update both themes when the code
 they show changes.
 
 ## Quickstart
