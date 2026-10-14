@@ -75,9 +75,9 @@
 //! scope of the claim. This test covers SQL written as text, which is all of
 //! the SQL there is right now.
 //!
-//! ## The three exemptions
+//! ## The four exemptions
 //!
-//! All three read the base table on purpose, and all three say why in place:
+//! All four read the base table on purpose, and all four say why in place:
 //!
 //! * [`LINK`] -- `link::unlink` re-reads the row by id to tell "already gone"
 //!   from "never existed", a question about the row rather than about which
@@ -86,6 +86,12 @@
 //!   and **ignores every filter**, which is what makes a dismissal and an
 //!   unlink the same fact to the detector (#40 story 12). Reading a view there
 //!   would re-propose what the user threw away.
+//! * [`SUGGEST_TRAY`] -- the tray's read (#774), moved out of [`SUGGEST`] so
+//!   the probe's after-pass snapshot is keyed on the pass alone (#776). Its
+//!   lookups read `knobas.link` by the pair indexes and test
+//!   `confirmed_at is null` on the rows they found, because on tables never
+//!   analyzed the planner read the whole table off `link_proposed_idx` for a
+//!   lookup that went through the view.
 //! * [`ATTACH`] -- the sync engine's monitor-name resolution (issue #453) asks
 //!   whether a pair already carries an **active row of any kind** before it
 //!   inserts one. That is `link_pair_active_idx`'s own question (`0011`:
@@ -120,6 +126,9 @@ const LINK: &str = "knobas-core/src/link.rs";
 
 /// Detection's unfiltered, both-directions suppression, relative to `crates/`.
 const SUGGEST: &str = "knobas-core/src/suggest.rs";
+
+/// The suggestion tray's read, relative to `crates/`. See the header.
+const SUGGEST_TRAY: &str = "knobas-core/src/suggest/tray.rs";
 
 /// The sync engine's monitor-name resolution, relative to `crates/` -- the
 /// reader that asks `link_pair_active_idx`'s question rather than a
@@ -169,12 +178,12 @@ fn offends(relative: &str, source: &str) -> bool {
     !EXEMPT.contains(&relative) && reads_the_base_table(source)
 }
 
-/// The three modules allowed to read the base table, in the header's order.
+/// The modules allowed to read the base table, in the header's order.
 ///
-/// A list rather than a chain of `!=`, now that there are three: growing it is
+/// A list rather than a chain of `!=`, now that there are four: growing it is
 /// allowed and is meant to be one line a reviewer sees, which is
 /// `write_choke_point.rs`' `HANDS_TO_THE_QUEUE` treatment.
-const EXEMPT: &[&str] = &[LINK, SUGGEST, ATTACH];
+const EXEMPT: &[&str] = &[LINK, SUGGEST, SUGGEST_TRAY, ATTACH];
 
 #[test]
 fn only_the_exempt_modules_read_the_base_table() {

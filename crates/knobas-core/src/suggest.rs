@@ -4,7 +4,7 @@
 //! vocabulary already closes `origin` over five spellings and one link table is
 //! a standing rule -- a parallel suggestions table would be a second graph that
 //! can disagree with the first. What tells a suggestion from a link is
-//! therefore its *state*: [`LinkRow::confirmed_at`] is `None` on a proposal and
+//! therefore its *state*: [`LinkRow::confirmed_at`](crate::link::LinkRow::confirmed_at) is `None` on a proposal and
 //! `Some` on a link that is in the graph.
 //!
 //! ## The two reads cannot blur
@@ -46,12 +46,11 @@
 //! Nothing here ever writes a confirmed link, and nothing here is ever written
 //! to a source.
 
-use serde::Serialize;
-use sqlx::PgPool;
-use uuid::Uuid;
-
 use crate::CoreError;
-use crate::link::{LinkEnd, LinkRow, Origin, link_columns};
+use crate::link::Origin;
+
+mod tray;
+pub use tray::*;
 
 crate::closed_vocabulary! {
     /// What *kind* of evidence a rule is -- the axis a user calibrates trust
@@ -717,13 +716,19 @@ macro_rules! prose_kinds {
 /// and the row [`MARK_SEEN`] stores -- because a stored query that differed
 /// from the one a pass builds would judge a pair differently depending on
 /// which of its ends changed last.
+///
+/// A [`common_lexemes!`] word is not in it (#776): a title of nothing but common
+/// words finds nothing.
 macro_rules! title_query {
     ($title:expr) => {
         concat!(
             "to_tsquery('english', (select string_agg(quote_literal(w), ' | ')
                                        from unnest(tsvector_to_array(to_tsvector('english', ",
             $title,
-            "))) w))"
+            "))) w
+                                      where w <> all(",
+            common_lexemes!(),
+            ")))"
         )
     };
 }
@@ -745,8 +750,36 @@ macro_rules! title_lexemes {
                      from unnest(tsvector_to_array(to_tsvector('english', ",
             $title,
             "))) w,
-                          unnest(tsvector_to_array(to_tsvector('english', w))) l)"
+                          unnest(tsvector_to_array(to_tsvector('english', w))) l
+                    where w <> all(",
+            common_lexemes!(),
+            "))"
         )
+    };
+}
+
+/// [`COMMON_FROM_ITEMS`] as the literal [`FLIP_COMMON`] is compiled with.
+macro_rules! common_from_items {
+    () => {
+        "200"
+    };
+}
+
+/// The words too common to count (#776), as one array: every lexeme
+/// `sync.similar_text_lexeme` (`0034`) marks common, which [`FLIP_COMMON`]
+/// decides from how many live prose items hold it. Uncorrelated, so a
+/// statement reads it once.
+macro_rules! common_lexemes {
+    () => {
+        "array(select c.lexeme from sync.similar_text_lexeme c where c.common)"
+    };
+}
+
+/// An item's lexemes without positions and without the [`common_lexemes!`] words:
+/// what two documents' shared lexemes are counted over.
+macro_rules! rare_lexemes {
+    ($fts:expr) => {
+        concat!("ts_delete(strip(", $fts, "), ", common_lexemes!(), ")")
     };
 }
 
@@ -819,6 +852,11 @@ macro_rules! shared_lexemes {
 /// * **A floor on shared lexemes.** English stop words are already gone by the
 ///   time `to_tsvector` is done, so [`SIMILARITY_FLOOR`] distinct shared stems
 ///   is a real overlap rather than two documents both being about work.
+/// * **Common words count for nothing** (#776). A lexeme in more than 5% of
+///   the live prose items ([`FLIP_COMMON`]) is a template's word, not a
+///   topic's: it is not in the title query and not among the shared lexemes.
+///   The title query and lexemes a seen row stores leave them out too, and an
+///   item holding a word that crossed the line is compared again.
 ///
 /// # Incremental (#745)
 ///
@@ -828,7 +866,10 @@ macro_rules! shared_lexemes {
 /// says were compared with the text they have now. Three arms cover every such
 /// pair once: batch with batch, a batch anchor with a settled item, a settled
 /// anchor with a batch item. The second finds its candidates through
-/// `item_fts_idx`, the anchor's query probing it; the third through
+/// `similar_text_seen_fts_idx` (`0034`), the anchor's query probing the
+/// settled items' `fts` -- not `item_fts_idx`, whose matches in the whole
+/// mirror (unsettled, not prose) cost a third of the pass on the probe; the
+/// third through
 /// `similar_text_seen_lex_idx`, the changed item's lexemes probing the settled
 /// anchors' title lexemes, with `@@` against the stored query deciding. Each
 /// probe sits in a `lateral ... offset 0`, which keeps the planner from
@@ -846,14 +887,17 @@ macro_rules! shared_lexemes {
 /// estimate the whole of `similar_text_seen` is read once per batch item.
 ///
 /// **A settled counterpart costs no visit to `sync.item`** (#771): its
-/// lexemes (`strip(fts)`) and its time are on its seen row, as they were when
-/// it was settled (`0033`), and two documents' shared lexemes are counted as
+/// lexemes (`strip(fts)` without the common words) and its time are on its
+/// seen row, as they were when it was settled (`0033`), and two documents'
+/// shared lexemes are counted as
 /// `length(a) + length(b) - length(a || b)`, the tsvector union doing the
 /// work. On the probe's 42-word corpus every batch item is paired with every
 /// settled one, and the count is most of the pass. Whether a settled
-/// counterpart is still the text its seen row vouches for (`settled` above is
-/// only "has a seen row") is checked once per counterpart that came out
-/// similar (`verified`), not once per candidate.
+/// counterpart is still the live text its seen row vouches for (a seen row
+/// is only "was settled") is checked once per counterpart that came out
+/// similar (`verified`), not once per candidate. That check is also what keeps
+/// an item that left the corpus since the pass began, and so still has its
+/// seen row until the next pass prunes it, out of a batch's rankings.
 ///
 /// # Ranked (#771)
 ///
@@ -875,7 +919,9 @@ macro_rules! shared_lexemes {
 /// keeps its place, so dismissing a proposal does not bring the eleventh in.
 const RANK_SIMILAR: &str = concat!(
     "with batch as materialized (
-         select p.entity_id, p.fts, strip(p.fts) as lexemes, ",
+         select p.entity_id, p.fts, ",
+    rare_lexemes!("p.fts"),
+    " as lexemes, ",
     title_query!("p.title"),
     " as q, ",
     item_at!("p"),
@@ -889,25 +935,20 @@ const RANK_SIMILAR: &str = concat!(
     live!("p"),
     "
      ),
-     settled as materialized (
-         select s.entity_id from sync.similar_text_seen s where s.entity_id <> all($1)
-     ),
      judged as (
          select a.entity_id as from_id, o.entity_id as to_id,
                 a.lexemes as a_lexemes, o.lexemes as o_lexemes,
                 a.at as from_at, o.at as to_at, null::text as settled_id
            from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
          union all
-         select a.entity_id, i.entity_id, a.lexemes, i.fts, a.at, i.at, i.entity_id
+         select a.entity_id, i.entity_id, a.lexemes, i.lexemes, a.at, i.at, i.entity_id
            from batch a
            cross join lateral (
-                  select i.entity_id, i.fts, ",
-    item_at!("i"),
-    " as at
-                    from sync.item i
+                  select i.entity_id, i.lexemes, i.at
+                    from sync.similar_text_seen i
                    where i.fts @@ a.q
                      and (i.entity_id > a.entity_id) is true
-                     and (i.entity_id in (select entity_id from settled)) is true
+                     and i.entity_id <> all($1)
                   offset 0) i
          union all
          select x.entity_id, o.entity_id, x.lexemes, o.lexemes, x.at, o.at, x.entity_id
@@ -1020,8 +1061,8 @@ const SIMILAR_TEXT: &str = detection!(concat!(
                    (select string_agg(s, ', ' order by s)
                       from (select unnest(",
     shared_lexemes!(
-        "(select a.fts from sync.item a where a.entity_id = t.entity_id)",
-        "(select b.fts from sync.item b where b.entity_id = t.other_id)"
+        "(select a.lexemes from sync.similar_text_seen a where a.entity_id = t.entity_id)",
+        "(select b.lexemes from sync.similar_text_seen b where b.entity_id = t.other_id)"
     ),
     ") as s order by 1 limit 4) top))
        from (select r.entity_id, r.other_id
@@ -1119,11 +1160,15 @@ const RETIRE_SIMILAR: &str = concat!(
               select 1 from sync.similar_text_seen s join sync.item i on i.entity_id = s.entity_id
                where s.entity_id = p.from_id and s.digest = ",
     digest_of!("i"),
+    " and ",
+    live!("i"),
     ")
         and exists (
               select 1 from sync.similar_text_seen s join sync.item i on i.entity_id = s.entity_id
                where s.entity_id = p.to_id and s.digest = ",
     digest_of!("i"),
+    " and ",
+    live!("i"),
     ")"
 );
 
@@ -1150,8 +1195,12 @@ const CHANGED_PROSE: &str = concat!(
 /// Forget the items that left the live prose corpus -- tombstoned, their
 /// source disabled, their kind no longer prose -- so one that comes back is
 /// compared again rather than trusted on verdicts taken while it was away.
-/// Run inside every batch's transaction, so the batch and the corpus it was
-/// judged against are one snapshot.
+///
+/// Once a pass, before the batches (#776). It read every seen row and cost 13
+/// of the realistic probe's 75 s when every batch ran it; an item that leaves
+/// mid-pass is kept out of the rankings by `verified` in [`RANK_SIMILAR`] and
+/// out of [`RETIRE_SIMILAR`] by its liveness test, and is pruned by the next
+/// pass.
 const PRUNE_SEEN: &str = concat!(
     "delete from sync.similar_text_seen s
       where not exists (
@@ -1164,19 +1213,109 @@ const PRUNE_SEEN: &str = concat!(
     ")"
 );
 
+/// Take off the lexeme counts (`0034`) every counted item that left the live
+/// prose corpus or whose lexemes changed (#776). [`COUNT_ARRIVED`] counts the
+/// changed ones again, with the lexemes they have now. Each statement keeps
+/// `similar_text_lexeme.items` the sum over the counted rows, so the counts are
+/// exact without ever being recounted.
+const COUNT_LEFT: &str = concat!(
+    "with gone as (
+         delete from sync.similar_text_counted c
+          where c.lexemes is distinct from (
+                  select strip(p.fts)
+                    from sync.item p
+                   where p.entity_id = c.entity_id and p.kind in ",
+    prose_kinds!(),
+    " and ",
+    live!("p"),
+    ")
+         returning c.lexemes
+     ),
+     n as (
+         select l.lexeme, count(*)::int as n
+           from gone, unnest(gone.lexemes) l
+          group by l.lexeme
+     )
+     update sync.similar_text_lexeme x
+        set items = x.items - n.n
+       from n
+      where x.lexeme = n.lexeme"
+);
+
+/// Count every live prose item that is not counted yet (#776): new, back, or
+/// changed and taken off by [`COUNT_LEFT`].
+const COUNT_ARRIVED: &str = concat!(
+    "with came as (
+         insert into sync.similar_text_counted (entity_id, lexemes)
+         select p.entity_id, strip(p.fts)
+           from sync.item p
+          where p.kind in ",
+    prose_kinds!(),
+    " and ",
+    live!("p"),
+    "
+            and (p.entity_id in (select c.entity_id from sync.similar_text_counted c)) is not true
+         on conflict (entity_id) do nothing
+         returning lexemes
+     ),
+     n as (
+         select l.lexeme, count(*)::int as n
+           from came, unnest(came.lexemes) l
+          group by l.lexeme
+     )
+     insert into sync.similar_text_lexeme (lexeme, items)
+     select lexeme, n from n
+     on conflict (lexeme) do update
+        set items = sync.similar_text_lexeme.items + excluded.items"
+);
+
+/// How many live prose items make the 5% line (#776): under this many,
+/// nothing is common, and a small install judges every word as before.
+pub const COMMON_FROM_ITEMS: usize = 200;
+
+/// Flip each lexeme whose count crossed the line since the corpus was last
+/// ranked, and unsettle every item that holds a flipped one (#776).
+///
+/// A lexeme is **common** when more than 5% of the live prose items hold it,
+/// once there are [`COMMON_FROM_ITEMS`] of them. A flip changes the shared
+/// lexemes of exactly the pairs whose two ends both hold the word, and the
+/// title query of exactly the items whose title does, so those items -- and
+/// no others -- are compared again: their seen rows go, and their rankings
+/// with them. Everything else stays ranked against the words it was ranked
+/// with, which are the words it would be ranked with now.
+const FLIP_COMMON: &str = concat!(
+    "with census as materialized (select count(*) as n from sync.similar_text_counted),
+     flipped as materialized (
+         update sync.similar_text_lexeme x
+            set common = not x.common
+          where x.common <> ((select n from census) >= ",
+    common_from_items!(),
+    " and x.items * 20 > (select n from census))
+         returning x.lexeme
+     )
+     delete from sync.similar_text_seen s
+      where s.entity_id = any(array(
+              select c.entity_id
+                from sync.similar_text_counted c
+               where (select count(*) from flipped) > 0
+                 and tsvector_to_array(c.lexemes) && array(select lexeme from flipped)))"
+);
+
 /// Mark a batch settled: its items were compared with the text they have in
 /// this snapshot.
 const MARK_SEEN: &str = concat!(
-    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex, lexemes, at)
+    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex, lexemes, at, fts)
      select p.entity_id, ",
     digest_of!("p"),
     ", ",
     title_query!("p.title"),
     ", ",
     title_lexemes!("p.title"),
-    ", strip(p.fts), ",
+    ", ",
+    rare_lexemes!("p.fts"),
+    ", ",
     item_at!("p"),
-    "
+    ", p.fts
        from sync.item p
       where p.entity_id = any($1) and p.kind in ",
     prose_kinds!(),
@@ -1185,7 +1324,8 @@ const MARK_SEEN: &str = concat!(
     "
      on conflict (entity_id) do update
         set digest = excluded.digest, title_q = excluded.title_q,
-            title_lex = excluded.title_lex, lexemes = excluded.lexemes, at = excluded.at"
+            title_lex = excluded.title_lex, lexemes = excluded.lexemes, at = excluded.at,
+            fts = excluded.fts"
 );
 
 /// How many changed items one [`RANK_SIMILAR`] statement compares.
@@ -1391,6 +1531,27 @@ pub fn planned_statements() -> Vec<PlannedStatement> {
             no_seq_scan: false,
         },
         PlannedStatement {
+            name: "count_left",
+            sql: COUNT_LEFT,
+            binds: Binds::Nothing,
+            class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
+            name: "count_arrived",
+            sql: COUNT_ARRIVED,
+            binds: Binds::Nothing,
+            class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
+            name: "flip_common",
+            sql: FLIP_COMMON,
+            binds: Binds::Nothing,
+            class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
             name: "prune_seen",
             sql: PRUNE_SEEN,
             binds: Binds::Nothing,
@@ -1519,6 +1680,9 @@ async fn run_rule(
             Ok(written.rows_affected())
         }
         Scope::ChangedProse => {
+            // The words too common to count, from the corpus as it stands;
+            // an item holding a word that crossed the line is unsettled.
+            count_lexemes(conn).await?;
             // Forget what left the corpus first, so a ranking that held a
             // place for it is found below.
             sqlx::query(PRUNE_SEEN).execute(&mut *conn).await?;
@@ -1568,6 +1732,21 @@ async fn run_rule(
             Ok(written)
         }
     }
+}
+
+/// Bring the lexeme counts up to date with the live prose corpus and flip the
+/// words that crossed the 5% line (#776), as one transaction, so the common
+/// words and the seen rows ranked with them never disagree. A pass over a
+/// corpus whose counts did not move flips nothing and skips the flip.
+async fn count_lexemes(conn: &mut sqlx::PgConnection) -> Result<(), sqlx::Error> {
+    use sqlx::Connection as _;
+    let mut tx = conn.begin().await?;
+    let left = sqlx::query(COUNT_LEFT).execute(&mut *tx).await?;
+    let arrived = sqlx::query(COUNT_ARRIVED).execute(&mut *tx).await?;
+    if left.rows_affected() + arrived.rows_affected() > 0 {
+        sqlx::query(FLIP_COMMON).execute(&mut *tx).await?;
+    }
+    tx.commit().await
 }
 
 /// `query_canceled`: what the server answers when `statement_timeout` fires.
@@ -1639,7 +1818,6 @@ async fn compare_batch_once(
     sqlx::query("set transaction isolation level repeatable read")
         .execute(&mut *tx)
         .await?;
-    sqlx::query(PRUNE_SEEN).execute(&mut *tx).await?;
     sqlx::query(CLEAR_RANKINGS)
         .bind(ids)
         .execute(&mut *tx)
@@ -1749,591 +1927,6 @@ pub async fn detect_paced(
         written += run_rule(conn, rule, pacing).await?;
     }
     Ok(written)
-}
-
-/// One proposal, as the tray draws it: the row, and **both** its ends.
-///
-/// Both, unlike [`crate::link::LinkEntry`], which resolves the end the reader is
-/// not on. The tray is not read from either end -- it is read from a room -- so
-/// there is no "here" for it to leave out, and #41's story 20 wants both ends
-/// openable before deciding.
-#[derive(Clone, Debug, Serialize)]
-pub struct SuggestionEntry {
-    pub link: LinkRow,
-    pub from: LinkEnd,
-    pub to: LinkEnd,
-}
-
-/// The row shape [`DRAWN`] returns, before the two ends are lifted out.
-///
-/// Two [`LinkEnd`]s cannot both be `#[sqlx(flatten)]` -- they would collide on
-/// every column name -- so the statement aliases them apart and this struct
-/// names the aliases.
-#[derive(sqlx::FromRow)]
-struct ProposalRow {
-    #[sqlx(flatten)]
-    link: LinkRow,
-    from_entity_id: String,
-    from_kind: String,
-    from_title: String,
-    from_deleted_at: Option<chrono::DateTime<chrono::Utc>>,
-    to_entity_id: String,
-    to_kind: String,
-    to_title: String,
-    to_deleted_at: Option<chrono::DateTime<chrono::Utc>>,
-}
-
-/// How many rows one item may have in the tray (#774, ruled by the deputy).
-pub const ROWS_PER_ITEM: usize = 3;
-
-/// An item with proposals the tray does not draw, and how many (#774).
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
-pub struct SuggestionMore {
-    #[sqlx(flatten)]
-    pub item: LinkEnd,
-    /// The item's proposals in the room that the tray did not draw.
-    pub more: i64,
-}
-
-/// A proposal is in the room: either end is an item of one of the room's
-/// sources (`$1`, `NULL` for every source), and either end is a member of the
-/// stored context (`$2`, `NULL` for none).
-///
-/// The source test is a membership in the sources' items, a subquery inside an
-/// `or` that cannot be pulled up into a join and so runs hashed, once: joining
-/// `sync.item` twice to learn each end's source was a primary-key probe per end
-/// per proposal in the generic plan (#778).
-macro_rules! in_room {
-    () => {
-        "($1::text[] is null
-          or (l.from_id in (select i.entity_id from sync.item i
-                             where i.source_id = any($1))) is true
-          or (l.to_id in (select i.entity_id from sync.item i
-                           where i.source_id = any($1))) is true)
-         and ($2::text[] is null or l.from_id = any($2) or l.to_id = any($2))"
-    };
-}
-
-/// One step of the tray's walk (#774): the room's next `$6` proposals, newest
-/// first, older than the cursor (`$3`, `$4`), leaving out every proposal that
-/// touches an item already holding its three rows (`$5`).
-///
-/// Ends only, no titles: the walk decides which rows are drawn and
-/// [`DRAWN`] reads those. `link_proposed_idx` gives the order, and the cursor
-/// is an index condition on it, so a step starts where the last one stopped.
-const WALK: &str = concat!(
-    "select l.id, l.from_id, l.to_id, l.created_at
-       from knobas.proposed_link l
-      where ",
-    in_room!(),
-    "   and l.created_at <= $3
-        and (l.created_at < $3 or l.id < $4)
-        and l.from_id <> all($5) and l.to_id <> all($5)
-      order by l.created_at desc, l.id desc
-      limit $6"
-);
-
-/// [`WALK`] for a stored context's room: every proposal touching a member,
-/// newest first, found member by member through the pair indexes rather than
-/// by walking the whole room's order, because a context holds a few items out
-/// of the whole mirror. On tables never analyzed the planner read each
-/// member's rows off `link_proposed_idx` -- the whole table, filtered -- because
-/// the lookup's predicate matched that partial index. So the lookup asks only
-/// `deleted_at is null` (`link_from_idx`, `link_to_idx`), `offset 0` keeps it
-/// its own, and `confirmed_at is null` is tested on the rows it found.
-const WALK_MEMBERS: &str = concat!(
-    "select l.id, l.from_id, l.to_id, l.created_at
-       from unnest($2::text[]) m(item)
-       cross join lateral (
-             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
-               from knobas.link p
-              where p.from_id = m.item and p.deleted_at is null
-             union all
-             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
-               from knobas.link p
-              where p.to_id = m.item and p.from_id <> all($2)
-                and p.deleted_at is null
-             offset 0) l
-      where l.confirmed_at is null and ",
-    in_room!(),
-    " order by l.created_at desc, l.id desc"
-);
-
-/// The tray's read: the rows the walk drew, newest first, with both ends.
-///
-/// `knobas.proposed_link`'s predicate and nothing else, which is what makes
-/// "the tray shows proposals only" structural rather than remembered. Driven
-/// from the ids by primary key, `offset 0` keeping each lookup its own: on
-/// tables never analyzed the planner read `knobas.link` whole off
-/// `link_proposed_idx` to find twenty rows, 22 ms on a 2,700-item mirror.
-///
-/// The ends join `knobas.entity` and not `sync.live_item`, for the reason
-/// `entries_of` does: an entity a source withdrew still has to resolve, so the
-/// tray marks it rather than dropping the row.
-const DRAWN: &str = concat!(
-    "select ",
-    link_columns!("l."),
-    ", f.id as from_entity_id, f.kind as from_kind,
-       f.title as from_title, f.deleted_at as from_deleted_at,
-       t.id as to_entity_id, t.kind as to_kind,
-       t.title as to_title, t.deleted_at as to_deleted_at
-       from unnest($1::uuid[]) d(id)
-       cross join lateral (select * from knobas.link p
-                            where p.id = d.id offset 0) l
-       join knobas.entity f on f.id = l.from_id
-       join knobas.entity t on t.id = l.to_id
-      where l.deleted_at is null and l.confirmed_at is null
-      order by l.created_at desc, l.id desc"
-);
-
-/// How many of the room's proposals each drawn item (`$3`) holds, for those
-/// holding more than the tray draws for one item (#774). One count per item
-/// through `link_from_idx` and `link_to_idx`, shaped as [`WALK_MEMBERS`] is and
-/// for its reason, so a hub costs a probe of its own rows and not a pass over
-/// the room. Its `3` is [`ROWS_PER_ITEM`].
-const OVERFLOW: &str = concat!(
-    "select e.id as entity_id, e.kind, e.title, e.deleted_at, n.total as more
-       from unnest($3::text[]) d(item)
-       join knobas.entity e on e.id = d.item
-       cross join lateral (
-             select count(*) as total
-               from (select p.from_id, p.to_id, p.confirmed_at from knobas.link p
-                      where p.from_id = d.item and p.deleted_at is null
-                     union all
-                     select p.from_id, p.to_id, p.confirmed_at from knobas.link p
-                      where p.to_id = d.item and p.deleted_at is null
-                     offset 0) l
-              where l.confirmed_at is null and ",
-    in_room!(),
-    "     ) n
-      where n.total > 3"
-);
-
-/// One proposal as the walk sees it.
-#[derive(sqlx::FromRow)]
-struct Step {
-    id: Uuid,
-    from_id: String,
-    to_id: String,
-    created_at: chrono::DateTime<chrono::Utc>,
-}
-
-/// The walk's state: which rows are drawn, and how many each item holds.
-#[derive(Default)]
-struct Tray {
-    drawn: Vec<Uuid>,
-    per_item: std::collections::HashMap<String, usize>,
-    full: Vec<String>,
-}
-
-impl Tray {
-    /// Draw `step` if neither end holds its three rows yet.
-    fn offer(&mut self, step: &Step) {
-        let held = |item: &str| self.per_item.get(item).copied().unwrap_or(0);
-        if held(&step.from_id) >= ROWS_PER_ITEM || held(&step.to_id) >= ROWS_PER_ITEM {
-            return;
-        }
-        self.drawn.push(step.id);
-        for item in [&step.from_id, &step.to_id] {
-            let held = self.per_item.entry(item.clone()).or_insert(0);
-            *held += 1;
-            if *held == ROWS_PER_ITEM {
-                self.full.push(item.clone());
-            }
-        }
-    }
-}
-
-/// The proposals a room holds, newest first, at most three per item.
-///
-/// `sources` is the room's membership, the same convention
-/// `EntityFilter::sources` uses: **empty means every source**, bound as SQL
-/// `NULL`, because `= any('{}')` matches nothing and a room whose filter said
-/// "no sources in particular" would come back empty. A proposal belongs to a
-/// room if *either* end does -- a suggestion connecting this room to another is
-/// exactly the one worth surfacing here.
-///
-/// `members` is the second scope, and the one #47 promised this signature: a
-/// stored context's room passes its membership (ADR-0008's rule, computed by
-/// `crate::context::member_ids` plus the context's own entity), and only
-/// proposals touching it come back. `None` is unscoped -- the derived rooms --
-/// while `Some(&[])` is a context with no members, whose tray is honestly
-/// empty. Membership is computed from **confirmed** links only, so scoping
-/// proposals by it cannot become circular.
-///
-/// **At most three rows per item (#774).** The room's proposals are walked
-/// newest first and a row is drawn while neither of its items holds three
-/// drawn rows, until `limit` rows are drawn or the room is exhausted. Under
-/// "either item's top ten" one item can carry thousands of proposals; the walk
-/// leaves an item out of its next steps once it holds three, so a hub costs
-/// three rows and not a scan of its own. A ranking by window function over the
-/// room was the first attempt and cost seconds on the probe's 152k proposals.
-///
-/// The tray holds no state: this is the whole of it.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if a query fails.
-pub async fn proposals(
-    pool: &PgPool,
-    sources: &[String],
-    members: Option<&[String]>,
-    limit: i64,
-) -> Result<Vec<SuggestionEntry>, CoreError> {
-    let Ok(limit) = usize::try_from(limit) else {
-        return Ok(Vec::new());
-    };
-    if limit == 0 {
-        return Ok(Vec::new());
-    }
-    let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let members = members.map(<[String]>::to_vec);
-    let mut tray = Tray::default();
-    if members.is_some() {
-        let steps = sqlx::query_as::<_, Step>(WALK_MEMBERS)
-            .bind(&scope)
-            .bind(&members)
-            .fetch_all(pool)
-            .await?;
-        for step in &steps {
-            if tray.drawn.len() == limit {
-                break;
-            }
-            tray.offer(step);
-        }
-    } else {
-        let mut before = (chrono::DateTime::<chrono::Utc>::MAX_UTC, Uuid::max());
-        let mut chunk = limit.saturating_mul(4).max(64);
-        loop {
-            let steps = sqlx::query_as::<_, Step>(WALK)
-                .bind(&scope)
-                .bind(&members)
-                .bind(before.0)
-                .bind(before.1)
-                .bind(&tray.full)
-                .bind(i64::try_from(chunk).unwrap_or(i64::MAX))
-                .fetch_all(pool)
-                .await?;
-            for step in &steps {
-                if tray.drawn.len() == limit {
-                    break;
-                }
-                tray.offer(step);
-            }
-            let Some(last) = steps.last() else { break };
-            if tray.drawn.len() == limit || steps.len() < chunk {
-                break;
-            }
-            before = (last.created_at, last.id);
-            chunk = chunk.saturating_mul(4).min(16_384);
-        }
-    }
-    let rows = sqlx::query_as::<_, ProposalRow>(DRAWN)
-        .bind(&tray.drawn)
-        .fetch_all(pool)
-        .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| SuggestionEntry {
-            link: row.link,
-            from: LinkEnd {
-                entity_id: row.from_entity_id,
-                kind: row.from_kind,
-                title: row.from_title,
-                deleted_at: row.from_deleted_at,
-            },
-            to: LinkEnd {
-                entity_id: row.to_entity_id,
-                kind: row.to_kind,
-                title: row.to_title,
-                deleted_at: row.to_deleted_at,
-            },
-        })
-        .collect())
-}
-
-/// The items among `drawn` that hold more of the room's proposals than the
-/// tray draws for one item, and how many of those the tray did not draw, most
-/// hidden first (#774).
-///
-/// Same scope as [`proposals`]. Only the drawn rows' items are counted, one
-/// index lookup each. The tray draws one "+N more similar to <title>" line for
-/// each.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the query fails.
-pub async fn proposal_overflow(
-    pool: &PgPool,
-    sources: &[String],
-    members: Option<&[String]>,
-    drawn: &[SuggestionEntry],
-) -> Result<Vec<SuggestionMore>, CoreError> {
-    let mut shown = std::collections::HashMap::<&str, i64>::new();
-    for entry in drawn {
-        for item in [&entry.from.entity_id, &entry.to.entity_id] {
-            *shown.entry(item.as_str()).or_insert(0) += 1;
-        }
-    }
-    if shown.is_empty() {
-        return Ok(Vec::new());
-    }
-    let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let items: Vec<&str> = shown.keys().copied().collect();
-    let mut more = sqlx::query_as::<_, SuggestionMore>(OVERFLOW)
-        .bind(scope)
-        .bind(members.map(<[String]>::to_vec))
-        .bind(&items)
-        .fetch_all(pool)
-        .await?;
-    for hub in &mut more {
-        hub.more -= shown.get(hub.item.entity_id.as_str()).copied().unwrap_or(0);
-    }
-    more.sort_by(|a, b| {
-        b.more
-            .cmp(&a.more)
-            .then_with(|| a.item.entity_id.cmp(&b.item.entity_id))
-    });
-    Ok(more)
-}
-
-/// [`proposal_count`]'s statement.
-///
-/// **No join** (#778). It joined `sync.item` twice to learn each end's source,
-/// and that join was its whole cost: analyzed, a hash join, 15 ms for the
-/// probe's 25,690 proposals; never analyzed, and in the generic plan
-/// PostgreSQL switched this persistent statement to at its sixth execution, a
-/// primary-key probe per end per proposal, 220 ms. That switch was the
-/// 220 ms maximum the probe read beside a 15 ms median in a project room.
-/// Now an end is in the room by membership in the room's sources' items, a
-/// subquery inside an `or` that cannot be pulled up into a join and so runs
-/// hashed, once: 6 ms never analyzed, 9 ms analyzed, either plan.
-const PROPOSAL_COUNT: &str = "select count(*)
-   from knobas.proposed_link l
-  where ($1::text[] is null
-     or (l.from_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true
-     or (l.to_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true)
-    and ($2::text[] is null
-     or l.from_id = any($2) or l.to_id = any($2))";
-
-/// [`PROPOSAL_COUNT`], for `knobas-app`'s plan test (`tests/it/read_plans.rs`,
-/// #778). It binds what [`proposal_count`] binds.
-#[doc(hidden)]
-#[must_use]
-pub fn planned_proposal_count() -> &'static str {
-    PROPOSAL_COUNT
-}
-
-/// The tray's lookups (#774) -- [`WALK_MEMBERS`] (binds as [`proposal_count`]),
-/// [`DRAWN`] (`$1` the drawn ids) and [`OVERFLOW`] (as [`proposal_count`], then
-/// `$3` the drawn items) -- for `knobas-app`'s plan test
-/// (`tests/it/read_plans.rs`).
-#[doc(hidden)]
-#[must_use]
-pub fn planned_tray_lookups() -> [&'static str; 3] {
-    [WALK_MEMBERS, DRAWN, OVERFLOW]
-}
-
-/// How many proposals a room is holding.
-///
-/// Its own statement rather than `proposals(..).len()`: the tray shows a count
-/// before it shows rows (#41 story 19), and a count that had to fetch every row
-/// to be produced would be capped by whatever `limit` the caller happened to
-/// pass.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the query fails.
-pub async fn proposal_count(
-    pool: &PgPool,
-    sources: &[String],
-    members: Option<&[String]>,
-) -> Result<i64, CoreError> {
-    let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let (count,): (i64,) = sqlx::query_as(PROPOSAL_COUNT)
-        .bind(scope)
-        .bind(members.map(<[String]>::to_vec))
-        .fetch_one(pool)
-        .await?;
-    Ok(count)
-}
-
-/// Accept a proposal: it becomes an ordinary link.
-///
-/// The row does not move and nothing about it is rewritten but `confirmed_at`,
-/// which is what "there are not two kinds of link to reason about afterwards"
-/// (#41 story 5) means in practice -- the same id, the same ends, the same
-/// relation, and from the panel's side the same query that returns every other
-/// link. Its `rule` and `reason` stay: they are provenance, and a link that can
-/// still say why knobas thought so is strictly more useful than one that
-/// cannot.
-///
-/// `Some(row)` is "this call accepted that proposal"; `None` is "there was
-/// nothing left to accept" -- it was already accepted, or it was dismissed. The
-/// distinction is the caller's, which writes one activity line per *mutation*.
-///
-/// # Errors
-///
-/// [`CoreError::LinkNotFound`] if no link carries `id` at all; [`CoreError::Db`]
-/// if the statement fails.
-pub async fn accept(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreError> {
-    let updated = sqlx::query_as::<_, LinkRow>(concat!(
-        "update knobas.link set confirmed_at = now()
-          where id = $1 and deleted_at is null and confirmed_at is null
-         returning ",
-        link_columns!("")
-    ))
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    settle(pool, id, updated).await
-}
-
-/// What [`resolve_edge`] found standing in the way of a hand-drawn link.
-#[derive(Debug)]
-pub enum Edge {
-    /// A proposal for *exactly* this triple was confirmed. It is the link now,
-    /// and the caller writes nothing.
-    Promoted(LinkRow),
-    /// A proposal for the **reversed** triple was withdrawn to make room. The
-    /// caller writes the link the user actually drew, in the same transaction.
-    Superseded(LinkRow),
-    /// Nothing to answer: no live proposal for this pair and relation, either
-    /// way round. Whatever refuses the write now is a real link.
-    Open,
-}
-
-/// Answer the live proposal for a pair and relation, if there is one, so that a
-/// hand-drawn link can be written where one stands.
-///
-/// The unique index spans proposals and links alike -- one active edge per pair
-/// per relation, whatever its state -- so without this a user drawing a link
-/// knobas had already proposed is told "already linked" about a pair whose links
-/// panel is empty.
-///
-/// ## Two answers, because the two cases are different acts
-///
-/// **Same direction: the user is pressing *Accept*.** Drawing by hand the link
-/// knobas proposed is that gesture spelled another way, so the proposal is
-/// confirmed and keeps its detector provenance -- `rule`, `rule_class` and the
-/// `reason` it was proposed with all still describe it truthfully.
-///
-/// **Reversed: the user is contradicting the proposal's direction**, and the
-/// user wins. The proposal is *withdrawn* rather than confirmed, because
-/// confirming it would store the opposite of what the user drew (`A blocks B`
-/// landing as `B blocks A`, which story 7's inverse labels would then faithfully
-/// render back at them as "A is blocked by B"), and reorienting it in place
-/// would leave a row whose stored `reason` describes ends it no longer has.
-/// Withdrawal is a tombstone -- the same mechanism as [`dismiss`], and therefore
-/// the same fact to detection's undirected suppression, so the proposal is not
-/// proposed straight back.
-///
-/// Before #70 the promotion was direction-exact while the index was directed,
-/// which cancelled out into a third outcome nobody chose: the reversed
-/// hand-drawn link *succeeded*, and left a stale proposal sitting in the tray
-/// beside a confirmed link for the same pair.
-///
-/// ## Why it takes an executor
-///
-/// [`Edge::Superseded`] is only half a mutation -- the caller's write is the
-/// other half -- so the two have to be able to share one transaction. A
-/// tombstone committed without the link that replaced it would have thrown away
-/// a proposal for nothing.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if either statement fails.
-pub async fn resolve_edge(
-    conn: &mut sqlx::PgConnection,
-    from: &crate::entity::EntityRef,
-    to: &crate::entity::EntityRef,
-    relation: &str,
-) -> Result<Edge, CoreError> {
-    let promoted = sqlx::query_as::<_, LinkRow>(concat!(
-        "update knobas.link set confirmed_at = now()
-          where from_id = $1 and to_id = $2 and relation = $3
-            and deleted_at is null and confirmed_at is null
-         returning ",
-        link_columns!("")
-    ))
-    .bind(from.to_string())
-    .bind(to.to_string())
-    .bind(relation)
-    .fetch_optional(&mut *conn)
-    .await?;
-    if let Some(row) = promoted {
-        return Ok(Edge::Promoted(row));
-    }
-
-    // The ends swapped, and nothing else: a proposal is what this withdraws, so
-    // `confirmed_at is null` is the clause that keeps a *link* out of reach. A
-    // confirmed link in the way is the caller's conflict to report.
-    let superseded = sqlx::query_as::<_, LinkRow>(concat!(
-        "update knobas.link set deleted_at = now()
-          where from_id = $2 and to_id = $1 and relation = $3
-            and deleted_at is null and confirmed_at is null
-         returning ",
-        link_columns!("")
-    ))
-    .bind(from.to_string())
-    .bind(to.to_string())
-    .bind(relation)
-    .fetch_optional(conn)
-    .await?;
-    Ok(match superseded {
-        Some(row) => Edge::Superseded(row),
-        None => Edge::Open,
-    })
-}
-
-/// Dismiss a proposal by tombstoning it -- the row stays, `deleted_at` is set.
-///
-/// **The same mechanism as [`crate::link::unlink`], deliberately.** A dismissed
-/// suggestion and an unlinked link are one fact to the detector, and the
-/// tombstone is that fact: [`detect`]'s suppression reads the table with no
-/// filter, so neither can come back. Building a second store for dismissals
-/// would be a second thing to keep in step with the first.
-///
-/// `Some(row)` is "this call dismissed that proposal"; `None` is "there was
-/// nothing left to dismiss" -- already dismissed, or already accepted, in which
-/// case it is a link and the panel's *Unlink* is what withdraws it. A confirmed
-/// link is therefore never tombstoned through this door.
-///
-/// # Errors
-///
-/// [`CoreError::LinkNotFound`] if no link carries `id` at all; [`CoreError::Db`]
-/// if the statement fails.
-pub async fn dismiss(pool: &PgPool, id: Uuid) -> Result<Option<LinkRow>, CoreError> {
-    let updated = sqlx::query_as::<_, LinkRow>(concat!(
-        "update knobas.link set deleted_at = now()
-          where id = $1 and deleted_at is null and confirmed_at is null
-         returning ",
-        link_columns!("")
-    ))
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    settle(pool, id, updated).await
-}
-
-/// Tell "nothing to do" from "no such link", the way `unlink` does.
-///
-/// An update that matched nothing is either a proposal that has already been
-/// answered -- fine, and idempotent -- or an id nothing carries, which the
-/// caller wants to hear about rather than silently succeed on.
-async fn settle(
-    pool: &PgPool,
-    id: Uuid,
-    updated: Option<LinkRow>,
-) -> Result<Option<LinkRow>, CoreError> {
-    if updated.is_some() {
-        return Ok(updated);
-    }
-    let existing: Option<(Uuid,)> = sqlx::query_as("select id from knobas.link where id = $1")
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
-    existing.map(|_| None).ok_or(CoreError::LinkNotFound(id))
 }
 
 #[cfg(test)]
@@ -2465,6 +2058,15 @@ mod tests {
 
     /// The cap a reader can name and the cap the ranking is compiled with are
     /// one number, and the ranking keeps and drops at it.
+    #[test]
+    fn the_common_word_floor_in_the_statement_is_the_one_that_is_documented() {
+        assert_eq!(
+            common_from_items!().parse::<usize>().unwrap(),
+            COMMON_FROM_ITEMS
+        );
+        assert!(FLIP_COMMON.contains(concat!("(select n from census) >= ", common_from_items!())));
+    }
+
     #[test]
     fn the_similar_text_cap_in_the_statement_is_the_one_that_is_documented() {
         assert_eq!(
