@@ -100,6 +100,7 @@ vi.mock("../ipc/entity", () => ({
     Promise.reject(new Error("no publish target change in this test")),
   publishStandupProtocol: () => Promise.reject(new Error("no publish in this test")),
   createActionItemTicket: () => Promise.reject(new Error("no ticket in this test")),
+  actionItemTicket: () => Promise.reject(new Error("no ticket in this test")),
   getNote: () =>
     Promise.resolve({
       note: {

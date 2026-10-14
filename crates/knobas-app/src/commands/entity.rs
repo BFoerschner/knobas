@@ -2363,7 +2363,8 @@ pub async fn start_work_flow(
     crate::start_work::begin(&pool, &ticket, &repo).await
 }
 
-/// Run the flow as far as it will go, and answer where it stopped.
+/// Run the flow as far as it will go, **behind the answer** (#779): answers
+/// the flow as it stands, and the steps run on in the background.
 ///
 /// # Errors
 ///
@@ -2375,15 +2376,25 @@ pub async fn start_work_run<R: tauri::Runtime>(
 ) -> Result<Vec<knobas_core::start_work::FlowStep>, IpcError> {
     let state = crate::sources::state(&app)?;
     let ticket = EntityRef::parse(&entity_id).map_err(IpcError::invalid)?;
-    crate::start_work::run(
+    run_behind(&state, &ticket).await
+}
+
+/// The flow run on behind the answer (#779): the stepper draws each step as
+/// it lands, by re-reading the flow while it moves.
+async fn run_behind(
+    state: &crate::sources::SourcesState,
+    ticket: &EntityRef,
+) -> Result<Vec<knobas_core::start_work::FlowStep>, IpcError> {
+    crate::start_work::run_in_background(
         &state.pool,
-        &crate::start_work::queue::Queue { state: &state },
-        &ticket,
+        std::sync::Arc::new(crate::start_work::queue::OwnedQueue(state.clone())),
+        ticket,
     )
     .await
 }
 
-/// Retry one step, without redoing the ones that succeeded.
+/// Retry one step, without redoing the ones that succeeded. The flow runs on
+/// from it behind the answer (#779).
 ///
 /// # Errors
 ///
@@ -2395,15 +2406,17 @@ pub async fn start_work_retry<R: tauri::Runtime>(
     step_id: i64,
 ) -> Result<Vec<knobas_core::start_work::FlowStep>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::start_work::retry(
+    let ticket = crate::start_work::ready_retry(
         &state.pool,
         &crate::start_work::queue::Queue { state: &state },
         step_id,
     )
-    .await
+    .await?;
+    run_behind(&state, &ticket).await
 }
 
 /// Skip one step, so a ticket that needs no branch still gets its status moved.
+/// The flow runs on past it behind the answer (#779).
 ///
 /// # Errors
 ///
@@ -2414,12 +2427,8 @@ pub async fn start_work_skip<R: tauri::Runtime>(
     step_id: i64,
 ) -> Result<Vec<knobas_core::start_work::FlowStep>, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::start_work::skip(
-        &state.pool,
-        &crate::start_work::queue::Queue { state: &state },
-        step_id,
-    )
-    .await
+    let ticket = crate::start_work::ready_skip(&state.pool, step_id).await?;
+    run_behind(&state, &ticket).await
 }
 
 /// Replace a step's proposal with the one the user edited.
@@ -3754,17 +3763,7 @@ pub async fn publish_standup_protocol_inner(
     target: Option<crate::protocol::PublishTarget>,
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let pool = &state.pool;
-    let target = match target {
-        Some(chosen) => crate::protocol::set_publish_target(pool, &chosen).await?,
-        None => crate::protocol::publish_target(pool)
-            .await?
-            .ok_or_else(|| {
-                IpcError::invalid(
-                    "knobas does not know where to publish standup protocols yet. Choose the \
-                 Confluence source and the parent page first.",
-                )
-            })?,
-    };
+    let target = target_for(pool, target).await?;
 
     let note = crate::protocol::get_or_create(pool, day).await?;
     if crate::protocol::publication_of(pool, day, &target.source_id)
@@ -3783,7 +3782,77 @@ pub async fn publish_standup_protocol_inner(
     standup_protocol_inner(pool, day).await
 }
 
-/// [`publish_standup_protocol_inner`] behind the app handle.
+/// [`publish_standup_protocol_inner`], **answering once the page's write is
+/// queued** (#779): what the `publish_standup_protocol` command does.
+///
+/// Every refusal the awaited path makes is made here too, before the answer:
+/// a missing or incoherent target, a parent the mirror does not hold. The
+/// answer's publication is the queued write -- `pending`, with no page id --
+/// which the panel draws as on its way. The send, the sync that brings the
+/// page into the mirror and the link ([`protocol::reconcile`], run by
+/// [`standup_protocol_inner`]) follow in a spawned task, and every later read
+/// of the protocol names the page and links it as well, so a panel that
+/// re-reads when the write settles finds the address there.
+///
+/// The awaited path stays for the battery and `atlassian_live.rs`.
+///
+/// [`protocol::reconcile`]: crate::protocol::reconcile
+///
+/// # Errors
+///
+/// As [`publish_standup_protocol_inner`], all of them before anything is sent.
+pub async fn publish_standup_protocol_in_background(
+    state: &crate::sources::SourcesState,
+    day: chrono::NaiveDate,
+    target: Option<crate::protocol::PublishTarget>,
+) -> Result<crate::protocol::Protocol, IpcError> {
+    let pool = &state.pool;
+    let target = target_for(pool, target).await?;
+
+    let note = crate::protocol::get_or_create(pool, day).await?;
+    if crate::protocol::publication_of(pool, day, &target.source_id)
+        .await?
+        .is_none()
+    {
+        let space = crate::protocol::space_of(pool, &target.parent).await?;
+        let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
+        let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+        crate::sources::write_queue::send_in_background_then(
+            state,
+            source_id,
+            queued.id,
+            target.source_id.clone(),
+            move |state| async move {
+                if let Err(error) = standup_protocol_inner(&state.pool, day).await {
+                    tracing::warn!(%error, "a published protocol could not be linked yet");
+                }
+            },
+        );
+    }
+    standup_protocol_inner(pool, day).await
+}
+
+/// The target a publish aims at: the one given, recorded as the setting, or
+/// the stored one, or a refusal rather than a guess.
+async fn target_for(
+    pool: &PgPool,
+    target: Option<crate::protocol::PublishTarget>,
+) -> Result<crate::protocol::PublishTarget, IpcError> {
+    Ok(match target {
+        Some(chosen) => crate::protocol::set_publish_target(pool, &chosen).await?,
+        None => crate::protocol::publish_target(pool)
+            .await?
+            .ok_or_else(|| {
+                IpcError::invalid(
+                    "knobas does not know where to publish standup protocols yet. Choose the \
+                 Confluence source and the parent page first.",
+                )
+            })?,
+    })
+}
+
+/// [`publish_standup_protocol_in_background`] behind the app handle: answers
+/// once the page's write is queued (#779).
 ///
 /// # Errors
 ///
@@ -3796,7 +3865,7 @@ pub async fn publish_standup_protocol<R: tauri::Runtime>(
     target: Option<crate::protocol::PublishTarget>,
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let state = crate::sources::state(&app)?;
-    publish_standup_protocol_inner(&state, day, target).await
+    publish_standup_protocol_in_background(&state, day, target).await
 }
 
 /// Where standup protocols are published, or `null` until somebody has said
@@ -3839,6 +3908,12 @@ pub async fn set_standup_publish_target(
 pub struct ActionItemTicket {
     /// The write queue row carrying the create.
     pub write_id: i64,
+    /// The queue's own word for where that write stands (#779): `pending`
+    /// while it is on its way, `sent` once it landed, `refused` or `held`
+    /// when it will not go on its own, `discarded` once withdrawn.
+    pub state: knobas_core::write_queue::WriteState,
+    /// The queue's or the source's sentence about the write. Untrusted text.
+    pub detail: Option<String>,
     /// The ticket, as an entity id, once the mirror has it.
     ///
     /// `None` for a create that is still queued, and for one that landed at a
@@ -3888,6 +3963,70 @@ pub async fn create_action_item_ticket_inner(
     body: &str,
 ) -> Result<ActionItemTicket, IpcError> {
     let pool = &state.pool;
+    let (project_ref, payload) =
+        action_item_payload(pool, note_id, project, ticket_type, title, body).await?;
+    let queued = crate::sources::write_queue::submit(state, payload).await?;
+    // The same wait, for the same reason: a created ticket has no address
+    // until the mirror has it, and this is the call that goes looking.
+    crate::sources::write_queue::sync_after_write(state, &project_ref.namespace).await;
+    action_item_ticket_inner(pool, note_id, queued.id).await
+}
+
+/// [`create_action_item_ticket_inner`], **answering once the create is
+/// queued** (#779): what the `create_action_item_ticket` command does.
+///
+/// Every refusal the awaited path makes is made before the answer. The answer
+/// is the queued write with no ticket yet; the send, the sync that brings the
+/// ticket into the mirror and the link follow in a spawned task, and
+/// [`action_item_ticket_inner`] -- which the panel asks when the write settles
+/// -- names the ticket and draws the link as well, whichever comes first.
+///
+/// The awaited path stays for the battery.
+///
+/// # Errors
+///
+/// As [`create_action_item_ticket_inner`], all of them before anything is sent.
+pub async fn create_action_item_ticket_in_background(
+    state: &crate::sources::SourcesState,
+    note_id: &str,
+    project: &str,
+    ticket_type: &str,
+    title: &str,
+    body: &str,
+) -> Result<ActionItemTicket, IpcError> {
+    let (project_ref, payload) =
+        action_item_payload(&state.pool, note_id, project, ticket_type, title, body).await?;
+    let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
+    let (note, id) = (note_id.to_owned(), queued.id);
+    crate::sources::write_queue::send_in_background_then(
+        state,
+        source_id,
+        id,
+        project_ref.namespace,
+        move |state| async move {
+            if let Err(error) = action_item_ticket_inner(&state.pool, &note, id).await {
+                tracing::warn!(%error, write_id = id, "an action item's ticket could not be linked yet");
+            }
+        },
+    );
+    Ok(ActionItemTicket {
+        write_id: queued.id,
+        state: queued.state,
+        detail: queued.detail,
+        ticket_entity_id: None,
+        linked: false,
+    })
+}
+
+/// The checks and the `CreateTicket` payload both paths share.
+async fn action_item_payload(
+    pool: &PgPool,
+    note_id: &str,
+    project: &str,
+    ticket_type: &str,
+    title: &str,
+    body: &str,
+) -> Result<(EntityRef, serde_json::Value), IpcError> {
     let title = title.trim();
     if title.is_empty() {
         return Err(IpcError::invalid(
@@ -3899,9 +4038,8 @@ pub async fn create_action_item_ticket_inner(
     // ticket linked to a protocol, and discovering the note was deleted after
     // Jira has the ticket leaves a ticket nothing points at.
     get_note_inner(pool, note_id).await?;
-
-    let queued = crate::sources::write_queue::submit(
-        state,
+    Ok((
+        project_ref,
         serde_json::json!({
             "CreateTicket": {
                 "entity": project,
@@ -3910,21 +4048,55 @@ pub async fn create_action_item_ticket_inner(
                 "ticket_type": ticket_type,
             }
         }),
-    )
-    .await?;
-    // The same wait, for the same reason: a created ticket has no address
-    // until the mirror has it, and this is the call that goes looking.
-    crate::sources::write_queue::sync_after_write(state, &project_ref.namespace).await;
+    ))
+}
 
-    let ticket_entity_id = ticket_titled(pool, &project_ref.namespace, title).await?;
+/// What became of the ticket an action item's write `write_id` files
+/// (#779): where the write stands, and -- once it was sent and the mirror has
+/// the ticket -- the ticket, linked to the note.
+///
+/// **Idempotent, like `protocol::reconcile`**: the panel asks it each time the
+/// queue moves until the ticket is named, and the background task behind
+/// [`create_action_item_ticket_in_background`] asks it once after its sync.
+/// Whichever finds the ticket first draws the link; the other finds it drawn.
+///
+/// The ticket is looked for **only once the write was sent**: before that, a
+/// ticket of the same title in the project is somebody else's, never this one.
+///
+/// # Errors
+///
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if no write carries
+/// `write_id`; [`Invalid`](crate::IpcErrorCode::Invalid) if it is not a
+/// ticket's create; [`Internal`](crate::IpcErrorCode::Internal) for a read or
+/// link failure.
+pub async fn action_item_ticket_inner(
+    pool: &PgPool,
+    note_id: &str,
+    write_id: i64,
+) -> Result<ActionItemTicket, IpcError> {
+    let write = knobas_core::write_queue::get(pool, write_id)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("no queued write with id {write_id}")))?;
+    let create = write
+        .payload
+        .get("CreateTicket")
+        .filter(|_| write.op == "create_ticket")
+        .ok_or_else(|| IpcError::invalid(format!("write {write_id} does not file a ticket")))?;
+    let title = create.get("title").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let mut ticket_entity_id = None;
     let mut linked = false;
-    if let Some(ticket) = ticket_entity_id.as_deref() {
-        crate::protocol::draw_link(pool, note_id, ticket, crate::protocol::ACTION_ITEM_RELATION)
-            .await?;
-        linked = true;
+    if write.state == knobas_core::write_queue::WriteState::Sent {
+        ticket_entity_id = ticket_titled(pool, &write.source_id, title).await?;
+        if let Some(ticket) = ticket_entity_id.as_deref() {
+            crate::protocol::draw_link(pool, note_id, ticket, crate::protocol::ACTION_ITEM_RELATION)
+                .await?;
+            linked = true;
+        }
     }
     Ok(ActionItemTicket {
-        write_id: queued.id,
+        write_id,
+        state: write.state,
+        detail: write.detail,
         ticket_entity_id,
         linked,
     })
@@ -3976,7 +4148,8 @@ async fn ticket_titled(
     Ok(found)
 }
 
-/// [`create_action_item_ticket_inner`] behind the app handle.
+/// [`create_action_item_ticket_in_background`] behind the app handle:
+/// answers once the create is queued (#779).
 ///
 /// # Errors
 ///
@@ -3992,5 +4165,23 @@ pub async fn create_action_item_ticket<R: tauri::Runtime>(
     body: String,
 ) -> Result<ActionItemTicket, IpcError> {
     let state = crate::sources::state(&app)?;
-    create_action_item_ticket_inner(&state, &note_id, &project, &ticket_type, &title, &body).await
+    create_action_item_ticket_in_background(&state, &note_id, &project, &ticket_type, &title, &body)
+        .await
+}
+
+/// Where an action item's ticket stands: its write, and the ticket once it is
+/// filed and mirrored (#779). The panel asks it as the queue moves, to fill in
+/// the address of a ticket it drew as on its way.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up; otherwise as [`action_item_ticket_inner`].
+#[tauri::command]
+pub async fn action_item_ticket(
+    lifecycle: State<'_, Lifecycle>,
+    note_id: String,
+    write_id: i64,
+) -> Result<ActionItemTicket, IpcError> {
+    action_item_ticket_inner(&lifecycle.pool()?, &note_id, write_id).await
 }

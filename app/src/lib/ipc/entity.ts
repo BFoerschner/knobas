@@ -1787,6 +1787,8 @@ export function publishStandupProtocol(
   day: string,
   target?: PublishTarget,
 ): Promise<Protocol> {
+  // Answers once the page's write is queued (#779): the publication is that
+  // write, with no page yet; `standupProtocol` names it once it lands.
   return invoke<Protocol>("publish_standup_protocol", { day, target: target ?? null });
 }
 
@@ -1807,6 +1809,10 @@ export function setStandupPublishTarget(target: PublishTarget): Promise<PublishT
 export interface ActionItemTicket {
   /** The write queue row carrying the create. */
   write_id: number;
+  /** Where that write stands, in the queue's own vocabulary (#779). */
+  state: WriteState;
+  /** The queue's or the source's sentence about it. Untrusted text. */
+  detail: string | null;
   /**
    * The ticket, as an entity id, once the mirror has it.
    *
@@ -1822,6 +1828,9 @@ export interface ActionItemTicket {
 /**
  * File a ticket from an action item and link it to the protocol —
  * `create_action_item_ticket` (story 69).
+ *
+ * Answers once the create is queued (#779): `ticket_entity_id` is `null`, and
+ * {@link actionItemTicket} names the ticket once it is filed and mirrored.
  *
  * The **existing** create-ticket op, carried by the write queue like any other
  * write; `project` is the project's entity id, which is what {@link
@@ -1841,6 +1850,16 @@ export function createActionItemTicket(
     title,
     body,
   });
+}
+
+/**
+ * Where an action item's ticket stands — `action_item_ticket` (#779): its
+ * write, and the ticket, linked to the protocol, once it is filed and
+ * mirrored. Asked as the queue moves, to fill in the address of a ticket
+ * drawn as on its way.
+ */
+export function actionItemTicket(noteId: string, writeId: number): Promise<ActionItemTicket> {
+  return invoke<ActionItemTicket>("action_item_ticket", { noteId, writeId });
 }
 
 /**

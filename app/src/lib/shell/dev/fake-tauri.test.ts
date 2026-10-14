@@ -768,6 +768,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
       "standup_publish_target",
       "set_standup_publish_target",
       "create_action_item_ticket",
+      "action_item_ticket",
     ],
   },
   {

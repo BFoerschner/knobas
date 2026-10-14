@@ -185,6 +185,7 @@ vi.mock("../ipc/entity", () => ({
   setStandupPublishTarget: () => deferred(null),
   publishStandupProtocol: () => deferred(null),
   createActionItemTicket: () => deferred(null),
+  actionItemTicket: () => deferred(null),
   // The Tickets tile's read (#178). Deferred like the rest, so the tile is
   // unmounted mid-flight by the test that checks it leaves nothing behind.
   miniBoard: () => deferred({ columns: [], sources: [] }),
@@ -352,6 +353,7 @@ const AssetsTile = (await import("./AssetsTile.svelte")).default;
 const Detail = (await import("../detail/Detail.svelte")).default;
 const SourceView = (await import("../detail/view/SourceView.svelte")).default;
 const LogBlock = (await import("../detail/view/LogBlock.svelte")).default;
+const SettingsBlock = (await import("../detail/view/SettingsBlock.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
 const InboxView = (await import("../inbox/InboxView.svelte")).default;
 const NoteView = (await import("../notes/NoteView.svelte")).default;
@@ -670,6 +672,25 @@ const CASES: Case[] = [
           onnavigate: () => {},
           onopenurl: () => {},
           onaction: () => Promise.resolve(false),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Its one effect reopens a row's editor for *Edit and resend* (#779);
+     * mounted asking for it, so the effect runs. It installs nothing.
+     */
+    name: "SettingsBlock",
+    source: "lib/detail/view/SettingsBlock.svelte",
+    open: (target) => ({
+      app: mount(SettingsBlock, {
+        target,
+        props: {
+          title: null,
+          values: [{ name: "env.X", value: "1", inherited: false, secret: false, editable: true, description: null }],
+          writable: true,
+          reopen: { name: "env.X", value: "2" },
         },
       }),
     }),

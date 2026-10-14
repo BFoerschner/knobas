@@ -36,8 +36,11 @@
   `{@html}`, which `shell/house-rules.test.ts` enforces anyway.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import { ipcErrorMessage } from "../ipc";
   import {
+    actionItemTicket as realActionItemTicket,
     createActionItemTicket as realCreateTicket,
     getNote as realGetNote,
     listProjects as realListProjects,
@@ -51,6 +54,7 @@
   } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../ipc/sources";
+  import { toastStopped, writeFollower, type WriteFollower } from "../shell/follow-write";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { push } from "../shell/toasts.svelte";
   import PublishTargetPicker from "./PublishTargetPicker.svelte";
@@ -63,6 +67,9 @@
     publishStandupProtocol: typeof realPublish;
     standupPublishTarget: typeof realPublishTarget;
     createActionItemTicket: typeof realCreateTicket;
+    actionItemTicket: typeof realActionItemTicket;
+    /** Where the queue's movements are heard (#779). */
+    follower: WriteFollower;
     listProjects: typeof realListProjects;
     listSources: typeof realListSources;
     listAdapters: typeof realListAdapters;
@@ -91,6 +98,8 @@
     publishStandupProtocol: realPublish,
     standupPublishTarget: realPublishTarget,
     createActionItemTicket: realCreateTicket,
+    actionItemTicket: realActionItemTicket,
+    follower: ports?.follower ?? writeFollower(),
     listProjects: realListProjects,
     listSources: realListSources,
     listAdapters: realListAdapters,
@@ -133,6 +142,7 @@
       protocol = opened;
       body = note.note.body_md;
       failure = null;
+      followPublication();
     } catch (cause) {
       failure = ipcErrorMessage(cause);
     } finally {
@@ -188,13 +198,23 @@
     // question already answered; a swallowed source list would say there is
     // nowhere to publish while there is.
     let stored: PublishTarget | null;
-    let offered: { id: string; name: string }[];
     try {
       stored = await io.standupPublishTarget();
       if (stored) {
         await send(undefined);
         return;
       }
+    } catch (cause) {
+      failure = ipcErrorMessage(cause);
+      return;
+    }
+    await openDialog();
+  }
+
+  /** The target dialog, with the sources a page can be made in. */
+  async function openDialog() {
+    let offered: { id: string; name: string }[];
+    try {
       const [sources, descriptors] = await Promise.all([
         io.listSources(),
         io.listAdapters(),
@@ -216,9 +236,12 @@
       // taken back the way a keystroke can. The failure the save set stays on
       // screen and the button can be pressed again.
       if (!(await save())) return;
+      // Answers once the page's write is queued (#779): the dialog closes
+      // now, and the page is drawn as on its way until it lands.
       protocol = await io.publishStandupProtocol(day, target);
       dialog = null;
       failure = null;
+      followPublication();
     } catch (cause) {
       failure = ipcErrorMessage(cause);
     } finally {
@@ -226,8 +249,114 @@
     }
   }
 
-  async function openTicketDialog(text: string) {
-    ticketFor = { text, project: null, type: "Task" };
+  // -- behind the answer (#779) ----------------------------------------------
+  //
+  // A publish and a ticket answer once their write is queued. What they make
+  // is drawn at once as on its way -- the page's title, the ticket's words --
+  // with no link, and the address fills in when the write lands and the sync
+  // brings the item in. A write that will not go on its own loses its echo
+  // and a toast says why, with *Edit and resend*.
+
+  /** The follows this panel holds, stopped when it goes. */
+  const following = new Map<number, () => void>();
+  onDestroy(() => {
+    for (const stop of following.values()) stop();
+    following.clear();
+  });
+
+  function unfollow(writeId: number) {
+    following.get(writeId)?.();
+    following.delete(writeId);
+  }
+
+  /**
+   * Follow the publication until its page is named and linked: each queue
+   * movement re-reads the protocol, whose read names the page and draws the
+   * link once the mirror has it.
+   */
+  function followPublication() {
+    const current = protocol?.publication;
+    if (!current || current.linked || following.has(current.write_id)) return;
+    const id = current.write_id;
+    let told = false;
+    following.set(
+      id,
+      io.follower.follow(id, (row) => {
+        if (row && (row.state === "held" || row.state === "refused") && !told) {
+          told = true;
+          toastStopped(row, { name: "Publish", resend: () => void openDialog() });
+        }
+        void reread(id);
+      }),
+    );
+  }
+
+  async function reread(id: number) {
+    let answer: Protocol;
+    try {
+      answer = await io.standupProtocol(day);
+    } catch {
+      // The next queue movement asks again.
+      return;
+    }
+    protocol = answer;
+    const publication = answer.publication;
+    if (publication === null || publication.write_id !== id || publication.linked || publication.state === "held") {
+      unfollow(id);
+    }
+  }
+
+  /** The tickets filed from this panel, on their way or with their address. */
+  let filed = $state<
+    { writeId: number; text: string; project: string; type: string; ticket: string | null }[]
+  >([]);
+
+  function followTicket(writeId: number) {
+    following.set(
+      writeId,
+      io.follower.follow(writeId, (row) => {
+        const echo = filed.find((f) => f.writeId === writeId);
+        if (!echo) return unfollow(writeId);
+        if (row && (row.state === "held" || row.state === "refused")) {
+          unfollow(writeId);
+          filed = filed.filter((f) => f.writeId !== writeId);
+          const { text, project, type } = echo;
+          toastStopped(row, {
+            name: "Ticket",
+            resend: () => {
+              ticketFor = { text, project, type };
+              void readProjects();
+            },
+          });
+          return;
+        }
+        // Gone from the open rows: sent (or withdrawn). Ask for the ticket.
+        if (row === undefined) void address(writeId);
+      }),
+    );
+  }
+
+  async function address(writeId: number) {
+    const current = protocol;
+    if (!current) return;
+    let answer;
+    try {
+      answer = await io.actionItemTicket(current.note_id, writeId);
+    } catch {
+      return;
+    }
+    if (answer.state === "refused" || answer.state === "discarded") {
+      unfollow(writeId);
+      filed = filed.filter((f) => f.writeId !== writeId);
+      return;
+    }
+    if (answer.ticket_entity_id === null) return; // the mirror is behind; the next movement asks again
+    unfollow(writeId);
+    const ticket = answer.ticket_entity_id;
+    filed = filed.map((f) => (f.writeId === writeId ? { ...f, ticket } : f));
+  }
+
+  async function readProjects() {
     try {
       projects = await io.listProjects();
     } catch (cause) {
@@ -235,12 +364,17 @@
     }
   }
 
+  async function openTicketDialog(text: string) {
+    ticketFor = { text, project: null, type: "Task" };
+    await readProjects();
+  }
+
   async function fileTicket() {
     const asked = ticketFor;
     const current = protocol;
     if (!asked || !current || asked.project === null) return;
     try {
-      const filed = await io.createActionItemTicket(
+      const made = await io.createActionItemTicket(
         current.note_id,
         asked.project,
         asked.type,
@@ -248,12 +382,14 @@
         `From the standup protocol of ${day}.`,
       );
       ticketFor = null;
-      push({
-        text:
-          filed.ticket_entity_id === null
-            ? "The ticket is on the write queue; it will be linked when it arrives."
-            : `${filed.ticket_entity_id} filed and linked to the protocol.`,
-      });
+      // Answers once queued (#779): drawn as on its way, the key filled in
+      // when it lands.
+      filed = [
+        ...filed,
+        { writeId: made.write_id, text: asked.text, project: asked.project, type: asked.type, ticket: made.ticket_entity_id },
+      ];
+      push({ text: `Ticket queued: ${asked.text}` });
+      if (made.ticket_entity_id === null) followTicket(made.write_id);
     } catch (cause) {
       failure = ipcErrorMessage(cause);
     }
@@ -303,7 +439,12 @@
         Published as {protocol?.page_title}
       </button>
     {:else}
-      <span class="wait">Publishing {protocol?.page_title} — the write is on the queue.</span>
+      <!-- On its way (#779): the title, marked, and no link until the page lands. -->
+      <span class="wait pending">
+        Publishing {protocol?.page_title} — {publication.state === "pending"
+          ? "on its way; the write is on the queue."
+          : `${publication.state} in the write queue.`}
+      </span>
     {/if}
   </div>
 
@@ -341,6 +482,25 @@
             <button class="btn sm" onclick={() => void openTicketDialog(item.text)}>
               Create ticket
             </button>
+          </li>
+        {/each}
+      </ul>
+    </div>
+  {/if}
+
+  {#if filed.length > 0}
+    <div class="pr-a">
+      <h3>Tickets filed</h3>
+      <ul class="pr-t">
+        {#each filed as made (made.writeId)}
+          <li class:pending={made.ticket === null}>
+            {#if made.ticket === null}
+              <span>{made.text}</span>
+              <span class="wait">on its way</span>
+            {:else}
+              <button class="link mono" onclick={() => router.go(addressOf(made.ticket!))}>{made.ticket}</button>
+              <span>{made.text}</span>
+            {/if}
           </li>
         {/each}
       </ul>
@@ -531,6 +691,10 @@
   .wait {
     color: var(--muted);
     font-size: 12px;
+  }
+
+  .pending {
+    opacity: 0.7;
   }
 
   .fail {
