@@ -803,6 +803,7 @@ knobas-app	test/it	start_work::a_pull_request_whose_state_cannot_be_read_is_not_
 knobas-app	test/it	start_work::a_re_used_head_links_the_open_pull_request_and_not_the_merged_one
 knobas-app	test/it	start_work::a_refusal_behind_the_answer_stops_the_flow_where_it_happened
 knobas-app	test/it	start_work::a_retry_of_a_step_whose_write_is_still_open_queues_nothing_new
+knobas-app	test/it	start_work::a_retry_of_an_interrupted_step_whose_branch_exists_adopts_it
 knobas-app	test/it	start_work::a_retry_resumes_without_repeating_what_already_worked
 knobas-app	test/it	start_work::a_retry_whose_effect_already_landed_sends_nothing
 knobas-app	test/it	start_work::a_second_flow_on_one_ticket_is_refused
@@ -811,6 +812,7 @@ knobas-app	test/it	start_work::a_skipped_step_lands_in_the_activity_stream
 knobas-app	test/it	start_work::a_source_that_cannot_take_the_write_queues_the_step_and_waits
 knobas-app	test/it	start_work::a_source_that_declares_no_merged_flag_still_reads_the_state
 knobas-app	test/it	start_work::a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited
+knobas-app	test/it	start_work::a_step_left_running_by_a_quit_reads_as_interrupted_and_can_be_retried_or_skipped
 knobas-app	test/it	start_work::a_step_the_sequence_has_not_reached_cannot_be_retried
 knobas-app	test/it	start_work::a_whole_flow_creates_a_branch_a_pull_request_a_link_and_a_transition
 knobas-app	test/it	start_work::an_edited_proposal_is_what_gets_dispatched
@@ -821,6 +823,7 @@ knobas-app	test/it	start_work::skipping_a_step_that_already_happened_is_refused
 knobas-app	test/it	start_work::skipping_the_branch_still_lets_the_ticket_move
 knobas-app	test/it	start_work::skipping_the_pull_request_leaves_the_link_step_with_nothing_to_do
 knobas-app	test/it	start_work::the_reverse_direction_names_its_pull_request_in_the_activity_stream
+knobas-app	test/it	start_work::the_start_up_pass_leaves_settled_steps_alone
 knobas-app	test/it	status_move::a_legal_move_lands_and_an_illegal_one_is_refused_by_name
 knobas-app	test/it	status_move::the_read_offers_the_workflow_and_a_source_without_one_refuses_by_name
 knobas-app	test/it	suggestion_pass::a_pass_past_its_statement_timeout_is_cancelled_and_the_next_one_finishes
