@@ -26,6 +26,7 @@
   import type { Router } from "../shell/router.svelte";
   import { ago } from "../shell/time";
   import { patience } from "../shell/patience.svelte";
+  import { followWrite } from "../shell/follow-write";
   import { push } from "../shell/toasts.svelte";
   import { drawable } from "./actions";
   import { addressOf } from "./address";
@@ -89,12 +90,26 @@
     const form = drawable(entry.actions).find((candidate) => candidate.op === op)?.form;
     if (!entity || !form) return;
     try {
-      await submitWrite(
+      const write = await submitWrite(
         form.kind === "text" ? form.build(entity, body) : form.build(entity),
       );
       push({ text: `${form.label} queued for ${entry.item.title}` });
       commenting = null;
       draft = "";
+      // Nowhere here to draw it on its way (#775): the toast says queued, and
+      // only a write that will not go on its own is told again -- with the
+      // box reopened on what was typed, for a reply.
+      const key = entry.item.key;
+      followWrite(write, {
+        name: form.label,
+        resend:
+          form.kind === "text"
+            ? () => {
+                commenting = key;
+                draft = body;
+              }
+            : undefined,
+      });
       // Not awaited (#752): the write is queued and its send is behind the
       // reader; the inbox re-reads on the `activity:new` its settle writes.
       void inbox.refresh();
@@ -257,7 +272,6 @@
             -->
             <button
               class="btn sm pri"
-              disabled={inbox.busy}
               onclick={() => void inbox.ack(entry.item.key)}
             >
               Ack
@@ -272,7 +286,6 @@
             {#if action.form.kind === "immediate"}
               <button
                 class="btn sm pri"
-                disabled={inbox.busy}
                 onclick={() => void act(entry, action.op, "")}
               >
                 {action.form.label}
@@ -297,7 +310,6 @@
           </button>
           <button
             class="btn sm ghost"
-            disabled={inbox.busy}
             onclick={() => void inbox.complete(entry.item.key)}
           >
             Done
@@ -333,7 +345,6 @@
             {#each presetsFor(entry) as preset (preset.label)}
               <button
                 class="btn sm"
-                disabled={inbox.busy}
                 onclick={() => void snooze(entry.item.key, preset.at)}
               >
                 {preset.label}
@@ -364,14 +375,12 @@
           <span class="acts">
             <button
               class="btn sm ghost"
-              disabled={inbox.busy}
               onclick={() => void snooze(entry.item.key, now)}
             >
               Bring back
             </button>
             <button
               class="btn sm ghost"
-              disabled={inbox.busy}
               onclick={() => void inbox.complete(entry.item.key)}
             >
               Done
