@@ -812,3 +812,136 @@ async fn a_batch_that_always_times_out_is_halved_then_its_item_skipped() {
     }
     assert_eq!(pacing.batch(), 8);
 }
+
+/// #776: `PRUNE_SEEN` runs once a pass, so an item withdrawn while a pass is
+/// under way keeps its seen row until the next one. It must still be kept out
+/// of the rankings the rest of the pass writes (`verified`), and a proposal to
+/// it must stay, as it does for an item withdrawn before the pass
+/// (`RETIRE_SIMILAR`'s liveness test). The next pass prunes it and ends on the
+/// capped whole-corpus set.
+///
+/// The pair is one only `x` ranks, so `t`'s own ranking, which no batch of
+/// this pass rewrites, does not hold the proposal up by itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn an_item_withdrawn_mid_pass_is_not_ranked_and_its_proposal_stays() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let pool = scratch().await;
+    let rule = suggest::rule("similar_text").unwrap();
+    apply(
+        &pool,
+        &Step::Write {
+            source: "jira",
+            keys: 0..48,
+            seed: 6,
+        },
+    )
+    .await;
+    let mut conn = pool.acquire().await.unwrap();
+    let mut pacing = suggest::Pacing::new(1);
+    suggest::detect_rule_paced(&mut conn, rule, &pacing)
+        .await
+        .unwrap();
+
+    let (x, t): (String, String) = sqlx::query_as(
+        "select a.entity_id, a.other_id
+           from sync.similar_text_top a
+          where not exists (select 1 from sync.similar_text_top b
+                             where b.entity_id = a.other_id and b.other_id = a.entity_id)
+            and exists (select 1 from knobas.proposed_link l
+                         where l.rule = 'similar_text'
+                           and ((l.from_id, l.to_id) = (a.entity_id, a.other_id)
+                             or (l.from_id, l.to_id) = (a.other_id, a.entity_id)))
+          order by 1, 2 limit 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("a proposal only one end ranks");
+    let pair_proposed = |pool: PgPool, x: String, t: String| async move {
+        proposed(&pool)
+            .await
+            .iter()
+            .any(|(from, to, _)| (from, to) == (&x, &t) || (from, to) == (&t, &x))
+    };
+
+    // `x` is rewritten, so this pass compares it again; `t` is withdrawn once
+    // the pass has pruned, before its first batch.
+    sqlx::query("update sync.item set body_text = body_text || ' payout' where entity_id = $1")
+        .bind(&x)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let fired = Arc::new(AtomicBool::new(false));
+    {
+        let (pool, t, fired) = (pool.clone(), t.clone(), fired.clone());
+        let handle = tokio::runtime::Handle::current();
+        pacing.stall = Some(Box::new(move |_ids| {
+            if !fired.swap(true, Ordering::SeqCst) {
+                tokio::task::block_in_place(|| {
+                    handle.block_on(async {
+                        sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+                            .bind(&t)
+                            .execute(&pool)
+                            .await
+                            .unwrap();
+                    });
+                });
+            }
+            false
+        }));
+    }
+    suggest::detect_rule_paced(&mut conn, rule, &pacing)
+        .await
+        .unwrap();
+    assert!(fired.load(Ordering::SeqCst), "the withdrawal ran mid-pass");
+    let seen_t: i64 =
+        sqlx::query_scalar("select count(*) from sync.similar_text_seen where entity_id = $1")
+            .bind(&t)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        seen_t, 1,
+        "the withdrawn item keeps its seen row until the next pass"
+    );
+    let ranked: i64 = sqlx::query_scalar(
+        "select count(*) from sync.similar_text_top where entity_id = $1 and other_id = $2",
+    )
+    .bind(&x)
+    .bind(&t)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ranked, 0, "{x} was ranked mid-pass against {t}, withdrawn");
+    assert!(
+        pair_proposed(pool.clone(), x.clone(), t.clone()).await,
+        "the proposal {x} / {t} was retired because its end left mid-pass"
+    );
+
+    // The next pass prunes the withdrawn item and lands on the capped set.
+    pacing.stall = None;
+    suggest::detect_rule_paced(&mut conn, rule, &pacing)
+        .await
+        .unwrap();
+    assert!(
+        pair_proposed(pool.clone(), x.clone(), t.clone()).await,
+        "a proposal to a withdrawn item stays"
+    );
+    let (kept, _) = capped(&old_pairs(&pool).await);
+    let live: BTreeSet<String> = sqlx::query_scalar(
+        "select entity_id from sync.live_item where kind in ('ticket','page','pr')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .collect();
+    let got: BTreeSet<(String, String)> = proposed(&pool)
+        .await
+        .into_iter()
+        .filter(|(from, to, _)| live.contains(from) && live.contains(to))
+        .map(|(from, to, _)| (from, to))
+        .collect();
+    assert_eq!(got, kept.into_keys().collect::<BTreeSet<_>>());
+}
