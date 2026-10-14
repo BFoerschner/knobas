@@ -98,7 +98,7 @@ export function openState(write: QueuedWrite | undefined): OpenState | null {
  */
 export function markState(write: QueuedWrite | undefined): SettingMark["state"] | null {
   const state = openState(write);
-  if (state === "pending" && !write!.wait_reason && write!.source_enabled !== false) return "saving";
+  if (write && state === "pending" && !write.wait_reason && write.source_enabled !== false) return "saving";
   return state;
 }
 

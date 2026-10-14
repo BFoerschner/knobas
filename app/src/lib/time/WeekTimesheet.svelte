@@ -31,7 +31,6 @@
   other people read is not something to discover afterwards.
 -->
 <script lang="ts">
-  import { followWrite } from "../shell/follow-write";
   import { ipcErrorMessage } from "../ipc";
   import {
     logAll as realLogAll,
@@ -41,6 +40,7 @@
     type Week,
     type WeekRow,
   } from "../ipc/time";
+  import { followWrite } from "../shell/follow-write";
   import { latestRead } from "../shell/latest-read";
   import { targetReading } from "../shell/timer";
   import { dayKey, durationReading, horizonNote } from "./day";

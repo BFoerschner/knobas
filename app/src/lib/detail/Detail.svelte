@@ -105,6 +105,7 @@
     viewAnswered = held !== null && held.view !== undefined;
     settingMarks = {};
     settingWrites = {};
+    savedHere.clear();
     sending = [];
     made = {};
     resending = null;

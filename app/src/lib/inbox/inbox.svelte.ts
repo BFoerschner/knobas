@@ -174,6 +174,9 @@ export function createInbox(ports?: InboxPorts): Inbox {
         io.inboxItems("snoozed"),
         io.inboxCount(),
       ]);
+      // An answer made while this read was out is drawn already, and the
+      // read after the last one in flight is the one that replaces it (#775).
+      if (inFlight > 0) return;
       state.stream = stream;
       state.snoozed = snoozed;
       state.count = count;
@@ -189,6 +192,8 @@ export function createInbox(ports?: InboxPorts): Inbox {
 
   /** Answers written and not yet answered; the re-read waits for the last. */
   let inFlight = 0;
+  /** Why an answer of the batch in flight failed, said once the batch is re-read. */
+  let refusal: string | null = null;
 
   /**
    * Run one answer, then re-read — including after a failure.
@@ -221,22 +226,20 @@ export function createInbox(ports?: InboxPorts): Inbox {
     if (refusal !== null) state.error = refusal;
     refusal = null;
   }
-  /** Why an answer of the batch in flight failed, said once the batch is re-read. */
-  let refusal: string | null = null;
 
-  /** The entry for `key` on either shelf, and whether it was in the stream. */
-  function take(key: string): { entry: InboxEntry | undefined; streamed: boolean } {
+  /** Take the entry for `key` off either shelf, and answer it. */
+  function take(key: string): InboxEntry | undefined {
     const streamed = state.stream.find((e) => e.item.key === key);
     const shelved = state.snoozed.find((e) => e.item.key === key);
     state.stream = state.stream.filter((e) => e.item.key !== key);
     state.snoozed = state.snoozed.filter((e) => e.item.key !== key);
     if (streamed) state.count = Math.max(0, state.count - 1);
-    return { entry: streamed ?? shelved, streamed: streamed !== undefined };
+    return streamed ?? shelved;
   }
 
   /** A snooze drawn: onto the shelf until `until`, or back into the stream if that is now. */
   function drawSnooze(key: string, until: Date) {
-    const { entry } = take(key);
+    const entry = take(key);
     if (!entry) return;
     if (until.getTime() <= Date.now()) {
       state.stream = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...state.stream];

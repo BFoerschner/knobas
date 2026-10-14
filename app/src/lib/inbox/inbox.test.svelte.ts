@@ -769,3 +769,22 @@ test("a comment closes its box on the queue's answer, and a refusal can reopen i
   expect(view.target.querySelector<HTMLInputElement>("input.inp")!.value).toBe("Looks right to me");
   view.stop();
 });
+
+test("a re-read that lands while an answer is out does not draw the row back", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  const done = inbox.complete("review_request:gitea:acme/payouts#144");
+  // An event's re-read, answered by a backend that has not seen the answer yet.
+  await inbox.refresh();
+  expect(inbox.stream).toEqual([]);
+  stream = [];
+  count = 0;
+  release();
+  await done;
+  expect(inbox.stream).toEqual([]);
+  expect(inbox.count).toBe(0);
+});
