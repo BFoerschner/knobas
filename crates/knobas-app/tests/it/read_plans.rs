@@ -144,24 +144,31 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         );
     };
 
-    // The *All* room's builds tile: no source, period, member or project
-    // narrowing.
-    let plan = explain(
-        &pool,
-        knobas_app::commands::entity::planned_latest_per_parent(),
-        |q| {
-            q.bind(None::<Vec<String>>)
-                .bind(Some(vec!["build".to_owned()]))
-                .bind(None::<i32>)
-                .bind(50_i64)
-                .bind(0_i64)
-                .bind(None::<Vec<String>>)
-                .bind(None::<String>)
-                .bind(declared.clone())
-        },
-    )
-    .await;
-    check("builds tile", plan);
+    // The *All* room's builds tile, and a project room's: the project's
+    // predicate is a declared read per row, which no statistics describe, so
+    // the room is estimated at a handful of builds analyzed or not -- where a
+    // join between the CTEs went to nested loops.
+    for (name, project) in [
+        ("builds tile", None),
+        ("builds tile, project room", Some("Payments")),
+    ] {
+        let plan = explain(
+            &pool,
+            knobas_app::commands::entity::planned_latest_per_parent(),
+            |q| {
+                q.bind(None::<Vec<String>>)
+                    .bind(Some(vec!["build".to_owned()]))
+                    .bind(None::<i32>)
+                    .bind(50_i64)
+                    .bind(0_i64)
+                    .bind(None::<Vec<String>>)
+                    .bind(project.map(str::to_owned))
+                    .bind(declared.clone())
+            },
+        )
+        .await;
+        check(name, plan);
+    }
     for (category, sql) in knobas_core::inbox::planned_statements() {
         if !RESHAPED_RULES.contains(&category) {
             continue;
