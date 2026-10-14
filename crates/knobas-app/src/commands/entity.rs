@@ -3764,14 +3764,7 @@ pub async fn publish_standup_protocol_inner(
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let pool = &state.pool;
     let target = target_for(pool, target).await?;
-
-    let note = crate::protocol::get_or_create(pool, day).await?;
-    if crate::protocol::publication_of(pool, day, &target.source_id)
-        .await?
-        .is_none()
-    {
-        let space = crate::protocol::space_of(pool, &target.parent).await?;
-        let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
+    if let Some(payload) = page_to_make(pool, day, &target).await? {
         crate::sources::write_queue::submit(state, payload).await?;
         // Wait for the re-read `submit` set off. The link this call is about
         // to draw points at a page that has an address only once a sync has
@@ -3808,14 +3801,7 @@ pub async fn publish_standup_protocol_in_background(
 ) -> Result<crate::protocol::Protocol, IpcError> {
     let pool = &state.pool;
     let target = target_for(pool, target).await?;
-
-    let note = crate::protocol::get_or_create(pool, day).await?;
-    if crate::protocol::publication_of(pool, day, &target.source_id)
-        .await?
-        .is_none()
-    {
-        let space = crate::protocol::space_of(pool, &target.parent).await?;
-        let payload = crate::protocol::create_page_payload(&target, &space, day, &note.body_md);
+    if let Some(payload) = page_to_make(pool, day, &target).await? {
         let (queued, source_id) = crate::sources::write_queue::queue(state, payload).await?;
         crate::sources::write_queue::send_in_background_then(
             state,
@@ -3830,6 +3816,29 @@ pub async fn publish_standup_protocol_in_background(
         );
     }
     standup_protocol_inner(pool, day).await
+}
+
+/// The `CreatePage` a publish for `day` owes, or `None` when the date already
+/// has a publication in the target's Confluence -- the module's one-page rule.
+async fn page_to_make(
+    pool: &PgPool,
+    day: chrono::NaiveDate,
+    target: &crate::protocol::PublishTarget,
+) -> Result<Option<serde_json::Value>, IpcError> {
+    let note = crate::protocol::get_or_create(pool, day).await?;
+    if crate::protocol::publication_of(pool, day, &target.source_id)
+        .await?
+        .is_some()
+    {
+        return Ok(None);
+    }
+    let space = crate::protocol::space_of(pool, &target.parent).await?;
+    Ok(Some(crate::protocol::create_page_payload(
+        target,
+        &space,
+        day,
+        &note.body_md,
+    )))
 }
 
 /// The target a publish aims at: the one given, recorded as the setting, or

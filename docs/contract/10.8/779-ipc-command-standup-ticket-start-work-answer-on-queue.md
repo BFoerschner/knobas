@@ -39,7 +39,8 @@
   the skip). Then all three call `start_work::run_in_background`, which answers the flow as it
   stands and runs `start_work::run` in a spawned task: the same sequence, one step at a time through
   the write queue, a failed step stopping it. One background run per ticket at a time; a second ask
-  meanwhile answers the flow and starts nothing. A run that ends in an error marks the step it was on
+  meanwhile answers the flow and starts nothing, and a run on its way out takes a step a retry or skip
+  made pending meanwhile. A run that ends in an error marks the step it was on
   `failed` with the reason. The stepper re-reads `start_work_flow` while the flow moves.
   `start_work::run`, `retry` and `skip` keep the awaited path for the battery and
   `start_work_live.rs`.

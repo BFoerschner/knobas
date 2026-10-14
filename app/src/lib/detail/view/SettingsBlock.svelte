@@ -85,9 +85,10 @@
   $effect(() => {
     const asked = reopen;
     if (asked === null) return;
-    const setting = untrack(() => values.find((v) => v.name === asked.name));
-    if (!setting || !canEdit(setting)) return;
-    void untrack(() => open(setting, asked.value));
+    untrack(() => {
+      const setting = values.find((v) => v.name === asked.name);
+      if (setting && canEdit(setting)) void open(setting, asked.value);
+    });
   });
 
   function close() {

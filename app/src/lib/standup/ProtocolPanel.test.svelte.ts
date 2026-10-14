@@ -537,6 +537,8 @@ test("a refused publish loses its echo, says why, and Edit and resend opens the 
   const told = toasts.items.filter((t) => t.tone === "err");
   expect(told.map((t) => t.text)).toEqual(["Publish was refused: a page with this title already exists"]);
   expect(told[0]!.more?.map((a) => a.label)).toEqual(["Edit and resend"]);
+  // Nothing left to follow: the refused write is no publication.
+  expect(handlers).toHaveLength(0);
 
   told[0]!.more![0]!.run();
   await settle();

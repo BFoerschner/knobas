@@ -519,10 +519,22 @@ pub async fn run_in_background<S: Steps + 'static>(
     if let Some(claim) = Behind::claim(pool, ticket) {
         let (pool, ticket) = (pool.clone(), ticket.clone());
         tokio::spawn(async move {
-            let _claim = claim;
-            if let Err(error) = run(&pool, steps.as_ref(), &ticket).await {
-                tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
-                stop_where_it_was(&pool, &ticket, &error.message).await;
+            let mut claim = Some(claim);
+            while claim.is_some() {
+                if let Err(error) = run(&pool, steps.as_ref(), &ticket).await {
+                    tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
+                    stop_where_it_was(&pool, &ticket, &error.message).await;
+                }
+                drop(claim.take());
+                // A retry or skip that landed while this run was finishing
+                // found the claim held and started nothing: its step is
+                // pending with no loop to take it. Take it here.
+                let again = store::flow(&pool, &ticket)
+                    .await
+                    .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
+                if again {
+                    claim = Behind::claim(&pool, &ticket);
+                }
             }
         });
     }

@@ -9,7 +9,7 @@
   own label and monogram when it declares them, the title-cased kind otherwise.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
@@ -36,7 +36,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import { openWriteQueue } from "../shell/write-queue.svelte";
-  import { toastStopped } from "../shell/follow-write";
+  import { toastStopped, willNotGo } from "../shell/follow-write";
   import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
   import BuildsSummary from "./BuildsSummary.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
@@ -530,6 +530,12 @@
   /** A row to reopen with what was typed: *Edit and resend* on a setting's toast. */
   let reopenSetting = $state<{ name: string; value: string } | null>(null);
 
+  /** Ask the row to reopen once, and take the ask back once it is drawn: a block drawn again later must not reopen. */
+  function reopen(name: string, value: string) {
+    reopenSetting = { name, value };
+    void tick().then(() => (reopenSetting = null));
+  }
+
   /**
    * Mark the rows whose edits are still on the queue (#692).
    *
@@ -604,9 +610,9 @@
         const value = settingMarks[name]?.value ?? "";
         settingMarks[name] = { state, detail: row?.detail ?? null, value };
         // Saved here and will not go on its own (#779): told once, the mark stays.
-        if (row && (state === "held" || state === "refused") && savedHere.has(id) && !toldSettings.has(id)) {
+        if (willNotGo(row) && savedHere.has(id) && !toldSettings.has(id)) {
           toldSettings.add(id);
-          toastStopped(row, { name, resend: () => (reopenSetting = { name, value }) });
+          toastStopped(row, { name, resend: () => reopen(name, value) });
         }
       } else {
         landed.push([name, settingMarks[name], id]);

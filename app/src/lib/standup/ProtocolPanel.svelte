@@ -54,7 +54,7 @@
   } from "../ipc/entity";
   import { search as realSearch } from "../ipc/search";
   import { listAdapters as realListAdapters, listSources as realListSources } from "../ipc/sources";
-  import { toastStopped, writeFollower, type WriteFollower } from "../shell/follow-write";
+  import { toastStopped, willNotGo, writeFollower, type WriteFollower } from "../shell/follow-write";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { push } from "../shell/toasts.svelte";
   import PublishTargetPicker from "./PublishTargetPicker.svelte";
@@ -99,7 +99,7 @@
     standupPublishTarget: realPublishTarget,
     createActionItemTicket: realCreateTicket,
     actionItemTicket: realActionItemTicket,
-    follower: ports?.follower ?? writeFollower(),
+    follower: writeFollower(),
     listProjects: realListProjects,
     listSources: realListSources,
     listAdapters: realListAdapters,
@@ -282,7 +282,7 @@
     following.set(
       id,
       io.follower.follow(id, (row) => {
-        if (row && (row.state === "held" || row.state === "refused") && !told) {
+        if (willNotGo(row) && !told) {
           told = true;
           toastStopped(row, { name: "Publish", resend: () => void openDialog() });
         }
@@ -317,7 +317,7 @@
       io.follower.follow(writeId, (row) => {
         const echo = filed.find((f) => f.writeId === writeId);
         if (!echo) return unfollow(writeId);
-        if (row && (row.state === "held" || row.state === "refused")) {
+        if (willNotGo(row)) {
           unfollow(writeId);
           filed = filed.filter((f) => f.writeId !== writeId);
           const { text, project, type } = echo;
@@ -694,7 +694,7 @@
   }
 
   .pending {
-    opacity: 0.7;
+    opacity: 0.55;
   }
 
   .fail {

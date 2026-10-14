@@ -1451,24 +1451,17 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
         Some("branch name taken")
     );
     assert_eq!(fake.ops(), ["create_branch"]);
-    // The stopped run lets go of the ticket, so a retry runs it on: asked
-    // until it does, because the run lets go a moment after it settles.
+    // Retried at once, asked once: if the stopped run still holds the claim,
+    // it finds the pending step on its way out and takes it; if not, this
+    // ask starts a run. Either way the flow moves on.
     fake.now_answers("create_branch", Answer::Landed(Landing::Sent));
     let id = step_of(&flow, Step::CreateBranch).id;
     let ticket = start_work::ready_retry(&pool, fake.as_ref(), id)
         .await
         .expect("a retry");
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
-    while fake.ops().len() < 2 {
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "the retry never ran"
-        );
-        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket)
-            .await
-            .expect("the retry runs");
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket)
+        .await
+        .expect("the retry runs");
     read_until(&pool, |f| {
         outcome(f, Step::CreatePullRequest) != StepOutcome::Pending
     })

@@ -134,6 +134,11 @@ export interface Following {
   resend?: () => void;
 }
 
+/** Whether an open row is one that will not go on its own: held or refused. */
+export function willNotGo(row: QueuedWrite | undefined): row is QueuedWrite {
+  return row?.state === "held" || row?.state === "refused";
+}
+
 /** The toast for a write that will not go on its own. */
 export function toastStopped(row: QueuedWrite, following: Following): void {
   push({
@@ -163,7 +168,7 @@ export function followWrite(
   stop = follower.follow(write.id, (row) => {
     if (done) return;
     if (row === undefined) return leave();
-    if (row.state !== "held" && row.state !== "refused") return;
+    if (!willNotGo(row)) return;
     leave();
     toastStopped(row, following);
   });
