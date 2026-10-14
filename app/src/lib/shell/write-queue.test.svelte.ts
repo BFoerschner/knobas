@@ -21,6 +21,8 @@ let rows: QueuedWrite[] = [];
 let counts: QueueCounts = { pending: 0, held: 0, refused: 0 };
 /** Set to make the next command reject, so the error path is reachable. */
 let reject: unknown = null;
+/** Set to make every flush a send that never answers (#775). */
+let flushHold: Promise<void> | null = null;
 
 function record<T>(command: string, args: unknown, value: T): Promise<T> {
   calls.push({ command, args });
@@ -35,7 +37,8 @@ function record<T>(command: string, args: unknown, value: T): Promise<T> {
 vi.mock("../ipc/sources", () => ({
   pendingWrites: () => record("pending_writes", null, rows),
   writeQueueCounts: () => record("write_queue_counts", null, counts),
-  flushWrites: (sourceId: string | null) => record("flush_writes", { sourceId }, undefined),
+  flushWrites: (sourceId: string | null) =>
+    flushHold ?? record("flush_writes", { sourceId }, undefined),
   applyHeldWrite: (id: number) => record("apply_held_write", { id }, undefined),
   discardWrite: (id: number) =>
     // The fake queue actually forgets the row, so "the row is untouched" is
@@ -768,5 +771,27 @@ test("a queue whose first read failed shows the reason, not 'Nothing is queued'"
   flushSync();
   expect(screen.text()).toContain("database is busy");
   expect(screen.text()).not.toContain("Nothing is queued");
+  screen.done();
+});
+
+/**
+ * Nothing is disabled while a send runs (#775): *Flush now* is the send, and
+ * the panel's other answers -- withdraw, edit, send anyway -- stay pressable
+ * while it is out.
+ */
+test("flush now disables nothing while the send it asked for is out", async () => {
+  rows = [held(), write()];
+  counts = { pending: 1, held: 1, refused: 0 };
+  const screen = await render();
+  flushHold = new Promise(() => {});
+  try {
+    screen.button("Flush now")!.click();
+    await settle();
+    expect(screen.queue.busy).toBe(false);
+    expect(screen.button("Flush now")!.disabled).toBe(false);
+    expect(screen.button("Discard")!.disabled).toBe(false);
+  } finally {
+    flushHold = null;
+  }
   screen.done();
 });

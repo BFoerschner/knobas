@@ -30,7 +30,7 @@ export interface FollowPorts {
 
 const REAL: FollowPorts = {
   listen: (event, handler) => tauriListen(event, handler),
-  pendingWrites: realPendingWrites,
+  pendingWrites: () => realPendingWrites(),
 };
 
 export interface Following {
