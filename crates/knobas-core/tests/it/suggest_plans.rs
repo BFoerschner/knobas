@@ -235,9 +235,55 @@ fn is_hashed(node: &serde_json::Value, hashed: &[String]) -> bool {
         && hashed.iter().any(|h| node["Subplan Name"] == h.as_str())
 }
 
+/// The aliases the scans under `node` give their rows.
+fn aliases(node: &serde_json::Value, out: &mut Vec<String>) {
+    if let Some(alias) = node["Alias"].as_str() {
+        out.push(alias.to_owned());
+    }
+    for child in children(node) {
+        aliases(child, out);
+    }
+}
+
+/// Whether anything under `node` (init plans aside) names a column of one of
+/// `aliases`: what makes the inner side of a nested loop a probe
+/// parameterized by the outer row rather than the same rows every time.
+fn mentions(node: &serde_json::Value, aliases: &[String]) -> bool {
+    let mut texts = Vec::new();
+    strings(node, &mut texts);
+    texts.iter().any(|text| {
+        aliases.iter().any(|alias| {
+            text.contains(&format!("\"{alias}\"."))
+                || text.match_indices(&format!("{alias}.")).any(|(i, _)| {
+                    !text[..i]
+                        .chars()
+                        .next_back()
+                        .is_some_and(|c| c.is_alphanumeric() || c == '_')
+                })
+        })
+    })
+}
+
+/// The tables and CTEs under `node` but the [`SMALL`] ones, init plans aside.
+fn relations(node: &serde_json::Value, out: &mut Vec<String>) {
+    let name = node["Relation Name"].as_str().or(node["CTE Name"].as_str());
+    if name.is_some_and(|name| !SMALL.contains(&name)) {
+        out.push(describe(node));
+    }
+    for child in children(node) {
+        if child["Parent Relationship"] != "InitPlan" {
+            relations(child, out);
+        }
+    }
+}
+
 /// Every per-row scan and every anti-join hashed without the pair's ids.
 fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) {
     if node["Node Type"] == "Nested Loop" {
+        let mut outer_aliases = Vec::new();
+        for outer in children(node).filter(|c| c["Parent Relationship"] == "Outer") {
+            aliases(outer, &mut outer_aliases);
+        }
         for inner in children(node).filter(|c| c["Parent Relationship"] == "Inner") {
             let mut scans = Vec::new();
             scans_per_row(inner, hashed, &mut scans);
@@ -246,6 +292,14 @@ fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) 
                     .into_iter()
                     .map(|s| format!("a nested loop rescans {s}")),
             );
+            if !mentions(inner, &outer_aliases) {
+                let mut read = Vec::new();
+                relations(inner, &mut read);
+                out.extend(
+                    read.into_iter()
+                        .map(|r| format!("a nested loop crosses its outer side with {r}")),
+                );
+            }
         }
     }
     if node["Parent Relationship"] == "SubPlan" && !is_hashed(node, hashed) {

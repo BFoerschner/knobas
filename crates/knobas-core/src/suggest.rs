@@ -316,18 +316,20 @@ macro_rules! ticket_namespaces {
 /// probe) and 84 live entities (22,000), and drove from the tickets: every
 /// ticket against every entity, which ran past the pass's two-minute
 /// statement limit in the first rule, so the pass ended there and proposed
-/// nothing at all. An `= any(array)` on the primary key is not a clause a
-/// hash join can take, so the lookup stays an index probe per key found and
-/// there is no ticket side to drive from: the cost is one walk of the rule's
-/// kind and a probe per key, statistics or none
-/// (`tests/it/suggest_plans.rs`).
+/// nothing at all. Here the lookup is a lateral the `offset 0` keeps from
+/// being flattened into a join -- flattened, the planner drove it from the
+/// tickets again, the `= any` a filter on every ticket-item pair -- and its
+/// `= any(array)` on the primary key is an index probe per key found. There is
+/// no ticket side to drive from: the cost is one walk of the rule's kind and
+/// a probe per key, statistics or none (`tests/it/suggest_plans.rs`).
 macro_rules! ticket_keyed {
     () => {
         "cross join lateral (
                select t.id
                  from knobas.entity t
                 where t.id = any(array(select n.ns || ':' || k.key from ticket_ns n))
-                  and t.kind = 'ticket' and t.deleted_at is null) t"
+                  and t.kind = 'ticket' and t.deleted_at is null
+               offset 0) t"
     };
 }
 
