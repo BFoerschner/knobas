@@ -151,7 +151,7 @@ macro_rules! driver_head {
 ///
 /// **The `not exists` is the whole of "dismissing persists".** It reads
 /// `knobas.link` -- the table, not either view -- in both directions and with
-/// no filter whatsoever, so one clause covers four separate promises:
+/// no filter whatsoever, so one pair of clauses covers four separate promises:
 ///
 /// * a pair that is already linked produces no suggestion (#41 story 17),
 /// * running detection twice proposes each suggestion once (idempotence),
@@ -164,6 +164,15 @@ macro_rules! driver_head {
 /// after the user removed `A -> B` would be the silent resurrection the
 /// withdrawal memory exists to prevent. Migration `0011` made the index agree;
 /// this clause did not change.
+///
+/// Two `not exists`, one per direction, each on the whole key -- not one with
+/// the directions `or`ed (#770). The `or` left the planner one equality it
+/// could hash on, `relation`, and with `knobas.link` analyzed while it held
+/// few rows it did: a hash anti-join on `relation` alone, every candidate
+/// compared with every link of its relation (6.5 million comparisons for 302
+/// proposals in one batch on the probe). Split, either clause is a probe of
+/// `link_pair_idx` or a hash on all three columns, whichever the statistics
+/// favour, and both are linear.
 ///
 /// `distinct on` in the head plus this `order by` de-duplicates *within* one
 /// pass: `not exists` reads the snapshot the statement started from, so two
@@ -296,19 +305,22 @@ macro_rules! ticket_namespaces {
 
 /// The live ticket whose key is `k.key`, under any namespace: a lateral
 /// joined after the keys a rule found, probing `knobas.entity`'s primary key
-/// with `<namespace>:<key>` once per namespace in [`ticket_namespaces!`].
+/// with `id = any(...)`: `<namespace>:<key>` for each namespace in
+/// [`ticket_namespaces!`].
 ///
 /// A key found in text names no namespace, so any Jira's `PAY-231` matches.
 /// Until #770 the rules joined the key to `substr(id, position(':' in id) +
-/// 1)` over every live ticket and every rule's item through
+/// 1)` over every live ticket, and every rule's item through
 /// `sync.live_item`, and the planner was free to drive that from either
 /// side. On tables never analyzed it estimated one ticket (15,000 on the
 /// probe) and 84 live entities (22,000), and drove from the tickets: every
 /// ticket against every entity, which ran past the pass's two-minute
 /// statement limit in the first rule, so the pass ended there and proposed
-/// nothing at all. Here the probe depends on the key, and the `offset 0` keeps
-/// it a probe, so there is no ticket side to drive from: the cost is one walk
-/// of the rule's kind and an index probe per key found, statistics or none.
+/// nothing at all. An `= any(array)` on the primary key is not a clause a
+/// hash join can take, so the lookup stays an index probe per key found and
+/// there is no ticket side to drive from: the cost is one walk of the rule's
+/// kind and a probe per key, statistics or none
+/// (`tests/it/suggest_plans.rs`).
 macro_rules! ticket_keyed {
     () => {
         "cross join lateral (
@@ -779,7 +791,7 @@ macro_rules! digest_of {
 /// statement judges only the pairs with at least one end in **`$5`**, a batch
 /// of items that changed since a pass last compared them, against the
 /// **settled** corpus: the live prose items `sync.similar_text_seen` (`0031`)
-/// says were compared with the text they have now. Three joins cover every
+/// says were compared with the text they have now. Three arms cover every
 /// such pair once, the smaller id always the anchor: batch with batch, a batch
 /// anchor with a settled item, a settled anchor with a batch item. The second
 /// finds its candidates through `item_fts_idx`, the anchor's query probing it;
@@ -794,6 +806,24 @@ macro_rules! digest_of {
 /// and marks each one settled in the same transaction; before #745 the
 /// statement judged every pair on every pass, 55 s at 2,000 items whether or
 /// not anything had changed.
+///
+/// # Settled is a hashed membership test, not a join (#770)
+///
+/// `settled` is computed once per statement, a digest per settled item, and
+/// each probe asks whether its candidate is in it with `(id in (select ...))
+/// is true`. Wrapped so, the test cannot be pulled up into a join, and the
+/// planner runs it as a hashed subplan: one hash table, a lookup per
+/// candidate. Until #770 the candidates were joined to the `settled` CTE, a
+/// join the planner costs from the CTE's estimate -- a handful of rows,
+/// against thousands -- so on tables never analyzed, and on tables analyzed
+/// before the pass's own writes, it chose a nested loop that scanned the CTE
+/// once per candidate: 144 million rows compared to find 120,000 on the
+/// probe's 42-word corpus, and on its realistic one a batch at the end of the
+/// pass took 7.7 s instead of 2.7 s. The settled anchor's `fts` comes by its
+/// primary key, once per candidate.
+///
+/// The items are read from `sync.item` with [`live!`] rather than through
+/// `sync.live_item`, for the reason the exact-key rules are.
 const SIMILAR_TEXT: &str = detection!(concat!(
     "with batch as materialized (
          select p.entity_id, p.fts, ",
