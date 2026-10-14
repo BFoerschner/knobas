@@ -1107,7 +1107,7 @@ pub enum Binds {
     /// The batch of item ids alone ([`MARK_SEEN`]).
     Batch,
     /// Nothing.
-    None,
+    Nothing,
 }
 
 /// One statement the pass runs, for the plan-shape tests of #770.
@@ -1117,6 +1117,8 @@ pub struct PlannedStatement {
     pub name: &'static str,
     pub sql: &'static str,
     pub binds: Binds,
+    /// The rule class a rule's statement binds; empty for the others.
+    pub class: &'static str,
 }
 
 /// Every statement a pass runs: each rule's, and the three that keep
@@ -1134,23 +1136,27 @@ pub fn planned_statements() -> Vec<PlannedStatement> {
                 Scope::Mirror => Binds::Rule,
                 Scope::ChangedProse => Binds::RuleAndBatch,
             },
+            class: rule.class.as_str(),
         })
         .collect();
     statements.extend([
         PlannedStatement {
             name: "changed_prose",
             sql: CHANGED_PROSE,
-            binds: Binds::None,
+            binds: Binds::Nothing,
+            class: "",
         },
         PlannedStatement {
             name: "prune_seen",
             sql: PRUNE_SEEN,
-            binds: Binds::None,
+            binds: Binds::Nothing,
+            class: "",
         },
         PlannedStatement {
             name: "mark_seen",
             sql: MARK_SEEN,
             binds: Binds::Batch,
+            class: "",
         },
     ]);
     statements

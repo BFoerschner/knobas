@@ -17,9 +17,9 @@
 //! * nothing executed once per row -- the inner side of a nested loop, or a
 //!   correlated subplan that is not hashed -- scans a table or a CTE. An index
 //!   probe per row is what a lookup should cost; a scan per row is the
-//!   quadratic plan. Two scans are allowed: `knobas.source_config`, one row
-//!   per configured source, and `similar_text`'s own `batch`, which holds at
-//!   most one batch;
+//!   quadratic plan. The tables and CTEs small by construction (`SMALL`: the
+//!   configured sources, the curated estate, one batch, the ticket
+//!   namespaces) are allowed;
 //! * no anti-join is hashed on `relation` without the pair's ids.
 
 use knobas_core::suggest;
@@ -37,6 +37,8 @@ async fn seed_mirror(pool: &PgPool) {
         .execute(&mut *tx)
         .await
         .unwrap();
+    // `g * 0` makes each word subquery correlated, so it runs once per row
+    // rather than once for the whole series.
     sqlx::query(
         "create temporary table seed on commit drop as
          select g, source, id, kind,
@@ -106,7 +108,7 @@ async fn settle_and_change(pool: &PgPool) {
     let mark = suggest::planned_statements()
         .into_iter()
         .find(|s| s.name == "mark_seen")
-        .unwrap();
+        .expect("planned_statements names MARK_SEEN `mark_seen`");
     sqlx::query(mark.sql)
         .bind(&prose)
         .execute(pool)
@@ -167,15 +169,15 @@ async fn plan(
             .bind("suggested")
             .bind("knobas")
             .bind(statement.name)
-            .bind("exact_key"),
+            .bind(statement.class),
         suggest::Binds::RuleAndBatch => query
             .bind("suggested")
             .bind("knobas")
             .bind(statement.name)
-            .bind("similarity")
+            .bind(statement.class)
             .bind(batch),
         suggest::Binds::Batch => query.bind(batch),
-        suggest::Binds::None => query,
+        suggest::Binds::Nothing => query,
     };
     query.fetch_one(pool).await.unwrap()
 }
@@ -359,7 +361,10 @@ async fn assert_every_plan_holds(pool: &PgPool, state: &str) {
         strings(&json, &mut texts);
         let hashed: Vec<String> = texts
             .iter()
-            .flat_map(|t| t.match_indices("hashed SubPlan ").map(|(i, _)| &t[i + 7..]))
+            .flat_map(|t| {
+                t.match_indices("hashed SubPlan ")
+                    .map(|(i, _)| &t[i + "hashed ".len()..])
+            })
             .map(|rest| {
                 rest.chars()
                     .take_while(|c| c.is_alphanumeric() || *c == ' ')
