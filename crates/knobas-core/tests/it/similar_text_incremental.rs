@@ -221,7 +221,7 @@ async fn apply(pool: &PgPool, step: &Step) {
                 let body = rng.words(12);
                 // Half the items carry a source time, from a few days so
                 // that times tie as well; the rest rank by `synced_at`.
-                let at = (rng.next() % 2 == 0).then(|| {
+                let at = rng.next().is_multiple_of(2).then(|| {
                     chrono::DateTime::<chrono::Utc>::from_timestamp(
                         1_760_000_000 + 86_400 * (rng.next() % 3) as i64,
                         0,
