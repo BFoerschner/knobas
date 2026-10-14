@@ -52,7 +52,7 @@ they show changes.
 
 ## Quickstart
 
-You need [rustup](https://rustup.rs) (`rust-toolchain.toml` pins Rust 1.94),
+You need [rustup](https://rustup.rs) (`rust-toolchain.toml` pins Rust 1.99),
 Node 20.19+ or 22.12+ (Vite 8's requirement) and
 [`just`](https://github.com/casey/just).
 

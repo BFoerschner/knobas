@@ -180,14 +180,14 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
         }
         let field = toks
             .get(i)
-            .and_then(&kw)
+            .and_then(kw)
             .ok_or_else(|| JqlError::Unsupported(unexpected(&toks, i)))?;
         i += 1;
         match field.as_str() {
             "updated" => {
                 let op = toks
                     .get(i)
-                    .and_then(&kw)
+                    .and_then(kw)
                     .ok_or_else(|| JqlError::Unsupported(unexpected(&toks, i)))?;
                 i += 1;
                 if op != ">=" && op != ">" {
@@ -209,7 +209,7 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
             "project" => {
                 let op = toks
                     .get(i)
-                    .and_then(&kw)
+                    .and_then(kw)
                     .ok_or_else(|| JqlError::Unsupported(unexpected(&toks, i)))?;
                 i += 1;
                 match op.as_str() {
@@ -262,7 +262,7 @@ pub fn parse_jql(raw: &str, off: FixedOffset) -> Result<Jql, JqlError> {
             return Err(JqlError::Unsupported(unexpected(&toks, i)));
         }
         i += 1;
-        match toks.get(i).and_then(&kw).as_deref() {
+        match toks.get(i).and_then(kw).as_deref() {
             None => {}
             Some("asc") => {
                 jql.order_by_updated_desc = false;

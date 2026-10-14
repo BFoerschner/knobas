@@ -715,7 +715,7 @@ fn build_issues() -> (Vec<JiraIssue>, u64) {
             issue_type: t.kind.clone(),
             status: t.status.clone(),
             priority: t.priority.clone(),
-            assignee: t.assignee.as_deref().map(&username),
+            assignee: t.assignee.as_deref().map(username),
             reporter: username(
                 t.assigned_by
                     .as_deref()
@@ -761,7 +761,7 @@ fn resolve_references(issues: &mut [JiraIssue], fx: &knobas_source_mock::Fixture
     let parents: Vec<Option<JiraIssueRef>> = fx
         .tickets
         .iter()
-        .map(|t| t.epic.as_deref().map(&reference))
+        .map(|t| t.epic.as_deref().map(reference))
         .collect();
 
     // One link object, two ends. The blocked issue gets the inward end and the

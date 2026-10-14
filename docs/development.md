@@ -5,7 +5,7 @@ quickstart. `testenv/README.md` covers the live suites against real products.
 
 ## Toolchain
 
-- `rust-toolchain.toml` pins Rust 1.94. The `just` recipes run cargo with
+- `rust-toolchain.toml` pins Rust 1.99. The `just` recipes run cargo with
   `RUSTUP_TOOLCHAIN` unset, so an exported override cannot beat the pin. Raw
   `cargo` commands need `env -u RUSTUP_TOOLCHAIN` for the same effect.
 - Node 20.19+ or 22.12+, which Vite 8 requires. `just deps` runs `npm ci` in

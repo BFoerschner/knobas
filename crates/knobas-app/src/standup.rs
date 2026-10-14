@@ -311,7 +311,7 @@ fn in_reach(day: NaiveDate, earlier: &[DayWindow]) -> Vec<DayWindow> {
         .copied()
         .filter(|window| window.day < day && window.day >= floor)
         .collect();
-    candidates.sort_by(|a, b| b.day.cmp(&a.day));
+    candidates.sort_by_key(|a| std::cmp::Reverse(a.day));
     candidates
 }
 
@@ -338,7 +338,7 @@ async fn work_in(
 /// hand back the same instant, and a list that reordered itself between two
 /// reads of an unchanged database would be a view that flickers.
 fn sort_newest_first(lines: &mut [DigestLine]) {
-    lines.sort_by(|a, b| b.at.cmp(&a.at));
+    lines.sort_by_key(|a| std::cmp::Reverse(a.at));
 }
 
 /// The mirror's answer to "what of mine moved on this day".
