@@ -1834,25 +1834,35 @@ const WALK: &str = concat!(
 );
 
 /// [`WALK`] for a stored context's room: every proposal touching a member,
-/// found by the pair indexes rather than by walking the whole tray's order,
-/// because a context holds a few items out of the whole mirror.
+/// newest first, found member by member through the pair indexes rather than
+/// by walking the whole room's order, because a context holds a few items out
+/// of the whole mirror. `offset 0` keeps each member's lookup its own: on
+/// tables never analyzed the planner otherwise read every member's rows off
+/// `link_proposed_idx`, the whole table, filtered.
 const WALK_MEMBERS: &str = concat!(
     "select l.id, l.from_id, l.to_id, l.created_at
-       from knobas.proposed_link l
-      where l.from_id = any($2) and ",
+       from unnest($2::text[]) m(item)
+       cross join lateral (
+             select p.id, p.from_id, p.to_id, p.created_at from knobas.link p
+              where p.from_id = m.item
+                and p.deleted_at is null and p.confirmed_at is null
+             union all
+             select p.id, p.from_id, p.to_id, p.created_at from knobas.link p
+              where p.to_id = m.item and p.from_id <> all($2)
+                and p.deleted_at is null and p.confirmed_at is null
+             offset 0) l
+      where ",
     in_room!(),
-    " union all
-     select l.id, l.from_id, l.to_id, l.created_at
-       from knobas.proposed_link l
-      where l.to_id = any($2) and l.from_id <> all($2) and ",
-    in_room!(),
-    " order by created_at desc, id desc"
+    " order by l.created_at desc, l.id desc"
 );
 
 /// The tray's read: the rows the walk drew, newest first, with both ends.
 ///
-/// `knobas.proposed_link` and nothing else, which is what makes "the tray shows
-/// proposals only" structural rather than remembered.
+/// `knobas.proposed_link`'s predicate and nothing else, which is what makes
+/// "the tray shows proposals only" structural rather than remembered. Driven
+/// from the ids by primary key, `offset 0` keeping each lookup its own: on
+/// tables never analyzed the planner read `knobas.link` whole off
+/// `link_proposed_idx` to find twenty rows, 22 ms on a 2,700-item mirror.
 ///
 /// The ends join `knobas.entity` and not `sync.live_item`, for the reason
 /// `entries_of` does: an entity a source withdrew still has to resolve, so the
@@ -1864,33 +1874,38 @@ const DRAWN: &str = concat!(
        f.title as from_title, f.deleted_at as from_deleted_at,
        t.id as to_entity_id, t.kind as to_kind,
        t.title as to_title, t.deleted_at as to_deleted_at
-       from knobas.proposed_link l
+       from unnest($1::uuid[]) d(id)
+       cross join lateral (select * from knobas.link p
+                            where p.id = d.id offset 0) l
        join knobas.entity f on f.id = l.from_id
        join knobas.entity t on t.id = l.to_id
-      where l.id = any($1)
+      where l.deleted_at is null and l.confirmed_at is null
       order by l.created_at desc, l.id desc"
 );
 
 /// How many of the room's proposals each drawn item (`$3`) holds, for those
 /// holding more than the tray draws for one item (#774). One count per item
-/// by the pair indexes, so a hub costs a probe of its own rows and not a pass
-/// over the room.
+/// through the pair indexes, `offset 0` keeping each lookup its own for the
+/// reason [`WALK_MEMBERS`] gives, so a hub costs a probe of its own rows and
+/// not a pass over the room.
 const OVERFLOW: &str = concat!(
-    "with ends as (
-           select l.from_id as item
-             from knobas.proposed_link l
-            where l.from_id = any($3) and ",
+    "select e.id as entity_id, e.kind, e.title, e.deleted_at, n.total as more
+       from unnest($3::text[]) d(item)
+       join knobas.entity e on e.id = d.item
+       cross join lateral (
+             select count(*) as total
+               from (select p.from_id, p.to_id from knobas.link p
+                      where p.from_id = d.item
+                        and p.deleted_at is null and p.confirmed_at is null
+                     union all
+                     select p.from_id, p.to_id from knobas.link p
+                      where p.to_id = d.item
+                        and p.deleted_at is null and p.confirmed_at is null
+                     offset 0) l
+              where ",
     in_room!(),
-    "     union all
-           select l.to_id
-             from knobas.proposed_link l
-            where l.to_id = any($3) and ",
-    in_room!(),
-    "),
-         held as (select item, count(*) as total from ends
-                   group by item having count(*) > 3)
-    select e.id as entity_id, e.kind, e.title, e.deleted_at, h.total as more
-      from held h join knobas.entity e on e.id = h.item"
+    "     ) n
+      where n.total > 3"
 );
 
 /// One proposal as the walk sees it.

@@ -676,7 +676,8 @@ export interface SuggestionPage {
   total: number;
   /**
    * Items holding more proposals than the tray draws for one item (three),
-   * most hidden first — `SuggestionMore` (#774). The bound is applied in SQL.
+   * most hidden first — `SuggestionMore` (#774). The bound is applied in the
+   * backend read, never after the fetch.
    */
   more: SuggestionMore[];
 }
@@ -684,7 +685,7 @@ export interface SuggestionPage {
 /** An item with proposals the tray did not draw, and how many. */
 export interface SuggestionMore {
   item: LinkEnd;
-  /** Proposals this item holds beyond the three drawn. */
+  /** This item's proposals in the room that the tray did not draw. */
   more: number;
 }
 

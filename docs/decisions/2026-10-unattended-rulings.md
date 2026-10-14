@@ -1359,4 +1359,18 @@ Ruled 2026-10-14 by the deputy for Björn. Posted on #774.
 
 **If you disagree, the cost of reversing this is:** low. One SQL statement, one IPC field, one tray branch.
 
-As built (#774): `not_found` already existed on the wire, so the shell alone decides. "Per item" is read across both ends: a row is drawn only if it is within the newest three of the proposals of *both* its items, so no item ever appears in more than three rows. Forks decided by the implementer: the "+N more" count is the item's proposals beyond its three, and a line is drawn only for an item among the drawn rows; `total` (the heading) still counts every stored proposal; "opens that item's own suggestions" is the item's address, whose links panel lists them. `SuggestionPage` gains `more`; §10.8 file `774-ipc-schema-suggestionpage-gains-more.md`. The read ranks the room's newest slice (a row's rank counts only newer rows, so a slice ranks exactly) and widens it until the tray is full: ranking the whole room cost 2.5 s on the probe.
+As built (#774): `not_found` already existed on the wire, so the shell alone decides. Forks decided by the implementer: `total` (the heading) still counts every stored proposal; "opens that item's own suggestions" is the item's address, whose links panel lists them. `SuggestionPage` gains `more`; §10.8 file `774-ipc-schema-suggestionpage-gains-more.md`. The first build ranked each item's proposals with a window function over the room's newest slice; on the probe's hub corpus that read took 413–445 ms in the *All* room and about 1.3 s in a project room, which the ruling below replaced.
+
+## #774 — the tray's bounded read must be fast on a hub corpus
+
+Ruled 2026-10-14 by the deputy for Björn, in the merge-manager's dispatch for PR #787.
+
+**The fork:** the tray read as first built took 413–445 ms in the *All* room and about 1.3 s in project JIRA00 on the hub corpus (`RP_SYNTHETIC=0 just responsiveness-probe`, `room_suggestions (20)`), which defeats the responsiveness work asked for.
+
+**Ruling:** done means at most 50 ms warm median in every room on that corpus, with the realistic corpus no worse than today, keeping the answers the ruling on #774 defines. Allowed: (a) a backend walk in Rust over the newest-first index in chunks, counting per item and stopping when the tray is full, the "+N more" counts from per-item index lookups; or (b) a stored per-item rank, which needs a migration and a §10.8 file. Prefer (a) if it meets the target. "In SQL, not the frontend" in the #774 ruling means not filtering after the fetch in the frontend; a backend walk is fine.
+
+**Reasoning:** the bound exists so the tray stays readable; a tray that takes a second to read is not.
+
+**If you disagree, the cost of reversing this is:** low; the walk is one function behind an unchanged signature.
+
+As built (merge-manager, PR #787): (a). `suggest::proposals` walks the room newest first in chunks and draws a row while neither of its items holds three drawn rows; an item holding three is left out of the next chunks in SQL, so a hub costs three rows. A stored context's room reads its members' proposals by the pair indexes instead. "Three per item" counts drawn rows, not every proposal: ranking every proposal (the first build) let rows nobody sees hide an item's own, which on the hub corpus left 9–30 drawable rows in 152k. "+N more" is the item's proposals in the room minus the rows drawn for it, for an item holding more than three, counted in one grouped statement by the pair indexes.

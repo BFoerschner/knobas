@@ -54,10 +54,35 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     assert_eq!(page.total, i64::from(written));
     // The tray draws at most three rows per item (#774), so the page may hold
-    // fewer rows than the pass wrote -- and then it says which items overflow.
-    assert!(page.rows.len() <= written as usize);
-    if page.rows.len() < written as usize {
-        assert!(!page.more.is_empty(), "rows left out are accounted for");
+    // fewer rows than the pass wrote. Every proposal it left out touches an
+    // item already holding three drawn rows, and that item says so in `more`.
+    let mut held = std::collections::HashMap::<&str, usize>::new();
+    for entry in &page.rows {
+        for end in [&entry.from.entity_id, &entry.to.entity_id] {
+            *held.entry(end.as_str()).or_default() += 1;
+        }
+    }
+    assert!(
+        held.values().all(|&n| n <= 3),
+        "at most three rows per item"
+    );
+    let stored: Vec<(uuid::Uuid, String, String)> =
+        sqlx::query_as("select id, from_id, to_id from knobas.proposed_link")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    for (id, from, to) in &stored {
+        if page.rows.iter().any(|e| e.link.id == *id) {
+            continue;
+        }
+        let full = [from, to]
+            .into_iter()
+            .find(|end| held.get(end.as_str()) == Some(&3))
+            .unwrap_or_else(|| panic!("{from} -> {to} was left out with room on both ends"));
+        assert!(
+            page.more.iter().any(|m| m.item.entity_id == *full),
+            "{full} holds rows the tray left out, and `more` must say so"
+        );
     }
 
     for entry in &page.rows {
