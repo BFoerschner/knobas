@@ -1037,7 +1037,9 @@ ui-pool-probe:
 # on the app's five-connection UI pool, one `RP` line each. A table for a PR
 # beside the load average, never a budget: it is red only when the read fails
 # or other than the one pinned test ran. Sizes: `RP_TICKETS`, `RP_PAGES`,
-# `RP_BUILDS`, `RP_RUNS`. Takes a gate slot and prints the head and the load
+# `RP_BUILDS`, `RP_RUNS`. A write-surface section closes it (#775): what each
+# dialog waited on before it closed and what it waits on now, every send
+# simulated as `RP_SEND_MS` (300). Takes a gate slot and prints the head and the load
 # average before and after.
 # Time every read the common interactions make, against a seeded mirror.
 responsiveness-probe:
