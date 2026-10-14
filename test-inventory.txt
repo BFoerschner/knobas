@@ -690,9 +690,9 @@ knobas-app	test/it	protocol_ipc::publishing_a_date_twice_queues_one_page
 knobas-app	test/it	protocol_ipc::publishing_creates_the_page_and_links_it_both_ways
 knobas-app	test/it	protocol_ipc::publishing_with_no_target_refuses_rather_than_guessing
 knobas-app	test/it	protocol_ipc::the_stored_target_is_what_the_next_publish_uses
+knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_ticket
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_analyzed_tables
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_tables_never_analyzed
-knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_ticket
 knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on
 knobas-app	test/it	search_ipc::a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure
 knobas-app	test/it	search_ipc::a_property_value_and_a_url_are_what_a_reader_types
