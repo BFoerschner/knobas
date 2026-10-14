@@ -806,6 +806,7 @@ knobas-app	test/it	start_work::a_retry_of_a_step_whose_write_is_still_open_queue
 knobas-app	test/it	start_work::a_retry_resumes_without_repeating_what_already_worked
 knobas-app	test/it	start_work::a_retry_whose_effect_already_landed_sends_nothing
 knobas-app	test/it	start_work::a_second_flow_on_one_ticket_is_refused
+knobas-app	test/it	start_work::a_second_run_while_one_is_behind_starts_no_second_loop
 knobas-app	test/it	start_work::a_skipped_step_lands_in_the_activity_stream
 knobas-app	test/it	start_work::a_source_that_cannot_take_the_write_queues_the_step_and_waits
 knobas-app	test/it	start_work::a_source_that_declares_no_merged_flag_still_reads_the_state
