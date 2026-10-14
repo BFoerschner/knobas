@@ -580,9 +580,14 @@ async fn what_the_reader_waits_on() {
     let migrations = probe_snapshot::migrations_hash(
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-db/migrations"),
     );
+    let pass_code = probe_snapshot::pass_code_hash(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src/suggest.rs"),
+        &migrations,
+    );
     for gone in probe_snapshot::sweep(
         &snapshots,
         &migrations,
+        &pass_code,
         std::time::SystemTime::now(),
         probe_snapshot::MAX_AGE,
     ) {
@@ -621,10 +626,7 @@ async fn what_the_reader_waits_on() {
     let passed_copy = snapshots.join(probe_snapshot::passed_name(
         &migrations,
         &key,
-        &probe_snapshot::pass_code_hash(
-            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src/suggest.rs"),
-            &migrations,
-        ),
+        &pass_code,
         if analyzed {
             probe_snapshot::State::Analyzed
         } else {
@@ -936,7 +938,7 @@ async fn what_the_reader_waits_on() {
 
     // Last: the writes queue sends and trigger post-write runs, and nothing
     // read above should be measured over what they leave.
-    writes(pool, &connector, runs).await;
+    writes(pool, &connector, runs, tickets).await;
 
     ui.close().await;
     db.stop().await.unwrap();
@@ -1028,11 +1030,31 @@ impl knobas_sync::scheduler::SyncEvents for Silent {
     fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
 }
 
+/// The first ticket number "write: start work" begins: a fifth of the way into
+/// each Jira-shaped source, so 1,000 of the default 5,000 and a number the
+/// mirror has at any smaller size (#798).
+fn first_start_work_ticket(tickets: u64) -> u64 {
+    tickets / 5
+}
+
+/// Every ticket number the probe names outright (`JIRA0-42`, the epic
+/// `JIRA0-3`, the linked-by-hand `JIRA1-100..`, the start-work run), for a
+/// mirror of `tickets` per source and `runs` warm runs.
+fn fixed_ticket_numbers(tickets: u64, runs: u64) -> Vec<u64> {
+    let start = first_start_work_ticket(tickets);
+    vec![3, 42, 100, 100 + runs, start, start + 2 * (runs + 1) - 1]
+}
+
 /// What each write surface waits on before its dialog closes (#775): the
 /// commands it awaited before, and what it awaits now, on the same corpus.
 /// The send is [`send_ms`] of sleep, so "before" rows carry that much of a
 /// remote call; the live figures for a real one are #752's.
-async fn writes(pool: &PgPool, connector: &knobas_db::embedded::Connector, runs: u64) {
+async fn writes(
+    pool: &PgPool,
+    connector: &knobas_db::embedded::Connector,
+    runs: u64,
+    tickets: u64,
+) {
     use knobas_app::sources::write_queue::{submit, submit_in_background};
     let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
     for id in ["jira0", "ci", "wiki", "forge"] {
@@ -1380,7 +1402,7 @@ async fn writes(pool: &PgPool, connector: &knobas_db::embedded::Connector, runs:
     )
     .await;
     let repo = knobas_core::entity::EntityRef::parse("forge:tidewater/probe").unwrap();
-    let tickets = std::sync::atomic::AtomicU64::new(1000);
+    let tickets = std::sync::atomic::AtomicU64::new(first_start_work_ticket(tickets));
     let flow = || async {
         let n = tickets.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         let ticket = knobas_core::entity::EntityRef::parse(&format!("jira0:JIRA0-{n}")).unwrap();
@@ -1446,4 +1468,23 @@ impl knobas_sync::scheduler::RunConnections for Conns {
 /// Any error, as the probe's panic prints it.
 fn said<E: std::fmt::Debug>(error: E) -> String {
     format!("{error:?}")
+}
+
+#[cfg(test)]
+mod fixed_keys {
+    use super::*;
+
+    #[test]
+    fn the_default_size_keeps_the_start_work_tickets_it_always_had() {
+        assert_eq!(first_start_work_ticket(5_000), 1000);
+    }
+
+    #[test]
+    fn every_fixed_key_exists_at_the_smallest_supported_size() {
+        // `RP_ITEMS=2500`: tickets/source = 5,000 * 2,500 / 22,000.
+        let tickets = 5_000 * 2_500 / 22_000;
+        for n in fixed_ticket_numbers(tickets, 7) {
+            assert!(n < tickets, "JIRA-{n} is not in a mirror of {tickets}");
+        }
+    }
 }

@@ -676,6 +676,7 @@ knobas-app	test/it	probe_snapshot::tests::a_saved_snapshot_is_a_finished_copy_wi
 knobas-app	test/it	probe_snapshot::tests::an_unfinished_copy_is_not_a_snapshot_and_goes_once_it_is_old
 knobas-app	test/it	probe_snapshot::tests::every_seed_parameter_is_in_the_key
 knobas-app	test/it	probe_snapshot::tests::the_sweep_removes_a_stale_key_and_an_old_age_and_spares_the_rest
+knobas-app	test/it	probe_snapshot::tests::the_sweep_removes_an_after_pass_snapshot_of_another_pass_code
 knobas-app	test/it	probe_snapshot::tests::the_two_states_are_two_snapshots
 knobas-app	test/it	project_census::the_census_is_the_walk_after_every_change
 knobas-app	test/it	project_census::the_stored_resolver_is_the_macros_expansion
@@ -700,6 +701,8 @@ knobas-app	test/it	protocol_ipc::the_stored_target_is_what_the_next_publish_uses
 knobas-app	test/it	protocol_ipc::the_ticket_read_refuses_a_write_that_files_no_ticket
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_analyzed_tables
 knobas-app	test/it	read_plans::every_reshaped_read_plans_without_estimates_on_tables_never_analyzed
+knobas-app	test/it	responsiveness_probe::fixed_keys::every_fixed_key_exists_at_the_smallest_supported_size
+knobas-app	test/it	responsiveness_probe::fixed_keys::the_default_size_keeps_the_start_work_tickets_it_always_had
 knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on
 knobas-app	test/it	search_ipc::a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure
 knobas-app	test/it	search_ipc::a_property_value_and_a_url_are_what_a_reader_types
