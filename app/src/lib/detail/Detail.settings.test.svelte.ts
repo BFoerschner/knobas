@@ -644,6 +644,11 @@ test("a write found held when the view opens is marked but not toasted", async (
   const screen = render();
   await settle();
   expect(screen.mark("env.SEPA_RETRIES")).toBe("held");
+  // A queue movement with it still held: it was not saved here, so it is not news.
+  expect(handlers.length - unlistened).toBe(1);
+  handlers.at(-1)!();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("held");
   expect(toasts.items).toEqual([]);
   screen.done();
 });
