@@ -271,6 +271,8 @@ mod tests {
         std::fs::write(&file, "fn pass() {} \n").unwrap(); // whitespace only
         let after = pass_code_hash(&file, "m1");
         assert_ne!(before, after);
+        std::fs::write(&file, "fn mass() {}\n").unwrap(); // same length
+        assert_ne!(before, pass_code_hash(&file, "m1"));
         let name = |pass: &str| passed_name("m", "s", pass, State::Analyzed);
         assert_ne!(name(&before), name(&after));
         assert_ne!(
