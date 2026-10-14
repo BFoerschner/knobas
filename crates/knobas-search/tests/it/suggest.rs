@@ -290,8 +290,11 @@ async fn the_read_offers_the_kinds_the_sources_and_the_parents_that_exist() {
     for p in &parents {
         leads_somewhere(&searcher(&pool).await, &typed_under(&p.name)).await;
     }
-    for k in &suggestions.kinds {
-        leads_somewhere(&searcher(&pool).await, &format!("kind:{}", k.kind)).await;
+    // Probed: the kinds this test seeded. Not every kind offered: a sibling
+    // test's kind is offered while its row is live and withdrawn before the
+    // probe runs (#782).
+    for kind in ["commit", "monitor", "repo"] {
+        leads_somewhere(&searcher(&pool).await, &format!("kind:{kind}")).await;
     }
 }
 
@@ -451,8 +454,10 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
 
     let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
     assert_eq!(sources_of(&suggestions, &t), [synced.as_str()]);
-    for s in &suggestions.sources {
-        leads_somewhere(&searcher(&pool).await, &format!("source:{}", s.id)).await;
+    // Only this test's sources: a sibling's source is offered while its row is
+    // live and withdrawn before the probe runs (#782).
+    for id in sources_of(&suggestions, &t) {
+        leads_somewhere(&searcher(&pool).await, &format!("source:{id}")).await;
     }
 
     item(
@@ -469,8 +474,10 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
         sources_of(&suggestions, &t),
         [synced.as_str(), unsynced.as_str()]
     );
-    for s in &suggestions.sources {
-        leads_somewhere(&searcher(&pool).await, &format!("source:{}", s.id)).await;
+    // Only this test's sources: a sibling's source is offered while its row is
+    // live and withdrawn before the probe runs (#782).
+    for id in sources_of(&suggestions, &t) {
+        leads_somewhere(&searcher(&pool).await, &format!("source:{id}")).await;
     }
 }
 
