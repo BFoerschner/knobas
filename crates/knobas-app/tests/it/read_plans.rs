@@ -161,10 +161,12 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         .await;
         wrong.extend(shapes(name, &plan));
     }
+    let mut rules = 0;
     for (category, sql) in knobas_core::inbox::planned_statements() {
         if !RESHAPED_RULES.contains(&category) {
             continue;
         }
+        rules += 1;
         let name = format!("inbox {category:?}");
         let name = name.as_str();
         let plan = explain(&pool, sql, |q| {
@@ -176,6 +178,12 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         .await;
         wrong.extend(shapes(name, &plan));
     }
+    // A rule renamed or dropped from `RULES` would otherwise go unchecked.
+    assert_eq!(
+        rules,
+        RESHAPED_RULES.len(),
+        "every reshaped rule was planned"
+    );
     let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
         q.bind(None::<Vec<String>>)
             .bind(None::<Vec<String>>)

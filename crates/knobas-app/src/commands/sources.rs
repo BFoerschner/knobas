@@ -56,8 +56,14 @@ pub async fn demo_load<R: tauri::Runtime>(
         )));
     }
     let pool = lifecycle.pool()?;
-    let events = crate::sources::events::TauriEvents::new(app);
-    Ok(crate::sources::demo::demo_load_announced(&pool, &events).await?)
+    let events = crate::sources::events::TauriEvents::new(app.clone());
+    let report = crate::sources::demo::demo_load_announced(&pool, &events).await?;
+    // The load syncs through the bare `run_once`, outside the scheduler, so
+    // the analyze pass a scheduled run asks for is asked for here (#778).
+    if let Ok(state) = crate::sources::state(&app) {
+        state.scheduler.analyzer().request();
+    }
+    Ok(report)
 }
 
 // -- §2.2: sources, secrets, credential health --------------------------------
