@@ -1251,3 +1251,17 @@ Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #768.
 **If you disagree, the cost of reversing this is:** low.
 
 As built (#768): a flag, `parents_only`, on the existing command (no new command, the DTO keeps its shape). The session sends it on every read after an opening's first and keeps that read's two lists. The statements drop `sync.live_item`'s joins for the same liveness as correlated subqueries, ordered probes of the item indexes. §10.8 entry: `docs/contract/10.8/768-ipc-command-filter-suggestions-parents-only.md`.
+
+## #770 — the suggestion pass on analyzed tables
+
+Ruled 2026-10-14 by the deputy for Björn. Posted on #770.
+
+**The fork:** the responsiveness probe's text drew on 42 words, so every two of its 17,000 prose items shared five lexemes and `similar_text` had to propose every pair, about 144 million proposals: hours of inserts in either planner state. "The probe's pass completes within budget" and "proposals unchanged" could not both hold. Options: (A) give the probe a realistic vocabulary; (B) bound what `similar_text` proposes per item; (C) A here, B as a follow-up.
+
+**Ruling:** (C). In this PR the probe takes `suggest-perf`'s vocabulary, the timing table is reported in both states, a plan-shape gate test is added, and proposals stay unchanged. (B) is filed as its own ticket and ruled there.
+
+**Reasoning:** this PR fixes the measured never-analyzed failure (the pass dying on the exact-key rules) without changing behaviour; capping proposals is a separate, behaviour-changing decision.
+
+**If you disagree, the cost of reversing this is:** none.
+
+As built (#770): the issue's premise was backwards. On tables never analyzed the exact-key rules ran 37 to 91 s each on the probe's realistic corpus and past the two-minute limit on its dense one, so the pass died in its first rule; on analyzed tables the dense corpus's cost was output volume, and on the realistic one statistics taken before the pass made `similar_text` hash its suppression on `relation` alone and loop over its settled CTE. Every statement now reads `sync.item` with liveness as correlated subqueries, finds tickets by a primary-key probe, tests settledness as a hashed subplan, and suppresses with two `not exists` on the whole key. `tests/it/suggest_plans.rs` holds each plan's shape on a fixture never analyzed and one analyzed before and after the pass. The probe's pass: 274 s analyzed and 276 s never analyzed, 25,690 proposals each.

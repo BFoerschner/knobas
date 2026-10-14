@@ -470,6 +470,107 @@ async fn each_exact_key_rule_reads_only_its_own_kind() {
     }
 }
 
+/// No exact-key or recorded-relation rule proposes from an item withdrawn or
+/// in a source the user turned off, or to a ticket withdrawn.
+///
+/// Until #770 every one of these rules read `sync.live_item` and joined the
+/// tickets through a CTE that skipped withdrawn ones; since, each reads
+/// `sync.item` with the liveness checks spelled out (`live!`) and finds the
+/// ticket by a primary-key lookup with its own `deleted_at` check. Each rule
+/// carries its copy, so each rule gets its three negatives here, beside a
+/// positive control that shows the rule fires at all.
+#[tokio::test]
+async fn no_key_rule_proposes_from_a_dead_item_or_to_a_withdrawn_ticket() {
+    let pool = scratch().await;
+    let withdraw = |id: String| {
+        let pool = pool.clone();
+        async move {
+            sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+                .bind(&id)
+                .execute(&pool)
+                .await
+                .unwrap();
+            id
+        }
+    };
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+         values ('off', 'gitea', 'off', 'http://x', 'Pat', false)",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let ticket = item(&pool, "ticket", "PAY-1", "Payout retry storm", "").await;
+    let gone = withdraw(item(&pool, "ticket", "PAY-2", "Ledger drift", "").await).await;
+
+    let mut expected = std::collections::BTreeSet::new();
+    for (rule, kind) in [
+        ("branch_name_key", "branch"),
+        ("commit_message_key", "commit"),
+        ("build_parameter_key", "build"),
+        ("page_text_key", "page"),
+    ] {
+        let live = item(&pool, kind, &format!("{kind}-live"), "PAY-1 retry", "").await;
+        item(&pool, kind, &format!("{kind}-to-gone"), "PAY-2 drift", "").await;
+        withdraw(item(&pool, kind, &format!("{kind}-gone"), "PAY-1 retry", "").await).await;
+        from(
+            &pool,
+            "off",
+            kind,
+            &format!("{kind}-off"),
+            "PAY-1 retry",
+            "",
+            serde_json::json!({}),
+        )
+        .await;
+        run_rule(&pool, rule).await;
+        expected.insert((live, ticket.clone()));
+    }
+
+    let links_to = |key: &str| {
+        serde_json::json!({"fields": {"issuelinks": [
+            {"type": {"name": "Blocks", "outward": "blocks"}, "outwardIssue": {"key": key}}
+        ]}})
+    };
+    let blocker = with_payload(&pool, "ticket", "PAY-3", "Blocker", links_to("PAY-1")).await;
+    with_payload(
+        &pool,
+        "ticket",
+        "PAY-4",
+        "Blocks the gone",
+        links_to("PAY-2"),
+    )
+    .await;
+    withdraw(with_payload(&pool, "ticket", "PAY-5", "Gone blocker", links_to("PAY-1")).await).await;
+    entity_only(&pool, "off", "ticket", "PAY-7").await;
+    from(
+        &pool,
+        "off",
+        "ticket",
+        "PAY-6",
+        "Off blocker",
+        "",
+        links_to("PAY-7"),
+    )
+    .await;
+    run_rule(&pool, "source_recorded_relation").await;
+    expected.insert((blocker, ticket.clone()));
+
+    let entries = tray(&pool).await;
+    assert_eq!(
+        pairs(&entries),
+        expected,
+        "only live items in enabled sources propose, and only live tickets"
+    );
+    assert!(
+        entries
+            .iter()
+            .all(|e| e.link.from_id != gone && e.link.to_id != gone),
+        "nothing reaches the withdrawn ticket"
+    );
+}
+
 #[tokio::test]
 async fn a_relation_the_source_records_becomes_a_proposal_with_the_sources_own_wording() {
     let pool = scratch().await;
