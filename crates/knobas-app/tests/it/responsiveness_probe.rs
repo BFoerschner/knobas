@@ -23,6 +23,7 @@
 
 use std::time::Instant;
 
+use crate::probe_snapshot;
 use knobas_app::commands::entity::{
     EntityFilter, EntityOrder, get_entity_inner, inbox_count_inner, inbox_items_inner,
     list_entities_inner, list_projects_inner, recent_activity_inner, room_suggestions_inner,
@@ -347,44 +348,15 @@ async fn room(
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "a wall-clock reading; run by `just responsiveness-probe`"]
-async fn what_the_reader_waits_on() {
-    let tickets = env("RP_TICKETS", 5_000);
-    let pages = env("RP_PAGES", 2_000);
-    let builds = env("RP_BUILDS", 5_000);
-    let runs = env("RP_RUNS", 7);
-
-    let connector = knobas_db::test_util::scratch_database("responsiveness").await;
-    let ui = connector.app_pool().await.unwrap();
-    let pool = &ui;
-    searcher(pool).await.unwrap();
-    // `RP_ANALYZED=1` reads against tables the planner has statistics for;
-    // otherwise autovacuum is switched off on the scratch database's tables, so
-    // they stay never analyzed -- the state of a fresh install for about a
-    // minute after its first sync, which is where a plan that leans on
-    // estimates shows (#767, #768).
-    let analyzed = env("RP_ANALYZED", 0) == 1;
-    if !analyzed {
-        let tables: Vec<(String, String)> = sqlx::query_as(
-            "select n.nspname::text, c.relname::text from pg_class c
-               join pg_namespace n on n.oid = c.relnamespace
-              where c.relkind = 'r' and n.nspname in ('knobas', 'sync')",
-        )
-        .fetch_all(pool)
-        .await
-        .unwrap();
-        for (schema, table) in tables {
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "alter table {schema}.{table} set (autovacuum_enabled = false)"
-            )))
-            .execute(pool)
-            .await
-            .unwrap();
-        }
-    }
-
-    let seeded = Instant::now();
+/// The mirror this probe reads: the synthetic sources, then the seeded Gitea
+/// when the env says where it is. What a snapshot saves (#781).
+async fn seed(
+    pool: &PgPool,
+    tickets: u64,
+    pages: u64,
+    builds: u64,
+    gitea: Option<&(String, String)>,
+) {
     let mut synthetic = Vec::new();
     for n in 0..3 {
         synthetic.push(Synthetic {
@@ -418,73 +390,235 @@ async fn what_the_reader_waits_on() {
             .unwrap();
     }
 
-    // The seeded Gitea, synced through its real adapter, when the env says
-    // where it is. Its views are the live reads the detail makes.
-    let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
-    let gitea = match (
+    // The seeded Gitea, synced through its real adapter. Its views are the
+    // live reads the detail makes.
+    if let Some((url, token)) = gitea {
+        config::insert(
+            pool,
+            &InsertConfig {
+                id: "gitea".into(),
+                adapter_kind: "gitea".into(),
+                display_name: "Gitea".into(),
+                base_url: url.clone(),
+                auth_kind: AuthKind::Method(AuthMethod::Pat),
+                config: serde_json::json!({
+                    "repos": ["tidewater/payout-service", "tidewater/ledger-api"]
+                }),
+                sync_interval_secs: 86_400,
+                enabled: true,
+            },
+        )
+        .await
+        .unwrap();
+        let source = Registry::builtin()
+            .build(knobas_source::instance::SourceInstance {
+                id: "gitea".into(),
+                kind: "gitea".into(),
+                display_name: "Gitea".into(),
+                base_url: url.clone(),
+                auth: Some(AuthMethod::Pat),
+                secret: Some(token.clone()),
+                account: None,
+                config: serde_json::json!({
+                    "repos": ["tidewater/payout-service", "tidewater/ledger-api"]
+                }),
+            })
+            .unwrap();
+        knobas_sync::run_once(pool, source.as_ref(), None)
+            .await
+            .unwrap();
+    }
+}
+
+/// `RP_ANALYZED=0` reads against tables the planner has no statistics for:
+/// autovacuum is switched off on the scratch database's tables, so they stay
+/// never analyzed -- the state of a fresh install for about a minute after its
+/// first sync, which is where a plan that leans on estimates shows (#767,
+/// #768).
+async fn tables_of_the_mirror(pool: &PgPool) -> Vec<String> {
+    let tables: Vec<(String, String)> = sqlx::query_as(
+        "select n.nspname::text, c.relname::text from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where c.relkind = 'r' and n.nspname in ('knobas', 'sync')",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    tables
+        .into_iter()
+        .map(|(schema, table)| format!("{schema}.{table}"))
+        .collect()
+}
+
+async fn start_at(root: &std::path::Path) -> knobas_db::embedded::EmbeddedDb {
+    knobas_db::embedded::EmbeddedDb::start(knobas_db::embedded::DbConfig {
+        root_dir: root.to_path_buf(),
+        existing_url: None,
+    })
+    .await
+    .expect("start the probe's postgres")
+}
+
+/// Build the mirror from nothing and save both snapshots: never analyzed
+/// (autovacuum off on every table, so it stays so), then analyzed (autovacuum
+/// back to its default, `analyze` run).
+async fn build_snapshots(
+    tickets: u64,
+    pages: u64,
+    builds: u64,
+    gitea: Option<&(String, String)>,
+    never: &std::path::Path,
+    analyzed: &std::path::Path,
+) {
+    let root = probe_snapshot::root().join(format!("build-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let db = start_at(&root).await;
+    let pool = db.connector().app_pool().await.unwrap();
+    knobas_db::migrate::run(&pool).await.unwrap();
+    searcher(&pool).await.unwrap();
+    for table in tables_of_the_mirror(&pool).await {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "alter table {table} set (autovacuum_enabled = false)"
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    seed(&pool, tickets, pages, builds, gitea).await;
+    pool.close().await;
+    db.stop().await.unwrap();
+    probe_snapshot::save(&root, never);
+
+    let db = start_at(&root).await;
+    let pool = db.connector().app_pool().await.unwrap();
+    for table in tables_of_the_mirror(&pool).await {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "alter table {table} reset (autovacuum_enabled)"
+        )))
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    sqlx::query("analyze").execute(&pool).await.unwrap();
+    pool.close().await;
+    db.stop().await.unwrap();
+    probe_snapshot::save(&root, analyzed);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "a wall-clock reading; run by `just responsiveness-probe`"]
+async fn what_the_reader_waits_on() {
+    // The full mirror is 22,000 items; `RP_ITEMS` scales the three sizes
+    // below it, each still settable on its own. `RP_ITEMS=2500` is the size to
+    // iterate on, with a snapshot of its own (#781).
+    let all = env("RP_ITEMS", 22_000);
+    let scaled = |full: u64| full * all / 22_000;
+    let tickets = env("RP_TICKETS", scaled(5_000));
+    let pages = env("RP_PAGES", scaled(2_000));
+    let builds = env("RP_BUILDS", scaled(5_000));
+    let runs = env("RP_RUNS", 7);
+    // `RP_ANALYZED=1` reads against tables the planner has statistics for;
+    // otherwise they are never analyzed (see `tables_of_the_mirror`).
+    let analyzed = env("RP_ANALYZED", 0) == 1;
+    let gitea_env = match (
         std::env::var("KNOBAS_GITEA_URL"),
         std::env::var("KNOBAS_GITEA_TOKEN"),
     ) {
-        (Ok(url), Ok(token)) => {
-            config::insert(
-                pool,
-                &InsertConfig {
-                    id: "gitea".into(),
-                    adapter_kind: "gitea".into(),
-                    display_name: "Gitea".into(),
-                    base_url: url.clone(),
-                    auth_kind: AuthKind::Method(AuthMethod::Pat),
-                    config: serde_json::json!({
-                        "repos": ["tidewater/payout-service", "tidewater/ledger-api"]
-                    }),
-                    sync_interval_secs: 86_400,
-                    enabled: true,
-                },
-            )
-            .await
-            .unwrap();
-            secrets
-                .put(
-                    &knobas_secrets::KeychainAccount::source("gitea"),
-                    &Secret::just(AuthMethod::Pat, token.clone()),
-                )
-                .unwrap();
-            let source = Registry::builtin()
-                .build(knobas_source::instance::SourceInstance {
-                    id: "gitea".into(),
-                    kind: "gitea".into(),
-                    display_name: "Gitea".into(),
-                    base_url: url,
-                    auth: Some(AuthMethod::Pat),
-                    secret: Some(token),
-                    account: None,
-                    config: serde_json::json!({
-                        "repos": ["tidewater/payout-service", "tidewater/ledger-api"]
-                    }),
-                })
-                .unwrap();
-            knobas_sync::run_once(pool, source.as_ref(), None)
-                .await
-                .unwrap();
-            true
-        }
-        _ => false,
+        (Ok(url), Ok(token)) => Some((url, token)),
+        _ => None,
     };
+    let gitea = gitea_env.is_some();
+
+    // The built database is a snapshot: a run restores it instead of seeding
+    // again. `RP_FRESH=1` rebuilds it; a changed key rebuilds on its own.
+    let snapshots = probe_snapshot::root();
+    let migrations = probe_snapshot::migrations_hash(
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-db/migrations"),
+    );
+    for gone in probe_snapshot::sweep(
+        &snapshots,
+        &migrations,
+        std::time::SystemTime::now(),
+        probe_snapshot::MAX_AGE,
+    ) {
+        println!("RP-SNAPSHOT deleted stale {}", gone.display());
+    }
+    let key = probe_snapshot::seed_hash(&[
+        ("tickets", tickets.to_string()),
+        ("pages", pages.to_string()),
+        ("builds", builds.to_string()),
+        ("synthetic", synthetic().to_string()),
+        (
+            "gitea",
+            gitea_env
+                .as_ref()
+                .map_or(String::new(), |(url, _)| url.clone()),
+        ),
+    ]);
+    let never = snapshots.join(probe_snapshot::name(
+        &migrations,
+        &key,
+        probe_snapshot::State::NeverAnalyzed,
+    ));
+    let analyzed_copy = snapshots.join(probe_snapshot::name(
+        &migrations,
+        &key,
+        probe_snapshot::State::Analyzed,
+    ));
+    let wanted = if analyzed { &analyzed_copy } else { &never };
+
+    let seeded = Instant::now();
+    let how = if env("RP_FRESH", 0) == 1 || !probe_snapshot::exists(wanted) {
+        build_snapshots(
+            tickets,
+            pages,
+            builds,
+            gitea_env.as_ref(),
+            &never,
+            &analyzed_copy,
+        )
+        .await;
+        "built"
+    } else {
+        "restored"
+    };
+    println!(
+        "RP-SNAPSHOT {how} {} size_mb={} age_s={}",
+        wanted.file_name().unwrap().to_string_lossy(),
+        probe_snapshot::size(wanted) / 1_000_000,
+        probe_snapshot::age(wanted, std::time::SystemTime::now()).as_secs()
+    );
+    let run_root = snapshots.join(format!("run-{}", std::process::id()));
+    probe_snapshot::restore(wanted, &run_root);
+    let db = start_at(&run_root).await;
+    let connector = db.connector();
+    let ui = connector.app_pool().await.unwrap();
+    let pool = &ui;
+    searcher(pool).await.unwrap();
+
+    // The seeded Gitea's views are read live, through the token.
+    let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
+    if let Some((_, token)) = &gitea_env {
+        secrets
+            .put(
+                &knobas_secrets::KeychainAccount::source("gitea"),
+                &Secret::just(AuthMethod::Pat, token.clone()),
+            )
+            .unwrap();
+    }
     let items: i64 = sqlx::query_scalar("select count(*) from sync.item")
         .fetch_one(pool)
         .await
         .unwrap();
     println!(
-        "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} in {} s",
+        "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} snapshot={how} in {} s",
         seeded.elapsed().as_secs()
     );
     // Analyzed before the pass as well as after it: a real install's
     // autovacuum analyzes within about a minute of the first sync, so the pass
     // that follows a sync plans against statistics (#770). Again after, so the
     // reads plan against the links the pass wrote.
-    if analyzed {
-        sqlx::query("analyze").execute(pool).await.unwrap();
-    }
     // The suggestion pass has run once, as it would have after a sync. Timed,
     // with what it wrote, because whether it finishes in both states is what
     // #770 measured: before it, the pass died in its first exact-key rule on
@@ -749,6 +883,10 @@ async fn what_the_reader_waits_on() {
     // Last: the writes queue sends and trigger post-write runs, and nothing
     // read above should be measured over what they leave.
     writes(pool, &connector, runs).await;
+
+    ui.close().await;
+    db.stop().await.unwrap();
+    let _ = std::fs::remove_dir_all(&run_root);
 }
 
 /// How long one simulated send takes: the remote call the queue makes behind

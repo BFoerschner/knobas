@@ -670,6 +670,12 @@ knobas-app	test/it	ipc::the_optional_channel_is_not_a_decodable_argument
 knobas-app	test/it	ipc::the_same_command_gets_through_once_the_database_is_up
 knobas-app	test/it	ipc::the_two_argument_shapes_decode_as_the_split_needs
 knobas-app	test/it	ipc::unlinking_announces_its_line_and_an_already_withdrawn_link_announces_nothing
+knobas-app	test/it	probe_snapshot::tests::a_changed_added_or_removed_migration_changes_the_hash
+knobas-app	test/it	probe_snapshot::tests::a_saved_snapshot_is_a_finished_copy_without_the_servers_locks
+knobas-app	test/it	probe_snapshot::tests::an_unfinished_copy_is_not_a_snapshot_and_goes_once_it_is_old
+knobas-app	test/it	probe_snapshot::tests::every_seed_parameter_is_in_the_key
+knobas-app	test/it	probe_snapshot::tests::the_sweep_removes_a_stale_key_and_an_old_age_and_spares_the_rest
+knobas-app	test/it	probe_snapshot::tests::the_two_states_are_two_snapshots
 knobas-app	test/it	project_census::the_census_is_the_walk_after_every_change
 knobas-app	test/it	project_census::the_stored_resolver_is_the_macros_expansion
 knobas-app	test/it	protocol_ipc::a_new_protocol_starts_from_the_template

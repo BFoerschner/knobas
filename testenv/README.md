@@ -1040,6 +1040,34 @@ its six monitors watches something on this machine. (From 2026-09-06 six of
 the eight it then held left it — three pings on the Hetzner servers and three
 checks through the SSH tunnel — and read down off the network.)
 
+## The responsiveness probe's saved database
+
+`just responsiveness-probe` (#753) times every read the shell makes against a
+seeded mirror of 22,000 items. Building that mirror takes minutes and reading
+it seconds, so the probe keeps the built database (#781): the whole server root,
+`data/` and `.pgpass`, under `$TMPDIR/knobas-probe-snapshots/`, in two copies,
+one never analyzed (autovacuum off on every table) and one analyzed. A run
+clones the copy for its `RP_ANALYZED` state with `cp -c` (an APFS clone, seconds
+whatever the size), starts its own postmaster on the clone, and leaves the
+snapshot untouched. It prints one `RP-SNAPSHOT` line: built or restored, the
+snapshot's name, its size and its age.
+
+- **Key.** A snapshot is named `m<migrations>-p<seed>-<never|analyzed>`:
+  `<migrations>` hashes every file in `crates/knobas-db/migrations`, `<seed>`
+  the sizes (`RP_TICKETS`, `RP_PAGES`, `RP_BUILDS`), `RP_SYNTHETIC` and whether
+  the seeded Gitea was synced. Change a migration, a size or `RP_SYNTHETIC`
+  and the next run builds a new snapshot on its own.
+- **`RP_FRESH=1`** rebuilds both copies. Use it when the seeded Gitea has
+  changed (the snapshot holds what it held when it was built) or when the seed
+  code in `responsiveness_probe.rs` has.
+- **`RP_ITEMS`** (default 22000) scales the three sizes; `RP_ITEMS=2500` is the
+  size to iterate on and has a snapshot of its own. An explicit `RP_TICKETS`,
+  `RP_PAGES` or `RP_BUILDS` still wins.
+- **Disk.** Each run first deletes snapshots older than 7 days or whose
+  migrations hash is not the current one, and unfinished copies older than an
+  hour. The 22k copies are about 0.2 GB each as files; the clone costs little
+  until the run writes.
+
 ## The estate file
 
 `estate.json` is the estate knobas models, written down: this notebook,
