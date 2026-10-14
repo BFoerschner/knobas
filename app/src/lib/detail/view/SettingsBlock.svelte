@@ -149,7 +149,6 @@
               class:secret={setting.secret}
               class:queued={mark !== undefined}
               aria-label="Edit {setting.name}"
-              disabled={mark !== undefined && mark.state === "saving"}
               onclick={() => void open(setting)}
             >
               {#if setting.secret}hidden{:else}{shown}{/if}

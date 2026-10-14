@@ -91,9 +91,22 @@ export function openState(write: QueuedWrite | undefined): OpenState | null {
 }
 
 /**
+ * The mark a still-open write puts on its row (#775): `saving` while it is
+ * pending with nothing in its way -- the background send is under way -- and
+ * the queue's own state once it waits for a reason, is held or is refused.
+ * `null` once it has left the queue.
+ */
+export function markState(write: QueuedWrite | undefined): SettingMark["state"] | null {
+  const state = openState(write);
+  if (state === "pending" && !write!.wait_reason && write!.source_enabled !== false) return "saving";
+  return state;
+}
+
+/**
  * A row's edit on its way through the queue. `saving` while the write is
- * queued and its first flush runs; then the queue's own open state until it
- * settles, when the mark goes and the view is read again.
+ * being queued and while its send runs; then the queue's own open state if it
+ * waits, is held or refused, until it settles, when the mark goes and the
+ * view is read again.
  */
 export interface SettingMark {
   state: "saving" | OpenState;
