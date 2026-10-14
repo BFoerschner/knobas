@@ -313,10 +313,9 @@ macro_rules! ticket_keyed {
     () => {
         "cross join lateral (
                select t.id
-                 from ticket_ns n
-                 join knobas.entity t on t.id = n.ns || ':' || k.key
-                where t.kind = 'ticket' and t.deleted_at is null
-               offset 0) t"
+                 from knobas.entity t
+                where t.id = any(array(select n.ns || ':' || k.key from ticket_ns n))
+                  and t.kind = 'ticket' and t.deleted_at is null) t"
     };
 }
 
@@ -439,9 +438,11 @@ const SOURCE_RECORDED_RELATION: &str = detection!(concat!(
                      nullif(trim(coalesce(l->'type'->>'outward', l->'type'->>'name', '')), '')
                                                                                    as relation,
                      coalesce(l->'type'->>'name', 'link')                          as label) side
-       join knobas.entity other
-         on other.deleted_at is null
-        and other.id = i.source_id || ':' || side.other_key
+       cross join lateral (
+              select o.id
+                from knobas.entity o
+               where o.id = i.source_id || ':' || side.other_key
+                 and o.deleted_at is null) other
       where jsonb_typeof(i.payload->'fields'->'issuelinks') = 'array'
         and side.other_key is not null
         and side.relation is not null
@@ -1062,6 +1063,66 @@ pub const RULES: &[Rule] = &[
         scope: Scope::ChangedProse,
     },
 ];
+
+/// What a [`PlannedStatement`] binds, in order.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Binds {
+    /// A whole-mirror rule's four: origin, `created_by`, rule, rule class.
+    Rule,
+    /// `similar_text`'s four and the batch of item ids.
+    RuleAndBatch,
+    /// The batch of item ids alone ([`MARK_SEEN`]).
+    Batch,
+    /// Nothing.
+    None,
+}
+
+/// One statement the pass runs, for the plan-shape tests of #770.
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug)]
+pub struct PlannedStatement {
+    pub name: &'static str,
+    pub sql: &'static str,
+    pub binds: Binds,
+}
+
+/// Every statement a pass runs: each rule's, and the three that keep
+/// `sync.similar_text_seen`. `tests/it/suggest_plans.rs` holds each one's plan
+/// to a shape that does not depend on the planner's statistics (#770).
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statements() -> Vec<PlannedStatement> {
+    let mut statements: Vec<PlannedStatement> = RULES
+        .iter()
+        .map(|rule| PlannedStatement {
+            name: rule.name,
+            sql: rule.sql,
+            binds: match rule.scope {
+                Scope::Mirror => Binds::Rule,
+                Scope::ChangedProse => Binds::RuleAndBatch,
+            },
+        })
+        .collect();
+    statements.extend([
+        PlannedStatement {
+            name: "changed_prose",
+            sql: CHANGED_PROSE,
+            binds: Binds::None,
+        },
+        PlannedStatement {
+            name: "prune_seen",
+            sql: PRUNE_SEEN,
+            binds: Binds::None,
+        },
+        PlannedStatement {
+            name: "mark_seen",
+            sql: MARK_SEEN,
+            binds: Binds::Batch,
+        },
+    ]);
+    statements
+}
 
 /// The rule called `name`, for a caller that wants one on its own.
 #[must_use]

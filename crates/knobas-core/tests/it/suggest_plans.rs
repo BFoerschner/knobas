@@ -1,0 +1,366 @@
+//! Every statement of the suggestion pass plans the same way with and without
+//! planner statistics (#770).
+//!
+//! #770 measured the pass on the responsiveness probe's mirror. On tables
+//! never analyzed -- a fresh install for about a minute after its first sync
+//! -- the exact-key rules were planned from `knobas.entity`, estimated at 84
+//! live rows for 22,000: every ticket against every entity, past the pass's
+//! statement limit in its first rule, so the pass proposed nothing at all.
+//! `similar_text` joined its batch's candidates to the settled corpus by a
+//! nested loop over a CTE scan (144 million rows a batch). And with `knobas.link`
+//! analyzed while it was nearly empty, the suppression could be hashed on
+//! `relation` alone, which compares every candidate with every link.
+//!
+//! A wall clock in the gate would measure the machine, so this asserts the
+//! shapes those plans had instead, on one fixture in both states:
+//!
+//! * nothing executed once per row -- the inner side of a nested loop, or a
+//!   correlated subplan that is not hashed -- scans a table or a CTE. An index
+//!   probe per row is what a lookup should cost; a scan per row is the
+//!   quadratic plan. Two scans are allowed: `knobas.source_config`, one row
+//!   per configured source, and `similar_text`'s own `batch`, which holds at
+//!   most one batch;
+//! * no anti-join is hashed on `relation` without the pair's ids.
+
+use knobas_core::suggest;
+use sqlx::PgPool;
+
+/// Ticket keys and namespaces enough that a quadratic plan is the planner's
+/// choice on tables never analyzed, small enough to seed in a second.
+const TICKETS: i32 = 10_000;
+const PAGES: i32 = 3_000;
+
+/// A mirror with every rule's inputs.
+async fn seed_mirror(pool: &PgPool) {
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::query("select setseed(0.770)")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query(
+        "create temporary table seed on commit drop as
+         select g, source, id, kind,
+                (select string_agg('w' || (random() * 4000)::int, ' ')
+                   from generate_series(1, 6 + g * 0)) as title,
+                (select string_agg('w' || (random() * 4000)::int, ' ')
+                   from generate_series(1, 40 + g * 0)) as body
+           from (select g, 'jira' as source, 'jira:PAY-' || g as id, 'ticket' as kind
+                   from generate_series(1, $1) g
+                 union all
+                 select g, 'wiki', 'wiki:page:' || g, 'page' from generate_series(1, $2) g
+                 union all
+                 select g, 'gitea', 'gitea:commit:' || g, 'commit' from generate_series(1, 2000) g
+                 union all
+                 select g, 'gitea', 'gitea:branch:' || g, 'branch' from generate_series(1, 500) g
+                 union all
+                 select g, 'ci', 'ci:build:' || g, 'build' from generate_series(1, 5000) g
+                 union all
+                 select g, 'kuma', 'kuma:monitor:' || g, 'monitor' from generate_series(1, 20) g) s",
+    )
+    .bind(TICKETS)
+    .bind(PAGES)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    sqlx::query("insert into knobas.entity (id, kind, title) select id, kind, title from seed")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    // Keys in the commits, branches and builds; a recorded relation on a
+    // fifth of the tickets; a URL on each monitor.
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         select id, source, kind,
+                case when kind in ('commit', 'branch', 'build')
+                     then 'PAY-' || (1 + g * 7 % $1) || ' ' || title else title end,
+                body,
+                case when kind = 'ticket' and g % 5 = 0
+                     then jsonb_build_object('fields', jsonb_build_object('issuelinks',
+                            jsonb_build_array(jsonb_build_object(
+                              'type', jsonb_build_object('name', 'Blocks', 'outward', 'blocks'),
+                              'outwardIssue', jsonb_build_object('key', 'PAY-' || (g + 1))))))
+                     when kind = 'monitor'
+                     then jsonb_build_object('url', 'http://host' || g || ':3000/')
+                     else '{}' end
+           from seed",
+    )
+    .bind(TICKETS)
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    tx.commit().await.unwrap();
+}
+
+/// What a pass leaves behind, written directly rather than by running one
+/// (a pass over this mirror is minutes, not a gate test's seconds): every
+/// prose item settled, a proposal per prose item in `knobas.link`, and then a
+/// hundred items changed -- the next pass after a sync, with a settled corpus
+/// to compare a batch against and proposals to suppress against.
+async fn settle_and_change(pool: &PgPool) {
+    let prose: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item where kind in ('ticket', 'page') order by 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let mark = suggest::planned_statements()
+        .into_iter()
+        .find(|s| s.name == "mark_seen")
+        .unwrap();
+    sqlx::query(mark.sql)
+        .bind(&prose)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into knobas.link
+                (from_id, to_id, relation, origin, created_by, confirmed_at, rule, rule_class, reason)
+         select 'jira:PAY-' || g, 'wiki:page:' || (1 + g % $2), 'related', 'suggested', 'knobas',
+                null, 'similar_text', 'similarity', 'both mention w1'
+           from generate_series(1, $1) g",
+    )
+    .bind(TICKETS)
+    .bind(PAGES)
+    .execute(pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "update sync.item set title = title || ' w4001'
+          where entity_id in (select 'jira:PAY-' || g from generate_series(1, 100) g)",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// Autovacuum off on every table of the database, so nothing analyzes them
+/// behind the test's back: the method #767 and #768 used.
+async fn never_analyzed(pool: &PgPool) {
+    let tables: Vec<(String, String)> = sqlx::query_as(
+        "select n.nspname::text, c.relname::text from pg_class c
+           join pg_namespace n on n.oid = c.relnamespace
+          where c.relkind = 'r' and n.nspname in ('knobas', 'sync')",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    for (schema, table) in tables {
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "alter table {schema}.{table} set (autovacuum_enabled = false)"
+        )))
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+/// The plan of one statement, as `explain (format json)` gives it.
+async fn plan(
+    pool: &PgPool,
+    statement: &suggest::PlannedStatement,
+    batch: &[String],
+) -> serde_json::Value {
+    let explain = format!("explain (format json) {}", statement.sql);
+    let query = sqlx::query_scalar::<_, serde_json::Value>(sqlx::AssertSqlSafe(explain));
+    let query = match statement.binds {
+        suggest::Binds::Rule => query
+            .bind("suggested")
+            .bind("knobas")
+            .bind(statement.name)
+            .bind("exact_key"),
+        suggest::Binds::RuleAndBatch => query
+            .bind("suggested")
+            .bind("knobas")
+            .bind(statement.name)
+            .bind("similarity")
+            .bind(batch),
+        suggest::Binds::Batch => query.bind(batch),
+        suggest::Binds::None => query,
+    };
+    query.fetch_one(pool).await.unwrap()
+}
+
+/// Every string anywhere in `value`.
+fn strings<'a>(value: &'a serde_json::Value, out: &mut Vec<&'a str>) {
+    match value {
+        serde_json::Value::String(s) => out.push(s),
+        serde_json::Value::Array(items) => items.iter().for_each(|v| strings(v, out)),
+        serde_json::Value::Object(map) => map.values().for_each(|v| strings(v, out)),
+        _ => {}
+    }
+}
+
+fn children(node: &serde_json::Value) -> impl Iterator<Item = &serde_json::Value> {
+    node["Plans"].as_array().into_iter().flatten()
+}
+
+fn describe(node: &serde_json::Value) -> String {
+    format!(
+        "{} on {}",
+        node["Node Type"].as_str().unwrap_or("?"),
+        node["Relation Name"]
+            .as_str()
+            .or(node["CTE Name"].as_str())
+            .unwrap_or("-")
+    )
+}
+
+/// Tables and CTEs small by construction, which a plan may scan per row: the
+/// sources the user configured, the estate the user curates (`asset`,
+/// `route`), the one batch `similar_text` compares, and the namespaces the
+/// tickets come from -- one per ticket source.
+const SMALL: &[&str] = &["source_config", "asset", "route", "batch", "ticket_ns"];
+
+/// What `node` and everything under it would scan once per row of an outer
+/// side: every table or CTE scan but the [`SMALL`] ones, not descending into
+/// init plans or hashed subplans, which run once.
+fn scans_per_row(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) {
+    let scanned = match node["Node Type"].as_str() {
+        Some("Seq Scan") => node["Relation Name"].as_str(),
+        Some("CTE Scan") => node["CTE Name"].as_str(),
+        _ => None,
+    };
+    if scanned.is_some_and(|name| !SMALL.contains(&name)) {
+        out.push(describe(node));
+    }
+    for child in children(node) {
+        if child["Parent Relationship"] != "InitPlan" && !is_hashed(child, hashed) {
+            scans_per_row(child, hashed, out);
+        }
+    }
+}
+
+fn is_hashed(node: &serde_json::Value, hashed: &[String]) -> bool {
+    node["Parent Relationship"] == "SubPlan"
+        && hashed.iter().any(|h| node["Subplan Name"] == h.as_str())
+}
+
+/// Every per-row scan and every anti-join hashed without the pair's ids.
+fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) {
+    if node["Node Type"] == "Nested Loop" {
+        for inner in children(node).filter(|c| c["Parent Relationship"] == "Inner") {
+            let mut scans = Vec::new();
+            scans_per_row(inner, hashed, &mut scans);
+            out.extend(
+                scans
+                    .into_iter()
+                    .map(|s| format!("a nested loop rescans {s}")),
+            );
+        }
+    }
+    if node["Parent Relationship"] == "SubPlan" && !is_hashed(node, hashed) {
+        let mut scans = Vec::new();
+        scans_per_row(node, hashed, &mut scans);
+        out.extend(
+            scans
+                .into_iter()
+                .map(|s| format!("a correlated subplan rescans {s}")),
+        );
+    }
+    if node["Node Type"] == "Hash Join"
+        && node["Join Type"]
+            .as_str()
+            .is_some_and(|t| t.contains("Anti"))
+    {
+        let cond = node["Hash Cond"].as_str().unwrap_or("");
+        if cond.contains("relation") && !cond.contains("from_id") {
+            out.push(format!("an anti-join hashed on {cond}"));
+        }
+    }
+    for child in children(node) {
+        findings(child, hashed, out);
+    }
+}
+
+async fn assert_every_plan_holds(pool: &PgPool, state: &str) {
+    let batch: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.item
+          where entity_id like 'jira:PAY-%' and title like '%w4001' order by entity_id",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(batch.len(), 100, "the fixture's changed items");
+    let settled: i64 = sqlx::query_scalar("select count(*) from sync.similar_text_seen")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        settled > i64::from(TICKETS),
+        "the fixture has a settled corpus: {settled}"
+    );
+    let links: i64 = sqlx::query_scalar("select count(*) from knobas.link")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    assert!(
+        links > 1_000,
+        "the fixture has proposals to suppress against: {links}"
+    );
+
+    let mut wrong = Vec::new();
+    for statement in suggest::planned_statements() {
+        let json = plan(pool, &statement, &batch).await;
+        let mut texts = Vec::new();
+        strings(&json, &mut texts);
+        let hashed: Vec<String> = texts
+            .iter()
+            .flat_map(|t| t.match_indices("hashed SubPlan ").map(|(i, _)| &t[i + 7..]))
+            .map(|rest| {
+                rest.chars()
+                    .take_while(|c| c.is_alphanumeric() || *c == ' ')
+                    .collect::<String>()
+            })
+            .collect();
+        let mut found = Vec::new();
+        findings(&json[0]["Plan"], &hashed, &mut found);
+        wrong.extend(
+            found
+                .into_iter()
+                .map(|f| format!("{}: {f}", statement.name)),
+        );
+    }
+    assert!(wrong.is_empty(), "tables {state}: {wrong:#?}");
+}
+
+#[tokio::test]
+async fn every_pass_statement_plans_by_index_on_tables_never_analyzed() {
+    let pool = knobas_db::test_util::scratch_database("plans_na")
+        .await
+        .pool(2)
+        .await
+        .unwrap();
+    never_analyzed(&pool).await;
+    seed_mirror(&pool).await;
+    settle_and_change(&pool).await;
+    let analyzed: i64 = sqlx::query_scalar(
+        "select count(*) from pg_stat_user_tables
+          where schemaname in ('knobas', 'sync')
+            and (last_analyze is not null or last_autoanalyze is not null)",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(analyzed, 0, "no table of the fixture is analyzed");
+    assert_every_plan_holds(&pool, "never analyzed").await;
+}
+
+/// Analyzed once the mirror is synced and before the pass -- what autovacuum
+/// does on a real install, and what the probe's `RP_ANALYZED=1` does -- so the
+/// statistics say `knobas.link` and `sync.similar_text_seen` are empty when
+/// they are not; then analyzed again, with statistics that are current.
+#[tokio::test]
+async fn every_pass_statement_plans_by_index_on_analyzed_tables() {
+    let pool = knobas_db::test_util::scratch_database("plans_an")
+        .await
+        .pool(2)
+        .await
+        .unwrap();
+    never_analyzed(&pool).await;
+    seed_mirror(&pool).await;
+    sqlx::query("analyze").execute(&pool).await.unwrap();
+    settle_and_change(&pool).await;
+    assert_every_plan_holds(&pool, "analyzed before the pass").await;
+    sqlx::query("analyze").execute(&pool).await.unwrap();
+    assert_every_plan_holds(&pool, "analyzed after the pass").await;
+}
