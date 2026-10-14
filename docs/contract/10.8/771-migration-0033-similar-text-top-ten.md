@@ -3,7 +3,7 @@
   symmetry and the retirement in the issue body; "add the §10.8 file, don't stop to ask" in the
   ruling comment). It edits no earlier migration.
 
-  **Migration `0033`: one table, one index, one truncate.**
+  **Migration `0033`: one table, one index, two columns, one index setting, one truncate.**
   - `sync.similar_text_top (entity_id, other_id, shared, other_at, other_digest)`, primary key
     `(entity_id, other_id)`, `entity_id` referencing `sync.similar_text_seen` `on delete cascade`.
     One row per place in an item's ranking: `other_id` is one of `entity_id`'s ten most similar
@@ -13,6 +13,12 @@
     was judged. `other_id` references nothing, so a counterpart deleted outright leaves its row and
     the ranking it held a place in is found and redone.
   - `similar_text_top_other_idx` on `other_id`: the rankings a changed item holds a place in.
+  - `sync.similar_text_seen.lexemes` (`tsvector not null`, the item's `strip(fts)`) and `.at`
+    (`timestamptz`, its `coalesce(item_updated_at, synced_at)`), written by `MARK_SEEN` as the item
+    is settled: what the ranking reads of a settled counterpart without visiting `sync.item`.
+  - `0031`'s `similar_text_seen_lex_idx` set to `fastupdate = off`. Its pending list, never merged
+    on tables autovacuum had not reached, made every probe of it read the whole list: 32 ms for 138
+    rows a batch item on the probe's mirror, rising with every batch settled.
   - `truncate sync.similar_text_seen`, so the first pass after the upgrade compares and ranks every
     prose item again and retires the unanswered proposals the cap no longer keeps. Derived data
     (`0031`): one full pass, nothing lost.

@@ -22,10 +22,10 @@
 -- documents share (at least the floor of five), `other_at` the counterpart's
 -- `coalesce(item_updated_at, synced_at)` when the pair was judged, the tie
 -- break, and `other_digest` the counterpart's digest (`0031`'s
--- `md5(title || E'\n' || fts::text)`) when the pair was judged. A row whose `other_digest` no longer matches its
--- counterpart is a ranking taken against text that has gone; the pass then
--- ranks `entity_id` again from the whole corpus, because the counterpart that
--- would have been eleventh is not stored.
+-- `md5(title || E'\n' || fts::text)`) when the pair was judged. A row whose
+-- `other_digest` no longer matches its counterpart is a ranking taken against
+-- text that has gone; the pass then ranks `entity_id` again from the whole
+-- corpus, because the counterpart that would have been eleventh is not stored.
 --
 -- `entity_id` references `sync.similar_text_seen`, so an item that is
 -- compared again, or leaves the corpus, takes its ranking with it.
@@ -43,6 +43,24 @@
 
 -- Before the table that references it: a referenced table cannot be truncated.
 truncate sync.similar_text_seen;
+
+-- `0031`'s title-lexeme index without its pending list. With `fastupdate` on
+-- (the default) every insert lands in an unsorted list that each lookup reads
+-- end to end until a vacuum, or 4 MB of it, merges it in: on the probe's
+-- mirror, never vacuumed, the probe that finds a changed item's settled
+-- anchors took 32 ms for 138 rows, rising with every batch settled. Off, an
+-- insert writes its ten-odd lexemes into the index itself.
+alter index sync.similar_text_seen_lex_idx set (fastupdate = off);
+
+-- What the ranking reads of a settled item, beside the row that says it is
+-- settled: its lexemes without positions (`strip(fts)`), which is all the
+-- shared-lexeme count needs, and its time, the tie break -- both as they were
+-- when it was settled, which is the text its digest vouches for. Read here,
+-- a settled counterpart costs no visit to `sync.item`; the probe's 42-word
+-- corpus pairs every batch item with every settled one.
+alter table sync.similar_text_seen
+  add column lexemes tsvector not null,
+  add column at timestamptz;
 
 create table sync.similar_text_top (
   entity_id    text not null references sync.similar_text_seen (entity_id) on delete cascade,

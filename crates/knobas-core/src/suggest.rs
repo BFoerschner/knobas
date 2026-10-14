@@ -842,16 +842,25 @@ macro_rules! shared_lexemes {
 /// flattening it into a join that tests every batch item against every settled
 /// one.
 ///
-/// **The anchor order is tested outside the probe** (#771). Inside it,
-/// `x.entity_id < o.entity_id` was an index condition the planner preferred to
-/// the lexemes: a walk of `similar_text_seen_pkey` over every settled item with
-/// a smaller id -- half the table per batch item -- with the lexemes and the
-/// query only filters on it. Past the `offset 0` it cannot be pushed down, so
-/// the only condition left inside is the one the GIN index answers.
+/// **The anchor order is not an index condition** (#771). Written plainly,
+/// `x.entity_id < o.entity_id` was one the planner preferred to the lexemes: a
+/// walk of `similar_text_seen_pkey` over every settled item with a smaller id
+/// -- half the table per batch item -- with the lexemes and the query only
+/// filters on it. Wrapped in `is true` it is a filter and nothing else, so the
+/// only index condition left in the probe is the one the GIN index answers.
+/// The pass runs this statement with seq scans off, because a GIN index cannot
+/// estimate an array it only sees per row, and on the plan with the best
+/// estimate the whole of `similar_text_seen` is read once per batch item.
 ///
-/// `settled` is a hashed membership test, not a join (#770): `(id in (select
-/// ...)) is true` cannot be pulled up into one, so the planner hashes it once
-/// and looks each candidate up.
+/// **A settled counterpart costs no visit to `sync.item`** (#771): its
+/// lexemes (`strip(fts)`) and its time are on its seen row, as they were when
+/// it was settled (`0033`), and two documents' shared lexemes are counted as
+/// `length(a) + length(b) - length(a || b)`, the tsvector union doing the
+/// work. On the probe's 42-word corpus every batch item is paired with every
+/// settled one, and the count is most of the pass. Whether a settled
+/// counterpart is still the text its seen row vouches for (`settled` above is
+/// only "has a seen row") is checked once per counterpart that came out
+/// similar (`verified`), not once per candidate.
 ///
 /// # Ranked (#771)
 ///
@@ -859,17 +868,21 @@ macro_rules! shared_lexemes {
 /// (`sync.similar_text_top`, `0033`) keeps its [`SIMILAR_TEXT_CAP`] best: a
 /// batch item's from its edges alone (its old ranking was cleared with
 /// [`CLEAR_RANKINGS`]), a settled item's from its stored ranking and its new
-/// edges, the ones pushed past the tenth place deleted. The stored ranking is
-/// exact because every pair is judged once, when the later of its ends is
-/// compared, and anything that would make a stored place wrong -- a
-/// counterpart's text changing, a counterpart leaving the corpus -- has the
-/// item ranked again from the whole corpus first ([`UNSETTLE_RANKINGS`]).
+/// edges, the ones pushed past the tenth place deleted. Only the edges that
+/// can place are sorted: `cut` counts each item's edges by shared lexemes and
+/// keeps those at or above the tenth's count, ties included, so a batch item
+/// paired with all 17,000 settled items sorts a handful rather than all of
+/// them. The stored ranking is exact because every pair is judged once, when
+/// the later of its ends is compared, and anything that would make a stored
+/// place wrong -- a counterpart's text changing, a counterpart leaving the
+/// corpus -- has the item ranked again from the whole corpus first
+/// ([`UNSETTLE_RANKINGS`]).
 ///
 /// Ranked on text alone: a counterpart the user already linked, or dismissed,
 /// keeps its place, so dismissing a proposal does not bring the eleventh in.
 const RANK_SIMILAR: &str = concat!(
     "with batch as materialized (
-         select p.entity_id, p.fts, ",
+         select p.entity_id, p.fts, strip(p.fts) as lexemes, ",
     title_query!("p.title"),
     " as q, ",
     item_at!("p"),
@@ -884,23 +897,15 @@ const RANK_SIMILAR: &str = concat!(
     "
      ),
      settled as materialized (
-         select p.entity_id
-           from sync.similar_text_seen s
-           join sync.item p on p.entity_id = s.entity_id
-          where s.digest = ",
-    digest_of!("p"),
-    " and p.kind in ",
-    prose_kinds!(),
-    " and p.entity_id <> all($1) and ",
-    live!("p"),
-    "
+         select s.entity_id from sync.similar_text_seen s where s.entity_id <> all($1)
      ),
      judged as (
-         select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts,
-                a.at as from_at, o.at as to_at
+         select a.entity_id as from_id, o.entity_id as to_id,
+                a.lexemes as a_lexemes, o.lexemes as o_lexemes,
+                a.at as from_at, o.at as to_at, null::text as settled_id
            from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
          union all
-         select a.entity_id, i.entity_id, a.fts, i.fts, a.at, i.at
+         select a.entity_id, i.entity_id, a.lexemes, i.fts, a.at, i.at, i.entity_id
            from batch a
            cross join lateral (
                   select i.entity_id, i.fts, ",
@@ -908,44 +913,56 @@ const RANK_SIMILAR: &str = concat!(
     " as at
                     from sync.item i
                    where i.fts @@ a.q
+                     and (i.entity_id > a.entity_id) is true
                      and (i.entity_id in (select entity_id from settled)) is true
                   offset 0) i
-          where i.entity_id > a.entity_id
          union all
-         select x.entity_id, o.entity_id,
-                (select p.fts from sync.item p where p.entity_id = x.entity_id), o.fts,
-                (select ",
-    item_at!("p"),
-    " from sync.item p where p.entity_id = x.entity_id), o.at
+         select x.entity_id, o.entity_id, x.lexemes, o.lexemes, x.at, o.at, x.entity_id
            from batch o
            cross join lateral (
-                  select x.entity_id
+                  select x.entity_id, x.lexemes, x.at
                     from sync.similar_text_seen x
                    where x.title_lex && tsvector_to_array(o.fts)
+                     and (x.entity_id < o.entity_id) is true
                      and o.fts @@ x.title_q
-                     and (x.entity_id in (select entity_id from settled)) is true
+                     and x.entity_id <> all($1)
                   offset 0) x
-          where x.entity_id < o.entity_id
      ),
-     scored as (
-         select from_id, to_id, from_at, to_at,
-                cardinality(",
-    shared_lexemes!("a_fts", "o_fts"),
-    ") as shared
-           from judged
-     ),
-     edge as (
-         select from_id as entity_id, to_id as other_id, shared, to_at as other_at
-           from scored where shared >= ",
+     alike as materialized (
+         select from_id, to_id, from_at, to_at, settled_id, shared
+           from (select from_id, to_id, from_at, to_at, settled_id,
+                        length(a_lexemes) + length(o_lexemes) - length(a_lexemes || o_lexemes)
+                          as shared
+                   from judged) j
+          where shared >= ",
     similarity_floor!(),
     "
+     ),
+     verified as materialized (
+         select d.settled_id
+           from (select distinct settled_id from alike where settled_id is not null offset 0) d
+          where exists (
+                  select 1
+                    from sync.similar_text_seen s
+                    join sync.item p on p.entity_id = s.entity_id
+                   where s.entity_id = d.settled_id and s.digest = ",
+    digest_of!("p"),
+    " and p.kind in ",
+    prose_kinds!(),
+    " and ",
+    live!("p"),
+    ")
+     ),
+     edge as materialized (
+         select from_id as entity_id, to_id as other_id, shared, to_at as other_at
+           from alike
+          where settled_id is null or (settled_id in (select settled_id from verified)) is true
          union all
          select to_id, from_id, shared, from_at
-           from scored where shared >= ",
-    similarity_floor!(),
-    "
+           from alike
+          where settled_id is null or (settled_id in (select settled_id from verified)) is true
      ),
-     pool as (
+     pool as materialized (
          select entity_id, other_id, shared, other_at, true as fresh
            from edge
          union all
@@ -953,30 +970,45 @@ const RANK_SIMILAR: &str = concat!(
            from (select distinct entity_id from edge) e
            join sync.similar_text_top t on t.entity_id = e.entity_id
      ),
-     ranked as (
-         select entity_id, other_id, shared, other_at, fresh,
-                row_number() over (partition by entity_id
-                                   order by shared desc, other_at desc nulls last, other_id)
-                  as place
-           from pool
+     tally as (
+         select entity_id, shared, count(*) as n from pool group by entity_id, shared
+     ),
+     cut as (
+         select entity_id, min(shared) as least_shared
+           from (select entity_id, shared, n,
+                        sum(n) over (partition by entity_id order by shared desc) as through
+                   from tally) t
+          where through - n < ",
+    similar_text_cap!(),
+    "
+          group by entity_id
+     ),
+     kept as materialized (
+         select entity_id, other_id, shared, other_at, fresh
+           from (select p.entity_id, p.other_id, p.shared, p.other_at, p.fresh,
+                        row_number() over (partition by p.entity_id
+                                           order by p.shared desc, p.other_at desc nulls last,
+                                                    p.other_id) as place
+                   from pool p
+                   join cut c on c.entity_id = p.entity_id and p.shared >= c.least_shared) r
+          where place <= ",
+    similar_text_cap!(),
+    "
      ),
      pushed_out as (
          delete from sync.similar_text_top t
-          using ranked r
-          where not r.fresh and r.place > ",
-    similar_text_cap!(),
-    "
-            and t.entity_id = r.entity_id and t.other_id = r.other_id
+          where t.entity_id in (select entity_id from edge)
+            and not exists (
+                  select 1 from kept k
+                   where k.entity_id = t.entity_id and k.other_id = t.other_id)
      )
      insert into sync.similar_text_top (entity_id, other_id, shared, other_at, other_digest)
-     select r.entity_id, r.other_id, r.shared, r.other_at,
-            coalesce((select b.digest from batch b where b.entity_id = r.other_id),
-                     (select ",
-    digest_of!("p"),
-    " from sync.item p where p.entity_id = r.other_id))
-       from ranked r
-      where r.fresh and r.place <= ",
-    similar_text_cap!()
+     select k.entity_id, k.other_id, k.shared, k.other_at,
+            coalesce((select b.digest from batch b where b.entity_id = k.other_id),
+                     (select s.digest from sync.similar_text_seen s
+                       where s.entity_id = k.other_id))
+       from kept k
+      where k.fresh"
 );
 
 /// Text that reads alike -- the connection nobody wrote a key for.
@@ -1137,13 +1169,15 @@ const PRUNE_SEEN: &str = concat!(
 /// Mark a batch settled: its items were compared with the text they have in
 /// this snapshot.
 const MARK_SEEN: &str = concat!(
-    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex)
+    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex, lexemes, at)
      select p.entity_id, ",
     digest_of!("p"),
     ", ",
     title_query!("p.title"),
     ", ",
     title_lexemes!("p.title"),
+    ", strip(p.fts), ",
+    item_at!("p"),
     "
        from sync.item p
       where p.entity_id = any($1) and p.kind in ",
@@ -1153,10 +1187,10 @@ const MARK_SEEN: &str = concat!(
     "
      on conflict (entity_id) do update
         set digest = excluded.digest, title_q = excluded.title_q,
-            title_lex = excluded.title_lex"
+            title_lex = excluded.title_lex, lexemes = excluded.lexemes, at = excluded.at"
 );
 
-/// How many changed items one `SIMILAR_TEXT` statement compares.
+/// How many changed items one [`RANK_SIMILAR`] statement compares.
 ///
 /// Each batch is its own statement and its own transaction, so a pass that
 /// times out keeps what its finished batches settled and the next pass goes
@@ -1240,8 +1274,8 @@ enum Scope {
     /// cheap at any size the mirror reaches.
     Mirror,
     /// The prose items that changed since the last pass, in batches
-    /// ([`SIMILAR_TEXT`]'s fifth bind), each marked settled as it is
-    /// compared.
+    /// ([`SIMILAR_TEXT`]'s fifth bind, ranked by [`RANK_SIMILAR`] first), each
+    /// marked settled as it is compared.
     ChangedProse,
 }
 
