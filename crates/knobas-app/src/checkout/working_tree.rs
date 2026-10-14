@@ -83,6 +83,7 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
         path,
         Path::new(APPLE_SHIM),
         command_line_tools_installed,
+        TIMEOUT,
     )
     .await
 }
@@ -118,22 +119,24 @@ async fn command_line_tools_installed() -> bool {
 }
 
 /// The decision seam: `probe` is asked only when the `git` found is `shim`,
-/// within [`TIMEOUT`], and a failing probe answers [`TreeRead::NoGit`] without
-/// spawning it.
+/// within `timeout` ([`TIMEOUT`] in production), and a failing probe answers
+/// [`TreeRead::NoGit`] without spawning it. `timeout` is a parameter so a test
+/// on a loaded machine can give a spawned script time to run (#794).
 async fn read_guarded(
     search: &OsStr,
     path: &Path,
     shim: &Path,
     probe: impl AsyncFnOnce() -> bool,
+    timeout: Duration,
 ) -> TreeRead {
     let Some(git) = find_on(search, "git") else {
         return TreeRead::NoGit;
     };
     if git == shim {
-        match tokio::time::timeout(TIMEOUT, probe()).await {
+        match tokio::time::timeout(timeout, probe()).await {
             Err(_) => {
                 return TreeRead::Failed {
-                    reason: format!("xcode-select did not answer within {} s", TIMEOUT.as_secs()),
+                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
                 };
             }
             Ok(false) => return TreeRead::NoGit,
@@ -176,10 +179,10 @@ async fn read_guarded(
         .stderr(Stdio::piped())
         .kill_on_drop(true);
 
-    let output = match tokio::time::timeout(TIMEOUT, command.output()).await {
+    let output = match tokio::time::timeout(timeout, command.output()).await {
         Err(_) => {
             return TreeRead::Failed {
-                reason: format!("git did not answer within {} s", TIMEOUT.as_secs()),
+                reason: format!("git did not answer within {} s", timeout.as_secs()),
             };
         }
         Ok(Err(error)) => {
@@ -260,6 +263,12 @@ fn parse(porcelain: &str) -> WorkingTreeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Long enough that a spawned script finishes on a machine at load 20; a
+    /// test that expects git to run must not race the production [`TIMEOUT`].
+    const PATIENT: Duration = Duration::from_secs(30);
+    /// For the test that expects the cut-off.
+    const IMPATIENT: Duration = Duration::from_millis(100);
 
     /// The four arms serialise as the words `app/src/lib/ipc/entity.ts`
     /// narrows on, with the state's fields beside the tag.
@@ -342,7 +351,7 @@ mod tests {
     async fn the_shim_without_command_line_tools_is_not_spawned() {
         let (_bin, search, shim, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
-        let read = read_guarded(&search, work.path(), &shim, async || false).await;
+        let read = read_guarded(&search, work.path(), &shim, async || false, PATIENT).await;
         assert_eq!(read, TreeRead::NoGit);
         assert!(!marker.exists(), "the shim was spawned");
     }
@@ -352,7 +361,7 @@ mod tests {
     async fn the_shim_with_command_line_tools_runs() {
         let (_bin, search, shim, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
-        read_guarded(&search, work.path(), &shim, async || true).await;
+        read_guarded(&search, work.path(), &shim, async || true, PATIENT).await;
         assert!(marker.exists(), "git was not run");
     }
 
@@ -361,9 +370,13 @@ mod tests {
     async fn a_probe_that_hangs_does_not_hang_the_read() {
         let (_bin, search, shim, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
-        let read = read_guarded(&search, work.path(), &shim, async || {
-            std::future::pending::<bool>().await
-        })
+        let read = read_guarded(
+            &search,
+            work.path(),
+            &shim,
+            async || std::future::pending::<bool>().await,
+            IMPATIENT,
+        )
         .await;
         assert!(matches!(read, TreeRead::Failed { .. }), "{read:?}");
         assert!(!marker.exists(), "the shim was spawned");
@@ -375,7 +388,14 @@ mod tests {
         let (_bin, search, _git, marker) = marker_git();
         let work = tempfile::tempdir().unwrap();
         let other = Path::new("/usr/bin/git");
-        read_guarded(&search, work.path(), other, async || panic!("probed")).await;
+        read_guarded(
+            &search,
+            work.path(),
+            other,
+            async || panic!("probed"),
+            PATIENT,
+        )
+        .await;
         assert!(marker.exists(), "git was not run");
     }
 
