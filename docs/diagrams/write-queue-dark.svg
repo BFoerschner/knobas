@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- knobas write-queue (dark). Hand-authored SVG, checked against the code at main 3c6f09be (2026-10-14). Edit both themes together. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="280" viewBox="0 0 880 280" role="img" aria-label="Write queue states: a submitted write is pending; it becomes sent if the target is unchanged, held if the target moved since it was queued, or refused if the source rejects it; held and refused writes return to pending only when a person acts.">
+  <defs>
+    <marker id="bh" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+    <marker id="bha" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mka" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>.bx{fill:#1D2024;stroke:#3A4047;stroke-width:1}
+.bx2{fill:#24282D;stroke:#3A4047;stroke-width:1}
+.bxd{fill:none;stroke:#3A4047;stroke-width:1;stroke-dasharray:4 4}
+.bxa{fill:#24282D;stroke:#FFB020;stroke-width:1.5}
+.grp{fill:none;stroke:#2E3339;stroke-width:1}
+.hl{stroke:#3A4047;stroke-width:1}
+.t{fill:#E7E9EC;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13.5px;font-weight:600}
+.s{fill:#8B929A;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:11.5px}
+.m{fill:#E7E9EC;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
+.mf{fill:#808790;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:10.5px}
+.h{fill:#808790;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em}
+.lb{fill:#8B929A;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
+.lba{fill:#FFB020;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
+.bad{fill:#FF6A5C}
+.ar{fill:none;stroke:#8B929A;stroke-width:1.25}
+.ara{fill:none;stroke:#FFB020;stroke-width:1.5}
+.mk{fill:#8B929A}
+.mka{fill:#FFB020}</style>
+  <rect x="0" y="0" width="880" height="280" rx="6" fill="#15171A"/>
+
+  <text class="lb" x="20" y="144">submit</text>
+  <line class="ar" x1="66" y1="140" x2="108" y2="140" marker-end="url(#bh)"/>
+
+  <rect class="bx2" x="110" y="115" width="120" height="50" rx="3"/>
+  <text class="t" x="170" y="137" text-anchor="middle">pending</text>
+  <text class="mf" x="170" y="153" text-anchor="middle">due, oldest first</text>
+
+  <path class="ar" d="M135,165 C135,200 165,200 165,167" marker-end="url(#bh)"/>
+  <text class="lb" x="150" y="216" text-anchor="middle">waits: unreachable</text>
+  <text class="lb" x="150" y="231" text-anchor="middle">or unauthorized</text>
+
+  <!-- to held -->
+  <path class="ar" d="M215,115 L215,55 L398,55" marker-end="url(#bh)"/>
+  <text class="lb" x="306" y="48" text-anchor="middle">target changed in the mirror</text>
+  <rect class="bx" x="400" y="30" width="120" height="50" rx="3"/>
+  <text class="t" x="460" y="52" text-anchor="middle">held</text>
+  <text class="mf" x="460" y="68" text-anchor="middle">both versions shown</text>
+  <path class="ar" d="M430,80 L430,124 L232,124" marker-end="url(#bh)"/>
+  <text class="lb" x="438" y="106">apply anyway · edit</text>
+
+  <!-- to refused -->
+  <path class="ar" d="M215,165 L215,225 L398,225" marker-end="url(#bh)"/>
+  <text class="lb" x="306" y="244" text-anchor="middle">source refuses</text>
+  <rect class="bx" x="400" y="200" width="120" height="50" rx="3"/>
+  <text class="t" x="460" y="222" text-anchor="middle">refused</text>
+  <text class="mf" x="460" y="238" text-anchor="middle">not retried</text>
+  <path class="ar" d="M430,200 L430,156 L232,156" marker-end="url(#bh)"/>
+  <text class="lb" x="438" y="182">edit and send</text>
+
+  <!-- to sent -->
+  <line class="ara" x1="232" y1="140" x2="718" y2="140" marker-end="url(#bha)"/>
+  <text class="lba" x="620" y="132" text-anchor="middle">unchanged → Source::write</text>
+  <rect class="bxa" x="720" y="115" width="140" height="50" rx="3"/>
+  <text class="t" x="790" y="137" text-anchor="middle">sent</text>
+  <text class="mf" x="790" y="153" text-anchor="middle">settled</text>
+</svg>

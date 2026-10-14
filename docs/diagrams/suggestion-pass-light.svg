@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- knobas suggestion-pass (light). Hand-authored SVG, checked against the code at main 3c6f09be (2026-10-14). Edit both themes together. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="590" viewBox="0 0 1200 590" role="img" aria-label="Suggestion pass: a finished sync run makes the room's tray call detect_suggestions; a queue coalesces requests into at most one running pass plus one owed; the pass runs seven rules on its own connection and inserts unconfirmed rows into knobas.link; the tray reads proposed_link and accept or dismiss updates the same row and writes an activity line.">
+  <defs>
+    <marker id="ch" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path class="mk" d="M0,0 L10,5 L0,10 z"/></marker>
+  </defs>
+  <style>.bx{fill:#FFFFFF;stroke:#C4C9CF;stroke-width:1}
+.bx2{fill:#F1F2F3;stroke:#C4C9CF;stroke-width:1}
+.bxd{fill:none;stroke:#C4C9CF;stroke-width:1;stroke-dasharray:4 4}
+.bxa{fill:#F1F2F3;stroke:#A86200;stroke-width:1.5}
+.grp{fill:none;stroke:#E1E4E8;stroke-width:1}
+.hl{stroke:#C4C9CF;stroke-width:1}
+.t{fill:#1D2024;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:13.5px;font-weight:600}
+.s{fill:#555C64;font-family:'IBM Plex Sans',system-ui,-apple-system,'Segoe UI',sans-serif;font-size:11.5px}
+.m{fill:#1D2024;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11.5px}
+.mf{fill:#68707A;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:10.5px}
+.h{fill:#68707A;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.08em}
+.lb{fill:#555C64;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
+.lba{fill:#A86200;font-family:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;font-size:11px}
+.bad{fill:#C2362B}
+.ar{fill:none;stroke:#555C64;stroke-width:1.25}
+.ara{fill:none;stroke:#A86200;stroke-width:1.5}
+.mk{fill:#555C64}
+.mka{fill:#A86200}</style>
+  <rect x="0" y="0" width="1200" height="590" rx="6" fill="#FAFAF9"/>
+
+  <text class="h" x="20" y="36">SCHEDULER</text>
+  <text class="h" x="250" y="36">WINDOW</text>
+  <text class="h" x="580" y="36">KNOBAS-APP</text>
+  <text class="h" x="910" y="36">THE PASS</text>
+  <line class="hl" x1="20" y1="46" x2="1180" y2="46"/>
+
+  <!-- row 1: trigger chain -->
+  <rect class="bx" x="20" y="60" width="160" height="70" rx="3"/>
+  <text class="t" x="34" y="82">Sync run ends</text>
+  <text class="mf" x="34" y="98">knobas-sync</text>
+  <text class="s" x="34" y="118">any outcome, failed too</text>
+
+  <line class="ar" x1="180" y1="95" x2="248" y2="95" marker-end="url(#ch)"/>
+  <text class="lb" x="214" y="80" text-anchor="middle">sync:state</text>
+  <text class="lb" x="214" y="112" text-anchor="middle">ended</text>
+
+  <rect class="bx" x="250" y="60" width="200" height="70" rx="3"/>
+  <text class="t" x="264" y="82">Suggestion tray</text>
+  <text class="mf" x="264" y="98">SuggestionTray.svelte</text>
+  <text class="s" x="264" y="118">one per room</text>
+
+  <line class="ar" x1="450" y1="95" x2="578" y2="95" marker-end="url(#ch)"/>
+  <text class="lb" x="514" y="88" text-anchor="middle">invoke</text>
+  <text class="lb" x="514" y="112" text-anchor="middle">detect_suggestions</text>
+
+  <rect class="bx2" x="580" y="60" width="230" height="110" rx="3"/>
+  <text class="t" x="594" y="82">SuggestionPass queue</text>
+  <text class="mf" x="594" y="98">Mutex&lt;Queue&gt; + watch channel</text>
+  <text class="s" x="594" y="120">≤ 1 running, ≤ 1 owed</text>
+  <text class="s" x="594" y="138">N calls during a pass → 1 more</text>
+  <text class="s" x="594" y="156">caller waits for its ticket</text>
+
+  <line class="ar" x1="810" y1="95" x2="908" y2="95" marker-end="url(#ch)"/>
+  <text class="lb" x="859" y="88" text-anchor="middle">spawn</text>
+  <text class="lb" x="859" y="112" text-anchor="middle">if idle</text>
+
+  <rect class="bx" x="910" y="60" width="270" height="110" rx="3"/>
+  <text class="t" x="924" y="82">Pass</text>
+  <text class="mf" x="924" y="98">own PgConnection, not a pool</text>
+  <text class="s" x="924" y="120">statement_timeout 120 s</text>
+  <text class="s" x="924" y="138">timeout: pass stops, tray shows a note</text>
+  <text class="s" x="924" y="156">committed batches stay</text>
+
+  <!-- rules -->
+  <line class="ar" x1="1045" y1="170" x2="1045" y2="206" marker-end="url(#ch)"/>
+  <text class="lb" x="1053" y="192">detect_paced</text>
+
+  <rect class="bx" x="580" y="208" width="600" height="222" rx="3"/>
+  <text class="t" x="596" y="230">Seven rules, in order</text>
+  <text class="mf" x="760" y="230">the most specific evidence wins a pair</text>
+  <text class="h" x="596" y="254">RULE</text><text class="h" x="790" y="254">RELATION</text><text class="h" x="900" y="254">REASON SHOWN</text>
+  <line class="hl" x1="596" y1="262" x2="1166" y2="262"/>
+  <text class="m" x="596" y="282">branch_name_key</text><text class="m" x="790" y="282">related</text><text class="s" x="900" y="282">the branch name contains PAY-231</text>
+  <text class="m" x="596" y="302">commit_message_key</text><text class="m" x="790" y="302">related</text><text class="s" x="900" y="302">the commit message mentions PAY-231</text>
+  <text class="m" x="596" y="322">build_parameter_key</text><text class="m" x="790" y="322">related</text><text class="s" x="900" y="322">this build's parameters name PAY-231</text>
+  <text class="m" x="596" y="342">page_text_key</text><text class="m" x="790" y="342">related</text><text class="s" x="900" y="342">this page mentions PAY-231</text>
+  <text class="m" x="596" y="362">monitor_url_host</text><text class="m" x="790" y="362">monitored-by</text><text class="s" x="900" y="362">this monitor watches h, the asset's h</text>
+  <text class="m" x="596" y="382">source_recorded_relation</text><text class="m" x="790" y="382">source's own</text><text class="s" x="900" y="382">jira already records this link</text>
+  <text class="m" x="596" y="402">similar_text</text><text class="m" x="790" y="402">related</text><text class="s" x="900" y="402">both mention sepa, retry, …</text>
+  <text class="mf" x="596" y="422">the four key rules match \m[A-Z][A-Z0-9]+-[0-9]+\M against live tickets</text>
+
+  <!-- storage -->
+  <line class="ar" x1="725" y1="430" x2="725" y2="466" marker-end="url(#ch)"/>
+  <text class="lb" x="733" y="452">insert</text>
+  <line class="ar" x1="1040" y1="430" x2="1040" y2="466" marker-end="url(#ch)"/>
+  <text class="lb" x="1048" y="452">similar_text only</text>
+
+  <rect class="bx" x="580" y="468" width="290" height="108" rx="3"/>
+  <text class="t" x="594" y="488">knobas.link</text>
+  <text class="mf" x="594" y="503">views: proposed_link · confirmed_link</text>
+  <text class="s" x="594" y="524">confirmed_at = null, with rule + reason</text>
+  <text class="s" x="594" y="542">skipped if the pair has any row,</text>
+  <text class="s" x="594" y="560">dismissed ones included</text>
+
+  <rect class="bx" x="900" y="468" width="280" height="108" rx="3"/>
+  <text class="t" x="914" y="488">sync.similar_text_seen · _top</text>
+  <text class="mf" x="914" y="503">written only by the pass</text>
+  <text class="s" x="914" y="524">md5 of the text: only changed prose</text>
+  <text class="s" x="914" y="542">is re-ranked · top 10, ≥ 5 shared stems</text>
+  <text class="s" x="914" y="560">batches ≤ 100, halved on timeout</text>
+
+  <!-- answer loop -->
+  <line class="ar" x1="350" y1="130" x2="350" y2="248" marker-end="url(#ch)"/>
+  <text class="lb" x="358" y="194">your click</text>
+
+  <rect class="bx" x="250" y="250" width="200" height="96" rx="3"/>
+  <text class="t" x="264" y="270">Accept / Dismiss</text>
+  <text class="mf" x="264" y="285">on the UI pool</text>
+  <text class="s" x="264" y="306">Accept: confirmed_at = now()</text>
+  <text class="s" x="264" y="324">Dismiss: deleted_at = now()</text>
+  <text class="s" x="264" y="340">same row, rule kept</text>
+
+  <line class="ar" x1="250" y1="298" x2="182" y2="298" marker-end="url(#ch)"/>
+  <rect class="bx" x="20" y="250" width="160" height="96" rx="3"/>
+  <text class="t" x="34" y="270">Activity line</text>
+  <text class="mf" x="34" y="285">activity::record</text>
+  <text class="s" x="34" y="306">accepted · dismissed</text>
+  <text class="s" x="34" y="324">then activity:new</text>
+
+  <path class="ar" d="M100,250 L100,180 L290,180 L290,132" marker-end="url(#ch)"/>
+  <text class="lb" x="108" y="172">re-read</text>
+
+  <path class="ar" d="M350,346 L350,540 L578,540" marker-end="url(#ch)"/>
+  <text class="lb" x="464" y="533" text-anchor="middle">update</text>
+
+  <path class="ar" d="M578,500 L470,500 L470,132" marker-end="url(#ch)"/>
+  <text class="lb" x="524" y="493" text-anchor="middle">reads proposed</text>
+  <text class="lb" x="524" y="516" text-anchor="middle">≤ 50 per room</text>
+</svg>
