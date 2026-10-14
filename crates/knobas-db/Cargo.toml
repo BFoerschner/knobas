@@ -11,7 +11,7 @@ version.workspace = true
 # `tokio/signal` rides on it for the test-server entry point below, which
 # stops its server on Ctrl-C as well as on a closed stdin; the shipped build
 # never enables the feature, so it never pays for it.
-test-util = ["tokio/signal"]
+test-util = ["tokio/signal", "dep:serde_json"]
 
 # The test-server entry point `just test` starts: one embedded PostgreSQL for
 # the whole gate, which every test binary then reaches through
@@ -53,6 +53,8 @@ postgresql_archive = { version = "0.21", default-features = false, features = [
 # depends on both, so this adds nothing to the build). `pg_dump` is a child
 # process and needs the password libpq's way -- see `embedded::password_of`.
 percent-encoding = "2"
+# `plan_shape`'s, under `test-util` only: it reads `explain (format json)`.
+serde_json = { workspace = true, optional = true }
 sqlx.workspace = true
 thiserror.workspace = true
 # `process` is `backup`'s: `pg_dump` and `pg_restore` are run as children, and

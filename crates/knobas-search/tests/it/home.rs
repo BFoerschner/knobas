@@ -252,7 +252,7 @@ async fn a_tombstoned_item_is_not_recent() {
             .recent
             .iter()
             .all(|r| r.entity_id != id),
-        "the board reads sync.live_item, not sync.item"
+        "the board reads live items only, never a withdrawn one"
     );
 }
 
@@ -352,9 +352,10 @@ async fn recency_reads_are_index_backed_per_kind() {
 ///
 /// The ruling is "every reader", and the launcher's board is a *different
 /// statement* from the search — `home::recent` orders by recency and never
-/// touches the FTS index. So it is the one that shows the filter is inherited
-/// from `sync.live_item` rather than re-implemented per reader, which is the
-/// whole reason migration `0012` put it in the view.
+/// touches the FTS index. Since #778 it reads `sync.item` with
+/// `knobas_core::live_by_key!` rather than through `sync.live_item`, so this
+/// is the test that its copy of the view's filter keeps the disabled source
+/// out.
 ///
 /// Serialised and stamped newest like every test here: the board is a
 /// whole-corpus read, so the row has to be the newest one to be certain of a

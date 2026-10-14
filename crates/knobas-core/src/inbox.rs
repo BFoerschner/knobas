@@ -8,7 +8,8 @@
 //! # The decision everything else follows from
 //!
 //! **The inbox is derived from the mirror, not synced into.** An
-//! [`InboxItem`] is computed from `sync.live_item`, `knobas.confirmed_link`
+//! [`InboxItem`] is computed from the live mirror (`sync.item` and its
+//! liveness, `crate::live_by_exclusion!` since #778), `knobas.confirmed_link`
 //! and `knobas.source_config` every time the stream is read. There is no
 //! adapter that fetches "inbox items", no table of them, and no fifth thing to
 //! keep consistent -- a materialised inbox would be a second corpus that can
@@ -298,11 +299,14 @@ macro_rules! review_request {
                            coalesce(nullif(i.author, ''), 'somebody')) as reason,
                     coalesce(i.item_updated_at, i.synced_at)           as occurred_at,
                     i.web_url                            as web_url
-               from sync.live_item i
+               from sync.item i
                cross join lateral ",
             $crate::declared_list!("$4", "reviewers"),
             " as r
-              where i.kind = 'pr'
+              where ",
+            $crate::live_by_exclusion!("i"),
+            "
+                and i.kind = 'pr'
                 and r.value = any($1)
                 and coalesce(i.payload->>'state', 'open') = 'open'"
         )
@@ -342,8 +346,11 @@ macro_rules! mention {
             r"select 'mention', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                      'you are mentioned here',
                      coalesce(i.item_updated_at, i.synced_at), i.web_url
-                from sync.live_item i
-               where i.kind in ('ticket','pr','page','note')
+                from sync.item i
+               where ",
+            $crate::live_by_exclusion!("i"),
+            r"
+                 and i.kind in ('ticket','pr','page','note')
                  and coalesce(i.item_updated_at, i.synced_at)
                        >= $2 - make_interval(days => ",
             window_days!(),
@@ -388,26 +395,33 @@ macro_rules! mention {
 /// re-run fails, which is a stream that flickers rather than resolves.
 macro_rules! failed_build {
     () => {
-        "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
+        concat!(
+            "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                 format('this build failed%s',
                        coalesce(': ' || nullif(i.payload->>'statusText', ''), '')),
                 coalesce(i.item_updated_at, i.synced_at), i.web_url
-           from sync.live_item i
-          where i.kind = 'build'
+           from sync.item i
+          where ",
+            $crate::live_by_exclusion!("i"),
+            "
+            and i.kind = 'build'
             and i.payload->>'status' = 'FAILURE'
             and coalesce(i.payload->>'state', 'finished') = 'finished'
             and (   i.author = any($1)
                  or exists (
                        select 1
                          from knobas.confirmed_link l
-                         join sync.live_item mine
+                         join sync.item mine
                            on mine.entity_id = case when l.from_id = i.entity_id
                                                     then l.to_id else l.from_id end
                         where (l.from_id = i.entity_id or l.to_id = i.entity_id)
-                          and mine.author = any($1)))
+                          and mine.author = any($1)
+                          and ",
+            $crate::live_by_key!("mine"),
+            "))
             and not exists (
                   select 1
-                    from sync.live_item newer
+                    from sync.item newer
                    where newer.kind = 'build'
                      and newer.source_id = i.source_id
                      and newer.payload->>'status' = 'SUCCESS'
@@ -419,7 +433,11 @@ macro_rules! failed_build {
                      and coalesce(i.payload->>'buildTypeId',
                                   i.payload->'buildType'->>'id') is not null
                      and coalesce(newer.item_updated_at, newer.synced_at)
-                       > coalesce(i.item_updated_at, i.synced_at))"
+                       > coalesce(i.item_updated_at, i.synced_at)
+                     and ",
+            $crate::live_by_key!("newer"),
+            ")"
+        )
     };
 }
 
@@ -447,8 +465,11 @@ macro_rules! new_assignment {
             "select 'new_assignment', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                     'assigned to you',
                     coalesce(i.item_updated_at, i.synced_at), i.web_url
-               from sync.live_item i
-              where i.kind = 'ticket'
+               from sync.item i
+              where ",
+            $crate::live_by_exclusion!("i"),
+            "
+                and i.kind = 'ticket'
                 and ",
             $crate::declared_string!("$4", "assignee"),
             " = any($1)
@@ -668,6 +689,15 @@ const ALL_RULES: &str = all_rules!();
 /// that no test comparing the inbox against itself can catch, so there is no
 /// second `where` to get wrong.
 const COUNT_ALL: &str = concat!("select count(*) as n from (", all_rules!(), ") counted");
+
+/// Each rule's statement, shelved, named by its category, for `knobas-app`'s
+/// plan test (`tests/it/read_plans.rs`, #778). Each binds what [`items`]
+/// binds; the stream and its count are these unioned.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_statements() -> Vec<(Category, &'static str)> {
+    RULES.iter().map(|rule| (rule.category, rule.sql)).collect()
+}
 
 /// One named detection rule.
 ///

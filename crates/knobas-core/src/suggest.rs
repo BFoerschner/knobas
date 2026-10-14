@@ -276,14 +276,7 @@ pub struct Rule {
 /// exact-key rule from it -- see [`ticket_keyed!`].
 macro_rules! live {
     ($alias:literal) => {
-        concat!(
-            "(select e.deleted_at is null from knobas.entity e where e.id = ",
-            $alias,
-            ".entity_id)
-         and coalesce((select c.enabled from knobas.source_config c where c.id = ",
-            $alias,
-            ".source_id), true)"
-        )
+        $crate::live_by_key!($alias)
     };
 }
 
@@ -1875,6 +1868,33 @@ pub async fn proposals(
         .collect())
 }
 
+/// [`proposal_count`]'s statement.
+///
+/// **No join** (#778). It joined `sync.item` twice to learn each end's source,
+/// and that join was its whole cost: analyzed, a hash join, 15 ms for the
+/// probe's 25,690 proposals; never analyzed, and in the generic plan
+/// PostgreSQL switched this persistent statement to at its sixth execution, a
+/// primary-key probe per end per proposal, 220 ms. That switch was the
+/// 220 ms maximum the probe read beside a 15 ms median in a project room.
+/// Now an end is in the room by membership in the room's sources' items, a
+/// subquery inside an `or` that cannot be pulled up into a join and so runs
+/// hashed, once: 6 ms never analyzed, 9 ms analyzed, either plan.
+const PROPOSAL_COUNT: &str = "select count(*)
+   from knobas.proposed_link l
+  where ($1::text[] is null
+     or (l.from_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true
+     or (l.to_id in (select i.entity_id from sync.item i where i.source_id = any($1))) is true)
+    and ($2::text[] is null
+     or l.from_id = any($2) or l.to_id = any($2))";
+
+/// [`PROPOSAL_COUNT`], for `knobas-app`'s plan test (`tests/it/read_plans.rs`,
+/// #778). It binds what [`proposal_count`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_proposal_count() -> &'static str {
+    PROPOSAL_COUNT
+}
+
 /// How many proposals a room is holding.
 ///
 /// Its own statement rather than `proposals(..).len()`: the tray shows a count
@@ -1891,20 +1911,11 @@ pub async fn proposal_count(
     members: Option<&[String]>,
 ) -> Result<i64, CoreError> {
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let (count,): (i64,) = sqlx::query_as(
-        "select count(*)
-           from knobas.proposed_link l
-           left join sync.item fi on fi.entity_id = l.from_id
-           left join sync.item ti on ti.entity_id = l.to_id
-          where ($1::text[] is null
-             or fi.source_id = any($1) or ti.source_id = any($1))
-            and ($2::text[] is null
-             or l.from_id = any($2) or l.to_id = any($2))",
-    )
-    .bind(scope)
-    .bind(members.map(<[String]>::to_vec))
-    .fetch_one(pool)
-    .await?;
+    let (count,): (i64,) = sqlx::query_as(PROPOSAL_COUNT)
+        .bind(scope)
+        .bind(members.map(<[String]>::to_vec))
+        .fetch_one(pool)
+        .await?;
     Ok(count)
 }
 

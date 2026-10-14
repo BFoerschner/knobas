@@ -41,6 +41,15 @@ pub const RECENT_LIMIT: u32 = 20;
 /// purpose: once inside the lateral, so no kind's branch is unbounded, and once
 /// outside, so the merge is too.
 ///
+/// Live rows only, as `sync.live_item` means it, read from `sync.item` with
+/// [`knobas_core::live_by_key!`]: each kind's branch walks
+/// `item_kind_updated_idx` newest first and probes liveness for the rows it
+/// walks, which is about twenty. Through the view, on tables never analyzed,
+/// the branch was planned from `knobas.entity` instead, a probe into
+/// `sync.item` per entity per kind: 300 ms of `launcher_home`'s 387 on the
+/// probe's 22,000 items at `7818d65b` (#778; #777 read 748 with the seeded
+/// Gitea synced too).
+///
 /// The columns are named rather than `select *`ed -- `sync.live_item` carries a
 /// `tsvector` and reading one into a `FromRow` struct panics at runtime
 /// (interfaces §1).
@@ -60,8 +69,11 @@ macro_rules! recent_sql {
             "             ",
             knobas_core::declared_state!("$3"),
             " as state\n",
-            "        from sync.live_item i\n",
+            "        from sync.item i\n",
             "       where i.kind = k.kind\n",
+            "         and ",
+            knobas_core::live_by_key!("i"),
+            "\n",
             "       order by i.item_updated_at desc nulls last, i.entity_id\n",
             "       limit $2\n",
             "  ) s\n",
@@ -72,6 +84,15 @@ macro_rules! recent_sql {
 }
 
 const RECENT_SQL: &str = recent_sql!("");
+
+/// The board's newest-of-each-kind statement, for `knobas-app`'s plan test
+/// (`tests/it/read_plans.rs`, #778): `$1` the kinds, `$2` the limit, `$3` the
+/// declarations.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_recent() -> &'static str {
+    RECENT_SQL
+}
 
 /// The same statement, planned rather than run.
 ///

@@ -424,6 +424,11 @@ select i.entity_id, i.source_id, i.kind, i.title, i.item_updated_at, i.synced_at
 /// a username, and the path line for a branch, because those are the rows
 /// the groups match; the Code tile's room holds only those two kinds.
 ///
+/// Liveness is [`knobas_core::live_by_exclusion!`], not the `sync.live_item`
+/// join: on tables never analyzed the planner drove that join from
+/// `knobas.entity`, at 0.5 % of its real size, and planned what followed from
+/// that (#778).
+///
 /// `materialized`, so the rule's column is computed once a row. Inlined, the
 /// CTE's column is an expression, and PostgreSQL evaluated it once for each
 /// place the statement names it: the state twice under `attention`, 56 ms
@@ -443,10 +448,13 @@ with ruled as materialized (
   select i.entity_id, i.source_id, i.kind, i.item_updated_at"#,
             $rule,
             r#"
-    from sync.live_item i"#,
+    from sync.item i"#,
             $join,
             r#"
-   where ($1::text[] is null or i.source_id = any($1))
+   where "#,
+            knobas_core::live_by_exclusion!("i"),
+            r#"
+     and ($1::text[] is null or i.source_id = any($1))
      and ($2::text[] is null or i.kind      = any($2))
      and ($3::int    is null or i.item_updated_at >= now() - make_interval(days => $3))
      and ($6::text[] is null or i.entity_id = any($6))
@@ -637,6 +645,18 @@ drawn as (
 /// database's own collation was most of the remaining time. The kept rows
 /// are fetched by primary key. Measured on the 20,000-build room: about
 /// 80 ms.
+///
+/// **No join between the CTEs** (#778). `keyed` and `latest` used to join
+/// `named` to `ruled` and `ruled` to `keyed`. On tables never analyzed the
+/// planner estimated each CTE at one row and joined them by nested loops,
+/// re-aggregating `keyed` once per build: 6.8 s for the probe's 5,000 builds,
+/// against 23 ms analyzed. Now each row's parent key is found by aggregation:
+/// `ruled`'s rows and `named`'s are unioned and grouped by entity, and only
+/// the rows `ruled` contributed are kept. Whether a row's source and kind are
+/// grouped at all is a membership test against `grouped`, a handful of rows,
+/// that cannot become a join. Nothing left in the statement is planned from a
+/// row estimate. `ruled` reads liveness by [`knobas_core::live_by_exclusion!`]
+/// rather than through `sync.live_item` (see [`tile_ruled!`]).
 const LIVE_LATEST: &str = concat!(
     tile_ruled!(),
     r#",
@@ -656,21 +676,27 @@ named as materialized (
      and ip.source_id in (select g.source_id from grouped g)
 ),
 keyed as (
-  select n.entity_id collate "C" as entity_id,
-         string_agg(n.kind || E'\x1f' || n.name, E'\x1e'
-                    order by n.kind collate "C", n.name collate "C") as parent_key
-    from named n
-    join ruled r on r.entity_id = n.entity_id
-    join grouped g on g.source_id = r.source_id and g.kind = r.kind
-   group by n.entity_id collate "C"
+  select u.entity_id collate "C" as entity_id,
+         max(u.source_id) as source_id, max(u.kind) as kind,
+         max(u.item_updated_at) as item_updated_at, bool_or(u.ruled) as ruled,
+         string_agg(u.parent_kind || E'\x1f' || u.name, E'\x1e'
+                    order by u.parent_kind collate "C", u.name collate "C") as parent_key
+    from (select r.entity_id, r.source_id, r.kind, r.item_updated_at, true as ruled,
+                 null::text as parent_kind, null::text as name
+            from ruled r
+          union all
+          select n.entity_id, null, null, null, false, n.kind, n.name
+            from named n) u
+   group by u.entity_id collate "C"
 ),
 latest as (
   select distinct on (g.grp) g.entity_id
-    from (select r.entity_id, r.item_updated_at,
-                 coalesce(r.source_id || E'\x1d' || r.kind || E'\x1d' || k.parent_key,
-                          E'\x1c' || r.entity_id) collate "C" as grp
-            from ruled r
-            left join keyed k on k.entity_id = r.entity_id) g
+    from (select k.entity_id collate "default" as entity_id, k.item_updated_at,
+                 coalesce(case when ((k.source_id, k.kind) in (select g.source_id, g.kind from grouped g)) is true
+                               then k.source_id || E'\x1d' || k.kind || E'\x1d' || k.parent_key end,
+                          E'\x1c' || k.entity_id) collate "C" as grp
+            from keyed k
+           where k.ruled) g
    order by g.grp, g.item_updated_at desc nulls last, g.entity_id
 ),
 drawn as (
@@ -685,6 +711,15 @@ drawn as (
 )"#,
     tile_page!(),
 );
+
+/// [`EntityOrder::LatestPerParent`]'s statement, for the plan test
+/// (`tests/it/read_plans.rs`, #778). It binds what [`list_entities_inner`]
+/// binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_latest_per_parent() -> &'static str {
+    LIVE_LATEST
+}
 
 /// The statement this filter reads through. Six constants, one `match`.
 ///

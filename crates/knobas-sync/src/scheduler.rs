@@ -1104,6 +1104,11 @@ struct Inner {
     /// thousands of finished handles for the sake of a shutdown that only
     /// cares about the live ones.
     tasks: Mutex<Vec<tokio::task::JoinHandle<()>>>,
+    /// Asked for a pass after every run that committed (#778): the mirror
+    /// tables a sync grew by more than a fifth are analyzed, on a connection
+    /// of their own, so a fresh install's reads plan with statistics within
+    /// seconds of its first sync rather than whenever autovacuum gets there.
+    analyzer: crate::analyze::Analyzer,
 }
 
 impl Scheduler {
@@ -1123,8 +1128,10 @@ impl Scheduler {
             tracing::warn!(closed, "closed sync runs left open by a previous process");
         }
 
+        let analyzer = crate::analyze::Analyzer::new(Arc::clone(&deps.connections));
         let inner = Arc::new(Inner {
             deps,
+            analyzer,
             permits: Semaphore::new(SYNC_CONCURRENCY),
             claims: Mutex::new(Claims {
                 runs: HashMap::new(),
@@ -1151,6 +1158,13 @@ impl Scheduler {
     #[must_use]
     pub fn deps(&self) -> &SchedulerDeps {
         &self.inner.deps
+    }
+
+    /// The analyze pass every committed run asks for (#778), for a caller
+    /// that has to know it is done.
+    #[must_use]
+    pub fn analyzer(&self) -> &crate::analyze::Analyzer {
+        &self.inner.analyzer
     }
 
     /// Start a run for one source and return its `sync_run.id` **immediately**
@@ -1756,6 +1770,11 @@ impl Inner {
         // closes its connection -- which is why `settle` can still write.
 
         settle(&self.deps, &source_id, run_id, &result).await;
+        // Only a run that committed changed the mirror. Not awaited: the
+        // pass is a background task, and the run's ending must not wait on it.
+        if result.outcome == SyncOutcome::Ok {
+            self.analyzer.request();
+        }
         let ending = ending(
             run_id,
             &source_id,
