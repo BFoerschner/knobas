@@ -582,8 +582,10 @@ async fn a_parent_is_offered_by_the_prefix_typed_newest_first() {
     let pool = pool().await;
     let t = token();
     // Twenty-five repos, each a day newer than the last, so the newest twenty
-    // are the ones numbered 05 to 24.
-    for n in 0..25 {
+    // are the ones numbered 05 to 24. Inserted newest first and dated after
+    // the insert, so the order holds only if the parent rows take the time
+    // the update moved (`sync.item_parent.at`), not the order they synced in.
+    for n in (0..25).rev() {
         let name = format!("{t}-r{n:02}");
         let id = item(
             &pool,
