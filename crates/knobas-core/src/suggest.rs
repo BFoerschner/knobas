@@ -276,14 +276,7 @@ pub struct Rule {
 /// exact-key rule from it -- see [`ticket_keyed!`].
 macro_rules! live {
     ($alias:literal) => {
-        concat!(
-            "(select e.deleted_at is null from knobas.entity e where e.id = ",
-            $alias,
-            ".entity_id)
-         and coalesce((select c.enabled from knobas.source_config c where c.id = ",
-            $alias,
-            ".source_id), true)"
-        )
+        $crate::live_by_key!($alias)
     };
 }
 

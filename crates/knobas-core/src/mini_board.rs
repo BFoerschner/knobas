@@ -134,9 +134,11 @@ macro_rules! priority_read {
 /// `Some` of no members is a stored room that is honestly empty, `None` is a
 /// derived room that never asked about membership at all.
 ///
-/// `sync.live_item` rather than `sync.item`, which is what keeps a tombstoned
-/// ticket -- and, since migration `0012`, a disabled source's ticket -- off the
-/// board (story 18). Newest first within the answer, so a column reads like the
+/// Live tickets only, which is what keeps a tombstoned ticket -- and, since
+/// migration `0012`, a disabled source's ticket -- off the board (story 18):
+/// `sync.item` with [`crate::live_by_exclusion!`] rather than `sync.live_item`,
+/// whose join the planner drove from `knobas.entity` on tables never analyzed,
+/// 225 ms for the *All* room's 15,000 tickets against 70 ms analyzed (#778). Newest first within the answer, so a column reads like the
 /// recency list the tile used to be; the grouping below preserves this order.
 ///
 /// `$3` is the project dimension (#208), which narrows **within** `$2` rather
@@ -160,8 +162,11 @@ const CARDS: &str = concat!(
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
     status_of_ticket!(),
     " as status
-       from sync.live_item i
+       from sync.item i
       where i.kind = 'ticket'
+        and ",
+    crate::live_by_exclusion!("i"),
+    "
         and ($1::text[] is null or i.entity_id = any($1))
         and ($2::text[] is null or i.source_id = any($2))
         and ($3::text is null or ",
