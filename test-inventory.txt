@@ -1695,9 +1695,12 @@ knobas-search	test/it	state_chip::the_boards_newest_rows_carry_their_state_chip
 knobas-search	test/it	suggest::a_parent_is_offered_by_the_prefix_typed_newest_first
 knobas-search	test/it	suggest::a_parent_only_its_children_name_is_still_offered
 knobas-search	test/it	suggest::a_source_is_offered_only_once_it_has_a_live_row
+knobas-search	test/it	suggest::a_withdrawn_item_vouches_for_neither_its_kind_nor_its_source
 knobas-search	test/it	suggest::every_asset_is_offered_by_its_name_and_leads_somewhere
+knobas-search	test/it	suggest::the_parents_alone_are_the_parents_of_the_full_read_without_its_lists
 knobas-search	test/it	suggest::the_parents_statement_is_never_a_named_prepared_statement
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
+knobas-search	test/it	suggest::the_rewritten_reads_return_what_the_live_item_view_returned
 knobas-search	test/it	suggest::under_knows_exactly_the_names_the_box_offers
 knobas-search	test/it	under::a_bare_name_two_owners_share_scopes_to_both
 knobas-search	test/it	under::a_plain_repo_name_finds_the_repo_and_not_its_contents

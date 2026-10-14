@@ -293,7 +293,8 @@ export function smartListItems(id: string, limit: number): Promise<SearchRespons
  *
  * Only values that exist right now, so a picked suggestion never leads to an
  * empty result or an unknown token. Read once per launcher opening; the box
- * narrows the lists itself as the reader types. Free-text keys (`author:`,
+ * narrows the lists itself as the reader types; the `under:` parents are asked
+ * again per keystroke, alone (#768). Free-text keys (`author:`,
  * `updated:`) have no list and get no suggestions.
  */
 export interface FilterSuggestions {
@@ -334,8 +335,9 @@ export interface ParentSuggestion {
 
 /**
  * The query box's suggestion lists (#601), the parents for the `under:` value
- * being typed (#761).
+ * being typed (#761). `parentsOnly` leaves `kinds` and `sources` empty and
+ * unread (#768): the box asks for them once per opening, with its first read.
  */
-export function filterSuggestions(under = ""): Promise<FilterSuggestions> {
-  return invoke<FilterSuggestions>("filter_suggestions", { under });
+export function filterSuggestions(under = "", parentsOnly = false): Promise<FilterSuggestions> {
+  return invoke<FilterSuggestions>("filter_suggestions", { under, parentsOnly });
 }

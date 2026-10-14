@@ -1237,3 +1237,17 @@ Ruled 2026-10-14 by the deputy for Björn. Posted on #761.
 **If you disagree, the cost of reversing this is:** low.
 
 As built (#761): `filter_suggestions` takes an optional `under`. A name is ranked by the newest mirrored item that names it, and offered only while `under:`'s own lookup knows it. The statement is unnamed, so every prefix gets a custom plan, and the ranking reads the item's time off `sync.item_parent.at` (added by the merge review: joining `sync.item` for it was 260 ms on tables never analyzed). `under:` with nothing typed answers in 44 ms, `under:pay` in 12 ms, about 1 KB each. Known concession: a name whose newest item was withdrawn ranks a little higher than its live items alone would put it.
+
+## #768 — the launcher re-reads the kinds and the sources on every `under:` keystroke
+
+Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #768.
+
+**The fork:** since #767 each `under:` keystroke called `filter_suggestions`, which also re-read the kinds and the sources (about 11 ms analyzed, about 520 ms on tables never analyzed, the state of a fresh install for about a minute after its first sync). Options: split the read or add a flag, and rewrite the two statements so they do not depend on statistics.
+
+**Ruling:** the launcher reads the kinds and the sources once per opening and only the parents per keystroke, by a split or a flag, whichever keeps the IPC change smallest (a §10.8 file if the shape changes); and `KINDS_SQL` / `SOURCES_SQL` are rewritten to be fast with and without `ANALYZE`, measured both ways.
+
+**Reasoning:** the keystroke path should pay only for what changes with the keystroke, and a fresh install should not wait on autovacuum.
+
+**If you disagree, the cost of reversing this is:** low.
+
+As built (#768): a flag, `parents_only`, on the existing command (no new command, the DTO keeps its shape). The session sends it on every read after an opening's first and keeps that read's two lists. The statements drop `sync.live_item`'s joins for the same liveness as correlated subqueries, ordered probes of the item indexes. §10.8 entry: `docs/contract/10.8/768-ipc-command-filter-suggestions-parents-only.md`.

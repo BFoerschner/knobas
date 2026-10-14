@@ -22,9 +22,10 @@
 //!   to its name, and `under:` returns the asset itself, so even a leaf leads
 //!   somewhere -- as a mirrored repo nothing sits in yet does).
 //!
-//! Read once per launcher opening for the kinds and sources, which are small,
-//! and again per keystroke of an `under:` value for the parents, which are
-//! not: the mirror holds a parent name per ticket key, so the engine answers a
+//! Read once per launcher opening for the kinds and sources, which are small
+//! ([`crate::Searcher::filter_suggestions`]), and again per keystroke of an
+//! `under:` value for the parents alone, which are not
+//! ([`crate::Searcher::filter_parent_suggestions`], #768): the mirror holds a parent name per ticket key, so the engine answers a
 //! prefix rather than shipping every name to be narrowed in the webview.
 //!
 //! [`KindCatalog`]: crate::KindCatalog
@@ -37,15 +38,48 @@ use crate::{SearchError, Vocabulary};
 /// Every kind with at least one row, over the four corpora the launcher
 /// unions.
 ///
-/// The mirror is `sync.live_item`, so a withdrawn item or a disabled source
-/// does not vouch for a kind the corpus no longer has. The three corpora
-/// knobas owns are asked whether they hold anything at all -- their kind is a
-/// constant, so one row is the whole answer. The route probe joins its asset
-/// as [`crate::corpus::ROUTE`]'s relation does, so it says what the launcher
-/// can actually return.
+/// The mirror's kinds are `sync.live_item`'s -- a withdrawn item or a disabled
+/// source does not vouch for a kind the corpus no longer has -- but read
+/// **without that view**, in two steps whose cost does not hang on the
+/// planner's statistics (#768):
+///
+/// 1. The distinct kinds of `sync.item`, by a recursive skip scan of
+///    `item_kind_updated_idx`: the smallest kind, then the smallest above the
+///    last.
+/// 2. Per kind, one probe **ordered as that index is** (`kind,
+///    item_updated_at desc nulls last`) that stops at the kind's first live
+///    row. Liveness is two correlated subqueries in the `where`, which the
+///    planner cannot turn into joins, so it cannot drive the plan from them.
+///
+/// The view's join did exactly that. On tables never analyzed `entity` is
+/// estimated at 84 rows for its `deleted_at is null` (22,000 on the probe), the
+/// planner drove from it, and the read took 90 ms; `SOURCES_SQL` took 520 ms
+/// the same way. This shape measured 0.3 to 0.6 ms never analyzed and
+/// analyzed alike, under a custom plan and a generic one. A `distinct` over
+/// the view took 8 ms even with statistics.
+///
+/// The three corpora knobas owns are asked whether they hold anything at all
+/// -- their kind is a constant, so one row is the whole answer. The route
+/// probe joins its asset as [`crate::corpus::ROUTE`]'s relation does, so it
+/// says what the launcher can actually return.
 const KINDS_SQL: &str = "\
+with recursive mirror_kinds(kind) as (
+  (select i.kind from sync.item i order by i.kind limit 1)
+  union all
+  select (select i.kind from sync.item i
+           where i.kind > m.kind order by i.kind limit 1)
+    from mirror_kinds m where m.kind is not null
+)
 select k.kind from (
-  select distinct i.kind from sync.live_item i
+  select m.kind from mirror_kinds m
+   cross join lateral (
+    select 1 from sync.item i
+     where i.kind = m.kind
+       and (select e.deleted_at is null from knobas.entity e where e.id = i.entity_id)
+       and coalesce((select c.enabled from knobas.source_config c where c.id = i.source_id), true)
+     order by i.item_updated_at desc nulls last
+     limit 1) l
+   where m.kind is not null
   union select 'note' where exists (select 1 from knobas.note)
   union select 'asset' where exists (select 1 from knobas.asset)
   union select 'route' where exists (
@@ -53,7 +87,7 @@ select k.kind from (
 ) k
  order by k.kind";
 
-/// The source ids bound at `$1` that have at least one row in the mirror.
+/// The source ids bound at `$1` that have at least one live row in the mirror.
 ///
 /// One probe per id, each **ordered as `item_source_updated_idx` is**
 /// (`source_id, item_updated_at desc nulls last`), so the planner walks that
@@ -62,11 +96,20 @@ select k.kind from (
 /// row of each source and took 30 ms at p50, the same as a `distinct` over the
 /// corpus, against 0.3 ms for this shape. An unordered `limit 1` seq-scanned
 /// to the same 30 ms once an enabled source with no rows was in the list.
+///
+/// Liveness is `sync.live_item`'s -- the entity not withdrawn, the source not
+/// turned off -- as two correlated subqueries in the `where`, and not that
+/// view's joins (#768): on tables never analyzed the planner drove from
+/// `entity` and the read took 520 ms (437 ms of it here), where this shape
+/// takes 0.4 ms never analyzed and analyzed alike, custom plan or generic. See
+/// [`KINDS_SQL`].
 const SOURCES_SQL: &str = "\
 select s.id from unnest($1::text[]) s(id)
  cross join lateral (
-  select 1 from sync.live_item i
+  select 1 from sync.item i
    where i.source_id = s.id
+     and (select e.deleted_at is null from knobas.entity e where e.id = i.entity_id)
+     and coalesce((select c.enabled from knobas.source_config c where c.id = i.source_id), true)
    order by i.item_updated_at desc nulls last
    limit 1) l";
 
@@ -152,18 +195,16 @@ const PARENTS_SQL: &str = concat!(
      limit $2"
 );
 
-/// Read the three lists against `vocab`, the parents for the prefix `under`
-/// (empty for none).
+/// The parents for the prefix `under` (empty for none), and nothing else: the
+/// read the box makes on every keystroke of an `under:` value (#761, #768).
 ///
 /// # Errors
 ///
-/// [`SearchError::Db`] if any read fails.
-pub(crate) async fn read(
+/// [`SearchError::Db`] if the read fails.
+pub(crate) async fn parents(
     pool: &PgPool,
-    vocab: &Vocabulary,
     under: &str,
-) -> Result<FilterSuggestions, SearchError> {
-    let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
+) -> Result<Vec<ParentSuggestion>, SearchError> {
     let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
         .bind(under)
         .bind(PARENT_SUGGESTIONS)
@@ -177,6 +218,25 @@ pub(crate) async fn read(
         .persistent(false)
         .fetch_all(pool)
         .await?;
+    Ok(parents
+        .into_iter()
+        .map(|(name, kind)| ParentSuggestion { name, kind })
+        .collect())
+}
+
+/// Read the three lists against `vocab`, the parents for the prefix `under`
+/// (empty for none).
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if any read fails.
+pub(crate) async fn read(
+    pool: &PgPool,
+    vocab: &Vocabulary,
+    under: &str,
+) -> Result<FilterSuggestions, SearchError> {
+    let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
+    let parents = parents(pool, under).await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()
@@ -205,10 +265,7 @@ pub(crate) async fn read(
                 display_name: source.display_name.clone(),
             })
             .collect(),
-        parents: parents
-            .into_iter()
-            .map(|(name, kind)| ParentSuggestion { name, kind })
-            .collect(),
+        parents,
     })
 }
 

@@ -474,6 +474,152 @@ async fn a_source_is_offered_only_once_it_has_a_live_row() {
     }
 }
 
+/// Withdraw an item's entity, as a sync that no longer sees it does.
+async fn withdraw(pool: &sqlx::PgPool, entity: &str) {
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(entity)
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
+/// A withdrawn item vouches for neither its kind nor its source (#768, which
+/// reads `sync.live_item`'s liveness without the view), and a live row
+/// *behind* a withdrawn newer one still does: the probe walks past it.
+#[tokio::test]
+async fn a_withdrawn_item_vouches_for_neither_its_kind_nor_its_source() {
+    let pool = pool().await;
+    let t = token();
+    let gone_source = format!("a-gone-{t}");
+    let walked_source = format!("b-walked-{t}");
+    source(&pool, &gone_source, true).await;
+    source(&pool, &walked_source, true).await;
+    let gone_kind = format!("gone-kind-{t}");
+    let walked_kind = format!("walked-kind-{t}");
+
+    // Only withdrawn rows: nothing to offer.
+    let only = item(&pool, &gone_source, &gone_kind, "x", serde_json::json!({})).await;
+    withdraw(&pool, &only).await;
+    // A live row, then a newer withdrawn one on top of it.
+    item(
+        &pool,
+        &walked_source,
+        &walked_kind,
+        "old",
+        serde_json::json!({}),
+    )
+    .await;
+    let newer = item(
+        &pool,
+        &walked_source,
+        &walked_kind,
+        "new",
+        serde_json::json!({}),
+    )
+    .await;
+    withdraw(&pool, &newer).await;
+
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
+    let kinds: Vec<&str> = suggestions.kinds.iter().map(|k| k.kind.as_str()).collect();
+    assert!(!kinds.contains(&gone_kind.as_str()), "{kinds:?}");
+    assert!(kinds.contains(&walked_kind.as_str()), "{kinds:?}");
+    assert_eq!(sources_of(&suggestions, &t), [walked_source.as_str()]);
+}
+
+/// The rewritten kinds and sources reads (#768) return what the reads through
+/// `sync.live_item` returned, on one fixture mixing every case: a live row, a
+/// withdrawn-only kind, a live row behind a newer withdrawn one, a disabled
+/// source, a source with no config row (visible, as the view reads it), and
+/// two sources sharing a kind.
+#[tokio::test]
+async fn the_rewritten_reads_return_what_the_live_item_view_returned() {
+    let pool = pool().await;
+    let t = token();
+    let live = format!("a-live-{t}");
+    let off = format!("b-off-{t}");
+    let bare = format!("c-bare-{t}"); // no source_config row
+    let gone = format!("d-gone-{t}");
+    source(&pool, &live, true).await;
+    source(&pool, &off, false).await;
+    source(&pool, &gone, true).await;
+    let shared = format!("shared-{t}");
+    let only_off = format!("only-off-{t}");
+    let only_bare = format!("only-bare-{t}");
+    let only_gone = format!("only-gone-{t}");
+    let behind = format!("behind-{t}");
+
+    item(&pool, &live, &shared, "l1", serde_json::json!({})).await;
+    item(&pool, &off, &shared, "o1", serde_json::json!({})).await;
+    item(&pool, &off, &only_off, "o2", serde_json::json!({})).await;
+    item(&pool, &bare, &only_bare, "b1", serde_json::json!({})).await;
+    let w = item(&pool, &gone, &only_gone, "g1", serde_json::json!({})).await;
+    withdraw(&pool, &w).await;
+    item(&pool, &live, &behind, "k-old", serde_json::json!({})).await;
+    let newer = item(&pool, &live, &behind, "k-new", serde_json::json!({})).await;
+    withdraw(&pool, &newer).await;
+
+    let ids = vec![live.clone(), off.clone(), bare.clone(), gone.clone()];
+    let old_sources: Vec<String> = sqlx::query_scalar(
+        "select s.id from unnest($1::text[]) s(id)
+          where exists (select 1 from sync.live_item i where i.source_id = s.id)
+          order by s.id",
+    )
+    .bind(&ids)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let old_kinds: Vec<String> = sqlx::query_scalar(
+        "select distinct kind from sync.live_item where kind like $1 order by kind",
+    )
+    .bind(format!("%{t}"))
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        old_kinds.len(),
+        3,
+        "the fixture should leave three live kinds: {old_kinds:?}"
+    );
+
+    let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
+    let mut new_kinds: Vec<String> = suggestions
+        .kinds
+        .iter()
+        .map(|k| k.kind.clone())
+        .filter(|k| k.ends_with(&t))
+        .collect();
+    new_kinds.sort();
+    assert_eq!(new_kinds, old_kinds);
+    // Sources are offered from the configured ones; the unconfigured source
+    // has no entry to offer, so compare over the configured.
+    let configured: Vec<String> = old_sources.into_iter().filter(|s| *s != bare).collect();
+    assert_eq!(sources_of(&suggestions, &t), configured);
+}
+
+/// `parents_only` (#768) answers the parents and reads nothing else: the same
+/// parents the full read gives, with `kinds` and `sources` empty.
+#[tokio::test]
+async fn the_parents_alone_are_the_parents_of_the_full_read_without_its_lists() {
+    let pool = pool().await;
+    let t = token();
+    let name = format!("alone-{t}");
+    commit(&pool, "gitea", "tidewater", &name).await;
+
+    let searcher = searcher(&pool).await;
+    let full = searcher.filter_suggestions(&name).await.unwrap();
+    let alone = searcher.filter_parent_suggestions(&name).await.unwrap();
+    assert!(
+        !full.kinds.is_empty() && !full.sources.is_empty(),
+        "{full:?}"
+    );
+    assert!(
+        alone.kinds.is_empty() && alone.sources.is_empty(),
+        "{alone:?}"
+    );
+    assert_eq!(alone.parents, full.parents);
+    assert_eq!(alone.parents, [parent(&name, "repo")]);
+}
+
 /// Whether `under:` knows `name`, asked the way the box asks: the spelling a
 /// picked suggestion is typed with, and no unknown token in the answer.
 async fn under_knows(searcher: &Searcher, name: &str) -> bool {

@@ -77,9 +77,11 @@ export interface SessionPorts {
    * pass none and draw no suggestions; the launcher passes it.
    *
    * `under` is the `under:` value being typed: the engine answers the
-   * parents by that prefix (#761).
+   * parents by that prefix (#761). `parentsOnly` asks for the parents alone,
+   * `kinds` and `sources` coming back empty (#768): the session sets it on
+   * every read after an opening's first, which already holds those two.
    */
-  filterSuggestions?(under?: string): Promise<FilterSuggestions>;
+  filterSuggestions?(under?: string, parentsOnly?: boolean): Promise<FilterSuggestions>;
 }
 
 export interface SessionOptions extends SessionPorts {
@@ -147,11 +149,15 @@ export class Session {
    * types one never pays for the read, and a reopened launcher sees the
    * values that exist then. The parents are asked again for each `under:`
    * value typed (#761): the engine answers them by prefix, and the box
-   * narrows the last answer itself until the next one lands.
+   * narrows the last answer itself until the next one lands. The kinds and
+   * the sources are read once per opening (#768); a later read asks for the
+   * parents alone and keeps the opening's two lists.
    */
   suggestions = $state<FilterSuggestions | null>(null);
   /** The `under:` prefix last asked for, or `null` before the first read. */
   #suggestionsFor: string | null = null;
+  /** The opening's first read, whose kinds and sources every later answer keeps. */
+  #lists: Promise<Pick<FilterSuggestions, "kinds" | "sources">> | null = null;
   /** A read failed: nothing is asked again until the next opening. */
   #suggestionsFailed = false;
   /** Orders the reads, so a late answer to an older prefix is dropped. */
@@ -302,7 +308,19 @@ export class Session {
     this.#suggestionsFor = under;
     const id = ++this.#suggestionsIssued;
     try {
-      const answer = await read(under);
+      let answer: FilterSuggestions;
+      if (this.#lists === null) {
+        const first = read(under, false);
+        this.#lists = first.then(({ kinds, sources }) => ({ kinds, sources }));
+        // A failed first read is reported by the `await` below; this copy of
+        // it has no other reader when no second read follows.
+        this.#lists.catch(() => {});
+        answer = await first;
+      } else {
+        // The parents alone, beside the opening's read if it is still in flight.
+        const [lists, next] = await Promise.all([this.#lists, read(under, true)]);
+        answer = { kinds: lists.kinds, sources: lists.sources, parents: next.parents };
+      }
       if (id <= this.#suggestionsApplied) return;
       this.#suggestionsApplied = id;
       this.suggestions = answer;
@@ -397,6 +415,7 @@ export class Session {
     // Read again on the next opening: the values that exist may have moved.
     this.#suggestionsFor = null;
     this.#suggestionsFailed = false;
+    this.#lists = null;
     this.suggestions = null;
     // Whatever else survives a close, this does not: it is a statement about
     // the query in the box, and the paste branch below empties the box. Left

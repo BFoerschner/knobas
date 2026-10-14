@@ -209,6 +209,10 @@ pub async fn delete_smart_list(
 /// `under:` value, narrowing the last answer itself while the next is in
 /// flight.
 ///
+/// `parents_only` (#768), absent meaning false: read the parents and leave
+/// `kinds` and `sources` empty. The box sets it on every read after the
+/// opening's first, which already holds those two lists.
+///
 /// # Errors
 ///
 /// `not_ready` before the database is up, `internal` if a read fails.
@@ -216,8 +220,14 @@ pub async fn delete_smart_list(
 pub async fn filter_suggestions(
     lifecycle: State<'_, Lifecycle>,
     under: Option<String>,
+    parents_only: Option<bool>,
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
-    filter_suggestions_inner(&lifecycle.pool()?, under.as_deref().unwrap_or("")).await
+    filter_suggestions_inner(
+        &lifecycle.pool()?,
+        under.as_deref().unwrap_or(""),
+        parents_only.unwrap_or(false),
+    )
+    .await
 }
 
 /// The launcher's engine, reading what the compiled-in adapters declare about
@@ -293,8 +303,14 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
 pub async fn filter_suggestions_inner(
     pool: &PgPool,
     under: &str,
+    parents_only: bool,
 ) -> Result<knobas_search::FilterSuggestions, IpcError> {
-    Ok(searcher(pool).await?.filter_suggestions(under).await?)
+    let searcher = searcher(pool).await?;
+    Ok(if parents_only {
+        searcher.filter_parent_suggestions(under).await?
+    } else {
+        searcher.filter_suggestions(under).await?
+    })
 }
 
 /// [`smart_lists`], against a pool.

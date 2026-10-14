@@ -1971,7 +1971,8 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     .await
     .unwrap();
 
-    let v = serde_json::to_value(filter_suggestions_inner(&pool, "").await.unwrap()).unwrap();
+    let v =
+        serde_json::to_value(filter_suggestions_inner(&pool, "", false).await.unwrap()).unwrap();
 
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
@@ -1995,8 +1996,12 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     // per name this test seeded, each answered in the same wire shape.
     let mut ours: Vec<(String, String)> = Vec::new();
     for prefix in [format!("o/{t}"), t.clone()] {
-        let v =
-            serde_json::to_value(filter_suggestions_inner(&pool, &prefix).await.unwrap()).unwrap();
+        let v = serde_json::to_value(
+            filter_suggestions_inner(&pool, &prefix, false)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
         ours.extend(
             v["parents"]
                 .as_array()
