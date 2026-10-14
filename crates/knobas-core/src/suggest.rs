@@ -187,9 +187,13 @@ macro_rules! driver_tail {
             and not exists (
                   select 1
                     from knobas.link l
-                   where l.relation = c.relation
-                     and (   (l.from_id = c.from_id and l.to_id = c.to_id)
-                          or (l.from_id = c.to_id   and l.to_id = c.from_id)))
+                   where l.from_id = c.from_id and l.to_id = c.to_id
+                     and l.relation = c.relation)
+            and not exists (
+                  select 1
+                    from knobas.link l
+                   where l.from_id = c.to_id and l.to_id = c.from_id
+                     and l.relation = c.relation)
           order by least(c.from_id, c.to_id), greatest(c.from_id, c.to_id),
                    c.relation, c.from_id, c.reason
          on conflict do nothing"
@@ -223,21 +227,6 @@ macro_rules! issue_key {
     };
 }
 
-/// Every ticket in the mirror, with the bare key an issue reference spells.
-///
-/// An entity id is `<namespace>:<key>` split on the **first** colon, which is
-/// why this is `substr(id, position(':' in id) + 1)` and not `split_part`: a
-/// key may itself contain colons.
-macro_rules! tickets {
-    () => {
-        "ticket as (
-             select id, substr(id, position(':' in id) + 1) as key
-               from knobas.entity
-              where kind = 'ticket' and deleted_at is null
-         )"
-    };
-}
-
 /// One named detection rule.
 ///
 /// Separate, named and independently testable (#41). `sql` is the whole
@@ -267,20 +256,87 @@ pub struct Rule {
     scope: Scope,
 }
 
+/// That the item `$alias` is live, as `sync.live_item` means it -- the entity
+/// not withdrawn, the source not turned off -- for a statement that reads
+/// `sync.item` itself (#770).
+///
+/// Two correlated subqueries in the `where`, #768's shape, which the planner
+/// cannot turn into joins and so cannot drive a plan from. Through the view's
+/// joins, on tables never analyzed, `knobas.entity` is estimated at 84 rows
+/// for `deleted_at is null` (22,000 on the probe), and the planner drove every
+/// exact-key rule from it -- see [`ticket_keyed!`].
+macro_rules! live {
+    ($alias:literal) => {
+        concat!(
+            "(select e.deleted_at is null from knobas.entity e where e.id = ",
+            $alias,
+            ".entity_id)
+         and coalesce((select c.enabled from knobas.source_config c where c.id = ",
+            $alias,
+            ".source_id), true)"
+        )
+    };
+}
+
+/// The namespaces a live ticket has, for [`ticket_keyed!`]: one per ticket
+/// source, read once per statement.
+///
+/// An entity id is `<namespace>:<key>` split on the **first** colon, so the
+/// namespace is `split_part(id, ':', 1)` -- it holds no colon -- and the key
+/// after it may hold more.
+macro_rules! ticket_namespaces {
+    () => {
+        "ticket_ns as materialized (
+             select distinct split_part(id, ':', 1) as ns
+               from knobas.entity
+              where kind = 'ticket' and deleted_at is null
+         )"
+    };
+}
+
+/// The live ticket whose key is `k.key`, under any namespace: a lateral
+/// joined after the keys a rule found, probing `knobas.entity`'s primary key
+/// with `<namespace>:<key>` once per namespace in [`ticket_namespaces!`].
+///
+/// A key found in text names no namespace, so any Jira's `PAY-231` matches.
+/// Until #770 the rules joined the key to `substr(id, position(':' in id) +
+/// 1)` over every live ticket and every rule's item through
+/// `sync.live_item`, and the planner was free to drive that from either
+/// side. On tables never analyzed it estimated one ticket (15,000 on the
+/// probe) and 84 live entities (22,000), and drove from the tickets: every
+/// ticket against every entity, which ran past the pass's two-minute
+/// statement limit in the first rule, so the pass ended there and proposed
+/// nothing at all. Here the probe depends on the key, and the `offset 0` keeps
+/// it a probe, so there is no ticket side to drive from: the cost is one walk
+/// of the rule's kind and an index probe per key found, statistics or none.
+macro_rules! ticket_keyed {
+    () => {
+        "cross join lateral (
+               select t.id
+                 from ticket_ns n
+                 join knobas.entity t on t.id = n.ns || ':' || k.key
+                where t.kind = 'ticket' and t.deleted_at is null
+               offset 0) t"
+    };
+}
+
 /// An issue key in a branch name -- the most common connection in this work.
 const BRANCH_NAME_KEY: &str = detection!(concat!(
     "with ",
-    tickets!(),
+    ticket_namespaces!(),
     " select b.entity_id, t.id, 'related',
              format('the branch name contains %s', k.key)
-        from sync.live_item b
+        from sync.item b
         cross join lateral (
                select distinct m[1] as key
                  from regexp_matches(b.title, ",
     issue_key!(),
     ", 'g') m) k
-        join ticket t on t.key = k.key
-       where b.kind = 'branch'"
+        ",
+    ticket_keyed!(),
+    "
+       where b.kind = 'branch' and ",
+    live!("b")
 ));
 
 /// An issue key in a commit message.
@@ -290,17 +346,20 @@ const BRANCH_NAME_KEY: &str = detection!(concat!(
 /// statement of connection as one in the subject.
 const COMMIT_MESSAGE_KEY: &str = detection!(concat!(
     "with ",
-    tickets!(),
+    ticket_namespaces!(),
     " select i.entity_id, t.id, 'related',
              format('the commit message mentions %s', k.key)
-        from sync.live_item i
+        from sync.item i
         cross join lateral (
                select distinct m[1] as key
                  from regexp_matches(i.title || ' ' || i.body_text, ",
     issue_key!(),
     ", 'g') m) k
-        join ticket t on t.key = k.key
-       where i.kind = 'commit'"
+        ",
+    ticket_keyed!(),
+    "
+       where i.kind = 'commit' and ",
+    live!("i")
 ));
 
 /// An issue key in a build's parameters.
@@ -312,34 +371,40 @@ const COMMIT_MESSAGE_KEY: &str = detection!(concat!(
 /// build source as well.
 const BUILD_PARAMETER_KEY: &str = detection!(concat!(
     "with ",
-    tickets!(),
+    ticket_namespaces!(),
     " select i.entity_id, t.id, 'related',
              format('this build''s parameters name %s', k.key)
-        from sync.live_item i
+        from sync.item i
         cross join lateral (
                select distinct m[1] as key
                  from regexp_matches(i.title || ' ' || i.body_text, ",
     issue_key!(),
     ", 'g') m) k
-        join ticket t on t.key = k.key
-       where i.kind = 'build'"
+        ",
+    ticket_keyed!(),
+    "
+       where i.kind = 'build' and ",
+    live!("i")
 ));
 
 /// An issue key in a page's text -- documentation connecting to what it
 /// documents.
 const PAGE_TEXT_KEY: &str = detection!(concat!(
     "with ",
-    tickets!(),
+    ticket_namespaces!(),
     " select i.entity_id, t.id, 'related',
              format('this page mentions %s', k.key)
-        from sync.live_item i
+        from sync.item i
         cross join lateral (
                select distinct m[1] as key
                  from regexp_matches(i.title || ' ' || i.body_text, ",
     issue_key!(),
     ", 'g') m) k
-        join ticket t on t.key = k.key
-       where i.kind = 'page'"
+        ",
+    ticket_keyed!(),
+    "
+       where i.kind = 'page' and ",
+    live!("i")
 ));
 
 /// A relation the source system already states.
@@ -361,12 +426,12 @@ const PAGE_TEXT_KEY: &str = detection!(concat!(
 ///
 /// It is still only a proposal. A relation Jira states is evidence, but M2's
 /// rule is that nothing enters the graph unconfirmed.
-const SOURCE_RECORDED_RELATION: &str = detection!(
+const SOURCE_RECORDED_RELATION: &str = detection!(concat!(
     "select case when side.outward then i.entity_id else other.id end,
             case when side.outward then other.id else i.entity_id end,
             lower(side.relation),
             format('%s already records this link (%s)', i.source_id, side.label)
-       from sync.live_item i
+       from sync.item i
        cross join lateral jsonb_array_elements(i.payload->'fields'->'issuelinks') as l
        cross join lateral (
               select coalesce(l->'outwardIssue'->>'key', l->'inwardIssue'->>'key') as other_key,
@@ -379,8 +444,10 @@ const SOURCE_RECORDED_RELATION: &str = detection!(
         and other.id = i.source_id || ':' || side.other_key
       where jsonb_typeof(i.payload->'fields'->'issuelinks') = 'array'
         and side.other_key is not null
-        and side.relation is not null"
-);
+        and side.relation is not null
+        and ",
+    live!("i")
+));
 
 /// The host an address names, lowercased, or `null` if it names none.
 ///
@@ -573,8 +640,10 @@ const MONITOR_URL_HOST: &str = detection!(concat!(
                                       then m.payload->>'hostname' end), ''))"
     ),
     " as host
-           from sync.live_item m
-          where m.kind = 'monitor'
+           from sync.item m
+          where m.kind = 'monitor' and ",
+    live!("m"),
+    "
      ),
      stated as (
          select a.id as asset_id, ",
@@ -729,50 +798,49 @@ const SIMILAR_TEXT: &str = detection!(concat!(
          select p.entity_id, p.fts, ",
     title_query!("p.title"),
     " as q
-           from sync.live_item p
+           from sync.item p
           where p.entity_id = any($5) and p.kind in ",
     prose_kinds!(),
+    " and ",
+    live!("p"),
     "
      ),
      settled as materialized (
-         select p.entity_id, p.fts, s.title_q as q
-           from sync.live_item p
-           join sync.similar_text_seen s
-             on s.entity_id = p.entity_id and s.digest = ",
+         select p.entity_id
+           from sync.similar_text_seen s
+           join sync.item p on p.entity_id = s.entity_id
+          where s.digest = ",
     digest_of!("p"),
-    "
-          where p.kind in ",
+    " and p.kind in ",
     prose_kinds!(),
-    " and p.entity_id <> all($5)
+    " and p.entity_id <> all($5) and ",
+    live!("p"),
+    "
      ),
-     reach as materialized (
-         select x.entity_id as from_id, o.entity_id as to_id
+     judged as (
+         select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts
+           from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
+         union all
+         select a.entity_id, i.entity_id, a.fts, i.fts
+           from batch a
+           cross join lateral (
+                  select i.entity_id, i.fts
+                    from sync.item i
+                   where i.fts @@ a.q and i.entity_id > a.entity_id
+                     and (i.entity_id in (select entity_id from settled)) is true
+                  offset 0) i
+         union all
+         select x.entity_id, o.entity_id,
+                (select p.fts from sync.item p where p.entity_id = x.entity_id), o.fts
            from batch o
            cross join lateral (
                   select x.entity_id
                     from sync.similar_text_seen x
                    where x.title_lex && tsvector_to_array(o.fts)
                      and x.entity_id < o.entity_id
+                     and o.fts @@ x.title_q
+                     and (x.entity_id in (select entity_id from settled)) is true
                   offset 0) x
-     ),
-     judged as (
-         select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts
-           from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
-         union all
-         select a.entity_id, o.entity_id, a.fts, o.fts
-           from batch a
-           cross join lateral (
-                  select i.entity_id
-                    from sync.item i
-                   where i.fts @@ a.q and i.entity_id > a.entity_id
-                  offset 0) i
-           join settled o on o.entity_id = i.entity_id
-         union all
-         select a.entity_id, o.entity_id, a.fts, o.fts
-           from reach r
-           join batch o on o.entity_id = r.to_id
-           join settled a on a.entity_id = r.from_id
-          where o.fts @@ a.q
      ),
      pair as (
          select from_id, to_id,
@@ -795,10 +863,13 @@ const SIMILAR_TEXT: &str = detection!(concat!(
 /// up part-way has settled a prefix and the next one starts after it.
 const CHANGED_PROSE: &str = concat!(
     "select p.entity_id
-       from sync.live_item p
+       from sync.item p
       where p.kind in ",
     prose_kinds!(),
-    " and not exists (
+    " and ",
+    live!("p"),
+    "
+        and not exists (
               select 1
                 from sync.similar_text_seen s
                where s.entity_id = p.entity_id and s.digest = ",
@@ -816,9 +887,11 @@ const PRUNE_SEEN: &str = concat!(
     "delete from sync.similar_text_seen s
       where not exists (
               select 1
-                from sync.live_item p
+                from sync.item p
                where p.entity_id = s.entity_id and p.kind in ",
     prose_kinds!(),
+    " and ",
+    live!("p"),
     ")"
 );
 
@@ -833,9 +906,11 @@ const MARK_SEEN: &str = concat!(
     ", ",
     title_lexemes!("p.title"),
     "
-       from sync.live_item p
+       from sync.item p
       where p.entity_id = any($1) and p.kind in ",
     prose_kinds!(),
+    " and ",
+    live!("p"),
     "
      on conflict (entity_id) do update
         set digest = excluded.digest, title_q = excluded.title_q,
