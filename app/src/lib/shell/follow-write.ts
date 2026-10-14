@@ -10,11 +10,19 @@
  * where the surface can open again with what was typed, *Edit and resend*:
  * the detail's own failure path (#752), for a surface without a panel.
  *
- * Listens on `activity:new`, which follows every queue transition, and asks
- * `pending_writes` once at once as well: a send quick enough to settle before
- * the listener was registered announced itself to nobody. Stops when the
- * write has left the open rows (sent, or withdrawn in the queue) or once it
- * has been told as held or refused.
+ * ## One reader for every follow (#779)
+ *
+ * Every follow goes through one {@link WriteFollower}: one listener on
+ * `activity:new`, which follows every queue transition, and **one**
+ * `pending_writes` read per event however many writes are followed (*Log
+ * all* of twenty is twenty follows). Events that land while a read is out
+ * are coalesced into one more read after it. Each read is fanned out to the
+ * subscribers by write id. A follow also asks once at once: a send quick
+ * enough to settle before the follow began announced itself to nobody.
+ *
+ * A subscriber leaves when its write settles (sent, withdrawn in the queue,
+ * or told as held or refused) or when its surface stops it -- `followWrite`
+ * answers the stop. The last one out stops the listener.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
@@ -33,6 +41,92 @@ const REAL: FollowPorts = {
   pendingWrites: () => realPendingWrites(),
 };
 
+/** What a subscriber hears: its write's open row, or `undefined` once it left the queue's open rows. */
+export type Hear = (row: QueuedWrite | undefined) => void;
+
+export interface WriteFollower {
+  /** Hear write `id`'s row after every queue read, until the answered stop is called. */
+  follow(id: number, hear: Hear): () => void;
+}
+
+/** A follower over `ports`: one listener and one read per event, shared by every follow. */
+export function createFollower(ports: FollowPorts): WriteFollower {
+  const subscribers = new Set<{ id: number; hear: Hear }>();
+  let reading = false;
+  let again = false;
+  let unlisten: (() => void) | null = null;
+  let listening = false;
+
+  async function read() {
+    if (reading) {
+      again = true;
+      return;
+    }
+    reading = true;
+    try {
+      do {
+        again = false;
+        let open: QueuedWrite[];
+        try {
+          open = await ports.pendingWrites();
+        } catch {
+          // Not known; the next queue movement asks again.
+          continue;
+        }
+        const byId = new Map(open.map((w) => [w.id, w]));
+        for (const subscriber of [...subscribers]) {
+          if (subscribers.has(subscriber)) subscriber.hear(byId.get(subscriber.id));
+        }
+      } while (again && subscribers.size > 0);
+    } finally {
+      reading = false;
+    }
+  }
+
+  function listenIfNeeded() {
+    if (listening) return;
+    listening = true;
+    ports
+      .listen(EVENTS.activityNew, () => void read())
+      .then((off) => {
+        if (listening && unlisten === null) unlisten = off;
+        else off();
+      })
+      .catch(() => {
+        // No event channel: the queue panel still says where the write is.
+        listening = false;
+      });
+  }
+
+  function stopIfIdle() {
+    if (subscribers.size > 0 || !listening) return;
+    listening = false;
+    unlisten?.();
+    unlisten = null;
+  }
+
+  return {
+    follow(id, hear) {
+      const subscriber = { id, hear };
+      subscribers.add(subscriber);
+      listenIfNeeded();
+      void read();
+      return () => {
+        if (!subscribers.delete(subscriber)) return;
+        stopIfIdle();
+      };
+    },
+  };
+}
+
+let shared: WriteFollower | null = null;
+
+/** The shell's one follower, made on first use. */
+export function writeFollower(): WriteFollower {
+  shared ??= createFollower(REAL);
+  return shared;
+}
+
 export interface Following {
   /** What the write is, in the toast's words: "Comment", "Worklog". */
   name: string;
@@ -40,45 +134,39 @@ export interface Following {
   resend?: () => void;
 }
 
-/** Watch `write` until it settles; say so only if it is held or refused. */
-export function followWrite(write: Pick<QueuedWrite, "id">, following: Following, ports: FollowPorts = REAL): void {
+/** The toast for a write that will not go on its own. */
+export function toastStopped(row: QueuedWrite, following: Following): void {
+  push({
+    text: `${following.name} ${row.state === "held" ? "was held" : "was refused"}${row.detail ? `: ${row.detail}` : ""}`,
+    tone: "err",
+    ms: 20_000,
+    action: { label: "Open write queue", run: openWriteQueue },
+    more: following.resend ? [{ label: "Edit and resend", run: following.resend }] : [],
+  });
+}
+
+/**
+ * Watch `write` until it settles; say so only if it is held or refused.
+ * Answers the stop, for a surface that unmounts first.
+ */
+export function followWrite(
+  write: Pick<QueuedWrite, "id">,
+  following: Following,
+  follower: WriteFollower = writeFollower(),
+): () => void {
+  let stop: () => void = () => {};
   let done = false;
-  let unlisten: (() => void) | null = null;
-  const stop = () => {
+  const leave = () => {
     done = true;
-    unlisten?.();
-    unlisten = null;
-  };
-  const ask = async () => {
-    if (done) return;
-    let open: QueuedWrite[];
-    try {
-      open = await ports.pendingWrites();
-    } catch {
-      // Not known; the next queue movement asks again.
-      return;
-    }
-    if (done) return;
-    const row = open.find((w) => w.id === write.id);
-    if (row === undefined) return stop();
-    if (row.state !== "held" && row.state !== "refused") return;
     stop();
-    push({
-      text: `${following.name} ${row.state === "held" ? "was held" : "was refused"}${row.detail ? `: ${row.detail}` : ""}`,
-      tone: "err",
-      ms: 20_000,
-      action: { label: "Open write queue", run: openWriteQueue },
-      more: following.resend ? [{ label: "Edit and resend", run: following.resend }] : [],
-    });
   };
-  ports
-    .listen(EVENTS.activityNew, () => void ask())
-    .then((off) => {
-      if (done) off();
-      else unlisten = off;
-    })
-    .catch(() => {
-      // No event channel: the queue panel still says where the write is.
-    });
-  void ask();
+  stop = follower.follow(write.id, (row) => {
+    if (done) return;
+    if (row === undefined) return leave();
+    if (row.state !== "held" && row.state !== "refused") return;
+    leave();
+    toastStopped(row, following);
+  });
+  if (done) stop();
+  return leave;
 }

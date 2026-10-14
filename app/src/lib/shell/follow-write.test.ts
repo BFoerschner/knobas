@@ -3,6 +3,9 @@
  * closed on the queue's answer, and the surface is told only if the write
  * will not go on its own -- held or refused -- with the way to the queue and,
  * where the surface can reopen, *Edit and resend*.
+ *
+ * Every follow shares one reader (#779): one `pending_writes` read per
+ * `activity:new`, however many writes are followed, fanned out by write id.
  */
 import { beforeEach, expect, test, vi } from "vitest";
 
@@ -11,42 +14,63 @@ import type { QueuedWrite } from "../ipc/sources";
 const handlers: (() => void)[] = [];
 let stopped = 0;
 let open: QueuedWrite[] = [];
+let reads = 0;
+/** Set to hold every read open until `release` is called. */
+let hold = false;
+let release: () => void = () => {};
 
 const ports = {
   listen: (_event: string, handler: () => void) => {
     handlers.push(handler);
     return Promise.resolve(() => {
       stopped += 1;
+      handlers.splice(handlers.indexOf(handler), 1);
     });
   },
-  pendingWrites: () => Promise.resolve(open),
+  pendingWrites: () => {
+    reads += 1;
+    const answer = open;
+    if (!hold) return Promise.resolve(answer);
+    return new Promise<QueuedWrite[]>((resolve) => {
+      release = () => resolve(answer);
+    });
+  },
 };
 
-const { followWrite } = await import("./follow-write");
+const { createFollower, followWrite } = await import("./follow-write");
 const { toasts } = await import("./toasts.svelte");
 
-function write(state: QueuedWrite["state"], detail: string | null = null): QueuedWrite {
-  return { id: 7, state, detail, op: "comment", entity_id: "jira:PAY-1" } as QueuedWrite;
+function write(state: QueuedWrite["state"], detail: string | null = null, id = 7): QueuedWrite {
+  return { id, state, detail, op: "comment", entity_id: "jira:PAY-1" } as QueuedWrite;
 }
 
 async function settle() {
-  for (let i = 0; i < 5; i++) await Promise.resolve();
+  for (let i = 0; i < 8; i++) await Promise.resolve();
 }
+
+function event() {
+  for (const handler of [...handlers]) handler();
+}
+
+let follower = createFollower(ports);
 
 beforeEach(() => {
   handlers.length = 0;
   stopped = 0;
   open = [];
+  reads = 0;
+  hold = false;
   toasts.items = [];
+  follower = createFollower(ports);
 });
 
 test("a write that went says nothing more and stops listening", async () => {
   open = [write("pending")];
-  followWrite(write("pending"), { name: "Comment" }, ports);
+  followWrite(write("pending"), { name: "Comment" }, follower);
   await settle();
   expect(handlers).toHaveLength(1);
   open = [];
-  handlers[0]!();
+  event();
   await settle();
   expect(toasts.items).toEqual([]);
   expect(stopped).toBe(1);
@@ -55,10 +79,10 @@ test("a write that went says nothing more and stops listening", async () => {
 test("a refused write says why, offers the queue and Edit and resend, and stops", async () => {
   open = [write("pending")];
   const resend = vi.fn();
-  followWrite(write("pending"), { name: "Comment", resend }, ports);
+  followWrite(write("pending"), { name: "Comment", resend }, follower);
   await settle();
   open = [write("refused", "403 Forbidden")];
-  handlers[0]!();
+  event();
   await settle();
   expect(toasts.items.map((t) => [t.text, t.tone])).toEqual([["Comment was refused: 403 Forbidden", "err"]]);
   const toast = toasts.items[0]!;
@@ -68,14 +92,14 @@ test("a refused write says why, offers the queue and Edit and resend, and stops"
   expect(resend).toHaveBeenCalledOnce();
   expect(stopped).toBe(1);
   // Told once: a later movement is not news about this write.
-  handlers[0]!();
+  event();
   await settle();
   expect(toasts.items).toHaveLength(1);
 });
 
 test("a held write from a surface that cannot reopen offers only the queue", async () => {
   open = [write("held", "the ticket moved")];
-  followWrite(write("pending"), { name: "Worklog" }, ports);
+  followWrite(write("pending"), { name: "Worklog" }, follower);
   await settle();
   // Settled before anything was heard: the first ask finds it.
   expect(toasts.items.map((t) => t.text)).toEqual(["Worklog was held: the ticket moved"]);
@@ -84,10 +108,75 @@ test("a held write from a surface that cannot reopen offers only the queue", asy
 
 test("a write still pending keeps listening", async () => {
   open = [write("pending")];
-  followWrite(write("pending"), { name: "Comment" }, ports);
+  followWrite(write("pending"), { name: "Comment" }, follower);
   await settle();
-  handlers[0]!();
+  event();
   await settle();
   expect(toasts.items).toEqual([]);
   expect(stopped).toBe(0);
+});
+
+test("N followed writes cost one queue read per event, and one listener", async () => {
+  open = [1, 2, 3, 4, 5].map((id) => write("pending", null, id));
+  for (const id of [1, 2, 3, 4, 5]) followWrite({ id }, { name: "Worklog" }, follower);
+  await settle();
+  expect(handlers).toHaveLength(1);
+  const before = reads;
+  event();
+  await settle();
+  expect(reads - before).toBe(1);
+  // The fan-out still reaches each one by its id.
+  open = [write("refused", "no", 3), ...[1, 2, 4, 5].map((id) => write("pending", null, id))];
+  event();
+  await settle();
+  expect(reads - before).toBe(2);
+  expect(toasts.items.map((t) => t.text)).toEqual(["Worklog was refused: no"]);
+});
+
+test("events that land while a read is out are coalesced into one more read", async () => {
+  open = [write("pending")];
+  followWrite(write("pending"), { name: "Comment" }, follower);
+  await settle();
+  hold = true;
+  const before = reads;
+  event();
+  event();
+  event();
+  await settle();
+  expect(reads - before).toBe(1);
+  hold = false;
+  release();
+  await settle();
+  expect(reads - before).toBe(2);
+});
+
+test("a follow stopped by its surface leaves, and the last one out stops the listener", async () => {
+  open = [write("pending", null, 1), write("pending", null, 2)];
+  const one = followWrite({ id: 1 }, { name: "Comment" }, follower);
+  const two = followWrite({ id: 2 }, { name: "Comment" }, follower);
+  await settle();
+  one();
+  expect(stopped).toBe(0);
+  two();
+  expect(stopped).toBe(1);
+  // Refused after it left: nobody is told, because nobody is listening.
+  open = [write("refused", "no", 1)];
+  event();
+  await settle();
+  expect(toasts.items).toEqual([]);
+});
+
+test("a raw follower hears its write's row on every read, and nothing once it left", async () => {
+  open = [write("pending")];
+  const heard: (string | undefined)[] = [];
+  const stop = follower.follow(7, (row) => heard.push(row?.state));
+  await settle();
+  open = [];
+  event();
+  await settle();
+  expect(heard).toEqual(["pending", undefined]);
+  stop();
+  event();
+  await settle();
+  expect(heard).toHaveLength(2);
 });

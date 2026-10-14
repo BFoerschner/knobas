@@ -68,8 +68,10 @@ vi.mock("../ipc/entity", () => ({
 /** What the view handed the queue's follower (#775), and how it would reopen. */
 const followed: { write: { id: number }; following: { name: string; resend?: () => void } }[] = [];
 vi.mock("../shell/follow-write", () => ({
-  followWrite: (write: { id: number }, following: { name: string; resend?: () => void }) =>
-    followed.push({ write, following }),
+  followWrite: (write: { id: number }, following: { name: string; resend?: () => void }) => {
+    followed.push({ write, following });
+    return () => {};
+  },
 }));
 
 // The ack is an **estate** command and not an inbox one (#446): what clears

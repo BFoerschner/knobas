@@ -57,6 +57,8 @@
   rest of story 81 and is not in M4.1's committed scope.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import { ipcErrorMessage } from "../ipc";
   import {
     monitorRoster as realMonitorRoster,
@@ -84,6 +86,12 @@
     typeCounts,
     type ChipState,
   } from "./monitors";
+
+  /** The writes this view follows, stopped when it goes (#779). */
+  const following: (() => void)[] = [];
+  onDestroy(() => {
+    for (const stop of following.splice(0)) stop();
+  });
 
   /** The bridge this view needs, injectable so a test needs no Tauri. */
   interface MonitorPorts {
@@ -287,7 +295,7 @@
       push({ text: `${form.queued} ${monitor.name}` });
       // Free on the queue's answer (#775): the re-read runs behind the reader,
       // and only a write that will not go is told again.
-      followWrite(write, { name: `${form.label} of ${monitor.name}` });
+      following.push(followWrite(write, { name: `${form.label} of ${monitor.name}` }));
       void read();
     } catch (rejection) {
       push({

@@ -31,6 +31,8 @@
   other people read is not something to discover afterwards.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
   import { ipcErrorMessage } from "../ipc";
   import {
     logAll as realLogAll,
@@ -54,6 +56,12 @@
     weekLabel,
     weekWindows,
   } from "./week";
+
+  /** The writes this view follows, stopped when it goes (#779). */
+  const following: (() => void)[] = [];
+  onDestroy(() => {
+    for (const stop of following.splice(0)) stop();
+  });
 
   /** The bridge this view needs, injectable so a test needs no Tauri. */
   interface WeekPorts {
@@ -215,7 +223,7 @@
       // Queued, not sent (#775): the week goes behind the reader, and only a
       // worklog that will not go is told again.
       for (const worklog of made) {
-        if (worklog.write_queue_id !== null) followWrite({ id: worklog.write_queue_id }, { name: "Worklog" });
+        if (worklog.write_queue_id !== null) following.push(followWrite({ id: worklog.write_queue_id }, { name: "Worklog" }));
       }
     } catch (error) {
       failure = ipcErrorMessage(error);
