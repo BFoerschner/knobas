@@ -1,7 +1,7 @@
 -- 0032_the_project_an_item_belongs_to.sql -- `sync.item_project`, the project
 -- each item declares, kept by the database beside `sync.item_parent` and
--- `sync.item_revision`; and a prefix index on `sync.item_parent`'s name
--- (issues #759 and #761, ADR-0019's pattern).
+-- `sync.item_revision`; and a prefix index and the item's time on
+-- `sync.item_parent` (issues #759 and #761, ADR-0019's pattern).
 --
 -- Single-writer (orchestrator), like every migration: a stream that needs more
 -- schema requests 0033 and never edits this file or its predecessors -- sqlx
@@ -24,6 +24,11 @@
 -- name starts with what was typed, and `item_parent_name_prefix_idx` is the
 -- index that prefix ranges over (`text_pattern_ops`: byte order, so a range
 -- on `~>=~` / `~<~` is an index range whatever the database's collation).
+-- `sync.item_parent.at` is the item's time on each parent row, copied as
+-- `sync.item_project.at` is (below), so ranking a broad prefix reads that one
+-- table: joining each row to `sync.item` for its time took 196-260 ms for
+-- `""`/`j` on the probe before `ANALYZE` had run, the planner estimating one
+-- row where 30,000 matched and probing `sync.item` once per row.
 --
 -- ## What is stored, and what it depends on
 --
@@ -66,7 +71,11 @@
 --
 -- * **A write to `sync.item`**: the rows a statement inserted, and the rows an
 --   update changed `source_id`, `kind` or `payload` of. A delete cascades.
---   Any other updated row whose time moved has `at` rewritten in place.
+--   Any other updated row whose time moved has `at` rewritten in place, on
+--   `sync.item_parent` and `sync.item_project` both. A row whose time did not
+--   move is not written: a re-sync rewrites an unchanged item's `sync.item`
+--   row, but its time moves only when the source's `updated` does, or, for
+--   an item whose source reports none, with every `synced_at`.
 -- * **A change to `sync.parent_declaration`**: every item of a kind the
 --   changed rows' old or new declarations give a project key. A truncate
 --   recomputes all.
@@ -94,6 +103,34 @@ create index item_project_census_idx on sync.item_project
 create index item_project_entity_idx on sync.item_project (entity_id);
 
 create index item_parent_name_prefix_idx on sync.item_parent (lower(name) text_pattern_ops);
+
+-- The item's time on each parent row, for the `under:` ranking (#761): a
+-- broad prefix ranks tens of thousands of rows, and fetching each one's time
+-- from `sync.item` is a join whose plan hangs on the planner's statistics.
+-- Kept as `sync.item_project.at` is, below.
+alter table sync.item_parent add column at timestamptz;
+
+-- `0029`'s, restated with the one difference that each row carries `at`. The
+-- two expansions are pasted unchanged, and `knobas-search`'s
+-- `tests/it/item_parent.rs` still holds the stored text to the macros'.
+create or replace function sync.resolve_item_parents(ids text[]) returns void
+language plpgsql as $fn$
+begin
+  delete from sync.item_parent p using unnest(ids) as u(id) where p.entity_id = u.id;
+  insert into sync.item_parent (entity_id, adapter_kind, name, kind, arm, source_id, at)
+  select i.entity_id, a.adapter_kind, n.name, n.kind, n.arm, i.source_id,
+         coalesce(i.item_updated_at, i.synced_at)
+    from unnest(ids) as u(id)
+    join sync.item i on i.entity_id = u.id
+    join sync.declared_adapters() as a on i.kind = any(a.reached)
+   cross join lateral (select jsonb_build_object(i.source_id, a.kinds) as decl) dd
+   cross join lateral (
+     select pn.name, pn.kind, 'child' as arm from (select pr.pos, pr.kind, n.name_ord, btrim(pr.obj #>> n.segs) as name from (select e.pos, w.kind, e.obj, w.names from (select c.kind, c.at_segs, c.names from (select t.p->>'kind' as kind, array(select jsonb_array_elements_text(case when jsonb_typeof(t.p->'at') = 'array' then t.p->'at' else '[]'::jsonb end)) as at_segs, t.p->'names' as names, t.ord from jsonb_array_elements(case when jsonb_typeof(dd.decl::jsonb #> array[i.source_id, i.kind, 'parent']) = 'array' then dd.decl::jsonb #> array[i.source_id, i.kind, 'parent'] else '[]'::jsonb end) with ordinality as t(p, ord)) c where cardinality(c.at_segs) > 0 and jsonb_typeof(i.payload #> c.at_segs) in ('object', 'array') order by c.ord limit 1) w cross join lateral jsonb_array_elements(case when jsonb_typeof(i.payload #> w.at_segs) = 'array' then i.payload #> w.at_segs else jsonb_build_array(i.payload #> w.at_segs) end) with ordinality as e(obj, pos) where jsonb_typeof(e.obj) = 'object') pr cross join lateral (select array(select jsonb_array_elements_text(case when jsonb_typeof(q.np) = 'array' then q.np else '[]'::jsonb end)) as segs, q.name_ord from jsonb_array_elements(case when jsonb_typeof(pr.names) = 'array' then pr.names else '[]'::jsonb end) with ordinality as q(np, name_ord)) n where jsonb_typeof(pr.obj #> n.segs) = 'string' and nullif(btrim(pr.obj #>> n.segs), '') is not null) pn
+     union all
+     select sn.name, i.kind, 'parent' from (select distinct btrim(i.payload #>> s.segs) as name from (select array(select jsonb_array_elements_text(case when jsonb_typeof(nm.np) = 'array' then nm.np else '[]'::jsonb end)) as segs from jsonb_each(case when jsonb_typeof(dd.decl::jsonb -> i.source_id) = 'object' then dd.decl::jsonb -> i.source_id else '{}'::jsonb end) as k(kind, kp) cross join lateral jsonb_array_elements(case when jsonb_typeof(k.kp->'parent') = 'array' then k.kp->'parent' else '[]'::jsonb end) as pp(p) cross join lateral jsonb_array_elements(case when jsonb_typeof(pp.p->'names') = 'array' then pp.p->'names' else '[]'::jsonb end) as nm(np) where pp.p->>'kind' = i.kind) s where jsonb_typeof(i.payload #> s.segs) = 'string' and nullif(btrim(i.payload #>> s.segs), '') is not null) sn
+   ) n;
+end
+$fn$;
 
 -- The kinds one adapter's declarations give a project key.
 create function sync.project_kinds_reached(payload_paths jsonb) returns text[]
@@ -189,7 +226,13 @@ begin
   perform sync.resolve_item_parents(ids);
   perform sync.resolve_item_revisions(ids);
   perform sync.resolve_item_projects(ids);
-  -- Every other updated row keeps its project and gets its new time.
+  -- Every other updated row keeps its parents and its project and gets its
+  -- new time. Only a row whose time moved is written.
+  update sync.item_parent p
+     set at = coalesce(n.item_updated_at, n.synced_at)
+    from new_rows n
+   where p.entity_id = n.entity_id
+     and p.at is distinct from coalesce(n.item_updated_at, n.synced_at);
   update sync.item_project p
      set at = coalesce(n.item_updated_at, n.synced_at)
     from new_rows n
@@ -250,6 +293,10 @@ end
 $fn$;
 
 -- Every row mirrored before this migration, from the declarations bring-up
--- already stored. Like `0028`'s last statement it takes no lock: migrations
--- run at bring-up, before any sync.
+-- already stored, and every stored parent row's time. Like `0028`'s last
+-- statement they take no lock: migrations run at bring-up, before any sync.
+update sync.item_parent p
+   set at = coalesce(i.item_updated_at, i.synced_at)
+  from sync.item i
+ where i.entity_id = p.entity_id;
 select sync.resolve_all_item_projects();

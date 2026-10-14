@@ -89,9 +89,12 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// Two steps, so the cost does not hang on the planner's statistics:
 ///
 /// 1. **Rank** every `(name, kind)` with the prefix by the newest mirrored
-///    item that names it -- `sync.item_parent` joined to `sync.item` alone,
-///    and every asset by its own time -- sorted. The `offset 0` keeps step 2
-///    from being pushed beneath the sort.
+///    item that names it -- `sync.item_parent` alone, which carries its
+///    item's time (`at`, migration `0032`), and every asset by its own time --
+///    sorted. Grouped in byte order (`collate "C"`): the grouping is only an
+///    identity, and a broad prefix groups tens of thousands of rows, which
+///    the database's collation compares several times slower. The `offset 0`
+///    keeps step 2 from being pushed beneath the sort.
 /// 2. **Offer** them in that order while [`crate::under::parent_names!`] --
 ///    the fragment `under:`'s own lookup reads -- has the same name and kind,
 ///    up to the limit. So an offered name is one `under:` knows (#615); and
@@ -101,13 +104,18 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 ///    into a semi join that builds the whole fragment (30,890 rows on the
 ///    probe, 28-175 ms), while a lateral is a few index probes per candidate,
 ///    in rank order, stopped by the outer limit. The outer `order by` is the
-///    subquery's own, so it adds no sort above the loop.
+///    subquery's own, so it adds no sort above the loop. The probe compares
+///    in the database's collation again (`collate "default"`), which is what
+///    `item_parent_name_idx` is built in.
 ///
 /// Joining every row to `sync.live_item` before ranking was 58 ms at the
 /// probe's size with fresh statistics and 306 ms without (the join to
 /// `knobas.source_config` on two columns is underestimated a hundredfold and
-/// the planner picks nested loops). This shape measured 39 ms for an empty
-/// prefix, 31 ms for `j` and 0.5 ms for `pay`, with statistics and without.
+/// the planner picks nested loops). Joining each row to `sync.item` for its
+/// time instead was 33 ms for an empty prefix with statistics and 260 ms on
+/// tables never analyzed, for the same reason. This shape measured 27 ms for
+/// an empty prefix, 20 ms for `j`, 3 ms for `jira0-1` and 1 ms for `pay` on
+/// the probe, never analyzed and analyzed alike, and under a generic plan.
 ///
 /// **What the ranking concedes**: a name is ranked by its newest item, live or
 /// not. A name whose newest item was withdrawn, or sits in a turned-off
@@ -126,20 +134,20 @@ pub const PARENT_SUGGESTIONS: i64 = 20;
 /// a row without a kind, is not offered.
 const PARENTS_SQL: &str = concat!(
     "select g.name, g.kind from ( \
-       select p.name, p.kind, max(p.at) as top from ( \
-         select ip.name, ip.kind, coalesce(i.item_updated_at, i.synced_at) as at \
-           from sync.item_parent ip join sync.item i on i.entity_id = ip.entity_id \
+       select p.name collate \"C\" as name, p.kind, max(p.at) as top from ( \
+         select ip.name, ip.kind, ip.at from sync.item_parent ip \
          union all select a.name, 'asset', a.updated_at from knobas.asset a) p \
         where lower(p.name) ~>=~ lower($1) \
           and lower(p.name) ~<~ (lower($1) || chr(1114111)) \
           and starts_with(lower(p.name), lower($1)) \
           and nullif(btrim(p.name), '') is not null and nullif(p.kind, '') is not null \
-        group by p.name, p.kind \
-        order by top desc nulls last, p.name, p.kind \
+        group by p.name collate \"C\", p.kind \
+        order by top desc nulls last, p.name collate \"C\", p.kind \
        offset 0) g \
      cross join lateral (select 1 from ",
     crate::under::parent_names!(),
-    " k where lower(k.name) = lower(g.name) and k.name = g.name and k.kind = g.kind limit 1) known \
+    " k where lower(k.name) = lower(g.name collate \"default\") \
+        and k.name = g.name collate \"default\" and k.kind = g.kind limit 1) known \
      order by g.top desc nulls last, g.name, g.kind \
      limit $2"
 );
