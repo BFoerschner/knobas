@@ -36,6 +36,7 @@
 //! the descriptor never declared.
 
 pub mod alerts;
+pub mod analyze;
 pub mod attach;
 pub mod config;
 pub mod health;
@@ -503,6 +504,14 @@ async fn run_inner(
             return Err(error);
         }
     };
+    // The run's statistics are flushed as it commits, not up to a second or
+    // so later when the backend next goes idle: the analyze pass the
+    // scheduler asks for next reads `n_live_tup` to decide what grew (#778,
+    // `analyze`), and a count still pending in this backend would read as
+    // nothing having changed.
+    sqlx::query("select pg_stat_force_next_flush()")
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
 
     let Locked {

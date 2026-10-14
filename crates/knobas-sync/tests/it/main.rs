@@ -9,6 +9,7 @@
 //! could not absorb a merged binary's extra load (`test-layout-exceptions.txt`).
 
 mod alerts;
+mod analyze;
 mod attach;
 mod backfill;
 mod config;
