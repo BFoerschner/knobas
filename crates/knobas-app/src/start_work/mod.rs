@@ -464,8 +464,13 @@ struct Behind(String);
 impl Behind {
     fn claim(ticket: &EntityRef) -> Option<Self> {
         let key = ticket.to_string();
-        let mut running = running_behind().lock().unwrap_or_else(|e| e.into_inner());
-        running.insert(key.clone()).then_some(Self(key))
+        let fresh = running_behind()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.clone());
+        // Built only once the lock is let go: a claim dropped under it -- the
+        // ticket already running -- would take the same lock in `drop`.
+        fresh.then(|| Self(key))
     }
 }
 

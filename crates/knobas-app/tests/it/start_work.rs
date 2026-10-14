@@ -1380,9 +1380,13 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     // The branch's send is out: the step reads as running, and a second ask
     // while it is out starts no second loop.
     read_until(&pool, |f| outcome(f, Step::CreateBranch) == StepOutcome::Running).await;
-    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
-        .await
-        .expect("a second ask answers");
+    tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
+    )
+    .await
+    .expect("a second ask answers, and does not wait on the first")
+    .expect("a second ask reads the flow");
 
     gate.add_permits(10);
     let flow = read_until(&pool, |f| {
