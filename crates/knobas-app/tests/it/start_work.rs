@@ -1577,3 +1577,90 @@ async fn a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited() {
         ["create_branch", "create_pull_request", "transition"]
     );
 }
+
+/// **#790.** A quit while a step was being sent leaves it `running`. The
+/// start-up pass reads it as interrupted -- failed, with the reason -- and
+/// *Retry* and *Skip* both work on it.
+#[tokio::test]
+async fn a_step_left_running_by_a_quit_reads_as_interrupted_and_can_be_retried_or_skipped() {
+    for skip in [false, true] {
+        let pool = corpus(if skip {
+            "sw_intr_skip"
+        } else {
+            "sw_intr_retry"
+        })
+        .await;
+        let flow = planned(&pool).await;
+        let branch = step_of(&flow, Step::CreateBranch).id;
+        knobas_core::start_work::settle(&pool, branch, StepOutcome::Running, None, None)
+            .await
+            .unwrap();
+
+        let count = start_work::interrupt_stranded(&pool).await.unwrap();
+        assert_eq!(count, 1);
+        let flow = start_work::flow(&pool, &ticket()).await.unwrap();
+        let step = step_of(&flow, Step::CreateBranch);
+        assert_eq!(step.outcome, StepOutcome::Failed);
+        assert_eq!(step.detail.as_deref(), Some(start_work::INTERRUPTED));
+
+        let fake = Fake::new();
+        let flow = if skip {
+            start_work::skip(&pool, &fake, branch).await.unwrap()
+        } else {
+            start_work::retry(&pool, &fake, branch).await.unwrap()
+        };
+        let expected = if skip {
+            StepOutcome::Skipped
+        } else {
+            StepOutcome::Succeeded
+        };
+        assert_eq!(outcome(&flow, Step::CreateBranch), expected);
+    }
+}
+
+/// A step that settled, or one with a live run behind it, is left alone.
+#[tokio::test]
+async fn the_start_up_pass_leaves_settled_steps_alone() {
+    let pool = corpus("sw_intr_settled").await;
+    let flow = planned(&pool).await;
+    let branch = step_of(&flow, Step::CreateBranch).id;
+    knobas_core::start_work::settle(&pool, branch, StepOutcome::Succeeded, None, None)
+        .await
+        .unwrap();
+    assert_eq!(start_work::interrupt_stranded(&pool).await.unwrap(), 0);
+    let flow = start_work::flow(&pool, &ticket()).await.unwrap();
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+}
+
+/// The interrupted step's write may have reached the source: a retry looks
+/// first, and a branch that is already there is adopted, not created twice.
+#[tokio::test]
+async fn a_retry_of_an_interrupted_step_whose_branch_exists_adopts_it() {
+    let pool = corpus("sw_intr_adopt").await;
+    let flow = planned(&pool).await;
+    let head = proposed_branch(&flow);
+    let branch = step_of(&flow, Step::CreateBranch).id;
+    knobas_core::start_work::settle(&pool, branch, StepOutcome::Running, None, None)
+        .await
+        .unwrap();
+    start_work::interrupt_stranded(&pool).await.unwrap();
+
+    let fake = Fake::new();
+    fake.branches
+        .lock()
+        .unwrap()
+        .push((REPO.to_owned(), head.clone()));
+    fake.pulls.lock().unwrap().push((
+        REPO.to_owned(),
+        head,
+        on_head(PR, Some(false), Some("open")),
+    ));
+    let flow = start_work::retry(&pool, &fake, branch).await.unwrap();
+
+    assert_eq!(
+        fake.ops(),
+        vec!["transition"],
+        "the retry created the branch or the pull request a second time"
+    );
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+}

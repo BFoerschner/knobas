@@ -375,6 +375,46 @@ pub async fn settle(
     Ok(row)
 }
 
+/// Every step stored as [`Running`](StepOutcome::Running), across all tickets.
+///
+/// Read by the start-up pass that finds steps a quit left running (#790).
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn running(pool: &PgPool) -> Result<Vec<FlowStep>, CoreError> {
+    let rows = sqlx::query_as::<_, FlowStep>(concat!(
+        "select ",
+        step_columns!(),
+        " from knobas.start_work_step where outcome = 'running' order by id"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Mark a step that is still `running` as [`Failed`](StepOutcome::Failed) with
+/// `detail`, and say whether it was.
+///
+/// The `where outcome = 'running'` is the guard: a step that settled between
+/// the caller's read and this write is left as it landed.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the statement fails.
+pub async fn interrupt(pool: &PgPool, id: i64, detail: &str) -> Result<bool, CoreError> {
+    let done = sqlx::query(
+        "update knobas.start_work_step
+            set outcome = 'failed', detail = $2, updated_at = now()
+          where id = $1 and outcome = 'running'",
+    )
+    .bind(id)
+    .bind(detail)
+    .execute(pool)
+    .await?;
+    Ok(done.rows_affected() > 0)
+}
+
 /// Replace a step's proposal with the one the user edited, and return it to
 /// [`Pending`](StepOutcome::Pending).
 ///

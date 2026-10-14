@@ -505,6 +505,14 @@ pub(crate) fn spawn_bring_up<R: tauri::Runtime>(handle: tauri::AppHandle<R>) {
             if let Err(error) = time::close_stranded(db.pool()).await {
                 tracing::error!(%error, "the stranded-timer sweep failed");
             }
+            // A start-work step a quit left `running` becomes interrupted
+            // (#790), so its ticket's flow can be retried or skipped. Logged,
+            // not fatal, like the sweep above.
+            match start_work::interrupt_stranded(db.pool()).await {
+                Ok(0) => {}
+                Ok(count) => tracing::info!(count, "start-work steps interrupted by a quit"),
+                Err(error) => tracing::error!(%error, "the interrupted-step sweep failed"),
+            }
             // The adapters' declarations, into the database before the first
             // sync writes an item (#627): the item trigger resolves each row's
             // parents from them, so a sync that ran first would resolve against

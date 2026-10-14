@@ -595,6 +595,39 @@ async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
     }
 }
 
+/// What an interrupted step says, drawn as a refusal is: *Retry*, *Skip* and
+/// *Edit* are enabled on it.
+pub const INTERRUPTED: &str = "knobas stopped while this step was being sent";
+
+/// The start-up pass (#790): a step stored `running` with no live run for its
+/// ticket was cut off by a quit, a crash or a kill, and would otherwise stay
+/// `running` for good. It becomes **interrupted** -- stored as `failed` with
+/// [`INTERRUPTED`], so no new stored state -- and a retry then looks at the
+/// source before it sends anything (`perform` reads before it writes), so a
+/// write that did reach the source is adopted and not made twice.
+///
+/// Answers how many steps it interrupted. A failing pass is the caller's to
+/// log; the rows stay and the next launch tries again.
+///
+/// # Errors
+///
+/// [`IpcError`] if the steps cannot be read or written.
+pub async fn interrupt_stranded(pool: &PgPool) -> Result<usize, IpcError> {
+    let mut interrupted = 0;
+    for step in store::running(pool).await? {
+        let Ok(ticket) = EntityRef::parse(&step.ticket_id) else {
+            continue;
+        };
+        if Behind::held(pool, &ticket) {
+            continue;
+        }
+        if store::interrupt(pool, step.id, INTERRUPTED).await? {
+            interrupted += 1;
+        }
+    }
+    Ok(interrupted)
+}
+
 /// Replace a step's proposal with the one the user edited, and return it to the
 /// front of the queue.
 ///
