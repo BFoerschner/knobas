@@ -61,6 +61,7 @@
     onopenurl,
     onaction,
     settingMarks = {},
+    reopenSetting = null,
     onsetting = () => Promise.resolve(false),
     summary,
     said = [],
@@ -87,6 +88,8 @@
      * name (#668). Drawn only on a settings block that is of this entity.
      */
     settingMarks?: Record<string, SettingMark>;
+    /** A row of this entity's settings to reopen with what was typed (#779). */
+    reopenSetting?: { name: string; value: string } | null;
     /** Queue one setting's new value; answers whether it was queued. */
     onsetting?: (block: SettingsTarget, name: string, value: string, base: string | null) => Promise<boolean>;
     /**
@@ -359,6 +362,7 @@
           values={block.values}
           writable={settingsWritable(block.write_op, writeOps)}
           marks={block.entity === entityId ? settingMarks : {}}
+          reopen={block.entity === entityId ? reopenSetting : null}
           onsave={(name, value, base) => onsetting(block, name, value, base)}
         />
       {:else if block.type === "actions"}

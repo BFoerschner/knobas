@@ -609,3 +609,41 @@ test("the editor closes on the queue's answer, and the row says saving until the
   expect(toasts.items.map((t) => t.text)).toContain("env.SEPA_RETRIES set");
   screen.done();
 });
+
+test("a saved write that is held or refused says why once, and Edit and resend reopens the row with the value typed", async () => {
+  const screen = render();
+  await settle();
+  open = [row("pending")];
+  await screen.edit("env.SEPA_RETRIES", "7");
+  expect(toasts.items.map((t) => t.text)).toEqual(["env.SEPA_RETRIES queued"]);
+
+  open = [row("refused", "403 Forbidden")];
+  handlers[0]!();
+  await settle();
+  const told = toasts.items.filter((t) => t.tone === "err");
+  expect(told.map((t) => t.text)).toEqual(["env.SEPA_RETRIES was refused: 403 Forbidden"]);
+  expect(told[0]!.action?.label).toBe("Open write queue");
+  expect(told[0]!.more?.map((a) => a.label)).toEqual(["Edit and resend"]);
+  // The inline mark stays.
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("refused");
+
+  // Told once: the next movement with the write still refused is not news.
+  handlers[0]!();
+  await settle();
+  expect(toasts.items.filter((t) => t.tone === "err")).toHaveLength(1);
+
+  told[0]!.more![0]!.run();
+  await settle();
+  expect(screen.input()?.value).toBe("7");
+  screen.done();
+});
+
+test("a write found held when the view opens is marked but not toasted", async () => {
+  open = [setting(51, "held", "env.SEPA_RETRIES", "9", "changed since")];
+  views = [parameters("5")];
+  const screen = render();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("held");
+  expect(toasts.items).toEqual([]);
+  screen.done();
+});

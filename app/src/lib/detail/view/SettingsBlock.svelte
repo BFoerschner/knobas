@@ -17,7 +17,7 @@
   the edit sets a value here that overrides the inherited one.
 -->
 <script lang="ts">
-  import { tick } from "svelte";
+  import { tick, untrack } from "svelte";
   import type { Setting } from "../../ipc/entity";
   import type { SettingMark } from "./settings";
 
@@ -26,6 +26,7 @@
     values,
     writable = false,
     marks = {},
+    reopen = null,
     onsave = () => Promise.resolve(false),
   }: {
     title: string | null;
@@ -34,6 +35,11 @@
     writable?: boolean;
     /** The rows whose edit is on its way through the queue, by name. */
     marks?: Record<string, SettingMark>;
+    /**
+     * A row to open again with what was typed: *Edit and resend* on the toast
+     * of a write that was held or refused (#779). A fresh object each time.
+     */
+    reopen?: { name: string; value: string } | null;
     /**
      * Queue `name = value`, edited against `base` (the value drawn when the
      * edit opened; `null` for a secret); answers whether it was queued.
@@ -64,15 +70,25 @@
     return writable && setting.editable;
   }
 
-  async function open(setting: Setting) {
+  async function open(setting: Setting, typed?: string) {
     if (saving) return;
     editing = setting.name;
     base = setting.secret ? null : setting.value;
-    draft = base ?? "";
+    draft = typed ?? base ?? "";
     await tick();
     input?.focus();
     input?.select();
   }
+
+  // Edit and resend: the row's editor, holding what was typed, edited
+  // against what the row shows now.
+  $effect(() => {
+    const asked = reopen;
+    if (asked === null) return;
+    const setting = untrack(() => values.find((v) => v.name === asked.name));
+    if (!setting || !canEdit(setting)) return;
+    void untrack(() => open(setting, asked.value));
+  });
 
   function close() {
     editing = null;
