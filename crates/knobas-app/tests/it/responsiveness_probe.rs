@@ -92,7 +92,14 @@ const WORDS: &[&str] = &[
 /// either planner state, and a corpus no install has. With 4,000 more words
 /// two documents share about half a lexeme on average, and the named words
 /// stay in the text for the search readings to find.
-const SYNTHETIC: u64 = 4_000;
+///
+/// `RP_SYNTHETIC=0` puts the narrow corpus back -- templated tickets, every
+/// pair similar -- which is what #771's cap of ten proposals per item is
+/// measured on.
+fn synthetic() -> u64 {
+    static SYNTHETIC: std::sync::OnceLock<u64> = std::sync::OnceLock::new();
+    *SYNTHETIC.get_or_init(|| env("RP_SYNTHETIC", 4_000))
+}
 
 const STATUSES: &[&str] = &["Open", "In Progress", "In Review", "Blocked", "Done"];
 
@@ -107,9 +114,9 @@ impl Rng {
     fn pick<'a>(&mut self, from: &[&'a str]) -> &'a str {
         from[(self.next() % from.len() as u64) as usize]
     }
-    /// `n` words of [`WORDS`] and [`SYNTHETIC`] more, drawn evenly.
+    /// `n` words of [`WORDS`] and [`synthetic`] more, drawn evenly.
     fn words(&mut self, n: usize) -> String {
-        let vocabulary = WORDS.len() as u64 + SYNTHETIC;
+        let vocabulary = WORDS.len() as u64 + synthetic();
         (0..n)
             .map(|_| match self.next() % vocabulary {
                 i if i < WORDS.len() as u64 => WORDS[i as usize].to_owned(),
