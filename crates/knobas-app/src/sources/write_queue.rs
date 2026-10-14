@@ -93,8 +93,14 @@ pub async fn submit_in_background(
     payload: serde_json::Value,
 ) -> Result<QueuedWrite, IpcError> {
     let (queued, source_id) = queue(state, payload).await?;
+    send_in_background(state, source_id, queued.id);
+    Ok(queued)
+}
+
+/// [`flush`] spawned onto the runtime with a copy of the state: the send
+/// behind [`submit_in_background`]'s answer, and behind a worklog's (#775).
+pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id: String, id: i64) {
     let state = state.clone();
-    let id = queued.id;
     tokio::spawn(async move {
         if let Err(error) = flush(&state, &source_id, id).await {
             tracing::warn!(
@@ -105,7 +111,6 @@ pub async fn submit_in_background(
             );
         }
     });
-    Ok(queued)
 }
 
 /// [`submit`]'s first half: everything it decides, and the row, **without

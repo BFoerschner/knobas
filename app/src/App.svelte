@@ -27,6 +27,7 @@
   import { canBeTarget, roomForeground } from "./lib/shell/timer";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
+  import { followWrite } from "./lib/shell/follow-write";
   import { localDay, offsetMinutes } from "./lib/time/draft";
   import AdHocBlockDialog from "./lib/time/AdHocBlock.svelte";
   import WorklogDraft from "./lib/time/WorklogDraft.svelte";
@@ -1007,11 +1008,14 @@
       onclose={() => (worklog = null)}
       onlogged={(logged) => {
         timeRevision += 1;
+        // Queued, not sent (#775): the draft closed on the queue's answer and
+        // the send is behind it; only a worklog that will not go is told again.
         push({
-          text: `Logged ${Math.round(logged.seconds / 60)}m to ${logged.entity_id.slice(
+          text: `Worklog of ${Math.round(logged.seconds / 60)}m queued for ${logged.entity_id.slice(
             logged.entity_id.indexOf(":") + 1,
-          )}.`,
+          )}`,
         });
+        if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
       }}
     />
   {/if}

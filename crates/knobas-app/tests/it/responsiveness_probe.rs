@@ -12,6 +12,11 @@
 //! cold, warm median, warm max, and the size of the answer as the webview
 //! would receive it.
 //!
+//! Last, the write surfaces (#775): what each dialog or editor waited on
+//! before it closed, and what it waits on now, through a scheduler whose
+//! adapters take `RP_SEND_MS` (default 300) for every send and read nothing
+//! back, so the corpus the reads were taken over is untouched.
+//!
 //! **Ignored**, and run by `just responsiveness-probe`: a wall-clock reading
 //! measures the machine as much as the code, so it is a reading to put in a
 //! PR beside the load average, never a gate test.
@@ -739,6 +744,330 @@ async fn what_the_reader_waits_on() {
     } else {
         println!("RP-NOTE KNOBAS_GITEA_URL/TOKEN unset: no live Gitea views read");
     }
+
+    // Last: the writes queue sends and trigger post-write runs, and nothing
+    // read above should be measured over what they leave.
+    writes(pool, &connector, runs).await;
+}
+
+/// How long one simulated send takes: the remote call the queue makes behind
+/// the answer. #752 measured 582 ms for a comment against the live Gitea.
+fn send_ms() -> u64 {
+    env("RP_SEND_MS", 300)
+}
+
+/// The adapters the write section sends through: the built-in descriptors,
+/// so `submit_write` checks the ops a real source declares, over a source
+/// whose `write` takes [`send_ms`] and whose read refuses -- so the post-write
+/// run cannot touch the corpus.
+struct Sending;
+
+impl AdapterRegistry for Sending {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        Registry::builtin().descriptors()
+    }
+
+    fn build(
+        &self,
+        instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn Source>, SourceError> {
+        let template = Registry::builtin()
+            .descriptors()
+            .into_iter()
+            .find(|d| d.adapter_kind == instance.kind)
+            .ok_or_else(|| SourceError::protocol(format!("no adapter {}", instance.kind)))?;
+        Ok(Box::new(Sends {
+            descriptor: SourceDescriptor {
+                id: instance.id,
+                ..template
+            },
+        }))
+    }
+}
+
+struct Sends {
+    descriptor: SourceDescriptor,
+}
+
+#[async_trait::async_trait]
+impl Source for Sends {
+    async fn write(
+        &self,
+        op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, SourceError> {
+        tokio::time::sleep(std::time::Duration::from_millis(send_ms())).await;
+        Ok(match op {
+            knobas_source::WriteOp::LogWork { .. } => knobas_source::WriteReceipt::id("1"),
+            _ => knobas_source::WriteReceipt::none(),
+        })
+    }
+    async fn reachable_transitions(&self, _e: &str) -> Result<Vec<String>, SourceError> {
+        Ok(Vec::new())
+    }
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
+        Ok(None)
+    }
+    fn descriptor(&self) -> SourceDescriptor {
+        self.descriptor.clone()
+    }
+    async fn test_connection(&self) -> Result<knobas_source::ConnectionInfo, SourceError> {
+        Ok(knobas_source::ConnectionInfo::default())
+    }
+    async fn sync(
+        &self,
+        _cursor: Option<Cursor>,
+        _sink: &mut (dyn Sink + Send),
+    ) -> Result<Cursor, SourceError> {
+        Err(SourceError::protocol(
+            "the probe's writes read nothing back".to_owned(),
+        ))
+    }
+}
+
+struct Silent;
+impl knobas_sync::scheduler::SyncEvents for Silent {
+    fn sync_state(&self, _status: knobas_sync::SourceSyncStatus) {}
+    fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+    fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+}
+
+/// What each write surface waits on before its dialog closes (#775): the
+/// commands it awaited before, and what it awaits now, on the same corpus.
+/// The send is [`send_ms`] of sleep, so "before" rows carry that much of a
+/// remote call; the live figures for a real one are #752's.
+async fn writes(pool: &PgPool, connector: &knobas_db::embedded::Connector, runs: u64) {
+    use knobas_app::sources::write_queue::{submit, submit_in_background};
+    let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
+    for id in ["jira0", "ci"] {
+        secrets
+            .put(
+                &knobas_secrets::KeychainAccount::source(id),
+                &Secret::just(AuthMethod::Pat, "probe".to_owned()),
+            )
+            .unwrap();
+    }
+    let registry: std::sync::Arc<dyn AdapterRegistry> = std::sync::Arc::new(Sending);
+    let scheduler =
+        knobas_sync::scheduler::Scheduler::start(knobas_sync::scheduler::SchedulerDeps {
+            pool: pool.clone(),
+            connections: std::sync::Arc::new(Conns(connector.clone())),
+            registry: std::sync::Arc::clone(&registry),
+            secrets: secrets.clone(),
+            events: std::sync::Arc::new(Silent),
+            // The tick held off: only the sends the writes make are measured.
+            timing: knobas_sync::scheduler::SchedulerTiming {
+                startup_delay: std::time::Duration::from_secs(3600),
+                tick: std::time::Duration::from_secs(3600),
+            },
+        })
+        .await
+        .unwrap();
+    let state = knobas_app::sources::SourcesState {
+        pool: pool.clone(),
+        scheduler,
+        secrets: secrets.clone(),
+        registry: std::sync::Arc::clone(&registry),
+    };
+    let state = &state;
+    println!("RP-NOTE writes: the simulated send takes {} ms", send_ms());
+
+    const TICKET: &str = "jira0:JIRA0-42";
+    let comment = || serde_json::json!({"Comment": {"entity": TICKET, "body": "probe"}});
+    let read_back = || async {
+        get_entity_inner(pool, TICKET).await.map_err(said)?;
+        knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), TICKET, None)
+            .await
+            .map_err(said)
+            .map(|_| ())
+    };
+    // -- a view action (comment, merge, transition): ActionDialog, page comment, status select
+    time(
+        "write: view action",
+        "before #752: submit (send awaited) + get_entity + entity_view",
+        runs,
+        || async {
+            submit(state, comment()).await.map_err(said)?;
+            read_back().await
+        },
+    )
+    .await;
+    time(
+        "write: view action",
+        "now: submit_write (answer on queue)",
+        runs,
+        || submit_in_background(state, comment()),
+    )
+    .await;
+
+    // -- a setting edited from the view: closed on its settle read before #775
+    let setting = || serde_json::json!({"SetParameter": {"entity": "ci:build:42", "name": "env.X", "value": "1", "base": null}});
+    time(
+        "write: settings row",
+        "before #775: submit_write + pending_writes + get_entity + entity_view",
+        runs,
+        || async {
+            submit_in_background(state, setting()).await.map_err(said)?;
+            knobas_core::write_queue::open(pool).await.map_err(said)?;
+            get_entity_inner(pool, "ci:build:42").await.map_err(said)?;
+            knobas_app::sources::crud::view(pool, &secrets, registry.as_ref(), "ci:build:42", None)
+                .await
+                .map_err(said)
+                .map(|_| ())
+        },
+    )
+    .await;
+    time(
+        "write: settings row",
+        "now: submit_write (answer on queue)",
+        runs,
+        || submit_in_background(state, setting()),
+    )
+    .await;
+
+    // -- the worklog draft: one fresh block on the ticket for every call
+    let day = chrono::NaiveDate::from_ymd_opt(2026, 9, 3).unwrap();
+    let minute = std::sync::atomic::AtomicI64::new(0);
+    let fresh = || async {
+        let k = minute.fetch_add(2, std::sync::atomic::Ordering::Relaxed);
+        let from = day.and_hms_opt(0, 0, 0).unwrap().and_utc() + chrono::Duration::minutes(k);
+        sqlx::query(
+            "insert into knobas.block (started_at, ended_at, entity_id, kind)
+             values ($1, $2, $3, 'manual')",
+        )
+        .bind(from)
+        .bind(from + chrono::Duration::minutes(1))
+        .bind(TICKET)
+        .execute(pool)
+        .await
+        .unwrap();
+        from
+    };
+    time(
+        "write: worklog draft",
+        "before #775: log_work (send awaited), + one block insert",
+        runs,
+        || async {
+            let from = fresh().await;
+            knobas_app::time::worklog::log(state, TICKET, day, 0, from, 60, "").await
+        },
+    )
+    .await;
+    time(
+        "write: worklog draft",
+        "now: log_work (answer on queue), + one block insert",
+        runs,
+        || async {
+            let from = fresh().await;
+            knobas_app::time::worklog::log_in_background(state, TICKET, day, 0, from, 60, "").await
+        },
+    )
+    .await;
+
+    // -- links by hand: the dialog closes on the insert; the row on the re-read
+    let n = std::sync::atomic::AtomicU64::new(100);
+    time(
+        "write: link by hand",
+        "create_link + get_entity",
+        runs,
+        || async {
+            let to = format!(
+                "jira1:JIRA1-{}",
+                n.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            );
+            knobas_app::commands::entity::create_link_inner(pool, TICKET, &to, None, None).await?;
+            get_entity_inner(pool, TICKET).await?;
+            Ok::<_, knobas_app::IpcError>(())
+        },
+    )
+    .await;
+    let links: Vec<String> = sqlx::query_scalar(
+        "select id::text from knobas.link where from_id = $1 and deleted_at is null",
+    )
+    .bind(TICKET)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    let next = std::sync::atomic::AtomicUsize::new(0);
+    time("write: unlink", "unlink + get_entity", runs, || async {
+        let id = &links[next.fetch_add(1, std::sync::atomic::Ordering::Relaxed) % links.len()];
+        knobas_app::commands::entity::unlink_inner(pool, id).await?;
+        get_entity_inner(pool, TICKET).await?;
+        Ok::<_, knobas_app::IpcError>(())
+    })
+    .await;
+
+    // -- notes
+    let note =
+        knobas_app::commands::entity::create_note_inner(pool, Some("probe"), Some("body"), &[])
+            .await
+            .unwrap();
+    let note_id = note.note.id.clone();
+    time("write: note", "create_note", runs, || {
+        knobas_app::commands::entity::create_note_inner(pool, Some("probe"), Some("body"), &[])
+    })
+    .await;
+    time("write: note", "save_note (autosave)", runs, || {
+        knobas_app::commands::entity::save_note_inner(pool, &note_id, "probe", "a longer body")
+    })
+    .await;
+
+    // -- timers
+    time("write: timer", "start_timer + stop_timer", runs, || async {
+        knobas_app::time::start(
+            pool,
+            knobas_app::time::TimerTarget::Entity {
+                entity_id: TICKET.to_owned(),
+            },
+            None,
+        )
+        .await?;
+        knobas_app::time::stop(pool).await.map(|_| ())
+    })
+    .await;
+
+    // -- the inbox: an answer and the re-read it used to wait on
+    let registry_builtin = Registry::builtin();
+    let now = chrono::Utc::now();
+    let reread = || async {
+        inbox_items_inner(
+            pool,
+            &registry_builtin,
+            now,
+            knobas_core::inbox::Shelf::Stream,
+        )
+        .await?;
+        inbox_items_inner(
+            pool,
+            &registry_builtin,
+            now,
+            knobas_core::inbox::Shelf::Snoozed,
+        )
+        .await?;
+        inbox_count_inner(pool, &registry_builtin, now).await
+    };
+    time(
+        "write: inbox answer",
+        "the re-read an answer waited on (3 reads)",
+        runs,
+        reread,
+    )
+    .await;
+
+    // Opening the write queue, over the rows the writes above left in it.
+    time("open write queue", "pending_writes", runs, || {
+        knobas_core::write_queue::open(pool)
+    })
+    .await;
+    time("open write queue", "write_queue_counts", runs, || {
+        knobas_core::write_queue::counts(pool)
+    })
+    .await;
+
+    state.scheduler.shutdown().await;
 }
 
 struct Conns(knobas_db::embedded::Connector);
@@ -747,4 +1076,9 @@ impl knobas_sync::scheduler::RunConnections for Conns {
     async fn open(&self) -> Result<sqlx::PgConnection, sqlx::Error> {
         self.0.connect().await
     }
+}
+
+/// Any error, as the probe's panic prints it.
+fn said<E: std::fmt::Debug>(error: E) -> String {
+    format!("{error:?}")
 }

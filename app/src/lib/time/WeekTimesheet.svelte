@@ -40,6 +40,7 @@
     type Week,
     type WeekRow,
   } from "../ipc/time";
+  import { followWrite } from "../shell/follow-write";
   import { latestRead } from "../shell/latest-read";
   import { targetReading } from "../shell/timer";
   import { dayKey, durationReading, horizonNote } from "./day";
@@ -209,8 +210,13 @@
   async function send() {
     sending = true;
     try {
-      await io.logAll(weekWindows(monday));
+      const made = await io.logAll(weekWindows(monday));
       planned = null;
+      // Queued, not sent (#775): the week goes behind the reader, and only a
+      // worklog that will not go is told again.
+      for (const worklog of made) {
+        if (worklog.write_queue_id !== null) followWrite({ id: worklog.write_queue_id }, { name: "Worklog" });
+      }
     } catch (error) {
       failure = ipcErrorMessage(error);
     } finally {

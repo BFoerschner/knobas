@@ -73,6 +73,9 @@ struct Wrote {
     /// When set, `write` fails with this status instead of accepting -- the
     /// "the source is not taking writes" fixture.
     fault: Mutex<Option<u16>>,
+    /// When set, `write` waits for a permit before it answers (#775): the
+    /// send held open, so an answer that came first is observably first.
+    gate: Mutex<Option<Arc<tokio::sync::Semaphore>>>,
 }
 
 /// A `Source` whose only job is to say what it received, and to answer the way
@@ -109,6 +112,13 @@ impl Source for Recording {
     }
 
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
+        let gate = self.state.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.acquire()
+                .await
+                .expect("the gate is never closed")
+                .forget();
+        }
         if let Some(status) = *self.state.fault.lock().unwrap() {
             return Err(SourceError::Unauthorized {
                 status: Some(status),
@@ -564,5 +574,62 @@ async fn stopping_the_timer_on_a_ticket_is_what_there_is_to_draft() {
     assert_eq!(opened.block_ids, vec![stopped.block.id]);
     assert_eq!(opened.entity_id, TICKET);
 
+    state.scheduler.shutdown().await;
+}
+
+/// **The draft closes on the queue's answer, not on Jira's** (#775).
+///
+/// `log_in_background` -- what the `log_work` command calls -- answers with
+/// the kept copy while the source's `write` is still held open: the copy
+/// names its queue row and carries no remote id yet, and the blocks are
+/// already spent. Released, the send lands behind the answer and its settle
+/// stamps the source's id onto that same copy. With the send awaited, the
+/// call never returns while the write is held, and the timeout says so.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_worklog_answers_once_queued_and_its_send_lands_behind_the_answer() {
+    let (state, wrote) = app("worklog_ipc_background").await;
+    let morning = block(&state.pool, (9, 0), (10, 0)).await;
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    *wrote.gate.lock().unwrap() = Some(Arc::clone(&gate));
+
+    let logged = tokio::time::timeout(
+        std::time::Duration::from_secs(20),
+        time::worklog::log_in_background(&state, TICKET, day(), UTC, at(9, 0), 3_600, ""),
+    )
+    .await
+    .expect("the worklog answers while its send is held")
+    .expect("the day is logged");
+    let write_id = logged.write_queue_id.expect("the copy names its write");
+    assert_eq!(logged.remote_id, None, "nothing has answered yet");
+    assert_eq!(
+        pointers(&state.pool, &[morning]).await,
+        vec![Some(logged.id)]
+    );
+
+    gate.add_permits(1);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    loop {
+        let row = knobas_core::write_queue::get(&state.pool, write_id)
+            .await
+            .expect("the queue row is readable")
+            .expect("the row it queued");
+        let remote: Option<String> =
+            sqlx::query_scalar("select remote_id from knobas.worklog where id = $1")
+                .bind(logged.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("the copy is readable");
+        if row.state == WriteState::Sent && remote.as_deref() == Some(WORKLOG_ID) {
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the send never landed: {:?} {:?} {remote:?}",
+            row.state,
+            row.detail
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(wrote.ops.lock().unwrap().len(), 1, "sent once");
     state.scheduler.shutdown().await;
 }

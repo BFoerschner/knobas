@@ -708,6 +708,27 @@ pub async fn log_all(
     state: &crate::sources::SourcesState,
     days: &[DayWindow],
 ) -> Result<Vec<worklog::Worklog>, IpcError> {
+    log_all_with(state, days, worklog::Delivery::Awaited).await
+}
+
+/// [`log_all`], each worklog answered once it is queued and its copy kept,
+/// and sent behind the answer (#775): what the `log_all` command does, so
+/// *Log all* closes on the queue's answers rather than on a week of sends.
+///
+/// # Errors
+/// As [`log_all`].
+pub async fn log_all_in_background(
+    state: &crate::sources::SourcesState,
+    days: &[DayWindow],
+) -> Result<Vec<worklog::Worklog>, IpcError> {
+    log_all_with(state, days, worklog::Delivery::Background).await
+}
+
+async fn log_all_with(
+    state: &crate::sources::SourcesState,
+    days: &[DayWindow],
+    delivery: worklog::Delivery,
+) -> Result<Vec<worklog::Worklog>, IpcError> {
     vet(days)?;
     let planned = plan(&state.pool, state.registry.as_ref(), days).await?;
     let mut made = Vec::new();
@@ -716,7 +737,16 @@ pub async fn log_all(
         let Some(window) = days.iter().find(|window| window.day == entry.day) else {
             continue;
         };
-        match worklog::log_within(state, &entry.entity_id, window.from, window.to, "").await {
+        match worklog::log_within(
+            state,
+            &entry.entity_id,
+            window.from,
+            window.to,
+            "",
+            delivery,
+        )
+        .await
+        {
             Ok(worklog) => made.push(worklog),
             Err(error) => failure = failure.or(Some(error)),
         }

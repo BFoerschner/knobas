@@ -52,7 +52,7 @@
   import { PLACEHOLDER_MS, sameAnswer, VIEW_PATIENCE_MS, viewMemory, type Loan } from "./view-read";
   import { actionName, actionPayload, answeredAsDrawn, sendsComments, type ActionValues } from "./view/actions";
   import { asReview, pendingComments, type PendingComment } from "./view/pending-comments.svelte";
-  import { openState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
+  import { markState, queuedSetting, settingPayload, type SettingMark, type SettingsTarget } from "./view/settings";
   import {
     pageSections,
     replaceSectionBody,
@@ -105,6 +105,7 @@
     viewAnswered = held !== null && held.view !== undefined;
     settingMarks = {};
     settingWrites = {};
+    savedHere.clear();
     sending = [];
     made = {};
     resending = null;
@@ -508,17 +509,19 @@
     }
     if (mine !== token) return true;
     settingWrites[name] = write.id;
+    savedHere.add(write.id);
+    push({ text: `${name} queued` });
     // Watched from here, not from the first answer: if that read fails, a
     // queue movement is what asks again, and nothing would hear one.
     watchQueue(true);
-    await settleSettings(mine);
-    if (mine !== token) return true;
-    // Settled by this read or by a queue movement that raced it: either way
-    // the write is no longer open, which is what "set" says.
-    if (settingWrites[name] !== write.id && settingMarks[name] === undefined) push({ text: `${name} set` });
-    else if (settingMarks[name]?.state === "pending") push({ text: `${name} queued` });
+    // The editor closes now (#775): the write is on the queue, the row stays
+    // marked until it settles, and the read after it runs behind the reader.
+    void settleSettings(mine);
     return true;
   }
+
+  /** The setting writes saved from this panel, whose landing says "set". */
+  const savedHere = new Set<number>();
 
   /**
    * Mark the rows whose edits are still on the queue (#692).
@@ -546,7 +549,7 @@
       const names = new Set(block.values.map((v) => v.name));
       for (const write of open) {
         const edit = queuedSetting(block.write_op, write);
-        const state = openState(write);
+        const state = markState(write);
         if (edit === null || state === null || edit.entity !== block.entity || !names.has(edit.name)) continue;
         if ((found[edit.name]?.id ?? -1) > write.id) continue;
         found[edit.name] = { id: write.id, mark: { state, detail: write.detail, value: edit.value } };
@@ -586,14 +589,14 @@
     if (mine !== token) return;
     // Each landed name with the mark it had: a save of that row made while
     // the view is re-read replaces the mark, and the newer one stays.
-    const landed: [string, SettingMark | undefined][] = [];
+    const landed: [string, SettingMark | undefined, number][] = [];
     for (const [name, id] of Object.entries(settingWrites)) {
       const row = open.find((w) => w.id === id);
-      const state = openState(row);
+      const state = markState(row);
       if (state !== null) {
         settingMarks[name] = { state, detail: row?.detail ?? null, value: settingMarks[name]?.value ?? "" };
       } else {
-        landed.push([name, settingMarks[name]]);
+        landed.push([name, settingMarks[name], id]);
         delete settingWrites[name];
       }
     }
@@ -620,8 +623,10 @@
     if (mine !== token) return;
     await rereadView();
     if (mine !== token) return;
-    for (const [name, mark] of landed) {
+    for (const [name, mark, id] of landed) {
       if (settingMarks[name] === mark) delete settingMarks[name];
+      // Gone from the queue: it went, or it was withdrawn there.
+      if (savedHere.delete(id)) push({ text: `${name} set` });
     }
     if (went.length > 0) {
       for (const id of went) delete made[id];

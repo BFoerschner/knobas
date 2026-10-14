@@ -43,6 +43,7 @@
   import { ipcErrorMessage } from "../ipc";
   import type { AssetDetail, editAsset, MonitorTarget } from "../ipc/assets";
   import type { submitWrite } from "../ipc/entity";
+  import { followWrite } from "../shell/follow-write";
   import Modal from "../shell/Modal.svelte";
   import { prefillFor } from "./create-monitor";
 
@@ -107,8 +108,11 @@
       // half-done state this order leaves is the one the pane can already say
       // out loud.
       await record(detail.asset.id, [{ field: "monitors", added: [wanted] }]);
-      await queue({ CreateMonitor: { entity: chosen.entity, name: wanted, url: url.trim() } });
+      const write = await queue({ CreateMonitor: { entity: chosen.entity, name: wanted, url: url.trim() } });
       oncreated({ name: wanted, source: chosen.display_name });
+      // Closed on the queue's answer; a create the source later refuses is
+      // told with the way to the queue (#775).
+      followWrite(write, { name: `Monitor ${wanted}` });
     } catch (rejection) {
       // In place and in the backend's own words: a URL with no scheme is
       // refused by the adapter by name, and a source that lost its account

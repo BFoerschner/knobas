@@ -18,9 +18,16 @@ let snoozed: InboxEntry[] = [];
 let count = 0;
 /** Set to make the next command reject, so the error path is reachable. */
 let reject: unknown = null;
+/** Set to hold the next answer (a write) open until it resolves (#775). */
+let hold: Promise<void> | null = null;
 
 function record<T>(what: string, value: T): Promise<T> {
   calls.push(what);
+  if (hold !== null) {
+    const gate = hold;
+    hold = null;
+    return gate.then(() => value);
+  }
   if (reject !== null) {
     const error = reject;
     reject = null;
@@ -54,7 +61,15 @@ vi.mock("../ipc/entity", () => ({
   snoozeInboxItem: (itemKey: string, until: string) =>
     record(`snooze ${itemKey} ${until}`, undefined),
   completeInboxItem: (itemKey: string) => record(`complete ${itemKey}`, undefined),
-  submitWrite: (payload: unknown) => record(`write ${JSON.stringify(payload)}`, undefined),
+  submitWrite: (payload: unknown) =>
+    record(`write ${JSON.stringify(payload)}`, { id: 900 + calls.length, state: "pending" }),
+}));
+
+/** What the view handed the queue's follower (#775), and how it would reopen. */
+const followed: { write: { id: number }; following: { name: string; resend?: () => void } }[] = [];
+vi.mock("../shell/follow-write", () => ({
+  followWrite: (write: { id: number }, following: { name: string; resend?: () => void }) =>
+    followed.push({ write, following }),
 }));
 
 // The ack is an **estate** command and not an inbox one (#446): what clears
@@ -122,6 +137,8 @@ beforeEach(() => {
   snoozed = [];
   count = 0;
   reject = null;
+  hold = null;
+  followed.length = 0;
   router.hash = "";
 });
 
@@ -664,4 +681,161 @@ test("a burst of events during a read makes one more read, not one per event", a
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(reads).toBe(2);
   stop();
+});
+
+// -- answered at once (#775) ---------------------------------------------------
+
+test("done takes the row away at once, and the next row can be answered while it is written", async () => {
+  const second = entry({ key: "review_request:gitea:acme/payouts#145", title: "Second request" });
+  stream = [entry(), second];
+  count = 2;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  view.button("Done")!.click();
+  flushSync();
+  // Gone before the write answered, and the count with it.
+  expect(view.text()).not.toContain("Add payout CSV export");
+  expect(inbox.count).toBe(1);
+  // Nothing disabled while the first is written.
+  const next = view.button("Done")!;
+  expect(next.disabled).toBe(false);
+  next.click();
+  flushSync();
+  expect(calls).toContain("complete review_request:gitea:acme/payouts#145");
+  expect(view.text()).not.toContain("Second request");
+
+  stream = [];
+  count = 0;
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(inbox.count).toBe(0);
+  view.stop();
+});
+
+test("a refused done puts the row back with the re-read and says why", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  reject = { code: "internal", message: "pool timed out", source_id: null };
+  await inbox.complete("review_request:gitea:acme/payouts#144");
+  expect(inbox.stream.map((e) => e.item.key)).toEqual(["review_request:gitea:acme/payouts#144"]);
+  expect(inbox.error).toBe("pool timed out");
+});
+
+test("a snooze moves the row to the shelf at once", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  hold = new Promise(() => {});
+  const until = new Date(Date.now() + 86_400_000);
+  void inbox.snooze("review_request:gitea:acme/payouts#144", until);
+  expect(inbox.stream).toEqual([]);
+  expect(inbox.snoozed.map((e) => [e.item.key, e.item.snoozed_until])).toEqual([
+    ["review_request:gitea:acme/payouts#144", until.toISOString()],
+  ]);
+  expect(inbox.count).toBe(0);
+});
+
+test("a comment closes its box on the queue's answer, and a refusal can reopen it with the words", async () => {
+  stream = [entry({}, ["comment"])];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  view.button("Comment")!.click();
+  flushSync();
+  const input = view.target.querySelector<HTMLInputElement>("input.inp")!;
+  input.value = "Looks right to me";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  view.button("Send")!.click();
+  await Promise.resolve();
+  await Promise.resolve();
+  flushSync();
+
+  expect(view.target.querySelector("input.inp")).toBeNull();
+  expect(followed.map((f) => f.following.name)).toEqual(["Comment"]);
+  // The queue later refuses it: *Edit and resend* opens the box again, typed.
+  followed[0]!.following.resend!();
+  flushSync();
+  expect(view.target.querySelector<HTMLInputElement>("input.inp")!.value).toBe("Looks right to me");
+  view.stop();
+});
+
+test("a re-read that lands while an answer is out does not draw the row back", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  const done = inbox.complete("review_request:gitea:acme/payouts#144");
+  // An event's re-read, answered by a backend that has not seen the answer yet.
+  await inbox.refresh();
+  expect(inbox.stream).toEqual([]);
+  stream = [];
+  count = 0;
+  release();
+  await done;
+  expect(inbox.stream).toEqual([]);
+  expect(inbox.count).toBe(0);
+});
+
+test("a re-read taken while an answer was out cannot draw the row back after the answer's own re-read", async () => {
+  stream = [entry()];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  let releaseAnswer!: () => void;
+  hold = new Promise((resolve) => (releaseAnswer = resolve));
+  const done = inbox.complete("review_request:gitea:acme/payouts#144");
+  // An event's re-read, taken before the backend saw the answer, and slow.
+  let releaseRead!: () => void;
+  hold = new Promise((resolve) => (releaseRead = resolve));
+  const early = inbox.refresh();
+  // The answer lands, and its own re-read draws the backend's empty stream.
+  stream = [];
+  count = 0;
+  releaseAnswer();
+  await done;
+  expect(inbox.stream).toEqual([]);
+  // The early read comes back last, with the row it saw: it is older, so it is dropped.
+  releaseRead();
+  await early;
+  expect(inbox.stream).toEqual([]);
+  expect(inbox.count).toBe(0);
+});
+
+test("a double click on Send queues one comment", async () => {
+  stream = [entry({}, ["comment"])];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  view.button("Comment")!.click();
+  flushSync();
+  const input = view.target.querySelector<HTMLInputElement>("input.inp")!;
+  input.value = "Looks right to me";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  const send = view.button("Send")!;
+  send.click();
+  send.click();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(calls.filter((c) => c.startsWith("write ")).length).toBe(1);
+  expect(followed.length).toBe(1);
+  view.stop();
 });

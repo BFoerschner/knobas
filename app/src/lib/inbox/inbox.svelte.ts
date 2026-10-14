@@ -166,6 +166,7 @@ export function createInbox(ports?: InboxPorts): Inbox {
   }
 
   async function refresh(): Promise<void> {
+    const seen = answers;
     try {
       // All three together: a badge reading 4 over a list of three rows is the
       // two reads having been taken at different moments.
@@ -174,6 +175,11 @@ export function createInbox(ports?: InboxPorts): Inbox {
         io.inboxItems("snoozed"),
         io.inboxCount(),
       ]);
+      // An answer made while this read was out is drawn already, and the
+      // read after the last one in flight is the one that replaces it (#775).
+      // A read that started before an answer was drawn or landed is older
+      // than that read, whichever of the two comes back first.
+      if (inFlight > 0 || seen !== answers) return;
       state.stream = stream;
       state.snoozed = snoozed;
       state.count = count;
@@ -187,21 +193,66 @@ export function createInbox(ports?: InboxPorts): Inbox {
     }
   }
 
-  /** Run one answer, then re-read — including after a failure. */
-  async function act(run: () => Promise<void>): Promise<void> {
-    if (state.busy) return;
+  /** Answers written and not yet answered; the re-read waits for the last. */
+  let inFlight = 0;
+  /** Bumped when an answer is drawn and when it lands: a read from before either is stale. */
+  let answers = 0;
+  /** Why an answer of the batch in flight failed, said once the batch is re-read. */
+  let refusal: string | null = null;
+
+  /**
+   * Run one answer, then re-read — including after a failure.
+   *
+   * What the answer does is drawn **first** (#775): the row leaves the
+   * stream, or moves to the shelf, before the write is made, so the reader
+   * goes on to the next row at their own pace and nothing is disabled
+   * meanwhile. The re-read then replaces the guess with the backend's answer,
+   * once the last answer in flight has landed -- a re-read between two would
+   * draw back the row the second one is still taking away. A failed answer
+   * comes back with that re-read, and its reason stays said.
+   */
+  async function act(draw: () => void, run: () => Promise<void>): Promise<void> {
+    draw();
+    answers += 1;
+    inFlight += 1;
     state.busy = true;
     try {
       await run();
-      state.error = null;
     } catch (error) {
       // `not_found` here means the item was resolved at the source while this
       // list was on screen, so the list is the stale thing that caused it —
       // which the re-read below fixes.
-      state.error = ipcErrorMessage(error);
-    } finally {
-      state.busy = false;
-      await refresh();
+      refusal = ipcErrorMessage(error);
+    }
+    answers += 1;
+    inFlight -= 1;
+    if (inFlight > 0) return;
+    state.busy = false;
+    await refresh();
+    // The re-read's success is not the answer's: a reason said stays said.
+    if (refusal !== null) state.error = refusal;
+    refusal = null;
+  }
+
+  /** Take the entry for `key` off either shelf, and answer it. */
+  function take(key: string): InboxEntry | undefined {
+    const streamed = state.stream.find((e) => e.item.key === key);
+    const shelved = state.snoozed.find((e) => e.item.key === key);
+    state.stream = state.stream.filter((e) => e.item.key !== key);
+    state.snoozed = state.snoozed.filter((e) => e.item.key !== key);
+    if (streamed) state.count = Math.max(0, state.count - 1);
+    return streamed ?? shelved;
+  }
+
+  /** A snooze drawn: onto the shelf until `until`, or back into the stream if that is now. */
+  function drawSnooze(key: string, until: Date) {
+    const entry = take(key);
+    if (!entry) return;
+    if (until.getTime() <= Date.now()) {
+      state.stream = [{ ...entry, item: { ...entry.item, snoozed_until: null } }, ...state.stream];
+      state.count += 1;
+    } else {
+      state.snoozed = [...state.snoozed, { ...entry, item: { ...entry.item, snoozed_until: until.toISOString() } }];
     }
   }
 
@@ -226,9 +277,13 @@ export function createInbox(ports?: InboxPorts): Inbox {
     },
     refreshCount,
     refresh,
-    snooze: (itemKey, until) => act(() => io.snoozeInboxItem(itemKey, until.toISOString())),
-    complete: (itemKey) => act(() => io.completeInboxItem(itemKey)),
-    ack: (itemKey) => act(() => io.ackAlert(subjectOf(itemKey))),
+    snooze: (itemKey, until) =>
+      act(
+        () => drawSnooze(itemKey, until),
+        () => io.snoozeInboxItem(itemKey, until.toISOString()),
+      ),
+    complete: (itemKey) => act(() => void take(itemKey), () => io.completeInboxItem(itemKey)),
+    ack: (itemKey) => act(() => void take(itemKey), () => io.ackAlert(subjectOf(itemKey))),
     start() {
       if (live) {
         // Already subscribed. Handing back a teardown that unwinds the *first*

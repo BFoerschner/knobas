@@ -362,6 +362,21 @@ export function createWriteQueue(): WriteQueue {
     }
   }
 
+  /**
+   * *Flush now* (#775): the send, so it takes no `busy` -- the panel's other
+   * answers stay pressable while it is out -- and the re-read follows it as
+   * `act`'s does, failure included.
+   */
+  async function flush(sourceId: string | null): Promise<void> {
+    try {
+      await flushWrites(sourceId);
+      state.error = null;
+    } catch (error) {
+      state.error = message(error);
+    }
+    await refresh();
+  }
+
   return {
     get counts() {
       return state.counts;
@@ -379,7 +394,7 @@ export function createWriteQueue(): WriteQueue {
       return state.busy;
     },
     refresh,
-    flush: (sourceId) => act(() => flushWrites(sourceId)),
+    flush,
     apply: (id) => act(() => applyHeldWrite(id)),
     discard: (id) => act(() => discardWrite(id)),
     amend: (id, payload) => act(() => amendWrite(id, payload)),

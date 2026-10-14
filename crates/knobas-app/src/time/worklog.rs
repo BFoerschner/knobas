@@ -819,6 +819,66 @@ pub async fn log(
     seconds: i64,
     comment: &str,
 ) -> Result<Worklog, IpcError> {
+    log_with(
+        state,
+        entity_id,
+        day,
+        offset_minutes,
+        (started_at, seconds, comment),
+        Delivery::Awaited,
+    )
+    .await
+}
+
+/// [`log`], answering once the write is queued and the copy kept (#775): the
+/// send happens behind the answer, as `submit_write`'s has since #752. What
+/// the `log_work` command does, so the draft closes on the queue's answer
+/// rather than on Jira's.
+///
+/// The copy it answers with carries the queue row's id and no `remote_id`
+/// yet: the settle stamps that on when the send lands, exactly as it does for
+/// a write that waited (see [`commit`]).
+///
+/// # Errors
+///
+/// As [`log`], every one of them before anything is sent.
+pub async fn log_in_background(
+    state: &SourcesState,
+    entity_id: &str,
+    day: NaiveDate,
+    offset_minutes: i32,
+    started_at: DateTime<Utc>,
+    seconds: i64,
+    comment: &str,
+) -> Result<Worklog, IpcError> {
+    log_with(
+        state,
+        entity_id,
+        day,
+        offset_minutes,
+        (started_at, seconds, comment),
+        Delivery::Background,
+    )
+    .await
+}
+
+/// Whether [`commit`] waits for the send or answers before it (#775).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Delivery {
+    /// Queue, keep the copy, send, then answer the copy as the send left it.
+    Awaited,
+    /// Queue, keep the copy, answer; the send runs behind the answer.
+    Background,
+}
+
+async fn log_with(
+    state: &SourcesState,
+    entity_id: &str,
+    day: NaiveDate,
+    offset_minutes: i32,
+    (started_at, seconds, comment): (DateTime<Utc>, i64, &str),
+    delivery: Delivery,
+) -> Result<Worklog, IpcError> {
     let entity = source_of(entity_id)?;
     if !takes_a_worklog(&state.pool, state.registry.as_ref(), &entity.namespace).await? {
         return Err(IpcError::invalid(format!(
@@ -840,10 +900,19 @@ pub async fn log(
              logged already, or the blocks are on another day"
         )));
     }
-    commit(state, entity_id, started_at, seconds, comment, &spans).await
+    commit(
+        state,
+        entity_id,
+        (started_at, seconds, comment),
+        &spans,
+        delivery,
+    )
+    .await
 }
 
-/// Queue the write, keep the copy, flush, and read the copy back.
+/// Queue the write, keep the copy, flush, and read the copy back -- or, for
+/// [`Delivery::Background`], answer the copy once it is kept and send behind
+/// the answer.
 ///
 /// The last three steps of [`log`], extracted because #283's *Log all* takes
 /// exactly the same three and taking them a second way is how two paths come
@@ -856,10 +925,9 @@ pub async fn log(
 async fn commit(
     state: &SourcesState,
     entity_id: &str,
-    started_at: DateTime<Utc>,
-    seconds: i64,
-    comment: &str,
+    (started_at, seconds, comment): (DateTime<Utc>, i64, &str),
     spans: &[Span],
+    delivery: Delivery,
 ) -> Result<Worklog, IpcError> {
     let block_ids: Vec<i64> = spans.iter().map(|s| s.id).collect();
 
@@ -883,6 +951,12 @@ async fn commit(
     )
     .await?;
 
+    if delivery == Delivery::Background {
+        // The copy already names the row, so a settle that lands after this
+        // answer stamps Jira's id onto it as it would have before it.
+        crate::sources::write_queue::send_in_background(state, source_id, queued.id);
+        return Ok(worklog);
+    }
     crate::sources::write_queue::flush(state, &source_id, queued.id).await?;
 
     // Read back rather than answer with what was just written: the flush above
@@ -929,6 +1003,7 @@ pub(super) async fn log_within(
     from: DateTime<Utc>,
     to: DateTime<Utc>,
     comment: &str,
+    delivery: Delivery,
 ) -> Result<Worklog, IpcError> {
     if !takes_a_worklog_for(&state.pool, state.registry.as_ref(), entity_id).await? {
         return Err(IpcError::invalid(format!(
@@ -949,7 +1024,14 @@ pub(super) async fn log_within(
              the blocks unlogged",
         ));
     }
-    commit(state, entity_id, started_at, seconds, comment, &spans).await
+    commit(
+        state,
+        entity_id,
+        (started_at, seconds, comment),
+        &spans,
+        delivery,
+    )
+    .await
 }
 
 #[cfg(test)]

@@ -574,3 +574,38 @@ test("Run… queues one RunBuild: no branch for the default, and only the value 
   expect(document.querySelector("[role=dialog]")).toBeNull();
   screen.done();
 });
+
+// --- close on queue (#775) --------------------------------------------------
+
+test("the editor closes on the queue's answer, and the row says saving until the write settles", async () => {
+  const screen = render();
+  await settle();
+  // The queue's answer arrives; the read of where the write is does not.
+  let answer!: () => void;
+  pendingGate = new Promise((resolve) => (answer = resolve));
+  open = [{ ...row("pending"), wait_reason: null }];
+  await screen.edit("env.SEPA_RETRIES", "7");
+
+  // Closed, though nothing after the queue's answer has come back.
+  expect(screen.input()).toBeNull();
+  expect(calls.slice(calls.indexOf("submit_write"))).toEqual(["submit_write", "pending_writes"]);
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("saving…");
+  expect(screen.value("env.SEPA_RETRIES")).toBe("7");
+  expect(toasts.items.map((t) => t.text)).toEqual(["env.SEPA_RETRIES queued"]);
+
+  // On its way with no reason to wait is still saving, not "pending".
+  answer();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("saving…");
+  // And the row can be edited again meanwhile: nothing is disabled while a send runs.
+  const button = screen.target.querySelector<HTMLButtonElement>('button[aria-label="Edit env.SEPA_RETRIES"]')!;
+  expect(button.disabled).toBe(false);
+
+  // It went: the view is read again in the background and the mark goes.
+  open = [];
+  handlers[0]!();
+  await settle();
+  expect(screen.mark("env.SEPA_RETRIES")).toBe("");
+  expect(toasts.items.map((t) => t.text)).toContain("env.SEPA_RETRIES set");
+  screen.done();
+});
