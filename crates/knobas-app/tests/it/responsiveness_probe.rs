@@ -330,6 +330,30 @@ async fn what_the_reader_waits_on() {
     let ui = connector.app_pool().await.unwrap();
     let pool = &ui;
     searcher(pool).await.unwrap();
+    // `RP_ANALYZED=1` reads against tables the planner has statistics for;
+    // otherwise autovacuum is switched off on the scratch database's tables, so
+    // they stay never analyzed -- the state of a fresh install for about a
+    // minute after its first sync, which is where a plan that leans on
+    // estimates shows (#767, #768).
+    let analyzed = env("RP_ANALYZED", 0) == 1;
+    if !analyzed {
+        let tables: Vec<(String, String)> = sqlx::query_as(
+            "select n.nspname::text, c.relname::text from pg_class c
+               join pg_namespace n on n.oid = c.relnamespace
+              where c.relkind = 'r' and n.nspname in ('knobas', 'sync')",
+        )
+        .fetch_all(pool)
+        .await
+        .unwrap();
+        for (schema, table) in tables {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "alter table {schema}.{table} set (autovacuum_enabled = false)"
+            )))
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+    }
 
     let seeded = Instant::now();
     let mut synthetic = Vec::new();
@@ -425,6 +449,10 @@ async fn what_the_reader_waits_on() {
         "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} in {} s",
         seeded.elapsed().as_secs()
     );
+    if analyzed {
+        sqlx::query("analyze").execute(pool).await.unwrap();
+    }
+    println!("RP-STATS analyzed={analyzed}");
     // The suggestion pass has run once, as it would have after a sync.
     let pass = knobas_app::suggestion_pass::SuggestionPass::new(
         std::sync::Arc::new(Conns(connector.clone())),
@@ -556,6 +584,15 @@ async fn what_the_reader_waits_on() {
         smart_lists_inner(pool)
     })
     .await;
+    // Opening the box on a filter token reads the kinds, the sources and the
+    // parents once (#601); each keystroke after it only the parents (#768).
+    time(
+        "open a filter token",
+        "filter_suggestions (kinds, sources, parents)",
+        runs,
+        || filter_suggestions_inner(pool, "", false),
+    )
+    .await;
     // The first `under:` keystroke asks with nothing typed yet, and each one
     // after it with the value so far (#761).
     for under in ["", "j", "jira0-1", "pay"] {
@@ -563,7 +600,7 @@ async fn what_the_reader_waits_on() {
             "type a filter token",
             &format!("filter_suggestions (under:{under})"),
             runs,
-            || filter_suggestions_inner(pool, under),
+            || filter_suggestions_inner(pool, under, true),
         )
         .await;
     }

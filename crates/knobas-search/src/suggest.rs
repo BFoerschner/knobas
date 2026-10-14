@@ -152,18 +152,16 @@ const PARENTS_SQL: &str = concat!(
      limit $2"
 );
 
-/// Read the three lists against `vocab`, the parents for the prefix `under`
-/// (empty for none).
+/// The parents for the prefix `under` (empty for none), and nothing else: the
+/// read the box makes on every keystroke of an `under:` value (#761, #768).
 ///
 /// # Errors
 ///
-/// [`SearchError::Db`] if any read fails.
-pub(crate) async fn read(
+/// [`SearchError::Db`] if the read fails.
+pub(crate) async fn parents(
     pool: &PgPool,
-    vocab: &Vocabulary,
     under: &str,
-) -> Result<FilterSuggestions, SearchError> {
-    let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
+) -> Result<Vec<ParentSuggestion>, SearchError> {
     let parents: Vec<(String, String)> = sqlx::query_as(PARENTS_SQL)
         .bind(under)
         .bind(PARENT_SUGGESTIONS)
@@ -177,6 +175,31 @@ pub(crate) async fn read(
         .persistent(false)
         .fetch_all(pool)
         .await?;
+    Ok(parents
+        .into_iter()
+        .map(|(name, kind)| ParentSuggestion { name, kind })
+        .collect())
+}
+
+/// Read the three lists against `vocab`, the parents for the prefix `under`
+/// (empty for none).
+///
+/// # Errors
+///
+/// [`SearchError::Db`] if any read fails.
+pub(crate) async fn read(
+    pool: &PgPool,
+    vocab: &Vocabulary,
+    under: &str,
+) -> Result<FilterSuggestions, SearchError> {
+    // Unnamed, like the parents' statement: both depend on how many rows the
+    // planner expects, and a named statement is planned generically from its
+    // sixth execution in a session (#768).
+    let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL)
+        .persistent(false)
+        .fetch_all(pool)
+        .await?;
+    let parents = parents(pool, under).await?;
     let enabled: Vec<&str> = vocab
         .sources
         .iter()
@@ -186,6 +209,7 @@ pub(crate) async fn read(
     // Only the enabled ids are probed, so `live` holds enabled sources only.
     let live: Vec<String> = sqlx::query_scalar(SOURCES_SQL)
         .bind(&enabled)
+        .persistent(false)
         .fetch_all(pool)
         .await?;
     Ok(FilterSuggestions {
@@ -205,10 +229,7 @@ pub(crate) async fn read(
                 display_name: source.display_name.clone(),
             })
             .collect(),
-        parents: parents
-            .into_iter()
-            .map(|(name, kind)| ParentSuggestion { name, kind })
-            .collect(),
+        parents,
     })
 }
 

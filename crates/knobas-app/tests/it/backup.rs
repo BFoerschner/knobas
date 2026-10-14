@@ -476,7 +476,7 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
         format!("ghost-{t}"),
     ] {
         parents.extend(
-            knobas_app::commands::search::filter_suggestions_inner(pool, &prefix)
+            knobas_app::commands::search::filter_suggestions_inner(pool, &prefix, false)
                 .await
                 .unwrap()
                 .parents

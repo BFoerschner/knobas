@@ -374,6 +374,27 @@ impl Searcher {
         suggest::read(&self.pool, &vocab, under).await
     }
 
+    /// The parents half of [`Searcher::filter_suggestions`] and nothing else
+    /// (#768): `kinds` and `sources` come back empty, unread.
+    ///
+    /// What the box asks on each keystroke of an `under:` value after the
+    /// opening's first read, which already holds the kinds and the sources.
+    /// One round trip, and no vocabulary.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the read fails.
+    pub async fn filter_parent_suggestions(
+        &self,
+        under: &str,
+    ) -> Result<FilterSuggestions, SearchError> {
+        Ok(FilterSuggestions {
+            kinds: Vec::new(),
+            sources: Vec::new(),
+            parents: suggest::parents(&self.pool, under).await?,
+        })
+    }
+
     /// The plan the board's recency read runs under.
     ///
     /// # Errors
