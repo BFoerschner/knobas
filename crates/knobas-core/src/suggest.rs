@@ -690,7 +690,7 @@ const MONITOR_URL_HOST: &str = detection!(concat!(
 ));
 
 /// How many distinct shared lexemes make two documents similar, as the literal
-/// [`SIMILAR_TEXT`] is compiled with.
+/// [`RANK_SIMILAR`] is compiled with.
 ///
 /// A macro because the statement is a compile-time `concat!` and `concat!`
 /// takes literals. [`SIMILARITY_FLOOR`] is the same number for a reader to name,
@@ -766,132 +766,375 @@ macro_rules! digest_of {
     };
 }
 
-/// Text that reads alike -- the connection nobody wrote a key for.
+/// How many counterparts an item's ranking keeps, as the literal the
+/// statements are compiled with. [`SIMILAR_TEXT_CAP`] is the same number for a
+/// reader to name, and a test holds the two together.
+macro_rules! similar_text_cap {
+    () => {
+        "10"
+    };
+}
+
+/// How many `similar_text` counterparts an item ranks (#771): its ten most
+/// similar, by distinct shared lexemes, ties to the newest. A pair is proposed
+/// when **either** end ranks the other, so an item can be proposed with more
+/// than ten -- the ones that rank it -- but never because of a counterpart that
+/// neither end ranks. No setting: the ruling of #771.
+pub const SIMILAR_TEXT_CAP: usize = 10;
+
+/// What a counterpart is ranked by when its distinct shared lexemes tie: the
+/// item's own time, newest first, the way the project census (`0032`) reads an
+/// item's time.
+macro_rules! item_at {
+    ($item:literal) => {
+        concat!(
+            "coalesce(",
+            $item,
+            ".item_updated_at, ",
+            $item,
+            ".synced_at)"
+        )
+    };
+}
+
+/// The distinct lexemes two documents share, as an array.
+macro_rules! shared_lexemes {
+    ($a:expr, $b:expr) => {
+        concat!(
+            "array(select x from unnest(tsvector_to_array(",
+            $a,
+            ")) x intersect select y from unnest(tsvector_to_array(",
+            $b,
+            ")) y)"
+        )
+    };
+}
+
+/// Rank one batch of changed items, and every settled item they meet, by
+/// their ten most similar counterparts (#771): the judging half of
+/// `similar_text`. [`SIMILAR_TEXT`] then proposes what the rankings hold.
 ///
 /// Built on the **existing** full-text corpus (`sync.item.fts`, `0001`): the
 /// anchor's title becomes an OR query, and the pair is then judged on how many
-/// distinct lexemes the two *documents* share.
-///
-/// Three deliberate narrowings, each of which is the difference between a rule
-/// and noise:
+/// distinct lexemes the two *documents* share. Three deliberate narrowings,
+/// each the difference between a rule and noise:
 ///
 /// * **Prose kinds only.** A branch and its repository share their whole name
 ///   and are not "similar" in any sense a reader cares about.
-/// * **`o.entity_id > a.entity_id`.** Each unordered pair is considered once,
-///   and the smaller id is always the anchor whose title is the query, so the
-///   rule cannot propose `A/B` and `B/A` in one pass.
+/// * **The smaller id is the anchor** whose title is the query, so each
+///   unordered pair is judged once.
 /// * **A floor on shared lexemes.** English stop words are already gone by the
 ///   time `to_tsvector` is done, so [`SIMILARITY_FLOOR`] distinct shared stems
 ///   is a real overlap rather than two documents both being about work.
 ///
-/// The reason names the overlap itself, because "these look related" is exactly
-/// the generic sentence #41's story 3 rejects.
-///
 /// # Incremental (#745)
 ///
-/// A pair's verdict depends on the two items' text and nothing else, so this
-/// statement judges only the pairs with at least one end in **`$5`**, a batch
-/// of items that changed since a pass last compared them, against the
-/// **settled** corpus: the live prose items `sync.similar_text_seen` (`0031`)
-/// says were compared with the text they have now. Three arms cover every
-/// such pair once, the smaller id always the anchor: batch with batch, a batch
-/// anchor with a settled item, a settled anchor with a batch item. The second
-/// finds its candidates through `item_fts_idx`, the anchor's query probing it;
-/// the third through `similar_text_seen_lex_idx` (`0031`), the changed item's
-/// lexemes probing the settled anchors' title lexemes, with `@@` against the
-/// stored query deciding. Each probe sits in a `lateral ... offset 0`, which
-/// keeps the planner from flattening it into a join that tests every batch item
-/// against every settled one -- measured on the perf corpus, that plan cost
-/// 450 ms and 9.6 s a batch where the probes cost 130 ms and 37 ms. A pair of
-/// two settled items was judged by the pass that settled the later of them, so
-/// a pass with nothing new judges nothing. [`detect_rule`] feeds the batches
-/// and marks each one settled in the same transaction; before #745 the
-/// statement judged every pair on every pass, 55 s at 2,000 items whether or
-/// not anything had changed.
+/// `$1` is a batch of items that changed since a pass last compared them; the
+/// statement judges every pair with at least one end in it against the
+/// **settled** corpus, the live prose items `sync.similar_text_seen` (`0031`)
+/// says were compared with the text they have now. Three arms cover every such
+/// pair once: batch with batch, a batch anchor with a settled item, a settled
+/// anchor with a batch item. The second finds its candidates through
+/// `item_fts_idx`, the anchor's query probing it; the third through
+/// `similar_text_seen_lex_idx`, the changed item's lexemes probing the settled
+/// anchors' title lexemes, with `@@` against the stored query deciding. Each
+/// probe sits in a `lateral ... offset 0`, which keeps the planner from
+/// flattening it into a join that tests every batch item against every settled
+/// one.
 ///
-/// # Settled is a hashed membership test, not a join (#770)
+/// **The anchor order is not an index condition** (#771). Written plainly,
+/// `x.entity_id < o.entity_id` was one the planner preferred to the lexemes: a
+/// walk of `similar_text_seen_pkey` over every settled item with a smaller id
+/// -- half the table per batch item -- with the lexemes and the query only
+/// filters on it. Wrapped in `is true` it is a filter and nothing else, so the
+/// only index condition left in the probe is the one the GIN index answers.
+/// The pass runs this statement with seq scans off, because a GIN index cannot
+/// estimate an array it only sees per row, and on the plan with the best
+/// estimate the whole of `similar_text_seen` is read once per batch item.
 ///
-/// `settled` is computed once per statement, a digest per settled item, and
-/// each probe asks whether its candidate is in it with `(id in (select ...))
-/// is true`. Wrapped so, the test cannot be pulled up into a join, and the
-/// planner runs it as a hashed subplan: one hash table, a lookup per
-/// candidate. Until #770 the candidates were joined to the `settled` CTE, a
-/// join the planner costs from the CTE's estimate -- a handful of rows,
-/// against thousands -- so on tables never analyzed, and on tables analyzed
-/// before the pass's own writes, it chose a nested loop that scanned the CTE
-/// once per candidate: 144 million rows compared to find 120,000 on the
-/// probe's 42-word corpus, and on its realistic one a batch at the end of the
-/// pass took 7.7 s instead of 2.7 s. The settled anchor's `fts` comes by its
-/// primary key, once per candidate.
+/// **A settled counterpart costs no visit to `sync.item`** (#771): its
+/// lexemes (`strip(fts)`) and its time are on its seen row, as they were when
+/// it was settled (`0033`), and two documents' shared lexemes are counted as
+/// `length(a) + length(b) - length(a || b)`, the tsvector union doing the
+/// work. On the probe's 42-word corpus every batch item is paired with every
+/// settled one, and the count is most of the pass. Whether a settled
+/// counterpart is still the text its seen row vouches for (`settled` above is
+/// only "has a seen row") is checked once per counterpart that came out
+/// similar (`verified`), not once per candidate.
 ///
-/// The items are read from `sync.item` with [`live!`] rather than through
-/// `sync.live_item`, for the reason the exact-key rules are.
-const SIMILAR_TEXT: &str = detection!(concat!(
+/// # Ranked (#771)
+///
+/// Every similar pair is an edge both ways, and each item's ranking
+/// (`sync.similar_text_top`, `0033`) keeps its [`SIMILAR_TEXT_CAP`] best: a
+/// batch item's from its edges alone (its old ranking was cleared with
+/// [`CLEAR_RANKINGS`]), a settled item's from its stored ranking and its new
+/// edges, the ones pushed past the tenth place deleted. Only the edges that
+/// can place are sorted: `cut` counts each item's edges by shared lexemes and
+/// keeps those at or above the tenth's count, ties included, so a batch item
+/// paired with all 17,000 settled items sorts a handful rather than all of
+/// them. The stored ranking is exact because every pair is judged once, when
+/// the later of its ends is compared, and anything that would make a stored
+/// place wrong -- a counterpart's text changing, a counterpart leaving the
+/// corpus -- has the item ranked again from the whole corpus first
+/// ([`UNSETTLE_RANKINGS`]).
+///
+/// Ranked on text alone: a counterpart the user already linked, or dismissed,
+/// keeps its place, so dismissing a proposal does not bring the eleventh in.
+const RANK_SIMILAR: &str = concat!(
     "with batch as materialized (
-         select p.entity_id, p.fts, ",
+         select p.entity_id, p.fts, strip(p.fts) as lexemes, ",
     title_query!("p.title"),
-    " as q
+    " as q, ",
+    item_at!("p"),
+    " as at, ",
+    digest_of!("p"),
+    " as digest
            from sync.item p
-          where p.entity_id = any($5) and p.kind in ",
+          where p.entity_id = any($1) and p.kind in ",
     prose_kinds!(),
     " and ",
     live!("p"),
     "
      ),
      settled as materialized (
-         select p.entity_id
-           from sync.similar_text_seen s
-           join sync.item p on p.entity_id = s.entity_id
-          where s.digest = ",
-    digest_of!("p"),
-    " and p.kind in ",
-    prose_kinds!(),
-    " and p.entity_id <> all($5) and ",
-    live!("p"),
-    "
+         select s.entity_id from sync.similar_text_seen s where s.entity_id <> all($1)
      ),
      judged as (
-         select a.entity_id as from_id, o.entity_id as to_id, a.fts as a_fts, o.fts as o_fts
+         select a.entity_id as from_id, o.entity_id as to_id,
+                a.lexemes as a_lexemes, o.lexemes as o_lexemes,
+                a.at as from_at, o.at as to_at, null::text as settled_id
            from batch a join batch o on o.entity_id > a.entity_id and o.fts @@ a.q
          union all
-         select a.entity_id, i.entity_id, a.fts, i.fts
+         select a.entity_id, i.entity_id, a.lexemes, i.fts, a.at, i.at, i.entity_id
            from batch a
            cross join lateral (
-                  select i.entity_id, i.fts
+                  select i.entity_id, i.fts, ",
+    item_at!("i"),
+    " as at
                     from sync.item i
-                   where i.fts @@ a.q and i.entity_id > a.entity_id
+                   where i.fts @@ a.q
+                     and (i.entity_id > a.entity_id) is true
                      and (i.entity_id in (select entity_id from settled)) is true
                   offset 0) i
          union all
-         select x.entity_id, o.entity_id,
-                (select p.fts from sync.item p where p.entity_id = x.entity_id), o.fts
+         select x.entity_id, o.entity_id, x.lexemes, o.lexemes, x.at, o.at, x.entity_id
            from batch o
            cross join lateral (
-                  select x.entity_id
+                  select x.entity_id, x.lexemes, x.at
                     from sync.similar_text_seen x
                    where x.title_lex && tsvector_to_array(o.fts)
-                     and x.entity_id < o.entity_id
+                     and (x.entity_id < o.entity_id) is true
                      and o.fts @@ x.title_q
-                     and (x.entity_id in (select entity_id from settled)) is true
+                     and x.entity_id <> all($1)
                   offset 0) x
      ),
-     pair as (
-         select from_id, to_id,
-                array(select x from unnest(tsvector_to_array(a_fts)) x
-                       intersect
-                      select y from unnest(tsvector_to_array(o_fts)) y) as shared
-           from judged
+     alike as materialized (
+         select from_id, to_id, from_at, to_at, settled_id, shared
+           from (select from_id, to_id, from_at, to_at, settled_id,
+                        length(a_lexemes) + length(o_lexemes) - length(a_lexemes || o_lexemes)
+                          as shared
+                   from judged) j
+          where shared >= ",
+    similarity_floor!(),
+    "
+     ),
+     verified as materialized (
+         select d.settled_id
+           from (select distinct settled_id from alike where settled_id is not null offset 0) d
+          where exists (
+                  select 1
+                    from sync.similar_text_seen s
+                    join sync.item p on p.entity_id = s.entity_id
+                   where s.entity_id = d.settled_id and s.digest = ",
+    digest_of!("p"),
+    " and p.kind in ",
+    prose_kinds!(),
+    " and ",
+    live!("p"),
+    ")
+     ),
+     edge as materialized (
+         select from_id as entity_id, to_id as other_id, shared, to_at as other_at
+           from alike
+          where settled_id is null or (settled_id in (select settled_id from verified)) is true
+         union all
+         select to_id, from_id, shared, from_at
+           from alike
+          where settled_id is null or (settled_id in (select settled_id from verified)) is true
+     ),
+     pool as materialized (
+         select entity_id, other_id, shared, other_at, true as fresh
+           from edge
+         union all
+         select t.entity_id, t.other_id, t.shared, t.other_at, false
+           from (select distinct entity_id from edge) e
+           join sync.similar_text_top t on t.entity_id = e.entity_id
+     ),
+     tally as (
+         select entity_id, shared, count(*) as n from pool group by entity_id, shared
+     ),
+     cut as (
+         select entity_id, min(shared) as least_shared
+           from (select entity_id, shared, n,
+                        sum(n) over (partition by entity_id order by shared desc) as through
+                   from tally) t
+          where through - n < ",
+    similar_text_cap!(),
+    "
+          group by entity_id
+     ),
+     kept as materialized (
+         select entity_id, other_id, shared, other_at, fresh
+           from (select p.entity_id, p.other_id, p.shared, p.other_at, p.fresh,
+                        row_number() over (partition by p.entity_id
+                                           order by p.shared desc, p.other_at desc nulls last,
+                                                    p.other_id) as place
+                   from pool p
+                   join cut c on c.entity_id = p.entity_id and p.shared >= c.least_shared) r
+          where place <= ",
+    similar_text_cap!(),
+    "
+     ),
+     pushed_out as (
+         delete from sync.similar_text_top t
+          where t.entity_id in (select entity_id from edge)
+            and not exists (
+                  select 1 from kept k
+                   where k.entity_id = t.entity_id and k.other_id = t.other_id)
      )
-     select from_id, to_id, 'related',
+     insert into sync.similar_text_top (entity_id, other_id, shared, other_at, other_digest)
+     select k.entity_id, k.other_id, k.shared, k.other_at,
+            coalesce((select b.digest from batch b where b.entity_id = k.other_id),
+                     (select s.digest from sync.similar_text_seen s
+                       where s.entity_id = k.other_id))
+       from kept k
+      where k.fresh"
+);
+
+/// Text that reads alike -- the connection nobody wrote a key for.
+///
+/// What the rankings [`RANK_SIMILAR`] just wrote hold for the batch `$5`: every
+/// pair one of whose ends ranks the other, with a batch item at either end.
+/// Every pair a batch can make proposable has a batch item at one end, since a
+/// ranking only ever gains a counterpart that was just compared.
+///
+/// The reason names the overlap itself, because "these look related" is exactly
+/// the generic sentence #41's story 3 rejects. The smaller id is `from_id`, as
+/// the anchor was before #771.
+const SIMILAR_TEXT: &str = detection!(concat!(
+    "select least(t.entity_id, t.other_id), greatest(t.entity_id, t.other_id), 'related',
             format('both mention %s',
                    (select string_agg(s, ', ' order by s)
-                      from (select unnest(shared) as s order by 1 limit 4) top))
-       from pair
-      where cardinality(shared) >= ",
-    similarity_floor!()
+                      from (select unnest(",
+    shared_lexemes!(
+        "(select a.fts from sync.item a where a.entity_id = t.entity_id)",
+        "(select b.fts from sync.item b where b.entity_id = t.other_id)"
+    ),
+    ") as s order by 1 limit 4) top))
+       from (select r.entity_id, r.other_id
+               from sync.similar_text_top r where r.entity_id = any($5)
+             union all
+             select r.entity_id, r.other_id
+               from sync.similar_text_top r where r.other_id = any($5)) t"
 ));
 
-/// The live prose items [`SIMILAR_TEXT`] has not compared with the text they
+/// Forget the rankings a batch is about to replace: its items' own, and every
+/// place they hold in another item's (#771). [`RANK_SIMILAR`] then ranks the
+/// batch and puts each of its items back wherever it still places, against the
+/// text it has now.
+const CLEAR_RANKINGS: &str = "delete from sync.similar_text_top t
+      where t.entity_id = any($1) or t.other_id = any($1)";
+
+/// Forget the rankings of items settled without being compared (#755's
+/// skipped item): [`CLEAR_RANKINGS`]' first half. The places they hold in
+/// other items' rankings stay, measured against text they still have.
+const FORGET_OWN_RANKINGS: &str = "delete from sync.similar_text_top where entity_id = any($1)";
+
+/// Unsettle the items whose ranking can no longer be trusted, so the pass
+/// compares them again, returning them (#771).
+///
+/// A ranking keeps ten places and not the eleventh, so a counterpart whose
+/// text changed, or that left the corpus, leaves a place nobody can refill
+/// from the stored rows: the item is compared with the whole corpus again.
+/// `$1` is what changed. A counterpart in it whose stored digest still matches
+/// its text -- unsettled, but not rewritten, after a pass gave up part-way --
+/// is still the counterpart it was, and costs nothing. A counterpart with no
+/// seen row that is not a live prose item has left the corpus.
+const UNSETTLE_RANKINGS: &str = concat!(
+    "delete from sync.similar_text_seen s
+      where s.entity_id <> all($1)
+        and s.entity_id in (
+              select t.entity_id
+                from sync.similar_text_top t
+               where t.other_id = any($1)
+                 and t.other_digest is distinct from (
+                       select ",
+    digest_of!("p"),
+    " from sync.item p where p.entity_id = t.other_id)
+              union
+              select t.entity_id
+                from sync.similar_text_top t
+               where not exists (
+                       select 1 from sync.similar_text_seen o where o.entity_id = t.other_id)
+                 and not exists (
+                       select 1
+                         from sync.item p
+                        where p.entity_id = t.other_id and p.kind in ",
+    prose_kinds!(),
+    " and ",
+    live!("p"),
+    "))
+      returning s.entity_id"
+);
+
+/// Retire the unanswered `similar_text` proposals that neither end ranks any
+/// more (#771), among the items a batch touched: its own, and those whose
+/// ranking it entered -- the only rankings that lost a place. Deleted, not
+/// tombstoned: a tombstone is a dismissal (the suppression reads it as one),
+/// and a pair that ranks again later is proposed again.
+///
+/// Only between two items compared with the text they have now. An end still
+/// waiting to be compared is ranked when it is, and its pairs are decided then.
+/// Accepted and dismissed rows are never touched.
+const RETIRE_SIMILAR: &str = concat!(
+    "with touched as materialized (
+         select unnest($1::text[]) as entity_id
+         union
+         select t.entity_id from sync.similar_text_top t where t.other_id = any($1)
+     ),
+     proposed as (
+         select l.id, l.from_id, l.to_id
+           from touched x
+           join knobas.link l on l.from_id = x.entity_id
+          where l.rule = 'similar_text' and l.confirmed_at is null and l.deleted_at is null
+         union
+         select l.id, l.from_id, l.to_id
+           from touched x
+           join knobas.link l on l.to_id = x.entity_id
+          where l.rule = 'similar_text' and l.confirmed_at is null and l.deleted_at is null
+     )
+     delete from knobas.link d
+      using proposed p
+      where d.id = p.id
+        and not exists (
+              select 1 from sync.similar_text_top t
+               where t.entity_id = p.from_id and t.other_id = p.to_id)
+        and not exists (
+              select 1 from sync.similar_text_top t
+               where t.entity_id = p.to_id and t.other_id = p.from_id)
+        and exists (
+              select 1 from sync.similar_text_seen s join sync.item i on i.entity_id = s.entity_id
+               where s.entity_id = p.from_id and s.digest = ",
+    digest_of!("i"),
+    ")
+        and exists (
+              select 1 from sync.similar_text_seen s join sync.item i on i.entity_id = s.entity_id
+               where s.entity_id = p.to_id and s.digest = ",
+    digest_of!("i"),
+    ")"
+);
+
+/// The live prose items [`RANK_SIMILAR`] has not compared with the text they
 /// have now: never compared, or changed since. Ordered, so a pass that gives
 /// up part-way has settled a prefix and the next one starts after it.
 const CHANGED_PROSE: &str = concat!(
@@ -931,13 +1174,15 @@ const PRUNE_SEEN: &str = concat!(
 /// Mark a batch settled: its items were compared with the text they have in
 /// this snapshot.
 const MARK_SEEN: &str = concat!(
-    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex)
+    "insert into sync.similar_text_seen (entity_id, digest, title_q, title_lex, lexemes, at)
      select p.entity_id, ",
     digest_of!("p"),
     ", ",
     title_query!("p.title"),
     ", ",
     title_lexemes!("p.title"),
+    ", strip(p.fts), ",
+    item_at!("p"),
     "
        from sync.item p
       where p.entity_id = any($1) and p.kind in ",
@@ -947,10 +1192,10 @@ const MARK_SEEN: &str = concat!(
     "
      on conflict (entity_id) do update
         set digest = excluded.digest, title_q = excluded.title_q,
-            title_lex = excluded.title_lex"
+            title_lex = excluded.title_lex, lexemes = excluded.lexemes, at = excluded.at"
 );
 
-/// How many changed items one `SIMILAR_TEXT` statement compares.
+/// How many changed items one [`RANK_SIMILAR`] statement compares.
 ///
 /// Each batch is its own statement and its own transaction, so a pass that
 /// times out keeps what its finished batches settled and the next pass goes
@@ -1034,8 +1279,8 @@ enum Scope {
     /// cheap at any size the mirror reaches.
     Mirror,
     /// The prose items that changed since the last pass, in batches
-    /// ([`SIMILAR_TEXT`]'s fifth bind), each marked settled as it is
-    /// compared.
+    /// ([`SIMILAR_TEXT`]'s fifth bind, ranked by [`RANK_SIMILAR`] first), each
+    /// marked settled as it is compared.
     ChangedProse,
 }
 
@@ -1119,11 +1364,15 @@ pub struct PlannedStatement {
     pub binds: Binds,
     /// The rule class a rule's statement binds; empty for the others.
     pub class: &'static str,
+    /// Planned with `enable_seqscan` off, as the pass runs it
+    /// ([`RANK_SIMILAR`]).
+    pub no_seq_scan: bool,
 }
 
-/// Every statement a pass runs: each rule's, and the three that keep
-/// `sync.similar_text_seen`. `tests/it/suggest_plans.rs` holds each one's plan
-/// to a shape that does not depend on the planner's statistics (#770).
+/// Every statement a pass runs: each rule's, and the ones that keep
+/// `sync.similar_text_seen` and the rankings (`sync.similar_text_top`).
+/// `tests/it/suggest_plans.rs` holds each one's plan to a shape that does not
+/// depend on the planner's statistics (#770).
 #[doc(hidden)]
 #[must_use]
 pub fn planned_statements() -> Vec<PlannedStatement> {
@@ -1137,6 +1386,7 @@ pub fn planned_statements() -> Vec<PlannedStatement> {
                 Scope::ChangedProse => Binds::RuleAndBatch,
             },
             class: rule.class.as_str(),
+            no_seq_scan: false,
         })
         .collect();
     statements.extend([
@@ -1145,18 +1395,49 @@ pub fn planned_statements() -> Vec<PlannedStatement> {
             sql: CHANGED_PROSE,
             binds: Binds::Nothing,
             class: "",
+            no_seq_scan: false,
         },
         PlannedStatement {
             name: "prune_seen",
             sql: PRUNE_SEEN,
             binds: Binds::Nothing,
             class: "",
+            no_seq_scan: false,
         },
         PlannedStatement {
             name: "mark_seen",
             sql: MARK_SEEN,
             binds: Binds::Batch,
             class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
+            name: "unsettle_rankings",
+            sql: UNSETTLE_RANKINGS,
+            binds: Binds::Batch,
+            class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
+            name: "clear_rankings",
+            sql: CLEAR_RANKINGS,
+            binds: Binds::Batch,
+            class: "",
+            no_seq_scan: false,
+        },
+        PlannedStatement {
+            name: "rank_similar",
+            sql: RANK_SIMILAR,
+            binds: Binds::Batch,
+            class: "",
+            no_seq_scan: true,
+        },
+        PlannedStatement {
+            name: "retire_similar",
+            sql: RETIRE_SIMILAR,
+            binds: Binds::Batch,
+            class: "",
+            no_seq_scan: false,
         },
     ]);
     statements
@@ -1245,9 +1526,21 @@ async fn run_rule(
             Ok(written.rows_affected())
         }
         Scope::ChangedProse => {
-            let changed: Vec<String> = sqlx::query_scalar(CHANGED_PROSE)
+            // Forget what left the corpus first, so a ranking that held a
+            // place for it is found below.
+            sqlx::query(PRUNE_SEEN).execute(&mut *conn).await?;
+            let mut changed: Vec<String> = sqlx::query_scalar(CHANGED_PROSE)
                 .fetch_all(&mut *conn)
                 .await?;
+            let unsettled: Vec<String> = sqlx::query_scalar(UNSETTLE_RANKINGS)
+                .bind(&changed)
+                .fetch_all(&mut *conn)
+                .await?;
+            if !unsettled.is_empty() {
+                changed.extend(unsettled);
+                changed.sort_unstable();
+                changed.dedup();
+            }
             let mut written = 0;
             let mut rest = changed.as_slice();
             while !rest.is_empty() {
@@ -1272,7 +1565,7 @@ async fn run_rule(
                              statement limit; it gets no similar-text proposals until its \
                              text changes"
                         );
-                        sqlx::query(MARK_SEEN).bind(ids).execute(&mut *conn).await?;
+                        settle_unranked(conn, ids).await?;
                     }
                     Err(error) => return Err(error.into()),
                 }
@@ -1354,6 +1647,29 @@ async fn compare_batch_once(
         .execute(&mut *tx)
         .await?;
     sqlx::query(PRUNE_SEEN).execute(&mut *tx).await?;
+    sqlx::query(CLEAR_RANKINGS)
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
+    // Settled before it is ranked: a ranking row references its item's seen
+    // row. `RANK_SIMILAR` reads the settled corpus without the batch.
+    sqlx::query(MARK_SEEN).bind(ids).execute(&mut *tx).await?;
+    // Seq scans off for this one statement: the third arm's probe of
+    // `similar_text_seen_lex_idx` is costed as if it read most of the index
+    // (a GIN index cannot estimate a per-row array), so with the settled
+    // corpus a few thousand rows the planner scans the whole table once per
+    // batch item instead (#771). Nothing in the statement needs a seq scan.
+    sqlx::query("set local enable_seqscan = off")
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(RANK_SIMILAR)
+        .persistent(false)
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query("set local enable_seqscan = on")
+        .execute(&mut *tx)
+        .await?;
     // Not a prepared statement: planned afresh for every batch, with the
     // batch's own ids and the settled corpus as it stands. A cached generic
     // plan, which PostgreSQL switches to after five executions, is costed for
@@ -1371,9 +1687,27 @@ async fn compare_batch_once(
         .execute(&mut *tx)
         .await?
         .rows_affected();
-    sqlx::query(MARK_SEEN).bind(ids).execute(&mut *tx).await?;
+    sqlx::query(RETIRE_SIMILAR)
+        .persistent(false)
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
     tx.commit().await?;
     Ok(written)
+}
+
+/// Settle `ids` without comparing them: the item a pass gives up on (#755).
+/// Its old ranking goes with it, so nothing proposes from text it no longer
+/// has.
+async fn settle_unranked(conn: &mut sqlx::PgConnection, ids: &[String]) -> Result<(), sqlx::Error> {
+    use sqlx::Connection as _;
+    let mut tx = conn.begin().await?;
+    sqlx::query(FORGET_OWN_RANKINGS)
+        .bind(ids)
+        .execute(&mut *tx)
+        .await?;
+    sqlx::query(MARK_SEEN).bind(ids).execute(&mut *tx).await?;
+    tx.commit().await
 }
 
 /// Run every rule, returning how many proposals the pass wrote.
@@ -1874,9 +2208,21 @@ mod tests {
             SIMILARITY_FLOOR
         );
         assert!(
-            SIMILAR_TEXT.contains(concat!("cardinality(shared) >= ", similarity_floor!())),
+            RANK_SIMILAR.contains(concat!("where shared >= ", similarity_floor!())),
             "the similarity rule no longer reads the floor it declares"
         );
+    }
+
+    /// The cap a reader can name and the cap the ranking is compiled with are
+    /// one number, and the ranking keeps and drops at it.
+    #[test]
+    fn the_similar_text_cap_in_the_statement_is_the_one_that_is_documented() {
+        assert_eq!(
+            similar_text_cap!().parse::<usize>().unwrap(),
+            SIMILAR_TEXT_CAP
+        );
+        assert!(RANK_SIMILAR.contains(concat!("where through - n < ", similar_text_cap!())));
+        assert!(RANK_SIMILAR.contains(concat!("where place <= ", similar_text_cap!())));
     }
 
     /// Both classes #41 names are actually reachable, and so is the third.

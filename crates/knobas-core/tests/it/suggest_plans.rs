@@ -20,7 +20,15 @@
 //!   quadratic plan. The tables and CTEs small by construction (`SMALL`: the
 //!   configured sources, the curated estate, one batch, the ticket
 //!   namespaces) are allowed;
-//! * no anti-join is hashed on `relation` without the pair's ids.
+//! * no index scan on the inner side of a nested loop is linked to the outer
+//!   row only by a range (#771): `similar_text`'s third arm walked
+//!   `similar_text_seen_pkey` for `entity_id < o.entity_id`, half the table per
+//!   batch item, its GIN-indexed lexemes only a filter on the walk;
+//! * no anti-join is hashed on part of its key: on `relation` without both of
+//!   the pair's ids, or with any of the key left to a join filter (#771).
+//!
+//! `rank_similar` is planned with seq scans off, as the pass runs it
+//! (`PlannedStatement::no_seq_scan`).
 
 use knobas_core::suggest;
 use sqlx::PgPool;
@@ -126,6 +134,22 @@ async fn settle_and_change(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
+    // Ten ranked counterparts per prose item (#771), the digest each was
+    // ranked with its own: the rankings a changed item holds a place in.
+    sqlx::query(
+        "insert into sync.similar_text_top (entity_id, other_id, shared, other_at, other_digest)
+         select s.entity_id, o.entity_id, 5 + n, now(), s.digest
+           from sync.similar_text_seen s
+           cross join generate_series(1, 10) n
+           join sync.similar_text_seen o
+             on o.entity_id = (array['jira:PAY-', 'wiki:page:'])[1 + n % 2]
+                              || (1 + (hashtext(s.entity_id) & 1023) * 7 + n)
+          where o.entity_id <> s.entity_id
+         on conflict do nothing",
+    )
+    .execute(pool)
+    .await
+    .unwrap();
     sqlx::query(
         "update sync.item set title = title || ' w4001'
           where entity_id in (select 'jira:PAY-' || g from generate_series(1, 100) g)",
@@ -162,6 +186,14 @@ async fn plan(
     statement: &suggest::PlannedStatement,
     batch: &[String],
 ) -> serde_json::Value {
+    let mut conn = pool.acquire().await.unwrap();
+    let seq_scans = if statement.no_seq_scan { "off" } else { "on" };
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "set enable_seqscan = {seq_scans}"
+    )))
+    .execute(&mut *conn)
+    .await
+    .unwrap();
     let explain = format!("explain (format json) {}", statement.sql);
     let query = sqlx::query_scalar::<_, serde_json::Value>(sqlx::AssertSqlSafe(explain));
     let query = match statement.binds {
@@ -179,7 +211,7 @@ async fn plan(
         suggest::Binds::Batch => query.bind(batch),
         suggest::Binds::Nothing => query,
     };
-    query.fetch_one(pool).await.unwrap()
+    query.fetch_one(&mut *conn).await.unwrap()
 }
 
 /// Every string anywhere in `value`.
@@ -279,6 +311,66 @@ fn relations(node: &serde_json::Value, out: &mut Vec<String>) {
     }
 }
 
+/// Whether an index condition's clause compares by a range: `<`, `>`, `<=`,
+/// `>=`, and nothing that narrows to a key (`=`, `@@`, `&&`).
+fn is_range(clause: &str) -> bool {
+    [" < ", " > ", " <= ", " >= "]
+        .iter()
+        .any(|op| clause.contains(op))
+}
+
+/// The index scans under `node` (init plans and hashed subplans aside) whose
+/// index condition reaches the rows around it (`around`: the loop's outer
+/// side and the inner side's other scans) only through a range, or not at all:
+/// each outer row then walks a slice of the index the range leaves -- about
+/// half the table for `entity_id < o.entity_id` -- and filters it, which is the
+/// scan per row in an index's clothing (#771).
+fn linked_only_by_a_range(
+    node: &serde_json::Value,
+    hashed: &[String],
+    around: &[String],
+    out: &mut Vec<String>,
+) {
+    let is_index = matches!(
+        node["Node Type"].as_str(),
+        Some("Index Scan" | "Index Only Scan" | "Bitmap Index Scan")
+    );
+    let small = node["Relation Name"]
+        .as_str()
+        .is_some_and(|name| SMALL.contains(&name));
+    if is_index && !small {
+        let cond = node["Index Cond"].as_str().unwrap_or("");
+        let own = node["Alias"].as_str().unwrap_or("");
+        let others: Vec<String> = around.iter().filter(|a| *a != own).cloned().collect();
+        // A clause on a subplan's answer computed inside the inner side --
+        // the ticket lookup's `id = ANY ((InitPlan n).col1)`, built from the
+        // key the outer row found -- is a link too.
+        let linked = cond.split(" AND ").any(|clause| {
+            let reaches = mentions(&serde_json::Value::String(clause.to_owned()), &others)
+                || clause.contains("(InitPlan ")
+                || clause.contains("(SubPlan ");
+            reaches && !is_range(clause)
+        });
+        if !linked {
+            out.push(format!(
+                "{} using {} ({})",
+                describe(node),
+                node["Index Name"].as_str().unwrap_or("?"),
+                if cond.is_empty() {
+                    "no condition"
+                } else {
+                    cond
+                }
+            ));
+        }
+    }
+    for child in children(node) {
+        if child["Parent Relationship"] != "InitPlan" && !is_hashed(child, hashed) {
+            linked_only_by_a_range(child, hashed, around, out);
+        }
+    }
+}
+
 /// Every per-row scan and every anti-join hashed without the pair's ids.
 fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) {
     if node["Node Type"] == "Nested Loop" {
@@ -294,6 +386,15 @@ fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) 
                     .into_iter()
                     .map(|s| format!("a nested loop rescans {s}")),
             );
+            // Linked means to anything the loop's rows carry: the outer side,
+            // or a sibling scan inside the inner side the index is probed for.
+            let mut around = outer_aliases.clone();
+            aliases(inner, &mut around);
+            let mut ranged = Vec::new();
+            linked_only_by_a_range(inner, hashed, &around, &mut ranged);
+            out.extend(ranged.into_iter().map(|r| {
+                format!("a nested loop walks {r} per outer row, linked to it only by a range")
+            }));
             if !mentions(inner, &outer_aliases) {
                 let mut read = Vec::new();
                 relations(inner, &mut read);
@@ -319,8 +420,16 @@ fn findings(node: &serde_json::Value, hashed: &[String], out: &mut Vec<String>) 
             .is_some_and(|t| t.contains("Anti"))
     {
         let cond = node["Hash Cond"].as_str().unwrap_or("");
-        if cond.contains("relation") && !cond.contains("from_id") {
+        if cond.contains("relation") && !(cond.contains("from_id") && cond.contains("to_id")) {
             out.push(format!("an anti-join hashed on {cond}"));
+        }
+        // Part of the key left to a filter: every row of a hash bucket is
+        // compared with it, which is the `relation`-only hash of #770 in any
+        // other spelling.
+        if let Some(filter) = node["Join Filter"].as_str() {
+            out.push(format!(
+                "an anti-join hashed on {cond} leaves part of its key to a filter: {filter}"
+            ));
         }
     }
     for child in children(node) {
@@ -344,6 +453,17 @@ async fn assert_every_plan_holds(pool: &PgPool, state: &str) {
     assert!(
         settled > i64::from(TICKETS),
         "the fixture has a settled corpus: {settled}"
+    );
+    let ranked: i64 = sqlx::query_scalar(
+        "select count(*) from sync.similar_text_top
+          where other_id in (select entity_id from sync.item where title like '%w4001')",
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    assert!(
+        ranked > 0,
+        "the fixture has rankings that hold a changed item: {ranked}"
     );
     let links: i64 = sqlx::query_scalar("select count(*) from knobas.link")
         .fetch_one(pool)
