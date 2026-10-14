@@ -20,7 +20,15 @@
 //!   quadratic plan. The tables and CTEs small by construction (`SMALL`: the
 //!   configured sources, the curated estate, one batch, the ticket
 //!   namespaces) are allowed;
-//! * no anti-join is hashed on `relation` without the pair's ids.
+//! * no index scan on the inner side of a nested loop is linked to the outer
+//!   row only by a range (#771): `similar_text`'s third arm walked
+//!   `similar_text_seen_pkey` for `entity_id < o.entity_id`, half the table per
+//!   batch item, its GIN-indexed lexemes only a filter on the walk;
+//! * no anti-join is hashed on part of its key: on `relation` without both of
+//!   the pair's ids, or with any of the key left to a join filter (#771).
+//!
+//! `rank_similar` is planned with seq scans off, as the pass runs it
+//! (`PlannedStatement::no_seq_scan`).
 
 use knobas_core::suggest;
 use sqlx::PgPool;
