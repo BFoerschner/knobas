@@ -1277,6 +1277,7 @@ knobas-core	test/it	suggestions::drawing_the_reverse_of_a_proposal_withdraws_it_
 knobas-core	test/it	suggestions::each_exact_key_rule_reads_only_its_own_kind
 knobas-core	test/it	suggestions::no_key_rule_proposes_from_a_dead_item_or_to_a_withdrawn_ticket
 knobas-core	test/it	suggestions::one_connection_seen_by_two_rules_is_proposed_once
+knobas-core	test/it	suggestions::rows_a_full_hub_leaves_out_do_not_count_against_the_other_item
 knobas-core	test/it	suggestions::text_that_reads_alike_is_proposed_and_labelled_as_a_guess
 knobas-core	test/it	suggestions::the_database_refuses_a_proposal_that_cannot_say_why
 knobas-core	test/it	suggestions::the_panel_shows_no_proposal_and_the_tray_shows_no_link

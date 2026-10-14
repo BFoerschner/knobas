@@ -1890,7 +1890,7 @@ const DRAWN: &str = concat!(
 /// holding more than the tray draws for one item (#774). One count per item
 /// through `link_from_idx` and `link_to_idx`, shaped as [`WALK_MEMBERS`] is and
 /// for its reason, so a hub costs a probe of its own rows and not a pass over
-/// the room.
+/// the room. Its `3` is [`ROWS_PER_ITEM`].
 const OVERFLOW: &str = concat!(
     "select e.id as entity_id, e.kind, e.title, e.deleted_at, n.total as more
        from unnest($3::text[]) d(item)
