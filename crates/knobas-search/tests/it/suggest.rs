@@ -577,8 +577,8 @@ async fn the_rewritten_reads_return_what_the_live_item_view_returned() {
     .unwrap();
     assert_eq!(
         old_kinds.len(),
-        4,
-        "the fixture should leave four live kinds: {old_kinds:?}"
+        3,
+        "the fixture should leave three live kinds: {old_kinds:?}"
     );
 
     let suggestions = searcher(&pool).await.filter_suggestions("").await.unwrap();
