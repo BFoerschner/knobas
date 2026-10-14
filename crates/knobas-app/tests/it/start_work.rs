@@ -1525,3 +1525,55 @@ async fn a_second_run_while_one_is_behind_starts_no_second_loop() {
         "the branch once: one loop took the flow"
     );
 }
+
+/// **A step a run behind the answer may be taking is not the reader's to skip
+/// or edit (#779).** The run is held at the branch read, before it marks the
+/// step running, so the step still reads as pending and the stepper would
+/// offer *Skip* and *Edit* on it. Both are refused while the run is behind;
+/// the branch goes once, with the proposal the run read, and the flow
+/// finishes.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_step_a_run_behind_may_be_taking_cannot_be_skipped_or_edited() {
+    let pool = corpus("start_work_behind_guarded").await;
+    let flow = planned(&pool).await;
+    let branch = proposed_branch(&flow);
+    let branch_step = step_of(&flow, Step::CreateBranch).clone();
+    let look = std::sync::Arc::new(tokio::sync::Semaphore::new(0));
+    let fake = std::sync::Arc::new(
+        Fake::new()
+            .revealing_on_refresh(&branch)
+            .looking_through(&look),
+    );
+
+    start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
+        .await
+        .expect("the run starts");
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    while *fake.looks.lock().unwrap() == 0 {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the run never looked"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+
+    let skipped = start_work::ready_skip(&pool, branch_step.id)
+        .await
+        .expect_err("a skip of the step the run is taking is refused");
+    assert_eq!(skipped.code, IpcErrorCode::Conflict);
+    let edited = start_work::repropose(&pool, branch_step.id, branch_step.payload.clone())
+        .await
+        .expect_err("an edit of the step the run is taking is refused");
+    assert_eq!(edited.code, IpcErrorCode::Conflict);
+
+    look.add_permits(10);
+    let flow = read_until(&pool, |f| {
+        f.iter().all(|step| step.outcome == StepOutcome::Succeeded)
+    })
+    .await;
+    assert_eq!(outcome(&flow, Step::CreateBranch), StepOutcome::Succeeded);
+    assert_eq!(
+        fake.ops(),
+        ["create_branch", "create_pull_request", "transition"]
+    );
+}

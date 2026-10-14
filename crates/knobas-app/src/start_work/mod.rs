@@ -420,7 +420,8 @@ pub async fn ready_retry(
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`;
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the step already succeeded
 /// -- its effect exists at the source, and marking it skipped would only
-/// rewrite the record of what happened.
+/// rewrite the record of what happened -- or if a run behind the answer may
+/// be taking it (#779).
 pub async fn skip(
     pool: &PgPool,
     steps: &dyn Steps,
@@ -445,6 +446,7 @@ pub async fn ready_skip(pool: &PgPool, step_id: i64) -> Result<EntityRef, IpcErr
         )));
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
+    refuse_while_behind(pool, &ticket, &step, "skipping")?;
     store::settle(pool, step_id, StepOutcome::Skipped, None, Some("skipped")).await?;
     note(pool, &step, "skipped", "the user chose not to run it").await;
     Ok(ticket)
@@ -464,13 +466,25 @@ fn running_behind() -> &'static std::sync::Mutex<std::collections::HashSet<Strin
 struct Behind(String);
 
 impl Behind {
-    fn claim(pool: &PgPool, ticket: &EntityRef) -> Option<Self> {
+    fn key(pool: &PgPool, ticket: &EntityRef) -> String {
         let database = pool
             .connect_options()
             .get_database()
             .unwrap_or_default()
             .to_owned();
-        let key = format!("{database}/{ticket}");
+        format!("{database}/{ticket}")
+    }
+
+    /// Whether a run is behind for `ticket` right now.
+    fn held(pool: &PgPool, ticket: &EntityRef) -> bool {
+        running_behind()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&Self::key(pool, ticket))
+    }
+
+    fn claim(pool: &PgPool, ticket: &EntityRef) -> Option<Self> {
+        let key = Self::key(pool, ticket);
         let fresh = running_behind()
             .lock()
             .unwrap_or_else(|e| e.into_inner())
@@ -541,6 +555,30 @@ pub async fn run_in_background<S: Steps + 'static>(
     Ok(store::flow(pool, ticket).await?)
 }
 
+/// Refuse to skip or edit a step a run behind the answer may be taking (#779).
+///
+/// The run reads the flow, looks at the source and only then marks the step
+/// running, so a step it is about to send still reads as pending. A skip or an
+/// edit landing then would be overwritten by the send's outcome, and the
+/// source would get the old proposal anyway. A failed or queued step is where
+/// a run stopped, so it stays the reader's.
+fn refuse_while_behind(
+    pool: &PgPool,
+    ticket: &EntityRef,
+    step: &FlowStep,
+    doing: &str,
+) -> Result<(), IpcError> {
+    if matches!(step.outcome, StepOutcome::Pending | StepOutcome::Running)
+        && Behind::held(pool, ticket)
+    {
+        return Err(IpcError::conflict(format!(
+            "the flow is running -- {doing} the {} step has to wait until it stops",
+            step.step
+        )));
+    }
+    Ok(())
+}
+
 /// Mark the step a failed run was on as failed, with why.
 async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
     let Ok(flow) = store::flow(pool, ticket).await else {
@@ -567,7 +605,8 @@ async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
 /// # Errors
 ///
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`;
-/// [`Conflict`](crate::IpcErrorCode::Conflict) if the step has already run.
+/// [`Conflict`](crate::IpcErrorCode::Conflict) if the step has already run,
+/// or if a run behind the answer may be taking it (#779).
 pub async fn repropose(
     pool: &PgPool,
     step_id: i64,
@@ -581,6 +620,7 @@ pub async fn repropose(
         )));
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
+    refuse_while_behind(pool, &ticket, &step, "editing")?;
     store::repropose(pool, step_id, payload).await?;
     Ok(store::flow(pool, &ticket).await?)
 }
