@@ -266,9 +266,10 @@ pub async fn worklog_draft<R: tauri::Runtime>(
 /// [`crate::time::worklog::log`] records why -- a caller that could name them
 /// could name another ticket's.
 ///
-/// The answer is the local copy, read back after the flush: `remote_id` is
-/// already Jira's if the write went through, and `null` if it is still owed.
-/// The write itself is in the pending-writes panel like any other.
+/// The answer is the local copy, once the write is queued and the copy kept
+/// (#775): `remote_id` is `null` until the send behind the answer lands and
+/// its settle stamps Jira's id on. The write itself is in the pending-writes
+/// panel like any other, and `write_queue_id` names it.
 ///
 /// # Errors
 ///
@@ -288,7 +289,8 @@ pub async fn log_work<R: tauri::Runtime>(
     comment: String,
 ) -> Result<time::worklog::Worklog, IpcError> {
     let sources = crate::sources::state(&app)?;
-    time::worklog::log(
+    // Answers on queue (#775): the draft closes before Jira is asked.
+    time::worklog::log_in_background(
         &sources,
         &entity_id,
         day,
@@ -465,8 +467,9 @@ pub async fn log_all_preview<R: tauri::Runtime>(
 /// Log the week: one worklog per day and ticket, from that day's unlogged
 /// manual blocks (issue #283, spec story 43).
 ///
-/// The worklogs it made. Each is queued, copied and flushed the way a single
-/// *Log* is, so they appear in the pending-writes panel like any other write.
+/// The worklogs it made. Each is queued and copied the way a single *Log* is,
+/// and sent behind the answer (#775), so they appear in the pending-writes
+/// panel like any other write.
 /// Passive and label blocks are untouched -- [`crate::time::week::plan`]
 /// carries why each exclusion is a rule rather than a filter.
 ///
@@ -486,7 +489,8 @@ pub async fn log_all<R: tauri::Runtime>(
     days: Vec<time::week::DayWindow>,
 ) -> Result<Vec<time::worklog::Worklog>, IpcError> {
     let sources = crate::sources::state(&app)?;
-    time::week::log_all(&sources, &days).await
+    // Answers on queue (#775): *Log all* closes before the week is sent.
+    time::week::log_all_in_background(&sources, &days).await
 }
 
 #[cfg(test)]

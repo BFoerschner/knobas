@@ -31,6 +31,7 @@
   other people read is not something to discover afterwards.
 -->
 <script lang="ts">
+  import { followWrite } from "../shell/follow-write";
   import { ipcErrorMessage } from "../ipc";
   import {
     logAll as realLogAll,
@@ -209,8 +210,13 @@
   async function send() {
     sending = true;
     try {
-      await io.logAll(weekWindows(monday));
+      const made = await io.logAll(weekWindows(monday));
       planned = null;
+      // Queued, not sent (#775): the week goes behind the reader, and only a
+      // worklog that will not go is told again.
+      for (const worklog of made) {
+        if (worklog.write_queue_id !== null) followWrite({ id: worklog.write_queue_id }, { name: "Worklog" });
+      }
     } catch (error) {
       failure = ipcErrorMessage(error);
     } finally {

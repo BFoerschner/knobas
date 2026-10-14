@@ -41,7 +41,7 @@ export interface Following {
 }
 
 /** Watch `write` until it settles; say so only if it is held or refused. */
-export function followWrite(write: QueuedWrite, following: Following, ports: FollowPorts = REAL): void {
+export function followWrite(write: Pick<QueuedWrite, "id">, following: Following, ports: FollowPorts = REAL): void {
   let done = false;
   let unlisten: (() => void) | null = null;
   const stop = () => {
