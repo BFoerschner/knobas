@@ -1063,6 +1063,14 @@ snapshot's name, its size and its age.
 - **`RP_ITEMS`** (default 22000) scales the three sizes; `RP_ITEMS=2500` is the
   size to iterate on and has a snapshot of its own. An explicit `RP_TICKETS`,
   `RP_PAGES` or `RP_BUILDS` still wins.
+- **`RP_PASS`** (#793). `run` (the default) runs and times the suggestion pass
+  (`RP-PASS ms=...`). `skip` restores a third snapshot, taken after the pass,
+  and skips it; the line then reads `RP-PASS skipped (snapshot ...)`, so a
+  reading is never mistaken for a pass measurement. The snapshot is built once
+  (restore the base copy, run the pass, save) when missing, and its key adds a
+  hash of `crates/knobas-core/src/suggest.rs` and the migrations, so a change to
+  the pass builds a new one. `RP_FRESH=1` rebuilds it too. Snapshots of an
+  older pass are removed by the 7-day sweep or a migrations change.
 - **Disk.** Each run first deletes snapshots older than 7 days or whose
   migrations hash is not the current one, and unfinished copies older than an
   hour. The 22k copies are about 0.2 GB each as files; the clone costs little

@@ -506,6 +506,50 @@ async fn build_snapshots(
     let _ = std::fs::remove_dir_all(&root);
 }
 
+/// The suggestion pass, run once as it would be after a sync, timed, with
+/// what it wrote: whether it finishes in both statistics states is what #770
+/// measured (before it, the pass died in its first exact-key rule on tables
+/// never analyzed). Analyzed before the pass as well as after it: a real
+/// install's autovacuum analyzes within about a minute of the first sync, so
+/// the pass plans against statistics. Again after, so the reads plan against
+/// the links the pass wrote.
+async fn run_pass(connector: &knobas_db::embedded::Connector, pool: &PgPool, analyzed: bool) {
+    let pass = knobas_app::suggestion_pass::SuggestionPass::new(
+        std::sync::Arc::new(Conns(connector.clone())),
+        knobas_app::suggestion_pass::PASS_STATEMENT_TIMEOUT,
+    );
+    let passed = Instant::now();
+    let outcome = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
+    let proposals: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
+        .fetch_one(pool)
+        .await
+        .unwrap();
+    println!(
+        "RP-PASS analyzed={analyzed} ms={} outcome={:?} proposals={proposals}",
+        passed.elapsed().as_millis(),
+        outcome.map_err(|error| error.message)
+    );
+    if analyzed {
+        sqlx::query("analyze").execute(pool).await.unwrap();
+    }
+}
+
+/// Build the after-pass snapshot `to` from the base snapshot `from` (#793):
+/// restore it, run the pass, stop, save.
+async fn build_passed(from: &std::path::Path, to: &std::path::Path, analyzed: bool) {
+    let root = probe_snapshot::root().join(format!("pass-{}", std::process::id()));
+    probe_snapshot::restore(from, &root);
+    let db = start_at(&root).await;
+    let connector = db.connector();
+    let pool = connector.app_pool().await.unwrap();
+    searcher(&pool).await.unwrap();
+    run_pass(&connector, &pool, analyzed).await;
+    pool.close().await;
+    db.stop().await.unwrap();
+    probe_snapshot::save(&root, to);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 #[ignore = "a wall-clock reading; run by `just responsiveness-probe`"]
 async fn what_the_reader_waits_on() {
@@ -566,10 +610,32 @@ async fn what_the_reader_waits_on() {
         &key,
         probe_snapshot::State::Analyzed,
     ));
-    let wanted = if analyzed { &analyzed_copy } else { &never };
+    let base = if analyzed { &analyzed_copy } else { &never };
+    // `RP_PASS=skip` reads against an after-pass snapshot (#793), keyed on the
+    // pass's code as well; `RP_PASS=run` (the default) runs and times the pass.
+    let skip_pass = match std::env::var("RP_PASS").as_deref() {
+        Ok("skip") => true,
+        Ok("run") | Err(_) => false,
+        Ok(other) => panic!("RP_PASS is `run` or `skip`, not `{other}`"),
+    };
+    let passed_copy = snapshots.join(probe_snapshot::passed_name(
+        &migrations,
+        &key,
+        &probe_snapshot::pass_code_hash(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src/suggest.rs"),
+            &migrations,
+        ),
+        if analyzed {
+            probe_snapshot::State::Analyzed
+        } else {
+            probe_snapshot::State::NeverAnalyzed
+        },
+    ));
+    let wanted = if skip_pass { &passed_copy } else { base };
 
     let seeded = Instant::now();
-    let how = if env("RP_FRESH", 0) == 1 || !probe_snapshot::exists(wanted) {
+    let fresh = env("RP_FRESH", 0) == 1;
+    let how = if fresh || !probe_snapshot::exists(base) {
         build_snapshots(
             tickets,
             pages,
@@ -582,6 +648,12 @@ async fn what_the_reader_waits_on() {
         "built"
     } else {
         "restored"
+    };
+    let how = if skip_pass && (fresh || !probe_snapshot::exists(wanted)) {
+        build_passed(base, wanted, analyzed).await;
+        "built"
+    } else {
+        how
     };
     println!(
         "RP-SNAPSHOT {how} {} size_mb={} age_s={}",
@@ -615,31 +687,13 @@ async fn what_the_reader_waits_on() {
         "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} snapshot={how} in {} s",
         seeded.elapsed().as_secs()
     );
-    // Analyzed before the pass as well as after it: a real install's
-    // autovacuum analyzes within about a minute of the first sync, so the pass
-    // that follows a sync plans against statistics (#770). Again after, so the
-    // reads plan against the links the pass wrote.
-    // The suggestion pass has run once, as it would have after a sync. Timed,
-    // with what it wrote, because whether it finishes in both states is what
-    // #770 measured: before it, the pass died in its first exact-key rule on
-    // tables never analyzed.
-    let pass = knobas_app::suggestion_pass::SuggestionPass::new(
-        std::sync::Arc::new(Conns(connector.clone())),
-        knobas_app::suggestion_pass::PASS_STATEMENT_TIMEOUT,
-    );
-    let passed = Instant::now();
-    let outcome = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
-    let proposals: i64 = sqlx::query_scalar("select count(*) from knobas.proposed_link")
-        .fetch_one(pool)
-        .await
-        .unwrap();
-    println!(
-        "RP-PASS analyzed={analyzed} ms={} outcome={:?} proposals={proposals}",
-        passed.elapsed().as_millis(),
-        outcome.map_err(|error| error.message)
-    );
-    if analyzed {
-        sqlx::query("analyze").execute(pool).await.unwrap();
+    if skip_pass {
+        println!(
+            "RP-PASS skipped (snapshot {})",
+            wanted.file_name().unwrap().to_string_lossy()
+        );
+    } else {
+        run_pass(&connector, pool, analyzed).await;
     }
     println!("RP-STATS analyzed={analyzed}");
     // A stored context: the promoted epic `jira0:JIRA0-3` and its children.
