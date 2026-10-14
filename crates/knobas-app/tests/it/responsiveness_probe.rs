@@ -449,16 +449,18 @@ async fn what_the_reader_waits_on() {
         "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} in {} s",
         seeded.elapsed().as_secs()
     );
-    if analyzed {
-        sqlx::query("analyze").execute(pool).await.unwrap();
-    }
-    println!("RP-STATS analyzed={analyzed}");
     // The suggestion pass has run once, as it would have after a sync.
     let pass = knobas_app::suggestion_pass::SuggestionPass::new(
         std::sync::Arc::new(Conns(connector.clone())),
         knobas_app::suggestion_pass::PASS_STATEMENT_TIMEOUT,
     );
     let _ = knobas_app::commands::entity::detect_suggestions_inner(&pass).await;
+    // After the pass, not before: it is not a read the table times, and on
+    // analyzed tables its inserts ran for over fifteen minutes.
+    if analyzed {
+        sqlx::query("analyze").execute(pool).await.unwrap();
+    }
+    println!("RP-STATS analyzed={analyzed}");
     // A stored context: the promoted epic `jira0:JIRA0-3` and its children.
     let promoted = knobas_core::context::promote(
         pool,
