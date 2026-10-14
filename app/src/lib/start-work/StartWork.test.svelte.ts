@@ -499,3 +499,36 @@ test("a repository read that answers with none is asked once, not on every answe
   expect(asked).toBe(1);
   screen.done();
 });
+
+/**
+ * #779: *Run* answers before the first send lands, so the stepper is free at
+ * once. It says the flow runs on behind it, offers no second *Run* meanwhile,
+ * draws each step as it lands, and goes back to the footer once it stops.
+ */
+test("Run frees the stepper on the answer, and each step is drawn as it lands", async () => {
+  vi.useFakeTimers();
+  try {
+    flow = sequence(["pending", "pending", "pending", "pending"]);
+    const screen = render();
+    await settle();
+    screen.button("Run the sequence")?.click();
+    await settle();
+    expect(screen.text()).toContain("Running behind you");
+    expect(screen.button("Run the sequence")).toBeNull();
+    expect(screen.button("Continue")).toBeNull();
+
+    flow = sequence(["running", "pending", "pending", "pending"]);
+    await vi.advanceTimersByTimeAsync(800);
+    flushSync();
+    expect(screen.steps()[0]!.textContent).toContain("running");
+
+    flow = sequence(["succeeded", "succeeded", "succeeded", "succeeded"]);
+    await vi.advanceTimersByTimeAsync(800);
+    flushSync();
+    expect(screen.text()).not.toContain("Running behind you");
+    expect(screen.text()).toContain("Every step is finished. The ticket is In Progress.");
+    screen.done();
+  } finally {
+    vi.useRealTimers();
+  }
+});

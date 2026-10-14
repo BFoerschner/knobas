@@ -66,6 +66,9 @@
   let editing = $state<number | null>(null);
   let draft = $state<Record<string, string>>({});
 
+  // The flow runs on without this page; only the re-reading stops with it.
+  $effect(() => () => flow.stop());
+
   $effect(() => {
     const id = entityId;
     void (async () => {
@@ -312,7 +315,13 @@
     </ol>
 
     <footer class="sw-foot">
-      {#if done}
+      {#if flow.following}
+        <!--
+          The steps run behind the answer (#779): each is drawn above as it
+          lands, and the reader may leave -- the flow goes on without this page.
+        -->
+        <span class="sw-note">Running behind you. Each step shows here as it lands; you can leave this page.</span>
+      {:else if done}
         <p class="sw-note">
           {ticketMoved
             ? "Every step is finished. The ticket is In Progress."

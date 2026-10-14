@@ -1,5 +1,7 @@
 /**
- * The flow store's polling (issue #44, story 11).
+ * The flow store's polling (issue #44, story 11). Since #779 the run answers
+ * at once, the steps run behind it, and the store follows the flow while it
+ * moves.
  *
  * `startWorkRun` answers only when the whole sequence stops, but the rows move
  * underneath it — a step is marked `running` while its dispatch is out — and
@@ -55,50 +57,59 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-test("while the run is out, the flow is re-read and what it answers is drawn", async () => {
+test("run answers at once, and the flow is re-read while it moves, each step drawn as it lands", async () => {
   const sw = createStartWork("jira:PAY-231");
+  const steps = [one(1, "pending"), { ...one(2, "pending"), position: 1 }];
   const running = sw.run();
-
-  peeked = [one(1, "running")];
-  await vi.advanceTimersByTimeAsync(1500);
-  expect(peeks).toBeGreaterThanOrEqual(2);
-  expect(sw.steps.map((step) => step.outcome)).toEqual(["running"]);
-
-  releaseRun([one(1, "succeeded")]);
+  // The command answers while the first send is still held: the store does not wait for it.
+  releaseRun(steps);
   await running;
-  expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded"]);
   expect(sw.busy).toBe(false);
+  expect(sw.following).toBe(true);
 
-  // The run has answered: nothing polls any more.
+  peeked = [one(1, "running"), { ...one(2, "pending"), position: 1 }];
+  await vi.advanceTimersByTimeAsync(800);
+  expect(sw.steps.map((step) => step.outcome)).toEqual(["running", "pending"]);
+
+  // Between two steps: the first landed, the second is not started yet. Still moving.
+  peeked = [one(1, "succeeded"), { ...one(2, "pending"), position: 1 }];
+  await vi.advanceTimersByTimeAsync(800);
+  expect(sw.following).toBe(true);
+
+  peeked = [one(1, "succeeded"), { ...one(2, "succeeded"), position: 1 }];
+  await vi.advanceTimersByTimeAsync(800);
+  expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded", "succeeded"]);
+  expect(sw.following).toBe(false);
+
+  // Settled: nothing polls any more.
   const before = peeks;
   await vi.advanceTimersByTimeAsync(3000);
   expect(peeks).toBe(before);
 });
 
-test("a peek that resolves after the run's answer cannot overwrite it", async () => {
+test("a flow that stops on a failed or queued step is no longer followed", async () => {
+  for (const stop of ["failed", "queued"] as const) {
+    const sw = createStartWork("jira:PAY-231");
+    const running = sw.run();
+    releaseRun([one(1, "pending")]);
+    await running;
+    peeked = [one(1, stop)];
+    await vi.advanceTimersByTimeAsync(800);
+    expect(sw.steps.map((step) => step.outcome)).toEqual([stop]);
+    expect(sw.following).toBe(false);
+    const before = peeks;
+    await vi.advanceTimersByTimeAsync(3000);
+    expect(peeks).toBe(before);
+  }
+});
+
+test("stop ends the following, for a stepper that goes away while the flow moves", async () => {
   const sw = createStartWork("jira:PAY-231");
-
-  // The peek hangs until after the run answers.
-  let releasePeek: (steps: StartWorkStep[]) => void = () => {};
-  peeked = [];
-  const slow = new Promise<StartWorkStep[]>((resolve) => {
-    releasePeek = resolve;
-  });
-  const entity = await import("../ipc/entity");
-  vi.spyOn(entity, "startWorkFlow").mockImplementation(() => slow);
-
   const running = sw.run();
-  await vi.advanceTimersByTimeAsync(800);
-
-  releaseRun([one(1, "succeeded")]);
+  releaseRun([one(1, "running")]);
   await running;
-  expect(sw.steps.map((step) => step.outcome)).toEqual(["succeeded"]);
-
-  releasePeek([one(1, "running")]);
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(sw.steps.map((step) => step.outcome)).toEqual(
-    ["succeeded"],
-    // A stale peek landing late must not un-succeed the flow on screen.
-  );
+  sw.stop();
+  const before = peeks;
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(peeks).toBe(before);
 });
