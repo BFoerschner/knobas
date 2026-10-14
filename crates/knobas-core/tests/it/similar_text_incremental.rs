@@ -945,3 +945,114 @@ async fn an_item_withdrawn_mid_pass_is_not_ranked_and_its_proposal_stays() {
         .collect();
     assert_eq!(got, kept.into_keys().collect::<BTreeSet<_>>());
 }
+
+/// #776: a word that crosses the 5% line is compared again only where it
+/// counts: in the items that hold it. Every other item keeps its ranking, which
+/// the flip cannot have changed.
+///
+/// Witnessed as [`a_pass_with_nothing_new_judges_nothing`] is: every proposal
+/// is withdrawn behind the detector's back, then prose items about nothing
+/// arrive until a common word is no longer common. The pass writes proposals
+/// only for the items it compared again, so every proposal it writes must have
+/// an end that holds the flipped word.
+#[tokio::test]
+async fn a_word_crossing_the_line_compares_again_only_the_items_holding_it() {
+    let pool = scratch().await;
+    let rule = suggest::rule("similar_text").unwrap();
+    apply(
+        &pool,
+        &Step::Topical {
+            source: "jira",
+            keys: 0..300,
+            seed: 11,
+        },
+    )
+    .await;
+    suggest::detect_rule(&pool, rule).await.unwrap();
+    let common_before: BTreeSet<String> =
+        sqlx::query_scalar("select lexeme from sync.similar_text_lexeme where common")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+    // The least held common word, past the template word every item holds.
+    let (word, items, n): (String, i32, i64) = sqlx::query_as(
+        "select lexeme, items, (select count(*) from sync.similar_text_counted)
+           from sync.similar_text_lexeme where common and lexeme <> 'team'
+          order by items, lexeme limit 1",
+    )
+    .fetch_one(&pool)
+    .await
+    .expect("a common word other than the template's");
+    // Enough items about nothing that `word` sits exactly on the line, which
+    // is not over it.
+    let fillers = i64::from(items) * 20 - n;
+    assert!(fillers > 0 && fillers < 100, "{word}: {items} of {n}");
+    for k in 0..fillers {
+        let id = format!("filler:F-{k}");
+        let text = format!("zq{k}alpha zq{k}bravo zq{k}charlie zq{k}delta zq{k}echo");
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $2)")
+            .bind(&id)
+            .bind(&text)
+            .execute(&pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, 'filler', 'ticket', $2, $2, '{}')",
+        )
+        .bind(&id)
+        .bind(&text)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+
+    let first = proposed(&pool).await;
+    sqlx::query("delete from knobas.link where rule = 'similar_text'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    suggest::detect_rule(&pool, rule).await.unwrap();
+
+    let common_after: BTreeSet<String> =
+        sqlx::query_scalar("select lexeme from sync.similar_text_lexeme where common")
+            .fetch_all(&pool)
+            .await
+            .unwrap()
+            .into_iter()
+            .collect();
+    let flipped: Vec<String> = common_before
+        .symmetric_difference(&common_after)
+        .cloned()
+        .collect();
+    assert!(
+        flipped.contains(&word),
+        "{word} is no longer common: {flipped:?}"
+    );
+    let holders: BTreeSet<String> = sqlx::query_scalar(
+        "select entity_id from sync.similar_text_counted
+          where tsvector_to_array(lexemes) && $1",
+    )
+    .bind(&flipped)
+    .fetch_all(&pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .collect();
+    let held =
+        |(from, to, _): &(String, String, String)| holders.contains(from) || holders.contains(to);
+    // The check below could not fail if every proposal touched a holder.
+    assert!(
+        first.iter().any(|p| !held(p)),
+        "every proposal touches a holder of {flipped:?}, so the check is empty"
+    );
+    let rewritten = proposed(&pool).await;
+    assert!(!rewritten.is_empty(), "the holders were compared again");
+    assert!(
+        rewritten.iter().all(held),
+        "an item not holding {flipped:?} was compared again: {:?}",
+        rewritten.iter().filter(|p| !held(p)).collect::<Vec<_>>()
+    );
+}
