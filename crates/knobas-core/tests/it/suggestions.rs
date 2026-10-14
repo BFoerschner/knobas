@@ -534,9 +534,15 @@ async fn no_key_rule_proposes_from_a_dead_item_or_to_a_withdrawn_ticket() {
         ]}})
     };
     let blocker = with_payload(&pool, "ticket", "PAY-3", "Blocker", links_to("PAY-1")).await;
-    with_payload(&pool, "ticket", "PAY-4", "Blocks the gone", links_to("PAY-2")).await;
-    withdraw(with_payload(&pool, "ticket", "PAY-5", "Gone blocker", links_to("PAY-1")).await)
-        .await;
+    with_payload(
+        &pool,
+        "ticket",
+        "PAY-4",
+        "Blocks the gone",
+        links_to("PAY-2"),
+    )
+    .await;
+    withdraw(with_payload(&pool, "ticket", "PAY-5", "Gone blocker", links_to("PAY-1")).await).await;
     entity_only(&pool, "off", "ticket", "PAY-7").await;
     from(
         &pool,

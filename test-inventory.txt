@@ -1247,6 +1247,7 @@ knobas-core	test/it	suggestions::detection_never_writes_a_confirmed_link
 knobas-core	test/it	suggestions::drawing_a_proposed_link_by_hand_accepts_the_proposal
 knobas-core	test/it	suggestions::drawing_the_reverse_of_a_proposal_withdraws_it_and_keeps_the_users_direction
 knobas-core	test/it	suggestions::each_exact_key_rule_reads_only_its_own_kind
+knobas-core	test/it	suggestions::no_key_rule_proposes_from_a_dead_item_or_to_a_withdrawn_ticket
 knobas-core	test/it	suggestions::one_connection_seen_by_two_rules_is_proposed_once
 knobas-core	test/it	suggestions::text_that_reads_alike_is_proposed_and_labelled_as_a_guess
 knobas-core	test/it	suggestions::the_database_refuses_a_proposal_that_cannot_say_why
