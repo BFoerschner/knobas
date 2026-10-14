@@ -8,7 +8,8 @@
 //! # The decision everything else follows from
 //!
 //! **The inbox is derived from the mirror, not synced into.** An
-//! [`InboxItem`] is computed from `sync.live_item`, `knobas.confirmed_link`
+//! [`InboxItem`] is computed from the live mirror (`sync.item` and its
+//! liveness, `crate::live_by_exclusion!` since #778), `knobas.confirmed_link`
 //! and `knobas.source_config` every time the stream is read. There is no
 //! adapter that fetches "inbox items", no table of them, and no fifth thing to
 //! keep consistent -- a materialised inbox would be a second corpus that can

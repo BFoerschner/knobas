@@ -46,8 +46,9 @@ pub const RECENT_LIMIT: u32 = 20;
 /// `item_kind_updated_idx` newest first and probes liveness for the rows it
 /// walks, which is about twenty. Through the view, on tables never analyzed,
 /// the branch was planned from `knobas.entity` instead, a probe into
-/// `sync.item` per entity per kind: 300 ms of the launcher's 410 on the
-/// probe's 22,000 items (#778).
+/// `sync.item` per entity per kind: 300 ms of `launcher_home`'s 387 on the
+/// probe's 22,000 items at `7818d65b` (#778; #777 read 748 with the seeded
+/// Gitea synced too).
 ///
 /// The columns are named rather than `select *`ed -- `sync.live_item` carries a
 /// `tsvector` and reading one into a `FromRow` struct panics at runtime

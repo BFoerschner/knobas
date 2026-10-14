@@ -16,9 +16,10 @@
 //! answer and nothing else -- the fixed rule of §16.11 / ADR-0008, computed
 //! once and reused here rather than re-spelled, so the board can never
 //! disagree with the rest of that room about who is in it. Of what the scope
-//! admits, the board draws the **live tickets**: `sync.live_item` is the join
-//! that puts a ticket the source deleted off the board while the rule still
-//! counts it a member.
+//! admits, the board draws the **live tickets**: liveness
+//! ([`crate::live_by_exclusion!`], the view's filter since #778) is what puts a
+//! ticket the source deleted off the board while the rule still counts it a
+//! member.
 //!
 //! There is no normalized status model and no migration behind any of this.
 //! Contract §4.1 normalizes four fields and a status is not one of them, so a
@@ -138,8 +139,9 @@ macro_rules! priority_read {
 /// migration `0012`, a disabled source's ticket -- off the board (story 18):
 /// `sync.item` with [`crate::live_by_exclusion!`] rather than `sync.live_item`,
 /// whose join the planner drove from `knobas.entity` on tables never analyzed,
-/// 225 ms for the *All* room's 15,000 tickets against 70 ms analyzed (#778). Newest first within the answer, so a column reads like the
-/// recency list the tile used to be; the grouping below preserves this order.
+/// 225 ms for the *All* room's 15,000 tickets against 70 ms analyzed (#778).
+/// Newest first within the answer, so a column reads like the recency list
+/// the tile used to be; the grouping below preserves this order.
 ///
 /// `$3` is the project dimension (#208), which narrows **within** `$2` rather
 /// than beside it: a project key is unique only inside its own source, so a

@@ -29,6 +29,10 @@
 //! (#745), so it never holds one of the UI pool's five. At most one pass runs;
 //! a request that arrives while one runs is owed one more pass after it, and
 //! any number of such requests are that one pass.
+//!
+//! **Not joined at shutdown.** A pass is a detached task, and
+//! `Scheduler::shutdown` does not wait for it: an `ANALYZE` cut off with its
+//! connection leaves the statistics as they were, and the next sync asks again.
 
 use std::sync::{Arc, Mutex, PoisonError};
 
@@ -43,7 +47,7 @@ pub const GROWTH: f64 = 0.2;
 /// The mirror tables a pass would analyze now: never analyzed, or more than
 /// [`GROWTH`] away from the count the last analyze saw. Quoted, ready to name
 /// in a statement (`format('%I.%I')`).
-const GROWN: &str = "
+const CHANGED: &str = "
 select format('%I.%I', s.schemaname, s.relname)
   from pg_stat_user_tables s
   join pg_class c on c.oid = s.relid
@@ -53,13 +57,16 @@ select format('%I.%I', s.schemaname, s.relname)
         or abs(s.n_live_tup - c.reltuples) > $1 * c.reltuples)
  order by 1";
 
-/// What a pass found to analyze, read on `conn`. See [`GROWN`].
+/// What a pass found to analyze, read on `conn`. See [`CHANGED`].
 ///
 /// # Errors
 ///
 /// [`sqlx::Error`] if the catalog read fails.
-pub async fn grown(conn: &mut sqlx::PgConnection) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar(GROWN).bind(GROWTH).fetch_all(conn).await
+pub async fn changed(conn: &mut sqlx::PgConnection) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar(CHANGED)
+        .bind(GROWTH)
+        .fetch_all(conn)
+        .await
 }
 
 /// The analyze pass, shared by every caller in the process. Cheap to clone: a
@@ -163,7 +170,7 @@ impl Inner {
     async fn pass(&self) -> Result<Vec<String>, sqlx::Error> {
         use sqlx::Connection as _;
         let mut conn = self.connections.open().await?;
-        let tables = grown(&mut conn).await?;
+        let tables = changed(&mut conn).await?;
         for table in &tables {
             // A name out of the catalog, quoted by `format('%I.%I')`.
             sqlx::query(sqlx::AssertSqlSafe(format!("analyze {table}")))
