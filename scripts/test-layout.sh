@@ -136,7 +136,7 @@ rename() {
 
     local listed
     listed=$(exceptions)
-    scratch=$(mktemp "${TMPDIR:-/tmp}/knobas-test-layout.XXXXXX")
+    scratch=$(mktemp "${TMPDIR:-/tmp}/knobas-layout-guard.XXXXXX")
     # Entries go to awk space-separated: macOS's awk refuses a newline in a
     # `-v` string, and an entry cannot contain a space (exceptions() checks).
     awk -F'\t' -v OFS='\t' -v prog="$prog" -v crates="$*" -v listed="$(printf '%s\n' "$listed" | tr '\n' ' ')" '

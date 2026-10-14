@@ -12,7 +12,11 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 script=$here/test-layout.sh
 
-scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-test-layout-test.XXXXXX")
+# Not `knobas-test-...`: that prefix names the scratch roots the test connector's
+# reaper (knobas-db test_util) sweeps, and a directory so named with no lock
+# beside it is deleted from under this script by the first cargo test binary
+# that starts, mid-run (issue #799).
+scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-layout-check.XXXXXX")
 trap 'rm -rf "$scratch"' EXIT
 trap 'rm -rf "$scratch"; trap - INT; kill -INT $$' INT
 trap 'rm -rf "$scratch"; trap - TERM; kill -TERM $$' TERM
