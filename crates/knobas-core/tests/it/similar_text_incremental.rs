@@ -1056,3 +1056,81 @@ async fn a_word_crossing_the_line_compares_again_only_the_items_holding_it() {
         rewritten.iter().filter(|p| !held(p)).collect::<Vec<_>>()
     );
 }
+
+/// #776, upgrading: `0034` empties the rankings and the seen rows and starts
+/// with no counts, beside the proposals the old rule made. The first pass
+/// counts every prose item exactly, and lands on the capped set over the
+/// uncommon words, retiring the unanswered proposals only common words made.
+///
+/// The install before the upgrade is the pass with no word common, which is
+/// the rule as it was; `0034`'s effect is then its truncate, with the two new
+/// tables empty, as a fresh `0034` leaves them.
+#[tokio::test]
+async fn the_first_pass_after_the_upgrade_counts_exactly_and_retires_what_common_words_made() {
+    let pool = scratch().await;
+    let rule = suggest::rule("similar_text").unwrap();
+    apply(
+        &pool,
+        &Step::Topical {
+            source: "jira",
+            keys: 0..300,
+            seed: 11,
+        },
+    )
+    .await;
+    let reset = "truncate sync.similar_text_top, sync.similar_text_seen,
+                          sync.similar_text_counted, sync.similar_text_lexeme";
+    // Counted, then nothing common and nothing settled: the old rule's pass.
+    suggest::detect_rule(&pool, rule).await.unwrap();
+    sqlx::query("delete from knobas.link where rule = 'similar_text'")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("truncate sync.similar_text_top, sync.similar_text_seen")
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update sync.similar_text_lexeme set common = false")
+        .execute(&pool)
+        .await
+        .unwrap();
+    suggest::detect_rule(&pool, rule).await.unwrap();
+    let (old, _) = capped(&old_pairs(&pool).await);
+    let pairs = |rows: BTreeSet<(String, String, String)>| -> BTreeSet<(String, String)> {
+        rows.into_iter().map(|(from, to, _)| (from, to)).collect()
+    };
+    assert_eq!(
+        pairs(proposed(&pool).await),
+        old.keys().cloned().collect(),
+        "the install before the upgrade proposes the old rule's set"
+    );
+
+    sqlx::query(reset).execute(&pool).await.unwrap();
+    suggest::detect_rule(&pool, rule).await.unwrap();
+
+    let wrong: i64 = sqlx::query_scalar(
+        "select count(*) from (
+             select l, count(*)::int as n
+               from sync.live_item, unnest(tsvector_to_array(fts)) l
+              where kind in ('ticket','page','pr') group by l) want
+           full join sync.similar_text_lexeme got on got.lexeme = want.l
+          where want.n is distinct from got.items",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        wrong, 0,
+        "every lexeme's count is exact after the first pass"
+    );
+    let (new, _) = capped(&pairs_of(&pool, UNCOMMON_PAIRS).await);
+    assert!(
+        old.keys().any(|pair| !new.contains_key(pair)),
+        "no old proposal was made by common words alone, so retiring is unwitnessed"
+    );
+    assert_eq!(
+        pairs(proposed(&pool).await),
+        new.keys().cloned().collect(),
+        "the first pass after the upgrade proposes the capped set over the uncommon words"
+    );
+}
