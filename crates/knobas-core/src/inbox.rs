@@ -340,6 +340,11 @@ macro_rules! review_request {
 /// ever named you. [`WINDOW_DAYS`] on the item's own timestamp is the stated
 /// limit, and *done* is what clears an older one -- and lets it come back when
 /// somebody says something new.
+///
+/// **The name is looked for before it is matched** (#785): a `strpos` of the
+/// username, which every match contains, ahead of the expression. On the
+/// probe's 17,000 prose items, read for an identity they never name, the
+/// expression alone was 16 of the rule's 24 ms.
 macro_rules! mention {
     () => {
         concat!(
@@ -358,7 +363,8 @@ macro_rules! mention {
                  and exists (
                        select 1
                          from unnest($1::text[]) as u
-                        where i.body_text ~ ('(\[~|@)'
+                        where strpos(i.body_text, u) > 0
+                          and i.body_text ~ ('(\[~|@)'
                               || regexp_replace(u, '([\\^$.|?*+()\[\]{}])', '\\\1', 'g')
                               || '($|[^A-Za-z0-9_.-])'))"
         )
@@ -393,50 +399,66 @@ macro_rules! mention {
 /// verdict -- a re-run that is green *so far* has not resolved anything, and
 /// hiding the red build while it runs would un-hide it minutes later if the
 /// re-run fails, which is a stream that flickers rather than resolves.
+///
+/// **Read once per statement, not once per build** (#785). Both lookups were
+/// correlated subqueries, and neither had an index to probe: the newer green
+/// build walked every build of the kind per red one (nothing indexes the
+/// configuration), and the confirmed link was a scan of `knobas.link` per
+/// build wherever the planner judged the table small. With every build the
+/// reader's, the rule read 185 ms on the probe's 5,000 builds in either
+/// statistics state. Now:
+///
+/// * the newest finished green of each configuration is a window over the
+///   builds, partitioned by source and configuration, so a red build is
+///   resolved when that time is later than its own -- the same question as
+///   "a newer green exists", answered in one sort with no join to plan. The
+///   partition keys sort under `"C"`: only equality matters to a partition;
+/// * the confirmed links are two uncorrelated `in` sets, one per direction,
+///   which PostgreSQL hashes once: a link from the build to my work, and one
+///   from my work to the build.
 macro_rules! failed_build {
     () => {
         concat!(
             "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
-                format('this build failed%s',
-                       coalesce(': ' || nullif(i.payload->>'statusText', ''), '')),
-                coalesce(i.item_updated_at, i.synced_at), i.web_url
-           from sync.item i
-          where ",
-            $crate::live_by_exclusion!("i"),
+                format('this build failed%s', coalesce(': ' || nullif(i.status_text, ''), '')),
+                i.at, i.web_url
+           from (select o.*,
+                        max(o.at) filter (where o.status = 'SUCCESS' and o.finished)
+                          over (partition by o.source_id collate \"C\", o.config collate \"C\")
+                          as latest_green
+                   from (select b.entity_id, b.source_id, b.kind, b.title, b.author, b.web_url,
+                                coalesce(b.item_updated_at, b.synced_at) as at,
+                                b.payload->>'status' as status,
+                                coalesce(b.payload->>'state', 'finished') = 'finished' as finished,
+                                b.payload->>'statusText' as status_text,
+                                coalesce(b.payload->>'buildTypeId',
+                                         b.payload->'buildType'->>'id') as config
+                           from sync.item b
+                          where ",
+            $crate::live_by_exclusion!("b"),
             "
-            and i.kind = 'build'
-            and i.payload->>'status' = 'FAILURE'
-            and coalesce(i.payload->>'state', 'finished') = 'finished'
+                            and b.kind = 'build'
+                            and b.payload->>'status' in ('FAILURE', 'SUCCESS')) o) i
+          where i.status = 'FAILURE'
+            and i.finished
             and (   i.author = any($1)
-                 or exists (
-                       select 1
+                 or i.entity_id in (
+                       select l.from_id
                          from knobas.confirmed_link l
-                         join sync.item mine
-                           on mine.entity_id = case when l.from_id = i.entity_id
-                                                    then l.to_id else l.from_id end
-                        where (l.from_id = i.entity_id or l.to_id = i.entity_id)
-                          and mine.author = any($1)
+                         join sync.item mine on mine.entity_id = l.to_id
+                        where mine.author = any($1)
+                          and ",
+            $crate::live_by_key!("mine"),
+            ")
+                 or i.entity_id in (
+                       select l.to_id
+                         from knobas.confirmed_link l
+                         join sync.item mine on mine.entity_id = l.from_id
+                        where mine.author = any($1)
                           and ",
             $crate::live_by_key!("mine"),
             "))
-            and not exists (
-                  select 1
-                    from sync.item newer
-                   where newer.kind = 'build'
-                     and newer.source_id = i.source_id
-                     and newer.payload->>'status' = 'SUCCESS'
-                     and coalesce(newer.payload->>'state', 'finished') = 'finished'
-                     and coalesce(newer.payload->>'buildTypeId',
-                                  newer.payload->'buildType'->>'id')
-                       = coalesce(i.payload->>'buildTypeId',
-                                  i.payload->'buildType'->>'id')
-                     and coalesce(i.payload->>'buildTypeId',
-                                  i.payload->'buildType'->>'id') is not null
-                     and coalesce(newer.item_updated_at, newer.synced_at)
-                       > coalesce(i.item_updated_at, i.synced_at)
-                     and ",
-            $crate::live_by_key!("newer"),
-            ")"
+            and (i.config is null or i.latest_green is null or i.latest_green <= i.at)"
         )
     };
 }
@@ -776,6 +798,13 @@ impl Shelf {
 
 /// The stream, newest first.
 ///
+/// **Planned for its values on every read** (`.persistent(false)`, #785), as
+/// the board's and the tiles' statements are. The stream and the snoozed shelf
+/// are one statement told apart by `$3`, and kept prepared, PostgreSQL ran its
+/// generic plan from the sixth execution on: the shelf read 70 ms on the
+/// probe's 22,000 items never analyzed, against 12 for the stream planned for
+/// its values. [`count`] is the same statement and gets the same treatment.
+///
 /// `identity` is the usernames the sources were configured with -- the same
 /// identity `@me` resolves to (`knobas_search::vocab`), never a second
 /// mechanism. With none, every identity-bearing rule matches nothing, which is
@@ -795,6 +824,7 @@ pub async fn items(
     declarations: &crate::payload::Declarations,
 ) -> Result<Vec<InboxItem>, CoreError> {
     Ok(sqlx::query_as::<_, InboxItem>(ALL_RULES)
+        .persistent(false)
         .bind(identity)
         .bind(now)
         .bind(shelf.snoozed())
@@ -840,6 +870,7 @@ pub async fn count(
     declarations: &crate::payload::Declarations,
 ) -> Result<i64, CoreError> {
     let (n,): (i64,) = sqlx::query_as(COUNT_ALL)
+        .persistent(false)
         .bind(identity)
         .bind(now)
         .bind(Shelf::Stream.snoozed())

@@ -1156,9 +1156,11 @@ knobas-core	test/it	inbox::an_assignee_the_declaration_does_not_reach_contribute
 knobas-core	test/it	inbox::an_item_leaves_when_its_entity_is_tombstoned_at_the_source
 knobas-core	test/it	inbox::an_item_marked_done_leaves_and_returns_when_its_subject_moves
 knobas-core	test/it	inbox::an_item_says_where_it_came_from_and_what_it_is_about
+knobas-core	test/it	inbox::every_build_mine_names_what_the_per_build_statement_named
 knobas-core	test/it	inbox::one_rule_sees_only_its_own_category
 knobas-core	test/it	inbox::the_count_excludes_snoozed_items
 knobas-core	test/it	inbox::the_five_existing_categories_are_untouched_by_the_sixth
+knobas-core	test/it	inbox::the_inbox_statements_are_never_kept_as_prepared_statements
 knobas-core	test/it	inbox::with_no_identity_only_the_rule_that_needs_none_produces_anything
 knobas-core	test/it	link_reads::only_the_exempt_modules_read_the_base_table
 knobas-core	test/it	link_reads::the_rule_actually_rejects_a_read_of_the_base_table

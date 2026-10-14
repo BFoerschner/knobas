@@ -26,20 +26,25 @@ use crate::responsiveness_probe::Synthetic;
 /// declared state; `status_paths`, one row per source and status candidate.
 const SMALL: &[&str] = &["source_config", "grouped", "status_paths"];
 
-/// The inbox rules whose whole statement #778 reshaped. Not here, and why:
+/// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
+/// and why: `credential_expiry` and `alert`, unchanged. They read the
+/// configured sources and the open alerts, a handful of rows each.
 ///
-/// * `failed_build`: its scan was reshaped, but two lookups it makes per
-///   failed build were not, and the checker sees both: the newer green build
-///   of the same configuration walks every build of the kind
-///   (`item_kind_updated_idx`, no key for the configuration), and on an
-///   analyzed, empty `knobas.link` the confirmed-link lookup is a scan per
-///   row. Both are quadratic in the failed builds whatever the statistics
-///   say; they are a follow-up of their own.
-/// * `credential_expiry` and `alert`: unchanged. They read the configured
-///   sources and the open alerts, a handful of rows each.
+/// `failed_build` joined in #785: its newer green build of the same
+/// configuration was a walk of every build of the kind per failed build
+/// (`item_kind_updated_idx`, no key for the configuration), and its
+/// confirmed-link lookup a scan of `knobas.link` per build on an analyzed,
+/// empty table. Both are read once per statement now. The rules are bound
+/// with an identity that owns every item, so each of the mirror's red builds
+/// reaches both: the case that read 195 ms on the probe.
+///
+/// The stream itself is these unioned with the two rules left out, so it is
+/// not planned here; that it is planned for its values on every read is
+/// `knobas-core`'s `the_inbox_statements_are_never_kept_as_prepared_statements`.
 const RESHAPED_RULES: &[knobas_core::inbox::Category] = &[
     knobas_core::inbox::Category::ReviewRequest,
     knobas_core::inbox::Category::Mention,
+    knobas_core::inbox::Category::FailedBuild,
     knobas_core::inbox::Category::NewAssignment,
 ];
 
