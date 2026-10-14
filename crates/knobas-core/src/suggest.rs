@@ -1764,7 +1764,7 @@ pub struct SuggestionEntry {
     pub to: LinkEnd,
 }
 
-/// The row shape [`PROPOSALS`] returns, before the two ends are lifted out.
+/// The row shape [`DRAWN`] returns, before the two ends are lifted out.
 ///
 /// Two [`LinkEnd`]s cannot both be `#[sqlx(flatten)]` -- they would collide on
 /// every column name -- so the statement aliases them apart and this struct
@@ -1783,37 +1783,168 @@ struct ProposalRow {
     to_deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// The tray's read: proposals, newest first, optionally scoped to a room.
+/// How many rows one item may have in the tray (#774, ruled by the deputy).
+pub const ROWS_PER_ITEM: usize = 3;
+
+/// An item with proposals the tray does not draw, and how many (#774).
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SuggestionMore {
+    #[sqlx(flatten)]
+    pub item: LinkEnd,
+    /// The item's proposals in the room that the tray did not draw.
+    pub more: i64,
+}
+
+/// A proposal is in the room: either end is an item of one of the room's
+/// sources (`$1`, `NULL` for every source), and either end is a member of the
+/// stored context (`$2`, `NULL` for none).
 ///
-/// `knobas.proposed_link` and nothing else, which is what makes "the tray shows
-/// proposals only" structural rather than remembered.
+/// The source test is a membership in the sources' items, a subquery inside an
+/// `or` that cannot be pulled up into a join and so runs hashed, once: joining
+/// `sync.item` twice to learn each end's source was a primary-key probe per end
+/// per proposal in the generic plan (#778).
+macro_rules! in_room {
+    () => {
+        "($1::text[] is null
+          or (l.from_id in (select i.entity_id from sync.item i
+                             where i.source_id = any($1))) is true
+          or (l.to_id in (select i.entity_id from sync.item i
+                           where i.source_id = any($1))) is true)
+         and ($2::text[] is null or l.from_id = any($2) or l.to_id = any($2))"
+    };
+}
+
+/// One step of the tray's walk (#774): the room's next `$6` proposals, newest
+/// first, older than the cursor (`$3`, `$4`), leaving out every proposal that
+/// touches an item already holding its three rows (`$5`).
+///
+/// Ends only, no titles: the walk decides which rows are drawn and
+/// [`DRAWN`] reads those. `link_proposed_idx` gives the order, and the cursor
+/// is an index condition on it, so a step starts where the last one stopped.
+const WALK: &str = concat!(
+    "select l.id, l.from_id, l.to_id, l.created_at
+       from knobas.proposed_link l
+      where ",
+    in_room!(),
+    "   and l.created_at <= $3
+        and (l.created_at < $3 or l.id < $4)
+        and l.from_id <> all($5) and l.to_id <> all($5)
+      order by l.created_at desc, l.id desc
+      limit $6"
+);
+
+/// [`WALK`] for a stored context's room: every proposal touching a member,
+/// newest first, found member by member through the pair indexes rather than
+/// by walking the whole room's order, because a context holds a few items out
+/// of the whole mirror. On tables never analyzed the planner read each
+/// member's rows off `link_proposed_idx` -- the whole table, filtered -- because
+/// the lookup's predicate matched that partial index. So the lookup asks only
+/// `deleted_at is null` (`link_from_idx`, `link_to_idx`), `offset 0` keeps it
+/// its own, and `confirmed_at is null` is tested on the rows it found.
+const WALK_MEMBERS: &str = concat!(
+    "select l.id, l.from_id, l.to_id, l.created_at
+       from unnest($2::text[]) m(item)
+       cross join lateral (
+             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
+               from knobas.link p
+              where p.from_id = m.item and p.deleted_at is null
+             union all
+             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
+               from knobas.link p
+              where p.to_id = m.item and p.from_id <> all($2)
+                and p.deleted_at is null
+             offset 0) l
+      where l.confirmed_at is null and ",
+    in_room!(),
+    " order by l.created_at desc, l.id desc"
+);
+
+/// The tray's read: the rows the walk drew, newest first, with both ends.
+///
+/// `knobas.proposed_link`'s predicate and nothing else, which is what makes
+/// "the tray shows proposals only" structural rather than remembered. Driven
+/// from the ids by primary key, `offset 0` keeping each lookup its own: on
+/// tables never analyzed the planner read `knobas.link` whole off
+/// `link_proposed_idx` to find twenty rows, 22 ms on a 2,700-item mirror.
 ///
 /// The ends join `knobas.entity` and not `sync.live_item`, for the reason
 /// `entries_of` does: an entity a source withdrew still has to resolve, so the
-/// tray marks it rather than dropping the row. `sync.item` is joined **left**
-/// and only to learn which source an end came from, because knobas' own
-/// entities (notes, contexts) have no mirror row at all.
-const PROPOSALS: &str = concat!(
+/// tray marks it rather than dropping the row.
+const DRAWN: &str = concat!(
     "select ",
     link_columns!("l."),
     ", f.id as from_entity_id, f.kind as from_kind,
        f.title as from_title, f.deleted_at as from_deleted_at,
        t.id as to_entity_id, t.kind as to_kind,
        t.title as to_title, t.deleted_at as to_deleted_at
-       from knobas.proposed_link l
+       from unnest($1::uuid[]) d(id)
+       cross join lateral (select * from knobas.link p
+                            where p.id = d.id offset 0) l
        join knobas.entity f on f.id = l.from_id
        join knobas.entity t on t.id = l.to_id
-       left join sync.item fi on fi.entity_id = l.from_id
-       left join sync.item ti on ti.entity_id = l.to_id
-      where ($1::text[] is null
-         or fi.source_id = any($1) or ti.source_id = any($1))
-        and ($2::text[] is null
-         or l.from_id = any($2) or l.to_id = any($2))
-      order by l.created_at desc, l.id desc
-      limit $3"
+      where l.deleted_at is null and l.confirmed_at is null
+      order by l.created_at desc, l.id desc"
 );
 
-/// The proposals a room holds, newest first.
+/// How many of the room's proposals each drawn item (`$3`) holds, for those
+/// holding more than the tray draws for one item (#774). One count per item
+/// through `link_from_idx` and `link_to_idx`, shaped as [`WALK_MEMBERS`] is and
+/// for its reason, so a hub costs a probe of its own rows and not a pass over
+/// the room. Its `3` is [`ROWS_PER_ITEM`].
+const OVERFLOW: &str = concat!(
+    "select e.id as entity_id, e.kind, e.title, e.deleted_at, n.total as more
+       from unnest($3::text[]) d(item)
+       join knobas.entity e on e.id = d.item
+       cross join lateral (
+             select count(*) as total
+               from (select p.from_id, p.to_id, p.confirmed_at from knobas.link p
+                      where p.from_id = d.item and p.deleted_at is null
+                     union all
+                     select p.from_id, p.to_id, p.confirmed_at from knobas.link p
+                      where p.to_id = d.item and p.deleted_at is null
+                     offset 0) l
+              where l.confirmed_at is null and ",
+    in_room!(),
+    "     ) n
+      where n.total > 3"
+);
+
+/// One proposal as the walk sees it.
+#[derive(sqlx::FromRow)]
+struct Step {
+    id: Uuid,
+    from_id: String,
+    to_id: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The walk's state: which rows are drawn, and how many each item holds.
+#[derive(Default)]
+struct Tray {
+    drawn: Vec<Uuid>,
+    per_item: std::collections::HashMap<String, usize>,
+    full: Vec<String>,
+}
+
+impl Tray {
+    /// Draw `step` if neither end holds its three rows yet.
+    fn offer(&mut self, step: &Step) {
+        let held = |item: &str| self.per_item.get(item).copied().unwrap_or(0);
+        if held(&step.from_id) >= ROWS_PER_ITEM || held(&step.to_id) >= ROWS_PER_ITEM {
+            return;
+        }
+        self.drawn.push(step.id);
+        for item in [&step.from_id, &step.to_id] {
+            let held = self.per_item.entry(item.clone()).or_insert(0);
+            *held += 1;
+            if *held == ROWS_PER_ITEM {
+                self.full.push(item.clone());
+            }
+        }
+    }
+}
+
+/// The proposals a room holds, newest first, at most three per item.
 ///
 /// `sources` is the room's membership, the same convention
 /// `EntityFilter::sources` uses: **empty means every source**, bound as SQL
@@ -1830,22 +1961,75 @@ const PROPOSALS: &str = concat!(
 /// empty. Membership is computed from **confirmed** links only, so scoping
 /// proposals by it cannot become circular.
 ///
+/// **At most three rows per item (#774).** The room's proposals are walked
+/// newest first and a row is drawn while neither of its items holds three
+/// drawn rows, until `limit` rows are drawn or the room is exhausted. Under
+/// "either item's top ten" one item can carry thousands of proposals; the walk
+/// leaves an item out of its next steps once it holds three, so a hub costs
+/// three rows and not a scan of its own. A ranking by window function over the
+/// room was the first attempt and cost seconds on the probe's 152k proposals.
+///
 /// The tray holds no state: this is the whole of it.
 ///
 /// # Errors
 ///
-/// [`CoreError::Db`] if the query fails.
+/// [`CoreError::Db`] if a query fails.
 pub async fn proposals(
     pool: &PgPool,
     sources: &[String],
     members: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<SuggestionEntry>, CoreError> {
+    let Ok(limit) = usize::try_from(limit) else {
+        return Ok(Vec::new());
+    };
+    if limit == 0 {
+        return Ok(Vec::new());
+    }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let rows = sqlx::query_as::<_, ProposalRow>(PROPOSALS)
-        .bind(scope)
-        .bind(members.map(<[String]>::to_vec))
-        .bind(limit)
+    let members = members.map(<[String]>::to_vec);
+    let mut tray = Tray::default();
+    if members.is_some() {
+        let steps = sqlx::query_as::<_, Step>(WALK_MEMBERS)
+            .bind(&scope)
+            .bind(&members)
+            .fetch_all(pool)
+            .await?;
+        for step in &steps {
+            if tray.drawn.len() == limit {
+                break;
+            }
+            tray.offer(step);
+        }
+    } else {
+        let mut before = (chrono::DateTime::<chrono::Utc>::MAX_UTC, Uuid::max());
+        let mut chunk = limit.saturating_mul(4).max(64);
+        loop {
+            let steps = sqlx::query_as::<_, Step>(WALK)
+                .bind(&scope)
+                .bind(&members)
+                .bind(before.0)
+                .bind(before.1)
+                .bind(&tray.full)
+                .bind(i64::try_from(chunk).unwrap_or(i64::MAX))
+                .fetch_all(pool)
+                .await?;
+            for step in &steps {
+                if tray.drawn.len() == limit {
+                    break;
+                }
+                tray.offer(step);
+            }
+            let Some(last) = steps.last() else { break };
+            if tray.drawn.len() == limit || steps.len() < chunk {
+                break;
+            }
+            before = (last.created_at, last.id);
+            chunk = chunk.saturating_mul(4).min(16_384);
+        }
+    }
+    let rows = sqlx::query_as::<_, ProposalRow>(DRAWN)
+        .bind(&tray.drawn)
         .fetch_all(pool)
         .await?;
     Ok(rows
@@ -1866,6 +2050,51 @@ pub async fn proposals(
             },
         })
         .collect())
+}
+
+/// The items among `drawn` that hold more of the room's proposals than the
+/// tray draws for one item, and how many of those the tray did not draw, most
+/// hidden first (#774).
+///
+/// Same scope as [`proposals`]. Only the drawn rows' items are counted, one
+/// index lookup each. The tray draws one "+N more similar to <title>" line for
+/// each.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn proposal_overflow(
+    pool: &PgPool,
+    sources: &[String],
+    members: Option<&[String]>,
+    drawn: &[SuggestionEntry],
+) -> Result<Vec<SuggestionMore>, CoreError> {
+    let mut shown = std::collections::HashMap::<&str, i64>::new();
+    for entry in drawn {
+        for item in [&entry.from.entity_id, &entry.to.entity_id] {
+            *shown.entry(item.as_str()).or_insert(0) += 1;
+        }
+    }
+    if shown.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope = (!sources.is_empty()).then(|| sources.to_vec());
+    let items: Vec<&str> = shown.keys().copied().collect();
+    let mut more = sqlx::query_as::<_, SuggestionMore>(OVERFLOW)
+        .bind(scope)
+        .bind(members.map(<[String]>::to_vec))
+        .bind(&items)
+        .fetch_all(pool)
+        .await?;
+    for hub in &mut more {
+        hub.more -= shown.get(hub.item.entity_id.as_str()).copied().unwrap_or(0);
+    }
+    more.sort_by(|a, b| {
+        b.more
+            .cmp(&a.more)
+            .then_with(|| a.item.entity_id.cmp(&b.item.entity_id))
+    });
+    Ok(more)
 }
 
 /// [`proposal_count`]'s statement.
@@ -1893,6 +2122,16 @@ const PROPOSAL_COUNT: &str = "select count(*)
 #[must_use]
 pub fn planned_proposal_count() -> &'static str {
     PROPOSAL_COUNT
+}
+
+/// The tray's lookups (#774) -- [`WALK_MEMBERS`] (binds as [`proposal_count`]),
+/// [`DRAWN`] (`$1` the drawn ids) and [`OVERFLOW`] (as [`proposal_count`], then
+/// `$3` the drawn items) -- for `knobas-app`'s plan test
+/// (`tests/it/read_plans.rs`).
+#[doc(hidden)]
+#[must_use]
+pub fn planned_tray_lookups() -> [&'static str; 3] {
+    [WALK_MEMBERS, DRAWN, OVERFLOW]
 }
 
 /// How many proposals a room is holding.

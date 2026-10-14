@@ -2116,6 +2116,9 @@ pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.
     pub total: i64,
+    /// Items holding more proposals than the tray draws for one item (#774),
+    /// most hidden first. The bound is applied by `suggest::proposals`.
+    pub more: Vec<suggest::SuggestionMore>,
 }
 
 /// Run a detection pass, returning how many proposals it wrote.
@@ -2175,10 +2178,16 @@ pub async fn room_suggestions_inner(
         None => None,
     };
     let members = members.as_deref();
-    Ok(SuggestionPage {
-        rows: suggest::proposals(pool, sources, members, i64::from(limit)).await?,
-        total: suggest::proposal_count(pool, sources, members).await?,
-    })
+    // The count reads the whole room and the rows read its newest end: two
+    // connections at once, so the tray waits for the slower and not the sum.
+    let drawn = async {
+        let rows = suggest::proposals(pool, sources, members, i64::from(limit)).await?;
+        let more = suggest::proposal_overflow(pool, sources, members, &rows).await?;
+        Ok::<_, knobas_core::CoreError>((rows, more))
+    };
+    let ((rows, more), total) =
+        tokio::try_join!(drawn, suggest::proposal_count(pool, sources, members))?;
+    Ok(SuggestionPage { rows, total, more })
 }
 
 /// Accept a proposal, making it an ordinary link.

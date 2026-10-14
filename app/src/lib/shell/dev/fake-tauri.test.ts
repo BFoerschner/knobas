@@ -80,8 +80,8 @@ test("every proposal is unconfirmed, gives a reason, shows both classes and open
 test("the page is scoped to the room it is read from", () => {
   const handlers = demoHandlers();
   expect(page(handlers, { ...ROOM, sources: ["mock"] }).total).toBe(page(handlers).total);
-  expect(page(handlers, { ...ROOM, sources: ["gitea"] })).toEqual({ rows: [], total: 0 });
-  expect(page(handlers, { ...ROOM, ctx: "ctx:fake-1" })).toEqual({ rows: [], total: 0 });
+  expect(page(handlers, { ...ROOM, sources: ["gitea"] })).toEqual({ rows: [], total: 0, more: [] });
+  expect(page(handlers, { ...ROOM, ctx: "ctx:fake-1" })).toEqual({ rows: [], total: 0, more: [] });
 });
 
 /**

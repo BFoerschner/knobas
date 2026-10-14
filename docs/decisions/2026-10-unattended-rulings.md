@@ -1347,3 +1347,30 @@ Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #785.
 **If you disagree, the cost of reversing this is:** low. No migration and no IPC change; every change is inside `knobas_core::inbox`.
 
 As built (#785): the generic plan was confirmed. Under `plan_cache_mode = force_generic_plan` the shelf read 41 ms against 17 ms custom, and in the probe's order the shelf runs after the stream's executions of the same statement. `items` and `count` are now `.persistent(false)`. The pin is `the_inbox_statements_are_never_kept_as_prepared_statements`. Forks decided by the implementer: the per-build lookups are **gone rather than indexed**, which needs no migration. Nothing indexes a build's configuration (`buildTypeId` lives in the payload), so an index lookup per build would have needed one. Instead, the newest finished green of each source and configuration is a window over the builds, and a red build is resolved when that time is later than its own. The confirmed links are two uncorrelated `in` sets, one per direction, hashed once. Both answer the same question the correlated subqueries did, checked against the old statement on a mirror of every resolving and non-resolving case. Measured, the rule alone went from 185 ms to 8–10 ms on the probe's 5,000 builds. That left the stream at about 36 ms all-mine, because the mention rule ran its expression on all 17,000 prose items. The mention rule now looks for the username with `strpos` before the expression, which every match contains, and that brought the stream to about 26–28 ms. The window costs the reader with no identity about 5 ms more than before: it sorts every build, where the old rule stopped at the author test.
+## #774 — the suggestion tray: a retired proposal vanishes quietly; an item shows at most three rows
+
+Ruled 2026-10-14 by the deputy for Björn. Posted on #774.
+
+**The fork:** since #771 a pass can retire `similar_text` proposals nobody answered, so *Accept* or *Dismiss* on a row still on screen gets not-found, which toasted an error and left the row until the next refresh. And under "either item's top ten" one item can carry thousands of proposals, which fill a newest-first tray with a limit and no per-item bound.
+
+**Ruling:** not-found on *Accept* or *Dismiss* means gone: the row disappears quietly, the list re-reads, no toast; any other error still toasts. This is decided in the shell, or in the IPC answer if the error kind is already there; no new error kind unless none fits. The tray shows at most 3 rows per item; an item with more gets one more line, "+N more similar to <title>", which opens that item's own suggestions. The bound applies to what is drawn and read, not to what is stored, and is read in SQL with a window function.
+
+**Reasoning:** a retired proposal is not a failure the reader can act on, and a hub that fills the tray hides everything else in the room.
+
+**If you disagree, the cost of reversing this is:** low. One SQL statement, one IPC field, one tray branch.
+
+As built (#774): `not_found` already existed on the wire, so the shell alone decides. Forks decided by the implementer: `total` (the heading) still counts every stored proposal; "opens that item's own suggestions" is the item's address, whose links panel lists them. `SuggestionPage` gains `more`; §10.8 file `774-ipc-schema-suggestionpage-gains-more.md`. The first build ranked each item's proposals with a window function over the room's newest slice; on the probe's hub corpus that read took 413–445 ms in the *All* room and about 1.3 s in a project room, which the ruling below replaced.
+
+## #774 — the tray's bounded read must be fast on a hub corpus
+
+Ruled 2026-10-14 by the deputy for Björn, in the merge-manager's dispatch for PR #787.
+
+**The fork:** the tray read as first built took 413–445 ms in the *All* room and about 1.3 s in project JIRA00 on the hub corpus (`RP_SYNTHETIC=0 just responsiveness-probe`, `room_suggestions (20)`), which defeats the responsiveness work asked for.
+
+**Ruling:** done means at most 50 ms warm median in every room on that corpus, with the realistic corpus no worse than today, keeping the answers the ruling on #774 defines. Allowed: (a) a backend walk in Rust over the newest-first index in chunks, counting per item and stopping when the tray is full, the "+N more" counts from per-item index lookups; or (b) a stored per-item rank, which needs a migration and a §10.8 file. Prefer (a) if it meets the target. "In SQL, not the frontend" in the #774 ruling means not filtering after the fetch in the frontend; a backend walk is fine.
+
+**Reasoning:** the bound exists so the tray stays readable; a tray that takes a second to read is not.
+
+**If you disagree, the cost of reversing this is:** low; the walk is one function behind an unchanged signature.
+
+As built (merge-manager, PR #787): (a). `suggest::proposals` walks the room newest first in chunks and draws a row while neither of its items holds three drawn rows; an item holding three is left out of the next chunks in SQL, so a hub costs three rows. A stored context's room reads its members' proposals by the pair indexes instead. "Three per item" counts drawn rows, not every proposal: ranking every proposal (the first build) let rows nobody sees hide an item's own, which on the hub corpus left 9–30 drawable rows in 152k. "+N more" is the item's proposals in the room minus the rows drawn for it, for an item holding more than three, counted per item through `link_from_idx` and `link_to_idx`. Every lookup is shaped off `link_proposed_idx`, which the planner chose on tables never analyzed and read whole (pinned in `read_plans.rs`), and the room's count runs beside the walk on a second connection. `room_suggestions (20)` warm median, never analyzed, main → this PR: hub corpus (`RP_SYNTHETIC=0`, 152,198 proposals) *All* 34.5 → 15.0 ms, project JIRA00 58.1 → 31.1, stored context 31.5 → 24.9; realistic corpus (25,690) 3.3 → 2.0, 8.3 → 5.7, 7.3 → 3.9. What remains on the hub corpus is the count, `proposal_count` (#778), 15–31 ms.

@@ -557,16 +557,23 @@ async fn no_key_rule_proposes_from_a_dead_item_or_to_a_withdrawn_ticket() {
     run_rule(&pool, "source_recorded_relation").await;
     expected.insert((blocker, ticket.clone()));
 
-    let entries = tray(&pool).await;
+    // The stored proposals, not the tray: this asserts what detection wrote,
+    // and the tray draws at most three rows per item (#774) -- PAY-1 holds five.
+    let stored: Vec<(String, String)> =
+        sqlx::query_as("select from_id, to_id from knobas.proposed_link")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
     assert_eq!(
-        pairs(&entries),
+        stored
+            .iter()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>(),
         expected,
         "only live items in enabled sources propose, and only live tickets"
     );
     assert!(
-        entries
-            .iter()
-            .all(|e| e.link.from_id != gone && e.link.to_id != gone),
+        stored.iter().all(|(from, to)| *from != gone && *to != gone),
         "nothing reaches the withdrawn ticket"
     );
 }
@@ -2105,5 +2112,156 @@ async fn the_database_refuses_a_proposal_that_cannot_say_why() {
             .as_deref(),
         Some("23514"),
         "an unconfirmed row must carry a rule, a class and a reason"
+    );
+}
+
+/// One written proposal, `age` seconds old, the way the driver writes one.
+async fn propose_aged(pool: &PgPool, from: &str, to: &str, age: i32) {
+    sqlx::query(
+        "insert into knobas.link
+                (from_id, to_id, relation, origin, created_by,
+                 confirmed_at, rule, rule_class, reason, created_at)
+         values ($1, $2, 'related', 'suggested', 'knobas',
+                 null, 'branch_name_key', 'exact_key', 'test',
+                 now() - make_interval(secs => $3))",
+    )
+    .bind(from)
+    .bind(to)
+    .bind(f64::from(age))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+#[tokio::test]
+async fn a_hub_holds_three_rows_in_the_tray_and_the_rest_are_counted() {
+    // #774: under "either item's top ten" one item can carry thousands of
+    // proposals. The tray bounds each item to three rows, in SQL, and reports
+    // what it left out.
+    let pool = scratch().await;
+    let hub = entity_only(&pool, "note", "note", "hub").await;
+    let mut spokes = Vec::new();
+    for i in 0..6 {
+        let spoke = entity_only(&pool, "note", "note", &format!("spoke-{i}")).await;
+        // spoke-0 is the oldest, spoke-5 the newest.
+        propose_aged(&pool, &hub, &spoke, 100 - i * 10).await;
+        spokes.push(spoke);
+    }
+    // Two items that have nothing to do with the hub, and one proposal each
+    // side of a pair of its own: other items are unaffected.
+    let a = entity_only(&pool, "note", "note", "a").await;
+    let b = entity_only(&pool, "note", "note", "b").await;
+    propose_aged(&pool, &a, &b, 1000).await;
+
+    let rows = suggest::proposals(&pool, &[], None, 200).await.unwrap();
+    let touching_hub: Vec<&str> = rows
+        .iter()
+        .filter(|e| e.from.entity_id == hub || e.to.entity_id == hub)
+        .map(|e| {
+            if e.from.entity_id == hub {
+                e.to.entity_id.as_str()
+            } else {
+                e.from.entity_id.as_str()
+            }
+        })
+        .collect();
+    assert_eq!(
+        touching_hub,
+        [spokes[5].as_str(), spokes[4].as_str(), spokes[3].as_str()],
+        "the hub's three newest proposals, newest first"
+    );
+    assert!(
+        rows.iter()
+            .any(|e| e.from.entity_id == a && e.to.entity_id == b),
+        "an item the hub does not touch keeps its row, however old"
+    );
+    assert_eq!(rows.len(), 4);
+
+    let more = suggest::proposal_overflow(&pool, &[], None, &rows)
+        .await
+        .unwrap();
+    assert_eq!(more.len(), 1, "only the hub overflows");
+    assert_eq!(more[0].item.entity_id, hub);
+    assert_eq!(more[0].more, 3, "six proposals, three drawn");
+
+    assert_eq!(
+        suggest::proposal_count(&pool, &[], None).await.unwrap(),
+        7,
+        "the heading's count is every proposal, drawn or not"
+    );
+    let first_two = suggest::proposals(&pool, &[], None, 2).await.unwrap();
+    assert_eq!(first_two.len(), 2, "the tray's own limit still holds");
+    let more = suggest::proposal_overflow(&pool, &[], None, &first_two)
+        .await
+        .unwrap();
+    assert_eq!(
+        (more[0].item.entity_id.as_str(), more[0].more),
+        (hub.as_str(), 4),
+        "the count is of what the tray did not draw, wherever the limit cut it"
+    );
+
+    // A stored context holding both ends of a pair draws that pair once.
+    let both = suggest::proposals(&pool, &[], Some(&[a.clone(), b.clone()]), 50)
+        .await
+        .unwrap();
+    assert_eq!(both.len(), 1);
+}
+
+#[tokio::test]
+async fn rows_a_full_hub_leaves_out_do_not_count_against_the_other_item() {
+    // The bound is on drawn rows (#774): an item whose newest proposals point
+    // at hubs already holding three rows still draws its own, older ones.
+    // Ranking every proposal instead would hide it behind rows nobody sees.
+    let pool = scratch().await;
+    let x = entity_only(&pool, "note", "note", "x").await;
+    let y = entity_only(&pool, "note", "note", "y").await;
+    propose_aged(&pool, &x, &y, 1000).await;
+    for h in 0..3 {
+        let hub = entity_only(&pool, "note", "note", &format!("hub-{h}")).await;
+        propose_aged(&pool, &hub, &x, 500).await;
+        for i in 0..3 {
+            let spoke = entity_only(&pool, "note", "note", &format!("spoke-{h}-{i}")).await;
+            propose_aged(&pool, &hub, &spoke, 100 - i).await;
+        }
+    }
+
+    let rows = suggest::proposals(&pool, &[], None, 50).await.unwrap();
+    assert_eq!(rows.len(), 10, "three per hub and the x-y pair");
+    assert!(
+        rows.iter()
+            .any(|e| e.from.entity_id == x && e.to.entity_id == y),
+        "x's own pair is drawn though its three newest rows were left out"
+    );
+    assert!(
+        !rows.iter().any(|e| e.to.entity_id == x),
+        "the hubs hold their three newest"
+    );
+}
+
+#[tokio::test]
+async fn a_hub_newer_than_everything_else_does_not_empty_the_tray() {
+    // The read ranks only the newest slice of the room (a hundred rows at this
+    // limit). A hub whose proposals fill that slice must make the read look
+    // further, not answer a tray that is short of what the room holds.
+    let pool = scratch().await;
+    let hub = entity_only(&pool, "note", "note", "hub").await;
+    for i in 0..150 {
+        let spoke = entity_only(&pool, "note", "note", &format!("spoke-{i}")).await;
+        propose_aged(&pool, &hub, &spoke, 100 + (150 - i)).await;
+    }
+    let mut older = Vec::new();
+    for i in 0..3 {
+        let a = entity_only(&pool, "note", "note", &format!("old-a-{i}")).await;
+        let b = entity_only(&pool, "note", "note", &format!("old-b-{i}")).await;
+        propose_aged(&pool, &a, &b, 10_000 + i).await;
+        older.push(a);
+    }
+
+    let rows = suggest::proposals(&pool, &[], None, 5).await.unwrap();
+    let from: Vec<&str> = rows.iter().map(|e| e.from.entity_id.as_str()).collect();
+    assert_eq!(
+        from,
+        [&hub, &hub, &hub, &older[0], &older[1]],
+        "the hub's three, then the older pairs the hub's rows had buried"
     );
 }
