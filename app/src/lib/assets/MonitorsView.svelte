@@ -66,6 +66,7 @@
     type UptimeRatio,
   } from "../ipc/assets";
   import { submitWrite as realSubmitWrite } from "../ipc/entity";
+  import { followWrite } from "../shell/follow-write";
   import type { WriteOpPayload } from "../ipc/sources";
   import { hashFor, type Router } from "../shell/router.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
@@ -282,9 +283,12 @@
     if (!form) return;
     writing = monitor.entity_id;
     try {
-      await io.submitWrite(form.build(monitor.entity_id));
+      const write = await io.submitWrite(form.build(monitor.entity_id));
       push({ text: `${form.queued} ${monitor.name}` });
-      await read();
+      // Free on the queue's answer (#775): the re-read runs behind the reader,
+      // and only a write that will not go is told again.
+      followWrite(write, { name: `${form.label} of ${monitor.name}` });
+      void read();
     } catch (rejection) {
       push({
         text: `Could not queue that for ${monitor.name}: ${ipcErrorMessage(rejection)}`,

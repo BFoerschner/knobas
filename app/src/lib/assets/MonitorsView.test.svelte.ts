@@ -862,3 +862,39 @@ test("a refused pause is reported and the row stays as it was", async () => {
   expect(toasts.items[0]!.tone).toBe("err");
   expect(actionButtons()).toEqual(["gitea → Pause"]);
 });
+
+/**
+ * Close on queue (#775): the row's button is free again on the queue's
+ * answer, not after the roster's re-read -- a reader pausing three monitors
+ * in a row never waits on a read between them -- and the write is followed so
+ * a refusal later is still told.
+ */
+test("a pause frees its row on the queue's answer, with the roster's re-read still out", async () => {
+  let reads = 0;
+  const queued: unknown[] = [];
+  location.hash = "#/assets/monitors";
+  app = mount(MonitorsView, {
+    target,
+    props: {
+      router: createRouter(),
+      now: () => NOW,
+      ports: {
+        // The first read draws the roster; every read after it never answers.
+        monitorRoster: () => (reads++ === 0 ? Promise.resolve([{ ...GITEA, actions: ["pause_monitor"] }]) : new Promise(() => {})),
+        unmonitoredAssets: () => Promise.resolve([]),
+        openExternal: () => Promise.resolve(),
+        submitWrite: (payload: unknown) => {
+          queued.push(payload);
+          return Promise.resolve({ id: 5, state: "pending" } as never);
+        },
+      },
+    },
+  });
+  flushSync();
+  await vi.waitFor(() => expect(target.querySelectorAll("button.act").length).toBe(1));
+  target.querySelector<HTMLButtonElement>("button.act")!.click();
+  await vi.waitFor(() => expect(queued.length).toBe(1));
+  await vi.waitFor(() => expect(toasts.items.map((t) => t.text)).toContain("Pause queued for gitea"));
+  expect(reads).toBe(2);
+  expect(target.querySelector<HTMLButtonElement>("button.act")!.disabled).toBe(false);
+});
