@@ -1764,7 +1764,7 @@ pub struct SuggestionEntry {
     pub to: LinkEnd,
 }
 
-/// The row shape [`PROPOSALS`] returns, before the two ends are lifted out.
+/// The row shape [`DRAWN`] returns, before the two ends are lifted out.
 ///
 /// Two [`LinkEnd`]s cannot both be `#[sqlx(flatten)]` -- they would collide on
 /// every column name -- so the statement aliases them apart and this struct
@@ -1783,40 +1783,7 @@ struct ProposalRow {
     to_deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
-/// The room's newest `$4` proposals, each end ranked within its item (#774).
-///
-/// `prefix` is the old `PROPOSALS` filter and order (a proposal belongs to a
-/// room if either end does) cut at `$4` rows; `ranked` numbers the proposals
-/// every item touches, from either end, with a window function. A row's rank
-/// counts only *newer* rows, and every newer row of the room is in the prefix,
-/// so the rank is the same one the whole room would give, without ranking the
-/// whole room: the old tray read was an index walk that stopped at its limit,
-/// and ranking all of a room's proposals (150k on the probe) cost seconds.
-macro_rules! prefix_ranked {
-    () => {
-        "prefix as (
-           select l.id, l.from_id, l.to_id, l.created_at
-             from knobas.proposed_link l
-             left join sync.item fi on fi.entity_id = l.from_id
-             left join sync.item ti on ti.entity_id = l.to_id
-            where ($1::text[] is null
-               or fi.source_id = any($1) or ti.source_id = any($1))
-              and ($2::text[] is null
-               or l.from_id = any($2) or l.to_id = any($2))
-            order by l.created_at desc, l.id desc
-            limit $4),
-         ranked as (
-           select id, item,
-                  row_number() over (partition by item
-                                     order by created_at desc, id desc) as rn
-             from (select id, from_id as item, created_at from prefix
-                   union all
-                   select id, to_id, created_at from prefix) ends)"
-    };
-}
-
 /// How many rows one item may have in the tray (#774, ruled by the deputy).
-/// Written into [`PROPOSALS`] and [`OVERFLOW`] as the literal `3`.
 pub const ROWS_PER_ITEM: usize = 3;
 
 /// An item with proposals the tray does not draw, and how many (#774).
@@ -1824,75 +1791,144 @@ pub const ROWS_PER_ITEM: usize = 3;
 pub struct SuggestionMore {
     #[sqlx(flatten)]
     pub item: LinkEnd,
-    /// Proposals this item holds beyond [`ROWS_PER_ITEM`].
+    /// The item's proposals in the room that the tray did not draw.
     pub more: i64,
 }
 
-/// The tray's read: proposals, newest first, optionally scoped to a room.
+/// A proposal is in the room: either end is an item of one of the room's
+/// sources (`$1`, `NULL` for every source), and either end is a member of the
+/// stored context (`$2`, `NULL` for none).
+///
+/// The source test is a membership in the sources' items, a subquery inside an
+/// `or` that cannot be pulled up into a join and so runs hashed, once: joining
+/// `sync.item` twice to learn each end's source was a primary-key probe per end
+/// per proposal in the generic plan (#778).
+macro_rules! in_room {
+    () => {
+        "($1::text[] is null
+          or (l.from_id in (select i.entity_id from sync.item i
+                             where i.source_id = any($1))) is true
+          or (l.to_id in (select i.entity_id from sync.item i
+                           where i.source_id = any($1))) is true)
+         and ($2::text[] is null or l.from_id = any($2) or l.to_id = any($2))"
+    };
+}
+
+/// One step of the tray's walk (#774): the room's next `$6` proposals, newest
+/// first, older than the cursor (`$3`, `$4`), leaving out every proposal that
+/// touches an item already holding its three rows (`$5`).
+///
+/// Ends only, no titles: the walk decides which rows are drawn and
+/// [`DRAWN`] reads those. `link_proposed_idx` gives the order, and the cursor
+/// is an index condition on it, so a step starts where the last one stopped.
+const WALK: &str = concat!(
+    "select l.id, l.from_id, l.to_id, l.created_at
+       from knobas.proposed_link l
+      where ",
+    in_room!(),
+    "   and l.created_at <= $3
+        and (l.created_at < $3 or l.id < $4)
+        and l.from_id <> all($5) and l.to_id <> all($5)
+      order by l.created_at desc, l.id desc
+      limit $6"
+);
+
+/// [`WALK`] for a stored context's room: every proposal touching a member,
+/// found by the pair indexes rather than by walking the whole tray's order,
+/// because a context holds a few items out of the whole mirror.
+const WALK_MEMBERS: &str = concat!(
+    "select l.id, l.from_id, l.to_id, l.created_at
+       from knobas.proposed_link l
+      where l.from_id = any($2) and ",
+    in_room!(),
+    " union all
+     select l.id, l.from_id, l.to_id, l.created_at
+       from knobas.proposed_link l
+      where l.to_id = any($2) and l.from_id <> all($2) and ",
+    in_room!(),
+    " order by created_at desc, id desc"
+);
+
+/// The tray's read: the rows the walk drew, newest first, with both ends.
 ///
 /// `knobas.proposed_link` and nothing else, which is what makes "the tray shows
 /// proposals only" structural rather than remembered.
 ///
 /// The ends join `knobas.entity` and not `sync.live_item`, for the reason
 /// `entries_of` does: an entity a source withdrew still has to resolve, so the
-/// tray marks it rather than dropping the row. `sync.item` is joined **left**
-/// and only to learn which source an end came from, because knobas' own
-/// entities (notes, contexts) have no mirror row at all.
-const PROPOSALS: &str = concat!(
-    "with ",
-    prefix_ranked!(),
-    ", kept as (select id from ranked group by id having max(rn) <= 3)
-     select ",
+/// tray marks it rather than dropping the row.
+const DRAWN: &str = concat!(
+    "select ",
     link_columns!("l."),
     ", f.id as from_entity_id, f.kind as from_kind,
        f.title as from_title, f.deleted_at as from_deleted_at,
        t.id as to_entity_id, t.kind as to_kind,
        t.title as to_title, t.deleted_at as to_deleted_at
-       from kept k
-       join knobas.proposed_link l on l.id = k.id
+       from knobas.proposed_link l
        join knobas.entity f on f.id = l.from_id
        join knobas.entity t on t.id = l.to_id
-      order by l.created_at desc, l.id desc
-      limit $3"
+      where l.id = any($1)
+      order by l.created_at desc, l.id desc"
 );
 
-/// How many proposals the room's newest `$3` really are: fewer than `$3` means
-/// the room has no more to look at.
-const PREFIX_SIZE: &str = "
-    select count(*) from (
-        select l.id
-          from knobas.proposed_link l
-          left join sync.item fi on fi.entity_id = l.from_id
-          left join sync.item ti on ti.entity_id = l.to_id
-         where ($1::text[] is null
-            or fi.source_id = any($1) or ti.source_id = any($1))
-           and ($2::text[] is null
-            or l.from_id = any($2) or l.to_id = any($2))
-         limit $3) newest";
-
-/// The drawn items (`$3`) that hold more in-scope proposals than the tray
-/// draws for one item, and how many more, most first (#774).
-const OVERFLOW: &str = "
-    with scoped as (
-           select l.from_id, l.to_id
+/// How many of the room's proposals each drawn item (`$3`) holds, for those
+/// holding more than the tray draws for one item (#774). One count per item
+/// by the pair indexes, so a hub costs a probe of its own rows and not a pass
+/// over the room.
+const OVERFLOW: &str = concat!(
+    "with ends as (
+           select l.from_id as item
              from knobas.proposed_link l
-             left join sync.item fi on fi.entity_id = l.from_id
-             left join sync.item ti on ti.entity_id = l.to_id
-            where (l.from_id = any($3) or l.to_id = any($3))
-              and ($1::text[] is null
-               or fi.source_id = any($1) or ti.source_id = any($1))
-              and ($2::text[] is null
-               or l.from_id = any($2) or l.to_id = any($2))),
-         ends as (select from_id as item from scoped where from_id = any($3)
-                  union all
-                  select to_id from scoped where to_id = any($3)),
-         over as (select item, count(*) - 3 as more from ends
+            where l.from_id = any($3) and ",
+    in_room!(),
+    "     union all
+           select l.to_id
+             from knobas.proposed_link l
+            where l.to_id = any($3) and ",
+    in_room!(),
+    "),
+         held as (select item, count(*) as total from ends
                    group by item having count(*) > 3)
-    select e.id as entity_id, e.kind, e.title, e.deleted_at, o.more
-      from over o join knobas.entity e on e.id = o.item
-     order by o.more desc, e.id";
+    select e.id as entity_id, e.kind, e.title, e.deleted_at, h.total as more
+      from held h join knobas.entity e on e.id = h.item"
+);
 
-/// The proposals a room holds, newest first.
+/// One proposal as the walk sees it.
+#[derive(sqlx::FromRow)]
+struct Step {
+    id: Uuid,
+    from_id: String,
+    to_id: String,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+/// The walk's state: which rows are drawn, and how many each item holds.
+#[derive(Default)]
+struct Tray {
+    drawn: Vec<Uuid>,
+    per_item: std::collections::HashMap<String, usize>,
+    full: Vec<String>,
+}
+
+impl Tray {
+    /// Draw `step` if neither end holds its three rows yet.
+    fn offer(&mut self, step: &Step) {
+        let held = |item: &str| self.per_item.get(item).copied().unwrap_or(0);
+        if held(&step.from_id) >= ROWS_PER_ITEM || held(&step.to_id) >= ROWS_PER_ITEM {
+            return;
+        }
+        self.drawn.push(step.id);
+        for item in [&step.from_id, &step.to_id] {
+            let held = self.per_item.entry(item.clone()).or_insert(0);
+            *held += 1;
+            if *held == ROWS_PER_ITEM {
+                self.full.push(item.clone());
+            }
+        }
+    }
+}
+
+/// The proposals a room holds, newest first, at most three per item.
 ///
 /// `sources` is the room's membership, the same convention
 /// `EntityFilter::sources` uses: **empty means every source**, bound as SQL
@@ -1909,50 +1945,77 @@ const OVERFLOW: &str = "
 /// empty. Membership is computed from **confirmed** links only, so scoping
 /// proposals by it cannot become circular.
 ///
+/// **At most three rows per item (#774).** The room's proposals are walked
+/// newest first and a row is drawn while neither of its items holds three
+/// drawn rows, until `limit` rows are drawn or the room is exhausted. Under
+/// "either item's top ten" one item can carry thousands of proposals; the walk
+/// leaves an item out of its next steps once it holds three, so a hub costs
+/// three rows and not a scan of its own. A ranking by window function over the
+/// room was the first attempt and cost seconds on the probe's 152k proposals.
+///
 /// The tray holds no state: this is the whole of it.
 ///
 /// # Errors
 ///
-/// [`CoreError::Db`] if the query fails.
+/// [`CoreError::Db`] if a query fails.
 pub async fn proposals(
     pool: &PgPool,
     sources: &[String],
     members: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<SuggestionEntry>, CoreError> {
-    if limit <= 0 {
+    let Ok(limit) = usize::try_from(limit) else {
+        return Ok(Vec::new());
+    };
+    if limit == 0 {
         return Ok(Vec::new());
     }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    // How much of the room's newest end to rank. Most rows survive the bound,
-    // so a small multiple of `limit` fills the tray; a hub that eats the
-    // prefix makes it grow until the tray is full or the room is exhausted.
-    let mut prefix = limit.saturating_mul(8).max(100);
-    let rows = loop {
-        let rows = sqlx::query_as::<_, ProposalRow>(PROPOSALS)
+    let members = members.map(<[String]>::to_vec);
+    let mut tray = Tray::default();
+    if members.is_some() {
+        let steps = sqlx::query_as::<_, Step>(WALK_MEMBERS)
             .bind(&scope)
-            .bind(members.map(<[String]>::to_vec))
-            .bind(limit)
-            .bind(prefix)
+            .bind(&members)
             .fetch_all(pool)
             .await?;
-        if i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit {
-            break rows;
+        for step in &steps {
+            if tray.drawn.len() == limit {
+                break;
+            }
+            tray.offer(step);
         }
-        // Short: either the room is exhausted or the prefix was too small. The
-        // count stops at the prefix, so it costs what the read just cost and
-        // not a pass over every proposal.
-        let (seen,): (i64,) = sqlx::query_as(PREFIX_SIZE)
-            .bind(&scope)
-            .bind(members.map(<[String]>::to_vec))
-            .bind(prefix)
-            .fetch_one(pool)
-            .await?;
-        if seen < prefix {
-            break rows;
+    } else {
+        let mut before = (chrono::DateTime::<chrono::Utc>::MAX_UTC, Uuid::max());
+        let mut chunk = limit.saturating_mul(4).max(64);
+        loop {
+            let steps = sqlx::query_as::<_, Step>(WALK)
+                .bind(&scope)
+                .bind(&members)
+                .bind(before.0)
+                .bind(before.1)
+                .bind(&tray.full)
+                .bind(i64::try_from(chunk).unwrap_or(i64::MAX))
+                .fetch_all(pool)
+                .await?;
+            for step in &steps {
+                if tray.drawn.len() == limit {
+                    break;
+                }
+                tray.offer(step);
+            }
+            let Some(last) = steps.last() else { break };
+            if tray.drawn.len() == limit || steps.len() < chunk {
+                break;
+            }
+            before = (last.created_at, last.id);
+            chunk = chunk.saturating_mul(4).min(16_384);
         }
-        prefix = prefix.saturating_mul(8);
-    };
+    }
+    let rows = sqlx::query_as::<_, ProposalRow>(DRAWN)
+        .bind(&tray.drawn)
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|row| SuggestionEntry {
@@ -1971,6 +2034,51 @@ pub async fn proposals(
             },
         })
         .collect())
+}
+
+/// The items among `drawn` that hold more of the room's proposals than the
+/// tray draws for one item, and how many of those the tray did not draw, most
+/// hidden first (#774).
+///
+/// Same scope as [`proposals`]. Only the drawn rows' items are counted, one
+/// index lookup each. The tray draws one "+N more similar to <title>" line for
+/// each.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn proposal_overflow(
+    pool: &PgPool,
+    sources: &[String],
+    members: Option<&[String]>,
+    drawn: &[SuggestionEntry],
+) -> Result<Vec<SuggestionMore>, CoreError> {
+    let mut shown = std::collections::HashMap::<&str, i64>::new();
+    for entry in drawn {
+        for item in [&entry.from.entity_id, &entry.to.entity_id] {
+            *shown.entry(item.as_str()).or_insert(0) += 1;
+        }
+    }
+    if shown.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope = (!sources.is_empty()).then(|| sources.to_vec());
+    let items: Vec<&str> = shown.keys().copied().collect();
+    let mut more = sqlx::query_as::<_, SuggestionMore>(OVERFLOW)
+        .bind(scope)
+        .bind(members.map(<[String]>::to_vec))
+        .bind(&items)
+        .fetch_all(pool)
+        .await?;
+    for hub in &mut more {
+        hub.more -= shown.get(hub.item.entity_id.as_str()).copied().unwrap_or(0);
+    }
+    more.sort_by(|a, b| {
+        b.more
+            .cmp(&a.more)
+            .then_with(|| a.item.entity_id.cmp(&b.item.entity_id))
+    });
+    Ok(more)
 }
 
 /// [`proposal_count`]'s statement.
@@ -1998,38 +2106,6 @@ const PROPOSAL_COUNT: &str = "select count(*)
 #[must_use]
 pub fn planned_proposal_count() -> &'static str {
     PROPOSAL_COUNT
-}
-
-/// The items among `drawn` whose proposals the per-item bound hid, most hidden
-/// first (#774).
-///
-/// Same scope as [`proposals`]. Only the drawn rows' items are counted, by the
-/// pair indexes, so a hub costs one probe of its own rows and not a pass over
-/// the room. The tray draws one "+N more similar to <title>" line for each.
-///
-/// # Errors
-///
-/// [`CoreError::Db`] if the query fails.
-pub async fn proposal_overflow(
-    pool: &PgPool,
-    sources: &[String],
-    members: Option<&[String]>,
-    drawn: &[SuggestionEntry],
-) -> Result<Vec<SuggestionMore>, CoreError> {
-    if drawn.is_empty() {
-        return Ok(Vec::new());
-    }
-    let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let items: Vec<String> = drawn
-        .iter()
-        .flat_map(|e| [e.from.entity_id.clone(), e.to.entity_id.clone()])
-        .collect();
-    Ok(sqlx::query_as::<_, SuggestionMore>(OVERFLOW)
-        .bind(scope)
-        .bind(members.map(<[String]>::to_vec))
-        .bind(items)
-        .fetch_all(pool)
-        .await?)
 }
 
 /// How many proposals a room is holding.

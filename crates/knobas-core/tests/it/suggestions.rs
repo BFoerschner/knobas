@@ -2189,10 +2189,52 @@ async fn a_hub_holds_three_rows_in_the_tray_and_the_rest_are_counted() {
         7,
         "the heading's count is every proposal, drawn or not"
     );
+    let first_two = suggest::proposals(&pool, &[], None, 2).await.unwrap();
+    assert_eq!(first_two.len(), 2, "the tray's own limit still holds");
+    let more = suggest::proposal_overflow(&pool, &[], None, &first_two)
+        .await
+        .unwrap();
     assert_eq!(
-        suggest::proposals(&pool, &[], None, 2).await.unwrap().len(),
-        2,
-        "the tray's own limit still holds"
+        (more[0].item.entity_id.as_str(), more[0].more),
+        (hub.as_str(), 4),
+        "the count is of what the tray did not draw, wherever the limit cut it"
+    );
+
+    // A stored context holding both ends of a pair draws that pair once.
+    let both = suggest::proposals(&pool, &[], Some(&[a.clone(), b.clone()]), 50)
+        .await
+        .unwrap();
+    assert_eq!(both.len(), 1);
+}
+
+#[tokio::test]
+async fn rows_a_full_hub_leaves_out_do_not_count_against_the_other_item() {
+    // The bound is on drawn rows (#774): an item whose newest proposals point
+    // at hubs already holding three rows still draws its own, older ones.
+    // Ranking every proposal instead would hide it behind rows nobody sees.
+    let pool = scratch().await;
+    let x = entity_only(&pool, "note", "note", "x").await;
+    let y = entity_only(&pool, "note", "note", "y").await;
+    propose_aged(&pool, &x, &y, 1000).await;
+    for h in 0..3 {
+        let hub = entity_only(&pool, "note", "note", &format!("hub-{h}")).await;
+        propose_aged(&pool, &hub, &x, 500).await;
+        for i in 0..3 {
+            let spoke = entity_only(&pool, "note", "note", &format!("spoke-{h}-{i}")).await;
+            propose_aged(&pool, &hub, &spoke, 100 - i).await;
+        }
+    }
+
+    let rows = suggest::proposals(&pool, &[], None, 50).await.unwrap();
+    assert_eq!(rows.len(), 10, "three per hub and the x-y pair");
+    assert!(
+        rows.iter()
+            .any(|e| e.from.entity_id == x && e.to.entity_id == y),
+        "x's own pair is drawn though its three newest rows were left out"
+    );
+    assert!(
+        !rows.iter().any(|e| e.to.entity_id == x),
+        "the hubs hold their three newest"
     );
 }
 
