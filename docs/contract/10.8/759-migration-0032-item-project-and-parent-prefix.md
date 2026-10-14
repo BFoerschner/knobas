@@ -1,10 +1,10 @@
 - **Migration `0032` — issues #759 and #761 (2026-10-14): the project census reads stored rows,
-  and `sync.item_parent`'s name has a prefix index.** Ruled by the deputy for Björn on #759 and
+  and `sync.item_parent` has a prefix index on its name and its item's time.** Ruled by the deputy for Björn on #759 and
   #761 on 2026-10-14 ("both (1) and (2)" on #759, "the prefix answer" on #761, one migration for
   both). It follows `0028`'s and `0030`'s pattern (ADR-0019) and edits no earlier migration.
 
-  **Migration `0032`: one table, three indexes, five functions, three restated trigger functions.**
-  No trigger is added or dropped.
+  **Migration `0032`: one table, one column, three indexes, five functions, four restated
+  functions.** No trigger is added or dropped.
   - `sync.item_project (entity_id, adapter_kind, source_id, key, name, at)`, `entity_id`
     referencing `sync.item` `on delete cascade`. One row per item per stored adapter that declares
     a `project_key` for the item's kind, when the key resolves: `key` is
@@ -15,14 +15,20 @@
     (the resolver's delete).
   - `item_parent_name_prefix_idx` on `sync.item_parent (lower(name) text_pattern_ops)`, the range
     #761's prefix read uses. `0028`'s `item_parent_name_idx` stays for `under:`'s equality lookup.
+  - `sync.item_parent.at`, the item's `coalesce(item_updated_at, synced_at)`, copied as
+    `sync.item_project.at` is, so #761's ranking reads `sync.item_parent` alone. `0029`'s
+    `sync.resolve_item_parents` is restated with that one column added and both expansions
+    unchanged; the migration fills it on every existing row with one `update`. Joining each row to
+    `sync.item` for its time instead was 196–260 ms for a broad prefix on tables never analyzed.
   - `sync.project_kinds_reached(jsonb)`, `sync.project_adapters()`,
     `sync.resolve_item_projects(text[])`, `sync.resolve_kind_projects(text[])` and
     `sync.resolve_all_item_projects()`: `0030`'s revision functions' counterparts. The resolver
     carries both macros' expansions as text, `$decl` bound per adapter as `{<source_id>: <kinds>}`.
   - `sync.item_inserted()`, `sync.item_updated()` and `sync.parent_declaration_changed()` are
-    restated to resolve all three tables. `item_updated()` also rewrites `at` in place for every
-    updated row whose time moved, whatever else changed, since a re-sync stamps `synced_at`
-    without touching the payload. The lock and its invariant are `0028`'s, unchanged.
+    restated to resolve all three tables. `item_updated()` also rewrites `at` in place, on
+    `sync.item_parent` and `sync.item_project`, for every updated row whose time moved, whatever
+    else changed. A row whose time did not move is not written; an item whose source reports no
+    `updated` moves with every `synced_at`. The lock and its invariant are `0028`'s, unchanged.
   - The stored rows depend on the item and on `sync.parent_declaration` and on nothing else. The
     adapter is matched at read time, so there is still no trigger on `knobas.source_config`. The
     last statement fills every existing row and takes no lock.

@@ -21,8 +21,15 @@
 
   **The statement** is unnamed (`.persistent(false)`). A named one switched to a generic plan
   after its fifth execution, and that plan cannot see how narrow the prefix is (`under:j` went
-  from 50 ms cold to 313 ms warm). It ranges over `item_parent_name_prefix_idx` (migration
-  `0032`).
+  from 50 ms cold to 313 ms warm). It ranges over `item_parent_name_prefix_idx` and ranks by
+  `sync.item_parent.at` (both migration `0032`), so the parents read alone measured 27 ms for
+  `""`, 20 ms for `j`, 3 ms for `jira0-1` and 1 ms for `pay` on tables never analyzed and
+  analyzed alike, custom or generic plan.
+
+  **What the keystroke path still pays.** Each call also re-reads the kinds and the sources, as
+  it did once per opening before. Those two statements are not this entry's and depend on
+  statistics: about 11 ms analyzed, about 520 ms on tables never analyzed (`SOURCES_SQL` 437 ms,
+  `KINDS_SQL` 90 ms), a state autovacuum ends within a minute of a first sync.
 
   Measured with `just responsiveness-probe` (22,000 items): before, one read of 314 ms warm
   median and 680 KB (load 8.2 to 17.3). After (load 2.9): `under:` 44 ms, `under:j` 39 ms,

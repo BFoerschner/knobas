@@ -1236,4 +1236,4 @@ Ruled 2026-10-14 by the deputy for Björn. Posted on #761.
 
 **If you disagree, the cost of reversing this is:** low.
 
-As built (#761): `filter_suggestions` takes an optional `under`. A name is ranked by the newest mirrored item that names it, and offered only while `under:`'s own lookup knows it. The statement is unnamed, so every prefix gets a custom plan. `under:` with nothing typed answers in 44 ms, `under:pay` in 12 ms, about 1 KB each. Known concession: a name whose newest item was withdrawn ranks a little higher than its live items alone would put it.
+As built (#761): `filter_suggestions` takes an optional `under`. A name is ranked by the newest mirrored item that names it, and offered only while `under:`'s own lookup knows it. The statement is unnamed, so every prefix gets a custom plan, and the ranking reads the item's time off `sync.item_parent.at` (added by the merge review: joining `sync.item` for it was 260 ms on tables never analyzed). `under:` with nothing typed answers in 44 ms, `under:pay` in 12 ms, about 1 KB each. Known concession: a name whose newest item was withdrawn ranks a little higher than its live items alone would put it.
