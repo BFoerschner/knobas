@@ -813,3 +813,29 @@ test("a re-read taken while an answer was out cannot draw the row back after the
   expect(inbox.stream).toEqual([]);
   expect(inbox.count).toBe(0);
 });
+
+test("a double click on Send queues one comment", async () => {
+  stream = [entry({}, ["comment"])];
+  count = 1;
+  const inbox = createInbox();
+  await inbox.refresh();
+  const view = await draw(inbox);
+
+  view.button("Comment")!.click();
+  flushSync();
+  const input = view.target.querySelector<HTMLInputElement>("input.inp")!;
+  input.value = "Looks right to me";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  let release!: () => void;
+  hold = new Promise((resolve) => (release = resolve));
+  const send = view.button("Send")!;
+  send.click();
+  send.click();
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+  expect(calls.filter((c) => c.startsWith("write ")).length).toBe(1);
+  expect(followed.length).toBe(1);
+  view.stop();
+});

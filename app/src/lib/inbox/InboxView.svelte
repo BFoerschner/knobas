@@ -89,6 +89,12 @@
     const entity = entry.item.entity_id;
     const form = drawable(entry.actions).find((candidate) => candidate.op === op)?.form;
     if (!entity || !form) return;
+    // A second press while the queue has not yet answered the first is the
+    // same press (a double click), not a second comment or approval: ignored,
+    // not disabled, and only until the queue answers -- never for the send.
+    const pressed = `${entry.item.key} ${op}`;
+    if (queueing.has(pressed)) return;
+    queueing.add(pressed);
     try {
       const write = await submitWrite(
         form.kind === "text" ? form.build(entity, body) : form.build(entity),
@@ -117,8 +123,13 @@
       void inbox.refresh();
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
+    } finally {
+      queueing.delete(pressed);
     }
   }
+
+  /** The actions whose `submit_write` has not answered yet, by item and op. */
+  const queueing = new Set<string>();
 
   /**
    * The deadline a snooze preset can hang *after it expires* on.
