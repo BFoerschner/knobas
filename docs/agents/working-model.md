@@ -151,9 +151,20 @@ This is the same failure the "commit before going idle" rule addresses, arriving
 - **The merge-manager skips the READY TO MERGE stop when the queue is empty.** A live suite that is green on the exact merged head is not re-run.
 - **Mutation checks: 3 to 6 mutants** on the load-bearing logic, not one per helper.
 - **A live test that writes reuses the shared cleanup guard** (`Litter` in `live_gitea.rs` for Gitea) instead of writing a new one.
-- **Model choice:** Sonnet for small mechanical tickets and their merge-managers; Opus for tracers, frozen-surface and UI-heavy work; at most three Opus agents at once.
+- **Model choice:** Sonnet for small mechanical tickets and their merge-managers; Opus for tracers, frozen-surface and UI-heavy work; at most five Opus agents at once (raised from three by the 2026-10-14 rules below). The two gate slots stay: they are the SysV shared-memory ceiling, not a usage limit.
 - **A rebase that conflicts in many places is squashed first** and resolved once.
 - **§10.8 entries are one file each** under `docs/contract/10.8/` (see `docs/contract.md` §10.8); a PR adds a file and runs `just contract-index`, it never appends to `docs/contract.md`.
+
+**Loop speed rules (Björn, 2026-10-14: "I want all of these suggestions"; from the overnight #770–#777 run, where one request waited about five hours behind a refilling follow-up chain).**
+
+- **Björn's own requests run beside the queue, never behind it.** A request from him starts as soon as it does not touch code in flight; a review's follow-up never jumps ahead of it. "When everything is done" means the work in flight at that moment.
+- **Every request gets a measurable "done".** When Björn names none, the deputy sets one in the ticket (for example "every dialog closes within 50 ms on the probe corpus") and the agent stops when it is met, not at the last 10%.
+- **A performance ticket is diagnosed before it is filed.** The deputy spends up to 20 minutes on the slow statement's `EXPLAIN (ANALYZE, BUFFERS)` on the probe database, in both statistics states, and the ticket names the measured cause. #770 was filed with the cause backwards and lost about an hour to finding that out.
+- **Measure small, then full once.** A performance agent iterates on a 2–3k-item corpus and runs the full 22k probe once at the end, before and after. The probe database is reused from a saved snapshot rather than rebuilt per run.
+- **Follow-ups are split by who would notice.** A follow-up the user would notice (speed he can feel, a visible bug, a wrong answer) is ruled and labelled `ready-for-agent`. An internal one (a test gap, a cleanup, a measurement to watch) is filed with the `backlog` label and is not dispatched until Björn or the deputy promotes it.
+- **The smallest tickets merge without a merge-manager.** A Sonnet-sized ticket with no frozen surface (§10.8, migration, SPI, ADR), no live suite, no user-visible behaviour change and a diff under about 150 lines: its implementer runs the Spec axis itself, gates on the head it merges and squash-merges. Everything else keeps its merge-manager; on #777 the separate review caught two real bugs.
+- **Reports are short.** An agent's final report is at most about 15 lines: verdict, PR, gate numbers, the key measurement, follow-ups. PR bodies give a summary and the key numbers; plans, long tables and transcripts go inside a `<details>` block.
+- **A daily check-in.** At the start of each of Björn's sessions the deputy gives one short summary: what merged since he last looked, what runs now, and the one question that needs him, so a wrong direction is caught within a day.
 
 **Branching model (decided 2026-08-24): trunk-based with short-lived task branches.** What actually keeps parallel features from breaking each other is not the branches — it's three structural rules; the branches just carry the work:
 
