@@ -16,6 +16,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { SuggestionEntry, SuggestionPage } from "../ipc/entity";
+import { toasts } from "./toasts.svelte";
 
 /**
  * Recorders rather than `vi.fn`s, for the reason `Tile.test.svelte.ts` gives:
@@ -115,8 +116,12 @@ function entry(
   };
 }
 
-function page(rows: SuggestionEntry[], total = rows.length): SuggestionPage {
-  return { rows, total };
+function page(
+  rows: SuggestionEntry[],
+  total = rows.length,
+  more: SuggestionPage["more"] = [],
+): SuggestionPage {
+  return { rows, total, more };
 }
 
 const opened: string[] = [];
@@ -494,6 +499,72 @@ test("a pass that gave up is a muted line over the rows, and the next pass clear
     "the next finished pass clears the line",
   ).toBeNull();
   expect(target.querySelectorAll(".row.sug").length).toBe(1);
+
+  unmount(app);
+  target.remove();
+});
+
+test.each([
+  ["accept", ".btn.pri"],
+  ["dismiss", ".btn.ghost"],
+])("%s on a proposal a pass retired removes the row quietly (#774)", async (_verb, button) => {
+  reads = [
+    () => Promise.resolve(page([entry()])),
+    // The proposal is gone from the query, which is what takes the row away.
+    () => Promise.resolve(page([])),
+  ];
+  answered = () =>
+    Promise.reject({ code: "not_found", message: "no such link", source_id: null });
+  toasts.items = [];
+  const { target, app } = render();
+  await settle();
+
+  target.querySelector<HTMLButtonElement>(button)?.click();
+  await settle();
+
+  expect(toasts.items).toEqual([]);
+  expect(calls.filter((call) => call.startsWith("read")).length).toBe(2);
+  expect(target.querySelectorAll(".row.sug").length).toBe(0);
+
+  unmount(app);
+  target.remove();
+});
+
+test("any other error on accept still toasts and keeps the row (#774)", async () => {
+  reads = [() => Promise.resolve(page([entry()]))];
+  answered = () =>
+    Promise.reject({ code: "internal", message: "the database went away", source_id: null });
+  toasts.items = [];
+  const { target, app } = render();
+  await settle();
+
+  target.querySelector<HTMLButtonElement>(".btn.pri")?.click();
+  await settle();
+
+  expect(toasts.items.map((t) => t.text)).toEqual(["the database went away"]);
+  expect(target.querySelectorAll(".row.sug").length).toBe(1);
+
+  unmount(app);
+  target.remove();
+});
+
+test("an item with proposals past the bound gets one line that opens it (#774)", async () => {
+  const hub = {
+    entity_id: "mock:PAY-1",
+    kind: "ticket",
+    title: "Payout epic",
+    deleted_at: null,
+  };
+  reads = [() => Promise.resolve(page([entry()], 9, [{ item: hub, more: 6 }]))];
+  const { target, app } = render();
+  await settle();
+
+  const line = target.querySelector<HTMLButtonElement>(".row.more button");
+  expect(line?.textContent?.trim()).toBe("+6 more similar to Payout epic");
+  line?.click();
+  expect(opened.length).toBe(1);
+  expect(opened[0]).toContain("PAY-1");
+  expect(target.querySelector(".cnt")?.textContent).toContain("9 waiting");
 
   unmount(app);
   target.remove();

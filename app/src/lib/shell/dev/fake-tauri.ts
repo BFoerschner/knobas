@@ -1971,9 +1971,9 @@ function linkEnd(entity_id: string): LinkEnd {
 function roomSuggestions(args: Record<string, unknown>): SuggestionPage {
   // The fixture has no link graph, so a stored context's room has nothing to
   // propose -- the same answer `context_members` and `list_entities` give.
-  if (args["ctx"]) return { rows: [], total: 0 };
+  if (args["ctx"]) return { rows: [], total: 0, more: [] };
   const sources = (args["sources"] as string[] | undefined) ?? [];
-  if (sources.length && !sources.includes("mock")) return { rows: [], total: 0 };
+  if (sources.length && !sources.includes("mock")) return { rows: [], total: 0, more: [] };
   const limit = Number(args["limit"] ?? 50);
 
   const waiting = FAKE_SUGGESTIONS.filter((link) => !ANSWERED.has(link.id)).sort((a, b) =>
@@ -1982,7 +1982,7 @@ function roomSuggestions(args: Record<string, unknown>): SuggestionPage {
   const rows: SuggestionEntry[] = waiting
     .slice(0, limit)
     .map((link) => ({ link, from: linkEnd(link.from_id), to: linkEnd(link.to_id) }));
-  return { rows, total: waiting.length };
+  return { rows, total: waiting.length, more: [] };
 }
 
 /**

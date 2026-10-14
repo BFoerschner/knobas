@@ -2116,6 +2116,9 @@ pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.
     pub total: i64,
+    /// Items holding more proposals than the tray draws for one item (#774),
+    /// most hidden first. The bound is applied in SQL.
+    pub more: Vec<suggest::SuggestionMore>,
 }
 
 /// Run a detection pass, returning how many proposals it wrote.
@@ -2175,9 +2178,12 @@ pub async fn room_suggestions_inner(
         None => None,
     };
     let members = members.as_deref();
+    let rows = suggest::proposals(pool, sources, members, i64::from(limit)).await?;
+    let more = suggest::proposal_overflow(pool, sources, members, &rows).await?;
     Ok(SuggestionPage {
-        rows: suggest::proposals(pool, sources, members, i64::from(limit)).await?,
         total: suggest::proposal_count(pool, sources, members).await?,
+        rows,
+        more,
     })
 }
 

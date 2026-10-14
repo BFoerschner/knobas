@@ -53,7 +53,12 @@ async fn a_pass_over_the_demo_corpus_proposes_suggestions_a_reader_can_judge() {
 
     let page = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
     assert_eq!(page.total, i64::from(written));
-    assert_eq!(page.rows.len(), written as usize);
+    // The tray draws at most three rows per item (#774), so the page may hold
+    // fewer rows than the pass wrote -- and then it says which items overflow.
+    assert!(page.rows.len() <= written as usize);
+    if page.rows.len() < written as usize {
+        assert!(!page.more.is_empty(), "rows left out are accounted for");
+    }
 
     for entry in &page.rows {
         assert!(

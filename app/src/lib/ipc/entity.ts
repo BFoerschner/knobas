@@ -674,6 +674,18 @@ export interface SuggestionPage {
    * decides whether to look at all.
    */
   total: number;
+  /**
+   * Items holding more proposals than the tray draws for one item (three),
+   * most hidden first — `SuggestionMore` (#774). The bound is applied in SQL.
+   */
+  more: SuggestionMore[];
+}
+
+/** An item with proposals the tray did not draw, and how many. */
+export interface SuggestionMore {
+  item: LinkEnd;
+  /** Proposals this item holds beyond the three drawn. */
+  more: number;
 }
 
 /**

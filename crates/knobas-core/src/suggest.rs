@@ -1783,6 +1783,51 @@ struct ProposalRow {
     to_deleted_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
+/// The room's newest `$4` proposals, each end ranked within its item (#774).
+///
+/// `prefix` is the old `PROPOSALS` filter and order (a proposal belongs to a
+/// room if either end does) cut at `$4` rows; `ranked` numbers the proposals
+/// every item touches, from either end, with a window function. A row's rank
+/// counts only *newer* rows, and every newer row of the room is in the prefix,
+/// so the rank is the same one the whole room would give, without ranking the
+/// whole room: the old tray read was an index walk that stopped at its limit,
+/// and ranking all of a room's proposals (150k on the probe) cost seconds.
+macro_rules! prefix_ranked {
+    () => {
+        "prefix as (
+           select l.id, l.from_id, l.to_id, l.created_at
+             from knobas.proposed_link l
+             left join sync.item fi on fi.entity_id = l.from_id
+             left join sync.item ti on ti.entity_id = l.to_id
+            where ($1::text[] is null
+               or fi.source_id = any($1) or ti.source_id = any($1))
+              and ($2::text[] is null
+               or l.from_id = any($2) or l.to_id = any($2))
+            order by l.created_at desc, l.id desc
+            limit $4),
+         ranked as (
+           select id, item,
+                  row_number() over (partition by item
+                                     order by created_at desc, id desc) as rn
+             from (select id, from_id as item, created_at from prefix
+                   union all
+                   select id, to_id, created_at from prefix) ends)"
+    };
+}
+
+/// How many rows one item may have in the tray (#774, ruled by the deputy).
+/// Written into [`PROPOSALS`] and [`OVERFLOW`] as the literal `3`.
+pub const ROWS_PER_ITEM: usize = 3;
+
+/// An item with proposals the tray does not draw, and how many (#774).
+#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+pub struct SuggestionMore {
+    #[sqlx(flatten)]
+    pub item: LinkEnd,
+    /// Proposals this item holds beyond [`ROWS_PER_ITEM`].
+    pub more: i64,
+}
+
 /// The tray's read: proposals, newest first, optionally scoped to a room.
 ///
 /// `knobas.proposed_link` and nothing else, which is what makes "the tray shows
@@ -1794,24 +1839,58 @@ struct ProposalRow {
 /// and only to learn which source an end came from, because knobas' own
 /// entities (notes, contexts) have no mirror row at all.
 const PROPOSALS: &str = concat!(
-    "select ",
+    "with ",
+    prefix_ranked!(),
+    ", kept as (select id from ranked group by id having max(rn) <= 3)
+     select ",
     link_columns!("l."),
     ", f.id as from_entity_id, f.kind as from_kind,
        f.title as from_title, f.deleted_at as from_deleted_at,
        t.id as to_entity_id, t.kind as to_kind,
        t.title as to_title, t.deleted_at as to_deleted_at
-       from knobas.proposed_link l
+       from kept k
+       join knobas.proposed_link l on l.id = k.id
        join knobas.entity f on f.id = l.from_id
        join knobas.entity t on t.id = l.to_id
-       left join sync.item fi on fi.entity_id = l.from_id
-       left join sync.item ti on ti.entity_id = l.to_id
-      where ($1::text[] is null
-         or fi.source_id = any($1) or ti.source_id = any($1))
-        and ($2::text[] is null
-         or l.from_id = any($2) or l.to_id = any($2))
       order by l.created_at desc, l.id desc
       limit $3"
 );
+
+/// How many proposals the room's newest `$3` really are: fewer than `$3` means
+/// the room has no more to look at.
+const PREFIX_SIZE: &str = "
+    select count(*) from (
+        select l.id
+          from knobas.proposed_link l
+          left join sync.item fi on fi.entity_id = l.from_id
+          left join sync.item ti on ti.entity_id = l.to_id
+         where ($1::text[] is null
+            or fi.source_id = any($1) or ti.source_id = any($1))
+           and ($2::text[] is null
+            or l.from_id = any($2) or l.to_id = any($2))
+         limit $3) newest";
+
+/// The drawn items (`$3`) that hold more in-scope proposals than the tray
+/// draws for one item, and how many more, most first (#774).
+const OVERFLOW: &str = "
+    with scoped as (
+           select l.from_id, l.to_id
+             from knobas.proposed_link l
+             left join sync.item fi on fi.entity_id = l.from_id
+             left join sync.item ti on ti.entity_id = l.to_id
+            where (l.from_id = any($3) or l.to_id = any($3))
+              and ($1::text[] is null
+               or fi.source_id = any($1) or ti.source_id = any($1))
+              and ($2::text[] is null
+               or l.from_id = any($2) or l.to_id = any($2))),
+         ends as (select from_id as item from scoped where from_id = any($3)
+                  union all
+                  select to_id from scoped where to_id = any($3)),
+         over as (select item, count(*) - 3 as more from ends
+                   group by item having count(*) > 3)
+    select e.id as entity_id, e.kind, e.title, e.deleted_at, o.more
+      from over o join knobas.entity e on e.id = o.item
+     order by o.more desc, e.id";
 
 /// The proposals a room holds, newest first.
 ///
@@ -1841,13 +1920,39 @@ pub async fn proposals(
     members: Option<&[String]>,
     limit: i64,
 ) -> Result<Vec<SuggestionEntry>, CoreError> {
+    if limit <= 0 {
+        return Ok(Vec::new());
+    }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
-    let rows = sqlx::query_as::<_, ProposalRow>(PROPOSALS)
-        .bind(scope)
-        .bind(members.map(<[String]>::to_vec))
-        .bind(limit)
-        .fetch_all(pool)
-        .await?;
+    // How much of the room's newest end to rank. Most rows survive the bound,
+    // so a small multiple of `limit` fills the tray; a hub that eats the
+    // prefix makes it grow until the tray is full or the room is exhausted.
+    let mut prefix = limit.saturating_mul(8).max(100);
+    let rows = loop {
+        let rows = sqlx::query_as::<_, ProposalRow>(PROPOSALS)
+            .bind(&scope)
+            .bind(members.map(<[String]>::to_vec))
+            .bind(limit)
+            .bind(prefix)
+            .fetch_all(pool)
+            .await?;
+        if i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit {
+            break rows;
+        }
+        // Short: either the room is exhausted or the prefix was too small. The
+        // count stops at the prefix, so it costs what the read just cost and
+        // not a pass over every proposal.
+        let (seen,): (i64,) = sqlx::query_as(PREFIX_SIZE)
+            .bind(&scope)
+            .bind(members.map(<[String]>::to_vec))
+            .bind(prefix)
+            .fetch_one(pool)
+            .await?;
+        if seen < prefix {
+            break rows;
+        }
+        prefix = prefix.saturating_mul(8);
+    };
     Ok(rows
         .into_iter()
         .map(|row| SuggestionEntry {
@@ -1893,6 +1998,38 @@ const PROPOSAL_COUNT: &str = "select count(*)
 #[must_use]
 pub fn planned_proposal_count() -> &'static str {
     PROPOSAL_COUNT
+}
+
+/// The items among `drawn` whose proposals the per-item bound hid, most hidden
+/// first (#774).
+///
+/// Same scope as [`proposals`]. Only the drawn rows' items are counted, by the
+/// pair indexes, so a hub costs one probe of its own rows and not a pass over
+/// the room. The tray draws one "+N more similar to <title>" line for each.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if the query fails.
+pub async fn proposal_overflow(
+    pool: &PgPool,
+    sources: &[String],
+    members: Option<&[String]>,
+    drawn: &[SuggestionEntry],
+) -> Result<Vec<SuggestionMore>, CoreError> {
+    if drawn.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope = (!sources.is_empty()).then(|| sources.to_vec());
+    let items: Vec<String> = drawn
+        .iter()
+        .flat_map(|e| [e.from.entity_id.clone(), e.to.entity_id.clone()])
+        .collect();
+    Ok(sqlx::query_as::<_, SuggestionMore>(OVERFLOW)
+        .bind(scope)
+        .bind(members.map(<[String]>::to_vec))
+        .bind(items)
+        .fetch_all(pool)
+        .await?)
 }
 
 /// How many proposals a room is holding.

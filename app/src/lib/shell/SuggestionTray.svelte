@@ -25,7 +25,7 @@
 <script lang="ts">
   import { listen } from "@tauri-apps/api/event";
 
-  import { EVENTS, ipcErrorMessage } from "../ipc";
+  import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
     acceptSuggestion,
     detectSuggestions,
@@ -198,7 +198,14 @@
       // local removal would be a second copy of the truth.
       await refresh(false, token);
     } catch (rejection) {
-      push({ text: ipcErrorMessage(rejection), tone: "err" });
+      if (isIpcError(rejection) && rejection.code === "not_found") {
+        // Gone, not failed (#774): a detection pass retired this proposal
+        // while it was still drawn. Nothing to tell the reader; the re-read
+        // is what takes the row off the screen.
+        await refresh(false, token);
+      } else {
+        push({ text: ipcErrorMessage(rejection), tone: "err" });
+      }
     } finally {
       busy = busy.filter((held) => held !== id);
     }
@@ -277,6 +284,19 @@
         </span>
       </div>
     {/each}
+    {#each page?.more ?? [] as hub (hub.item.entity_id)}
+      <!-- An item holding more proposals than the tray draws for it (#774):
+           the line opens the item, whose own panel lists them all. -->
+      <div class="row more">
+        <button
+          class="t open"
+          title="Open {hub.item.entity_id}"
+          onclick={() => onopen(addressOf(hub.item))}
+        >
+          +{hub.more} more similar to {hub.item.title || hub.item.entity_id}
+        </button>
+      </div>
+    {/each}
   {/if}
 </section>
 
@@ -289,6 +309,16 @@
   .row.sug {
     grid-template-columns: 34px 1fr 1fr 1.4fr 148px;
     cursor: default;
+  }
+
+  .row.more {
+    grid-template-columns: 1fr;
+    cursor: default;
+  }
+
+  .row.more .open {
+    color: var(--faint);
+    font: 500 11px var(--mono);
   }
 
   /* The whole title cell is the navigation target, not a link-coloured word. */

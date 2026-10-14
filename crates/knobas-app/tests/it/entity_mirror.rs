@@ -580,9 +580,10 @@ fn the_suggestion_shapes_match_their_typescript_mirror() {
     let page = serde_json::to_value(SuggestionPage {
         rows: vec![entry],
         total: 7,
+        more: vec![],
     })
     .unwrap();
-    assert_shape("SuggestionPage", &page, &["rows", "total"]);
+    assert_shape("SuggestionPage", &page, &["rows", "total", "more"]);
     assert_eq!(
         page["total"], 7,
         "the total is the room's, not the page's -- it is what the heading shows"
