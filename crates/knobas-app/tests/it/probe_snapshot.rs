@@ -106,6 +106,13 @@ fn of_migrations(name: &str, current: &str) -> bool {
         .is_some_and(|(migrations, _)| migrations == current)
 }
 
+/// The pass-code hash of the after-pass snapshot `name`, `None` for a base
+/// snapshot.
+fn pass_of(name: &str) -> Option<&str> {
+    let (head, _) = name.split_once("-passed-")?;
+    head.rsplit_once("-c").map(|(_, pass)| pass)
+}
+
 /// The directory snapshots live in: `$TMPDIR/knobas-probe-snapshots`.
 pub fn root() -> PathBuf {
     std::env::temp_dir().join("knobas-probe-snapshots")
@@ -128,9 +135,15 @@ pub fn exists(path: &Path) -> bool {
 }
 
 /// Delete every entry of `root` that is stale: another migrations hash, older
-/// than `max_age`, or an unfinished copy older than an hour. Returns what it
-/// deleted.
-pub fn sweep(root: &Path, current: &str, now: SystemTime, max_age: Duration) -> Vec<PathBuf> {
+/// than `max_age`, an after-pass snapshot of another pass code than `pass`, or
+/// an unfinished copy older than an hour. Returns what it deleted.
+pub fn sweep(
+    root: &Path,
+    current: &str,
+    pass: &str,
+    now: SystemTime,
+    max_age: Duration,
+) -> Vec<PathBuf> {
     let Ok(entries) = std::fs::read_dir(root) else {
         return Vec::new();
     };
@@ -142,7 +155,9 @@ pub fn sweep(root: &Path, current: &str, now: SystemTime, max_age: Duration) -> 
         let stale = if unfinished {
             age(&path, now) > Duration::from_secs(3600)
         } else {
-            !of_migrations(&file, current) || age(&path, now) > max_age
+            !of_migrations(&file, current)
+                || pass_of(&file).is_some_and(|code| code != pass)
+                || age(&path, now) > max_age
         };
         if stale && std::fs::remove_dir_all(&path).is_ok() {
             removed.push(path);
@@ -316,14 +331,29 @@ mod tests {
 
         // Eight days on: every finished snapshot is older than a week...
         let later = SystemTime::now() + Duration::from_secs(8 * 24 * 3600);
-        assert_eq!(sweep(root.path(), current, later, MAX_AGE).len(), 3);
+        assert_eq!(sweep(root.path(), current, "p", later, MAX_AGE).len(), 3);
 
         // ...and now: only the other migrations' snapshot goes.
         snapshot(root.path(), &keep, true);
         snapshot(root.path(), &other_key, true);
-        let removed = sweep(root.path(), current, SystemTime::now(), MAX_AGE);
+        let removed = sweep(root.path(), current, "p", SystemTime::now(), MAX_AGE);
         assert_eq!(removed, vec![root.path().join(&other_key)]);
         assert!(exists(&root.path().join(&keep)));
+    }
+
+    #[test]
+    fn the_sweep_removes_an_after_pass_snapshot_of_another_pass_code() {
+        let root = tempfile::tempdir().unwrap();
+        let stale = passed_name("aaaa", "s1", "old", State::Analyzed);
+        let current = passed_name("aaaa", "s1", "new", State::Analyzed);
+        let base = name("aaaa", "s1", State::Analyzed);
+        for n in [&stale, &current, &base] {
+            snapshot(root.path(), n, true);
+        }
+        let removed = sweep(root.path(), "aaaa", "new", SystemTime::now(), MAX_AGE);
+        assert_eq!(removed, vec![root.path().join(&stale)]);
+        assert!(exists(&root.path().join(&current)));
+        assert!(exists(&root.path().join(&base)));
     }
 
     #[test]
@@ -331,9 +361,9 @@ mod tests {
         let root = tempfile::tempdir().unwrap();
         snapshot(root.path(), "m1-p2-never.partial", false);
         assert!(!exists(&root.path().join("m1-p2-never.partial")));
-        assert!(sweep(root.path(), "1", SystemTime::now(), MAX_AGE).is_empty());
+        assert!(sweep(root.path(), "1", "p", SystemTime::now(), MAX_AGE).is_empty());
         let later = SystemTime::now() + Duration::from_secs(2 * 3600);
-        assert_eq!(sweep(root.path(), "1", later, MAX_AGE).len(), 1);
+        assert_eq!(sweep(root.path(), "1", "p", later, MAX_AGE).len(), 1);
     }
 
     #[test]
