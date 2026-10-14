@@ -134,6 +134,41 @@ impl Steps for Queue<'_> {
     }
 }
 
+/// [`Queue`] over its own copy of the state: the window a run behind its
+/// command's answer looks through (#779), since it outlives the command.
+pub struct OwnedQueue(pub SourcesState);
+
+#[async_trait]
+impl Steps for OwnedQueue {
+    async fn dispatch(&self, payload: &serde_json::Value) -> Result<(i64, Landing), IpcError> {
+        Queue { state: &self.0 }.dispatch(payload).await
+    }
+
+    async fn landing_of(&self, write_id: i64) -> Result<Landing, IpcError> {
+        Queue { state: &self.0 }.landing_of(write_id).await
+    }
+
+    async fn link(&self, from: &str, to: &str, relation: &str) -> Result<Linked, IpcError> {
+        Queue { state: &self.0 }.link(from, to, relation).await
+    }
+
+    async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError> {
+        Queue { state: &self.0 }.branch(repo, name).await
+    }
+
+    async fn pull_request(
+        &self,
+        repo: &EntityRef,
+        head: &str,
+    ) -> Result<PullRequestOnHead, IpcError> {
+        Queue { state: &self.0 }.pull_request(repo, head).await
+    }
+
+    async fn refresh(&self, source: &str) {
+        Queue { state: &self.0 }.refresh(source).await;
+    }
+}
+
 /// The branch of a repository whose own name is `$3`.
 ///
 /// `title` is the branch's name: contract §4.1 makes every adapter build it

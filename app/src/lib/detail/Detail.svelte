@@ -9,7 +9,7 @@
   own label and monogram when it declares them, the title-cased kind otherwise.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
   import { listen } from "@tauri-apps/api/event";
   import { EVENTS, ipcErrorMessage, isIpcError } from "../ipc";
   import {
@@ -36,6 +36,7 @@
   import { ago } from "../shell/time";
   import { push } from "../shell/toasts.svelte";
   import { openWriteQueue } from "../shell/write-queue.svelte";
+  import { toastStopped, willNotGo } from "../shell/follow-write";
   import BranchCheckoutNote from "./BranchCheckoutNote.svelte";
   import BuildsSummary from "./BuildsSummary.svelte";
   import CheckoutPanel from "./CheckoutPanel.svelte";
@@ -106,6 +107,8 @@
     settingMarks = {};
     settingWrites = {};
     savedHere.clear();
+    toldSettings.clear();
+    reopenSetting = null;
     sending = [];
     made = {};
     resending = null;
@@ -522,6 +525,21 @@
 
   /** The setting writes saved from this panel, whose landing says "set". */
   const savedHere = new Set<number>();
+  /** The saved writes already told as held or refused (#779): told once. */
+  const toldSettings = new Set<number>();
+  /** A row to reopen with what was typed: *Edit and resend* on a setting's toast. */
+  let reopenSetting = $state<{ name: string; value: string } | null>(null);
+
+  /**
+   * Ask the row to reopen once, and take the ask back once it is drawn: a block drawn again later must not reopen.
+   * The toast outlives the item: once another item is open, its row of the same name is not this one, so the
+   * write is shown in the queue instead.
+   */
+  function reopen(entity: string, name: string, value: string) {
+    if (entity !== entityId) return openWriteQueue();
+    reopenSetting = { name, value };
+    void tick().then(() => (reopenSetting = null));
+  }
 
   /**
    * Mark the rows whose edits are still on the queue (#692).
@@ -594,7 +612,14 @@
       const row = open.find((w) => w.id === id);
       const state = markState(row);
       if (state !== null) {
-        settingMarks[name] = { state, detail: row?.detail ?? null, value: settingMarks[name]?.value ?? "" };
+        const value = settingMarks[name]?.value ?? "";
+        settingMarks[name] = { state, detail: row?.detail ?? null, value };
+        // Saved here and will not go on its own (#779): told once, the mark stays.
+        if (willNotGo(row) && savedHere.has(id) && !toldSettings.has(id)) {
+          toldSettings.add(id);
+          const entity = entityId;
+          toastStopped(row, { name, resend: () => reopen(entity, name, value) });
+        }
       } else {
         landed.push([name, settingMarks[name], id]);
         delete settingWrites[name];
@@ -1551,6 +1576,7 @@
           onopenurl={(url) => void open(url)}
           onaction={queueAction}
           {settingMarks}
+          {reopenSetting}
           onsetting={saveSetting}
           said={saidOnTheirWay}
         />

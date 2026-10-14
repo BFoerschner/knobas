@@ -143,27 +143,43 @@ export interface StartWork {
   readonly steps: StartWorkStep[];
   /** Set when the last read or action failed, so the view can say so. */
   readonly error: string | null;
-  /** True while an action is in flight, so a button cannot be double-fired. */
+  /** True while an action's command is out, so a button cannot be double-fired. */
   readonly busy: boolean;
   /** True once a read has answered — so "no flow yet" is not drawn while loading. */
   readonly loaded: boolean;
+  /** True while the flow runs behind an action's answer and is re-read as it moves (#779). */
+  readonly following: boolean;
   /** Read the flow; propose one when `repoId` names where it would go. */
   load(repoId: string | null): Promise<void>;
   run(): Promise<void>;
   retry(stepId: number): Promise<void>;
   skip(stepId: number): Promise<void>;
   amend(stepId: number, payload: unknown): Promise<void>;
+  /** Stop following, for a stepper that goes away. The flow runs on regardless. */
+  stop(): void;
 }
 
 /**
- * How often the stepper re-reads the flow while `run` is in flight.
+ * How often the stepper re-reads the flow while it moves.
  *
- * The run command answers only when the whole sequence stops, but the rows
- * move underneath it -- a step is marked `running` while its dispatch is out
- * -- and polling is the only way the stepper can show that (story 11: a slow
- * step must be distinguishable from a stuck one).
+ * Since #779 *Run*, *Retry* and *Skip* answer at once and the backend runs the
+ * steps behind the answer, one at a time through the write queue. The rows
+ * move underneath -- a step is marked `running` while its dispatch is out --
+ * and re-reading them is how the stepper draws each step as it lands (story
+ * 11: a slow step must be distinguishable from a stuck one).
  */
 const POLL_MS = 700;
+
+/**
+ * Whether the backend is still taking the flow on: a step is out, or the
+ * first step not done yet is one nothing has started -- between two steps,
+ * or before the first. A failed or queued step is where the run stopped, and
+ * a flow with every step done has nothing left to run.
+ */
+export function moving(steps: readonly StartWorkStep[]): boolean {
+  const current = steps.find((step) => demandOf(step.outcome) !== "done");
+  return current !== undefined && (current.outcome === "running" || current.outcome === "pending");
+}
 
 export function createStartWork(entityId: string): StartWork {
   const state = $state<{
@@ -171,14 +187,16 @@ export function createStartWork(entityId: string): StartWork {
     error: string | null;
     busy: boolean;
     loaded: boolean;
-  }>({ steps: [], error: null, busy: false, loaded: false });
+    following: boolean;
+  }>({ steps: [], error: null, busy: false, loaded: false, following: false });
 
   /**
-   * The generation of the newest action, so a poll that resolves late cannot
+   * The generation of the newest action, so a read that resolves late cannot
    * overwrite the action's own answer -- the same device the suggestion
    * tray's `token` is.
    */
   let generation = 0;
+  let poll: ReturnType<typeof setInterval> | null = null;
 
   async function load(repoId: string | null): Promise<void> {
     try {
@@ -194,44 +212,58 @@ export function createStartWork(entityId: string): StartWork {
     }
   }
 
+  function stop() {
+    if (poll !== null) clearInterval(poll);
+    poll = null;
+    state.following = false;
+  }
+
+  /**
+   * Re-read the flow while it moves. A read applies only while no newer action
+   * has answered, so a slow one can never overwrite that answer; the first
+   * read that finds the flow stopped or done ends the following.
+   */
+  function follow() {
+    stop();
+    state.following = true;
+    const mine = generation;
+    poll = setInterval(() => {
+      void (async () => {
+        let steps: StartWorkStep[];
+        try {
+          steps = await startWorkFlow(entityId, null);
+        } catch {
+          // A failed read changes nothing; the next one asks again.
+          return;
+        }
+        if (mine !== generation || poll === null) return;
+        state.steps = steps;
+        if (!moving(steps)) stop();
+      })();
+    }, POLL_MS);
+  }
+
   /**
    * Run one action and take what it answers.
    *
    * Every one of these commands returns the flow as it now stands, so there is
    * no second read to disagree with the first — and a failure leaves the rows
-   * alone, because an action that was refused did not change them.
+   * alone, because an action that was refused did not change them. Those that
+   * run the flow on (`behind`) are then followed while it moves.
    */
-  async function act(run: () => Promise<StartWorkStep[]>, live = false): Promise<void> {
+  async function act(run: () => Promise<StartWorkStep[]>, behind = false): Promise<void> {
     if (state.busy) return;
     state.busy = true;
-    const mine = ++generation;
-    // The interval lives strictly inside the action, and a peek applies only
-    // while its action is still the newest thing that happened -- cleared and
-    // invalidated before the command's answer is taken, so a slow poll can
-    // never overwrite it.
-    const poll = live
-      ? setInterval(() => {
-          void (async () => {
-            try {
-              const steps = await startWorkFlow(entityId, null);
-              if (mine === generation) state.steps = steps;
-            } catch {
-              // A failed peek changes nothing: the command's own answer is
-              // authoritative and still on its way.
-            }
-          })();
-        }, POLL_MS)
-      : null;
     try {
       const answer = await run();
       generation += 1;
       state.steps = answer;
       state.error = null;
+      if (behind) follow();
     } catch (error) {
       generation += 1;
       state.error = ipcErrorMessage(error);
     } finally {
-      if (poll !== null) clearInterval(poll);
       state.busy = false;
     }
   }
@@ -249,11 +281,14 @@ export function createStartWork(entityId: string): StartWork {
     get loaded() {
       return state.loaded;
     },
+    get following() {
+      return state.following;
+    },
     load,
     run: () => act(() => startWorkRun(entityId), true),
-    retry: (stepId) => act(() => startWorkRetry(stepId)),
-    skip: (stepId) => act(() => startWorkSkip(stepId)),
+    retry: (stepId) => act(() => startWorkRetry(stepId), true),
+    skip: (stepId) => act(() => startWorkSkip(stepId), true),
     amend: (stepId, payload) => act(() => startWorkAmend(stepId, payload)),
+    stop,
   };
 }
-

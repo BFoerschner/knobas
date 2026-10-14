@@ -40,7 +40,9 @@ use std::sync::{Arc, Mutex};
 use async_trait::async_trait;
 use chrono::NaiveDate;
 use knobas_app::commands::entity::{
-    create_action_item_ticket_inner, publish_standup_protocol_inner, standup_protocol_inner,
+    action_item_ticket_inner, create_action_item_ticket_in_background,
+    create_action_item_ticket_inner, publish_standup_protocol_in_background,
+    publish_standup_protocol_inner, standup_protocol_inner,
 };
 use knobas_app::protocol::{self, PublishTarget};
 use knobas_app::sources::SourcesState;
@@ -103,6 +105,8 @@ struct Log {
     pending: Vec<SyncItem>,
     /// While true, `write` refuses the way an unreachable server does.
     offline: bool,
+    /// When set, every write waits for a permit first: a send held open (#779).
+    gate: Option<Arc<tokio::sync::Semaphore>>,
 }
 
 /// A source that behaves like the Confluence adapter at the trait.
@@ -155,6 +159,10 @@ impl Source for Wiki {
     }
 
     async fn write(&self, op: WriteOp) -> Result<WriteReceipt, SourceError> {
+        let gate = self.log().gate.clone();
+        if let Some(gate) = gate {
+            gate.acquire().await.expect("the gate stays open").forget();
+        }
         {
             let mut log = self.log();
             log.written.push(op.identifier().to_owned());
@@ -1075,4 +1083,152 @@ async fn an_empty_action_item_files_nothing() {
     .expect_err("it refuses");
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
     assert!(harness.log().written.is_empty(), "and sent nothing");
+}
+
+// -- behind the answer (#779) -----------------------------------------------
+
+/// Read `what` until `done` says so or ten seconds pass.
+async fn until<T: std::fmt::Debug, F: std::future::Future<Output = T>>(
+    what: impl Fn() -> F,
+    done: impl Fn(&T) -> bool,
+) -> T {
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let value = what().await;
+        if done(&value) {
+            return value;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never got there: {value:?}"
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+}
+
+/// **#779: *Publish* answers while the page's send is held open**, with the
+/// queued write as the publication and no page yet. Once the send lands, the
+/// next read names the page and it is linked -- behind the answer, with
+/// nothing else asked of the reader.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_publish_answers_once_queued_and_the_page_is_named_and_linked_behind_it() {
+    let harness = Harness::new("protocol_publish_behind").await;
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    harness.log().gate = Some(Arc::clone(&gate));
+    let opened = harness.open().await;
+
+    let answered = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        publish_standup_protocol_in_background(&harness.state, day(), Some(target())),
+    )
+    .await
+    .expect("the publish answers while its send is held open")
+    .expect("the publish is queued");
+    let publication = answered
+        .publication
+        .expect("the queued write is the publication");
+    assert_eq!(publication.state, WriteState::Pending);
+    assert_eq!(
+        publication.page_entity_id, None,
+        "no page has been made yet"
+    );
+    assert!(!publication.linked);
+    assert!(harness.links(&opened.note_id).await.is_empty());
+
+    gate.add_permits(1);
+    let landed = until(
+        || async { harness.open().await.publication },
+        |p| p.as_ref().is_some_and(|p| p.linked),
+    )
+    .await
+    .expect("a publication");
+    assert_eq!(landed.state, WriteState::Sent);
+    assert_eq!(landed.page_entity_id, Some(created_page_id()));
+    assert_eq!(
+        harness.create_pages_queued().await,
+        1,
+        "one page, however often it is read"
+    );
+    assert_eq!(
+        harness.links(&opened.note_id).await,
+        [(
+            opened.note_id.clone(),
+            created_page_id(),
+            protocol::PUBLISHED_RELATION.to_owned()
+        )]
+    );
+}
+
+/// **#779: *Create ticket* answers while the create is held open**, with the
+/// queued write and no ticket. Once it lands, the read the panel asks names
+/// the ticket and the note is linked to it.
+#[tokio::test(flavor = "multi_thread")]
+async fn an_action_item_answers_once_queued_and_its_ticket_is_named_and_linked_behind_it() {
+    let harness = Harness::new("protocol_action_item_behind").await;
+    let gate = Arc::new(tokio::sync::Semaphore::new(0));
+    harness.log().gate = Some(Arc::clone(&gate));
+    let opened = harness.open().await;
+
+    let filed = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        create_action_item_ticket_in_background(
+            &harness.state,
+            &opened.note_id,
+            &format!("{TRACKER}:PAY"),
+            "Task",
+            "Ask Ines about the SEPA retry",
+            "From the standup on 2026-09-03.",
+        ),
+    )
+    .await
+    .expect("the create answers while its send is held open")
+    .expect("the create is queued");
+    assert_eq!(filed.state, WriteState::Pending);
+    assert_eq!(filed.ticket_entity_id, None);
+    assert!(!filed.linked);
+
+    // Asked while the send is out: still on its way, and nothing is guessed.
+    let asked = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+        .await
+        .expect("the read answers");
+    assert_eq!(
+        (asked.state, asked.ticket_entity_id),
+        (WriteState::Pending, None)
+    );
+
+    gate.add_permits(1);
+    let landed = until(
+        || async {
+            action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
+                .await
+                .expect("the read answers")
+        },
+        |t| t.linked,
+    )
+    .await;
+    assert_eq!(landed.state, WriteState::Sent);
+    assert_eq!(landed.ticket_entity_id.as_deref(), Some("tracker:PAY-999"));
+    assert_eq!(harness.log().written, ["create_ticket"], "one create");
+    assert_eq!(
+        harness.links(&opened.note_id).await,
+        [(
+            opened.note_id.clone(),
+            "tracker:PAY-999".to_owned(),
+            protocol::ACTION_ITEM_RELATION.to_owned()
+        )]
+    );
+}
+
+/// The read refuses a write that files no ticket, rather than reading a page
+/// create's title as a ticket's.
+#[tokio::test(flavor = "multi_thread")]
+async fn the_ticket_read_refuses_a_write_that_files_no_ticket() {
+    let harness = Harness::new("protocol_ticket_read_wrong_write").await;
+    let opened = harness.open().await;
+    let published = harness.publish(Some(target())).await.expect("published");
+    let write = published.publication.expect("a publication").write_id;
+    let refused = action_item_ticket_inner(harness.pool(), &opened.note_id, write)
+        .await
+        .expect_err("not a ticket's write");
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }

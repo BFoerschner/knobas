@@ -421,6 +421,9 @@ pub fn run() {
             // #601's query-box suggestions, appended at the foot: a read on
             // the search module, and the list is append-only (§10.8).
             commands::search::filter_suggestions,
+            // #779's read of an action item's ticket, appended at the foot:
+            // the list is append-only (§10.8).
+            commands::entity::action_item_ticket,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

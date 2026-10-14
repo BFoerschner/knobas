@@ -66,6 +66,9 @@
   let editing = $state<number | null>(null);
   let draft = $state<Record<string, string>>({});
 
+  // The flow runs on without this page; only the re-reading stops with it.
+  $effect(() => () => flow.stop());
+
   $effect(() => {
     const id = entityId;
     void (async () => {
@@ -285,7 +288,7 @@
             {/if}
             <div class="sw-acts">
               {#if step.outcome !== "succeeded" && fields.length > 0}
-                <button class="btn" disabled={flow.busy} onclick={() => openEditor(step, fields)}>
+                <button class="btn" disabled={flow.busy || flow.following} onclick={() => openEditor(step, fields)}>
                   Edit
                 </button>
               {/if}
@@ -293,7 +296,9 @@
                 Retry and Skip only on the step the sequence is on. A stepper
                 that offered them everywhere would invite running a later step
                 over an earlier failure, which is the outcome the whole sequence
-                exists to prevent.
+                exists to prevent. Edit and Skip wait while the flow runs
+                behind (#779): the step it is about to send still reads as
+                pending, and the backend refuses both until it stops.
               -->
               {#if isCurrent && step.outcome === "failed"}
                 <button class="btn pri" disabled={flow.busy} onclick={() => flow.retry(step.id)}>
@@ -301,7 +306,7 @@
                 </button>
               {/if}
               {#if isCurrent && demand !== "done" && step.outcome !== "running"}
-                <button class="btn" disabled={flow.busy} onclick={() => flow.skip(step.id)}>
+                <button class="btn" disabled={flow.busy || flow.following} onclick={() => flow.skip(step.id)}>
                   Skip
                 </button>
               {/if}
@@ -312,7 +317,13 @@
     </ol>
 
     <footer class="sw-foot">
-      {#if done}
+      {#if flow.following}
+        <!--
+          The steps run behind the answer (#779): each is drawn above as it
+          lands, and the reader may leave -- the flow goes on without this page.
+        -->
+        <span class="sw-note">Running behind you. Each step shows here as it lands; you can leave this page.</span>
+      {:else if done}
         <p class="sw-note">
           {ticketMoved
             ? "Every step is finished. The ticket is In Progress."

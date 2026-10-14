@@ -1300,27 +1300,35 @@ fn the_standup_protocol_shape_matches_its_typescript_mirror() {
 ///
 /// The `None` case is the one worth pinning: a create still on the queue has
 /// no ticket to name, and the panel says so rather than reading `undefined`.
+/// Since #779 it also carries the write's state and the queue's sentence.
 #[test]
 fn the_action_item_ticket_shape_matches_its_typescript_mirror() {
     use knobas_app::commands::entity::ActionItemTicket;
 
     let filed = ActionItemTicket {
         write_id: 31,
+        state: knobas_core::write_queue::WriteState::Sent,
+        detail: None,
         ticket_entity_id: Some("jira:PAY-999".to_owned()),
         linked: true,
     };
     assert_shape(
         "ActionItemTicket",
         &serde_json::to_value(&filed).unwrap(),
-        &["write_id", "ticket_entity_id", "linked"],
+        &["write_id", "state", "detail", "ticket_entity_id", "linked"],
     );
 
+    // On its way (#779): the queue's word, and no ticket to name yet.
     let queued = ActionItemTicket {
         write_id: 31,
+        state: knobas_core::write_queue::WriteState::Pending,
+        detail: Some("the tracker did not answer".to_owned()),
         ticket_entity_id: None,
         linked: false,
     };
-    assert!(serde_json::to_value(&queued).unwrap()["ticket_entity_id"].is_null());
+    let wire = serde_json::to_value(&queued).unwrap();
+    assert!(wire["ticket_entity_id"].is_null());
+    assert_eq!(wire["state"], "pending");
 }
 
 /// The `notify` command's argument (#339). Three strings and no nullable

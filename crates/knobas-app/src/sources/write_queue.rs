@@ -113,6 +113,39 @@ pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id
     });
 }
 
+/// [`send_in_background`], and then, once the mirror has been re-read for the
+/// write, `then` -- in the same spawned task (#779).
+///
+/// For the callers that go looking for what their write made: the standup
+/// protocol's page and an action item's ticket have an address only once a
+/// sync has seen them, so the link they owe is drawn after that read rather
+/// than by the command, which has already answered.
+pub(crate) fn send_in_background_then<F, Fut>(
+    state: &crate::sources::SourcesState,
+    source_id: String,
+    id: i64,
+    reread: String,
+    then: F,
+) where
+    F: FnOnce(crate::sources::SourcesState) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = ()> + Send,
+{
+    let state = state.clone();
+    tokio::spawn(async move {
+        if let Err(error) = flush(&state, &source_id, id).await {
+            tracing::warn!(
+                source = %source_id,
+                write_id = id,
+                %error,
+                "the background send of a queued write failed; the scheduler's tick retries it"
+            );
+            return;
+        }
+        sync_after_write(&state, &reread).await;
+        then(state).await;
+    });
+}
+
 /// [`submit`]'s first half: everything it decides, and the row, **without
 /// trying to deliver it**.
 ///

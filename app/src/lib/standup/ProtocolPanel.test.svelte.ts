@@ -16,8 +16,11 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { NoteDetail, Protocol, PublishTarget } from "../ipc/entity";
+import type { ActionItemTicket, NoteDetail, Protocol, PublishTarget } from "../ipc/entity";
+import type { QueuedWrite } from "../ipc/sources";
+import { createFollower } from "../shell/follow-write";
 import { createRouter } from "../shell/router.svelte";
+import { toasts } from "../shell/toasts.svelte";
 import { paste } from "../shell/test-paste";
 import ProtocolPanel from "./ProtocolPanel.svelte";
 
@@ -61,6 +64,16 @@ function wiki(id: string) {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
+/** The queue as the panel's follower sees it (#779): its open rows, and the `activity:new` handlers. */
+let open: QueuedWrite[] = [];
+const handlers: (() => void)[] = [];
+function moved() {
+  for (const handler of [...handlers]) handler();
+}
+function queued(id: number, state: QueuedWrite["state"], detail: string | null = null): QueuedWrite {
+  return { id, state, detail, op: "create_page", entity_id: "wiki:98400" } as QueuedWrite;
+}
+
 interface Calls {
   published: { day: string; target: PublishTarget | undefined }[];
   saved: { title: string; body: string }[];
@@ -77,6 +90,12 @@ function render(
     targetReadFails?: boolean;
     /** Make every save fail, the way a note deleted underneath does. */
     saveFails?: boolean;
+    /** What a publish answers; a sent, linked page by default. */
+    published?: Protocol;
+    /** What filing a ticket answers; a filed, linked ticket by default. */
+    filed?: ActionItemTicket;
+    /** What each `action_item_ticket` read answers, in turn. */
+    ticketReads?: ActionItemTicket[];
   } = {},
 ) {
   const calls: Calls = { published: [], saved: [], filed: [] };
@@ -131,7 +150,7 @@ function render(
           } as never),
         publishStandupProtocol: (day: string, chosen?: PublishTarget) => {
           calls.published.push({ day, target: chosen });
-          current = protocol({
+          current = over.published ?? protocol({
             publication: {
               write_id: 1,
               state: "sent",
@@ -151,17 +170,37 @@ function render(
           title: string,
         ) => {
           calls.filed.push({ project, type: ticketType, title });
-          return Promise.resolve({
-            write_id: 3,
-            ticket_entity_id: "tracker:PAY-999",
-            linked: true,
-          });
+          return Promise.resolve(
+            over.filed ?? {
+              write_id: 3,
+              state: "sent",
+              detail: null,
+              ticket_entity_id: "tracker:PAY-999",
+              linked: true,
+            },
+          );
         },
+        actionItemTicket: () => {
+          const next = over.ticketReads?.shift();
+          return next ? Promise.resolve(next) : Promise.reject(new Error("no read set up"));
+        },
+        follower: createFollower({
+          listen: (_event, handler) => {
+            handlers.push(handler);
+            return Promise.resolve(() => handlers.splice(handlers.indexOf(handler), 1));
+          },
+          pendingWrites: () => Promise.resolve(open),
+        }),
+
       },
     },
   });
   flushSync();
-  return { router, calls };
+  /** What the next `standup_protocol` read answers. */
+  const reads = (next: Protocol) => {
+    current = next;
+  };
+  return { router, calls, reads };
 }
 
 function text(): string {
@@ -190,6 +229,9 @@ async function settle() {
 }
 
 beforeEach(() => {
+  open = [];
+  handlers.length = 0;
+  toasts.items = [];
   target = document.createElement("div");
   document.body.append(target);
 });
@@ -431,4 +473,117 @@ test("a URL pasted into the protocol is left as text and published as typed", as
   expect(calls.saved.at(-1)?.body).toContain(link);
   expect(calls.saved.at(-1)?.body).not.toContain("[[");
   expect(calls.published).toHaveLength(1);
+});
+
+// -- behind the answer (#779) ----------------------------------------------
+
+const STORED = { source_id: "wiki", parent: "wiki:98400" };
+const ON_ITS_WAY = protocol({
+  publication: { write_id: 21, state: "pending", detail: null, page_entity_id: null, linked: false },
+});
+const LANDED = protocol({
+  publication: { write_id: 21, state: "sent", detail: null, page_entity_id: "wiki:98411", linked: true },
+});
+
+function ticket(over: Partial<ActionItemTicket> = {}): ActionItemTicket {
+  return { write_id: 33, state: "pending", detail: null, ticket_entity_id: null, linked: false, ...over };
+}
+
+async function fileOne() {
+  button("Create ticket")?.click();
+  await settle();
+  const select = [...target.querySelectorAll("select")].at(-1)!;
+  select.value = "tracker:PAY";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  button("Create")?.click();
+  await settle();
+}
+
+test("a publish closes on the queue's answer, draws the page as on its way, and names it when it lands", async () => {
+  const { reads } = render(protocol(), { stored: STORED, published: ON_ITS_WAY });
+  await settle();
+  open = [queued(21, "pending")];
+  button("Publish to Confluence")?.click();
+  await settle();
+  // On its way: the title, marked, and no link yet.
+  expect(text()).toContain(`Publishing ${DAY}`);
+  expect(text()).toContain("on its way");
+  expect(text()).not.toContain("Published as");
+
+  // The write lands and the sync brings the page in: the next read names it.
+  open = [];
+  reads(LANDED);
+  moved();
+  await settle();
+  expect(text()).toContain(`Published as ${DAY}`);
+  expect(handlers).toHaveLength(0);
+});
+
+test("a refused publish loses its echo, says why, and Edit and resend opens the dialog again", async () => {
+  const { reads } = render(protocol(), { stored: STORED, published: ON_ITS_WAY });
+  await settle();
+  open = [queued(21, "pending")];
+  button("Publish to Confluence")?.click();
+  await settle();
+
+  open = [queued(21, "refused", "a page with this title already exists")];
+  // A refused write is no publication: the read answers none.
+  reads(protocol());
+  moved();
+  await settle();
+  expect(text()).not.toContain("on its way");
+  expect(button("Publish to Confluence")).toBeDefined();
+  const told = toasts.items.filter((t) => t.tone === "err");
+  expect(told.map((t) => t.text)).toEqual(["Publish was refused: a page with this title already exists"]);
+  expect(told[0]!.more?.map((a) => a.label)).toEqual(["Edit and resend"]);
+  // Nothing left to follow: the refused write is no publication.
+  expect(handlers).toHaveLength(0);
+
+  told[0]!.more![0]!.run();
+  await settle();
+  expect(text()).toContain("Where do standup protocols go?");
+});
+
+test("a ticket's dialog closes on the queue's answer, the ticket is drawn on its way, and its key fills in", async () => {
+  render(protocol(), {
+    filed: ticket(),
+    ticketReads: [ticket({ state: "sent", ticket_entity_id: "tracker:PAY-999", linked: true })],
+  });
+  await settle();
+  open = [queued(33, "pending")];
+  await fileOne();
+  expect(text()).not.toContain("File a ticket");
+  const filed = () => target.querySelector(".pr-t")?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+  expect(filed()).toContain("Ask Ines");
+  expect(filed()).toContain("on its way");
+  expect(filed()).not.toContain("PAY-999");
+
+  open = [];
+  moved();
+  await settle();
+  expect(filed()).toContain("tracker:PAY-999");
+  expect(filed()).not.toContain("on its way");
+  expect(handlers).toHaveLength(0);
+});
+
+test("a refused ticket loses its echo, says why, and Edit and resend reopens the dialog with what was typed", async () => {
+  render(protocol(), { filed: ticket() });
+  await settle();
+  open = [queued(33, "pending")];
+  await fileOne();
+
+  open = [{ ...queued(33, "refused", "Issue type is required"), op: "create_ticket" }];
+  moved();
+  await settle();
+  expect(target.querySelector(".pr-t")).toBeNull();
+  const told = toasts.items.filter((t) => t.tone === "err");
+  expect(told.map((t) => t.text)).toEqual(["Ticket was refused: Issue type is required"]);
+
+  told[0]!.more![0]!.run();
+  await settle();
+  expect(text()).toContain("File a ticket");
+  expect([...target.querySelectorAll("select")].at(-1)!.value).toBe("tracker:PAY");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Ticket type']")!.value).toBe("Task");
+  expect(target.querySelector(".dlg .sub")?.textContent).toBe("Ask Ines");
 });

@@ -15,7 +15,7 @@
   and the writes it queues — lands in the activity stream.
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { onDestroy, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../ipc";
   import { contextMembers, submitWrite, type InboxEntry } from "../ipc/entity";
@@ -106,7 +106,7 @@
       // only a write that will not go on its own is told again -- with the
       // box reopened on what was typed, for a reply.
       const key = entry.item.key;
-      followWrite(
+      following.push(followWrite(
         write,
         form.kind === "text"
           ? {
@@ -117,7 +117,7 @@
               },
             }
           : { name: form.label },
-      );
+      ));
       // Not awaited (#752): the write is queued and its send is behind the
       // reader; the inbox re-reads on the `activity:new` its settle writes.
       void inbox.refresh();
@@ -130,6 +130,12 @@
 
   /** The actions whose `submit_write` has not answered yet, by item and op. */
   const queueing = new Set<string>();
+
+  /** The writes this view follows, stopped when it goes (#779). */
+  const following: (() => void)[] = [];
+  onDestroy(() => {
+    for (const stop of following.splice(0)) stop();
+  });
 
   /**
    * The deadline a snooze preset can hang *after it expires* on.

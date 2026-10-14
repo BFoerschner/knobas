@@ -375,6 +375,21 @@ pub async fn retry(
     steps: &dyn Steps,
     step_id: i64,
 ) -> Result<Vec<FlowStep>, IpcError> {
+    let ticket = ready_retry(pool, steps, step_id).await?;
+    run(pool, steps, &ticket).await
+}
+
+/// [`retry`]'s first half: everything it decides about the step, without
+/// running the flow on from it. Answers the ticket the flow is about.
+///
+/// # Errors
+///
+/// As [`retry`].
+pub async fn ready_retry(
+    pool: &PgPool,
+    steps: &dyn Steps,
+    step_id: i64,
+) -> Result<EntityRef, IpcError> {
     let step = step_of(pool, step_id).await?;
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
     guard_position(pool, &ticket, step_id).await?;
@@ -385,14 +400,14 @@ pub async fn retry(
         if !matches!(landing, Landing::Refused { .. } | Landing::Withdrawn) {
             let (outcome, detail) = outcome_of(&landing);
             store::settle(pool, step_id, outcome, None, detail.as_deref()).await?;
-            return run(pool, steps, &ticket).await;
+            return Ok(ticket);
         }
     }
 
     // Rules 2 and 3 are `perform`'s: it reads before it writes, and dispatches
     // only what the mirror could not already account for.
     store::settle(pool, step_id, StepOutcome::Pending, None, None).await?;
-    run(pool, steps, &ticket).await
+    Ok(ticket)
 }
 
 /// Skip a step (story 14), so a ticket that needs no branch can still get its
@@ -405,12 +420,24 @@ pub async fn retry(
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`;
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the step already succeeded
 /// -- its effect exists at the source, and marking it skipped would only
-/// rewrite the record of what happened.
+/// rewrite the record of what happened -- or if a run behind the answer may
+/// be taking it (#779).
 pub async fn skip(
     pool: &PgPool,
     steps: &dyn Steps,
     step_id: i64,
 ) -> Result<Vec<FlowStep>, IpcError> {
+    let ticket = ready_skip(pool, step_id).await?;
+    run(pool, steps, &ticket).await
+}
+
+/// [`skip`]'s first half: the step settled as skipped, without running the
+/// flow on past it. Answers the ticket the flow is about.
+///
+/// # Errors
+///
+/// As [`skip`].
+pub async fn ready_skip(pool: &PgPool, step_id: i64) -> Result<EntityRef, IpcError> {
     let step = step_of(pool, step_id).await?;
     if step.outcome == StepOutcome::Succeeded {
         return Err(IpcError::conflict(format!(
@@ -419,9 +446,153 @@ pub async fn skip(
         )));
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
+    refuse_while_behind(pool, &ticket, &step, "skipping")?;
     store::settle(pool, step_id, StepOutcome::Skipped, None, Some("skipped")).await?;
     note(pool, &step, "skipped", "the user chose not to run it").await;
-    run(pool, steps, &ticket).await
+    Ok(ticket)
+}
+
+/// The tickets whose flow is running behind a command's answer (#779), each
+/// with the database it is in: one process can hold more than one -- the
+/// test binaries do, one scratch database per test.
+fn running_behind() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static RUNNING: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> =
+        std::sync::OnceLock::new();
+    RUNNING.get_or_init(Default::default)
+}
+
+/// A ticket's place in [`running_behind`], given up when the run ends however
+/// it ends.
+struct Behind(String);
+
+impl Behind {
+    fn key(pool: &PgPool, ticket: &EntityRef) -> String {
+        let database = pool
+            .connect_options()
+            .get_database()
+            .unwrap_or_default()
+            .to_owned();
+        format!("{database}/{ticket}")
+    }
+
+    /// Whether a run is behind for `ticket` right now.
+    fn held(pool: &PgPool, ticket: &EntityRef) -> bool {
+        running_behind()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .contains(&Self::key(pool, ticket))
+    }
+
+    fn claim(pool: &PgPool, ticket: &EntityRef) -> Option<Self> {
+        let key = Self::key(pool, ticket);
+        let fresh = running_behind()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(key.clone());
+        // Built only once the lock is let go: a claim dropped under it -- the
+        // ticket already running -- would take the same lock in `drop`.
+        fresh.then(|| Self(key))
+    }
+}
+
+impl Drop for Behind {
+    fn drop(&mut self) {
+        running_behind()
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&self.0);
+    }
+}
+
+/// Run the flow **behind the answer** (#779): what the stepper's *Run*,
+/// *Retry* and *Skip* do since #779, after their first half.
+///
+/// Answers the flow as it stands at once, and [`run`] goes on in a spawned
+/// task. Nothing about the sequence changes: one step at a time, branch, then
+/// pull request, then link, then transition, each through the write queue, a
+/// failed step stopping it. The stepper re-reads the flow while it moves and
+/// draws each step as it lands.
+///
+/// **One run per ticket at a time.** A second ask while one is behind answers
+/// the flow and starts nothing: two loops over one flow would both be handed
+/// the same pending step and dispatch it twice.
+///
+/// A run that ends in an error rather than a step outcome -- the step store
+/// failing -- marks the step it was on *failed* with the reason, so the
+/// stepper stops on a step the reader can retry instead of a pending one that
+/// never moves.
+///
+/// # Errors
+///
+/// [`IpcError`] if the flow cannot be read for the answer.
+pub async fn run_in_background<S: Steps + 'static>(
+    pool: &PgPool,
+    steps: std::sync::Arc<S>,
+    ticket: &EntityRef,
+) -> Result<Vec<FlowStep>, IpcError> {
+    if let Some(claim) = Behind::claim(pool, ticket) {
+        let (pool, ticket) = (pool.clone(), ticket.clone());
+        tokio::spawn(async move {
+            let mut claim = Some(claim);
+            while claim.is_some() {
+                if let Err(error) = run(&pool, steps.as_ref(), &ticket).await {
+                    tracing::warn!(%ticket, %error, "a start-work run behind its answer failed");
+                    stop_where_it_was(&pool, &ticket, &error.message).await;
+                }
+                drop(claim.take());
+                // A retry or skip that landed while this run was finishing
+                // found the claim held and started nothing: its step is
+                // pending with no loop to take it. Take it here.
+                let again = store::flow(&pool, &ticket)
+                    .await
+                    .is_ok_and(|flow| matches!(store::advance(&flow), Advance::Run(_)));
+                if again {
+                    claim = Behind::claim(&pool, &ticket);
+                }
+            }
+        });
+    }
+    Ok(store::flow(pool, ticket).await?)
+}
+
+/// Refuse to skip or edit a step a run behind the answer may be taking (#779).
+///
+/// The run reads the flow, looks at the source and only then marks the step
+/// running, so a step it is about to send still reads as pending. A skip or an
+/// edit landing then would be overwritten by the send's outcome, and the
+/// source would get the old proposal anyway. A failed or queued step is where
+/// a run stopped, so it stays the reader's.
+fn refuse_while_behind(
+    pool: &PgPool,
+    ticket: &EntityRef,
+    step: &FlowStep,
+    doing: &str,
+) -> Result<(), IpcError> {
+    if matches!(step.outcome, StepOutcome::Pending | StepOutcome::Running)
+        && Behind::held(pool, ticket)
+    {
+        return Err(IpcError::conflict(format!(
+            "the flow is running -- {doing} the {} step has to wait until it stops",
+            step.step
+        )));
+    }
+    Ok(())
+}
+
+/// Mark the step a failed run was on as failed, with why.
+async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
+    let Ok(flow) = store::flow(pool, ticket).await else {
+        return;
+    };
+    let id = match store::advance(&flow) {
+        Advance::Run(step) | Advance::Waiting(step) if step.outcome != StepOutcome::Queued => {
+            step.id
+        }
+        _ => return,
+    };
+    if let Err(error) = store::settle(pool, id, StepOutcome::Failed, None, Some(why)).await {
+        tracing::warn!(%ticket, %error, "a failed start-work run could not mark its step");
+    }
 }
 
 /// Replace a step's proposal with the one the user edited, and return it to the
@@ -434,7 +605,8 @@ pub async fn skip(
 /// # Errors
 ///
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if no step carries `step_id`;
-/// [`Conflict`](crate::IpcErrorCode::Conflict) if the step has already run.
+/// [`Conflict`](crate::IpcErrorCode::Conflict) if the step has already run,
+/// or if a run behind the answer may be taking it (#779).
 pub async fn repropose(
     pool: &PgPool,
     step_id: i64,
@@ -448,6 +620,7 @@ pub async fn repropose(
         )));
     }
     let ticket = EntityRef::parse(&step.ticket_id).map_err(IpcError::invalid)?;
+    refuse_while_behind(pool, &ticket, &step, "editing")?;
     store::repropose(pool, step_id, payload).await?;
     Ok(store::flow(pool, &ticket).await?)
 }
