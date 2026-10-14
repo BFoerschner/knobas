@@ -1849,9 +1849,11 @@ mod tests {
                 "{} does not close with the driver",
                 rule.name
             );
+            // The driver's suppression is two `not exists`, one per direction
+            // (#770); a rule adds none of its own.
             assert_eq!(
                 rule.sql.matches("not exists").count(),
-                1,
+                driver_tail!().matches("not exists").count(),
                 "{} carries a second suppression",
                 rule.name
             );
