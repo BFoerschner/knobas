@@ -30,6 +30,7 @@ mod entity_view;
 mod estate_exit;
 mod inbox_ipc;
 mod ipc;
+mod probe_snapshot;
 mod project_census;
 mod protocol_ipc;
 mod read_plans;

@@ -1041,6 +1041,12 @@ ui-pool-probe:
 # dialog waited on before it closed and what it waits on now, every send
 # simulated as `RP_SEND_MS` (300). Takes a gate slot and prints the head and the load
 # average before and after.
+#
+# The built database is kept (#781) under `$TMPDIR/knobas-probe-snapshots/`, one
+# copy never analyzed and one analyzed, keyed by the migrations plus the seed
+# parameters; a run clones it (`cp -c`) instead of seeding again. `RP_FRESH=1`
+# rebuilds, `RP_ITEMS=2500` is the small size to iterate on (its own snapshot,
+# default 22000). Snapshots over 7 days old or of other migrations are deleted.
 # Time every read the common interactions make, against a seeded mirror.
 responsiveness-probe:
     #!/usr/bin/env bash
