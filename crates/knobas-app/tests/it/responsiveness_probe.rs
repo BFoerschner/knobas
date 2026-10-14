@@ -581,7 +581,7 @@ async fn what_the_reader_waits_on() {
         &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-db/migrations"),
     );
     let pass_code = probe_snapshot::pass_code_hash(
-        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src/suggest.rs"),
+        &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src"),
         &migrations,
     );
     for gone in probe_snapshot::sweep(

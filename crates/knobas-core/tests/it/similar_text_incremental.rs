@@ -115,9 +115,73 @@ fn capped(old: &[OldPair]) -> (BTreeMap<(String, String), String>, usize) {
     (kept, widest)
 }
 
+/// [`OLD_PAIRS`] with the common words left out (#776): a lexeme in more
+/// than 5% of the live prose items, once there are 200 of them, counts
+/// neither for the anchor's title query nor for the shared lexemes. Counted
+/// here from the corpus as it stands, not from anything the pass stores.
+const UNCOMMON_PAIRS: &str = "with prose as (
+         select entity_id, title, fts from sync.live_item where kind in ('ticket','page','pr')
+     ),
+     census as (select count(*) as n from prose),
+     common as (
+         select coalesce(array_agg(l), '{}'::text[]) as words
+           from (select l, count(*) as c
+                   from prose, unnest(tsvector_to_array(fts)) l group by l) df, census
+          where census.n >= 200 and df.c * 20 > census.n
+     ),
+     anchor as (
+         select entity_id, fts, ts_delete(fts, common.words) as rare,
+                (select string_agg(quote_literal(w), ' | ')
+                   from unnest(tsvector_to_array(to_tsvector('english', title))) w
+                  where w <> all(common.words)) as q
+           from prose, common
+     ),
+     pair as (
+         select a.entity_id as from_id, o.entity_id as to_id,
+                array(select x from unnest(tsvector_to_array(a.rare)) x
+                       intersect
+                      select y from unnest(tsvector_to_array(o.rare)) y) as shared
+           from anchor a
+           join anchor o
+             on o.entity_id > a.entity_id
+            and o.fts @@ to_tsquery('english', a.q)
+          where a.q is not null
+     )
+     select from_id, to_id,
+            format('both mention %s',
+                   (select string_agg(s, ', ' order by s)
+                      from (select unnest(shared) as s order by 1 limit 4) top)),
+            cardinality(shared)::int8,
+            (select coalesce(i.item_updated_at, i.synced_at) from sync.item i
+              where i.entity_id = from_id),
+            (select coalesce(i.item_updated_at, i.synced_at) from sync.item i
+              where i.entity_id = to_id)
+       from pair
+      where cardinality(shared) >= 5";
+
+/// The common words [`UNCOMMON_PAIRS`] leaves out, as it counts them.
+async fn common_words(pool: &PgPool) -> BTreeSet<String> {
+    let sql = UNCOMMON_PAIRS
+        .split_once("anchor as (")
+        .map(|(head, _)| head.trim_end().trim_end_matches(','))
+        .unwrap();
+    sqlx::query_scalar::<_, Vec<String>>(sqlx::AssertSqlSafe(format!(
+        "{sql} select words from common"
+    )))
+    .fetch_one(pool)
+    .await
+    .unwrap()
+    .into_iter()
+    .collect()
+}
+
 async fn old_pairs(pool: &PgPool) -> Vec<OldPair> {
+    pairs_of(pool, OLD_PAIRS).await
+}
+
+async fn pairs_of(pool: &PgPool, sql: &'static str) -> Vec<OldPair> {
     let rows: Vec<(String, String, String, i64, At, At)> =
-        sqlx::query_as(OLD_PAIRS).fetch_all(pool).await.unwrap();
+        sqlx::query_as(sql).fetch_all(pool).await.unwrap();
     rows.into_iter()
         .map(|(from, to, reason, shared, from_at, to_at)| OldPair {
             from,
@@ -186,6 +250,29 @@ impl Rng {
     }
 }
 
+/// Text for a corpus past the 200 prose items common words are counted from
+/// (#776): thirty topics of ten words each, so items on one topic share five
+/// and more of them while no topic word reaches 5% of the corpus; a template
+/// word in every item, common from the first pass; and four words each item
+/// carries one time in twenty, whose counts sit on the 5% line and cross it
+/// either way as items arrive, change and leave.
+fn topical(rng: &mut Rng) -> (String, String) {
+    const LINE: &[&str] = &["storm", "ledger", "carrier", "freight"];
+    let topic = rng.next() % 30;
+    let word = |rng: &mut Rng| format!("topic{topic}word{}", rng.next() % 10);
+    let mut title = (0..3).map(|_| word(rng)).collect::<Vec<_>>();
+    title.push("team".to_owned());
+    // In the title, so a title query is built from a word that is common on
+    // one pass and not on the next.
+    for line in LINE {
+        if rng.next().is_multiple_of(20) {
+            title.push((*line).to_owned());
+        }
+    }
+    let body = (0..8).map(|_| word(rng)).collect::<Vec<_>>();
+    (title.join(" "), body.join(" "))
+}
+
 async fn scratch() -> PgPool {
     knobas_db::test_util::scratch_database("simincr")
         .await
@@ -202,6 +289,12 @@ enum Step {
         keys: std::ops::Range<u32>,
         seed: u64,
     },
+    /// As [`Step::Write`], with [`topical`] text.
+    Topical {
+        source: &'static str,
+        keys: std::ops::Range<u32>,
+        seed: u64,
+    },
     Tombstone(&'static str, u32),
     Restore(&'static str, u32),
     Enabled(&'static str, bool),
@@ -212,13 +305,16 @@ enum Step {
 
 async fn apply(pool: &PgPool, step: &Step) {
     match step {
-        Step::Write { source, keys, seed } => {
+        Step::Write { source, keys, seed } | Step::Topical { source, keys, seed } => {
             for key in keys.clone() {
                 let mut rng = Rng(seed ^ (u64::from(key) + 1).wrapping_mul(0x9E37_79B9));
                 let id = format!("{source}:K-{key}");
                 let kind = ["ticket", "page", "pr", "branch"][(key % 4) as usize];
-                let title = rng.words(4);
-                let body = rng.words(12);
+                let (title, body) = if matches!(step, Step::Topical { .. }) {
+                    topical(&mut rng)
+                } else {
+                    (rng.words(4), rng.words(12))
+                };
                 // Half the items carry a source time, from a few days so
                 // that times tie as well; the rest rank by `synced_at`.
                 let at = rng.next().is_multiple_of(2).then(|| {
@@ -369,109 +465,205 @@ fn script() -> Vec<Step> {
 /// whole-corpus set capped at each item's ten, with the old reasons: every pair
 /// proposed is in the old set and within at least one end's ten, every such
 /// pair is proposed, and what the reader answered stays as answered.
+/// What [`replay`] saw of one step: the most counterparts any item had, the
+/// common words, and whether leaving them out changed the capped set.
+struct Seen {
+    widest: usize,
+    common: BTreeSet<String>,
+    common_mattered: bool,
+}
+
+/// Run `script` with a pass of batch size `batch` after each step, and hold
+/// every pass to `oracle`'s pairs capped at either end's ten.
+async fn replay(script: &[Step], batch: usize, oracle: &'static str) -> Vec<Seen> {
+    let pool = scratch().await;
+    let rule = suggest::rule("similar_text").unwrap();
+    let mut reader = BTreeSet::new();
+    let mut answers = 0;
+    let mut seen = Vec::new();
+    for (n, step) in script.iter().enumerate() {
+        apply(&pool, step).await;
+        if matches!(step, Step::Answer(_)) {
+            reader = answered(&pool).await;
+            answers += 2;
+            assert_eq!(reader.len(), answers, "step {n}: answered");
+        }
+        let before: BTreeSet<(String, String)> = proposed(&pool)
+            .await
+            .into_iter()
+            .map(|(from, to, _)| (from, to))
+            .collect();
+        suggest::detect_rule_batched(&pool, rule, batch)
+            .await
+            .unwrap();
+
+        let old = pairs_of(&pool, oracle).await;
+        let (kept, widest) = capped(&old);
+        let (uncapped_old, _) = capped(&old_pairs(&pool).await);
+        seen.push(Seen {
+            widest,
+            common: common_words(&pool).await,
+            common_mattered: uncapped_old.keys().ne(kept.keys()),
+        });
+        let answered_pairs: BTreeSet<(String, String)> = reader
+            .iter()
+            .map(|(_, from, to, _, _)| (from.clone(), to.clone()))
+            .collect();
+        let want: BTreeSet<(String, String)> = kept
+            .keys()
+            .filter(|(from, to)| {
+                !answered_pairs.contains(&(from.clone(), to.clone()))
+                    && !answered_pairs.contains(&(to.clone(), from.clone()))
+            })
+            .cloned()
+            .collect();
+        // A proposal with an end that left the corpus stays, as it always
+        // has (the tray marks the withdrawn end); the cap is a statement
+        // about the live corpus.
+        let live: BTreeSet<String> = sqlx::query_scalar(
+            "select entity_id from sync.live_item where kind in ('ticket','page','pr')",
+        )
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .collect();
+        let got_rows: BTreeSet<(String, String, String)> = proposed(&pool)
+            .await
+            .into_iter()
+            .filter(|(from, to, _)| live.contains(from) && live.contains(to))
+            .collect();
+        let got: BTreeSet<(String, String)> = got_rows
+            .iter()
+            .map(|(from, to, _)| (from.clone(), to.clone()))
+            .collect();
+        assert!(
+            want.len() > 10,
+            "step {n}: the corpus must propose enough to compare ({} proposals)",
+            want.len()
+        );
+        let old_set: BTreeMap<(String, String), String> = old
+            .iter()
+            .map(|p| ((p.from.clone(), p.to.clone()), p.reason.clone()))
+            .collect();
+        for (from, to, reason) in &got_rows {
+            let pair = (from.clone(), to.clone());
+            assert!(
+                old_set.contains_key(&pair),
+                "step {n}, batch {batch}: {from} / {to} is not in the old set"
+            );
+            // A proposal keeps the reason it was written with, as it
+            // always has: the suppression does not rewrite a row. One
+            // written by this pass carries the old statement's reason.
+            if !before.contains(&pair) {
+                assert_eq!(
+                    old_set.get(&pair),
+                    Some(reason),
+                    "step {n}, batch {batch}: {from} / {to} is proposed for another reason"
+                );
+            }
+            assert!(
+                kept.contains_key(&(from.clone(), to.clone())),
+                "step {n}, batch {batch}: {from} / {to} is in neither end's ten"
+            );
+        }
+        assert_eq!(
+            got, want,
+            "step {n}, batch {batch}: the passes disagree with the capped whole corpus"
+        );
+        assert_eq!(
+            answered(&pool).await,
+            reader,
+            "step {n}, batch {batch}: a pass touched what the reader answered"
+        );
+    }
+    seen
+}
+
+/// Batched passes over a mirror that keeps changing propose exactly the old
+/// whole-corpus set capped at each item's ten, with the old reasons: every pair
+/// proposed is in the old set and within at least one end's ten, every such
+/// pair is proposed, and what the reader answered stays as answered. Under
+/// 200 prose items no word is common (#776), though every word here is in
+/// more than 5% of them.
 #[tokio::test]
 async fn incremental_passes_propose_the_whole_corpus_set_capped_at_ten() {
     for batch in [1, 4, 1_000] {
-        let pool = scratch().await;
-        let rule = suggest::rule("similar_text").unwrap();
-        let mut reader = BTreeSet::new();
-        let mut answers = 0;
-        let mut capped_somewhere = false;
-        for (n, step) in script().iter().enumerate() {
-            apply(&pool, step).await;
-            if matches!(step, Step::Answer(_)) {
-                reader = answered(&pool).await;
-                answers += 2;
-                assert_eq!(reader.len(), answers, "step {n}: answered");
-            }
-            let before: BTreeSet<(String, String)> = proposed(&pool)
-                .await
-                .into_iter()
-                .map(|(from, to, _)| (from, to))
-                .collect();
-            suggest::detect_rule_batched(&pool, rule, batch)
-                .await
-                .unwrap();
-
-            let old = old_pairs(&pool).await;
-            let (kept, widest) = capped(&old);
-            capped_somewhere |= widest > suggest::SIMILAR_TEXT_CAP;
-            let answered_pairs: BTreeSet<(String, String)> = reader
-                .iter()
-                .map(|(_, from, to, _, _)| (from.clone(), to.clone()))
-                .collect();
-            let want: BTreeSet<(String, String)> = kept
-                .keys()
-                .filter(|(from, to)| {
-                    !answered_pairs.contains(&(from.clone(), to.clone()))
-                        && !answered_pairs.contains(&(to.clone(), from.clone()))
-                })
-                .cloned()
-                .collect();
-            // A proposal with an end that left the corpus stays, as it always
-            // has (the tray marks the withdrawn end); the cap is a statement
-            // about the live corpus.
-            let live: BTreeSet<String> = sqlx::query_scalar(
-                "select entity_id from sync.live_item where kind in ('ticket','page','pr')",
-            )
-            .fetch_all(&pool)
-            .await
-            .unwrap()
-            .into_iter()
-            .collect();
-            let got_rows: BTreeSet<(String, String, String)> = proposed(&pool)
-                .await
-                .into_iter()
-                .filter(|(from, to, _)| live.contains(from) && live.contains(to))
-                .collect();
-            let got: BTreeSet<(String, String)> = got_rows
-                .iter()
-                .map(|(from, to, _)| (from.clone(), to.clone()))
-                .collect();
-            assert!(
-                want.len() > 10,
-                "step {n}: the corpus must propose enough to compare ({} proposals)",
-                want.len()
-            );
-            let old_set: BTreeMap<(String, String), String> = old
-                .iter()
-                .map(|p| ((p.from.clone(), p.to.clone()), p.reason.clone()))
-                .collect();
-            for (from, to, reason) in &got_rows {
-                let pair = (from.clone(), to.clone());
-                assert!(
-                    old_set.contains_key(&pair),
-                    "step {n}, batch {batch}: {from} / {to} is not in the old set"
-                );
-                // A proposal keeps the reason it was written with, as it
-                // always has: the suppression does not rewrite a row. One
-                // written by this pass carries the old statement's reason.
-                if !before.contains(&pair) {
-                    assert_eq!(
-                        old_set.get(&pair),
-                        Some(reason),
-                        "step {n}, batch {batch}: {from} / {to} is proposed for another reason"
-                    );
-                }
-                assert!(
-                    kept.contains_key(&(from.clone(), to.clone())),
-                    "step {n}, batch {batch}: {from} / {to} is in neither end's ten"
-                );
-            }
-            assert_eq!(
-                got, want,
-                "step {n}, batch {batch}: the passes disagree with the capped whole corpus"
-            );
-            assert_eq!(
-                answered(&pool).await,
-                reader,
-                "step {n}, batch {batch}: a pass touched what the reader answered"
-            );
-        }
+        let seen = replay(&script(), batch, OLD_PAIRS).await;
         assert!(
-            capped_somewhere,
+            seen.iter().any(|s| s.widest > suggest::SIMILAR_TEXT_CAP),
             "batch {batch}: no item ever had more than ten counterparts, so the cap was never \
              witnessed"
+        );
+        assert!(
+            seen.iter().all(|s| s.common.is_empty()),
+            "a corpus under 200 prose items has no common words"
+        );
+    }
+}
+
+/// The sequence the topical corpus goes through: past 200 prose items, then
+/// rewrites, arrivals, a tombstone, a disabled source and answers, each of
+/// which moves the 5% line or the counts on it.
+fn topical_script() -> Vec<Step> {
+    vec![
+        Step::Topical {
+            source: "jira",
+            keys: 0..300,
+            seed: 11,
+        },
+        Step::Answer(0),
+        Step::Topical {
+            source: "jira",
+            keys: 0..60,
+            seed: 12,
+        },
+        Step::Topical {
+            source: "wiki",
+            keys: 0..60,
+            seed: 13,
+        },
+        Step::Tombstone("jira", 8),
+        Step::Answer(2),
+        Step::Enabled("wiki", false),
+        Step::Topical {
+            source: "jira",
+            keys: 280..340,
+            seed: 14,
+        },
+        Step::Enabled("wiki", true),
+        Step::Restore("jira", 8),
+    ]
+}
+
+/// #776: once the corpus has 200 prose items, a word in more than 5% of them
+/// counts neither for finding a counterpart nor for the shared lexemes. Every
+/// pass proposes exactly the capped set computed over the uncommon words of
+/// the corpus as it stands, as words cross the line in both directions, and
+/// what the reader answered stays as answered.
+#[tokio::test]
+async fn common_words_count_for_nothing_as_they_cross_the_line() {
+    for batch in [1, 1_000] {
+        let seen = replay(&topical_script(), batch, UNCOMMON_PAIRS).await;
+        assert!(
+            seen.iter().all(|s| s.common.contains("team")),
+            "batch {batch}: the template word is common at every step"
+        );
+        assert!(
+            seen.iter().any(|s| s.common_mattered),
+            "batch {batch}: leaving the common words out never changed a proposal"
+        );
+        let became = seen
+            .windows(2)
+            .any(|w| w[1].common.difference(&w[0].common).next().is_some());
+        let ceased = seen
+            .windows(2)
+            .any(|w| w[0].common.difference(&w[1].common).next().is_some());
+        assert!(
+            became && ceased,
+            "batch {batch}: a word must become common and one must stop being so \
+             (became {became}, ceased {ceased}): {:?}",
+            seen.iter().map(|s| &s.common).collect::<Vec<_>>()
         );
     }
 }

@@ -152,6 +152,13 @@ async fn settle_and_change(pool: &PgPool) {
     .execute(pool)
     .await
     .unwrap();
+    // Every prose item counted (#776), so the changed ones below are taken
+    // off the counts and counted again.
+    let count = suggest::planned_statements()
+        .into_iter()
+        .find(|s| s.name == "count_arrived")
+        .expect("planned_statements names COUNT_ARRIVED `count_arrived`");
+    sqlx::query(count.sql).execute(pool).await.unwrap();
     sqlx::query(
         "update sync.item set title = title || ' w4001'
           where entity_id in (select 'jira:PAY-' || g from generate_series(1, 100) g)",

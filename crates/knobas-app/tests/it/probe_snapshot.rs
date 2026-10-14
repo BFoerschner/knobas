@@ -66,12 +66,16 @@ pub fn migrations_hash(dir: &Path) -> String {
     hex(&hasher)
 }
 
-/// A hash of the suggestion pass's code: the file `suggest` and every
-/// migration (`migrations`, as [`migrations_hash`] gives it), so a change to
-/// either names an after-pass snapshot that does not exist.
-pub fn pass_code_hash(suggest: &Path, migrations: &str) -> String {
+/// A hash of the suggestion pass's code: `suggest.rs` under `knobas-core`'s
+/// `src` (`core_src`) and every migration (`migrations`, as
+/// [`migrations_hash`] gives it), so a change to either names an after-pass
+/// snapshot that does not exist. The tray read lives beside it in
+/// `suggest/tray.rs` and is not hashed: the tray reads what the pass wrote, so
+/// an edit there keeps the snapshot (#776).
+pub fn pass_code_hash(core_src: &Path, migrations: &str) -> String {
+    let suggest = core_src.join("suggest.rs");
     let mut hasher = DefaultHasher::new();
-    std::fs::read(suggest)
+    std::fs::read(&suggest)
         .unwrap_or_else(|error| panic!("read {}: {error}", suggest.display()))
         .hash(&mut hasher);
     migrations.hash(&mut hasher);
@@ -280,14 +284,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let file = dir.path().join("suggest.rs");
         std::fs::write(&file, "fn pass() {}\n").unwrap();
-        let before = pass_code_hash(&file, "m1");
-        assert_eq!(before, pass_code_hash(&file, "m1"));
-        assert_ne!(before, pass_code_hash(&file, "m2"));
+        let before = pass_code_hash(dir.path(), "m1");
+        assert_eq!(before, pass_code_hash(dir.path(), "m1"));
+        assert_ne!(before, pass_code_hash(dir.path(), "m2"));
         std::fs::write(&file, "fn pass() {} \n").unwrap(); // whitespace only
-        let after = pass_code_hash(&file, "m1");
+        let after = pass_code_hash(dir.path(), "m1");
         assert_ne!(before, after);
         std::fs::write(&file, "fn mass() {}\n").unwrap(); // same length
-        assert_ne!(before, pass_code_hash(&file, "m1"));
+        assert_ne!(before, pass_code_hash(dir.path(), "m1"));
         let name = |pass: &str| passed_name("m", "s", pass, State::Analyzed);
         assert_ne!(name(&before), name(&after));
         assert_ne!(
@@ -296,6 +300,32 @@ mod tests {
         );
         assert_ne!(name(&before), name_of_base());
         assert!(of_migrations(&name(&before), "m"));
+    }
+
+    /// #776: the key is the pass alone. A change to the tray read, in
+    /// `suggest/tray.rs`, keeps the after-pass snapshot; a change to the pass
+    /// in `suggest.rs` names another.
+    #[test]
+    fn the_tray_read_is_not_in_the_pass_key() {
+        let src = tempfile::tempdir().unwrap();
+        std::fs::create_dir(src.path().join("suggest")).unwrap();
+        let pass = src.path().join("suggest.rs");
+        let tray = src.path().join("suggest/tray.rs");
+        std::fs::write(&pass, "fn pass() {}\n").unwrap();
+        std::fs::write(&tray, "fn proposals() {}\n").unwrap();
+        let before = pass_code_hash(src.path(), "m1");
+        std::fs::write(&tray, "fn proposals() { walk() }\n").unwrap();
+        assert_eq!(before, pass_code_hash(src.path(), "m1"), "a tray edit");
+        std::fs::write(&pass, "fn pass() { rank() }\n").unwrap();
+        assert_ne!(before, pass_code_hash(src.path(), "m1"), "a pass edit");
+
+        // And the tree is laid out that way: the pass in the hashed file, the
+        // tray read beside it.
+        let core = Path::new(env!("CARGO_MANIFEST_DIR")).join("../knobas-core/src");
+        let read = |path: &str| std::fs::read_to_string(core.join(path)).unwrap();
+        assert!(read("suggest.rs").contains("const RANK_SIMILAR"));
+        assert!(read("suggest/tray.rs").contains("pub async fn proposals("));
+        assert!(!read("suggest.rs").contains("pub async fn proposals("));
     }
 
     fn name_of_base() -> String {

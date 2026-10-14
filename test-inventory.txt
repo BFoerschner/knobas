@@ -677,6 +677,7 @@ knobas-app	test/it	probe_snapshot::tests::an_unfinished_copy_is_not_a_snapshot_a
 knobas-app	test/it	probe_snapshot::tests::every_seed_parameter_is_in_the_key
 knobas-app	test/it	probe_snapshot::tests::the_sweep_removes_a_stale_key_and_an_old_age_and_spares_the_rest
 knobas-app	test/it	probe_snapshot::tests::the_sweep_removes_an_after_pass_snapshot_of_another_pass_code
+knobas-app	test/it	probe_snapshot::tests::the_tray_read_is_not_in_the_pass_key
 knobas-app	test/it	probe_snapshot::tests::the_two_states_are_two_snapshots
 knobas-app	test/it	project_census::the_census_is_the_walk_after_every_change
 knobas-app	test/it	project_census::the_stored_resolver_is_the_macros_expansion
@@ -1064,6 +1065,7 @@ knobas-core	lib/knobas_core	suggest::tests::every_rule_has_its_own_name_and_can_
 knobas-core	lib/knobas_core	suggest::tests::every_rule_statement_is_built_from_the_one_driver
 knobas-core	lib/knobas_core	suggest::tests::rule_class_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	suggest::tests::rule_class_serializes_as_its_column_value
+knobas-core	lib/knobas_core	suggest::tests::the_common_word_floor_in_the_statement_is_the_one_that_is_documented
 knobas-core	lib/knobas_core	suggest::tests::the_relation_this_rule_proposes_is_the_one_the_estate_reads
 knobas-core	lib/knobas_core	suggest::tests::the_rule_classes_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	suggest::tests::the_similar_text_cap_in_the_statement_is_the_one_that_is_documented
@@ -1226,6 +1228,7 @@ knobas-core	test/it	projects::one_key_in_two_sources_is_two_projects
 knobas-core	test/it	projects::teamcitys_own_two_words_read_as_well_as_jiras
 knobas-core	test/it	similar_text_incremental::a_batch_that_always_times_out_is_halved_then_its_item_skipped
 knobas-core	test/it	similar_text_incremental::a_pass_with_nothing_new_judges_nothing
+knobas-core	test/it	similar_text_incremental::common_words_count_for_nothing_as_they_cross_the_line
 knobas-core	test/it	similar_text_incremental::incremental_passes_propose_the_whole_corpus_set_capped_at_ten
 knobas-core	test/it	similar_text_perf::a_pass_with_nothing_new_takes_under_a_second_at_ten_thousand_items
 knobas-core	test/it	stores::a_foreign_key_violation_outside_a_link_write_is_not_an_endpoint
