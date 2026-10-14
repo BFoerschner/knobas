@@ -1548,6 +1548,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
     }
     // Red builds whose only newer green is running, older, in another source,
     // tombstoned, or in a turned-off source.
+    let running = rows.len();
     rows.push(row(
         "teamcity",
         "FAILURE",
@@ -1575,6 +1576,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
         Some(ME),
         20,
     ));
+    let older = rows.len();
     rows.push(row(
         "teamcity",
         "FAILURE",
@@ -1584,6 +1586,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
         Some(ME),
         10,
     ));
+    let elsewhere = rows.len();
     rows.push(row(
         "teamcity",
         "FAILURE",
@@ -1602,6 +1605,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
         Some(ME),
         1,
     ));
+    let tombstoned = rows.len();
     rows.push(row(
         "teamcity",
         "FAILURE",
@@ -1621,6 +1625,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
         Some(ME),
         1,
     ));
+    let off = rows.len();
     rows.push(row(
         "offci",
         "FAILURE",
@@ -1640,6 +1645,7 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
         1,
     ));
     // No configuration: nothing can resolve it.
+    let unconfigured = rows.len();
     rows.push(row(
         "teamcity",
         "FAILURE",
@@ -1722,12 +1728,12 @@ async fn every_build_mine_names_what_the_per_build_statement_named() {
     for (what, i, wanted) in [
         ("the newest red of H, never green again", 55, true),
         ("a red of A that A's next green resolved", 0, false),
-        ("a red whose re-run is still running", 60, true),
-        ("a red with only an older green", 63, true),
-        ("a red whose green is in another source", 64, true),
-        ("a red whose green is tombstoned", gone - 1, true),
-        ("a red of a turned-off source", gone + 1, false),
-        ("a red with no configuration", gone + 3, true),
+        ("a red whose re-run is still running", running, true),
+        ("a red with only an older green", older, true),
+        ("a red whose green is in another source", elsewhere, true),
+        ("a red whose green is tombstoned", tombstoned, true),
+        ("a red of a turned-off source", off, false),
+        ("a red with no configuration", unconfigured, true),
         ("a red linked from me", linked, true),
         ("a red linked to me", linked + 1, true),
         ("a red only proposed to me", linked + 2, false),

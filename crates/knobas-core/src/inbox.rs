@@ -422,9 +422,9 @@ macro_rules! failed_build {
             "select 'failed_build', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                 format('this build failed%s', coalesce(': ' || nullif(i.status_text, ''), '')),
                 i.at, i.web_url
-           from (select o.*,
-                        max(o.at) filter (where o.status = 'SUCCESS' and o.finished)
-                          over (partition by o.source_id collate \"C\", o.config collate \"C\")
+           from (select scored.*,
+                        max(scored.at) filter (where scored.status = 'SUCCESS' and scored.finished)
+                          over (partition by scored.source_id collate \"C\", scored.config collate \"C\")
                           as latest_green
                    from (select b.entity_id, b.source_id, b.kind, b.title, b.author, b.web_url,
                                 coalesce(b.item_updated_at, b.synced_at) as at,
@@ -438,7 +438,7 @@ macro_rules! failed_build {
             $crate::live_by_exclusion!("b"),
             "
                             and b.kind = 'build'
-                            and b.payload->>'status' in ('FAILURE', 'SUCCESS')) o) i
+                            and b.payload->>'status' in ('FAILURE', 'SUCCESS')) scored) i
           where i.status = 'FAILURE'
             and i.finished
             and (   i.author = any($1)

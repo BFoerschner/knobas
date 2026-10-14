@@ -1,5 +1,5 @@
-//! The reads #778 reshaped plan without leaning on row estimates, with and
-//! without planner statistics.
+//! The reads #778 and #785 reshaped plan without leaning on row estimates,
+//! with and without planner statistics.
 //!
 //! On the probe's 22,000 items never analyzed -- a fresh install until its
 //! first analyze -- the *All* room's builds tile took 6.8 s, the inbox's
@@ -7,7 +7,9 @@
 //! 225 ms, against 15-70 ms analyzed (#775's timings). Each was planned from
 //! `knobas.entity` through `sync.live_item`, estimated at 0.5 % of its rows,
 //! and the builds tile then joined its CTEs by nested loops, re-aggregating
-//! once per build. This asserts the shapes those plans had are gone, through
+//! once per build. #785 added the inbox's `failed_build` rule, whose lookups
+//! walked the builds per red build whatever the statistics. This asserts the
+//! shapes those plans had are gone, through
 //! `knobas_db::plan_shape` (#770's checker, and `driven_from` for the read
 //! driven from `knobas.entity`), on one mirror in both states.
 //!
