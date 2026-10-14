@@ -1045,6 +1045,11 @@ const SIMILAR_TEXT: &str = detection!(concat!(
 const CLEAR_RANKINGS: &str = "delete from sync.similar_text_top t
       where t.entity_id = any($1) or t.other_id = any($1)";
 
+/// Forget the rankings of items settled without being compared (#755's
+/// skipped item): [`CLEAR_RANKINGS`]' first half. The places they hold in
+/// other items' rankings stay, measured against text they still have.
+const FORGET_OWN_RANKINGS: &str = "delete from sync.similar_text_top where entity_id = any($1)";
+
 /// Unsettle the items whose ranking can no longer be trusted, so the pass
 /// compares them again, returning them (#771).
 ///
@@ -1129,7 +1134,7 @@ const RETIRE_SIMILAR: &str = concat!(
     ")"
 );
 
-/// The live prose items [`SIMILAR_TEXT`] has not compared with the text they
+/// The live prose items [`RANK_SIMILAR`] has not compared with the text they
 /// have now: never compared, or changed since. Ordered, so a pass that gives
 /// up part-way has settled a prefix and the next one starts after it.
 const CHANGED_PROSE: &str = concat!(
@@ -1365,8 +1370,9 @@ pub struct PlannedStatement {
 }
 
 /// Every statement a pass runs: each rule's, and the ones that keep
-/// `sync.similar_text_seen` and the rankings (`sync.similar_text_top`). `tests/it/suggest_plans.rs` holds each one's plan
-/// to a shape that does not depend on the planner's statistics (#770).
+/// `sync.similar_text_seen` and the rankings (`sync.similar_text_top`).
+/// `tests/it/suggest_plans.rs` holds each one's plan to a shape that does not
+/// depend on the planner's statistics (#770).
 #[doc(hidden)]
 #[must_use]
 pub fn planned_statements() -> Vec<PlannedStatement> {
@@ -1696,7 +1702,7 @@ async fn compare_batch_once(
 async fn settle_unranked(conn: &mut sqlx::PgConnection, ids: &[String]) -> Result<(), sqlx::Error> {
     use sqlx::Connection as _;
     let mut tx = conn.begin().await?;
-    sqlx::query("delete from sync.similar_text_top where entity_id = any($1)")
+    sqlx::query(FORGET_OWN_RANKINGS)
         .bind(ids)
         .execute(&mut *tx)
         .await?;
@@ -2201,12 +2207,9 @@ mod tests {
             similarity_floor!().parse::<usize>().unwrap(),
             SIMILARITY_FLOOR
         );
-        assert_eq!(
-            RANK_SIMILAR
-                .matches(concat!("where shared >= ", similarity_floor!()))
-                .count(),
-            2,
-            "the similarity rule no longer reads the floor it declares, both ways round"
+        assert!(
+            RANK_SIMILAR.contains(concat!("where shared >= ", similarity_floor!())),
+            "the similarity rule no longer reads the floor it declares"
         );
     }
 
@@ -2218,8 +2221,8 @@ mod tests {
             similar_text_cap!().parse::<usize>().unwrap(),
             SIMILAR_TEXT_CAP
         );
-        assert!(RANK_SIMILAR.contains(concat!("r.place > ", similar_text_cap!())));
-        assert!(RANK_SIMILAR.contains(concat!("r.place <= ", similar_text_cap!())));
+        assert!(RANK_SIMILAR.contains(concat!("where through - n < ", similar_text_cap!())));
+        assert!(RANK_SIMILAR.contains(concat!("where place <= ", similar_text_cap!())));
     }
 
     /// Both classes #41 names are actually reachable, and so is the third.

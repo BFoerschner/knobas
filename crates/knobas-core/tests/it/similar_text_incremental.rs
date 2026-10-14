@@ -14,9 +14,9 @@
 //! [`suggest::detect_rule`] after each step, and after every step its
 //! unanswered proposals are exactly the capped old set, each one written by
 //! that pass with the old statement's reason, and nothing the reader answered
-//! was touched. The batch size is varied down to
-//! one, so the three joins that replace the old one each carry pairs the
-//! others do not.
+//! was touched. A proposal with an end that left the corpus stays, as it did
+//! before. The batch size is varied down to one, so the three joins that
+//! replace the old one each carry pairs the others do not.
 
 use std::collections::{BTreeMap, BTreeSet};
 
