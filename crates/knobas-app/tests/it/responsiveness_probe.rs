@@ -843,7 +843,7 @@ impl knobas_sync::scheduler::SyncEvents for Silent {
 async fn writes(pool: &PgPool, connector: &knobas_db::embedded::Connector, runs: u64) {
     use knobas_app::sources::write_queue::{submit, submit_in_background};
     let secrets: std::sync::Arc<dyn SecretStore> = std::sync::Arc::new(MemoryStore::new());
-    for id in ["jira0", "ci"] {
+    for id in ["jira0", "ci", "wiki", "forge"] {
         secrets
             .put(
                 &knobas_secrets::KeychainAccount::source(id),
@@ -1055,6 +1055,178 @@ async fn writes(pool: &PgPool, connector: &knobas_db::embedded::Connector, runs:
         "the re-read an answer waited on (3 reads)",
         runs,
         reread,
+    )
+    .await;
+
+    // -- #779: the three surfaces that drew the address of what they made.
+    // They close on the queue's answer now; "before" is the awaited path,
+    // which is still the battery's.
+    let mirrored = |id: &'static str,
+                    kind: &'static str,
+                    title: &'static str,
+                    payload: serde_json::Value| async move {
+        let entity = knobas_core::entity::EntityRef::parse(id).unwrap();
+        sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3) on conflict do nothing")
+            .bind(id)
+            .bind(kind)
+            .bind(title)
+            .execute(pool)
+            .await
+            .unwrap();
+        sqlx::query(
+            "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+             values ($1, $2, $3, $4, '', $5) on conflict do nothing",
+        )
+        .bind(id)
+        .bind(&entity.namespace)
+        .bind(kind)
+        .bind(title)
+        .bind(payload)
+        .execute(pool)
+        .await
+        .unwrap();
+    };
+    // The standup publish: one fresh date per call, so each is a first publish.
+    mirrored(
+        "wiki:probe-parent",
+        "page",
+        "Standup protocols",
+        serde_json::json!({"space": {"key": "ENG"}}),
+    )
+    .await;
+    let target = knobas_app::protocol::PublishTarget {
+        source_id: "wiki".to_owned(),
+        parent: "wiki:probe-parent".to_owned(),
+    };
+    let days = std::sync::atomic::AtomicI64::new(0);
+    let next_day =
+        || day + chrono::Duration::days(days.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+    time(
+        "write: standup publish",
+        "before #779: publish_standup_protocol (send + sync awaited)",
+        runs,
+        || {
+            knobas_app::commands::entity::publish_standup_protocol_inner(
+                state,
+                next_day(),
+                Some(target.clone()),
+            )
+        },
+    )
+    .await;
+    time(
+        "write: standup publish",
+        "now: publish_standup_protocol (answer on queue)",
+        runs,
+        || {
+            knobas_app::commands::entity::publish_standup_protocol_in_background(
+                state,
+                next_day(),
+                Some(target.clone()),
+            )
+        },
+    )
+    .await;
+
+    // The action-item ticket, filed from the probe's note.
+    time(
+        "write: action-item ticket",
+        "before #779: create_action_item_ticket (send + sync awaited)",
+        runs,
+        || {
+            knobas_app::commands::entity::create_action_item_ticket_inner(
+                state,
+                &note_id,
+                "jira0:JIRA0",
+                "Task",
+                "Ask Ines",
+                "",
+            )
+        },
+    )
+    .await;
+    time(
+        "write: action-item ticket",
+        "now: create_action_item_ticket (answer on queue)",
+        runs,
+        || {
+            knobas_app::commands::entity::create_action_item_ticket_in_background(
+                state,
+                &note_id,
+                "jira0:JIRA0",
+                "Task",
+                "Ask Ines",
+                "",
+            )
+        },
+    )
+    .await;
+
+    // Start work: a fresh ticket's flow per call, over a forge whose sends
+    // sleep like every other here and whose read refuses -- so the awaited run
+    // stops at the link step, after the branch and pull request sends.
+    config::insert(
+        pool,
+        &InsertConfig {
+            id: "forge".into(),
+            adapter_kind: "gitea".into(),
+            display_name: "Forge".into(),
+            base_url: "https://forge.invalid".into(),
+            auth_kind: AuthKind::Method(AuthMethod::Pat),
+            config: serde_json::json!({}),
+            sync_interval_secs: 86_400,
+            enabled: true,
+        },
+    )
+    .await
+    .unwrap();
+    mirrored(
+        "forge:tidewater/probe",
+        "repo",
+        "tidewater/probe",
+        serde_json::json!({"default_branch": "main"}),
+    )
+    .await;
+    let repo = knobas_core::entity::EntityRef::parse("forge:tidewater/probe").unwrap();
+    let tickets = std::sync::atomic::AtomicU64::new(1000);
+    let flow = || async {
+        let n = tickets.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let ticket = knobas_core::entity::EntityRef::parse(&format!("jira0:JIRA0-{n}")).unwrap();
+        knobas_app::start_work::begin(pool, &ticket, &repo)
+            .await
+            .map_err(said)?;
+        Ok::<_, String>(ticket)
+    };
+    time(
+        "write: start work",
+        "before #779: start_work_run (each step's send awaited)",
+        runs,
+        || async {
+            let ticket = flow().await?;
+            knobas_app::start_work::run(
+                pool,
+                &knobas_app::start_work::queue::Queue { state },
+                &ticket,
+            )
+            .await
+            .map_err(said)
+        },
+    )
+    .await;
+    time(
+        "write: start work",
+        "now: start_work_run (answer, steps behind)",
+        runs,
+        || async {
+            let ticket = flow().await?;
+            knobas_app::start_work::run_in_background(
+                pool,
+                std::sync::Arc::new(knobas_app::start_work::queue::OwnedQueue(state.clone())),
+                &ticket,
+            )
+            .await
+            .map_err(said)
+        },
     )
     .await;
 
