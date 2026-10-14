@@ -528,9 +528,7 @@ async fn stop_where_it_was(pool: &PgPool, ticket: &EntityRef, why: &str) {
         return;
     };
     let id = match store::advance(&flow) {
-        Advance::Run(step) | Advance::Waiting(step)
-            if step.outcome != StepOutcome::Queued =>
-        {
+        Advance::Run(step) | Advance::Waiting(step) if step.outcome != StepOutcome::Queued => {
             step.id
         }
         _ => return,

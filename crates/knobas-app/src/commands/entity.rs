@@ -4082,14 +4082,22 @@ pub async fn action_item_ticket_inner(
         .get("CreateTicket")
         .filter(|_| write.op == "create_ticket")
         .ok_or_else(|| IpcError::invalid(format!("write {write_id} does not file a ticket")))?;
-    let title = create.get("title").and_then(serde_json::Value::as_str).unwrap_or_default();
+    let title = create
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
     let mut ticket_entity_id = None;
     let mut linked = false;
     if write.state == knobas_core::write_queue::WriteState::Sent {
         ticket_entity_id = ticket_titled(pool, &write.source_id, title).await?;
         if let Some(ticket) = ticket_entity_id.as_deref() {
-            crate::protocol::draw_link(pool, note_id, ticket, crate::protocol::ACTION_ITEM_RELATION)
-                .await?;
+            crate::protocol::draw_link(
+                pool,
+                note_id,
+                ticket,
+                crate::protocol::ACTION_ITEM_RELATION,
+            )
+            .await?;
             linked = true;
         }
     }

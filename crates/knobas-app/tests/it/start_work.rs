@@ -1340,7 +1340,9 @@ async fn the_reverse_direction_names_its_pull_request_in_the_activity_stream() {
 async fn read_until(pool: &PgPool, done: impl Fn(&[FlowStep]) -> bool) -> Vec<FlowStep> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        let flow = start_work::flow(pool, &ticket()).await.expect("the flow reads");
+        let flow = start_work::flow(pool, &ticket())
+            .await
+            .expect("the flow reads");
         if done(&flow) {
             return flow;
         }
@@ -1373,13 +1375,18 @@ async fn run_answers_before_the_first_send_and_the_steps_land_behind_it() {
     .expect("the run answers while its first send is held open")
     .expect("the run starts");
     assert!(
-        answered.iter().all(|step| step.outcome != StepOutcome::Succeeded),
+        answered
+            .iter()
+            .all(|step| step.outcome != StepOutcome::Succeeded),
         "nothing has landed yet"
     );
 
     // The branch's send is out: the step reads as running, and a second ask
     // while it is out starts no second loop.
-    read_until(&pool, |f| outcome(f, Step::CreateBranch) == StepOutcome::Running).await;
+    read_until(&pool, |f| {
+        outcome(f, Step::CreateBranch) == StepOutcome::Running
+    })
+    .await;
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
         start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket()),
@@ -1418,22 +1425,36 @@ async fn a_refusal_behind_the_answer_stops_the_flow_where_it_happened() {
     start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket())
         .await
         .expect("the run starts");
-    let flow = read_until(&pool, |f| outcome(f, Step::CreateBranch) == StepOutcome::Failed).await;
-    assert_eq!(step_of(&flow, Step::CreateBranch).detail.as_deref(), Some("branch name taken"));
+    let flow = read_until(&pool, |f| {
+        outcome(f, Step::CreateBranch) == StepOutcome::Failed
+    })
+    .await;
+    assert_eq!(
+        step_of(&flow, Step::CreateBranch).detail.as_deref(),
+        Some("branch name taken")
+    );
     assert_eq!(fake.ops(), ["create_branch"]);
     // The stopped run lets go of the ticket, so a retry runs it on: asked
     // until it does, because the run lets go a moment after it settles.
     fake.now_answers("create_branch", Answer::Landed(Landing::Sent));
     let id = step_of(&flow, Step::CreateBranch).id;
-    let ticket = start_work::ready_retry(&pool, fake.as_ref(), id).await.expect("a retry");
+    let ticket = start_work::ready_retry(&pool, fake.as_ref(), id)
+        .await
+        .expect("a retry");
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(10);
     while fake.ops().len() < 2 {
-        assert!(tokio::time::Instant::now() < deadline, "the retry never ran");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the retry never ran"
+        );
         start_work::run_in_background(&pool, std::sync::Arc::clone(&fake), &ticket)
             .await
             .expect("the retry runs");
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
-    read_until(&pool, |f| outcome(f, Step::CreatePullRequest) != StepOutcome::Pending).await;
+    read_until(&pool, |f| {
+        outcome(f, Step::CreatePullRequest) != StepOutcome::Pending
+    })
+    .await;
     assert_eq!(&fake.ops()[..2], ["create_branch", "create_branch"]);
 }

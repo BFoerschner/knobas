@@ -1098,7 +1098,10 @@ async fn until<T: std::fmt::Debug, F: std::future::Future<Output = T>>(
         if done(&value) {
             return value;
         }
-        assert!(tokio::time::Instant::now() < deadline, "never got there: {value:?}");
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "never got there: {value:?}"
+        );
         tokio::time::sleep(std::time::Duration::from_millis(20)).await;
     }
 }
@@ -1121,9 +1124,14 @@ async fn a_publish_answers_once_queued_and_the_page_is_named_and_linked_behind_i
     .await
     .expect("the publish answers while its send is held open")
     .expect("the publish is queued");
-    let publication = answered.publication.expect("the queued write is the publication");
+    let publication = answered
+        .publication
+        .expect("the queued write is the publication");
     assert_eq!(publication.state, WriteState::Pending);
-    assert_eq!(publication.page_entity_id, None, "no page has been made yet");
+    assert_eq!(
+        publication.page_entity_id, None,
+        "no page has been made yet"
+    );
     assert!(!publication.linked);
     assert!(harness.links(&opened.note_id).await.is_empty());
 
@@ -1136,7 +1144,11 @@ async fn a_publish_answers_once_queued_and_the_page_is_named_and_linked_behind_i
     .expect("a publication");
     assert_eq!(landed.state, WriteState::Sent);
     assert_eq!(landed.page_entity_id, Some(created_page_id()));
-    assert_eq!(harness.create_pages_queued().await, 1, "one page, however often it is read");
+    assert_eq!(
+        harness.create_pages_queued().await,
+        1,
+        "one page, however often it is read"
+    );
     assert_eq!(
         harness.links(&opened.note_id).await,
         [(
@@ -1179,7 +1191,10 @@ async fn an_action_item_answers_once_queued_and_its_ticket_is_named_and_linked_b
     let asked = action_item_ticket_inner(harness.pool(), &opened.note_id, filed.write_id)
         .await
         .expect("the read answers");
-    assert_eq!((asked.state, asked.ticket_entity_id), (WriteState::Pending, None));
+    assert_eq!(
+        (asked.state, asked.ticket_entity_id),
+        (WriteState::Pending, None)
+    );
 
     gate.add_permits(1);
     let landed = until(
