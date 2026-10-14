@@ -417,6 +417,18 @@ pre-gate:
     #!/usr/bin/env bash
     set -euo pipefail
     snapshot() { { git status --short; git diff; } | shasum; }
+    # One line, never a failure (#743): a configured rustc-wrapper that is
+    # missing breaks every cargo call, and the error names cargo, not the wrapper.
+    wrapper=${RUSTC_WRAPPER:-}
+    if [ -z "$wrapper" ]; then
+        wrapper=$(sed -n 's/^[[:space:]]*rustc-wrapper[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' \
+            "${CARGO_HOME:-$HOME/.cargo}/config.toml" .cargo/config.toml 2>/dev/null | tail -1 || true)
+    fi
+    if [ -n "$wrapper" ] && ! { [ -x "$wrapper" ] || command -v "$wrapper" >/dev/null 2>&1; }; then
+        echo "pre-gate: WARNING cargo's rustc-wrapper '$wrapper' is missing; every cargo call will fail (testenv/README.md, 'sccache on a dev machine')"
+    elif [ -n "$wrapper" ] && [ "$(basename "$wrapper")" = sccache ] && ! "$wrapper" --version >/dev/null 2>&1; then
+        echo "pre-gate: WARNING sccache at '$wrapper' does not run (testenv/README.md, 'sccache on a dev machine')"
+    fi
     before=$(snapshot)
     env -u RUSTUP_TOOLCHAIN cargo fmt --all
     just inventory-update

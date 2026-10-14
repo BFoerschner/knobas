@@ -1272,6 +1272,29 @@ at all, and one sent without the field is refused with `Cannot read properties
 of undefined (reading 'every')` — an error naming neither the field nor the
 monitor. `kuma-seed.mjs` therefore sends `accepted_statuscodes` for every type.
 
+## sccache on a dev machine
+
+Björn's Mac builds through sccache as a machine-wide `rustc-wrapper` (sccache 0.18, installed 2026-10-13, 30 GiB cache). It is expected, not required by the repo: nothing in `.cargo/` or the `justfile` mentions it. The setup:
+
+```toml
+# ~/.cargo/config.toml
+[build]
+rustc-wrapper = "/opt/homebrew/bin/sccache"
+```
+
+The cache's own config is `~/Library/Application Support/Mozilla.sccache/config` (size, location). `sccache --show-stats` shows hits.
+
+**Failure mode:** the wrapper path is absolute. If `/opt/homebrew/bin/sccache` goes missing (a `brew uninstall`, a new machine with the config copied over), **every** cargo call fails, including `rustc -vV` probes, and the message names cargo rather than the wrapper. `just pre-gate` prints one warning line (it never fails) when the configured wrapper is missing or does not run.
+
+**What it buys (measured 2026-10-14, #743, quiet 12-core machine, `main` at 749985ff, `just check`):** dependencies are cacheable, so a fresh worktree's first gate reuses them. Workspace crates mostly are not: sccache hashes absolute source paths, so a workspace crate hits only in the worktree that built it, and with incremental compilation on (the default for dev and test) rustc output is not cached at all.
+
+| gate | default | `CARGO_INCREMENTAL=0` |
+|---|---|---|
+| fresh worktree, first gate | 291 s | 293 s |
+| repeat gate after a one-line edit to `knobas-core` | 160 s | 193 s |
+
+`CARGO_INCREMENTAL=0` was **not** adopted in the recipes: it is no faster for a fresh worktree (the workspace crates miss on the new path either way) and slower for the repeat, where incremental compilation beats a full rebuild of the changed crate and everything above it. One trap when measuring it: sccache folds `CARGO_*` variables into its key, so the first run with `CARGO_INCREMENTAL=0` re-misses every dependency (3.5% Rust hits against 60% warm); compare only a second run.
+
 ## Signed dev build (macOS)
 
 Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed
