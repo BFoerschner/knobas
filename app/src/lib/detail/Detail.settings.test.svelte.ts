@@ -56,9 +56,9 @@ vi.mock("../ipc/entity", () => ({
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   unlink: () => Promise.resolve(),
   createLink: () => Promise.resolve({}),
-  getEntity: () => {
+  getEntity: (entityId: string) => {
     calls.push("get_entity");
-    return Promise.resolve(config());
+    return Promise.resolve(config(entityId));
   },
   entityView: async () => {
     calls.push("entity_view");
@@ -139,10 +139,10 @@ function row(state: QueuedWrite["state"], detail: string | null = null): QueuedW
   } as QueuedWrite;
 }
 
-function config(): EntityDetail {
+function config(entityId: string = ID): EntityDetail {
   return {
     row: {
-      entity_id: ID,
+      entity_id: entityId,
       kind: "build_config",
       source_id: "teamcity",
       title: "Payout / Integration Tests",
@@ -165,7 +165,7 @@ function config(): EntityDetail {
   } as EntityDetail;
 }
 
-function parameters(retries: string): SourceView {
+function parameters(retries: string, entity: string = ID): SourceView {
   return {
     actions: [],
     sections: [
@@ -178,7 +178,7 @@ function parameters(retries: string): SourceView {
           {
             type: "settings",
             title: null,
-            entity: ID,
+            entity,
             write_op: "set_parameter",
             values: [
               { name: "env.SEPA_RETRIES", value: retries, inherited: false, secret: false, editable: true, description: null },
@@ -651,4 +651,37 @@ test("a write found held when the view opens is marked but not toasted", async (
   expect(screen.mark("env.SEPA_RETRIES")).toBe("held");
   expect(toasts.items).toEqual([]);
   screen.done();
+});
+
+test("Edit and resend from a toast that outlived its item opens no row of the item now open", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const OTHER = "teamcity:buildType:Payout_Nightly";
+  const props = $state({ entityId: ID, kind: "build_config", contextLabel: "All work", onclose: vi.fn(), onnavigate: vi.fn() });
+  views = [parameters("5")];
+  const app = mount(Detail, { target, props });
+  await settle();
+  open = [row("pending")];
+  target.querySelector<HTMLButtonElement>(".sb-row button.sb-val")!.click();
+  flushSync();
+  await tick();
+  const input = target.querySelector<HTMLInputElement>("input.sb-input")!;
+  input.value = "7";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  await settle();
+  open = [row("refused", "403 Forbidden")];
+  handlers[0]!();
+  await settle();
+  const told = toasts.items.find((t) => t.tone === "err")!;
+
+  // Another build configuration with a row of the same name is open now.
+  views = [parameters("3", OTHER)];
+  props.entityId = OTHER;
+  await settle();
+  told.more![0]!.run();
+  await settle();
+  expect(target.querySelector("input.sb-input")).toBeNull();
+  unmount(app);
+  target.remove();
 });
