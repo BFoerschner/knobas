@@ -135,14 +135,6 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     let (pool, declarations) = mirror(analyzed).await;
     let declared = declarations.as_param();
     let mut wrong = Vec::new();
-    let mut check = |name: &str, plan: serde_json::Value| {
-        wrong.extend(
-            knobas_db::plan_shape::findings(&plan, SMALL)
-                .into_iter()
-                .chain(knobas_db::plan_shape::driven_from(&plan, "entity"))
-                .map(|f| format!("{name}: {f}")),
-        );
-    };
 
     // The *All* room's builds tile, and a project room's: the project's
     // predicate is a declared read per row, which no statistics describe, so
@@ -167,7 +159,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             },
         )
         .await;
-        check(name, plan);
+        wrong.extend(shapes(name, &plan));
     }
     for (category, sql) in knobas_core::inbox::planned_statements() {
         if !RESHAPED_RULES.contains(&category) {
@@ -182,7 +174,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                 .bind(declared.clone())
         })
         .await;
-        check(name, plan);
+        wrong.extend(shapes(name, &plan));
     }
     let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
         q.bind(None::<Vec<String>>)
@@ -192,7 +184,7 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             .bind(Some(50_i64))
     })
     .await;
-    check("mini_board", plan);
+    wrong.extend(shapes("mini_board", &plan));
     let plan = explain(&pool, knobas_search::home::planned_recent(), |q| {
         q.bind(vec![
             "ticket".to_owned(),
@@ -203,7 +195,46 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
         .bind(declared.clone())
     })
     .await;
-    check("launcher_recent", plan);
+    wrong.extend(shapes("launcher_recent", &plan));
+
+    // The tray's count in a project room, as the server plans it for the
+    // values and as it plans it generically: PostgreSQL switched the
+    // persistent statement to its generic plan at the sixth execution, and
+    // there the join to `sync.item` was a probe per end per proposal (#778).
+    let count = knobas_core::suggest::planned_proposal_count();
+    let custom = explain(&pool, count, |q| {
+        q.bind(Some(vec!["jira0".to_owned()]))
+            .bind(None::<Vec<String>>)
+    })
+    .await;
+    // `generic_plan` takes no values, which the extended protocol insists on
+    // sending: the simple protocol.
+    let generic = {
+        use sqlx::Row as _;
+        sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+            "explain (generic_plan, format json) {count}"
+        )))
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get::<serde_json::Value, _>(0)
+    };
+    for (name, plan) in [
+        ("proposal_count", custom),
+        ("proposal_count, generic", generic),
+    ] {
+        let mut types = Vec::new();
+        node_types(&plan[0]["Plan"], &mut types);
+        if let Some(join) = types
+            .iter()
+            .find(|t| t.contains("Join") || t.contains("Nested Loop"))
+        {
+            wrong.push(format!(
+                "{name}: joins ({join}) where an end's room is a membership test"
+            ));
+        }
+        wrong.extend(shapes(name, &plan));
+    }
 
     let state = if analyzed {
         "analyzed"
@@ -221,4 +252,23 @@ async fn every_reshaped_read_plans_without_estimates_on_tables_never_analyzed() 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn every_reshaped_read_plans_without_estimates_on_analyzed_tables() {
     assert_every_read_plans_without_estimates(true).await;
+}
+
+/// What `plan_shape` finds in one plan, named.
+fn shapes(name: &str, plan: &serde_json::Value) -> Vec<String> {
+    knobas_db::plan_shape::findings(plan, SMALL)
+        .into_iter()
+        .chain(knobas_db::plan_shape::driven_from(plan, "entity"))
+        .map(|f| format!("{name}: {f}"))
+        .collect()
+}
+
+/// Every node type in a plan, subplans included.
+fn node_types(node: &serde_json::Value, out: &mut Vec<String>) {
+    if let Some(t) = node["Node Type"].as_str() {
+        out.push(t.to_owned());
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        node_types(child, out);
+    }
 }
