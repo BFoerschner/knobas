@@ -1836,22 +1836,25 @@ const WALK: &str = concat!(
 /// [`WALK`] for a stored context's room: every proposal touching a member,
 /// newest first, found member by member through the pair indexes rather than
 /// by walking the whole room's order, because a context holds a few items out
-/// of the whole mirror. `offset 0` keeps each member's lookup its own: on
-/// tables never analyzed the planner otherwise read every member's rows off
-/// `link_proposed_idx`, the whole table, filtered.
+/// of the whole mirror. On tables never analyzed the planner read each
+/// member's rows off `link_proposed_idx` -- the whole table, filtered -- because
+/// the lookup's predicate matched that partial index. So the lookup asks only
+/// `deleted_at is null` (`link_from_idx`, `link_to_idx`), `offset 0` keeps it
+/// its own, and `confirmed_at is null` is tested on the rows it found.
 const WALK_MEMBERS: &str = concat!(
     "select l.id, l.from_id, l.to_id, l.created_at
        from unnest($2::text[]) m(item)
        cross join lateral (
-             select p.id, p.from_id, p.to_id, p.created_at from knobas.link p
-              where p.from_id = m.item
-                and p.deleted_at is null and p.confirmed_at is null
+             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
+               from knobas.link p
+              where p.from_id = m.item and p.deleted_at is null
              union all
-             select p.id, p.from_id, p.to_id, p.created_at from knobas.link p
+             select p.id, p.from_id, p.to_id, p.created_at, p.confirmed_at
+               from knobas.link p
               where p.to_id = m.item and p.from_id <> all($2)
-                and p.deleted_at is null and p.confirmed_at is null
+                and p.deleted_at is null
              offset 0) l
-      where ",
+      where l.confirmed_at is null and ",
     in_room!(),
     " order by l.created_at desc, l.id desc"
 );
@@ -1885,24 +1888,22 @@ const DRAWN: &str = concat!(
 
 /// How many of the room's proposals each drawn item (`$3`) holds, for those
 /// holding more than the tray draws for one item (#774). One count per item
-/// through the pair indexes, `offset 0` keeping each lookup its own for the
-/// reason [`WALK_MEMBERS`] gives, so a hub costs a probe of its own rows and
-/// not a pass over the room.
+/// through `link_from_idx` and `link_to_idx`, shaped as [`WALK_MEMBERS`] is and
+/// for its reason, so a hub costs a probe of its own rows and not a pass over
+/// the room.
 const OVERFLOW: &str = concat!(
     "select e.id as entity_id, e.kind, e.title, e.deleted_at, n.total as more
        from unnest($3::text[]) d(item)
        join knobas.entity e on e.id = d.item
        cross join lateral (
              select count(*) as total
-               from (select p.from_id, p.to_id from knobas.link p
-                      where p.from_id = d.item
-                        and p.deleted_at is null and p.confirmed_at is null
+               from (select p.from_id, p.to_id, p.confirmed_at from knobas.link p
+                      where p.from_id = d.item and p.deleted_at is null
                      union all
-                     select p.from_id, p.to_id from knobas.link p
-                      where p.to_id = d.item
-                        and p.deleted_at is null and p.confirmed_at is null
+                     select p.from_id, p.to_id, p.confirmed_at from knobas.link p
+                      where p.to_id = d.item and p.deleted_at is null
                      offset 0) l
-              where ",
+              where l.confirmed_at is null and ",
     in_room!(),
     "     ) n
       where n.total > 3"
@@ -2121,6 +2122,16 @@ const PROPOSAL_COUNT: &str = "select count(*)
 #[must_use]
 pub fn planned_proposal_count() -> &'static str {
     PROPOSAL_COUNT
+}
+
+/// The tray's lookups (#774) -- [`WALK_MEMBERS`] (binds as [`proposal_count`]),
+/// [`DRAWN`] (`$1` the drawn ids) and [`OVERFLOW`] (as [`proposal_count`], then
+/// `$3` the drawn items) -- for `knobas-app`'s plan test
+/// (`tests/it/read_plans.rs`).
+#[doc(hidden)]
+#[must_use]
+pub fn planned_tray_lookups() -> [&'static str; 3] {
+    [WALK_MEMBERS, DRAWN, OVERFLOW]
 }
 
 /// How many proposals a room is holding.

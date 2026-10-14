@@ -100,6 +100,21 @@ async fn mirror(analyzed: bool) -> (PgPool, knobas_core::payload::Declarations) 
         .execute(&pool)
         .await
         .unwrap();
+    // Proposals, so the tray's lookups (#774) are planned over a table that
+    // holds some: each ticket proposed with its next three, about 13,500.
+    sqlx::query(
+        "with t as (select id, row_number() over (order by id) as n
+                      from knobas.entity where kind = 'ticket')
+         insert into knobas.link
+                (from_id, to_id, relation, origin, created_by,
+                 rule, rule_class, reason)
+         select a.id, b.id, 'related', 'suggested', 'knobas',
+                'similar_text', 'similarity', 'plan test'
+           from t a join t b on b.n between a.n + 1 and a.n + 3",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
     let state: i64 = sqlx::query_scalar(
         "select count(*) from pg_stat_user_tables
           where schemaname in ('knobas', 'sync')
@@ -247,6 +262,41 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             wrong.push(format!(
                 "{name}: joins ({join}) where an end's room is a membership test"
             ));
+        }
+        wrong.extend(shapes(name, &plan));
+    }
+
+    // The tray's lookups (#774): one item's or one id's rows, never a walk of
+    // `link_proposed_idx`. Never analyzed, the planner read every member's
+    // rows off that partial index, the whole table filtered, whenever the
+    // lookup's predicate implied it.
+    let [members, drawn, overflow] = knobas_core::suggest::planned_tray_lookups();
+    let ids = vec!["jira0:JIRA0-3".to_owned(), "jira1:JIRA1-7".to_owned()];
+    let plans = [
+        (
+            "tray, a context's walk",
+            explain(&pool, members, |q| {
+                q.bind(None::<Vec<String>>).bind(Some(ids.clone()))
+            })
+            .await,
+        ),
+        (
+            "tray, the drawn rows",
+            explain(&pool, drawn, |q| q.bind(vec![uuid::Uuid::new_v4()])).await,
+        ),
+        (
+            "tray, the overflow counts",
+            explain(&pool, overflow, |q| {
+                q.bind(Some(vec!["jira0".to_owned()]))
+                    .bind(None::<Vec<String>>)
+                    .bind(ids.clone())
+            })
+            .await,
+        ),
+    ];
+    for (name, plan) in plans {
+        if plan.to_string().contains("link_proposed_idx") {
+            wrong.push(format!("{name}: reads link_proposed_idx, the whole tray"));
         }
         wrong.extend(shapes(name, &plan));
     }
