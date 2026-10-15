@@ -13,6 +13,7 @@ pub(crate) fn to_sync_item(
     source_id: &str,
     base_url: &str,
     epic_link_field: Option<&str>,
+    sprint_field: Option<&str>,
     raw: &RawIssue,
 ) -> SyncItem {
     let fields = &raw.issue.fields;
@@ -42,7 +43,7 @@ pub(crate) fn to_sync_item(
             .updated
             .as_deref()
             .and_then(crate::time::parse_jira_time),
-        payload: with_epic(&raw.raw, epic_link_field),
+        payload: with_sprints(with_epic(&raw.raw, epic_link_field), sprint_field),
         // P5: `/browse/<key>` is the URL a human opens. It is built from the
         // configured base URL rather than `serverInfo.baseUrl`, because the URL
         // the user typed is the one reachable from the user's machine.
@@ -82,6 +83,87 @@ fn with_epic(raw: &serde_json::Value, epic_link_field: Option<&str>) -> serde_js
             .or_insert_with(|| serde_json::json!({ "key": key }));
     }
     payload
+}
+
+/// The record with the sprints its Sprint field names stored beside it as
+/// `sprints: [{id, name, state}]` (#811), where the record does not already
+/// have a `sprints` key.
+///
+/// The Sprint field is a custom field whose id is the instance's own, so no
+/// adapter-wide declaration can name it, as with Epic Link above; the
+/// descriptor's `sprint_state` reads `sprints` instead. A third departure
+/// from §3a's verbatim payload, for #598's reason. **Always written**, empty
+/// when the field is not configured, null, or holds nothing readable: an
+/// empty list is a ticket in no sprint as far as knobas knows, and a key that
+/// is there lets the contract battery tell that from a misspelt path.
+///
+/// Jira Data Center sends each sprint in one of two spellings: an object
+/// (`{"id": 4, "name": …, "state": "active"}`) or, on older instances, the
+/// sprint's `toString`, `…Sprint@6f2c[id=3,rapidViewId=1,state=CLOSED,name=…,
+/// startDate=…]`. Both are read; the state is lowercased so the two agree. An
+/// element that yields no state is dropped: a sprint whose state is unknown
+/// says nothing `sprint:current` could use.
+fn with_sprints(mut payload: serde_json::Value, sprint_field: Option<&str>) -> serde_json::Value {
+    let sprints: Vec<serde_json::Value> = sprint_field
+        .and_then(|field| payload.get("fields")?.get(field)?.as_array().cloned())
+        .unwrap_or_default()
+        .iter()
+        .filter_map(sprint)
+        .collect();
+    if let Some(record) = payload.as_object_mut() {
+        record
+            .entry("sprints")
+            .or_insert_with(|| serde_json::Value::Array(sprints));
+    }
+    payload
+}
+
+/// One sprint, in either spelling [`with_sprints`] reads, as
+/// `{id, name, state}`; `None` when no state can be read.
+fn sprint(value: &serde_json::Value) -> Option<serde_json::Value> {
+    if let Some(object) = value.as_object() {
+        let state = object.get("state")?.as_str()?.trim().to_lowercase();
+        if state.is_empty() {
+            return None;
+        }
+        return Some(serde_json::json!({
+            "id": object.get("id").cloned().unwrap_or(serde_json::Value::Null),
+            "name": object.get("name").cloned().unwrap_or(serde_json::Value::Null),
+            "state": state,
+        }));
+    }
+    let text = value.as_str()?;
+    let body = text.split_once('[')?.1.strip_suffix(']')?;
+    // `key=value` pairs separated by commas, where a name may itself hold a
+    // comma: a piece that does not start with `word=` belongs to the value
+    // before it.
+    let mut pairs: Vec<(String, String)> = Vec::new();
+    for piece in body.split(',') {
+        match piece.split_once('=') {
+            Some((key, rest)) if !key.is_empty() && key.chars().all(char::is_alphanumeric) => {
+                pairs.push((key.to_owned(), rest.to_owned()));
+            }
+            _ => {
+                if let Some((_, value)) = pairs.last_mut() {
+                    value.push(',');
+                    value.push_str(piece);
+                }
+            }
+        }
+    }
+    let get = |key: &str| {
+        pairs
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .filter(|v| !v.is_empty() && *v != "<null>")
+    };
+    let state = get("state")?.trim().to_lowercase();
+    let id = get("id").map_or(serde_json::Value::Null, |id| {
+        id.parse::<i64>()
+            .map_or_else(|_| serde_json::json!(id), |n| serde_json::json!(n))
+    });
+    Some(serde_json::json!({ "id": id, "name": get("name"), "state": state }))
 }
 
 /// Join the non-empty parts into the blob FTS indexes -- the same rule
@@ -124,7 +206,13 @@ mod tests {
     #[test]
     fn maps_an_issue_the_way_the_conventions_say() {
         let p = page();
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &p.issues[0]);
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &p.issues[0],
+        );
         assert_eq!(item.entity.to_string(), "jira:PAY-231");
         assert_eq!(item.kind, crate::KIND_TICKET);
         assert_eq!(item.title, "Retry failed SEPA payouts");
@@ -148,7 +236,13 @@ mod tests {
     #[test]
     fn body_text_is_what_search_will_match_on() {
         let p = page();
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &p.issues[0]);
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &p.issues[0],
+        );
         assert!(item.body_text.starts_with("Retry failed SEPA payouts\n\n"));
         assert!(item.body_text.contains("retryable SEPA error"));
         assert!(item.body_text.contains("AC04"));
@@ -163,7 +257,13 @@ mod tests {
     #[test]
     fn payload_keeps_the_record_verbatim() {
         let p = page();
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &p.issues[0]);
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &p.issues[0],
+        );
         assert_eq!(item.payload["key"], "PAY-231");
         assert_eq!(item.payload["fields"]["status"]["name"], "In Progress");
         assert_eq!(item.payload["fields"]["priority"]["name"], "High");
@@ -179,7 +279,13 @@ mod tests {
     /// M2.
     #[test]
     fn an_epic_is_a_ticket_whose_payload_still_says_epic() {
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &epic());
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &epic(),
+        );
         assert_eq!(item.kind, crate::KIND_TICKET);
         assert_eq!(item.entity.to_string(), "jira:PAY-200");
         assert_eq!(item.payload["fields"]["issuetype"]["name"], "Epic");
@@ -188,8 +294,17 @@ mod tests {
     /// The payload with the knobas-written `epic` removed: what the rest of
     /// the record must equal, byte for byte, in every case below.
     fn without_epic(payload: &serde_json::Value) -> serde_json::Value {
-        let mut rest = payload.clone();
+        let mut rest = without_sprints(payload);
         rest.as_object_mut().unwrap().remove("epic");
+        rest
+    }
+
+    /// The payload without the `sprints` every ticket carries (#811), which
+    /// must be the empty list where no Sprint field was configured.
+    fn without_sprints(payload: &serde_json::Value) -> serde_json::Value {
+        let mut rest = payload.clone();
+        let sprints = rest.as_object_mut().unwrap().remove("sprints");
+        assert_eq!(sprints, Some(serde_json::json!([])), "{payload}");
         rest
     }
 
@@ -207,6 +322,7 @@ mod tests {
             "jira",
             "https://jira.tidewater.example",
             Some("customfield_10008"),
+            None,
             raw,
         );
         assert_eq!(
@@ -250,13 +366,13 @@ mod tests {
             ),
         ];
         for (case, field, raw) in cases {
-            let item = to_sync_item("jira", "https://jira.tidewater.example", field, &raw);
+            let item = to_sync_item("jira", "https://jira.tidewater.example", field, None, &raw);
             assert!(
                 item.payload.get("epic").is_none(),
                 "{case}: {}",
                 item.payload
             );
-            assert_eq!(item.payload, raw.raw, "{case}");
+            assert_eq!(without_sprints(&item.payload), raw.raw, "{case}");
         }
     }
 
@@ -271,14 +387,26 @@ mod tests {
             "fields": { "summary": "s", "customfield_10008": "PAY-200" }
         }))
         .unwrap();
-        let item = to_sync_item("jira", "https://x.example", Some("customfield_10008"), &raw);
-        assert_eq!(item.payload, raw.raw);
+        let item = to_sync_item(
+            "jira",
+            "https://x.example",
+            Some("customfield_10008"),
+            None,
+            &raw,
+        );
+        assert_eq!(without_sprints(&item.payload), raw.raw);
     }
 
     #[test]
     fn an_unassigned_issue_has_no_author() {
         let p = page();
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &p.issues[1]);
+        let item = to_sync_item(
+            "jira",
+            "https://jira.tidewater.example",
+            None,
+            None,
+            &p.issues[1],
+        );
         assert_eq!(item.author, None);
         assert_eq!(item.body_text, "Add a retry budget metric");
     }
@@ -291,6 +419,7 @@ mod tests {
         let item = to_sync_item(
             "jira-eu",
             "https://jira.eu.example/jira",
+            None,
             None,
             &p.issues[0],
         );
@@ -309,6 +438,7 @@ mod tests {
         let item = to_sync_item(
             "jira",
             "https://jira.tidewater.example/",
+            None,
             None,
             &p.issues[0],
         );
@@ -343,7 +473,7 @@ mod tests {
         .unwrap();
         let first = raw.issue.fields.comment.as_ref().unwrap().comments[0].clone();
         raw.set_comments(vec![first, extra]);
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &raw);
+        let item = to_sync_item("jira", "https://jira.tidewater.example", None, None, &raw);
         assert!(item.body_text.contains("Retry budget capped"));
         assert_eq!(item.payload["fields"]["comment"]["total"], 2);
         assert_eq!(
@@ -361,7 +491,7 @@ mod tests {
         raw.set_worklogs(vec![
             serde_json::json!({ "id": "30099", "timeSpentSeconds": 600 }),
         ]);
-        let item = to_sync_item("jira", "https://jira.tidewater.example", None, &raw);
+        let item = to_sync_item("jira", "https://jira.tidewater.example", None, None, &raw);
         assert_eq!(item.payload["fields"]["worklog"]["total"], 1);
         assert_eq!(
             item.payload["fields"]["worklog"]["worklogs"][0]["id"],
@@ -382,7 +512,7 @@ mod tests {
             "brandNewTopLevel": 7
         }))
         .unwrap();
-        let item = to_sync_item("jira", "https://x.example", None, &raw);
+        let item = to_sync_item("jira", "https://x.example", None, None, &raw);
         assert_eq!(item.title, "s");
         assert_eq!(item.payload["brandNewTopLevel"], 7);
     }
@@ -444,5 +574,62 @@ mod tests {
         .unwrap();
         assert_eq!(worklogs.worklogs.len(), 1);
         assert_eq!(worklogs.worklogs[0]["timeSpentSeconds"], 5400);
+    }
+
+    /// A configured Sprint field is stored as `sprints` beside the record
+    /// (#811), in either spelling Jira Data Center serves it: the objects a
+    /// recent instance sends, and the `Sprint@…[id=…,state=ACTIVE,name=…]`
+    /// strings an older one sends. The state is lowercased, so `active` is
+    /// one word whichever spelling arrived. The custom field itself stays as
+    /// Jira sent it.
+    #[test]
+    fn a_configured_sprint_field_is_stored_as_sprints_beside_the_record() {
+        let mut raw = page().issues[0].clone();
+        raw.raw["fields"]["customfield_10104"] = serde_json::json!([
+            "com.atlassian.greenhopper.service.sprint.Sprint@6f2c[id=3,rapidViewId=1,state=CLOSED,name=PAY Sprint 2, the long one,startDate=2026-09-01T09:00:00.000Z,endDate=2026-09-14T17:00:00.000Z,completeDate=<null>,activatedDate=<null>,sequence=3,goal=,autoStartStop=false,synced=false]",
+            { "id": 4, "name": "PAY Sprint 3", "state": "active", "boardId": 1 }
+        ]);
+        let item = to_sync_item(
+            "jira",
+            "https://x.example",
+            None,
+            Some("customfield_10104"),
+            &raw,
+        );
+        assert_eq!(
+            item.payload["sprints"],
+            serde_json::json!([
+                { "id": 3, "name": "PAY Sprint 2, the long one", "state": "closed" },
+                { "id": 4, "name": "PAY Sprint 3", "state": "active" }
+            ])
+        );
+        assert_eq!(item.payload["fields"]["customfield_10104"][1]["id"], 4);
+    }
+
+    /// Every ticket carries `sprints`, empty where the field is not
+    /// configured, is null, or holds nothing readable: a declared list that
+    /// is there and empty is a ticket in no sprint, which the contract
+    /// battery can tell from a misspelt path (clause 3).
+    #[test]
+    fn a_ticket_in_no_sprint_carries_an_empty_list() {
+        let p = page();
+        let unconfigured = to_sync_item("jira", "https://x.example", None, None, &p.issues[0]);
+        assert_eq!(unconfigured.payload["sprints"], serde_json::json!([]));
+        let mut raw = p.issues[0].clone();
+        for value in [
+            serde_json::Value::Null,
+            serde_json::json!("not a list"),
+            serde_json::json!([42, "no brackets here", { "name": "no state" }]),
+        ] {
+            raw.raw["fields"]["customfield_10104"] = value.clone();
+            let item = to_sync_item(
+                "jira",
+                "https://x.example",
+                None,
+                Some("customfield_10104"),
+                &raw,
+            );
+            assert_eq!(item.payload["sprints"], serde_json::json!([]), "{value}");
+        }
     }
 }

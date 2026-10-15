@@ -70,6 +70,37 @@ pub(crate) fn epic_link_field(fields: &[FieldMeta]) -> Option<String> {
         .map(|f| f.id.clone())
 }
 
+/// The Greenhopper plugin's key for the Sprint field (#811).
+pub(crate) const SPRINT_SCHEMA: &str = "com.pyxis.greenhopper.jira:gh-sprint";
+
+/// The display name Jira ships the Sprint field under.
+const SPRINT_NAME: &str = "Sprint";
+
+/// This instance's Sprint field id, or `None` where it has none (#811).
+///
+/// Found the way [`epic_link_field`] finds Epic Link: by the plugin key, which
+/// survives a rename, and only then by the name `Sprint` -- and the name only
+/// for a **custom** field that describes **no** plugin key, so a field some
+/// other plugin calls "Sprint" is never taken for Jira Software's. An id that
+/// cannot go into `fields=` is not one.
+pub(crate) fn sprint_field(fields: &[FieldMeta]) -> Option<String> {
+    let key = |f: &FieldMeta| f.schema.as_ref().and_then(|s| s.custom.clone());
+    fields
+        .iter()
+        .find(|f| key(f).is_some_and(|k| k == SPRINT_SCHEMA))
+        .or_else(|| {
+            fields.iter().find(|f| {
+                f.custom
+                    && key(f).is_none()
+                    && f.name
+                        .as_deref()
+                        .is_some_and(|n| n.trim().eq_ignore_ascii_case(SPRINT_NAME))
+            })
+        })
+        .filter(|f| crate::config::is_field_id(&f.id))
+        .map(|f| f.id.clone())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -225,6 +256,64 @@ mod tests {
                 "epic_link_field": "customfield_10101"
             }))
             .is_ok()
+        );
+    }
+
+    /// The Sprint field's plugin key, spelled out for the reason [`REAL_KEY`]
+    /// is.
+    const SPRINT_KEY: &str = "com.pyxis.greenhopper.jira:gh-sprint";
+
+    /// The Sprint field is found by its plugin key among the epic fields it
+    /// sits beside, renamed or not (#811).
+    #[test]
+    fn the_sprint_field_is_the_one_with_the_greenhopper_key() {
+        let mut fields = greenhopper();
+        fields.push(field("customfield_10104", "Sprint", true, Some(SPRINT_KEY)));
+        assert_eq!(sprint_field(&fields).as_deref(), Some("customfield_10104"));
+        fields[5] = field("customfield_10107", "Iteration", true, Some(SPRINT_KEY));
+        fields.insert(0, field("customfield_10500", "Sprint", true, None));
+        assert_eq!(
+            sprint_field(&fields).as_deref(),
+            Some("customfield_10107"),
+            "the renamed Greenhopper field wins over a hand-made one wearing its name"
+        );
+        // Epic Link is never the Sprint field, nor the other way round.
+        assert_eq!(
+            epic_link_field(&fields).as_deref(),
+            Some("customfield_10101")
+        );
+    }
+
+    /// The name is a fallback for a field table without schemas only: a
+    /// field another plugin calls "Sprint" is not Jira Software's.
+    #[test]
+    fn the_sprint_name_fallback_takes_only_a_custom_field_with_no_plugin_key() {
+        assert_eq!(
+            sprint_field(&[field("customfield_10104", "Sprint", true, None)]).as_deref(),
+            Some("customfield_10104")
+        );
+        assert_eq!(
+            sprint_field(&[field(
+                "customfield_10001",
+                "Sprint",
+                true,
+                Some("com.example:other")
+            )]),
+            None
+        );
+        assert_eq!(
+            sprint_field(&[field("sprint", "Sprint", false, None)]),
+            None
+        );
+        assert_eq!(sprint_field(&greenhopper()), None);
+        assert_eq!(
+            sprint_field(&[field(
+                "customfield_1,*all",
+                "Sprint",
+                true,
+                Some(SPRINT_KEY)
+            )]),
+            None
         );
     }
 }

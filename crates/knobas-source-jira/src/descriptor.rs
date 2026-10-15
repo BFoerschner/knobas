@@ -80,6 +80,13 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// `accountId` is not a username, so a reader matching it against the
 /// configured identity would never fire.
 ///
+/// **The issue type, the labels and the sprints** (#811) are what
+/// `issuetype:`, `label:` and `sprint:current` read. The first two are in the
+/// record as Jira sends it (`BASE_FIELDS` has asked for both since M1). The
+/// sprints are a custom field whose id is the instance's own, so `map`
+/// stores them beside the record as `sprints: [{id, name, state}]`, on every
+/// ticket, empty when the field is not configured or the ticket is in none.
+///
 /// **No reviewers and no merged flag**: a Jira issue has neither. A kind that
 /// declares no path for a field is a miss, which is what those readers did
 /// against Jira before this existed.
@@ -108,7 +115,7 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// direct parent comes first. On any one instance one of the two is unused,
 /// which is what clause 6's shared evidence slot tolerates (#301).
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
-    use knobas_source::{KindPaths, ParentPath, PayloadPath};
+    use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
     vec![KindPaths {
         kind: crate::KIND_TICKET.to_owned(),
         status_name: vec![PayloadPath::of(["fields", "status", "name"])],
@@ -119,6 +126,15 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         ],
         project_key: vec![PayloadPath::of(["fields", "project", "key"])],
         project_name: vec![PayloadPath::of(["fields", "project", "name"])],
+        issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+        labels: vec![ListPath {
+            at: PayloadPath::of(["fields", "labels"]),
+            entry: PayloadPath::default(),
+        }],
+        sprint_state: vec![ListPath {
+            at: PayloadPath::of(["sprints"]),
+            entry: PayloadPath::of(["state"]),
+        }],
         blocked_statuses: vec![
             "Blocked".to_owned(),
             "On Hold".to_owned(),
@@ -172,6 +188,10 @@ fn config_schema() -> serde_json::Value {
             "epic_link_field": {
                 "type": ["string", "null"], "default": null, "title": "Epic Link field id",
                 "description": "Where a classic project keeps epic membership. Filled in by Test connection: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent."
+            },
+            "sprint_field": {
+                "type": ["string", "null"], "default": null, "title": "Sprint field id",
+                "description": "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection: the id is different on every Jira. Leave it empty and no ticket is in a sprint as far as knobas knows."
             },
             "page_size": {
                 "type": "integer", "minimum": 1, "maximum": 1000, "default": 100,

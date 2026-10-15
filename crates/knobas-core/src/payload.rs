@@ -258,6 +258,25 @@ pub struct KindPaths {
     /// other.
     #[serde(default)]
     pub default_branch: Vec<PayloadPath>,
+    /// The ticket's type in the source's own spelling (#811): Jira's
+    /// `fields.issuetype.name` (`Bug`, `Story`). What `issuetype:` matches,
+    /// ignoring case. Its own field and not the entity kind: `type:` already
+    /// means the kind. Empty for every kind with no such type, and a miss
+    /// matches no `issuetype:` value.
+    #[serde(default)]
+    pub issue_type: Vec<PayloadPath>,
+    /// The labels an item carries (#811): Jira's `fields.labels`, an array
+    /// of strings, so `entry` is empty. What `label:` matches, ignoring case.
+    #[serde(default)]
+    pub labels: Vec<ListPath>,
+    /// The states of the sprints an item is in, one per sprint (#811):
+    /// `active`, `future`, `closed`. For Jira the sprint is a custom field
+    /// whose id is the instance's own, so `map` stores the sprints beside the
+    /// record as `sprints: [{id, name, state}]` and this points there.
+    /// `sprint:current` matches an item with an `active` one, ignoring case.
+    /// Empty for a kind with no sprints, and a miss is in no sprint.
+    #[serde(default)]
+    pub sprint_state: Vec<ListPath>,
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -343,6 +362,9 @@ pub mod field {
     pub const REVISION: &str = "revision";
     pub const HEAD_REPO: &str = "head_repo";
     pub const DEFAULT_BRANCH: &str = "default_branch";
+    pub const ISSUE_TYPE: &str = "issue_type";
+    pub const LABELS: &str = "labels";
+    pub const SPRINT_STATE: &str = "sprint_state";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -364,6 +386,9 @@ pub mod field {
         REVISION,
         HEAD_REPO,
         DEFAULT_BRANCH,
+        ISSUE_TYPE,
+        LABELS,
+        SPRINT_STATE,
     ];
 }
 

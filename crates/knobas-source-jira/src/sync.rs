@@ -191,6 +191,7 @@ impl SyncRun<'_> {
                     self.source_id,
                     self.base_url,
                     self.cfg.epic_link_field.as_deref(),
+                    self.cfg.sprint_field.as_deref(),
                     &raw,
                 );
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
@@ -286,7 +287,12 @@ impl SyncRun<'_> {
 
     fn fields(&self) -> String {
         let mut fields = BASE_FIELDS.to_owned();
-        if let Some(extra) = &self.cfg.epic_link_field {
+        for extra in self
+            .cfg
+            .epic_link_field
+            .iter()
+            .chain(&self.cfg.sprint_field)
+        {
             fields.push(',');
             fields.push_str(extra);
         }
@@ -1500,6 +1506,25 @@ mod tests {
             fields.split(',').any(|n| n == "customfield_10008"),
             "{fields}"
         );
+    }
+
+    /// The Sprint field rides the same parameter (#811), beside Epic Link.
+    #[test]
+    fn the_sprint_field_is_appended_to_the_field_list() {
+        let config = cfg(serde_json::json!({
+            "epic_link_field": "customfield_10008", "sprint_field": "customfield_10104"
+        }));
+        let api = FakeApi::default();
+        let fields = SyncRun {
+            api: &api,
+            cfg: &config,
+            source_id: "jira",
+            base_url: "https://jira.example",
+        }
+        .fields();
+        let names: Vec<&str> = fields.split(',').collect();
+        assert!(names.contains(&"customfield_10104"), "{fields}");
+        assert!(names.contains(&"customfield_10008"), "{fields}");
     }
 
     /// Battery clause 6: a sink error aborts the run rather than being

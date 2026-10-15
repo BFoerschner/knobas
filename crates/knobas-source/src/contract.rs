@@ -742,7 +742,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 10] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 11] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -753,12 +753,16 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::COMMIT, &paths.commit, Wanted::Text),
             (field::HEAD_REPO, &paths.head_repo, Wanted::Text),
             (field::DEFAULT_BRANCH, &paths.default_branch, Wanted::Text),
+            (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
         ];
-        // The two list fields: who a review is asked of, and the commits a
-        // build ran on (#710). One rule for both.
-        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 2] = [
+        // The list fields: who a review is asked of, the commits a build ran
+        // on (#710), a ticket's labels and its sprints' states (#811). One
+        // rule for all four.
+        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 4] = [
             (field::REVIEWERS, &paths.reviewers),
             (field::REVISION, &paths.revision),
+            (field::LABELS, &paths.labels),
+            (field::SPRINT_STATE, &paths.sprint_state),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants

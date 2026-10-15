@@ -100,13 +100,27 @@ impl JiraSource {
     /// swallowing it here would report a refused credential as a healthy
     /// connection missing one convenience; a 500 is a Jira in trouble and the
     /// user should hear about it.
-    async fn discover_epic_link_field(&self) -> Result<Option<String>, SourceError> {
+    ///
+    /// One read answers both ids the field table holds: Epic Link and, since
+    /// #811, the Sprint field.
+    async fn discover_fields(&self) -> Result<Discovered, SourceError> {
         match self.http.fields().await {
-            Ok(fields) => Ok(crate::discover::epic_link_field(&fields)),
-            Err(error) if matches!(error.status(), Some(404 | 501)) => Ok(None),
+            Ok(fields) => Ok(Discovered {
+                epic_link: crate::discover::epic_link_field(&fields),
+                sprint: crate::discover::sprint_field(&fields),
+            }),
+            Err(error) if matches!(error.status(), Some(404 | 501)) => Ok(Discovered::default()),
             Err(error) => Err(error),
         }
     }
+}
+
+/// The ids the field table answered with: each `None` where the instance has
+/// no such field, or no field table.
+#[derive(Default)]
+struct Discovered {
+    epic_link: Option<String>,
+    sprint: Option<String>,
 }
 
 /// The **connection note** (`CONTEXT.md`): what this connection says about
@@ -204,10 +218,14 @@ impl Source for JiraSource {
         // as".
         let me = self.http.myself().await?;
         let server = self.http.server_info().await?;
-        let epic_link = self.discover_epic_link_field().await?;
+        let found = self.discover_fields().await?;
+        let epic_link = found.epic_link;
         let mut discovered = std::collections::BTreeMap::new();
         if let Some(id) = &epic_link {
             discovered.insert("epic_link_field".to_owned(), id.clone());
+        }
+        if let Some(id) = found.sprint {
+            discovered.insert("sprint_field".to_owned(), id);
         }
         Ok(ConnectionInfo {
             account: me.name.or(me.display_name),

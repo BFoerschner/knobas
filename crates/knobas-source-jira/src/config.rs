@@ -67,6 +67,17 @@ pub struct JiraConfig {
     /// `sync.item.payload` column. Until then the round trip could not be run
     /// at all -- mockd served no `customfield_*` and answered 400.
     pub epic_link_field: Option<String>,
+    /// The instance's Sprint custom field (#811). Naming it adds it to the
+    /// requested `fields=` list, and `map` stores the sprints it holds beside
+    /// the record as `sprints`, which `sprint:current` reads.
+    ///
+    /// **Filled in by *Test connection*, not typed**, for Epic Link's reason:
+    /// the id is minted per instance. `test_connection` finds it in the same
+    /// field table by its Greenhopper plugin key and reports it as
+    /// `ConnectionInfo::discovered["sprint_field"]`; the Add-source dialog
+    /// fills it in when the reader left it empty. Left empty, no ticket is in
+    /// a sprint as far as knobas knows.
+    pub sprint_field: Option<String>,
     /// `maxResults` per `/search` page (interfaces §4.1 default: 100).
     pub page_size: u32,
     /// Per-instance rate limit (interfaces §4.1 default: 5 req/s, burst 10).
@@ -84,6 +95,7 @@ impl Default for JiraConfig {
             jql_filter: None,
             username: None,
             epic_link_field: None,
+            sprint_field: None,
             page_size: 100,
             rate_per_sec: 5,
             rate_burst: 10,
@@ -145,8 +157,11 @@ impl JiraConfig {
                 );
             }
         }
-        if let Some(field) = &self.epic_link_field
-            && !is_field_id(field)
+        if let Some(field) = self
+            .epic_link_field
+            .iter()
+            .chain(&self.sprint_field)
+            .find(|field| !is_field_id(field))
         {
             return bad(format!(
                 "{field:?} is not a bare Jira field id (letters, digits and _), and it is \
@@ -334,6 +349,9 @@ mod tests {
     fn the_epic_link_field_must_be_a_bare_field_id() {
         assert!(err(json!({ "epic_link_field": "customfield_10008,*all" })).contains("field id"));
         JiraConfig::from_json(&json!({ "epic_link_field": "customfield_10008" })).unwrap();
+        // The Sprint field goes into the same query parameter (#811).
+        assert!(err(json!({ "sprint_field": "customfield_10104,*all" })).contains("field id"));
+        JiraConfig::from_json(&json!({ "sprint_field": "customfield_10104" })).unwrap();
     }
 
     #[test]

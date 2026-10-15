@@ -106,6 +106,12 @@ export interface KindPaths {
   head_repo: PayloadPath[];
   /** A branch's repo's default branch, never drawn as wanting a PR (#718). */
   default_branch: PayloadPath[];
+  /** A ticket's type in the source's spelling, what `issuetype:` reads (#811). */
+  issue_type: PayloadPath[];
+  /** The labels an item carries, what `label:` reads (#811). */
+  labels: ListPath[];
+  /** The states of the sprints an item is in, what `sprint:current` reads (#811). */
+  sprint_state: ListPath[];
 }
 
 /**
