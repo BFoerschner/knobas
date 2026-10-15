@@ -281,19 +281,21 @@
   />
   <main class="tf-main" tabindex="-1">
     <TfPage
-      {route}
-      ready={lifecycle.ready}
-      job={lastJob}
-      {timedTicket}
-      {onrooms}
-      {timer}
-      {layers}
-      {ontimer}
-      {onstarttimer}
-      {jobPorts}
-      {onlog}
-      {timeRevision}
-      {ontimechanged}
+      ctx={{
+        route,
+        ready: lifecycle.ready,
+        job: lastJob,
+        timedTicket,
+        onrooms,
+        timer,
+        layers,
+        ontimer,
+        onstarttimer,
+        jobPorts,
+        onlog,
+        timeRevision,
+        ontimechanged,
+      }}
     />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />

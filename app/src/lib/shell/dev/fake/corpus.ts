@@ -1,0 +1,528 @@
+/**
+ * `?fake-ipc`: The demo corpus: the mirror the fixture holds, its stored contexts and its
+ * one link graph, and the reads that list it (`list_entities`, the mini
+ * board, the project census). Other feature modules read `CORPUS` from here.
+ */
+import type { Handler } from "../fake-tauri";
+
+// -- the demo corpus --------------------------------------------------------
+
+/**
+ * Where the fixture pretends its items live.
+ *
+ * **Loopback, and not the mock adapter's own `tidewater.example` host.**
+ * `house-rules.test.ts` refuses any non-loopback URL anywhere under `app/src/`
+ * — including one that is only ever data, and including one that appears only
+ * in a comment, since that rule scans raw text rather than stripping prose.
+ * Both halves of that are right as they stand: a remote host named in the
+ * frontend is a fetch waiting to happen, the rule fails *closed*, and
+ * loosening a working lint so a fixture could spell a prettier hostname is
+ * exactly how a lint stops catching things. Nothing serves this address, which
+ * is the honest state of affairs: *Open in browser* under `?fake-ipc` proves
+ * the button and its scheme guard, not the page at the other end.
+ */
+const FIXTURE_HOST = "http://127.0.0.1:5399";
+
+/** When the fixture claims it last synced. Fixed, so screenshots are stable. */
+export const SYNCED_AT = "2026-08-22T14:30:00Z";
+
+/**
+ * A slice of the Tidewater dataset, plus one kind nothing declares.
+ *
+ * Enough to fill the mockup's tiles and no more: this exists so a browser can
+ * be pointed at the shell, not so the fixture can stand in for PostgreSQL. The
+ * `incident` row is the §3a case — an *undeclared* kind, which must get its
+ * own tile and the generic detail view rather than being dropped.
+ */
+export const CORPUS: {
+  entity_id: string;
+  kind: string;
+  title: string;
+  updated_at: string | null;
+  body_text: string;
+  author: string | null;
+  web_url: string | null;
+  deleted_at: string | null;
+  payload: Record<string, unknown>;
+}[] = [
+  row("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "2026-08-22T11:48:00Z", "mara", {
+    key: "PAY-231",
+    // The shape a *source* writes a project in, not a shape of this file's
+    // choosing: the mock adapter puts it at `fields.project` because Jira does
+    // (#207), and `project_key_read!` reads it there. A flat `project` here
+    // would make the fixture's rooms disagree with the real backend's.
+    fields: { project: { key: "PAY", name: "Payments Platform" } },
+    status: "In Progress",
+    priority: "High",
+    assignee: "mara",
+    type: "Story",
+    epic: "PAY-200",
+    story_points: 3,
+    estimate_h: 6,
+    blocked: false,
+    description:
+      "Payouts to two SEPA banks fail with a 409 on retry. The retry window has to be idempotent before we can turn the scheduler back on.",
+    comments: [{ by: "mara" }, { by: "jonas" }],
+  }),
+  // Deliberately in **no** project, key prefix notwithstanding: the miss
+  // direction ADR-0010 fixes, and the one a QA pass has to be able to see. It
+  // stays in *All work* and in the mock source's room, and appears in neither
+  // project room.
+  row("mock:PAY-228", "ticket", "Idempotency key on the payout endpoint", "2026-08-21T16:05:00Z", "jonas", {
+    key: "PAY-228",
+    status: "In Review",
+    priority: "Normal",
+    assignee: "jonas",
+    type: "Bug",
+  }),
+  row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
+    key: "OPS-77",
+    fields: { project: { key: "OPS", name: "Operations" } },
+    status: "To Do",
+    priority: "Low",
+    assignee: null,
+  }),
+  // The Tickets view's board (#810) wants more than three tickets to look
+  // like prototype-6's: these are its own, in its words, with the type, the
+  // assignee and the epic its cards draw, flat like the rest of this corpus.
+  ...(
+    [
+      ["PAY-240", "Payout dashboard latency", "To Do", "Medium", "Task", "mara", "PAY-200", "2026-08-22T08:12:00Z"],
+      ["PAY-236", "Payout CSV export for finance", "To Do", "Low", "Story", "jonas", "PAY-200", "2026-08-20T10:00:00Z"],
+      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-21T11:00:00Z"],
+      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-22T09:20:00Z"],
+      ["PAY-219", "Rotate PSP credentials", "Done", "Medium", "Task", "mara", "PAY-200", "2026-08-18T10:00:00Z"],
+      ["PAY-244", "Refund webhooks retry", "In Progress", "High", "Story", "priya", "PAY-300", "2026-08-21T09:30:00Z"],
+      ["PAY-251", "Validate payout batch limits", "In Review", "Medium", "Task", "jonas", "PAY-300", "2026-08-20T15:10:00Z"],
+      ["PAY-205", "Fix FX rate cache", "Done", "Low", "Bug", "priya", "PAY-150", "2026-08-15T12:00:00Z"],
+      ["PAY-210", "Export settlement report timezone", "Done", "Medium", "Story", "jonas", "PAY-150", "2026-08-14T12:00:00Z"],
+      ["PAY-214", "Monitor PSP client rate limit", "Done", "High", "Task", "mara", "PAY-200", "2026-08-12T12:00:00Z"],
+      ["PAY-216", "Clean up manual payout audit log", "Done", "Low", "Task", "priya", null, "2026-08-11T12:00:00Z"],
+    ] as const
+  ).map(([key, title, status, priority, type, assignee, epic, at]) =>
+    row(`mock:${key}`, "ticket", title, at, assignee, {
+      key,
+      fields: { project: { key: "PAY", name: "Payments Platform" } },
+      status,
+      priority,
+      type,
+      assignee,
+      ...(epic ? { epic } : {}),
+      description: `${title}. Finance asked for this; scope is the stage environment first.`,
+    }),
+  ),
+  // The repo and one of its branches (#499). Both are here so a QA pass can
+  // see the two checkout states the panel exists to keep apart: this repo has
+  // a clone under the fixture's clones root, and `mock:ledger` deliberately
+  // does not -- so one detail shows a path and the other shows the clone
+  // command to copy. The keys follow interfaces §4.2's Gitea grammar
+  // (`owner/repo`, `owner/repo@refs/heads/<name>`), which is what the real
+  // backend resolves a branch's repository by.
+  {
+    ...row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
+      full_name: "tidewater/payout-service",
+      description: "Payout scheduling and SEPA retries.",
+    }),
+    // A forge-shaped URL rather than the fixture's default: it is what the
+    // clone command is built from, and a person reading the panel should see
+    // the command they would actually run.
+    web_url: "https://gitea.example.com/tidewater/payout-service",
+  },
+  row(
+    "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry",
+    "branch",
+    "feat/PAY-231-idempotent-retry",
+    "2026-08-22T09:40:00Z",
+    "mara",
+    { name: "feat/PAY-231-idempotent-retry", repository: "tidewater/payout-service" },
+  ),
+  // A second repo, with no clone on this fixture's disk: the *no checkout*
+  // arm, and the one that shows the clone command.
+  {
+    ...row("mock:tidewater/ledger", "repo", "tidewater/ledger", "2026-08-18T12:00:00Z", "jonas", {
+      full_name: "tidewater/ledger",
+      description: "The ledger service.",
+    }),
+    web_url: "https://gitea.example.com/tidewater/ledger",
+  },
+  row("mock:payout-service#142", "pr", "Idempotent retry window", "2026-08-22T10:12:00Z", "mara", {
+    num: 142,
+    repo: "payout-service",
+    state: "open",
+    approvals: "1/2",
+  }),
+  // The commit and the build carry the ticket's key -- in the branch name and
+  // in the message body -- because that is the evidence `FAKE_SUGGESTIONS`
+  // below cites, and a proposal whose reason the corpus cannot bear out is a
+  // fixture lying about the one thing the tray exists to show.
+  row("mock:9f2c1ab", "commit", "payout: key the retry on the mandate id", "2026-08-22T09:40:00Z", "mara", {
+    sha: "9f2c1ab",
+    repo: "payout-service",
+    branch: "feat/PAY-231-idempotent-retry",
+    description: "A replayed payout with the same mandate id is now a no-op.\n\nRefs PAY-231.",
+  }),
+  row("mock:payout-service#318", "build", "payout-service #318", "2026-08-22T10:20:00Z", null, {
+    cfg: "payout-service",
+    num: 318,
+    status: "failed",
+    branch: "feat/PAY-231-idempotent-retry",
+    // The build's parameters as a build source mirrors them into `body_text`
+    // (`knobas_source_teamcity::map::build_item`): the branch, the status, the
+    // trigger. That blob is what `build_parameter_key` reads.
+    description: "branch feat/PAY-231-idempotent-retry, status failed, triggered by a push",
+  }),
+  // The page shares enough of PAY-231's vocabulary to clear `similar_text`'s
+  // floor of five stems, so the `similarity` proposal below is one the real
+  // detector would make of this pair rather than a badge painted on for QA.
+  row("mock:ENG-SEPA", "page", "SEPA retry design", "2026-08-20T15:30:00Z", "priya", {
+    space: "ENG",
+    id: "ENG-SEPA",
+    section: "Payments",
+    description:
+      "How the payout scheduler retries failed SEPA payouts: the retry window, the 409 on a replayed payout, and the mandate id as the idempotency key.",
+  }),
+  // The §3a case: no adapter declares this kind, and it still has to work.
+  row("mock:INC-1", "incident", "Payout queue backed up for 40 minutes", "2026-08-22T08:05:00Z", "priya", {
+    id: "INC-1",
+    severity: "SEV2",
+    resolved: true,
+    affected_services: ["payout-service", "ledger"],
+  }),
+  {
+    ...row("mock:PAY-198", "ticket", "Legacy payout reconciliation (withdrawn)", null, null, {
+      key: "PAY-198",
+      status: "Deleted",
+    }),
+    web_url: null,
+    deleted_at: "2026-08-22T12:00:00Z",
+  },
+];
+
+/** One corpus entry, with the fields every row shares filled in. */
+function row(
+  entity_id: string,
+  kind: string,
+  title: string,
+  updated_at: string | null,
+  author: string | null,
+  payload: Record<string, unknown>,
+) {
+  return {
+    entity_id,
+    kind,
+    title,
+    updated_at,
+    author,
+    body_text: String(payload["description"] ?? title),
+    web_url: `${FIXTURE_HOST}/browse/${entity_id.slice(entity_id.indexOf(":") + 1)}`,
+    deleted_at: null as string | null,
+    payload,
+  };
+}
+
+/** The stored contexts the fixture session holds. Starts empty on purpose:
+ * the new-context flow is what a QA pass wants to see working. */
+export const FAKE_CONTEXTS: {
+  id: string;
+  kind: string;
+  title: string;
+  anchor_id: string | null;
+  created_at: string;
+  archived_at: string | null;
+}[] = [];
+
+let nextContext = 1;
+export function fakeContext(kind: string, title: string, anchor_id: string | null) {
+  return {
+    id: `ctx:fake-${nextContext++}`,
+    kind,
+    title,
+    anchor_id,
+    created_at: new Date().toISOString(),
+    archived_at: null,
+  };
+}
+
+/** The mirror row `list_entities` returns — the six columns, and no more. */
+export function mirrorRow(entry: (typeof CORPUS)[number]) {
+  return {
+    entity_id: entry.entity_id,
+    kind: entry.kind,
+    source_id: "mock",
+    title: entry.title,
+    updated_at: entry.updated_at,
+    synced_at: SYNCED_AT,
+  };
+}
+
+/**
+ * `mini_board` (#177), over the fixture.
+ *
+ * The dev bridge's own answer, so the Tickets tile has a board to draw under
+ * `just dev` and `just demo`. Like `listEntities` below, it *restates* the
+ * command's rule — the leading four, then the rest folded and alphabetical,
+ * then the statusless column last — and a restatement is a copy that can
+ * drift. The command is the authority; a divergence here is a bug in this
+ * file, never a second opinion about the order. It reads the fixture's
+ * payloads the way the command's second `coalesce` arm reads the mock source's
+ * — a flat `status` and `priority` — because that is the shape this corpus is
+ * in.
+ */
+function miniBoard(args: Record<string, unknown>) {
+  // The fixture has no link graph, so a stored context's membership is
+  // honestly empty — the same answer `context_members` and `list_entities`
+  // give.
+  if (args["ctxId"]) return { columns: [], sources: [] };
+
+  const sources = (args["sources"] as string[] | undefined) ?? [];
+  if (sources.length && !sources.includes("mock")) return { columns: [], sources: [] };
+
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+
+  const project = args["project"] as string | null | undefined;
+  const query = typeof args["query"] === "string" ? args["query"].trim() : "";
+  const tickets = CORPUS.filter(
+    (entry) =>
+      entry.kind === "ticket" &&
+      entry.deleted_at === null &&
+      inProject(entry, project) &&
+      (query === "" || fakeQueryMatches(entry, query)),
+  )
+    .slice()
+    .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+
+  const columns: { status: string | null; cards: ReturnType<typeof boardCard>[] }[] = [];
+  for (const entry of tickets) {
+    const status = text(entry.payload["status"]);
+    const column = columns.find((candidate) => candidate.status === status);
+    if (column) column.cards.push(boardCard(entry));
+    else columns.push({ status, cards: [boardCard(entry)] });
+  }
+
+  const LEADING = ["To Do", "In Progress", "In Review", "Done"];
+  const rank = (status: string | null): [number, number, string] => {
+    if (status === null) return [2, 0, ""];
+    const at = LEADING.findIndex((leading) => leading.toLowerCase() === status.toLowerCase());
+    return at === -1 ? [1, 0, status.toLowerCase()] : [0, at, status.toLowerCase()];
+  };
+  columns.sort((a, b) => {
+    const [aClass, aAt, aFolded] = rank(a.status);
+    const [bClass, bAt, bFolded] = rank(b.status);
+    return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
+  });
+
+  const observed = [...new Set(tickets.map((entry) => text(entry.payload["status"])))]
+    .filter((status): status is string => status !== null)
+    .sort((a, b) => {
+      const [aClass, aAt, aFolded] = rank(a);
+      const [bClass, bAt, bFolded] = rank(b);
+      return aClass - bClass || aAt - bAt || aFolded.localeCompare(bFolded);
+    });
+
+  // The command's cap (#753): each column's newest `per_column`, and its total.
+  const perColumn = args["perColumn"] as number | null | undefined;
+  return {
+    columns: columns.map((column) => ({
+      status: column.status,
+      cards: perColumn == null ? column.cards : column.cards.slice(0, perColumn),
+      total: column.cards.length,
+    })),
+    sources: columns.length ? [{ source_id: "mock", statuses: observed }] : [],
+  };
+}
+
+/**
+ * `source_statuses` (#760): the statuses the source's live tickets show, in
+ * the board's order -- `miniBoard`'s `sources` entry for one source.
+ */
+function sourceStatuses(args: Record<string, unknown>): string[] {
+  if (args["sourceId"] !== "mock") return [];
+  const board = miniBoard({ sources: ["mock"], ctxId: null, project: null });
+  return board.sources[0]?.statuses ?? [];
+}
+
+/**
+ * The project a fixture entry carries, at the path the real read looks at.
+ *
+ * A restatement of `project_key_read!`'s Jira arm and of its failure
+ * direction: absence, never a guess. An entry with no readable key belongs to
+ * no project room and stays in every other room it was in.
+ */
+function projectOf(entry: (typeof CORPUS)[number]): { key: string; name: string | null } | null {
+  const fields = entry.payload["fields"];
+  const project = (fields as Record<string, unknown> | undefined)?.["project"] as
+    | Record<string, unknown>
+    | undefined;
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const key = text(project?.["key"]);
+  return key === null ? null : { key, name: text(project?.["name"]) };
+}
+
+/** Whether an entry is admitted by a room's project scope. */
+function inProject(entry: (typeof CORPUS)[number], project: string | null | undefined): boolean {
+  return !project || projectOf(entry)?.key === project;
+}
+
+/** `list_projects` (#209): the projects the fixture's live corpus shows. */
+function listProjects() {
+  const seen = new Map<string, { source_id: string; key: string; name: string | null }>();
+  for (const entry of CORPUS) {
+    if (entry.deleted_at !== null) continue;
+    const project = projectOf(entry);
+    if (project === null || seen.has(project.key)) continue;
+    seen.set(project.key, { source_id: "mock", key: project.key, name: project.name });
+  }
+  return [...seen.values()].sort((a, b) => a.key.localeCompare(b.key));
+}
+
+/** One card of the fixture's board. */
+function boardCard(entry: (typeof CORPUS)[number]) {
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const assignee = text(entry.payload["assignee"]);
+  return {
+    entity_id: entry.entity_id,
+    source_id: "mock",
+    key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
+    title: entry.title,
+    priority: text(entry.payload["priority"]),
+    // The fields the Tickets view's cards draw (#810), read flat because
+    // that is the shape this corpus is in.
+    issue_type: text(entry.payload["type"]),
+    assignee,
+    updated_at: entry.updated_at,
+    path: text(entry.payload["epic"]),
+    mine: assignee !== null && assignee.toLowerCase() === FAKE_IDENTITY,
+  };
+}
+
+/** Who `@me` is in the fixture: the username the cards' `mine` matches. */
+const FAKE_IDENTITY = "mara";
+
+/**
+ * `mini_board`'s `query` (#810), restated over the fixture: every word must
+ * appear in the key, the title, the assignee or the epic, ignoring case, as
+ * `knobas_search::sql::ids_sql` has it, and each ticket key the
+ * Tickets view's chips and dropdowns write (`issuetype:`, `priority:`,
+ * `assignee:`, `status:`, `project:`, `under:`) must hold, values of one key
+ * meaning any of them. A restatement, which certifies nothing: the real
+ * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
+ */
+function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+  const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
+  const keys = new Map<string, { negated: boolean; values: string[] }>();
+  const words: string[] = [];
+  for (const [, minus, key, quoted, bare, word] of tokens) {
+    if (word !== undefined) {
+      words.push(word.toLowerCase());
+      continue;
+    }
+    const name = `${minus}${key!.toLowerCase()}`;
+    const held = keys.get(name) ?? { negated: minus === "-", values: [] };
+    held.values.push((quoted ?? bare ?? "").toLowerCase());
+    keys.set(name, held);
+  }
+  const card = boardCard(entry);
+  const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
+  if (!words.every((word) => haystack.includes(word))) return false;
+  const field: Record<string, string | null> = {
+    issuetype: card.issue_type,
+    priority: card.priority,
+    assignee: card.assignee,
+    status: typeof entry.payload["status"] === "string" ? (entry.payload["status"] as string) : null,
+    project: projectOf(entry)?.key ?? null,
+    under: card.path,
+  };
+  for (const [name, { negated, values }] of keys) {
+    const key = name.replace(/^-/, "");
+    if (!(key in field)) continue;
+    const have = field[key]?.toLowerCase() ?? null;
+    const wanted = values.map((value) => (value === "@me" ? FAKE_IDENTITY : value));
+    const hit = have !== null && wanted.includes(have);
+    if (hit === negated) return false;
+  }
+  return true;
+}
+
+/** `list_entities`, filtered, ordered and paged the way the real one is. */
+function listEntities(args: Record<string, unknown>) {
+  const filter = (args["filter"] ?? {}) as {
+    sources?: string[];
+    kinds?: string[];
+    order?: string;
+    context?: string | null;
+    project?: string | null;
+    include_deleted?: boolean;
+  };
+  const limit = Number(args["limit"] ?? 50);
+  const offset = Number(args["offset"] ?? 0);
+
+  // The tile orders (#680) count what they drew; the plain orders do not.
+  // Spelled out rather than `tile-count.ts`'s `isTileOrder`: this bridge
+  // stands in for the IPC that `ipc/entity.ts` invokes, and imports only its
+  // types.
+  const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
+  // A context's membership is `FAKE_MEMBERS`' (#816): the one small link
+  // graph this fixture has, so a job's Code section has rows to draw.
+  const members = filter.context ? fakeMembers(filter.context) : null;
+  let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
+  if (members !== null) rows = rows.filter((entry) => members.includes(entry.entity_id));
+  if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
+  if (filter.kinds?.length) rows = rows.filter((entry) => filter.kinds?.includes(entry.kind));
+  rows = rows.filter((entry) => inProject(entry, filter.project));
+
+  rows = [...rows].sort((a, b) =>
+    filter.order === "title_asc"
+      ? a.title.localeCompare(b.title)
+      : (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
+  );
+
+  // The fixture is the mock corpus, whose adapter declares no state: under
+  // the tile orders that is §3a's recency fallback, so the rows above are
+  // already the answer and the tally is a count per kind with no tone.
+  const mirrored = rows.map(mirrorRow);
+  const tally = tileOrder
+    ? [...new Set(mirrored.map((row) => row.kind))].map((kind) => ({
+        kind,
+        tone: null,
+        count: mirrored.filter((row) => row.kind === kind).length,
+      }))
+    : null;
+  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally, groups: null };
+}
+
+/**
+ * Who is in a stored context (#816): the anchor, and what `FAKE_MEMBERS`
+ * links to it. Every other context, and an unknown id, holds nothing.
+ */
+export function fakeMembers(ctxId: string): string[] {
+  const anchor = FAKE_CONTEXTS.find((row) => row.id === ctxId)?.anchor_id ?? null;
+  if (anchor === null) return [];
+  return [anchor, ...(FAKE_MEMBERS[anchor] ?? [])];
+}
+
+/**
+ * The fixture's one link graph (#816): what PAY-231 links to, so the job's
+ * Code section draws its repository, branch, pull request and commit. Ids
+ * from `CORPUS`; a promoted PAY-231 context holds exactly these.
+ */
+const FAKE_MEMBERS: Record<string, string[]> = {
+  "mock:PAY-231": [
+    "mock:tidewater/payout-service",
+    "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry",
+    "mock:payout-service#142",
+    "mock:9f2c1ab",
+  ],
+};
+
+/** This feature's commands. */
+export function handlers(): Record<string, Handler> {
+  return {
+    list_entities: (args) => listEntities(args),
+    mini_board: (args) => miniBoard(args),
+    source_statuses: (args) => sourceStatuses(args),
+    list_projects: () => listProjects(),
+  };
+}
