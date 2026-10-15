@@ -631,3 +631,59 @@ async fn a_saved_list_of_ticket_keys_counts_what_it_lists() {
         Some(1)
     );
 }
+
+/// The Tickets view's server-side filter (#810): every ticket the grammar
+/// admits, past the launcher's ten a kind, and only tickets. A query with
+/// nothing in it narrows nothing.
+#[tokio::test]
+async fn matching_ids_are_every_ticket_the_query_admits() {
+    let pool = pool().await;
+    let p = project();
+    let mut bugs = Vec::new();
+    for n in 1..=12 {
+        bugs.push(
+            store(
+                &pool,
+                &p,
+                n,
+                Ticket {
+                    issuetype: "Bug",
+                    ..BASE
+                },
+            )
+            .await,
+        );
+    }
+    let story = store(&pool, &p, 13, BASE).await;
+    sqlx::query("update sync.item set title = 'Retry failed SEPA payouts' where entity_id = $1")
+        .bind(&story)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let searcher = searcher(&pool).await;
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} payouts retr"), "ticket")
+            .await
+            .unwrap(),
+        Some(vec![story]),
+        "every word must match, the last one as a prefix while it is typed"
+    );
+
+    let matched = searcher
+        .matching_ids(&format!("project:{p} issuetype:bug"), "ticket")
+        .await
+        .unwrap()
+        .expect("a query with keys narrows");
+    assert_eq!(sorted(matched), sorted(bugs));
+
+    assert_eq!(searcher.matching_ids("   ", "ticket").await.unwrap(), None);
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} type:page"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "a query for another kind matches no ticket"
+    );
+}

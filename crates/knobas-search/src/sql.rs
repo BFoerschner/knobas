@@ -170,38 +170,7 @@ pub fn search_sql(
     let mut sql = String::from("with\n");
 
     if let Some(tsquery) = &tsquery {
-        // Computed ONCE, as a FROM item, and never bound as a tsquery
-        // (roadmap §4 gotcha 2): the match, the rank and the headline all read
-        // this one value.
-        sql.push_str("q as not materialized (\n  select ");
-        if prefix_last {
-            // What makes the box answer while the word is still being typed.
-            // `websearch_to_tsquery` output is already a well-formed, quoted
-            // tsquery, so appending ':*' to its *text* and casting back turns
-            // only the last lexeme into a prefix. The guard is for the empty
-            // case -- a query of nothing but stopwords yields the empty
-            // tsquery, and ':*' on its own is a syntax error.
-            sql.push_str(concat!(
-                "case when t.tsq::text = '' then null::tsquery\n",
-                "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
-                // The same words with none of them a prefix: what a row is
-                // ranked by when it holds the last word whole (`RANK_WHOLE`).
-                "         t.tsq as whole,\n"
-            ));
-        } else {
-            sql.push_str("t.tsq as tsq,\n");
-        }
-        // The typed words as `to_tsvector` lexes a name, sorted and distinct,
-        // for `NAMED`: one array per search, compared against each match. It
-        // must lex exactly as `NAMED` does, or no row is ever named.
-        let _ = writeln!(
-            sql,
-            "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
-        );
-        let _ = writeln!(
-            sql,
-            "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
-        );
+        sql.push_str(&tsquery_cte(tsquery, prefix_last));
     }
 
     // A ticket key's declared paths, resolved once for the statement (#811).
@@ -312,6 +281,83 @@ pub fn search_sql(
         order_by("d.", ranked, true)
     );
 
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
+}
+
+/// The `q` CTE: the typed words as one tsquery, computed once a statement,
+/// ending in `,\n`. [`search_sql`]'s, and [`ids_sql`]'s since #810.
+fn tsquery_cte(tsquery: &str, prefix_last: bool) -> String {
+    let mut sql = String::new();
+    // Computed ONCE, as a FROM item, and never bound as a tsquery
+    // (roadmap §4 gotcha 2): the match, the rank and the headline all read
+    // this one value.
+    sql.push_str("q as not materialized (\n  select ");
+    if prefix_last {
+        // What makes the box answer while the word is still being typed.
+        // `websearch_to_tsquery` output is already a well-formed, quoted
+        // tsquery, so appending ':*' to its *text* and casting back turns
+        // only the last lexeme into a prefix. The guard is for the empty
+        // case -- a query of nothing but stopwords yields the empty
+        // tsquery, and ':*' on its own is a syntax error.
+        sql.push_str(concat!(
+            "case when t.tsq::text = '' then null::tsquery\n",
+            "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
+            // The same words with none of them a prefix: what a row is
+            // ranked by when it holds the last word whole (`RANK_WHOLE`).
+            "         t.tsq as whole,\n"
+        ));
+    } else {
+        sql.push_str("t.tsq as tsq,\n");
+    }
+    // The typed words as `to_tsvector` lexes a name, sorted and distinct,
+    // for `NAMED`: one array per search, compared against each match. It
+    // must lex exactly as `NAMED` does, or no row is ever named.
+    let _ = writeln!(
+        sql,
+        "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
+    );
+    let _ = writeln!(
+        sql,
+        "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
+    );
+    sql
+}
+
+/// Every id a query admits in one corpus, uncapped and unranked (#810): the
+/// Tickets view's server-side filter, which narrows a board rather than
+/// filling a launcher page. The same predicates [`search_sql`] matches with,
+/// from the same [`corpus_predicates`], so the view and the launcher cannot
+/// disagree about what a query admits; no rank, no excerpt, no per-kind cap.
+#[must_use]
+pub fn ids_sql(
+    corpus: &Corpus,
+    text: Option<&str>,
+    prefix_last: bool,
+    filters: &EffectiveFilters,
+) -> SearchSql {
+    let mut builder = Builder::default();
+    let tsquery = text.map(|raw| builder.param(Bind::Text(raw.to_owned())));
+    let bound = bind_filters(&mut builder, filters);
+
+    let mut sql = String::from("with\n");
+    if let Some(tsquery) = &tsquery {
+        sql.push_str(&tsquery_cte(tsquery, prefix_last));
+    }
+    sql.push_str(&field_paths(&bound));
+    // `with` needs at least one CTE; this one is free.
+    sql.push_str("nothing as (select 1)\n");
+    let _ = write!(sql, "select {} as entity_id from {}", corpus.entity_id, corpus.relation);
+    if text.is_some() {
+        sql.push_str(" cross join q");
+    }
+    sql.push('\n');
+    let predicates = corpus_predicates(corpus, text.is_some().then_some("q.tsq"), &bound);
+    if !predicates.is_empty() {
+        let _ = write!(sql, " where {}", predicates.join("\n   and "));
+    }
     SearchSql {
         sql,
         binds: builder.binds,
