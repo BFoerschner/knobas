@@ -1680,3 +1680,19 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
 - **`?fake-ipc` answers the timer, `day_blocks`, `ad_hoc_block`, `worklog_draft` and `log_work`**,
   in memory, so a stop can be screenshotted (`&fake-timer` starts one). Block edits, *Log all* and
   the week stay unanswered. **Reversing:** low, move them back to `UNANSWERED`.
+
+## #884 (gitea-live: a seeded pull request merged on the shared fixture)
+
+- **Refuse, do not repair, a seeded open pull request found merged or closed.** The issue allowed
+  re-create or refuse. A merged one has lost its head branch and its commit is on `main`; a
+  re-created one would need a new commit on `main`-adjacent history. *Ruling:* the seed dies with
+  the Gitea-only remedy (fresh `gitea-data` volume); `./reset` named as the all-products one.
+  *Reversing:* low, one function in `testenv/gitea-pr-state.sh`.
+- **The culprit is not a suite.** Every merge site in `live_gitea.rs` and `start_work_live.rs`
+  merge a pull request the test opened. The commit on `main` ("PAY-236: Add payout CSV export")
+  was rewritten at 12:12:45Z and merged 15 s later with the head branch deleted, in a run with
+  hand-made branches and review text on the same repository: manual use of the app or UI.
+  *Ruling:* no test change. *Reversing:* n/a.
+- **The shared Gitea volume was reset** to meet the second criterion (it was the only way to make
+  `just gitea-live` green); it now seeds the exact numbers #142 and #144 (the old volume had
+  them at #1 and #2). Other worktrees re-mint their token on their next seed (#684).

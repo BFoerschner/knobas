@@ -302,6 +302,9 @@ synth_branch() {  # synth_branch <pr number> -> branch name, or empty
   esac
 }
 
+# shellcheck source=testenv/gitea-pr-state.sh
+. ./gitea-pr-state.sh
+
 PR_MAP=''   # "<fixture num>=<real index>" lines, for seed-state.json
 
 for num in $(jqf '.prs[] | .num'); do
@@ -331,6 +334,7 @@ for num in $(jqf '.prs[] | .num'); do
 
   existing=$(find_pr_by_title "$repo" "$title")
   if [ -n "$existing" ]; then
+    [ "$state" = "open" ] && gitea_require_open_pr "$repo" "$existing" "$title"
     say "pull request \"$title\" already exists as $repo#$existing"
     PR_MAP="$PR_MAP$num=$existing
 "

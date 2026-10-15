@@ -956,6 +956,20 @@ space, page comments by text — and the run ends with `done: created N,
 skipped M`. Re-running against a half-seeded instance finishes it; against a
 seeded one it creates nothing.
 
+## A seeded pull request that is no longer open (#884)
+
+`seed-gitea.sh` refuses when a pull request the fixture says is open ("SEPA
+retry with exponential backoff", "Add payout CSV export") is merged or closed
+on the server, and prints the remedy: Gitea on a fresh volume (`docker compose
+rm -sfv gitea`, remove the `gitea-data` volume, delete `seed-state.json`, seed
+again; `./reset` does the same for every product). A merged pull request whose
+head branch is gone cannot be reopened, and a replacement would invent history on
+`main`, so the seed does not repair it. The live suites only merge pull requests
+they opened on `knobas-` branches (audited in #884: every `MergePullRequest` site in
+`live_gitea.rs` and `start_work_live.rs` merges its own); what merged the original
+one on 2026-10-14 was not a suite. `testenv/gitea-pr-state-test.sh` (in `just
+witness-unit`) holds the rule to account.
+
 ## The capped-Gitea overlay
 
 `docker-compose.capped.yml` recreates the Gitea service with
