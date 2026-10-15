@@ -347,6 +347,7 @@ const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
+const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
@@ -716,6 +717,13 @@ const CASES: Case[] = [
             checkoutCommands: () => deferred([]),
             openCheckout: () => deferred(undefined),
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
+            visitEntity: () => deferred(null),
+            entityThread: () => deferred({ comments: [], changes: [], me: [] }),
+            createLink: () => new Promise(() => {}),
+            unlink: () => new Promise(() => {}),
+            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
+            search: () => new Promise(() => {}),
+            launcherHome: () => new Promise(() => {}),
           },
         },
       }),
@@ -749,6 +757,25 @@ const CASES: Case[] = [
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
     },
+  },
+  {
+    /** The Connections drawer (#820) registers a drawer layer while it is open. */
+    name: "TfConnections",
+    source: "lib/tf/job/TfConnections.svelte",
+    open: (target) => ({
+      app: mount(TfConnections, {
+        target,
+        props: {
+          jobKey: "PAY-231",
+          links: [],
+          proposals: [],
+          layers: createLayers(),
+          onclose: () => {},
+          onunlink: () => {},
+          onlinkto: () => {},
+        },
+      }),
+    }),
   },
   {
     /**

@@ -1,6 +1,6 @@
 /**
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
- * transitions, and the URL resolver.
+ * transitions, the conversation, and the URL resolver.
  */
 import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
@@ -230,10 +230,98 @@ function entityView(args: Record<string, unknown>) {
   return { sections };
 }
 
+/**
+ * The conversation (#819): prototype-6's PAY-231 thread, in its words, with
+ * its *today* and *yesterday* read off the clock the page runs on, so the card
+ * and the tab draw what the prototype draws on any day. Mentions are written
+ * `@mara`, the account `@me` resolves to under this fixture, where the
+ * prototype writes the display name. The prototype's pull-request events are
+ * left out: knobas knows only the moves it sent (`entity_thread`), and one of
+ * those stands in for *Mara moved this from To Do to In Progress*.
+ */
+const PEOPLE: Record<string, string> = {
+  ML: "Mara Lindqvist",
+  JB: "Jonas Becker",
+  PN: "Priya Nair",
+  TW: "Tomasz Wójcik",
+  LH: "Lena Hoffmann",
+};
+const PAY_231_THREAD: [string, string, string][] = [
+  ["LH", "2026-08-12 09:14", "Finance keeps chasing failed SEPA payouts by hand, about 30 a week. Can we retry the transient ones automatically?"],
+  ["PN", "2026-08-12 09:40", "Yes. @mara can you pick this up after PAY-219? Keep it to transient PSP errors only."],
+  ["ML", "2026-08-12 10:02", "Sure. Which codes count as transient? I only know 503."],
+  ["PN", "2026-08-12 10:30", "503 and TEMP_UNAVAILABLE. The PSP docs list RATE_LIMITED too, but they say not to retry that one automatically."],
+  ["TW", "2026-08-12 11:05", "If you retry, please don’t hammer the PSP. Last outage we got rate limited for an hour."],
+  ["ML", "2026-08-13 16:20", "Plan: exponential backoff, base 30 s, factor 2. Max attempts still open."],
+  ["LH", "2026-08-14 09:00", "Finance asks for at most 5 attempts. After that it should land in the manual review queue."],
+  ["JB", "2026-08-14 09:12", "5 attempts from base 30 s is about 15 min until the last one. Fine for the 13:00 batch?"],
+  ["LH", "2026-08-14 09:30", "Yes, the cutoff is 15:00."],
+  ["ML", "2026-08-18 09:06", "Starting. The design goes on the SEPA payout retry design page."],
+  ["PN", "2026-08-19 11:45", "Add jitter, otherwise all retries of a batch hit the PSP in the same second."],
+  ["ML", "2026-08-19 12:10", "Will do. ±20 %?"],
+  ["TW", "2026-08-20 08:50", "Staging PSP sandbox is flaky this week, don’t trust red integration tests blindly."],
+  ["PN", "yesterday 14:20", "Please make sure the backoff policy matches the design page. Finance wants max 5 attempts."],
+  ["LH", "yesterday 15:02", "@mara will the manual review queue get an SLA? Finance asked twice."],
+  ["ML", "yesterday 15:30", "Priya, can you decide the SLA? I’ll document it."],
+  ["ML", "yesterday 17:30", "First version pushed on feature/PAY-231-sepa-retry."],
+  ["JB", "today 09:35", "Left a comment on the PR about the jitter width."],
+  ["ML", "today 10:15", "Backoff + jitter implemented in a41f2c, integration test still red (#1187), investigating."],
+  ["TW", "today 12:45", "flows-stage is down since 12:40, so sandbox calls from stage time out right now. Looking into it."],
+];
+
+/** A prototype time (`today 09:35`, `yesterday 17:41`, `2026-08-12 09:14`) on the page's own clock. */
+function fixtureTime(said: string): string {
+  const [day, clock] = said.split(" ") as [string, string];
+  const [hours, minutes] = clock.split(":").map(Number) as [number, number];
+  let at: Date;
+  if (day === "today" || day === "yesterday") {
+    at = new Date();
+    if (day === "yesterday") at.setDate(at.getDate() - 1);
+  } else {
+    const [year, month, date] = day.split("-").map(Number) as [number, number, number];
+    at = new Date(year, month - 1, date);
+  }
+  at.setHours(hours, minutes, 0, 0);
+  return at.toISOString();
+}
+
+function entityThread(args: Record<string, unknown>) {
+  const id = String(args["entityId"] ?? "");
+  if (!CORPUS.some((candidate) => candidate.entity_id === id)) {
+    throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
+  }
+  if (id !== "mock:PAY-231") return { comments: [], changes: [], me: ["mara"] };
+  return {
+    comments: PAY_231_THREAD.map(([who, at, body]) => ({
+      author: PEOPLE[who] ?? who,
+      at: fixtureTime(at),
+      body,
+      mine: who === "ML",
+      mentions_me: /@mara(?![\p{L}\p{N}_.-])/u.test(body),
+    })),
+    changes: [{ at: fixtureTime("2026-08-18 09:05"), status: "In Progress" }],
+    me: ["mara"],
+  };
+}
+
+/**
+ * `visit_entity` (#819): the reader was last here at 09:00 today, as in
+ * prototype-6, on every open; the fixture records nothing.
+ */
+function visitEntity(args: Record<string, unknown>): string | null {
+  const id = String(args["entityId"] ?? "");
+  if (!CORPUS.some((candidate) => candidate.entity_id === id)) {
+    throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
+  }
+  return fixtureTime("today 09:00");
+}
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
     get_entity: (args) => getEntity(args),
+    entity_thread: (args) => entityThread(args),
+    visit_entity: (args) => visitEntity(args),
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
     resolve_url: (args) => resolveUrl(args),

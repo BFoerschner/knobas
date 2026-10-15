@@ -95,6 +95,13 @@ const JOB_PORTS: JobPorts = {
   checkoutCommands: () => Promise.resolve([]),
   openCheckout: () => Promise.resolve(),
   weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
+  visitEntity: () => Promise.resolve(null),
+  entityThread: () => Promise.resolve({ comments: [], changes: [], me: [] }),
+  createLink: () => Promise.reject(new Error("not in this suite")),
+  unlink: () => Promise.reject(new Error("not in this suite")),
+  roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
+  search: () => Promise.reject(new Error("not in this suite")),
+  launcherHome: () => Promise.reject(new Error("not in this suite")),
 };
 
 function start(

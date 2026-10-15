@@ -119,6 +119,8 @@ const NOT_WORK: &[&str] = &[
     "refused",
     "waiting",
     "unclaimed",
+    // Opening a job (#819, `crate::conversation`): looking, not working.
+    knobas_core::activity::VISITED,
 ];
 
 /// One thing knobas saw the reader do inside a draft's interval.

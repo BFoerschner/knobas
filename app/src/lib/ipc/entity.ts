@@ -2279,3 +2279,53 @@ export function captureContext(): Promise<CaptureContext> {
 export function revealNote(noteId: string): Promise<void> {
   return invoke<void>("reveal_note", { noteId });
 }
+
+/** One comment of a ticket's thread — `knobas_app::conversation::ThreadComment` (#819). */
+export interface ThreadComment {
+  /** The name a person reads (Jira's display name), else the account; `null` for nobody. */
+  author: string | null;
+  /** RFC 3339; `null` when the source's stamp is absent or unreadable. */
+  at: string | null;
+  /** The source's own text (Jira's wiki markup), drawn as text. */
+  body: string;
+  /** The reader wrote it. */
+  mine: boolean;
+  /** It names the reader: `@name` or Jira's `[~name]`, for an account `@me` resolves to. */
+  mentions_me: boolean;
+}
+
+/** A status move on the thread — `knobas_app::conversation::ThreadChange` (#819). */
+export interface ThreadChange {
+  at: string;
+  /** The status the ticket was moved to. */
+  status: string;
+}
+
+/** A ticket's thread — `knobas_app::conversation::Thread` (#819). */
+export interface Thread {
+  /** In the source's order, oldest first. */
+  comments: ThreadComment[];
+  /** The moves knobas delivered: status changes, which are never comments. */
+  changes: ThreadChange[];
+  /** The accounts `@me` resolves to, to mark `@name` in a body by. */
+  me: string[];
+}
+
+/**
+ * Record that the reader opened this ticket's job, and answer when they last
+ * did before now — `visit_entity` (#819, R-5.5). `null` on a first visit.
+ * Rejects with `invalid` for a non-id and `not_found` for an unknown entity.
+ */
+export function visitEntity(entityId: string): Promise<string | null> {
+  return invoke<string | null>("visit_entity", { entityId });
+}
+
+/**
+ * A ticket's thread — `entity_thread` (#819, R-5.2): its comments, each marked
+ * when it is the reader's or mentions them, and the status moves knobas sent.
+ * Rejects with `invalid` for a non-id and `not_found` for one the mirror does
+ * not hold.
+ */
+export function entityThread(entityId: string): Promise<Thread> {
+  return invoke<Thread>("entity_thread", { entityId });
+}

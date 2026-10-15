@@ -3,7 +3,7 @@
  */
 import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
-import { CORPUS } from "./corpus";
+import { CORPUS, FAKE_CONTEXTS } from "./corpus";
 
 /**
  * What a detection pass would propose over this corpus, in the detector's own
@@ -72,14 +72,18 @@ function linkEnd(entity_id: string): LinkEnd {
  * it is the number the tray's heading shows.
  */
 function roomSuggestions(args: Record<string, unknown>): SuggestionPage {
-  // The fixture has no link graph, so a stored context's room has nothing to
-  // propose -- the same answer `context_members` and `list_entities` give.
-  if (args["ctx"]) return { rows: [], total: 0, more: [] };
+  // A stored context's room proposes what touches its anchor (#820's drawer
+  // asks a ticket's): the fixture keeps no membership past the anchor, so the
+  // anchor is the whole of the room's scope here.
+  const ctx = typeof args["ctx"] === "string" ? args["ctx"] : null;
+  const anchor = ctx === null ? null : (FAKE_CONTEXTS.find((row) => row.id === ctx)?.anchor_id ?? "");
   const sources = (args["sources"] as string[] | undefined) ?? [];
   if (sources.length && !sources.includes("mock")) return { rows: [], total: 0, more: [] };
   const limit = Number(args["limit"] ?? 50);
 
-  const waiting = FAKE_SUGGESTIONS.filter((link) => !ANSWERED.has(link.id)).sort((a, b) =>
+  const waiting = FAKE_SUGGESTIONS.filter(
+    (link) => !ANSWERED.has(link.id) && (anchor === null || link.from_id === anchor || link.to_id === anchor),
+  ).sort((a, b) =>
     b.created_at.localeCompare(a.created_at),
   );
   const rows: SuggestionEntry[] = waiting
