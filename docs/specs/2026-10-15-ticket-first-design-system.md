@@ -125,3 +125,5 @@ These are engineering constraints the prototype doesn't have. Each UI ticket tha
 - **The new stylesheet is its own file.** It doesn't append to `app.css`, whose header asks later milestones to append. That rule was for extending the Signal design, and this one replaces it.
 - **Theme.** Today's app is dark only. The new shell follows the OS, and the theme toggle and *Settings → Appearance* (R-13a.8) override it through `data-theme` on the shell root, with the same three-way selector the prototype uses (OS dark unless `data-theme="light"`, or forced `data-theme="dark"`).
 - **Not a source.** Prototype-6 still contains the retired global map (`renderMap`, `renderGlobalMap` and its `.ma-*`, `.gm-*`, `.mn`, `.minsp` selectors). The job's Map tab is Dependencies only (D11/D12). Don't port those selectors.
+
+The conventions the first shell tickets settled (class prefix, fixtures, mounting, addresses) are in [ticket-first-shell-conventions](2026-10-15-ticket-first-shell-conventions.md).
