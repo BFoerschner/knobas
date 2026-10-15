@@ -8,6 +8,9 @@ license.workspace = true
 # Its contract source is the real pinned container in testenv/, not a mock.
 [dependencies]
 async-trait.workspace = true
+# A file commit's text goes to Gitea's contents API in base64, and a moved
+# file's comes back that way (#822). Already in the tree, at this version.
+base64 = "0.22"
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-http = { path = "../knobas-http" }

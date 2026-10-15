@@ -1,7 +1,8 @@
 //! The four writes M2 ratified for Gitea -- branch, pull request, comment,
 //! approval -- the merge the source views added (issue #667), the review a
 //! pull request's toolbar writes (issue #705) and the branch delete (issue
-//! #707), and a pull request's edit, close and reopen (issue #706).
+//! #707), a pull request's edit, close and reopen (issue #706), and a file
+//! commit through the contents API (issue #822).
 //!
 //! Deliberately free of [`WriteOp`], for the same reason the Jira adapter's is:
 //! knobas has one outbound write path, and
@@ -24,6 +25,7 @@
 //! | review | `POST /repos/{o}/{r}/pulls/{index}/reviews` | `{"event":…,"body":…,"comments":[…]}` |
 //! | branch delete | `DELETE /repos/{o}/{r}/branches/{name}` | none |
 //! | edit | `PATCH /repos/{o}/{r}/pulls/{index}` | only the given of `{"title":…,"body":…,"state":…}` |
+//! | file commit | `PUT /repos/{o}/{r}/contents/{path}` | `{"content":<base64>,"message":…,"branch":…,"sha":…}`, plus `"new_branch"` when set |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -32,6 +34,8 @@
 
 use std::time::Duration;
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as BASE64;
 use serde_json::json;
 
 use knobas_source::{
@@ -447,6 +451,144 @@ pub(crate) async fn edit_pull_request(
         .patch(&path, &serde_json::Value::Object(fields))
         .await
         .map(|_| ())
+}
+
+// -- commit_file (issue #822) ------------------------------------------------
+
+/// What a commit reads of the branch it would land on: whether it is
+/// protected, and whether this token may push to it anyway.
+#[derive(serde::Deserialize)]
+struct PushGuard {
+    #[serde(default)]
+    protected: bool,
+    #[serde(default = "pushable")]
+    user_can_push: bool,
+}
+
+/// An answer that does not say is not read as a refusal: Gitea's own 403 is
+/// the backstop.
+fn pushable() -> bool {
+    true
+}
+
+/// One file as the contents API answers it: its blob and its text.
+#[derive(serde::Deserialize)]
+struct FileAt {
+    sha: String,
+    #[serde(default)]
+    content: Option<String>,
+}
+
+/// What one file commit says (#822), as the source's match unpacks it.
+pub(crate) struct Commit<'a> {
+    pub(crate) branch: &'a str,
+    pub(crate) new_branch: Option<&'a str>,
+    pub(crate) path: &'a str,
+    pub(crate) content: &'a str,
+    pub(crate) message: &'a str,
+    pub(crate) base_sha: &'a str,
+}
+
+/// Commit one file's new text to `branch`, or to `new_branch` made from it
+/// (spec #808 D4, R-8.6): Gitea's `PUT /repos/{o}/{r}/contents/{path}`, the
+/// text in base64 and `base_sha` as its `sha`, and the commit it made as the
+/// receipt's id. The checkout is never written to.
+///
+/// **The race is Gitea's to see.** It compares `sha` with the blob `branch`
+/// holds and answers a stale one 422 (*sha does not match*, measured on
+/// 1.27.3). On a 422 the file is read again on `branch`, and a blob other than
+/// `base_sha` comes back as [`SourceError::Moved`] with that blob and its
+/// text: the write queue holds it with both versions. A 422 over a file that
+/// did not move (a new branch that already exists) stays Gitea's refusal, so
+/// the reading does not rest on the sentence.
+///
+/// A commit straight onto a **protected** branch this token may not push to is
+/// refused here, before the request, saying what to do instead: Gitea's own
+/// 403 says only *user cannot commit to repo*. A commit to a new branch reads
+/// no protection, since nothing lands on `branch`. A file that is not on
+/// `branch` (404) or a branch that is not (404) is Gitea's refusal, never a
+/// create.
+///
+/// # Errors
+///
+/// [`SourceError::Moved`] as above; [`SourceError::Protocol`] for a protected
+/// branch, an empty branch name or a path that is not one; otherwise whatever
+/// the request maps to.
+pub(crate) async fn commit_file(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    commit: &Commit<'_>,
+) -> Result<Option<String>, SourceError> {
+    if commit.branch.is_empty() || commit.new_branch.is_some_and(str::is_empty) {
+        return Err(SourceError::protocol(format!(
+            "gitea: a commit to {owner}/{repo} names no branch"
+        )));
+    }
+    // Before any request, the read of the branch included: an empty path is
+    // the repository's top directory to the contents API, and the request
+    // path's own escaping refuses the rest only once it is built.
+    let unusable = |segment: &str| {
+        segment.is_empty()
+            || segment == "."
+            || segment == ".."
+            || segment.contains(char::is_control)
+    };
+    if commit.path.split('/').any(unusable) {
+        return Err(SourceError::protocol(format!(
+            "gitea: {:?} is not a file path in {owner}/{repo}",
+            commit.path
+        )));
+    }
+    if commit.new_branch.is_none() {
+        let guard = client
+            .branch_as::<PushGuard>(owner, repo, commit.branch)
+            .await?;
+        if guard.protected && !guard.user_can_push {
+            return Err(SourceError::protocol(format!(
+                "gitea: {:?} is a protected branch of {owner}/{repo} that this account may not \
+                 push to; commit to a new branch and open a pull request instead",
+                commit.branch
+            )));
+        }
+    }
+    let mut body = json!({
+        "content": BASE64.encode(commit.content.as_bytes()),
+        "message": commit.message,
+        "branch": commit.branch,
+        "sha": commit.base_sha,
+    });
+    if let Some(new_branch) = commit.new_branch {
+        body["new_branch"] = json!(new_branch);
+    }
+    match client.put_contents(owner, repo, commit.path, &body).await {
+        Ok(response) => {
+            let answer: serde_json::Value = response.json().await.unwrap_or_default();
+            Ok(answer["commit"]["sha"].as_str().map(ToOwned::to_owned))
+        }
+        Err(error) if error.status() == Some(422) => {
+            let now = client
+                .contents_entry_as::<FileAt>(owner, repo, commit.path, commit.branch)
+                .await?;
+            if now.sha == commit.base_sha {
+                return Err(error);
+            }
+            Err(SourceError::Moved {
+                current: decoded(now.content.as_deref().unwrap_or_default()),
+                base: now.sha,
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// The text of a contents answer's base64 `content`, which Gitea may wrap.
+/// Bytes that are not UTF-8 are shown replaced rather than refused: the reader
+/// is being asked to compare, and an approximate other side beats none.
+fn decoded(content: &str) -> String {
+    let packed: String = content.split_whitespace().collect();
+    let bytes = BASE64.decode(packed).unwrap_or_default();
+    String::from_utf8_lossy(&bytes).into_owned()
 }
 
 #[cfg(test)]

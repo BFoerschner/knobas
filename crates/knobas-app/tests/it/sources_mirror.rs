@@ -710,6 +710,15 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             body: None,
             state: Some(knobas_source::PullRequestState::Closed),
         },
+        knobas_source::WriteOp::CommitFile {
+            repo: "gitea:tidewater/payout-service".to_owned(),
+            branch: "main".to_owned(),
+            new_branch: Some("feature/PAY-231-retry-doc".to_owned()),
+            path: "docs/retry.md".to_owned(),
+            content: "Three times.\n".to_owned(),
+            message: "PAY-231: say how often".to_owned(),
+            base_sha: "986f74b7".to_owned(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -734,6 +743,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::DeleteBranch { .. } => "DeleteBranch",
             knobas_source::WriteOp::EditPullRequest { .. } => "EditPullRequest",
             knobas_source::WriteOp::UpdatePullRequestBranch { .. } => "UpdatePullRequestBranch",
+            knobas_source::WriteOp::CommitFile { .. } => "CommitFile",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

@@ -78,6 +78,11 @@ struct Fake {
     /// while the call is outstanding by construction rather than by luck, so
     /// the settle that follows finds no open row every time this test runs.
     interrupt: Arc<Mutex<Option<Interrupt>>>,
+    /// The version of a file the source holds, where a test says it holds
+    /// one (#822): a `commit_file` made against any other comes back
+    /// [`SourceError::Moved`] with this version and its text, as Gitea's
+    /// `sha` check answers a stale base.
+    file_at: Arc<Mutex<Option<String>>>,
     /// The pool the withdrawal above goes through. The fake reaches the store
     /// directly rather than the flusher, which would need the `SchedulerDeps`
     /// that holds this fake.
@@ -118,6 +123,15 @@ impl Source for Fake {
     }
 
     async fn write(&self, op: WriteOp) -> Result<knobas_source::WriteReceipt, SourceError> {
+        let held = self.file_at.lock().unwrap().clone();
+        if let (Some(theirs), WriteOp::CommitFile { base_sha, .. }) = (held, &op)
+            && theirs != *base_sha
+        {
+            return Err(SourceError::Moved {
+                current: format!("theirs at {theirs}\n"),
+                base: theirs,
+            });
+        }
         let answer = *self.answer.lock().unwrap();
         let dwell = *self.dwell.lock().unwrap();
         if !dwell.is_zero() {
@@ -171,6 +185,7 @@ struct FakeRegistry {
     dwell: Arc<Mutex<std::time::Duration>>,
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
+    file_at: Arc<Mutex<Option<String>>>,
     pool: sqlx::PgPool,
 }
 
@@ -187,6 +202,7 @@ impl AdapterRegistry for FakeRegistry {
             dwell: Arc::clone(&self.dwell),
             receipt: Arc::clone(&self.receipt),
             interrupt: Arc::clone(&self.interrupt),
+            file_at: Arc::clone(&self.file_at),
             pool: self.pool.clone(),
         }))
     }
@@ -261,6 +277,7 @@ struct Harness {
     dwell: Arc<Mutex<std::time::Duration>>,
     receipt: Arc<Mutex<Option<String>>>,
     interrupt: Arc<Mutex<Option<Interrupt>>>,
+    file_at: Arc<Mutex<Option<String>>>,
     source: String,
 }
 
@@ -301,6 +318,12 @@ impl Harness {
                     .clone()
                     .or_else(|| state.map(|s| s.as_str().to_owned()))
                     .unwrap_or_default(),
+                // A file commit by the version it was sent against and what it
+                // says, so a re-based send reads differently from the first
+                // (#822).
+                WriteOp::CommitFile {
+                    base_sha, content, ..
+                } => format!("{base_sha}: {content}"),
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -496,6 +519,36 @@ impl Harness {
         .unwrap()
     }
 
+    /// Say which version of a file the source holds now (#822).
+    fn file_at(&self, version: &str) {
+        *self.file_at.lock().unwrap() = Some(version.to_owned());
+    }
+
+    /// Queue a commit of `content` to `docs/retry.md` in `repo`, made against
+    /// the file at `base_sha`.
+    async fn commit_file(
+        &self,
+        repo: &EntityRef,
+        base_sha: &str,
+        content: &str,
+    ) -> store::QueuedWrite {
+        flusher::submit(
+            &self.deps,
+            &self.source,
+            WriteOp::CommitFile {
+                repo: repo.to_string(),
+                branch: "main".to_owned(),
+                new_branch: None,
+                path: "docs/retry.md".to_owned(),
+                content: content.to_owned(),
+                message: "PAY-231: say how often".to_owned(),
+                base_sha: base_sha.to_owned(),
+            },
+        )
+        .await
+        .unwrap()
+    }
+
     async fn reload(&self, id: i64) -> store::QueuedWrite {
         store::get(self.pool(), id).await.unwrap().unwrap()
     }
@@ -537,6 +590,7 @@ async fn harness() -> Harness {
     let dwell = Arc::new(Mutex::new(std::time::Duration::ZERO));
     let receipt = Arc::new(Mutex::new(None));
     let interrupt = Arc::new(Mutex::new(None));
+    let file_at = Arc::new(Mutex::new(None));
     let events = Arc::new(Recorder::default());
     Harness {
         deps: SchedulerDeps {
@@ -548,6 +602,7 @@ async fn harness() -> Harness {
                 dwell: Arc::clone(&dwell),
                 receipt: Arc::clone(&receipt),
                 interrupt: Arc::clone(&interrupt),
+                file_at: Arc::clone(&file_at),
                 pool,
             }),
             secrets: Arc::new(secrets),
@@ -560,6 +615,7 @@ async fn harness() -> Harness {
         dwell,
         receipt,
         interrupt,
+        file_at,
         source,
     }
 }
@@ -1044,6 +1100,59 @@ async fn an_edited_held_write_sends_what_the_user_wrote() {
     assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
 
+/// Story 93 of spec #808 (issue #822): a commit that lost a race -- the file
+/// changed at the source since it was read -- is a **held** write carrying
+/// both versions, never a refusal and never an overwrite. The reader's is the
+/// payload, theirs the held snapshot, with the version the source holds now.
+/// Nothing sends it until the reader acts; *Apply anyway* sends it again
+/// against **their** version, which the source then takes; and a file that
+/// moved again after the reader looked holds it again.
+#[tokio::test]
+async fn a_commit_over_a_file_that_moved_is_held_with_both_versions() {
+    let h = harness().await;
+    let repo = EntityRef::new(&h.source, "tidewater/payout-service");
+    h.file_at("b2");
+
+    let write = h.commit_file(&repo, "b1", "mine\n").await;
+    let held = h.reload(write.id).await;
+    assert_eq!(held.state, WriteState::Held, "{held:?}");
+    let theirs = held.held_snapshot.clone().expect("the held side");
+    assert_eq!(theirs["text"], "theirs at b2\n");
+    assert_eq!(theirs["base"], "b2");
+    assert_eq!(held.payload["CommitFile"]["content"], "mine\n");
+    assert_eq!(held.payload["CommitFile"]["base_sha"], "b1");
+    assert!(h.verbs().contains(&"held".to_owned()));
+    assert!(!h.verbs().contains(&"refused".to_owned()));
+
+    for _ in 0..2 {
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    }
+    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+    assert!(
+        h.delivered().is_empty(),
+        "a held write waits for the reader"
+    );
+
+    // Somebody commits again before the reader decides: what they consent to
+    // overwrite is what they saw, so the send against b2 is held on b3.
+    h.file_at("b3");
+    flusher::apply_anyway(&h.deps, write.id)
+        .await
+        .unwrap()
+        .unwrap();
+    let again = h.reload(write.id).await;
+    assert_eq!(again.state, WriteState::Held);
+    assert_eq!(again.payload["CommitFile"]["base_sha"], "b2");
+    assert_eq!(again.held_snapshot.as_ref().unwrap()["base"], "b3");
+
+    flusher::apply_anyway(&h.deps, write.id)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(h.delivered(), vec!["b3: mine\n".to_owned()]);
+}
+
 /// A source with no stored credential cannot take a write, and that is a
 /// *waiting* fault rather than a lost edit -- entering the credential is what
 /// releases it.
@@ -1149,6 +1258,15 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::UpdateStyle::Merge,
         },
+        WriteOp::CommitFile {
+            repo: "gitea:tidewater/payout-service".to_owned(),
+            branch: "main".to_owned(),
+            new_branch: Some("feature/PAY-231-retry-doc".to_owned()),
+            path: "docs/retry.md".to_owned(),
+            content: "Three times.\n".to_owned(),
+            message: "PAY-231: say how often".to_owned(),
+            base_sha: "986f74b7".to_owned(),
+        },
         WriteOp::SetParameter {
             entity: "teamcity:buildType:Payout_Build".to_owned(),
             name: "env.SEPA_RETRIES".to_owned(),
@@ -1214,7 +1332,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::SubmitReview { .. }
             | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
-            | WriteOp::UpdatePullRequestBranch { .. } => op.identifier(),
+            | WriteOp::UpdatePullRequestBranch { .. }
+            | WriteOp::CommitFile { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1431,6 +1550,11 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // what is left is that head, up to date with its base, which the
             // next sync reads back (#708). Nothing new exists to claim.
             | WriteOp::UpdatePullRequestBranch { .. }
+            // A commit lands on a branch the withdrawn row names, at a path it
+            // names (#822): the next sync reads the branch's tip back, and the
+            // row is the address to look at -- `create_branch`'s reading, not
+            // `create_ticket`'s. A new branch is named in the row too.
+            | WriteOp::CommitFile { .. }
             // A parameter set changes a value on a configuration the mirror
             // holds: what is left is that value, at the source, and nothing
             // new exists that knobas cannot name.

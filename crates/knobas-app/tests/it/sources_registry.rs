@@ -178,7 +178,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // workstation's too (#707), on a branch's; `edit_pull_request` the
             // pull request's edit, close and reopen (#706);
             // `update_pull_request_branch` the landing's (#708), *Update
-            // branch…* on a pull request whose head is behind its base.
+            // branch…* on a pull request whose head is behind its base;
+            // `commit_file` the ticket-first redesign's (#822), *Commit
+            // change…* on a file, through Gitea and never the checkout.
             vec![
                 "create_branch",
                 "create_pull_request",
@@ -189,6 +191,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "delete_branch",
                 "edit_pull_request",
                 "update_pull_request_branch",
+                "commit_file",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,

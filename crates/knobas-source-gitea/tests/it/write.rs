@@ -1041,3 +1041,265 @@ async fn an_edit_aimed_at_a_repository_is_refused_before_a_request() {
     );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
+
+// -- commit_file (issue #822) -------------------------------------------------
+
+/// The blob the tests' file is at when it was read, and the one somebody
+/// else's commit left it at.
+const READ_AT: &str = "986f74b729a686f111e61e07635d01e9bf265198";
+const MOVED_TO: &str = "da0c4eb8d9a48d171a33574b380752e183286751";
+
+/// A Gitea holding `main` (protected or not, and whether this token may push
+/// to it all the same) and `docs/retry.md` on it at `at`, whose contents `PUT`
+/// answers `put_status` -- 200 with the commit it made, or Gitea's sentence.
+async fn holding_file(protected: bool, at: &str, put_status: u16, said: &str) -> MockServer {
+    let server = MockServer::start().await;
+    let token = format!("token {TOKEN}");
+    Mock::given(method("GET"))
+        .and(path("/api/v1/repos/tidewater/payout-service/branches/main"))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "main",
+            "protected": protected,
+            "user_can_push": !protected,
+            "commit": { "id": "c90d11aa" }
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/contents/docs/retry.md",
+        ))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "retry.md", "path": "docs/retry.md", "type": "file", "sha": at,
+            "encoding": "base64",
+            // "Retry twice.\n" -- what somebody else committed, wrapped the
+            // way a long base64 body may be.
+            "content": "UmV0cnkg\ndHdpY2UuCg=="
+        })))
+        .mount(&server)
+        .await;
+    let answer = if put_status == 200 {
+        ResponseTemplate::new(200).set_body_json(json!({
+            "content": { "path": "docs/retry.md", "sha": "0e1d2c" },
+            "commit": { "sha": "657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d" }
+        }))
+    } else {
+        ResponseTemplate::new(put_status).set_body_json(json!({
+            "message": said, "url": "https://gitea.example/api/swagger"
+        }))
+    };
+    Mock::given(method("PUT"))
+        .and(path(
+            "/api/v1/repos/tidewater/payout-service/contents/docs/retry.md",
+        ))
+        .and(header("Authorization", token.as_str()))
+        .respond_with(answer)
+        .mount(&server)
+        .await;
+    server
+}
+
+fn commit_file(new_branch: Option<&str>) -> WriteOp {
+    WriteOp::CommitFile {
+        repo: "gitea:tidewater/payout-service".to_owned(),
+        branch: "main".to_owned(),
+        new_branch: new_branch.map(str::to_owned),
+        path: "docs/retry.md".to_owned(),
+        content: "Retry three times.\n".to_owned(),
+        message: "PAY-231: say how often a payout is retried".to_owned(),
+        base_sha: READ_AT.to_owned(),
+    }
+}
+
+/// The `PUT`s the fake was sent, as `(path, body)`.
+async fn puts(server: &MockServer) -> Vec<(String, Value)> {
+    server
+        .received_requests()
+        .await
+        .expect("the mock server records requests")
+        .iter()
+        .filter(|r| r.method.as_str() == "PUT")
+        .map(|r| (r.url.path().to_owned(), r.body_json().expect("a JSON body")))
+        .collect()
+}
+
+/// R-8.6 (#822): an edit is one `PUT /repos/{o}/{r}/contents/{path}` carrying
+/// the whole new text in base64, the message, the branch, and the blob the
+/// edit was made against as Gitea's `sha` -- the check that makes a race a
+/// hold rather than an overwrite. The receipt names the commit Gitea made.
+#[tokio::test]
+async fn a_file_is_committed_through_the_contents_api_against_the_blob_it_was_read_at() {
+    let server = holding_file(false, READ_AT, 200, "").await;
+    let receipt = source(&server)
+        .write(commit_file(None))
+        .await
+        .expect("a declared op is performed");
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        Some("657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d")
+    );
+    assert_eq!(
+        puts(&server).await,
+        vec![(
+            "/api/v1/repos/tidewater/payout-service/contents/docs/retry.md".to_owned(),
+            json!({
+                // "Retry three times.\n"
+                "content": "UmV0cnkgdGhyZWUgdGltZXMuCg==",
+                "message": "PAY-231: say how often a payout is retried",
+                "branch": "main",
+                "sha": READ_AT
+            })
+        )]
+    );
+}
+
+/// *Commit to a new branch*: Gitea's own `new_branch` makes the branch from
+/// `branch` and commits there, in the one request. The base branch's
+/// protection is no reason to refuse it -- nothing lands on `main` -- so it
+/// is not even read.
+#[tokio::test]
+async fn a_commit_to_a_new_branch_names_it_and_minds_no_protection_on_the_base() {
+    let server = holding_file(true, READ_AT, 200, "").await;
+    source(&server)
+        .write(commit_file(Some("feature/PAY-231-retry-doc")))
+        .await
+        .expect("a new branch off a protected one is fine");
+    let sent = puts(&server).await;
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1["new_branch"], "feature/PAY-231-retry-doc");
+    assert_eq!(sent[0].1["branch"], "main");
+    let read_branch = server
+        .received_requests()
+        .await
+        .unwrap()
+        .iter()
+        .any(|r| r.url.path().ends_with("/branches/main"));
+    assert!(!read_branch, "a new branch's commit reads no protection");
+}
+
+/// A protected branch this token may not push to is refused before the
+/// commit, saying why and what to do instead: Gitea's own 403 says only
+/// *user cannot commit to repo* (measured on 1.27.3).
+#[tokio::test]
+async fn a_commit_to_a_protected_branch_is_refused_with_the_reason() {
+    let server = holding_file(true, READ_AT, 200, "").await;
+    let error = source(&server)
+        .write(commit_file(None))
+        .await
+        .expect_err("a protected branch takes no commit");
+    assert!(
+        matches!(&error, SourceError::Protocol { status: None, message }
+            if message.contains("protected") && message.contains("new branch")),
+        "{error:?}"
+    );
+    assert!(puts(&server).await.is_empty());
+}
+
+/// Story 93 (#822): the file changed since it was read. Gitea answers the
+/// stale `sha` with a 422; the adapter reads the file as `branch` holds it now
+/// and answers [`SourceError::Moved`] with that blob and its text, which the
+/// queue holds with the reader's own beside it.
+#[tokio::test]
+async fn a_stale_base_comes_back_moved_with_what_gitea_holds_now() {
+    let server = holding_file(
+        false,
+        MOVED_TO,
+        422,
+        &format!("sha does not match [given: {READ_AT}, expected: {MOVED_TO}]"),
+    )
+    .await;
+    let error = source(&server)
+        .write(commit_file(None))
+        .await
+        .expect_err("a moved file is not overwritten");
+    assert!(
+        matches!(&error, SourceError::Moved { base, current }
+            if base == MOVED_TO && current == "Retry twice.\n"),
+        "{error:?}"
+    );
+}
+
+/// A 422 that is not about the file -- here the new branch already exists --
+/// stays Gitea's refusal: the file still reads at the blob the edit was made
+/// against, so nothing moved.
+#[tokio::test]
+async fn a_422_over_a_file_that_did_not_move_is_a_refusal() {
+    let server = holding_file(
+        false,
+        READ_AT,
+        422,
+        "branch already exists [name: feature/PAY-231-retry-doc]",
+    )
+    .await;
+    let error = source(&server)
+        .write(commit_file(Some("feature/PAY-231-retry-doc")))
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(422), "{error:?}");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. } if message.contains("branch already exists")),
+        "{error:?}"
+    );
+}
+
+/// A commit goes into a **repository**: a pull request's or a branch's id is
+/// refused before a request leaves, and so is a path that could leave the
+/// route it is put in.
+#[tokio::test]
+async fn a_commit_aimed_at_anything_but_a_repository_is_refused_before_a_request() {
+    let server = refusing(500, "must not be reached").await;
+    for repo in [
+        "gitea:tidewater/payout-service#142",
+        "gitea:tidewater/payout-service@refs/heads/main",
+    ] {
+        let WriteOp::CommitFile {
+            branch,
+            new_branch,
+            path,
+            content,
+            message,
+            base_sha,
+            ..
+        } = commit_file(None)
+        else {
+            unreachable!()
+        };
+        let error = source(&server)
+            .write(WriteOp::CommitFile {
+                repo: repo.to_owned(),
+                branch,
+                new_branch,
+                path,
+                content,
+                message,
+                base_sha,
+            })
+            .await
+            .expect_err("only a repository takes a commit");
+        assert!(
+            matches!(&error, SourceError::Protocol { status: None, message } if message.contains("not a repository")),
+            "{repo}: {error:?}"
+        );
+    }
+    for path in ["../etc/passwd", "docs//retry.md", ""] {
+        let error = source(&server)
+            .write(WriteOp::CommitFile {
+                repo: "gitea:tidewater/payout-service".to_owned(),
+                branch: "main".to_owned(),
+                new_branch: Some("x".to_owned()),
+                path: path.to_owned(),
+                content: "c".to_owned(),
+                message: "m".to_owned(),
+                base_sha: READ_AT.to_owned(),
+            })
+            .await
+            .expect_err("not a usable path");
+        assert!(
+            matches!(&error, SourceError::Protocol { status: None, .. }),
+            "{path:?}: {error:?}"
+        );
+    }
+    assert!(server.received_requests().await.unwrap().is_empty());
+}

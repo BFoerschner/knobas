@@ -91,6 +91,10 @@ impl IpcError {
             SourceError::Unauthorized { .. } => IpcErrorCode::Unauthorized,
             SourceError::Unreachable(_) => IpcErrorCode::Unreachable,
             SourceError::Protocol { .. } | SourceError::Sink(_) => IpcErrorCode::Internal,
+            // A write over a target that moved (#822): the queue holds it, so
+            // this arm is reached only if a caller ever surfaces the fault
+            // itself, and then it is what `Conflict` means.
+            SourceError::Moved { .. } => IpcErrorCode::Conflict,
         };
         let mut mapped = Self::new(code, error);
         mapped.source_id = source_id.map(ToOwned::to_owned);
