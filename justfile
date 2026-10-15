@@ -19,15 +19,16 @@
 # Each half writes to a per-invocation `mktemp` file (the inventory recipe
 # below says why a shared path is not an option on a machine with several
 # worktrees on it). A half that passes is reported as its summary; a half
-# that fails is reported as its captured output in full, and both are when
-# both fail -- running them together must not cost a signal the serial run
-# had. Neither half is cut short by the other failing, for the same reason,
-# and the exit status is non-zero if either half's was. `front` still goes
+# that fails is reported as its captured output in full, and every one that
+# fails is -- running them together must not cost a signal the serial run
+# had. No half is cut short by another failing, for the same reason, and the
+# exit status is non-zero if any half's was. (Since #920 there are three: the
+# script checks run as a half of their own.) `front` still goes
 # through `deps`: a missing `app/node_modules` is installed, and if that
 # cannot happen the frontend half is a red, not a skip.
 #
 # The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
-# left of both halves and remove the scratch files before re-raising, so a
+# left of every half and remove the scratch files before re-raising, so a
 # cancelled gate leaves no cargo or vitest running under nobody and nothing in
 # `$TMPDIR`. The kill is explicit because the halves cannot be relied on to
 # get the signal themselves. Without job control, bash starts a `&` job with
@@ -53,8 +54,12 @@ check:
     set -euo pipefail
     # A stale section 10.8 index fails the gate before anything slow runs (#737).
     python3 -I scripts/contract-index.py --check
-    front_log= cargo_log= front_pid= cargo_pid=
-    cargo_recipes=(fmt shell test-layout witness-unit clippy clippy-libs inventory test)
+    front_log= scripts_log= cargo_log= front_pid= scripts_pid= cargo_pid=
+    # The script checks are a half of their own (#920): none of them runs
+    # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
+    # quiet, 2026-10-15) were paid in full ahead of `clippy`.
+    script_recipes=(shell test-layout witness-unit)
+    cargo_recipes=(fmt clippy clippy-libs inventory test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -62,31 +67,41 @@ check:
     }
     stop_halves() {
         local p pids=
-        for p in $front_pid $cargo_pid; do pids="$pids $(descendants "$p")"; done
+        for p in $front_pid $scripts_pid $cargo_pid; do pids="$pids $(descendants "$p")"; done
         [ -z "${pids// /}" ] || kill -TERM $pids 2>/dev/null || true
         wait
     }
-    cleanup() { rm -f "$front_log" "$cargo_log"; }
+    cleanup() { rm -f "$front_log" "$scripts_log" "$cargo_log"; }
     # Traps first, so a second `mktemp` failing cannot leave the first behind.
     trap 'cleanup' EXIT
     trap 'stop_halves; cleanup; trap - INT; kill -INT $$' INT
     trap 'stop_halves; cleanup; trap - TERM; kill -TERM $$' TERM
     front_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-front.XXXXXX")
+    scripts_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-scripts.XXXXXX")
     cargo_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-cargo.XXXXXX")
 
-    # Starts `just RECIPE...` in the background with everything it prints in
-    # LOG, ending with the half's own exit status and wall time; the caller
-    # takes the pid from `$!`.
+    # Starts the recipes in the background, one `just` each, with
+    # everything they print in LOG; the caller takes the pid from `$!`. Each
+    # recipe's wall time is a line of its own (`step: <recipe> N s`, #920),
+    # the chain stops at its first red as `just A B C` does, and the last line
+    # is the half's own exit status and wall time.
     run_half() {
         local name=$1 log=$2
         shift 2
-        ( SECONDS=0; status=0; just "$@" || status=$?
+        ( SECONDS=0; status=0
+          for r in "$@"; do
+              start=$SECONDS
+              just "$r" || status=$?
+              echo "step: $r $((SECONDS - start)) s"
+              [ "$status" -eq 0 ] || break
+          done
           echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
     }
 
-    echo "check: running 'front' beside '${cargo_recipes[*]}';"
+    echo "check: running 'front' and '${script_recipes[*]}' beside '${cargo_recipes[*]}';"
     echo "check: each half's output is captured and reported when it finishes."
     run_half front "$front_log" front; front_pid=$!
+    run_half scripts "$scripts_log" "${script_recipes[@]}"; scripts_pid=$!
     run_half cargo "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
 
     # A passing half is one line of status plus the lines a reader would look
@@ -108,11 +123,16 @@ check:
             echo "check: $(tail -n 1 "$log")"
             case $name in
                 front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
+                scripts) awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log" ;;
                 cargo) awk '/^test: (ok|FAILED)  / { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
                              if ($(i+1) == "ignored;") g += $i } }
-                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
+                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log"
+                       # Where the half's time went (#920): each recipe's
+                       # wall time, `test`'s build and run, its slowest binaries.
+                       awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log"
+                       { grep -E '^test: (build|run) |^test: slowest|^  +[0-9.]+ s ' "$log" || true; } | sed 's/^/  /' ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
@@ -127,12 +147,15 @@ check:
     front_status=0; wait "$front_pid" || front_status=$?
     front_pid=
     report front "$front_log" "$front_status"
+    scripts_status=0; wait "$scripts_pid" || scripts_status=$?
+    scripts_pid=
+    report scripts "$scripts_log" "$scripts_status"
     cargo_status=0; wait "$cargo_pid" || cargo_status=$?
     cargo_pid=
     report cargo "$cargo_log" "$cargo_status"
 
-    if [ "$front_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
-        echo "check: FAILED (front exit $front_status, cargo exit $cargo_status)" >&2
+    if [ "$front_status" -ne 0 ] || [ "$scripts_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
+        echo "check: FAILED (front exit $front_status, scripts exit $scripts_status, cargo exit $cargo_status)" >&2
         exit 1
     fi
     echo "check: ok in ${SECONDS} s"
@@ -141,10 +164,65 @@ check:
 # with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
 # `crates/` reads what changed, so the cargo half would run the tree main
 # already passed. Ruling: Björn, 2026-10-15.
-check-front:
+#
+# Its vitest run is the tests the change can reach, not the whole suite
+# (#920): `front-changed` below. `check` still runs every test.
+check-front base="origin/main":
     python3 -I scripts/contract-index.py --check
-    just front
+    just front-changed "{{base}}"
     @echo "check-front: ok"
+
+# `front` with vitest narrowed to what a change since BASE can reach (#920).
+# svelte-check and `vite build` stay whole: together under 10 s, and a type
+# error can surface in a file nothing imports from the change.
+#
+# Vitest runs `vitest related` over the changed `app/src` files -- every test
+# file whose import graph reaches one, and every changed test file -- plus
+# every test that reads source files off disk (`readFileSync`, `readdirSync`,
+# `import.meta.glob`, `?raw`: the a11y, residue, house-rules and CSS guards
+# and their kind). Those see the tree through `fs`, not through imports, so
+# the graph cannot say when one is reached; they are found by that grep on
+# every run, so a new guard is included without a list to keep. The whole
+# suite runs instead when anything changed in `app/` outside `app/src`
+# (config, `package.json`, the lockfile), when the test setup file changed
+# (every test runs it, none imports it), or when an `app/src` file was
+# deleted or renamed (a test that still imports it is reached by nothing).
+#
+# What it stops covering: a test that depends on a changed file other than
+# by import or by reading files -- through a global a changed module sets up
+# at import time in some other test's graph, say. None is known (2026-10-15).
+# `check` runs every test, so the full gate still sees one.
+front-changed base="origin/main": deps
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mb=$(git merge-base "{{base}}" HEAD)
+    cd app
+    npx svelte-check --tsconfig ./tsconfig.json
+    # Captured before the loop, not read from a process substitution, so a
+    # failing git stops the recipe instead of leaving `changed` empty.
+    # Untracked files count as added (`A`).
+    diff=$(git diff --name-status "$mb" -- .)
+    untracked=$(git ls-files --others --exclude-standard --full-name -- . | awk '{ print "A\t" $0 }')
+    all=
+    changed=()
+    while IFS=$'\t' read -r st f _; do
+        [ -n "$f" ] || continue
+        case $f in app/src/*) ;; app/*) all="$f is outside app/src" ;; *) continue ;; esac
+        case $st in D*|R*) all="$f was deleted or renamed" ;; esac
+        [ "$f" != app/src/lib/shell/test-setup.ts ] || all="the test setup file changed"
+        changed+=("${f#app/}")
+    done <<< "$diff"$'\n'"$untracked"
+    guards=()
+    while IFS= read -r f; do guards+=("$f"); done \
+      < <(grep -rlE 'readFileSync|readdirSync|import\.meta\.glob|\?raw' src | grep -E '\.test\.(svelte\.)?ts$' | sort)
+    if [ -n "$all" ] || [ ${#guards[@]} -eq 0 ]; then
+        echo "front-changed: the whole vitest suite: ${all:-no fs-reading guard tests found}"
+        npx vitest run
+    else
+        echo "front-changed: vitest related to ${#changed[@]} changed files, plus ${#guards[@]} fs-reading guard tests"
+        npx vitest related --run ${changed[@]+"${changed[@]}"} "${guards[@]}"
+    fi
+    npm run build
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
 # `just shot 3 shots time job/PAY-231`. See scripts/shot.sh for query parameters, size and the rooms UI.
@@ -158,7 +236,7 @@ gate base="origin/main":
     set -euo pipefail
     scope=$(scripts/gate-scope.sh "{{base}}")
     echo "gate: $scope"
-    if [ "$scope" = front ]; then just check-front; else just check; fi
+    if [ "$scope" = front ]; then just check-front "{{base}}"; else just check; fi
 
 # The test inventory: every test this workspace defines, by name, committed.
 #
@@ -648,7 +726,9 @@ test:
     hold_gate_slot test
 
     gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    build_start=$SECONDS
     just _test-executables > "$gate/executables"
+    echo "test: build $((SECONDS - build_start)) s"
     awk -F'\t' '$1 == "test"' "$gate/executables" > "$gate/tests"
     server=$(awk -F'\t' '$1 == "server" { print $4 }' "$gate/executables")
     count=$(wc -l < "$gate/tests" | tr -d ' ')
@@ -697,6 +777,13 @@ test:
     # 400 (82 client backends at N=6 on 2026-09-05, when the pool was 112
     # binaries; N=12 peaked at 143 then).
     #
+    # Re-measured 2026-10-15 (#920), whole `just check` after a one-line
+    # `knobas-core` edit, 1-minute load under 4 at each start, interleaved:
+    # `test`'s run N=6: 79, 77, 78 s; N=8: 82, 82 s; N=10: 82, 85 s. The run
+    # is as long as `knobas-app`'s `test/it` (77-85 s on its own), so more
+    # binaries at once only slow that one down. 6 stays. SysV segments peaked
+    # at 14 of 32 at every N.
+    #
     # THE START ORDER is cargo's build order, as `_test-executables` prints
     # it, which starts `knobas-app`'s `test/it` last. Measured the same day,
     # same way, at N=6, in a run of its own just before the one above and
@@ -732,7 +819,15 @@ test:
         # `</dev/null`: GNU xargs gives a child /dev/null for stdin, BSD xargs
         # hands it its own, which here is the queue of job numbers -- a test
         # that read stdin would eat the queue on macOS and not on Linux.
-        ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1 || status=$?
+        # The wall time, process start to exit, goes to `out/<n>.time` for
+        # the slowest-binaries list; bash's `time` keyword because bash 3.2
+        # has no sub-second clock of its own. libtest's `finished in` leaves
+        # out the binary's start-up and anything it does outside the harness.
+        # `time` is aimed at a function, not at the subshell: bash 3.2 prints
+        # nothing for `{ time ( a; b ); } 2>file` (checked 2026-10-15, #920).
+        run_binary() { ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1; }
+        local TIMEFORMAT=%R LC_NUMERIC=C
+        { time run_binary; } 2> "$KNOBAS_GATE_DIR/out/$n.time" || status=$?
         echo "$status" > "$KNOBAS_GATE_DIR/out/$n.status"
         summary=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9]* passed; [0-9]* failed; [0-9]* ignored;\).*finished in \([0-9.]*s\)$/\1 \2/p' "$log" | tail -n 1)
         if [ "$status" -eq 0 ] && [ -n "$summary" ]; then
@@ -745,6 +840,7 @@ test:
     mkdir "$gate/out"
 
     echo "test: $count binaries, $jobs at a time, doc-tests alongside; one Postgres for all of them"
+    run_start=$SECONDS
     ( awk '{ print NR }' "$gate/tests" | xargs -P "$jobs" -I{} bash -c 'run_one "$1"' _ {} ) 3>&- &
     pool_pid=$!
     ( env -u RUSTUP_TOOLCHAIN cargo test --workspace --doc ) > "$gate/doc.log" 2>&1 3>&- &
@@ -756,6 +852,20 @@ test:
     pool_pid=
     doc_status=0; wait "$doc_pid" || doc_status=$?
     doc_pid=
+    echo "test: run $((SECONDS - run_start)) s"
+
+    # The ten slowest binaries by wall time (#920), slowest first: what the
+    # pool's length is made of. A binary with no time file never ran and is
+    # reported as a red below, not here.
+    echo "test: slowest binaries"
+    n=0
+    while IFS=$'\t' read -r _ pkg target _ _; do
+        n=$((n + 1))
+        t=$(cat "$gate/out/$n.time" 2>/dev/null || true)
+        [ -z "$t" ] || printf '%s\t%s\t%s\n' "$t" "$pkg" "$target"
+    done < "$gate/tests" \
+      | sort -t $'\t' -k1,1 -rn | sed -n 1,10p \
+      | awk -F'\t' '{ printf "  %7.1f s  %-24s %s\n", $1, $2, $3 }'
 
     # Doc-tests: one line per crate on success, in the same shape as the
     # binaries' lines so `check` adds them up the same way; the whole log on
