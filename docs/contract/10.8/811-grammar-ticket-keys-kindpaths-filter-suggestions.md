@@ -11,7 +11,8 @@
   `-key:value` negates (these eight keys only: `-kind:pr` stays search text as before); every
   condition must hold. `project:` matches the declared project key or name. `assignee:@me` (and
   `assignee:me`) is every username the identity holds, nobody when it holds none. `sprint:` reads
-  `current` only: the item is in a sprint whose state is `active`. `assigned:` reads `updated:`'s
+  `current` only: the item is in a sprint whose state is `active` (any such sprint, as JQL's
+  `openSprints()`). `assigned:` reads `updated:`'s
   windows (`today`, `week`, `7d`, ...): the declared assignee is the user and the item changed
   within the window, the inbox's admission, since a record holds no assignment time. A value a key
   cannot read is an unknown token; a bare key is mid-typing. **A miss never matches**: a row whose
@@ -54,7 +55,9 @@
   declaring source and kind hold, in the source's spelling; a project with its name as detail;
   `assignee`'s `@me` (detail `you`) first while the identity is known; `sprint`'s `current` while
   a sampled row is in an active sprint; `assigned`'s `today` and `week` always. Read with the
-  kinds and the sources; a `parentsOnly` read returns it empty. Mirrored in
+  kinds and the sources; a `parentsOnly` read returns it empty. The read is `suggest::FIELDS_SQL`,
+  which reads the fields through the same `corpus::FIELD_PATHS` CTEs and `field_of!`/`list_of!`
+  macros the keys filter by. Mirrored in
   `app/src/lib/ipc/search.ts`; the launcher's session keeps the opening's `fields` across
   parents-only reads, and `suggest.ts` offers them after each key, a negated one included.
   Measured with `just responsiveness-probe` (22,000 items), the opening read's warm median: 28 ms

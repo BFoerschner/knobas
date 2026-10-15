@@ -217,6 +217,7 @@ macro_rules! field_paths {
         )
     };
 }
+pub(crate) use field_paths;
 
 /// The same for a declared list field, as rows of `lp`.
 macro_rules! list_paths {
@@ -230,6 +231,7 @@ macro_rules! list_paths {
         )
     };
 }
+pub(crate) use list_paths;
 
 /// The CTEs a statement with a ticket key carries (#811), after a CTE
 /// `fdecl(d)` holding the bound declarations, which `crate::sql` writes:
@@ -243,30 +245,38 @@ macro_rules! list_paths {
 /// 171 to 202 ms; through these CTEs 122 to 146 ms, beside 152 to 155 ms for
 /// the text query `payout`, which every row matched. A ticket key over the
 /// whole mirror costs what a text query matching all of it does.
-pub(crate) const FIELD_PATHS: &str = concat!(
-    "fk as materialized (select f.d, s.source_id, k.kind from fdecl f \
-       cross join jsonb_each(case when jsonb_typeof(f.d) = 'object' then f.d \
-                                  else '{}'::jsonb end) as s(source_id, kinds) \
-       cross join lateral jsonb_object_keys(case when jsonb_typeof(s.kinds) = 'object' \
-                                  then s.kinds else '{}'::jsonb end) as k(kind)),\n",
-    "fp as materialized (",
-    field_paths!("project_key"),
-    " union all ",
-    field_paths!("project_name"),
-    " union all ",
-    field_paths!("status_name"),
-    " union all ",
-    field_paths!("issue_type"),
-    " union all ",
-    field_paths!("priority"),
-    " union all ",
-    field_paths!("assignee"),
-    "),\nlp as materialized (",
-    list_paths!("labels"),
-    " union all ",
-    list_paths!("sprint_state"),
-    ")"
-);
+macro_rules! field_paths_ctes {
+    () => {
+        concat!(
+            "fk as materialized (select f.d, s.source_id, k.kind from fdecl f \
+               cross join jsonb_each(case when jsonb_typeof(f.d) = 'object' then f.d \
+                                          else '{}'::jsonb end) as s(source_id, kinds) \
+               cross join lateral jsonb_object_keys(case when jsonb_typeof(s.kinds) = 'object' \
+                                          then s.kinds else '{}'::jsonb end) as k(kind)),\n",
+            "fp as materialized (",
+            $crate::corpus::field_paths!("project_key"),
+            " union all ",
+            $crate::corpus::field_paths!("project_name"),
+            " union all ",
+            $crate::corpus::field_paths!("status_name"),
+            " union all ",
+            $crate::corpus::field_paths!("issue_type"),
+            " union all ",
+            $crate::corpus::field_paths!("priority"),
+            " union all ",
+            $crate::corpus::field_paths!("assignee"),
+            "),\nlp as materialized (",
+            $crate::corpus::list_paths!("labels"),
+            " union all ",
+            $crate::corpus::list_paths!("sprint_state"),
+            ")"
+        )
+    };
+}
+pub(crate) use field_paths_ctes;
+
+/// The same CTEs, as text.
+pub(crate) const FIELD_PATHS: &str = field_paths_ctes!();
 
 /// A row's declared string for one field, through `fp`.
 macro_rules! field_of {
@@ -279,6 +289,7 @@ macro_rules! field_of {
         ))
     };
 }
+pub(crate) use field_of;
 
 /// A row's declared list values for one field, through `lp`.
 macro_rules! list_of {
@@ -291,6 +302,7 @@ macro_rules! list_of {
         ))
     };
 }
+pub(crate) use list_of;
 
 /// The mirror's ticket keys (#811), each the field its source declares.
 ///

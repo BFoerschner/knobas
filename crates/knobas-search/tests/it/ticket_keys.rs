@@ -448,8 +448,25 @@ async fn filter_suggestions_offer_each_keys_values() {
         },
     )
     .await;
+    // A ticket missing priority, assignee and labels offers nothing for them:
+    // a miss is absence, never an empty or a null value.
+    store(
+        &pool,
+        &p,
+        2,
+        Ticket {
+            priority: None,
+            ..BASE
+        },
+    )
+    .await;
     let s = searcher(&pool).await;
     let lists = s.filter_suggestions("").await.unwrap();
+    assert!(
+        lists.fields.iter().all(|f| !f.value.trim().is_empty()),
+        "{:?}",
+        lists.fields
+    );
     let values = |key: &str| -> Vec<(String, String)> {
         lists
             .fields

@@ -35,7 +35,7 @@ use sqlx::PgPool;
 use crate::types::{
     FieldSuggestion, FilterSuggestions, KindSuggestion, ParentSuggestion, SourceSuggestion,
 };
-use crate::{SearchError, Vocabulary};
+use crate::{FieldKey, SearchError, Vocabulary};
 
 /// Every kind with at least one row, over the four corpora the launcher
 /// unions.
@@ -213,65 +213,16 @@ pub const FIELD_SUGGESTIONS: i64 = 50;
 /// (#768's entry).
 pub(crate) const FIELD_SAMPLE: i64 = 200;
 
-/// One declared scalar field's candidates for every declaring source and kind
-/// in `dk`, keyed by the suggestion key they serve.
-macro_rules! scalar_candidates {
-    ($key:literal, $field:literal) => {
-        concat!(
-            "select i.source_id, i.kind, '",
-            $key,
-            "'::text as key, c.segs, c.ord from dk i cross join lateral ",
-            knobas_core::declared_candidates!("$1", $field),
-            " c"
-        )
-    };
-}
-
-/// The same for a declared list field.
-macro_rules! list_candidates {
-    ($key:literal, $field:literal) => {
-        concat!(
-            "select i.source_id, i.kind, '",
-            $key,
-            "'::text as key, c.at_segs, c.entry_segs from dk i cross join lateral ",
-            knobas_core::declared_list_candidates!("$1", $field),
-            " c"
-        )
-    };
-}
-
-/// A sampled row's value for one scalar suggestion key.
-macro_rules! scalar_of {
-    ($key:literal) => {
-        knobas_core::first_string_of!(concat!(
-            "(select sp.segs, sp.ord from sp where sp.source_id = i.source_id \
-              and sp.kind = i.kind and sp.key = '",
-            $key,
-            "')"
-        ))
-    };
-}
-
-/// A sampled row's values for one list suggestion key.
-macro_rules! list_of {
-    ($key:literal) => {
-        knobas_core::list_values_of!(concat!(
-            "(select lp.at_segs, lp.entry_segs from lp where lp.source_id = i.source_id \
-              and lp.kind = i.kind and lp.key = '",
-            $key,
-            "')"
-        ))
-    };
-}
-
 /// The values the live mirror holds for each ticket key (#811), the most
 /// used [`FIELD_SUGGESTIONS`] per key, most used first: `(key, value,
 /// detail)`.
 ///
-/// Read through the **declared** paths the keys filter by (ADR-0007), with
-/// the declarations at `$1`, so an offered value is one the key matches. The
-/// declaration is resolved once a source and kind (`sp`, `lp`), as the mini
-/// board does (#753), rather than walked per row; and only the newest
+/// Read through the **same** declared reads the keys filter by (ADR-0007):
+/// `crate::corpus::FIELD_PATHS` over the declarations at `$1`, and the
+/// corpus's `field_of!` and `list_of!`, so an offered value is one the key
+/// matches and the two statements cannot read a field two ways. The
+/// declaration is resolved once a source and kind, as the mini board does
+/// (#753), rather than walked per row; and only the newest
 /// [`FIELD_SAMPLE`] (`$3`) live rows of each source and kind that declares
 /// any of these fields are read, each probe ordered as
 /// `item_source_updated_idx` is so it stops early. A row whose record misses
@@ -283,58 +234,38 @@ macro_rules! list_of {
 /// it. `sprint` is offered as `current`, once, when a sampled row is in an
 /// active sprint.
 const FIELDS_SQL: &str = concat!(
-    "with dk as materialized ( \
-       select d.source_id, k.kind \
-         from jsonb_each(case when jsonb_typeof($1::jsonb) = 'object' then $1::jsonb \
-                              else '{}'::jsonb end) as d(source_id, kinds) \
-         cross join lateral jsonb_object_keys(case when jsonb_typeof(d.kinds) = 'object' \
-                              then d.kinds else '{}'::jsonb end) as k(kind)), \
-     sp as materialized (",
-    scalar_candidates!("project", "project_key"),
-    " union all ",
-    scalar_candidates!("project_name", "project_name"),
-    " union all ",
-    scalar_candidates!("status", "status_name"),
-    " union all ",
-    scalar_candidates!("issuetype", "issue_type"),
-    " union all ",
-    scalar_candidates!("priority", "priority"),
-    " union all ",
-    scalar_candidates!("assignee", "assignee"),
-    "), lp as materialized (",
-    list_candidates!("label", "labels"),
-    " union all ",
-    list_candidates!("sprint", "sprint_state"),
-    "), sampled as materialized ( \
+    "with fdecl as (select $1::jsonb as d), ",
+    crate::corpus::field_paths_ctes!(),
+    ", sampled as materialized ( \
        select r.source_id, r.kind, r.payload \
-         from (select source_id, kind from sp union select source_id, kind from lp) p \
+         from (select source_id, kind from fp union select source_id, kind from lp) p \
          cross join lateral (select i.source_id, i.kind, i.payload from sync.item i \
                               where i.source_id = p.source_id and i.kind = p.kind and ",
     knobas_core::live_by_exclusion!("i"),
     " order by i.item_updated_at desc nulls last limit $3) r), \
      v as ( \
        select 'project' as key, ",
-    scalar_of!("project"),
+    crate::corpus::field_of!("project_key"),
     " as value, ",
-    scalar_of!("project_name"),
+    crate::corpus::field_of!("project_name"),
     " as detail from sampled i \
        union all select 'status', ",
-    scalar_of!("status"),
+    crate::corpus::field_of!("status_name"),
     ", null from sampled i \
        union all select 'issuetype', ",
-    scalar_of!("issuetype"),
+    crate::corpus::field_of!("issue_type"),
     ", null from sampled i \
        union all select 'priority', ",
-    scalar_of!("priority"),
+    crate::corpus::field_of!("priority"),
     ", null from sampled i \
        union all select 'assignee', ",
-    scalar_of!("assignee"),
+    crate::corpus::field_of!("assignee"),
     ", null from sampled i \
        union all select 'label', l.value, null from sampled i cross join lateral ",
-    list_of!("label"),
+    crate::corpus::list_of!("labels"),
     " l \
        union all select 'sprint', 'current', null from sampled i where exists (select 1 from ",
-    list_of!("sprint"),
+    crate::corpus::list_of!("sprint_state"),
     " s where lower(s.value) = 'active')) \
      select f.key, f.value, f.detail from ( \
        select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
@@ -343,18 +274,6 @@ const FIELDS_SQL: &str = concat!(
       where f.rn <= $2 \
       order by f.key, f.uses desc, f.value"
 );
-
-/// The keys whose values are offered, in the order the box shows them.
-const FIELD_ORDER: [&str; 8] = [
-    "project",
-    "status",
-    "issuetype",
-    "priority",
-    "assignee",
-    "label",
-    "sprint",
-    "assigned",
-];
 
 /// The ticket keys' values (#811), `@me` first among the assignees while
 /// knobas knows who the user is, and `assigned:`'s windows, which every
@@ -375,21 +294,25 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
         value: value.to_owned(),
         detail: detail.to_owned(),
     };
-    for key in FIELD_ORDER {
-        if key == "assignee" && !vocab.identity.is_empty() {
-            out.push(suggestion(key, "@me", "you"));
-        }
-        if key == "assigned" {
-            out.push(suggestion(key, "today", "assigned to you, changed today"));
-            out.push(suggestion(
-                key,
-                "week",
-                "assigned to you, changed this week",
-            ));
+    for field in FieldKey::ALL {
+        let key = field.spelling();
+        match field {
+            FieldKey::Assignee if !vocab.identity.is_empty() => {
+                out.push(suggestion(key, "@me", "you"));
+            }
+            FieldKey::Assigned => {
+                out.push(suggestion(key, "today", "assigned to you, changed today"));
+                out.push(suggestion(
+                    key,
+                    "week",
+                    "assigned to you, changed this week",
+                ));
+            }
+            _ => {}
         }
         for (_, value, detail) in rows.iter().filter(|(k, _, _)| k == key) {
-            let detail = match key {
-                "sprint" => "the active sprint",
+            let detail = match field {
+                FieldKey::Sprint => "the active sprint",
                 _ => detail.as_deref().unwrap_or(""),
             };
             out.push(suggestion(key, value, detail));
