@@ -1390,3 +1390,32 @@ Ruled 2026-10-14 by the deputy for Björn. Posted in the body of #776; the probe
 As built (#776): the counts are exact incrementally (`COUNT_LEFT`/`COUNT_ARRIVED`: every statement keeps `items` equal to the sum over `sync.similar_text_counted`), so no recount was needed and none was written. A flip deletes the seen rows of the items that hold the flipped lexeme, in the same transaction as the counts. Forks decided by the implementer: the reason ("both mention ...") lists only uncommon lexemes. A title lexeme is kept out of the query when it is common, which is the same test the oracle applies. To reach the 60 s target on the realistic corpus, which has no common words, two more changes were made. The second arm finds settled counterparts through a GIN index on a new `sync.similar_text_seen.fts`, not `item_fts_idx` over the whole mirror; that was 34 of 75 s. And `PRUNE_SEEN` runs once a pass, not in every batch (13 s): an item that leaves mid-pass is kept out by `verified` and by a liveness test added to `RETIRE_SIMILAR`. The probe key: the tray read and answers moved to `suggest/tray.rs`, and the key hashes `suggest.rs` alone. That was the smaller change: hashing the statements would miss the pass's Rust.
 
 Measured (`just responsiveness-probe`, 22,000 items, the pass alone): realistic corpus 76.9 → 40.8 s never analyzed and 72.4 → 46.6 s analyzed, with the 25,690 proposals byte-identical before and after (it has no common words). 42-word corpus 1,203 s → 4.5 s never analyzed and 17 min (#773's reading, not re-run by the deputy's ruling) → 4.5 s analyzed; 152,198 standing proposals → 0, as the ruling expected. `just suggest-perf`: nothing-new pass 228 ms (budget 1,000 ms).
+
+## #809 — the ticket-first shell frame: where the switch lives, and six smaller forks
+
+Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up while implementing are the implementer's). Recorded in PR for #809.
+
+**The fork:** the switch between the rooms UI and the new shell needs a home, and the spec says only "a setting at startup". `knobas.setting` behind a new command pair, or the webview's storage.
+
+**Ruling:** the webview's `localStorage` (`knobas.shell`), read once at startup; switching reloads the window. No new command. A dev build also takes `?shell=tickets` for `?fake-ipc` screenshots.
+
+**Reasoning:** the switch lives until TF5 removes the rooms UI, it must be known before the database is up (the boot screen belongs to the chosen shell), and a share export should not carry a colleague's half-built UI choice. `pending-comments.svelte.ts` already keeps a per-viewer value there.
+
+**If you disagree, the cost of reversing this is:** low. One read and one write in `lib/tf/shell-choice.ts` become a command pair with its §10.8 entry and a fake-IPC handler.
+
+**Smaller forks, same ticket:**
+
+- Every class in `tf.css` starts with `tf-`. `app.css` styles bare class names globally (`.btn`, `.toast`, `.timer`, `.search`), and those rules would leak onto the new shell. `tf-css.test.ts` holds it. Reversing at TF5, when `app.css` goes, is a rename.
+- `Esc` on a full view with no job goes to Tickets. Prototype-6 does nothing there while its breadcrumb says *Back* beside `Esc`.
+- A count badge is drawn only once its read has answered and only above zero. Prototype-6 always has something to count; the rooms strip already hides a zero.
+- An unreachable source is plain text in the status bar, with no err tone and no *Re-enter password*. R-1.5 asks for credential failures. The scheduler retries an unreachable server on its own (P7).
+- The write queue, the launcher, the worklog draft and the timer picker stay as the rooms UI draws them. They mount outside `.tf`, so they keep their own tokens. Porting them belongs to the tickets that redraw them (Time is TF2).
+- The Job tab names the job last opened, else the ticket the timer runs on (R-1.2). The breadcrumb and `Esc` use only a job actually opened (R-1.6, prototype-6's `S.job`).
+- The timer's clock is Archivo with tabular figures, not JetBrains Mono as prototype-6 draws it: the design system says durations are Archivo and mono is for code values, and the design system decides where it and the prototype differ.
+
+**Merge review, PR #885** (ruled 2026-10-15 by its merge-manager):
+
+- Four acceptance claims had no test that could fail: the rooms router and keys being off under the new shell, the queued-writes count opening the queue, the Monitors badge, and the toasts. Each now has a test, and its mutant dies.
+- Under the new shell, the chip and `⌘T` with nothing running open the picker, not a timer on the current job (R-1.4's second half). R-1.4 is not in #809's list, and the job page that would supply the current job is #816. Filed as #886, blocked by #816. Reversing: one `foreground` branch.
+- The toasts draw `action` plus `more`, though R-1.8 says "may carry one action". The store is shared with the rooms UI, and #752's refused-write toast needs both buttons. Dropping the extra ones would drop a caller's verb. Reversing: one line in `TfToasts.svelte`.
+- `App.svelte` passing `toggleTimer` as the new shell's `ontimer` has no test of its own. It is one prop, read in review, and `TfShell.test` covers the shell side. Not fixed.

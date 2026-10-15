@@ -1,0 +1,239 @@
+/*
+  The ticket-first stylesheet (#809).
+
+  `docs/specs/2026-10-15-ticket-first-design-system.md` is the source; it
+  writes down what `mockups/ticket-first/prototype-6.html` draws. This file is
+  the app's copy, and it grows with every UI ticket of the redesign.
+
+  Three rules hold the two UIs apart until TF5 removes the rooms UI and
+  `app.css` with it:
+
+  - **Tokens live on `.tf`, the new shell's root, never on `:root`.** The
+    rooms UI's tokens share names (`--ok`, `--muted`, `--sans`, `--mono`)
+    with different values; `.tf` redefines them for everything inside it and
+    leaves `app.css` untouched. `.tf` paints its own paper and fills the
+    window.
+  - **Every class here starts with `tf-`.** `app.css` styles bare class
+    names globally (`.btn`, `.chip`, `.toast`, `.timer`, `.search`, `.top`),
+    and a rule there would leak onto any element of the new shell carrying
+    the same name. The prefix is the cheapest wall; `tf-css.test.ts` holds
+    it. The prototype's names follow the prefix, so `.btn.primary` is
+    `.tf-btn.tf-primary` here.
+  - **No inline styles anywhere** (`style-src 'self'`). Prototype-6's 345
+    inline `style` attributes become classes as each view is ported.
+
+  Width is set with `font-variation-settings: "wdth" N` only, never with
+  `font-stretch`, so it cannot depend on how `@font-face` declares its range.
+
+  Fonts are vendored from npm, never fetched. Archivo comes from its `wdth`
+  file: the package's default file carries only `wght`, and without the
+  width axis the job key draws at normal width.
+*/
+@import "@fontsource-variable/archivo/wdth.css";
+@import "@fontsource-variable/source-serif-4/opsz.css";
+@import "@fontsource/jetbrains-mono/latin-400.css";
+@import "@fontsource/jetbrains-mono/latin-600.css";
+
+/* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
+.tf {
+  --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --ink: #17212B; --ink-2: #4B5663;
+  --rule: #CBD2D9; --rule-2: #DDE2E7;
+  --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
+  --focus: #2F55D4; --mark: #F6E08F;
+  --ok: #1F7444; --warn: #8A5600; --err: #B0262A; --info: #2F55D4; --muted: #5F6975;
+  --ok-bg: #DDEFE4; --warn-bg: #F6EBD3; --err-bg: #F7DEDD; --info-bg: #DFE6FA; --muted-bg: #E6E9EC;
+  --shadow: 0 1px 0 rgba(23,33,43,.06), 0 8px 24px -12px rgba(23,33,43,.25);
+  --sans: "Archivo Variable", system-ui, sans-serif;
+  --serif: "Source Serif 4 Variable", Georgia, serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  /* The type scale. Rounding of half a pixel to two against prototype-6 is expected. */
+  --t-2xs: 11px; --t-xs: 12px; --t-sm: 13px; --t-md: 14px; --t-lg: 15px; --t-xl: 17px;
+  --t-2xl: 20px; --t-3xl: 24px; --t-d1: 34px; --t-d2: 44px; --t-d3: 64px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  .tf:not([data-theme="light"]) {
+    --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+    --rule: #323C47; --rule-2: #28313A;
+    --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+    --focus: #8AA6FF; --mark: #5C4E17;
+    --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+    --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+    --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+    color-scheme: dark;
+  }
+}
+.tf[data-theme="dark"] {
+  --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
+  --rule: #323C47; --rule-2: #28313A;
+  --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
+  --focus: #8AA6FF; --mark: #5C4E17;
+  --ok: #6FCF97; --warn: #E5B04D; --err: #FF8A80; --info: #8AA6FF; --muted: #94A0AC;
+  --ok-bg: #1B3427; --warn-bg: #3A2E14; --err-bg: #3F1F1F; --info-bg: #1F2A4A; --muted-bg: #262E37;
+  --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
+  color-scheme: dark;
+}
+
+/* ---------- the root: its own paper, the whole window ---------- */
+.tf {
+  position: fixed; inset: 0;
+  display: grid; grid-template-rows: auto 1fr auto; grid-template-columns: minmax(0, 1fr);
+  background: var(--paper); color: var(--ink);
+  font: 400 var(--t-md)/1.45 var(--sans);
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden;
+}
+.tf *, .tf *::before, .tf *::after { box-sizing: border-box; }
+.tf button, .tf select, .tf input, .tf textarea { font: inherit; color: inherit; }
+.tf a { color: inherit; }
+.tf h1, .tf h2, .tf h3, .tf p { margin: 0; }
+
+/* Focus is always visible: 2px --focus, and --card-ink on a yellow card, where --focus is 1.22:1 in dark. */
+.tf :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; border-radius: 3px; }
+.tf .tf-card:focus-visible, .tf .tf-card :focus-visible { outline-color: var(--card-ink); }
+
+.tf .tf-mono { font-family: var(--mono); font-size: .9em; }
+.tf .tf-dim { color: var(--ink-2); }
+.tf .tf-num { font-variant-numeric: tabular-nums; }
+
+/* A state dot. A running one pulses: the only motion nobody started. */
+.tf-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none; display: inline-block; }
+.tf-dot.tf-ok { background: var(--ok); } .tf-dot.tf-warn { background: var(--warn); }
+.tf-dot.tf-err { background: var(--err); } .tf-dot.tf-info { background: var(--info); }
+.tf-dot.tf-run { background: var(--info); animation: tf-pulse 1.4s ease-in-out infinite; }
+
+/* The yellow card: the ticket you are on, and nothing else. */
+.tf .tf-card { background: var(--card); color: var(--card-ink); }
+
+/* ---------- top bar ---------- */
+.tf-top {
+  display: flex; align-items: center; gap: 6px; padding: 8px 14px;
+  background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0;
+}
+.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
+.tf-nav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.tf-nav a {
+  display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
+  text-decoration: none; color: var(--ink-2); white-space: nowrap;
+}
+.tf-nav a:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-nav a[aria-current="page"] { color: var(--ink); background: var(--sheet-2); box-shadow: inset 0 -2px 0 var(--ink); }
+.tf-navkey { font-family: var(--mono); font-size: var(--t-2xs); }
+.tf-count {
+  font-size: var(--t-2xs); font-weight: 600; padding: 0 6px; border-radius: 9px;
+  background: var(--muted-bg); color: var(--ink-2); font-variant-numeric: tabular-nums;
+}
+.tf-count.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-spacer { flex: 1; }
+.tf-search {
+  display: flex; align-items: center; gap: 8px; border: 1px solid var(--rule); background: var(--paper);
+  border-radius: 4px; padding: 5px 10px; color: var(--ink-2); cursor: pointer; min-width: 170px;
+}
+.tf-search kbd { margin-left: auto; }
+.tf kbd {
+  font: 600 var(--t-2xs) var(--mono); padding: 1px 5px; border: 1px solid var(--rule); border-bottom-width: 2px;
+  border-radius: 3px; background: var(--sheet); color: var(--ink-2);
+}
+.tf-timer {
+  display: flex; align-items: center; gap: 8px; border-radius: 4px; padding: 4px 4px 4px 10px;
+  font-weight: 600; border: 0; cursor: pointer; white-space: nowrap;
+}
+.tf-timer.tf-off { background: var(--sheet-2); color: var(--ink-2); }
+.tf-timer-key { font-family: var(--mono); font-size: var(--t-xs); }
+/* A duration is Archivo with tabular figures, not mono (design system, Type). */
+.tf-timer-t { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+.tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
+.tf-timer.tf-off .tf-timer-stop { background: none; }
+.tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
+.tf-iconbtn {
+  display: inline-flex; border: 0; background: none; cursor: pointer; color: var(--ink-2); padding: 6px; border-radius: 4px;
+}
+.tf-iconbtn:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-iconbtn[aria-current="page"] { color: var(--ink); background: var(--sheet-2); }
+.tf-iconbtn svg { width: 16px; height: 16px; }
+
+/* ---------- status bar ---------- */
+.tf-status {
+  display: flex; gap: 18px; align-items: center; padding: 5px 14px; font-size: var(--t-xs); color: var(--ink-2);
+  background: var(--sheet); border-top: 1px solid var(--rule); overflow-x: auto; white-space: nowrap;
+}
+.tf-status .tf-bad { color: var(--err); font-weight: 600; }
+.tf-status button, .tf-status a {
+  border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
+}
+.tf-status a.tf-sources { font-weight: 600; text-decoration: none; }
+.tf-status a.tf-sources:hover { text-decoration: underline; }
+.tf-status .tf-queue { margin-left: auto; }
+.tf-status button.tf-queued { color: var(--warn); font-weight: 600; }
+
+/* ---------- main, full views, breadcrumb ---------- */
+.tf-main { overflow: auto; min-height: 0; min-width: 0; }
+.tf-full { display: flex; flex-direction: column; min-height: 100%; }
+.tf-crumbs {
+  display: flex; align-items: center; gap: 8px; padding: 9px 22px; background: var(--sheet);
+  border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); flex-wrap: wrap;
+}
+.tf-crumbs a { text-decoration: none; }
+.tf-jobchip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
+  font-weight: 600; text-decoration: none; font-family: var(--mono); font-size: var(--t-xs);
+}
+.tf-crumbs .tf-sep { color: var(--ink-2); }
+.tf-crumbs .tf-esc { margin-left: auto; color: var(--ink-2); }
+.tf-fhead { padding: 16px 22px 12px; display: flex; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.tf-fhead h1 { font-size: var(--t-3xl); line-height: 1.15; font-weight: 700; font-variation-settings: "wdth" 85; }
+.tf-fhead .tf-sub { color: var(--ink-2); margin-top: 4px; font-size: var(--t-sm); }
+
+/* An empty state: centred, says what would fill it, offers the action. */
+.tf-empty { padding: 22px; color: var(--ink-2); text-align: center; display: flex; flex-direction: column; align-items: center; gap: 8px; }
+.tf-empty p { max-width: 60ch; }
+
+/* The job key: Archivo at width 62, weight 800, 64px. The identity of the app. */
+.tf-jobkey { font-weight: 800; font-variation-settings: "wdth" 62; font-size: var(--t-d3); line-height: 1; letter-spacing: -.01em; }
+.tf-keycard { display: inline-flex; flex-direction: column; gap: 6px; padding: 18px 22px; border-radius: 6px; text-align: left; }
+.tf-keycard .tf-dim { color: var(--card-ink-2); }
+
+/* ---------- buttons ---------- */
+.tf-btn {
+  display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--sheet);
+  padding: 5px 11px; border-radius: 4px; cursor: pointer; font-weight: 500; white-space: nowrap; text-decoration: none;
+}
+.tf-btn:hover { border-color: var(--ink-2); }
+.tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
+.tf-btn.tf-ghost { border-color: transparent; background: none; }
+.tf-btn.tf-ghost:hover { background: var(--sheet-2); }
+.tf-btn[disabled] { opacity: .55; cursor: not-allowed; }
+
+/* ---------- toasts: ink on the page, rising 20px into place ---------- */
+.tf-toasts {
+  position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
+  display: flex; flex-direction: column; gap: 8px; align-items: center; pointer-events: none;
+}
+.tf-toast {
+  background: var(--ink); color: var(--sheet); padding: 10px 14px; border-radius: 6px;
+  display: flex; gap: 12px; align-items: center; max-width: calc(100vw - 32px); pointer-events: auto;
+  animation: tf-rise .2s ease-out;
+}
+.tf-toast.tf-err { background: var(--err); }
+.tf-toast button { border: 0; background: none; color: inherit; text-decoration: underline; cursor: pointer; font-weight: 600; padding: 0; }
+.tf-toast .tf-x { text-decoration: none; opacity: .7; }
+
+@keyframes tf-pulse { 50% { opacity: .35; } }
+@keyframes tf-rise { from { transform: translateY(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ---------- narrow: 1240px closes side rails, 900px stacks ---------- */
+@media (max-width: 900px) {
+  .tf-search { min-width: 0; }
+  .tf-search .tf-label { display: none; }
+  .tf-brand { margin-right: 2px; }
+  .tf-nav { flex: 1; }
+  .tf-spacer { display: none; }
+  .tf-timer-key { display: none; }
+  .tf-crumbs, .tf-fhead { padding-left: 16px; padding-right: 16px; }
+  .tf-jobkey { font-size: var(--t-d2); }
+}
+
+/* Reduced motion stops everything above: the pulse, the toast's rise, every transition. */
+@media (prefers-reduced-motion: reduce) {
+  .tf *, .tf *::before, .tf *::after { transition: none !important; animation: none !important; }
+}
