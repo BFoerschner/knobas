@@ -4490,3 +4490,237 @@ async fn a_403_refusing_the_write_is_a_refusal_and_the_token_stays_good() {
         "a token without the write scope still waits for a new one: {narrow_write:?}"
     );
 }
+
+// -- a file commit through the contents API (issue #822) ----------------------
+
+/// A file's blob and its text on `branch`, read the way the Files tab reads
+/// it: what an edit is made against, and what a commit reads back.
+async fn file_on(http: &reqwest::Client, env: &Env, branch: &str, path: &str) -> (String, String) {
+    let record: serde_json::Value = http
+        .get(format!(
+            "{}/api/v1/repos/{}/contents/{path}?ref={branch}",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .expect("read the file")
+        .json()
+        .await
+        .expect("a contents record");
+    let raw = http
+        .get(format!(
+            "{}/api/v1/repos/{}/raw/{path}?ref={branch}",
+            env.url,
+            env.full_name()
+        ))
+        .header("Authorization", format!("token {}", env.token))
+        .send()
+        .await
+        .expect("read the raw file")
+        .text()
+        .await
+        .unwrap();
+    (
+        record["sha"]
+            .as_str()
+            .unwrap_or_else(|| panic!("a blob sha: {record}"))
+            .to_owned(),
+        raw,
+    )
+}
+
+/// Spec #808 D4 and story 93, against the real server (issue #822): the
+/// adapter's `commit_file` -- the call the write queue's flush makes -- on a
+/// file this test makes on a `knobas-` branch of its own:
+///
+/// 1. **onto the branch**, against the blob the file was read at: the branch
+///    carries the new text, at the commit the receipt names;
+/// 2. **onto a new branch** made from it by Gitea's `new_branch`, which a
+///    pull request is then opened from, the base branch left as it was;
+/// 3. **over a file somebody changed since it was read**: Gitea's 422 on the
+///    stale `sha`, answered as `SourceError::Moved` carrying the blob the
+///    branch holds now and its text -- the other half of the held write,
+///    whose queue half `knobas-sync`'s
+///    `a_commit_over_a_file_that_moved_is_held_with_both_versions` pins --
+///    and the file left as they made it;
+/// 4. **onto a protected branch**: refused before the request, with the
+///    reason and what to do instead, the file untouched -- while a new branch
+///    from it still goes.
+///
+/// [`Litter`] deletes both branches, the protection named for the first and
+/// the pull request, whether this passes or panics. Nothing touches `main`.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_refused_when_protected()
+ {
+    use knobas_source::WriteOp;
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let repo_id = format!("gitea:{}", env.full_name());
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-commit-{stamp}");
+    let fresh = format!("{branch}-new");
+    let path = format!("docs/{branch}.md");
+    litter.branch_off_main(&branch).await;
+    push_file(&http, &env, &branch, &path, "a file to edit").await;
+    let (read_at, before) = file_on(&http, &env, &branch, &path).await;
+    assert_eq!(before, "knobas live check\n");
+    let commit =
+        |branch: &str, new_branch: Option<&str>, content: &str, base: &str| WriteOp::CommitFile {
+            repo: repo_id.clone(),
+            branch: branch.to_owned(),
+            new_branch: new_branch.map(str::to_owned),
+            path: path.clone(),
+            content: content.to_owned(),
+            message: format!("knobas commit check {stamp}"),
+            base_sha: base.to_owned(),
+        };
+
+    // 1. Onto the branch.
+    let receipt = source
+        .write(commit(&branch, None, "mine, first\n", &read_at))
+        .await
+        .expect("the adapter commits the file");
+    println!("LIVE commit_file onto {branch}: {receipt:?}");
+    let (first, text) = file_on(&http, &env, &branch, &path).await;
+    assert_eq!(text, "mine, first\n");
+    let tip: serde_json::Value = http
+        .get(format!("{api}/branches/{branch}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(
+        receipt.remote_id.as_deref(),
+        tip["commit"]["id"].as_str(),
+        "the receipt names the commit the branch is now at"
+    );
+
+    // 2. Onto a new branch, and a pull request from it.
+    litter.will_create(&fresh);
+    source
+        .write(commit(
+            &branch,
+            Some(&fresh),
+            "mine, on a new branch\n",
+            &first,
+        ))
+        .await
+        .expect("the adapter commits to a new branch");
+    assert_eq!(
+        file_on(&http, &env, &fresh, &path).await.1,
+        "mine, on a new branch\n"
+    );
+    assert_eq!(
+        file_on(&http, &env, &branch, &path).await,
+        (first.clone(), "mine, first\n".to_owned()),
+        "the branch it was made from is left as it was"
+    );
+    source
+        .write(WriteOp::CreatePullRequest {
+            entity: repo_id.clone(),
+            title: format!("knobas commit check {stamp}"),
+            body: "Opened by the knobas Gitea adapter's live suite (#822).".to_owned(),
+            head: fresh.clone(),
+            base: branch.clone(),
+        })
+        .await
+        .expect("a pull request from the new branch");
+    assert!(
+        litter.pulls().await.iter().any(|(_, head)| head == &fresh),
+        "the pull request is in the server's listing"
+    );
+
+    // 3. Somebody commits to the file first; the edit made against `first`
+    //    comes back moved, with what the branch holds now.
+    let theirs = http
+        .put(format!("{api}/contents/{path}"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({
+            "branch": branch,
+            // "theirs\n"
+            "content": "dGhlaXJzCg==",
+            "message": "somebody else's edit",
+            "sha": first,
+        }))
+        .send()
+        .await
+        .expect("their commit");
+    assert!(theirs.status().is_success(), "theirs: {}", theirs.status());
+    let (theirs_at, _) = file_on(&http, &env, &branch, &path).await;
+    let moved = source
+        .write(commit(&branch, None, "mine, too late\n", &first))
+        .await;
+    println!("LIVE commit_file over a moved file: {moved:?}");
+    assert!(
+        matches!(&moved, Err(SourceError::Moved { base, current })
+                 if *base == theirs_at && current == "theirs\n"),
+        "a stale base is held with what Gitea holds now: {moved:?}"
+    );
+    assert_eq!(
+        file_on(&http, &env, &branch, &path).await.1,
+        "theirs\n",
+        "their commit stands"
+    );
+
+    // 4. The branch is protected: refused with the reason, before a request;
+    //    a new branch from it still goes.
+    let protected = http
+        .post(format!("{api}/branch_protections"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "rule_name": branch }))
+        .send()
+        .await
+        .expect("protect the branch");
+    assert!(
+        protected.status().is_success(),
+        "protection: {}",
+        protected.text().await.unwrap_or_default()
+    );
+    let refused = source
+        .write(commit(
+            &branch,
+            None,
+            "mine, on a protected branch\n",
+            &theirs_at,
+        ))
+        .await;
+    println!("LIVE commit_file onto a protected branch: {refused:?}");
+    assert!(
+        matches!(&refused, Err(SourceError::Protocol { status: None, message })
+                 if message.contains("protected") && message.contains("new branch")),
+        "{refused:?}"
+    );
+    assert_eq!(file_on(&http, &env, &branch, &path).await.1, "theirs\n");
+    let off_protected = format!("{branch}-off");
+    litter.will_create(&off_protected);
+    source
+        .write(commit(
+            &branch,
+            Some(&off_protected),
+            "mine, off a protected branch\n",
+            &theirs_at,
+        ))
+        .await
+        .expect("a new branch from a protected one takes the commit");
+    assert_eq!(
+        file_on(&http, &env, &off_protected, &path).await.1,
+        "mine, off a protected branch\n"
+    );
+    println!(
+        "{branch}: committed onto, to {fresh} with a pull request, held when moved, refused when protected"
+    );
+}
