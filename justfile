@@ -225,7 +225,8 @@ front-changed base="origin/main": deps
     npm run build
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
-# `just shot 3 shots time job/PAY-231`. See scripts/shot.sh for query parameters, size and the rooms UI.
+# `just shot 3 shots time job/PAY-231`. `SHOT_THEME=light|dark` sets the colour scheme.
+# See scripts/shot.sh for query parameters, size and the rooms UI.
 shot slot out +routes:
     scripts/shot.sh {{slot}} {{out}} {{routes}}
 
