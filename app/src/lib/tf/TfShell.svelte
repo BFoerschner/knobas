@@ -56,6 +56,7 @@
   import { parseTfHash, sectionOf } from "./route";
   import { switchShell } from "./shell-choice";
   import { sourceReadings } from "./status";
+  import { bridgePorts, type JobPorts } from "./job/ports";
   import TfPage from "./TfPage.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
   import TfToasts from "./TfToasts.svelte";
@@ -79,6 +80,8 @@
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
     onrooms = () => switchShell("rooms"),
+    onstarttimer = () => {},
+    jobPorts = bridgePorts,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -94,6 +97,10 @@
     ports?: TfShellPorts;
     prefersDark?: () => boolean;
     onrooms?: () => void;
+    /** Start the timer on a ticket, stopping another into its draft first (#816). */
+    onstarttimer?: (entityId: string, title: string) => void;
+    /** The job page's reads (#816); the bridge's when omitted. */
+    jobPorts?: JobPorts;
   } = $props();
 
   let hash = $state(location.hash);
@@ -253,7 +260,7 @@
     ontheme={toggleTheme}
   />
   <main class="tf-main" tabindex="-1">
-    <TfPage {route} ready={lifecycle.ready} job={lastJob} {timedTicket} {onrooms} />
+    <TfPage {route} ready={lifecycle.ready} job={lastJob} {timedTicket} {onrooms} {timer} {layers} {ontimer} {onstarttimer} {jobPorts} />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
   <TfToasts />

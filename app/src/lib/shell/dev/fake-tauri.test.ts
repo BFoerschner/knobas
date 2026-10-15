@@ -756,7 +756,8 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   {
     surface: "The worklog draft and the week timesheet",
     witnesses: ["crates/knobas-app/tests/it/worklog_ipc.rs", "crates/knobas-app/tests/it/week_ipc.rs"],
-    commands: ["worklog_draft", "log_work", "log_all_preview", "log_all", "week_timesheet"],
+    // `week_timesheet` is answered since #816, for the job card's *Time this week*.
+    commands: ["worklog_draft", "log_work", "log_all_preview", "log_all"],
   },
   {
     surface: "The standup digest, its protocol and the action items it publishes",
@@ -782,11 +783,6 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
       "start_work_amend",
       "follow_merges",
     ],
-  },
-  {
-    surface: "The status select's read of what the workflow offers",
-    witnesses: ["crates/knobas-app/tests/it/status_move.rs"],
-    commands: ["reachable_transitions"],
   },
   {
     surface: "Linking, unlinking and deleting a note",

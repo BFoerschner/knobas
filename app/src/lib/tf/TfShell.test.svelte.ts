@@ -12,6 +12,7 @@ import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
+import type { JobPorts } from "./job/ports";
 import TfShell from "./TfShell.svelte";
 
 let target: HTMLElement;
@@ -63,6 +64,39 @@ function health(id: string, state: CredentialHealth["state"]): CredentialHealth 
   return { source_id: id, state, checked_at: new Date().toISOString(), detail: null, secret_expires_at: null };
 }
 
+/** The job page's reads: `PAY-231` under Jira, holding nothing yet. */
+const JOB_PORTS: JobPorts = {
+  listSources: () => Promise.resolve([{ id: "jira" }]),
+  getEntity: (id) =>
+    id === "jira:PAY-231"
+      ? Promise.resolve({
+          row: { entity_id: id, kind: "ticket", source_id: "jira", title: "Retry failed SEPA payouts", updated_at: null, synced_at: "", path: null, state: null },
+          source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
+          kind_info: null,
+          body_text: "",
+          author: null,
+          payload: {},
+          web_url: null,
+          deleted_at: null,
+          links: [],
+          activity: [],
+          builds: [],
+          status: "In Progress",
+          issue_type: null,
+          priority: null,
+          estimate_seconds: null,
+        })
+      : Promise.reject({ code: "not_found", message: "", source_id: null }),
+  promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
+  listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
+  reachableTransitions: () => Promise.resolve([]),
+  submitWrite: () => Promise.reject(new Error("not in this suite")),
+  entityCheckout: () => Promise.reject(new Error("not in this suite")),
+  checkoutCommands: () => Promise.resolve([]),
+  openCheckout: () => Promise.resolve(),
+  weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
+};
+
 function start(
   over: {
     layers?: Layers;
@@ -71,6 +105,7 @@ function start(
     prefersDark?: () => boolean;
     onsearch?: () => void;
     monitorsDown?: number;
+    onstarttimer?: (entityId: string, title: string) => void;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -105,6 +140,8 @@ function start(
       },
       prefersDark: over.prefersDark ?? (() => false),
       onrooms: () => {},
+      onstarttimer: over.onstarttimer ?? (() => {}),
+      jobPorts: JOB_PORTS,
     },
   });
   flushSync();
@@ -327,4 +364,14 @@ test("a toast from anywhere lands in the shell's stack, as text, and its action 
   } finally {
     toasts.items = [];
   }
+});
+
+test("a job address draws the job inside the frame, and its Start timer reaches the shell's timer verb", async () => {
+  const started: [string, string][] = [];
+  start({ onstarttimer: (id, title) => started.push([id, title]) });
+  await at("#/job/PAY-231");
+  expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
+  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard button")].find((b) => b.textContent === "Start timer")!.click();
+  expect(started).toEqual([["jira:PAY-231", "PAY-231"]]);
 });

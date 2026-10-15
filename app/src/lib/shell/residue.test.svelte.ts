@@ -344,6 +344,9 @@ const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const { createBadges } = await import("../tf/badges.svelte");
+const TfJob = (await import("../tf/job/TfJob.svelte")).default;
+const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
+const { createLayers } = await import("../tf/layers.svelte");
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
@@ -628,6 +631,69 @@ const CASES: Case[] = [
         },
       }),
     }),
+  },
+  {
+    /**
+     * The job (#816): its reads are answers that land after the case opens,
+     * so an unmount before them must drop them rather than draw into nothing.
+     */
+    name: "TfJob",
+    source: "lib/tf/job/TfJob.svelte",
+    open: (target) => ({
+      app: mount(TfJob, {
+        target,
+        props: {
+          segment: "mock:PAY-231",
+          tab: null,
+          timer: { current: null, elapsed: null },
+          layers: createLayers(),
+          ontimer: undefined,
+          onstarttimer: () => {},
+          ports: {
+            listSources: () => deferred([]),
+            getEntity: () => deferred(DETAIL),
+            promoteContext: () =>
+              deferred({ id: "ctx:pay", kind: "ticket" as const, title: "", anchor_id: "mock:PAY-231", created_at: "", archived_at: null }),
+            listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null }),
+            reachableTransitions: () => deferred([]),
+            submitWrite: () => new Promise(() => {}),
+            entityCheckout: () => new Promise(() => {}),
+            checkoutCommands: () => deferred([]),
+            openCheckout: () => deferred(undefined),
+            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /** The Code section's *Open in…* menu registers a layer while open (#816). */
+    name: "TfCodeSection",
+    source: "lib/tf/job/TfCodeSection.svelte",
+    open: (target) => ({
+      app: mount(TfCodeSection, {
+        target,
+        props: {
+          rows: [],
+          checkout: {
+            repo_entity_id: null,
+            repo_url: null,
+            path: "/src/payout-service",
+            found_by: "scan" as const,
+            clones_root: null,
+            clone_command: null,
+            tree: null,
+          },
+          checkoutOf: "mock:tidewater/payout-service",
+          commands: [{ action: "vscode", label: "Open in VS Code", template: "code {path}", is_default: true }],
+          onopen: () => Promise.resolve(),
+          layers: createLayers(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
   },
   {
     name: "Tile",
