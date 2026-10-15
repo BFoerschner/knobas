@@ -17,12 +17,13 @@
   let stats = $state<DbStats | null>(null);
   let version = $state<string | null>(null);
   let indexing = $state(false);
+  let failure = $state<string | null>(null);
 
   $effect(() => {
     void ports
       .dbStats()
       .then((read) => (stats = read))
-      .catch(() => {});
+      .catch((cause) => (failure = ipcErrorMessage(cause)));
     void ports
       .appStatus()
       .then((read) => (version = read.app_version))
@@ -54,7 +55,13 @@
 <header class="tf-stg-h"><h1>Logs and database</h1></header>
 <div class="tf-stg-row">
   <div class="tf-stg-l">Database</div>
-  <div class="tf-stg-c"><span>{stats === null ? "—" : databaseWords(stats)}</span></div>
+  <div class="tf-stg-c">
+    {#if failure !== null}
+      <span class="tf-stg-errt">Could not read the database: {failure}</span>
+    {:else}
+      <span>{stats === null ? "—" : databaseWords(stats)}</span>
+    {/if}
+  </div>
 </div>
 <div class="tf-stg-row">
   <div class="tf-stg-l">Version</div>

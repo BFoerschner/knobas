@@ -1,7 +1,8 @@
 /**
- * The commands Settings › Sources reads and writes (#830), injectable so a
- * component test needs no Tauri bridge. Every one of them already exists:
- * this ticket adds no command.
+ * The commands Settings reads and writes, injectable so a component test
+ * needs no Tauri bridge: `SettingsPorts` for Sources and a source's page
+ * (#830), `SectionPorts` for the other sections (#831). Every one of them
+ * already exists: neither ticket adds a command.
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
