@@ -876,6 +876,77 @@ function routeDetail(args: Record<string, unknown>) {
   return { route: routeRow(route), history: [] };
 }
 
+let mintedRoutes = 0;
+
+/**
+ * `create_route` (#876's *Add route*): minted here the way `assets::create_route`
+ * mints one. A route's properties are all custom rows, so a property pair
+ * becomes one. Refused as the backend refuses: a missing exposer, an empty
+ * name or URL, a target that is not an asset. The history stays empty
+ * (see `routeDetail`).
+ */
+function createRoute(args: Record<string, unknown>) {
+  const assetId = String(args.assetId ?? "");
+  assetOr404(assetId);
+  const name = String(args.name ?? "").trim();
+  const url = String(args.url ?? "").trim();
+  if (name === "") throw { code: "invalid", message: "a route needs a name", source_id: null };
+  if (url === "") throw { code: "invalid", message: "a route needs a URL", source_id: null };
+  const targetId = (args.targetId as string | null) ?? null;
+  if (targetId !== null) assetOr404(targetId);
+  mintedRoutes += 1;
+  const created: FixtureRoute = {
+    id: `route:new-${mintedRoutes}`,
+    asset_id: assetId,
+    target_id: targetId,
+    name,
+    url,
+    visibility: (args.visibility as "internal" | "public" | null) ?? "internal",
+    properties: ((args.properties ?? []) as [string, unknown][]).map(([key, value]) => ({
+      key,
+      label: key,
+      value,
+      custom: true,
+    })),
+  };
+  FIXTURE_ROUTES.push(created);
+  return routeRow(created);
+}
+
+/** `edit_route`: the five edits `RouteEdit` names, applied in order. */
+function editRoute(args: Record<string, unknown>) {
+  const id = String(args.routeId ?? "");
+  const route = FIXTURE_ROUTES.find((candidate) => candidate.id === id);
+  if (!route) throw { code: "not_found", message: `no route ${id}`, source_id: null };
+  for (const edit of (args.edits ?? []) as Record<string, unknown>[]) {
+    if (edit.field === "name") route.name = String(edit.value ?? "").trim();
+    else if (edit.field === "url") route.url = String(edit.value ?? "").trim();
+    else if (edit.field === "visibility") route.visibility = edit.value as "internal" | "public";
+    else if (edit.field === "target") {
+      const target = (edit.value as string | null) ?? null;
+      if (target !== null) assetOr404(target);
+      route.target_id = target;
+    } else if (edit.field === "property") {
+      const key = String(edit.key);
+      const at = route.properties.findIndex((property) => property.key === key);
+      if (edit.value === null) {
+        if (at !== -1) route.properties.splice(at, 1);
+      } else if (at === -1) route.properties.push({ key, label: key, value: edit.value, custom: true });
+      else route.properties[at]!.value = edit.value;
+    }
+  }
+  return routeRow(route);
+}
+
+/** `delete_route`: gone, with nothing pointing at it to clear. */
+function deleteRoute(args: Record<string, unknown>) {
+  const id = String(args.routeId ?? "");
+  const at = FIXTURE_ROUTES.findIndex((candidate) => candidate.id === id);
+  if (at === -1) throw { code: "not_found", message: `no route ${id}`, source_id: null };
+  FIXTURE_ROUTES.splice(at, 1);
+  return null;
+}
+
 /** `knobas.asset.path_text`: the ancestors' names, outermost first. */
 export function assetPathText(asset: (typeof FIXTURE_ESTATE)[number]): string | null {
   const names: string[] = [];
@@ -905,10 +976,12 @@ export function handlers(): Record<string, Handler> {
     move_asset: (args) => moveAsset(args),
     delete_asset: (args) => deleteAsset(args),
     // A route's own read, for the `#/route/<id>` address a click on a route's
-    // name opens (#432). The three writes are **not** here: creating a route
-    // from the dialog would need a minted id and a history of its own, and
-    // what this fixture exists for is the two reads a browser looks at.
+    // name opens (#432), and its three writes (#876): in memory like the
+    // assets', with no history line, since `routeDetail` has none to draw.
     depends_on_this: (args) => dependsOnThis(args),
     get_route: (args) => routeDetail(args),
+    create_route: (args) => createRoute(args),
+    edit_route: (args) => editRoute(args),
+    delete_route: (args) => deleteRoute(args),
   };
 }

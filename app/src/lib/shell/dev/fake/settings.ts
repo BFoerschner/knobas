@@ -1,0 +1,102 @@
+/**
+ * `?fake-ipc`: The Settings pages that read a stored preference (#831): Time (passive
+ * attribution), Monitoring and Backup and export's status.
+ *
+ * Answers `passive_attribution`, `set_passive_attribution`,
+ * `monitoring_settings`, `set_monitoring_settings`, `backup_status`,
+ * `backup_now` and `set_backup_schedule`. Notifications are `inbox.ts`'s and
+ * Standup's publish target is `standup.ts`'s, each beside the data it names.
+ *
+ * **Values are prototype-6's `STGV` pages**: passive blocks on; slow above
+ * 2000 ms and samples kept 30 days; the last backup "today 02:00, 48 MB",
+ * every day at 02:00, keep 14.
+ *
+ * **Where this diverges from prototype-6:**
+ *
+ * - `share_export` and `restore_backup` stay unanswered, with the census's
+ *   reason (the deputy's ruling of 2026-09-08 on #507: a fake would certify
+ *   nothing about an archive). Prototype-6's *Export...* and *Restore from a
+ *   file...* buttons therefore reject under `?fake-ipc`.
+ * - Prototype-6 draws the schedule as "Every day at 02:00 / Every week /
+ *   Never"; `BackupSchedule` is `{enabled, hour, minute, keep}`, so a weekly
+ *   choice has no field (listed in the PR, not invented here).
+ * - Prototype-6's "Back up" label is the nightly export; `backup_now` answers
+ *   a record and adds an archive to the list, nothing more.
+ */
+import type { BackupRecord, BackupSchedule, BackupStatus } from "../../../ipc/backup";
+import type { MonitoringSettings } from "../../../ipc/assets";
+import type { Handler } from "../fake-tauri";
+
+const DIRECTORY = "~/Library/Application Support/knobas/backups";
+
+/** Today at `hour:minute` by the browser's clock, so "today 02:00" stays today. */
+function todayAt(hour: number, minute: number): Date {
+  const at = new Date();
+  at.setHours(hour, minute, 0, 0);
+  return at;
+}
+
+function archiveName(at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `knobas-${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}-${pad(at.getHours())}${pad(at.getMinutes())}.knobas`;
+}
+
+function record(at: Date, bytes: number): BackupRecord {
+  return { taken_at: at.toISOString(), file: `${DIRECTORY}/${archiveName(at)}`, bytes };
+}
+
+/** This feature's commands. */
+export function handlers(): Record<string, Handler> {
+  let passive = true;
+  let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
+  let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
+  const taken = todayAt(2, 0);
+  const archives = [record(taken, 48_000_000)];
+  for (const back of [1, 2, 3]) {
+    const earlier = new Date(taken.getTime() - back * 86_400_000);
+    archives.push(record(earlier, 47_000_000 - back * 200_000));
+  }
+
+  const status = (): BackupStatus => {
+    const next = todayAt(schedule.hour, schedule.minute);
+    if (next.getTime() <= Date.now()) next.setDate(next.getDate() + 1);
+    return {
+      schedule,
+      directory: DIRECTORY,
+      last: archives[0] ?? null,
+      next_due_at: schedule.enabled ? next.toISOString() : null,
+      archives: archives.slice(0, Math.max(1, schedule.keep)).map((made) => ({
+        file: made.file,
+        bytes: made.bytes,
+        share: false,
+      })),
+    };
+  };
+
+  return {
+    passive_attribution: () => passive,
+    set_passive_attribution: (args) => {
+      passive = args["enabled"] === true;
+      return passive;
+    },
+    monitoring_settings: () => monitoring,
+    set_monitoring_settings: (args) => {
+      const next = args["settings"] as MonitoringSettings;
+      if (!(next.sample_retention_days >= 1) || !(next.response_time_warn_ms >= 1)) {
+        throw { code: "invalid", message: "both numbers must be at least 1", source_id: null };
+      }
+      monitoring = next;
+      return monitoring;
+    },
+    backup_status: () => status(),
+    backup_now: () => {
+      const made = record(new Date(), 48_100_000);
+      archives.unshift(made);
+      return made;
+    },
+    set_backup_schedule: (args) => {
+      schedule = args["schedule"] as BackupSchedule;
+      return status();
+    },
+  };
+}

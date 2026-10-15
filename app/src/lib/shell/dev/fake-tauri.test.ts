@@ -717,46 +717,16 @@ function barrelCommands(): Map<string, string> {
  */
 const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[] = [
   {
-    surface: "Settings → Backup: the status read, a backup now, the Share… export, the schedule, the restore",
+    // The status, *Back up now* and the schedule are answered since #921
+    // (`fake/settings.ts`); the two that remain stay out for the reason in
+    // the block comment above: an archive a fake wrote certifies nothing.
+    surface: "Settings → Backup: the Share… export and the restore",
     witnesses: [
       "crates/knobas-app/tests/it/backup_ipc.rs",
       "crates/knobas-app/tests/share_exit.rs",
       "app/src/lib/settings/BackupSection.test.svelte.ts",
     ],
-    commands: ["backup_status", "backup_now", "share_export", "set_backup_schedule", "restore_backup"],
-  },
-  {
-    surface: "The inbox and its notifications",
-    witnesses: ["crates/knobas-app/tests/it/inbox_ipc.rs"],
-    commands: [
-      "inbox_items",
-      "inbox_count",
-      "snooze_inbox_item",
-      "complete_inbox_item",
-      "notify",
-      "notification_kinds",
-      "set_notification_kinds",
-    ],
-  },
-  {
-    surface: "The week's Log all",
-    witnesses: ["crates/knobas-app/tests/it/worklog_ipc.rs", "crates/knobas-app/tests/it/week_ipc.rs"],
-    // `week_timesheet` is answered since #816, for the job card's *Time this week*;
-    // `worklog_draft` and `log_work` since #826.
-    commands: ["log_all_preview", "log_all"],
-  },
-  {
-    surface: "The standup digest, its protocol and the action items it publishes",
-    witnesses: ["crates/knobas-app/tests/it/standup_ipc.rs", "crates/knobas-app/tests/it/protocol_ipc.rs"],
-    commands: [
-      "standup_digest",
-      "standup_protocol",
-      "publish_standup_protocol",
-      "standup_publish_target",
-      "set_standup_publish_target",
-      "create_action_item_ticket",
-      "action_item_ticket",
-    ],
+    commands: ["share_export", "restore_backup"],
   },
   {
     surface: "Start work, and the merge follow that closes it",
@@ -771,37 +741,15 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     ],
   },
   {
-    surface: "Linking, unlinking and deleting a note",
+    // `create_link` and `unlink` are answered since #921 (`fake/entity.ts`).
+    surface: "Deleting a note (hidden from the new shell, D10)",
     witnesses: ["crates/knobas-app/tests/it/entity.rs"],
-    commands: ["create_link", "unlink", "delete_note"],
-  },
-  {
-    surface: "Writing a route in the estate",
-    witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
-    commands: ["create_route", "edit_route", "delete_route"],
+    commands: ["delete_note"],
   },
   {
     surface: "A source's assets",
     witnesses: ["crates/knobas-app/tests/it/assets_ipc.rs"],
     commands: ["source_assets"],
-  },
-  {
-    surface: "Settings → Monitoring",
-    witnesses: [
-      "crates/knobas-app/tests/it/assets_ipc.rs",
-      "app/src/lib/settings/MonitoringSection.test.svelte.ts",
-    ],
-    commands: ["monitoring_settings", "set_monitoring_settings"],
-  },
-  {
-    surface: "Settings → Passive attribution",
-    witnesses: ["crates/knobas-app/tests/it/time_ipc.rs", "app/src/lib/settings/PassiveSection.test.svelte.ts"],
-    commands: ["passive_attribution", "set_passive_attribution"],
-  },
-  {
-    surface: "Cloning a repository (#823; the button is #846)",
-    witnesses: ["crates/knobas-app/tests/it/clone_ipc.rs", "crates/knobas-app/tests/clone_live.rs"],
-    commands: ["clone_repo"],
   },
 ];
 

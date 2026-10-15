@@ -271,9 +271,8 @@ export function handlers(): Record<string, Handler> {
     // strip a browser draws agrees with the tab beside it. Added with #446
     // because #444 left it out and the two surfaces it feeds -- the Assets
     // view's strip and the top strip's badge -- were the only ones under
-    // `?fake-ipc` answering "command not found" in red. **The inbox is a
-    // different matter and still has no handlers here at all**, so the sixth
-    // category's row cannot be seen this way whatever this answers.
+    // `?fake-ipc` answering "command not found" in red. The inbox has its own
+    // module since #921 (`inbox.ts`), which carries an `alert` row.
     open_alerts: () => fakeOpenAlerts(),
     // The ack a card offers (#446's write, #449's button). Kept in a set here
     // rather than derived, because *acked* is the one fact on this surface a

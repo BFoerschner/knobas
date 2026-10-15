@@ -1,0 +1,140 @@
+/**
+ * `?fake-ipc`: Time > Standup: the digest, the protocol, its publication and the action-item
+ * tickets (#829; Settings > Standup, #831).
+ *
+ * Answers `standup_digest`, `standup_protocol`, `publish_standup_protocol`,
+ * `standup_publish_target`, `set_standup_publish_target`,
+ * `create_action_item_ticket` and `action_item_ticket`.
+ *
+ * **Shape from prototype-6's `tmStandup`**: yesterday three lines (PAY-231
+ * tracked time and a push, PR #142, an edit to the retry design page), today
+ * two, one blocker (PAY-228 blocked by OPS-77). Titles come from `CORPUS`
+ * where the entity is in the mirror, so a line cannot name a ticket
+ * differently from the board.
+ *
+ * **Where this diverges from prototype-6 and the mock adapter:**
+ *
+ * - The digest has no *Infrastructure* list: `StandupDigest` carries
+ *   `yesterday`, `today` and `blockers` only. Prototype-6's "payout-api was
+ *   down 12 min" paragraph needs a field that does not exist (listed in the
+ *   PR, not invented here).
+ * - Prototype-6 draws the protocol as an attendee list with notes per person
+ *   and action items; `Protocol` is a note id, a page title and a
+ *   `publication`. Those people and items are the note's body, which the
+ *   notes commands carry, and not this module's.
+ * - The publish target is the mock source and a page id, not "Confluence,
+ *   Payments > Standups": the fixture has no Confluence source (`sources.ts`).
+ * - A publish and an action-item ticket start `pending` and read `sent` on the
+ *   second ask, which is what the write queue does between a click and a
+ *   sync; nothing is written anywhere.
+ */
+import type { Handler } from "../fake-tauri";
+import type { ActionItemTicket, DigestLine, Protocol, PublishTarget } from "../../../ipc/entity";
+import { CORPUS } from "./corpus";
+
+/** The mirror's title for an entity, else the given one. */
+function titled(entityId: string, fallback: string): string {
+  return CORPUS.find((row) => row.entity_id === entityId)?.title ?? fallback;
+}
+
+function line(
+  entity_id: string | null,
+  kind: string | null,
+  fallback: string,
+  verb: string,
+  reason: string,
+  at: string,
+): DigestLine {
+  return {
+    entity_id,
+    kind,
+    title: entity_id === null ? fallback : titled(entity_id, fallback),
+    source: "mock",
+    verb,
+    reason,
+    at,
+  };
+}
+
+/** `HH:MM` on `day`, as the instant the browser's clock reads it. */
+function on(day: string, hour: number, minute: number): string {
+  const at = new Date(`${day}T00:00:00`);
+  at.setHours(hour, minute, 0, 0);
+  return at.toISOString();
+}
+
+export function handlers(): Record<string, Handler> {
+  let target: PublishTarget | null = { source_id: "mock", parent: "mock:ENG-STANDUPS" };
+  const published = new Map<string, Protocol["publication"]>();
+  let nextWrite = 801;
+  /** Writes by id, and how many times each was asked about. */
+  const asked = new Map<number, number>();
+
+  const protocol = (day: string): Protocol => ({
+    day,
+    note_id: `note:standup-${day}`,
+    page_title: day,
+    publication: published.get(day) ?? null,
+  });
+  /** A re-read of a pending publication finds it sent, as the queue would. */
+  const settle = (day: string): Protocol => {
+    const publication = published.get(day);
+    if (publication?.state === "pending") {
+      published.set(day, { ...publication, state: "sent", page_entity_id: "mock:ENG-SEPA", linked: true });
+    }
+    return protocol(day);
+  };
+
+  return {
+    standup_digest: (args) => {
+      const today = args["today"] as { day: string };
+      const earlier = (args["earlier"] as { day: string }[] | undefined) ?? [];
+      const before = earlier.at(-1)?.day ?? null;
+      const when = before ?? today.day;
+      return {
+        yesterday_day: before,
+        yesterday:
+          before === null
+            ? []
+            : [
+                line("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "tracked", "4h 30m; pushed 3 commits to the pull request", on(when, 17, 40)),
+                line("mock:payout-service#142", "pr", "PR #142", "merged", "PAY-228 moved to In Review", on(when, 15, 5)),
+                line("mock:ENG-SEPA", "page", "SEPA retry design", "edited", "Backoff policy", on(when, 11, 20)),
+              ],
+        today: [
+          line("mock:PAY-231", "ticket", "Retry failed SEPA payouts", "tracking", "timer running", on(today.day, 9, 40)),
+          line("mock:PAY-198", "ticket", "Payout dashboard latency", "assigned", "assigned to you today", on(today.day, 8, 12)),
+        ],
+        blockers: [
+          line("mock:PAY-228", "ticket", "Fix ledger drift", "blocked", "blocked by OPS-77 On-call runbook outdated", on(today.day, 8, 0)),
+        ],
+      };
+    },
+    standup_protocol: (args) => settle(String(args["day"])),
+    publish_standup_protocol: (args) => {
+      const day = String(args["day"]);
+      const write_id = nextWrite++;
+      asked.set(write_id, 0);
+      published.set(day, { write_id, state: "pending", detail: null, page_entity_id: null, linked: false });
+      return protocol(day);
+    },
+    standup_publish_target: () => target,
+    set_standup_publish_target: (args) => {
+      target = args["target"] as PublishTarget;
+      return target;
+    },
+    create_action_item_ticket: (): ActionItemTicket => {
+      const write_id = nextWrite++;
+      asked.set(write_id, 0);
+      return { write_id, state: "pending", detail: null, ticket_entity_id: null, linked: false };
+    },
+    action_item_ticket: (args): ActionItemTicket => {
+      const write_id = Number(args["writeId"]);
+      const count = (asked.get(write_id) ?? 0) + 1;
+      asked.set(write_id, count);
+      return count < 2
+        ? { write_id, state: "pending", detail: null, ticket_entity_id: null, linked: false }
+        : { write_id, state: "sent", detail: null, ticket_entity_id: "mock:OPS-77", linked: true };
+    },
+  };
+}
