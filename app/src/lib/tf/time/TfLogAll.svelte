@@ -196,15 +196,16 @@
           </thead>
           <tbody>
             {#each rows as row (id(row.plan))}
+              {@const ticket = targetReading({ kind: "entity", entity_id: row.plan.entity_id })}
               <tr>
                 <td><input type="checkbox" aria-label="Log this" bind:checked={row.ticked} /></td>
                 <td class="tf-nowrap">{dayHeading(row.plan.day)}</td>
-                <td class="tf-mono tf-nowrap">{targetReading({ kind: "entity", entity_id: row.plan.entity_id })}</td>
+                <td class="tf-mono tf-nowrap">{ticket}</td>
                 <td class="tf-nowrap tf-tm-num">{hm(minutesOf(row.plan.seconds))}</td>
                 <td class="tf-tm-comment">
                   <textarea
                     rows="2"
-                    aria-label="Comment for {targetReading({ kind: 'entity', entity_id: row.plan.entity_id })}, {dayHeading(row.plan.day)}"
+                    aria-label="Comment for {ticket}, {dayHeading(row.plan.day)}"
                     bind:value={row.comment}
                   ></textarea>
                 </td>

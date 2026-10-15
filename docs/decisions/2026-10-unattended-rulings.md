@@ -1859,3 +1859,7 @@ Ruled 2026-10-16 by the implementer (PR for #828).
 - **`#/time/week/<date>` is the week containing that date**, with *‹* and *›* stepping by seven days
   and *This week* to return, like the Day tab's *Today*. The prototype's *‹* only toasted.
   **Reversing:** low.
+- **The refused worklog lives in `fake/write-queue.ts`, not `fake/time.ts`**, although the shell
+  conventions say a ticket edits its own feature's module. `pending_writes` is the write queue's
+  command, and two modules cannot answer it. The hour it covers is already in `time.ts`'s week
+  numbers. **Reversing:** low.

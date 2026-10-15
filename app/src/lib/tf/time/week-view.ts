@@ -24,7 +24,7 @@ import type { QueuedWrite } from "../../ipc/sources";
 import type { RunningTimer, TimerTarget, Week, WeekCell } from "../../ipc/time";
 import { withdrawnWorklog } from "../../shell/write-queue.svelte";
 import { targetReading } from "../../shell/timer";
-import { dayBounds, dayKey } from "../../time/day";
+import { dayBounds, dayKey, dayLabel } from "../../time/day";
 import { isWeekend, minutesOf } from "../../time/week";
 import { hm } from "./day-view";
 
@@ -79,13 +79,19 @@ function runningOn(day: string, running: RunningTimer, now: Date): number {
   return Math.max(0, Math.floor((end - start) / 1000));
 }
 
-function cellView(day: string, index: number, cell: WeekCell | undefined, open: boolean, extra = 0): WeekCellView {
-  const tracked = minutesOf((cell?.tracked_seconds ?? 0) + extra);
+function cellView(
+  day: string,
+  index: number,
+  cell: WeekCell | undefined,
+  noTarget: boolean,
+  runningSeconds = 0,
+): WeekCellView {
+  const tracked = minutesOf((cell?.tracked_seconds ?? 0) + runningSeconds);
   const logged = minutesOf(cell?.logged_seconds ?? 0);
   const held = minutesOf(cell?.held_seconds ?? 0);
-  const toLog = minutesOf((cell?.unlogged_seconds ?? 0) + extra);
+  const toLog = minutesOf((cell?.unlogged_seconds ?? 0) + runningSeconds);
   const empty = tracked === 0 && logged === 0 && held === 0;
-  const note = open || empty ? null : toLog > 0 ? `${hm(toLog)} to log` : held > 0 ? `${hm(held)} held` : "logged";
+  const note = noTarget || empty ? null : toLog > 0 ? `${hm(toLog)} to log` : held > 0 ? `${hm(held)} held` : "logged";
   return { day, weekend: isWeekend(index), tracked, logged, held, toLog, bar: !open && !empty, note };
 }
 
@@ -127,7 +133,8 @@ export function weekView(week: Week, running: RunningTimer | null, now: Date): W
   };
 }
 
-const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+/** `"Thursday"`: the weekday `dayLabel` names, so there is one list of them. */
+const weekday = (key: string) => dayLabel(key).split(" ")[0]!;
 
 /** Why a worklog waits on a person: the source's own words, else the queue's state. */
 function reasonOf(write: QueuedWrite): string {
@@ -153,7 +160,7 @@ export function heldNotes(writes: QueuedWrite[], days: string[]): string[] {
     const index = days.indexOf(dayKey(new Date(worklog.started)));
     if (index < 0) continue;
     const key = targetReading({ kind: "entity", entity_id: worklog.entity });
-    notes.push(`${hm(minutesOf(worklog.seconds))} of ${key} on ${WEEKDAYS[index]} is held: ${reasonOf(write)}`);
+    notes.push(`${hm(minutesOf(worklog.seconds))} of ${key} on ${weekday(days[index]!)} is held: ${reasonOf(write)}`);
   }
   return notes;
 }

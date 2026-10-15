@@ -3,6 +3,7 @@
  * UI's week timesheet.
  */
 import type { Handler } from "../fake-tauri";
+import { dayKey } from "../../../time/day";
 import { CORPUS } from "./corpus";
 
 /**
@@ -117,11 +118,16 @@ function todaysBlocks(): FakeBlock[] {
   ];
 }
 
-/** `YYYY-MM-DD` of an instant, by the browser's clock. */
-function localKey(at: Date): string {
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
-}
+/**
+ * Prototype-6's Thu 21 PAY-231 row in *Log all*, which no block backs: one
+ * place for its start hour, length and comment (#828).
+ */
+const YESTERDAY_ROW = {
+  entity_id: "mock:PAY-231",
+  hour: 10,
+  seconds: 90 * 60,
+  comment: "Retry classification for TEMP_UNAVAILABLE; review on PR #142.",
+};
 
 /** This time yesterday, by the browser's clock. */
 function yesterdayAt(): Date {
@@ -267,10 +273,12 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
       if (!entityId.startsWith("mock:")) return null;
       const day = String(args["day"]);
       // Yesterday's PAY-231 (#828): *Log all*'s fixed row, with prototype-6's comment.
-      if (entityId === "mock:PAY-231" && day === localKey(yesterdayAt()) && !loggedYesterday) {
-        const started_at = new Date(`${day}T10:00:00`).toISOString();
-        const comment = "Retry classification for TEMP_UNAVAILABLE; review on PR #142.";
-        return { entity_id: entityId, day, started_at, ended_at: started_at, seconds: 5400, block_ids: [], candidates: [], comment };
+      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt()) && !loggedYesterday) {
+        const at = yesterdayAt();
+        at.setHours(YESTERDAY_ROW.hour, 0, 0, 0);
+        const started_at = at.toISOString();
+        const { seconds, comment } = YESTERDAY_ROW;
+        return { entity_id: entityId, day, started_at, ended_at: started_at, seconds, block_ids: [], candidates: [], comment };
       }
       const spans = unlogged(entityId);
       if (spans.length === 0) return null;
@@ -298,8 +306,8 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     log_work: (args) => {
       const entityId = String(args["entityId"]);
       const day = args["day"] === undefined ? null : String(args["day"]);
-      if (entityId === "mock:PAY-231" && day === localKey(yesterdayAt())) loggedYesterday = true;
-      const spans = unlogged(entityId).filter((block) => day === null || localKey(new Date(block.started_at)) === day);
+      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt())) loggedYesterday = true;
+      const spans = unlogged(entityId).filter((block) => day === null || dayKey(new Date(block.started_at)) === day);
       const id = nextWorklog++;
       for (const block of spans) block.worklog_id = id;
       return {
@@ -360,8 +368,7 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
   function planLogAll(args: Record<string, unknown>) {
     const windows = (args["days"] as { day: string; from: string; to: string }[] | undefined) ?? [];
     lastWindows = windows;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterday = dayKey(yesterdayAt());
     const plan: { day: string; entity_id: string; title: string | null; started_at: string; seconds: number; blocks: number }[] = [];
     for (const window of windows) {
       const ids = new Set<string>();
@@ -381,13 +388,13 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
           blocks: spans.length,
         });
       }
-      if (new Date(window.from) <= yesterday && yesterday < new Date(window.to) && !loggedYesterday) {
+      if (window.day === yesterday && !loggedYesterday) {
         plan.push({
           day: window.day,
-          entity_id: "mock:PAY-231",
-          title: titleOf({ kind: "entity", entity_id: "mock:PAY-231" }),
-          started_at: new Date(new Date(window.from).getTime() + 10 * 3600_000).toISOString(),
-          seconds: 90 * 60,
+          entity_id: YESTERDAY_ROW.entity_id,
+          title: titleOf({ kind: "entity", entity_id: YESTERDAY_ROW.entity_id }),
+          started_at: new Date(new Date(window.from).getTime() + YESTERDAY_ROW.hour * 3600_000).toISOString(),
+          seconds: YESTERDAY_ROW.seconds,
           blocks: 0,
         });
       }
