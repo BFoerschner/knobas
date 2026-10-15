@@ -1323,6 +1323,30 @@ Each ticket worktree grew to 8–26 GB, and the loop's disk guard made that the 
 
 Option 2 changes nothing in the gate: clippy only checks, so no dev-profile code is generated, and its sccache hits matched option 1's exactly. It is kept because it shrinks what does build on the dev profile (`just dev`, `cargo build -p knobas-app`, the desktop witness), and a dev backtrace still names file and line for each frame. Test binaries stay at `debug = 0`: a failing test's panic message names file and line (from the panic location), and its backtrace frames name functions only, as before.
 
+### Gate stages (#920)
+
+A passing `just check` now prints each recipe's wall time (`step <recipe> N s`), `test`'s build and run times, and its ten slowest test binaries by wall time. Measured 2026-10-15 (#920) the same way as #905's repeat: a warm worktree (one throwaway gate first), a one-line edit to `knobas-core` (a new `pub const`) before each run, cargo's default jobs, normal priority, nothing else running, the 1-minute load under 4 at each start (in brackets). Times in seconds.
+
+| run | `fmt` | `shell` | `test-layout` | `witness-unit` | `clippy` | `clippy-libs` | `inventory` | `test` (build + run) | cargo half | `front` | `just check` |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| before, 1 (3.76) | 1 | 6 | 0 | 16 | 14 | 7 | 69 | 82 (0 + 79) | 195 | 45 | 196 |
+| before, 2 (3.93) | 2 | 6 | 0 | 17 | 13 | 5 | 64 | 80 (1 + 77) | 187 | 43 | 187 |
+| before, 3 (3.73) | | | | | 13 | 6 | 62 | 81 (+ 78) | 185 | | 186 |
+| scripts beside, 1 (1.45) | 2 | 7* | 0* | 17* | 12 | 6 | 70 | 82 (1 + 78) | 172 | 53 | 172 |
+| scripts beside, 2 (3.90) | 1 | 6* | 0* | 17* | 12 | 6 | 62 | 82 (+ 79) | 163 | 52 | 164 |
+
+\* in their own half, beside the cargo chain (23-24 s), off the critical path.
+
+Slowest binaries (before, 2): `knobas-app` `test/it` 77 s, `knobas-core` `test/it` 60 s, `knobas-db` `test/embedded` 26 s, `knobas-sync` `test/it` 23 s, `knobas-sync` `test/scheduler_loop` 20 s, `knobas-db` `test/schema` 18 s, `knobas-search` `test/it` 15 s, `knobas-db` lib 9 s, `knobas-source-gitea` `test/it` 6 s, `knobas-app` `test/share_exit` 5 s. `test`'s run is `knobas-app`'s `test/it`'s length.
+
+What the numbers decided:
+
+- **The script checks run as a half of their own** (adopted): `shell`, `test-layout` and `witness-unit` run no cargo and read no `target/`, and their 23 s sat ahead of `clippy`. `just check` 186-196 s before, 164-172 s after.
+- **`inventory` is the test build.** It runs `_test-executables`, which builds the test binaries; `test` then runs the same build as a no-op (0-1 s). Nothing compiles twice, so nothing changed.
+- **`clippy-libs` stays**: 5-7 s, a second pass whose point is a different feature set (`knobas-db` without `test-util`). One cargo invocation cannot lint both, since unifying the features is what it avoids.
+- **`xargs -P` stays 6.** `test`'s run, interleaved: N=6 79, 77, 78 s (load 3.76, 3.93, 3.73); N=8 82, 82 s (3.93, 3.48); N=10 82, 85 s (3.54, 3.91). The pool is paced by one binary, and more at once only slow it. SysV segments peaked at 14 of 32 at every N.
+- **`check-front` runs the Vitest files a change can reach** (adopted, `just front-changed`): `svelte-check` (about 6 s) and `vite build` (1 s) stay whole; Vitest (32-34 s whole) runs `vitest related` over the changed `app/src` files plus every test that reads sources off disk (11 today, found by grep each run), and the whole suite when config, the setup file, or a deleted or renamed file is in the change. Measured against an edit shaped like a real frontend PR (a comment appended to each `app/src` file it touched), load under 4: shaped like #915 (15 files), old 39, 39 s, new 16, 16 s; like #899 (12 files), old 39, 38 s, new 17, 16 s. 18 of 169 test files ran each time. It stops covering a test that depends on a changed file neither by import nor by reading files; `just check` still runs every test.
+
 ## Signed dev build (macOS)
 
 Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed

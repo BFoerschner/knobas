@@ -1811,3 +1811,23 @@ Ruled 2026-10-15 by the implementer (PR #916).
   frames named functions only before this change and still do. Line tables in test binaries
   would add size, which is the opposite of this ticket. **Reversing:** one line, if someone wants
   file and line per frame in test backtraces.
+
+## #920 Gate stage timing
+
+- **The script checks (`shell`, `test-layout`, `witness-unit`) run as a third half of `check`,
+  beside the cargo chain.** None runs cargo or reads `target/`; their 23 s left the critical
+  path, `just check` 186-196 s to 164-172 s. Every check still runs, and a red in one half no
+  longer hides a red in another. **Reversing:** move the three names back into `cargo_recipes`.
+- **`clippy-libs` stays.** It costs 5-7 s and lints `knobas-db` without `test-util`, which no
+  `--all-targets` pass can do, because cargo unifies features within one invocation.
+  **Reversing:** n/a, nothing changed.
+- **`inventory` is left as is.** `test`'s own build after it is a 0-1 s no-op, so no binary
+  compiles twice. **Reversing:** n/a.
+- **`xargs -P` stays 6.** 8 and 10 were 3-6 s slower on `test`'s run; the pool is paced by
+  `knobas-app`'s `test/it`. **Reversing:** `KNOBAS_TEST_JOBS`, or the constant.
+- **`check-front` runs `vitest related` over the changed `app/src` files plus every fs-reading
+  test, not the whole suite.** 39 s to 16 s on two real change shapes. The whole suite still runs
+  in `just check`, and in `check-front` whenever config, the setup file, or a deleted or renamed
+  file is in the change. It stops covering a test that depends on a changed file by neither import
+  nor file read. The issue body asked for this exact trade when the saving is real.
+  **Reversing:** `check-front` back to `just front`.

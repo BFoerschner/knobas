@@ -20,14 +20,19 @@ The first test run or `just dev` downloads PostgreSQL 18.6 once into the shared
 
 `just check` is the quality gate. Nothing is pushed without it green. It first
 fails on a stale contract index (`scripts/contract-index.py --check`), then
-runs two halves side by side:
+runs three halves side by side:
 
 - `front`: `svelte-check`, the Vitest suite and `vite build`.
-- the cargo chain: `fmt`, `shell`, `test-layout`, `witness-unit`, `clippy`,
-  `clippy-libs`, `inventory` and `test`.
+- the scripts: `shell`, `test-layout` and `witness-unit`.
+- the cargo chain: `fmt`, `clippy`, `clippy-libs`, `inventory` and `test`.
 
 Each half's output is captured and printed when it finishes. A failing half
-prints its whole log.
+prints its whole log. A passing one prints each recipe's wall time, and the
+cargo half adds `test`'s build and run times and its ten slowest test binaries.
+
+`just gate` runs `check-front` instead on a frontend-only head: the
+contract-index check, `svelte-check`, the Vitest files the change can reach
+(`just front-changed`) and `vite build`.
 
 `just front` alone is the fast loop for frontend work. `just pre-gate` formats,
 refreshes the inventory and the contract index, and runs a few quick checks.

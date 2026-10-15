@@ -19,10 +19,11 @@
 # Each half writes to a per-invocation `mktemp` file (the inventory recipe
 # below says why a shared path is not an option on a machine with several
 # worktrees on it). A half that passes is reported as its summary; a half
-# that fails is reported as its captured output in full, and both are when
-# both fail -- running them together must not cost a signal the serial run
-# had. Neither half is cut short by the other failing, for the same reason,
-# and the exit status is non-zero if either half's was. `front` still goes
+# that fails is reported as its captured output in full, and every one that
+# fails is -- running them together must not cost a signal the serial run
+# had. No half is cut short by another failing, for the same reason, and the
+# exit status is non-zero if any half's was. (Since #920 there are three: the
+# script checks run as a half of their own.) `front` still goes
 # through `deps`: a missing `app/node_modules` is installed, and if that
 # cannot happen the frontend half is a red, not a skip.
 #
@@ -769,6 +770,13 @@ test:
     # region: half the cores, and a connection peak far below the server's
     # 400 (82 client backends at N=6 on 2026-09-05, when the pool was 112
     # binaries; N=12 peaked at 143 then).
+    #
+    # Re-measured 2026-10-15 (#920), whole `just check` after a one-line
+    # `knobas-core` edit, 1-minute load under 4 at each start, interleaved:
+    # `test`'s run N=6: 79, 77, 78 s; N=8: 82, 82 s; N=10: 82, 85 s. The run
+    # is as long as `knobas-app`'s `test/it` (77-85 s on its own), so more
+    # binaries at once only slow that one down. 6 stays. SysV segments peaked
+    # at 14 of 32 at every N.
     #
     # THE START ORDER is cargo's build order, as `_test-executables` prints
     # it, which starts `knobas-app`'s `test/it` last. Measured the same day,
