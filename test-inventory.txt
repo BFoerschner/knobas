@@ -1589,6 +1589,7 @@ knobas-search	lib/knobas_search	query::tests::an_unreadable_ticket_value_is_repo
 knobas-search	lib/knobas_search	query::tests::assignee_me_is_the_identity_and_assigned_is_mine_within_a_window
 knobas-search	lib/knobas_search	query::tests::each_dimension_alone_makes_a_query_filtered
 knobas-search	lib/knobas_search	query::tests::each_ticket_key_is_a_filter_on_its_own_field
+knobas-search	lib/knobas_search	query::tests::every_ticket_key_negates
 knobas-search	lib/knobas_search	query::tests::inline_key_values_fill_the_filters_they_have_a_home_for
 knobas-search	lib/knobas_search	query::tests::leading_prefixes_are_exclusive_and_consume_their_marker
 knobas-search	lib/knobas_search	query::tests::me_and_a_name_are_both_bound_but_only_the_name_is_echoed
@@ -1749,6 +1750,7 @@ knobas-search	test/it	suggest::the_parents_statement_is_never_a_named_prepared_s
 knobas-search	test/it	suggest::the_read_offers_the_kinds_the_sources_and_the_parents_that_exist
 knobas-search	test/it	suggest::the_rewritten_reads_return_what_the_live_item_view_returned
 knobas-search	test/it	suggest::under_knows_exactly_the_names_the_box_offers
+knobas-search	test/it	ticket_keys::a_mirror_row_whose_kind_declares_no_path_fails_the_key_and_passes_its_negation
 knobas-search	test/it	ticket_keys::a_saved_list_of_ticket_keys_counts_what_it_lists
 knobas-search	test/it	ticket_keys::a_ticket_key_alone_is_a_query_and_matches_no_note
 knobas-search	test/it	ticket_keys::assigned_is_mine_and_changed_within_the_window
