@@ -298,14 +298,18 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
         let key = field.spelling();
         match field {
             FieldKey::Assignee if !vocab.identity.is_empty() => {
-                out.push(suggestion(key, "@me", "you"));
+                out.push(suggestion(key, crate::query::ME, "you"));
             }
             FieldKey::Assigned => {
-                out.push(suggestion(key, "today", "assigned to you, changed today"));
+                out.push(suggestion(
+                    key,
+                    "today",
+                    "assigned to you, changed in the last day",
+                ));
                 out.push(suggestion(
                     key,
                     "week",
-                    "assigned to you, changed this week",
+                    "assigned to you, changed in the last 7 days",
                 ));
             }
             _ => {}

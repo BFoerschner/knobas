@@ -502,8 +502,8 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
         { key: "assignee", value: "jonas.becker", detail: "" },
         { key: "label", value: "sepa", detail: "" },
         { key: "sprint", value: "current", detail: "the active sprint" },
-        { key: "assigned", value: "today", detail: "assigned to you, changed today" },
-        { key: "assigned", value: "week", detail: "assigned to you, changed this week" },
+        { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },
+        { key: "assigned", value: "week", detail: "assigned to you, changed in the last 7 days" },
       ],
     }),
   };

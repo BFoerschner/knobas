@@ -232,6 +232,11 @@ async fn project_matches_the_key_or_the_name() {
         (format!("project:{}", p.to_lowercase()), vec![&ours]),
         (format!(r#"project:"{p} payments""#), vec![&ours]),
         (format!("project:{p} project:{o}"), vec![&ours, &theirs]),
+        // The negation keeps the other project's ticket.
+        (
+            format!("project:{p} project:{o} -project:{p}"),
+            vec![&theirs],
+        ),
     ] {
         let got = ids(&s.search(q(&raw)).await.unwrap());
         assert_eq!(
@@ -350,7 +355,7 @@ async fn assigned_is_mine_and_changed_within_the_window() {
         },
     )
     .await;
-    store(
+    let stale = store(
         &pool,
         &p,
         3,
@@ -360,7 +365,7 @@ async fn assigned_is_mine_and_changed_within_the_window() {
         },
     )
     .await;
-    store(
+    let theirs = store(
         &pool,
         &p,
         4,
@@ -377,6 +382,12 @@ async fn assigned_is_mine_and_changed_within_the_window() {
     assert_eq!(
         answer(&pool, &p, "assigned:week").await,
         sorted(vec![today, this_week])
+    );
+    // The negation keeps what is not mine-and-recent: mine but stale, and
+    // somebody else's however recent.
+    assert_eq!(
+        answer(&pool, &p, "-assigned:week").await,
+        sorted(vec![stale, theirs])
     );
 }
 
@@ -422,6 +433,41 @@ async fn a_ticket_key_alone_is_a_query_and_matches_no_note() {
         .await
         .unwrap());
     assert!(got.contains(&note), "{got:?}");
+}
+
+/// A mirror row whose source declares no path for the field takes the
+/// mirror's own predicate, not the constant one a note gets: the declared
+/// read finds no candidate, yields null, and so fails the key and passes its
+/// negation. Here a kind the Jira descriptor declares nothing for, even with
+/// a record that has a `fields.status.name` a payload-key read would find.
+#[tokio::test]
+async fn a_mirror_row_whose_kind_declares_no_path_fails_the_key_and_passes_its_negation() {
+    let pool = pool().await;
+    let p = project();
+    let id = format!("jira:{p}-page");
+    let title = format!("{p} page");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'undeclared', $2)")
+        .bind(&id)
+        .bind(&title)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at)
+         values ($1, 'jira', 'undeclared', $2, $2, $3, now())",
+    )
+    .bind(&id)
+    .bind(&title)
+    .bind(serde_json::json!({ "fields": { "status": { "name": "Done" } } }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    let s = searcher(&pool).await;
+    for (raw, found) in [("status:Done", false), ("-status:Done", true)] {
+        let got = ids(&s.search(q(&format!("{p} {raw}"))).await.unwrap());
+        assert_eq!(got.contains(&id), found, "{raw}: {got:?}");
+    }
 }
 
 /// `filter_suggestions` offers the eight keys' values (#811): the values the

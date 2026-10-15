@@ -111,7 +111,7 @@ impl FieldKey {
 }
 
 /// The value `assignee:` takes for the user, whoever the sources say that is.
-const ME: &str = "@me";
+pub(crate) const ME: &str = "@me";
 
 /// One ticket-key condition: the field, whether it is negated, and the values
 /// any of which it matches, lowercased.
@@ -1396,6 +1396,37 @@ mod tests {
             !eff.is_empty(),
             "knobas not knowing who you are is still a filter"
         );
+    }
+
+    /// Every ticket key negates with a leading `-`, as a filter of its own
+    /// beside the unsigned one; a minus never turns a key into a word.
+    #[test]
+    fn every_ticket_key_negates() {
+        let v = fixture();
+        for (raw, key, value) in [
+            ("project:PAY", FieldKey::Project, Some("pay")),
+            ("status:Done", FieldKey::Status, Some("done")),
+            ("issuetype:Bug", FieldKey::IssueType, Some("bug")),
+            ("priority:High", FieldKey::Priority, Some("high")),
+            ("assignee:jonas", FieldKey::Assignee, Some("jonas")),
+            ("label:sepa", FieldKey::Label, Some("sepa")),
+            ("sprint:current", FieldKey::Sprint, Some("current")),
+            ("assigned:week", FieldKey::Assigned, None),
+        ] {
+            let p = parse(&format!("{raw} -{raw}"), &v);
+            assert_eq!(p.fields.len(), 2, "{raw:?}");
+            for (filter, negated) in p.fields.iter().zip([false, true]) {
+                assert_eq!(filter.key, key, "{raw:?}");
+                assert_eq!(filter.negated, negated, "{raw:?}");
+                assert_eq!(
+                    filter.values,
+                    value.map(str::to_owned).into_iter().collect::<Vec<_>>(),
+                    "{raw:?}"
+                );
+            }
+            assert!(p.query.text.is_empty(), "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+        }
     }
 
     /// A value the key cannot read is reported, never guessed at; a key with
