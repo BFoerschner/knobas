@@ -155,6 +155,9 @@ function detail(over: Partial<EntityDetail> = {}): EntityDetail {
     builds: [],
     // `PAY-231` sits *In Progress*, as `get_entity` reads it (#760).
     status: "In Progress",
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
     ...over,
   };
 }

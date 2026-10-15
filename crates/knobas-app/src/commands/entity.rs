@@ -966,6 +966,17 @@ pub struct EntityDetail {
     /// terminal group, "No status"), and for a withdrawn ticket or a disabled
     /// source's, which the board does not draw either.
     pub status: Option<String>,
+    /// A ticket's type in its source's own word (#816, `Story`, `Bug`), read
+    /// through the declared `issue_type` path; the job card draws it. `None`
+    /// where nothing is declared or the record misses it (ADR-0007).
+    pub issue_type: Option<String>,
+    /// A ticket's priority in its source's own word (#816), through the
+    /// declared `priority` path. `None` on a miss.
+    pub priority: Option<String>,
+    /// A ticket's original estimate in seconds (#816), through the declared
+    /// `estimate` path: a whole JSON number or nothing, never zero for a
+    /// miss. The job card writes it as *est. 3h*.
+    pub estimate_seconds: Option<i64>,
 }
 
 /// How many history lines the detail view is given up front.
@@ -1051,6 +1062,15 @@ select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
        "#,
     knobas_core::declared_string!("$2", "status_name"),
     r#" as status,
+       "#,
+    knobas_core::declared_string!("$2", "issue_type"),
+    r#" as issue_type,
+       "#,
+    knobas_core::declared_string!("$2", "priority"),
+    r#" as priority,
+       "#,
+    knobas_core::declared_integer!("$2", "estimate"),
+    r#" as estimate_seconds,
        e.deleted_at,
        c.display_name, c.kind as adapter_kind,
        coalesce(c.enabled, true) as source_enabled
@@ -1149,6 +1169,9 @@ pub async fn get_entity_inner(pool: &PgPool, entity_id: &str) -> Result<EntityDe
         activity: knobas_core::activity::recent(pool, DETAIL_ACTIVITY, Some(&entity)).await?,
         builds,
         status,
+        issue_type: row.get("issue_type"),
+        priority: row.get("priority"),
+        estimate_seconds: row.get("estimate_seconds"),
     })
 }
 

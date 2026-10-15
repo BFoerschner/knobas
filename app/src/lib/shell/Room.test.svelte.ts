@@ -1447,6 +1447,9 @@ test("a detail opened from another keeps the first drawn until its row is read, 
     activity: [],
     builds: [],
     status: null,
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
   });
   let releaseB!: () => void;
   const gateB = new Promise<void>((resolve) => (releaseB = resolve));
@@ -1498,6 +1501,9 @@ test("a detail closed while its row was being read is not drawn when the read an
     activity: [],
     builds: [],
     status: null,
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
   });
   let releaseB!: () => void;
   const gateB = new Promise<void>((resolve) => (releaseB = resolve));
@@ -1550,6 +1556,9 @@ test("navigating A to B keeps A drawn until B's view answers, and B is drawn who
       activity: [],
       builds: [],
       status: null,
+      issue_type: null,
+      priority: null,
+      estimate_seconds: null,
     });
     const drawn = (label: string): SourceView => ({
       sections: [

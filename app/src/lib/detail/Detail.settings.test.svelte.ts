@@ -162,6 +162,9 @@ function config(entityId: string = ID): EntityDetail {
     activity: [],
     builds: [],
     status: null,
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
   } as EntityDetail;
 }
 

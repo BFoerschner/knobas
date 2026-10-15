@@ -300,6 +300,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "blocked_statuses",
             "commit",
             "default_branch",
+            "estimate",
             "issue_type",
             "labels",
             "sprint_state",

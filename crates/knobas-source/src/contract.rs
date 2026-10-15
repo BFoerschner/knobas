@@ -682,6 +682,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         Flag,
         /// The array a list path opens.
         List,
+        /// A whole number: an estimate in seconds (#816).
+        Integer,
     }
 
     impl Wanted {
@@ -690,6 +692,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Text => value.is_string(),
                 Wanted::Flag => value.is_boolean(),
                 Wanted::List => value.is_array(),
+                Wanted::Integer => value.is_i64() || value.is_u64(),
             }
         }
 
@@ -698,6 +701,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Text => "string",
                 Wanted::Flag => "boolean",
                 Wanted::List => "array",
+                Wanted::Integer => "whole number",
             }
         }
     }
@@ -742,7 +746,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 11] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 12] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -754,6 +758,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::HEAD_REPO, &paths.head_repo, Wanted::Text),
             (field::DEFAULT_BRANCH, &paths.default_branch, Wanted::Text),
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
+            (field::ESTIMATE, &paths.estimate, Wanted::Integer),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811). One

@@ -96,6 +96,9 @@ const DETAIL: EntityDetail = {
   activity: [],
   builds: [],
   status: null,
+  issue_type: null,
+  priority: null,
+  estimate_seconds: null,
 };
 
 /** What `entity_checkout` answers for the repo the panel case opens (#499). */

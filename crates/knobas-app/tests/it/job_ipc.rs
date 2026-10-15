@@ -1,0 +1,176 @@
+//! The job (#816) through the commands the job card and its Code section
+//! call: `get_entity` for the card's fields, `promote_context` and the
+//! membership-scoped `list_entities` for the section, over the embedded
+//! PostgreSQL with the declarations the compiled-in Jira adapter makes
+//! (`Registry::builtin`), never a copy of them.
+//!
+//! This file's database is its own (#572); each test uses a key nothing else
+//! holds.
+
+use knobas_app::commands::entity::{
+    EntityFilter, EntityOrder, create_link_inner, get_entity_inner, list_entities_inner,
+    promote_context_inner,
+};
+
+async fn pool() -> sqlx::PgPool {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira', 'jira', 'Jira', 'http://x', 'Pat', '{}')
+         on conflict (id) do update set kind = excluded.kind, enabled = true",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool
+}
+
+/// A ticket key nothing else in this database holds.
+fn key() -> String {
+    let hex = uuid::Uuid::new_v4().simple().to_string();
+    format!("JOB-{}", u32::from_str_radix(&hex[..6], 16).unwrap())
+}
+
+/// One mirror item, stored as an adapter stores it.
+async fn item(pool: &sqlx::PgPool, id: &str, source: &str, kind: &str, payload: serde_json::Value) {
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,$2,$1)")
+        .bind(id)
+        .bind(kind)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload,
+                                item_updated_at)
+         values ($1,$2,$3,$1,'',$4, now())",
+    )
+    .bind(id)
+    .bind(source)
+    .bind(kind)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// One Jira issue: the record as Jira sends it.
+async fn issue(pool: &sqlx::PgPool, key: &str, fields: serde_json::Value) -> String {
+    let id = format!("jira:{key}");
+    item(
+        pool,
+        &id,
+        "jira",
+        "ticket",
+        serde_json::json!({ "key": key, "fields": fields }),
+    )
+    .await;
+    id
+}
+
+/// **The job card's type, priority and estimate** (R-4.2) come with the
+/// detail, read through the fields the Jira adapter declares: the type and
+/// priority by name, the estimate as Jira's `timeoriginalestimate`, seconds.
+#[tokio::test]
+async fn a_tickets_detail_carries_its_type_priority_and_estimate() {
+    let pool = pool().await;
+    let id = issue(
+        &pool,
+        &key(),
+        serde_json::json!({
+            "status": { "name": "In Progress" },
+            "issuetype": { "name": "Story" },
+            "priority": { "name": "High" },
+            "timeoriginalestimate": 10800,
+        }),
+    )
+    .await;
+
+    let detail = get_entity_inner(&pool, &id).await.unwrap();
+    assert_eq!(detail.issue_type.as_deref(), Some("Story"));
+    assert_eq!(detail.priority.as_deref(), Some("High"));
+    assert_eq!(detail.estimate_seconds, Some(10800));
+}
+
+/// A miss is a miss (ADR-0007): no estimate, an estimate Jira wrote as `null`
+/// and one that is not a number all read as none, never as zero.
+#[tokio::test]
+async fn a_missing_or_unreadable_estimate_is_none() {
+    let pool = pool().await;
+    for fields in [
+        serde_json::json!({ "issuetype": { "name": "Bug" } }),
+        serde_json::json!({ "timeoriginalestimate": null }),
+        serde_json::json!({ "timeoriginalestimate": "3h" }),
+    ] {
+        let id = issue(&pool, &key(), fields.clone()).await;
+        let detail = get_entity_inner(&pool, &id).await.unwrap();
+        assert_eq!(detail.estimate_seconds, None, "{fields}");
+        assert_eq!(detail.priority, None, "{fields}");
+    }
+}
+
+/// **Opening a job promotes its ticket exactly once** (#816): the job page
+/// calls `promote_context` on every open, so the second open must answer the
+/// first one's context and write nothing, and the Code section's read --
+/// `list_entities` scoped by that context -- holds what the ticket links.
+#[tokio::test]
+async fn opening_a_job_twice_promotes_its_ticket_once() {
+    let pool = pool().await;
+    let key = key();
+    let ticket = issue(&pool, &key, serde_json::json!({})).await;
+    let pr = format!("gitea-{key}:tidewater/payout-service#1");
+    item(
+        &pool,
+        &pr,
+        &format!("gitea-{key}"),
+        "pr",
+        serde_json::json!({}),
+    )
+    .await;
+    create_link_inner(&pool, &ticket, &pr, Some("implements"), None)
+        .await
+        .unwrap();
+
+    let first = promote_context_inner(&pool, &ticket).await.unwrap();
+    let again = promote_context_inner(&pool, &ticket).await.unwrap();
+    assert_eq!(first.context.id, again.context.id);
+
+    let (contexts,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.context where anchor_id = $1")
+            .bind(&ticket)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        contexts, 1,
+        "one context per ticket, however often it opens"
+    );
+    let (lines,): (i64,) = sqlx::query_as(
+        "select count(*) from knobas.activity where verb = 'promoted' and entity_id = $1",
+    )
+    .bind(&first.context.id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(lines, 1, "the second open mutated nothing and logs nothing");
+
+    let code = list_entities_inner(
+        &pool,
+        &EntityFilter {
+            sources: Vec::new(),
+            kinds: vec!["pr".into(), "branch".into(), "commit".into(), "repo".into()],
+            updated_within_days: None,
+            context: Some(first.context.id.clone()),
+            project: None,
+            order: EntityOrder::UpdatedDesc,
+            include_deleted: false,
+        },
+        200,
+        0,
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap();
+    let ids: Vec<&str> = code.rows.iter().map(|r| r.entity_id.as_str()).collect();
+    assert_eq!(ids, vec![pr.as_str()]);
+}
