@@ -1795,7 +1795,6 @@ const CORPUS: {
     type: "Story",
     epic: "PAY-200",
     story_points: 3,
-    type: "Story",
     estimate_h: 6,
     blocked: false,
     description:
