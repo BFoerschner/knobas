@@ -5,8 +5,33 @@
  */
 import { listen as tauriListen } from "@tauri-apps/api/event";
 
+import { appStatus, type AppStatus } from "../../ipc/app";
+import { monitoringSettings, setMonitoringSettings, type MonitoringSettings } from "../../ipc/assets";
+import {
+  backupNow,
+  backupStatus,
+  restoreBackup,
+  setBackupSchedule,
+  shareExport,
+  type BackupRecord,
+  type BackupSchedule,
+  type BackupStatus,
+  type ShareParts,
+} from "../../ipc/backup";
+import {
+  getEntity,
+  notify,
+  setStandupPublishTarget,
+  standupPublishTarget,
+  type EntityDetail,
+  type PublishTarget,
+} from "../../ipc/entity";
+import { search, smartLists, type SmartListSummary } from "../../ipc/search";
+import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
 import {
   backfillSource,
+  dbStats,
+  reindexFts,
   deleteSource,
   listAdapters,
   listSources,
@@ -18,6 +43,7 @@ import {
   testSource,
   updateSource,
   type ConnectionReport,
+  type DbStats,
   type CredentialHealth,
   type SecretInput,
   type SourceDescriptor,
@@ -61,4 +87,66 @@ export const realSettingsPorts: SettingsPorts = {
   syncNow: (sourceId) => syncNow(sourceId),
   syncAll: () => syncAll(),
   listen: (event, handler) => tauriListen(event, handler),
+};
+
+/**
+ * The commands the other Settings sections read and write (#831): Time,
+ * Notifications' test, Standup, Monitoring, Backup and export, and Logs and
+ * database. Every one exists already, the rooms UI's settings sections call
+ * them: this ticket adds no command. Notifications' switches go through the
+ * one store `inbox/notify.svelte.ts` keeps, not through here.
+ */
+export interface SectionPorts {
+  passiveAttribution: () => Promise<boolean>;
+  setPassiveAttribution: (enabled: boolean) => Promise<boolean>;
+  notify: (draft: { title: string; body: string; address: string }) => Promise<void>;
+  standupPublishTarget: () => Promise<PublishTarget | null>;
+  setStandupPublishTarget: (target: PublishTarget) => Promise<PublishTarget>;
+  getEntity: (entityId: string) => Promise<Pick<EntityDetail, "row">>;
+  search: typeof search;
+  listSources: () => Promise<SourceSummary[]>;
+  listAdapters: () => Promise<SourceDescriptor[]>;
+  monitoringSettings: () => Promise<MonitoringSettings>;
+  setMonitoringSettings: (settings: MonitoringSettings) => Promise<MonitoringSettings>;
+  backupStatus: () => Promise<BackupStatus>;
+  backupNow: () => Promise<BackupRecord>;
+  setBackupSchedule: (schedule: BackupSchedule) => Promise<BackupStatus>;
+  shareExport: (parts: ShareParts) => Promise<BackupRecord>;
+  restoreBackup: (file: string) => Promise<void>;
+  smartLists: () => Promise<Pick<SmartListSummary, "saved">[]>;
+  appStatus: () => Promise<Pick<AppStatus, "app_version">>;
+  dbStats: () => Promise<DbStats>;
+  reindexFts: () => Promise<void>;
+  openLogs: () => Promise<void>;
+}
+
+/** The real commands, each looked up when it is called (see above). */
+export const realSectionPorts: SectionPorts = {
+  passiveAttribution: () => passiveAttribution(),
+  setPassiveAttribution: (enabled) => setPassiveAttribution(enabled),
+  notify: (draft) => notify(draft),
+  standupPublishTarget: () => standupPublishTarget(),
+  setStandupPublishTarget: (target) => setStandupPublishTarget(target),
+  getEntity: (entityId) => getEntity(entityId),
+  search: (query) => search(query),
+  listSources: () => listSources(),
+  listAdapters: () => listAdapters(),
+  monitoringSettings: () => monitoringSettings(),
+  setMonitoringSettings: (settings) => setMonitoringSettings(settings),
+  backupStatus: () => backupStatus(),
+  backupNow: () => backupNow(),
+  setBackupSchedule: (schedule) => setBackupSchedule(schedule),
+  shareExport: (parts) => shareExport(parts),
+  restoreBackup: (file) => restoreBackup(file),
+  smartLists: () => smartLists(),
+  appStatus: () => appStatus(),
+  dbStats: () => dbStats(),
+  reindexFts: () => reindexFts(),
+  // The rooms UI's `LogsSection` (#747): Tauri's path API and the opener,
+  // whose `open-path` permission is scoped to `$APPLOG`; loaded on the press.
+  openLogs: async () => {
+    const { appLogDir } = await import("@tauri-apps/api/path");
+    const { openPath } = await import("@tauri-apps/plugin-opener");
+    await openPath(await appLogDir());
+  },
 };

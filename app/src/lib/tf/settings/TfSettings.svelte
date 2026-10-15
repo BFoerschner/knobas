@@ -3,9 +3,11 @@
   `renderSettings`. The breadcrumb, the sections on the left, and the section
   on the right.
 
-  Sources and a source's page are built here. Every other section names
-  itself and offers the rooms UI, which still has it, until #831 and #844
-  build them.
+  Sources and a source's page are built here (#830); Time, Notifications,
+  Standup, Monitoring, Backup and export, Appearance, Keyboard, and Logs and
+  database each draw from their own component (#831). Checkouts and Notes
+  and capture name themselves and offer the rooms UI, which still has them,
+  until #844 and #832 build them.
 
   This component owns the reads both Sources pages draw from: the source
   list, each source's sync status and the adapters' descriptors. A finished
@@ -21,10 +23,20 @@
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { jobHash } from "../route";
   import { addSourcePanel } from "./add-source.svelte";
-  import { realSettingsPorts, type SettingsPorts } from "./ports";
+  import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
+  import { theme as sharedTheme, type Theme } from "../theme.svelte";
+  import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
   import { SETTINGS_SECTIONS, settingsPlace, sourceState } from "./settings";
   import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
+  import TfAppearanceSection from "./TfAppearanceSection.svelte";
+  import TfBackupSection from "./TfBackupSection.svelte";
+  import TfKeyboardSection from "./TfKeyboardSection.svelte";
+  import TfLogsSection from "./TfLogsSection.svelte";
+  import TfMonitoringSection from "./TfMonitoringSection.svelte";
+  import TfNotificationsSection from "./TfNotificationsSection.svelte";
+  import TfStandupSection from "./TfStandupSection.svelte";
+  import TfTimeSection from "./TfTimeSection.svelte";
 
   let {
     rest,
@@ -32,6 +44,9 @@
     ready,
     onrooms,
     ports = realSettingsPorts,
+    sectionPorts = realSectionPorts,
+    theme = sharedTheme,
+    notifications = sharedNotifications,
     health = sharedHealth,
     layers = sharedLayers,
     now = () => new Date(),
@@ -45,10 +60,19 @@
     /** Switch back to the rooms UI, for the sections not built here yet. */
     onrooms: () => void;
     ports?: SettingsPorts;
+    /** The other sections' commands (#831). */
+    sectionPorts?: SectionPorts;
+    /** The colour theme, the top bar's toggle's own (#831). */
+    theme?: Theme;
+    /** Notifications' store: the inbox notifier's own, so the switch is the one that fires. */
+    notifications?: Pick<Notifications, "kinds" | "loaded" | "permission" | "error" | "busy" | "reseed" | "choose">;
     health?: Pick<Health, "get" | "patch" | "replace">;
     layers?: Layers;
     now?: () => Date;
   } = $props();
+
+  /** The sections #831 draws whose first paint waits on a read. */
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "backup", "logs"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -183,7 +207,26 @@
         <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
         <p class="tf-stg-p tf-stg-errt" role="status">Could not read the sources again: {error}</p>
       {/if}
-      {#if place.section !== "sources"}
+      {#if !ready && place.section !== "sources" && SECTIONS_THAT_READ.has(place.section)}
+        <!-- Their reads wait for the database, as the source list does. -->
+        <header class="tf-stg-h"><h1>{sectionName}</h1></header>
+      {:else if place.section === "time"}
+        <TfTimeSection ports={sectionPorts} />
+      {:else if place.section === "notifications"}
+        <TfNotificationsSection ports={sectionPorts} store={notifications} />
+      {:else if place.section === "standup"}
+        <TfStandupSection ports={sectionPorts} {layers} />
+      {:else if place.section === "monitoring"}
+        <TfMonitoringSection ports={sectionPorts} />
+      {:else if place.section === "backup"}
+        <TfBackupSection ports={sectionPorts} {layers} now={clock} />
+      {:else if place.section === "appearance"}
+        <TfAppearanceSection {theme} />
+      {:else if place.section === "keyboard"}
+        <TfKeyboardSection />
+      {:else if place.section === "logs"}
+        <TfLogsSection ports={sectionPorts} />
+      {:else if place.section !== "sources"}
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
         <p class="tf-stg-p">{sectionName} is not built in the new shell yet. The rooms UI has every setting today.</p>
         <div class="tf-stg-acts">

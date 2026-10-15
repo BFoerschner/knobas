@@ -1,0 +1,230 @@
+<!--
+  Settings › Backup and export (#831, R-13a.7): prototype-6's `STGV.backup`
+  over the commands the rooms UI's `BackupSection` uses: `backup_status`,
+  `backup_now`, `set_backup_schedule`, `share_export` and `restore_backup`.
+
+  knobas has no file picker and `restore_backup` takes an archive in the
+  backup folder, so *Restore from a file…* and *Import…* open a dialog that
+  lists the archives in that folder: backups for the one, share exports for
+  the other. Both restore only into a knobas that holds no data yet, which the
+  dialog says, since a merge with a preview is not built.
+
+  Every write re-reads, because an export also prunes past `keep`;
+  `set_backup_schedule` answers with the status itself.
+-->
+<script lang="ts">
+  import { ipcErrorMessage } from "../../ipc";
+  import { shareDefaults, type ArchiveFile, type BackupSchedule, type BackupStatus, type ShareParts } from "../../ipc/backup";
+  import { latestRead } from "../../shell/latest-read";
+  import { push } from "../../shell/toasts.svelte";
+  import { formatBytes } from "../../sources/diagnostics";
+  import type { Layers } from "../layers.svelte";
+  import type { SectionPorts } from "./ports";
+  import { boundedNumber, lastBackupWords, scheduleWords, shareTicks } from "./sections";
+  import TfDialog from "./TfDialog.svelte";
+
+  let {
+    ports,
+    layers,
+    now,
+  }: {
+    ports: Pick<
+      SectionPorts,
+      "backupStatus" | "backupNow" | "setBackupSchedule" | "shareExport" | "restoreBackup" | "smartLists"
+    >;
+    layers: Layers;
+    now: Date;
+  } = $props();
+
+  let status = $state<BackupStatus | null>(null);
+  let error = $state<string | null>(null);
+  let savedLists = $state(false);
+  /** The share ticks: the ratified defaults, smart lists only when one is saved. */
+  let parts = $state<ShareParts>({ ...shareDefaults, smart_lists: false });
+  let busy = $state(false);
+  /** Which archives the open dialog lists, or `null` when none is open. */
+  let choosing = $state<"backup" | "share" | null>(null);
+
+  const read = latestRead<BackupStatus>();
+  async function load() {
+    await read(ports.backupStatus, {
+      ok: (next) => {
+        status = next;
+        error = null;
+      },
+      fail: (cause) => (error = ipcErrorMessage(cause)),
+    });
+  }
+
+  $effect(() => {
+    void load();
+    void ports
+      .smartLists()
+      .then((lists) => {
+        savedLists = lists.some((list) => list.saved);
+        parts = { ...parts, smart_lists: savedLists };
+      })
+      // Not knowing is the safe half: no tick, and the part goes off.
+      .catch(() => (savedLists = false));
+  });
+
+  async function saveSchedule(next: BackupSchedule) {
+    try {
+      const saved = await ports.setBackupSchedule(next);
+      // Read after the write, so newer than any read still in flight.
+      await read(() => Promise.resolve(saved), { ok: (current) => (status = current), fail: () => {} });
+    } catch (cause) {
+      push({ text: `Could not save the schedule: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  async function backUpNow() {
+    busy = true;
+    try {
+      const made = await ports.backupNow();
+      push({ text: `Backed up: ${formatBytes(made.bytes)}` });
+      await load();
+    } catch (cause) {
+      push({ text: `Backup failed: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function exportShare() {
+    busy = true;
+    try {
+      const made = await ports.shareExport({ ...parts, smart_lists: savedLists && parts.smart_lists });
+      push({ text: `Saved ${made.file} to ${status?.directory ?? "the backup folder"}`, ms: 15_000 });
+      await load();
+    } catch (cause) {
+      push({ text: `Export failed: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function restore(archive: ArchiveFile) {
+    busy = true;
+    try {
+      await ports.restoreBackup(archive.file);
+      choosing = null;
+      push({ text: `Restored from ${archive.file}. Restart knobas so every view reads the restored database.`, ms: 30_000 });
+    } catch (cause) {
+      // The dialog stays: the refusal ("already holds knobas data") is the answer.
+      push({ text: `Restore refused: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      busy = false;
+    }
+  }
+
+  const ticks = $derived(shareTicks(savedLists));
+  const nothingTicked = $derived(!ticks.some((tick) => parts[tick.part]));
+  const listed = $derived(status?.archives.filter((archive) => archive.share === (choosing === "share")) ?? []);
+</script>
+
+<header class="tf-stg-h">
+  <h1>Backup and export</h1>
+  <p>The database is yours. Back it up, restore it, or share part of it.</p>
+</header>
+{#if error !== null}
+  <p class="tf-stg-p tf-stg-errt">Could not read the backup settings: {error}</p>
+  <div class="tf-stg-acts"><button class="tf-btn" onclick={() => void load()}>Try again</button></div>
+{:else if status !== null}
+  {@const current = status}
+  <div class="tf-stg-row">
+    <div class="tf-stg-l">Last backup</div>
+    <div class="tf-stg-c"><span>{lastBackupWords(current.last, current.directory, now)}</span></div>
+  </div>
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-bak-every">Back up</label>
+    <div class="tf-stg-c">
+      <select
+        id="tf-bak-every"
+        class="tf-stg-in tf-stg-fit"
+        value={current.schedule.enabled ? "daily" : "never"}
+        onchange={(event) => void saveSchedule({ ...current.schedule, enabled: event.currentTarget.value === "daily" })}
+      >
+        <option value="daily">{scheduleWords(current.schedule)}</option>
+        <option value="never">Never</option>
+      </select>
+    </div>
+  </div>
+  <div class="tf-stg-row">
+    <label class="tf-stg-l" for="tf-bak-keep">Keep</label>
+    <div class="tf-stg-c tf-stg-inl">
+      <input
+        id="tf-bak-keep"
+        type="number"
+        min="1"
+        max="365"
+        class="tf-stg-in tf-stg-n70"
+        value={current.schedule.keep}
+        onchange={(event) => {
+          const keep = boundedNumber(event.currentTarget.value, 1, 365, current.schedule.keep);
+          event.currentTarget.value = String(keep);
+          if (keep !== current.schedule.keep) void saveSchedule({ ...current.schedule, keep });
+        }}
+      />
+      <span>backups</span>
+    </div>
+  </div>
+  <div class="tf-stg-acts">
+    <button class="tf-btn" disabled={busy} onclick={() => void backUpNow()}>Back up now</button>
+    <button class="tf-btn tf-ghost" onclick={() => (choosing = "backup")}>Restore from a file…</button>
+  </div>
+  <div class="tf-stg-sec">
+    <h2>Share with a colleague</h2>
+    <p class="tf-stg-p">An export they can import. Passwords never go in it.</p>
+    <div class="tf-stg-checks">
+      {#each ticks as tick (tick.part)}
+        <label class="tf-ck"><input type="checkbox" bind:checked={parts[tick.part]} /> {tick.label}</label>
+      {/each}
+    </div>
+    <div class="tf-stg-acts">
+      <button class="tf-btn tf-primary" disabled={busy || nothingTicked} onclick={() => void exportShare()}>Export…</button>
+      <button class="tf-btn tf-ghost" onclick={() => (choosing = "share")}>Import…</button>
+    </div>
+  </div>
+
+  {#if choosing !== null}
+    <TfDialog
+      title={choosing === "share" ? "Import a share export" : "Restore from a file"}
+      onclose={() => (choosing = null)}
+      {layers}
+    >
+      {#snippet body()}
+        <p class="tf-dsub">
+          {choosing === "share" ? "Share exports" : "Backups"} in <span class="tf-mono">{current.directory}</span>. Put a
+          file there to see it here.
+        </p>
+        <p class="tf-dsub">
+          This works only into a knobas that holds no data yet; one that has data refuses it. Passwords are not in the
+          file, so each source asks for its own again.
+        </p>
+        {#if listed.length === 0}
+          <p class="tf-stg-note">{choosing === "share" ? "No share exports there yet." : "No backups there yet."}</p>
+        {:else}
+          <table class="tf-tbl tf-stg-gap">
+            <tbody>
+              {#each listed as archive (archive.file)}
+                <tr>
+                  <td class="tf-mono">{archive.file}</td>
+                  <td class="tf-num tf-stg-r">{formatBytes(archive.bytes)}</td>
+                  <td class="tf-num tf-stg-r">
+                    <button class="tf-btn tf-sm" disabled={busy} onclick={() => void restore(archive)}>
+                      {choosing === "share" ? "Import" : "Restore"}
+                    </button>
+                  </td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+        {/if}
+      {/snippet}
+      {#snippet footer()}
+        <button class="tf-btn" onclick={() => (choosing = null)}>Cancel</button>
+      {/snippet}
+    </TfDialog>
+  {/if}
+{/if}
