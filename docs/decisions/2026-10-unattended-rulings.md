@@ -1726,3 +1726,27 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
   be photographed at prototype-6's own `#/settings/source/teamcity`. **Reversing:** fixture only.
 - **Sections other than Sources name themselves and offer the rooms UI** until #831 and #844 build
   them. **Reversing:** replaced by those tickets.
+## #827 Time: Day (implementer)
+
+- **The strip is SVG.** Prototype-6 positions blocks with inline `left`/`width`, which
+  `style-src 'self'` and `house-rules.test.ts` refuse. SVG's `x` and `width` are attributes and
+  take percentages; a nested `<svg>` per block clips its label. **Reversing:** low, one component.
+- **08:00 to 18:00, widened by whole hours** when a row starts earlier or ends later, so an evening
+  is not clipped off the strip. **Reversing:** one function (`stripWindow`).
+- **Gaps between blocks are *untracked*, not *open*.** No read returns focused no-target stretches,
+  only `week_timesheet`'s day total, which is the fifth figure. A gap may be lunch, so the rows say
+  "Nothing tracked" rather than "app open". Follow-up #901. **Reversing:** with #901.
+- **No *Dismiss* on offered blocks.** No command dismisses one, and `delete_block` would come back
+  on the next read through `passive::materialize`. Follow-up #900. **Reversing:** with #900.
+- **Whether a block is on a ticket is `ad_hoc_block`'s answer**, asked once per unlogged block on
+  each day read. That decides *unlogged* against *needs a ticket* and names the ticket for *Add to*
+  and *Log to*. **Reversing:** low.
+- **The running timer is a row of its own**, from its start (or midnight) to now, and the only
+  yellow. It counts in *tracked*, not in *to log*. **Reversing:** low.
+- ***Log all…* goes to the Week tab**, where #828 builds its dialog. **Reversing:** one link.
+- ***Log…* on an unlogged row opens the worklog draft** for that ticket and day through
+  `App.svelte`, which owns the draft. **Reversing:** low.
+- **Past the horizon with blocks**, the day draws them under a note, and *No record* only when
+  there are none. Prototype-6 has only the empty case. **Reversing:** low.
+- **`?fake-timer`** starts a fake timer, so no other screen under `?fake-ipc` changes.
+  **Reversing:** low.
