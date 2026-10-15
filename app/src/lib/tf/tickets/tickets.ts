@@ -142,3 +142,178 @@ export function aroundLines(tally: EntityPage["tally"]): AroundLine[] {
       };
     });
 }
+
+/** What a ticket board's lanes split by (R-3.5): nothing, or one field. */
+export type LaneField = "none" | "epic" | "assignee" | "priority" | "issuetype" | "label";
+
+/** The *Lanes* switch's choices, in prototype-6's order and words. */
+export const LANE_FIELDS: readonly (readonly [LaneField, string])[] = [
+  ["none", "None"],
+  ["epic", "Epic"],
+  ["assignee", "Assignee"],
+  ["priority", "Priority"],
+  ["issuetype", "Issue type"],
+  ["label", "Label"],
+];
+
+/** One band of the ticket board: its own columns and its own count. */
+export interface Lane {
+  /** What the lane's tickets share (`""` for none of it); `null` for the one band of no lanes. */
+  key: string | null;
+  /** The lane's heading; empty for the one band of no lanes. */
+  title: string;
+  count: number;
+  columns: MiniBoardColumn[];
+}
+
+/** The value a card is laned by: its epic line, assignee, priority, type or first label; `""` for none. */
+function laneKey(card: MiniBoardCard, field: LaneField): string {
+  switch (field) {
+    case "epic":
+      return card.path ?? "";
+    case "assignee":
+      return card.assignee ?? "";
+    case "priority":
+      return card.priority ?? "";
+    case "issuetype":
+      return card.issue_type ?? "";
+    case "label":
+      return card.labels[0] ?? "";
+    case "none":
+      return "";
+  }
+}
+
+/** A lane's heading: the value, or what the lane of tickets without one is called. */
+export function laneTitle(field: LaneField, key: string): string {
+  if (key !== "") return key;
+  switch (field) {
+    case "epic":
+      return "No epic";
+    case "assignee":
+      return "Unassigned";
+    case "priority":
+      return "No priority";
+    case "issuetype":
+      return "No type";
+    case "label":
+      return "No label";
+    case "none":
+      return "";
+  }
+}
+
+/**
+ * The board split into lanes (R-3.5): one per value of `field` the cards
+ * show, each with every column of the board narrowed to its tickets and
+ * counted, sorted by size, biggest first (ties in the order first met).
+ * Over the cards the board read; a laned board reads them all (see
+ * `TicketsPage`). No lanes is one untitled band holding the board as it is.
+ */
+export function splitLanes(columns: MiniBoardColumn[], field: LaneField): Lane[] {
+  if (field === "none") {
+    return [{ key: null, title: "", count: columns.reduce((all, column) => all + column.total, 0), columns }];
+  }
+  const keys: string[] = [];
+  for (const column of columns) {
+    for (const card of column.cards) {
+      const key = laneKey(card, field);
+      if (!keys.includes(key)) keys.push(key);
+    }
+  }
+  return keys
+    .map((key) => {
+      const laned = columns.map((column) => {
+        const cards = column.cards.filter((card) => laneKey(card, field) === key);
+        return { status: column.status, cards, total: cards.length };
+      });
+      return {
+        key,
+        title: laneTitle(field, key),
+        count: laned.reduce((all, column) => all + column.total, 0),
+        columns: laned,
+      };
+    })
+    .sort((a, b) => b.count - a.count);
+}
+
+/** What a list header sorts by (R-3.6). Signals do not sort. */
+export type SortColumn = "key" | "summary" | "status" | "priority" | "assignee" | "updated";
+
+export interface ListSort {
+  column: SortColumn;
+  direction: "ascending" | "descending";
+}
+
+/** How the list opens: newest first. */
+export const DEFAULT_SORT: ListSort = { column: "updated", direction: "descending" };
+
+/** A header pressed: the same column turns its direction, another starts ascending. */
+export function nextSort(current: ListSort, column: SortColumn): ListSort {
+  if (current.column === column) {
+    return { column, direction: current.direction === "ascending" ? "descending" : "ascending" };
+  }
+  return { column, direction: "ascending" };
+}
+
+/**
+ * Priorities in the order Jira's defaults rank them, highest first, matched
+ * ignoring case. Order only, never wording: a priority not here sorts after
+ * these, by name.
+ */
+const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medium", "normal", "minor", "low", "trivial", "lowest"];
+
+const byText = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+/** One row's value for a column, comparable; `null` for none, which sorts last either way. */
+function sortValue(
+  row: { card: MiniBoardCard; status: string | null },
+  column: SortColumn,
+  statuses: (string | null)[],
+): string | number | null {
+  const { card } = row;
+  switch (column) {
+    case "key":
+      return card.key;
+    case "summary":
+      return card.title;
+    case "status":
+      return statuses.indexOf(row.status);
+    case "priority": {
+      if (card.priority === null) return null;
+      const at = PRIORITY_ORDER.indexOf(card.priority.toLowerCase());
+      return at === -1 ? PRIORITY_ORDER.length : at;
+    }
+    case "assignee":
+      return card.assignee;
+    case "updated":
+      return card.updated_at;
+  }
+}
+
+/**
+ * The list's rows sorted by a header (R-3.6). Status sorts in the board's
+ * column order (`statuses`), priority by {@link PRIORITY_ORDER}, keys
+ * numerically (`PAY-9` before `PAY-10`), the rest by text. A row with no
+ * value sorts last in either direction; ties keep key order.
+ */
+export function sortRows<Row extends { card: MiniBoardCard; status: string | null }>(
+  rows: Row[],
+  sort: ListSort,
+  statuses: (string | null)[],
+): Row[] {
+  const sign = sort.direction === "ascending" ? 1 : -1;
+  const compare = (x: string | number, y: string | number) =>
+    typeof x === "number" && typeof y === "number" ? x - y : byText.compare(String(x), String(y));
+  return [...rows].sort((a, b) => {
+    const x = sortValue(a, sort.column, statuses);
+    const y = sortValue(b, sort.column, statuses);
+    if (x === null || y === null) {
+      if (x !== y) return x === null ? 1 : -1;
+    } else {
+      const order = compare(x, y);
+      if (order !== 0) return order * sign;
+    }
+    return byText.compare(a.card.key, b.card.key);
+  });
+}

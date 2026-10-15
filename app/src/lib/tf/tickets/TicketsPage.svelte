@@ -6,7 +6,8 @@
     the ad-hoc contexts (R-3.11);
   - **middle**, every synced ticket as a ticket board, one column per status
     in the source's words, eight cards then *Show N more*, *Done* three, and
-    every match while the filter has words (R-3.4); or as a list (R-3.6);
+    every match while the filter has words (R-3.4), split into lanes by a
+    field or not (R-3.5, #813); or as a list sorted by any header (R-3.6);
   - **right**, the selected ticket's preview (R-3.9).
 
   The filter bar is `FilterBar` in its server-side mode (R-2.7): every
@@ -15,7 +16,17 @@
   filters nothing; it only marks the words in what came back.
 
   The board is `mini_board`'s, the same read the rooms' Tickets tile makes,
-  with its columns and their order (`knobas_core::mini_board`).
+  with its columns and their order (`knobas_core::mini_board`). A laned
+  board reads every ticket, uncapped, and splits it here: a lane's columns
+  and counts are its own, which a per-status cap cannot give.
+
+  **Keys** (R-3.10): `j`/`k` and the arrows move the selection through the
+  cards on screen in reading order (lane by lane, column by column, top to
+  bottom; the list's rows as sorted), and focus the card. `Enter` and a
+  double click open the job.
+
+  **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
+  module state, never written anywhere, so a restart forgets them.
 -->
 <script lang="ts" module>
   import type {
@@ -25,6 +36,7 @@
     MiniBoard,
   } from "../../ipc/entity";
   import type { FilterSuggestions } from "../../ipc/search";
+  import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface TicketsPorts {
@@ -38,11 +50,15 @@
     suggestions: () => Promise<Pick<FilterSuggestions, "fields" | "parents">>;
   }
 
-  /** What the page keeps for the session: the layout, the selection, the expanded columns. */
+  /** What the page keeps for the session: the layout, the lanes, the sort, the selection, the expanded columns. */
   const session = $state({
     layout: "board" as "board" | "list",
+    /** The *Lanes* switch (#813): nothing, or the field the board is split by. */
+    lanes: "none" as LaneField,
+    /** The list's sort (#813), newest first until a header is pressed. */
+    sort: DEFAULT_SORT as ListSort,
     selected: null as string | null,
-    /** Expanded board columns by status (`""` for *No status*). */
+    /** Expanded board columns by status (`""` for *No status*); in a lane, `<lane>|<status>`. */
     expanded: [] as string[],
     /** Whether the list's *Show N more* was pressed: the list reads every ticket, the board keeps its caps. */
     listAll: false,
@@ -51,6 +67,8 @@
   /** A new session: what each test is. */
   export function forgetTicketsSession(): void {
     session.layout = "board";
+    session.lanes = "none";
+    session.sort = DEFAULT_SORT;
     session.selected = null;
     session.expanded = [];
     session.listAll = false;
@@ -58,7 +76,7 @@
 </script>
 
 <script lang="ts">
-  import { onMount, untrack } from "svelte";
+  import { flushSync, onMount, untrack } from "svelte";
 
   import {
     getEntity,
@@ -76,15 +94,22 @@
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
   import TicketCard from "./TicketCard.svelte";
+  import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
   import {
     aroundLines,
     COLUMN_CAP,
     columnName,
     drawnCards,
+    LANE_FIELDS,
     moreLine,
+    nextSort,
+    sortRows,
+    splitLanes,
     when,
     type AroundLine,
+    type Lane,
+    type SortColumn,
   } from "./tickets";
 
   let {
@@ -163,6 +188,10 @@
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
   const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
   const isExpanded = (column: MiniBoardColumn) => session.expanded.includes(columnKey(column));
+  /** Whether the board is split into lanes, which reads it whole. */
+  const laned = $derived(session.layout === "board" && session.lanes !== "none");
+  const expandKey = (lane: Lane, column: MiniBoardColumn) =>
+    lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
   /**
    * The per-column cap a read asks for: none while words filter (every match,
@@ -170,7 +199,7 @@
    * column's once the list is), else the eight a column draws.
    */
   function capFor(): number | null {
-    if (typing) return null;
+    if (typing || laned) return null;
     if ((session.expanded.length === 0 && !session.listAll) || board === null) return COLUMN_CAP;
     const wanted = board.columns
       .filter((column) => session.listAll || isExpanded(column))
@@ -206,9 +235,27 @@
     return String(error);
   }
 
-  function expand(column: MiniBoardColumn) {
-    session.expanded = [...session.expanded, columnKey(column)];
-    read();
+  function expand(lane: Lane, column: MiniBoardColumn) {
+    session.expanded = [...session.expanded, expandKey(lane, column)];
+    // A lane's column is already read whole; the board's own is capped.
+    if (lane.key === null) read();
+  }
+
+  function chooseLayout(layout: "board" | "list") {
+    if (session.layout === layout) return;
+    const wasLaned = laned;
+    session.layout = layout;
+    if (wasLaned !== laned) read();
+  }
+
+  function chooseLanes(lanes: LaneField) {
+    const wasLaned = laned;
+    session.lanes = lanes;
+    if (wasLaned !== laned) read();
+  }
+
+  function sortBy(column: SortColumn) {
+    session.sort = nextSort(session.sort, column);
   }
 
   function expandAll() {
@@ -224,14 +271,23 @@
   }
 
   // ---- what is drawn, and the selection ----
-  const drawn = $derived(
-    (board?.columns ?? []).map((column) => ({ column, cards: drawnCards(column, isExpanded(column), typing) })),
+  /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
+  const bands = $derived(
+    splitLanes(board?.columns ?? [], laned ? session.lanes : "none").map((lane) => ({
+      lane,
+      drawn: lane.columns.map((column) => ({
+        column,
+        cards: drawnCards(column, session.expanded.includes(expandKey(lane, column)), typing),
+      })),
+    })),
   );
-  /** The list's rows: every card read, newest first. */
+  /** The list's rows: every card read, in the header's order. */
   const rows = $derived(
-    (board?.columns ?? [])
-      .flatMap((column) => column.cards.map((card) => ({ card, status: column.status })))
-      .sort((a, b) => (b.card.updated_at ?? "").localeCompare(a.card.updated_at ?? "")),
+    sortRows(
+      (board?.columns ?? []).flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
+      session.sort,
+      (board?.columns ?? []).map((column) => column.status),
+    ),
   );
   const listCut = $derived((board?.columns ?? []).some((column) => column.cards.length < column.total));
   const listRest = $derived(
@@ -240,7 +296,9 @@
   /** What is on screen, in reading order: the first is selected when the selection is not. */
   const visible = $derived(
     session.layout === "board"
-      ? drawn.flatMap(({ column, cards }) => cards.map((card) => ({ card, status: column.status })))
+      ? bands.flatMap(({ drawn }) =>
+          drawn.flatMap(({ column, cards }) => cards.map((card) => ({ card, status: column.status }))),
+        )
       : rows,
   );
   const current = $derived(visible.find((entry) => entry.card.entity_id === session.selected) ?? visible[0] ?? null);
@@ -304,13 +362,37 @@
     session.selected = card.entity_id;
   }
 
+  function openJob(card: MiniBoardCard) {
+    session.selected = card.entity_id;
+    location.hash = jobHash(card.key);
+  }
+
+  /** `j`/`k` and the arrows (R-3.10): the next or previous card on screen, selected and focused. */
+  function step(by: 1 | -1) {
+    if (visible.length === 0) return;
+    const at = current === null ? 0 : visible.findIndex((entry) => entry.card.entity_id === current.card.entity_id);
+    const next = visible[Math.min(visible.length - 1, Math.max(0, at + by))]!;
+    session.selected = next.card.entity_id;
+    flushSync();
+    const element = document.querySelector<HTMLElement>(`.tf-tickets [data-entity="${CSS.escape(next.card.entity_id)}"]`);
+    element?.focus();
+    element?.scrollIntoView?.({ block: "nearest" });
+  }
+
   // `Enter` presses the preview's button (R-3.9), from anywhere but a field
   // that types or a control of its own; a card is not one.
   onMount(() => {
     const onkey = (event: KeyboardEvent) => {
-      if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
+      if (event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;
+      const by = { j: 1, ArrowDown: 1, k: -1, ArrowUp: -1 }[event.key] as 1 | -1 | undefined;
+      if (by !== undefined) {
+        event.preventDefault();
+        step(by);
+        return;
+      }
+      if (event.key !== "Enter") return;
       const card = at instanceof HTMLElement ? at.closest<HTMLElement>("[data-entity]") : null;
       if (at instanceof HTMLElement && at !== document.body && card === null && at.closest("a, button, select") !== null)
         return;
@@ -346,15 +428,32 @@
     <div class="tf-board-head">
       <h1>All tickets</h1>
       <div class="tf-seg" role="group" aria-label="Layout">
-        <button type="button" aria-pressed={session.layout === "board"} onclick={() => (session.layout = "board")}
+        <button type="button" aria-pressed={session.layout === "board"} onclick={() => chooseLayout("board")}
           >Board</button
         >
-        <button type="button" aria-pressed={session.layout === "list"} onclick={() => (session.layout = "list")}
+        <button type="button" aria-pressed={session.layout === "list"} onclick={() => chooseLayout("list")}
           >List</button
         >
       </div>
     </div>
-    <FilterBar {config} {filter} {shown} {total} onchange={read} />
+    <FilterBar {config} {filter} {shown} {total} onchange={read} extra={lanesSwitch} />
+    {#snippet lanesSwitch()}
+      <!-- prototype-6 offers lanes on the ticket board only. -->
+      {#if session.layout === "board"}
+        <label class="tf-fsel">
+          Lanes
+          <select
+            aria-label="Lanes"
+            value={session.lanes}
+            onchange={(event) => chooseLanes(event.currentTarget.value as LaneField)}
+          >
+            {#each LANE_FIELDS as [value, label] (value)}
+              <option {value}>{label}</option>
+            {/each}
+          </select>
+        </label>
+      {/if}
+    {/snippet}
 
     {#if failed !== null}
       <div class="tf-empty"><p>The tickets could not be read: {failed}</p></div>
@@ -368,36 +467,55 @@
     {:else if shown === 0}
       <div class="tf-empty"><p>No tickets synced yet. Add a Jira source in Settings and they appear here.</p></div>
     {:else if session.layout === "board"}
-      <div class="tf-lane">
-        <div class="tf-cols">
-          {#each drawn as { column, cards } (columnKey(column))}
-            {@const more = moreLine(column, cards.length)}
-            <div class="tf-col">
-              <h3>{columnName(column.status)} <span class="tf-count">{column.total}</span></h3>
-              <div class="tf-stack">
-                {#each cards as card (card.entity_id)}
-                  <TicketCard
-                    {card}
-                    typed={filter.text}
-                    selected={current?.card.entity_id === card.entity_id}
-                    onselect={() => select(card)}
-                  />
-                {:else}
-                  <span class="tf-dim tf-nothing">Nothing here</span>
-                {/each}
-                {#if more}
-                  <button type="button" class="tf-more" onclick={() => expand(column)}>{more}</button>
-                {/if}
+      {#each bands as { lane, drawn } (lane.key ?? "")}
+        <div class="tf-lane">
+          {#if lane.key !== null}
+            <h2>{lane.title} <span class="tf-count">{lane.count}</span></h2>
+          {/if}
+          <div class="tf-cols">
+            {#each drawn as { column, cards } (columnKey(column))}
+              {@const more = moreLine(column, cards.length)}
+              <div class="tf-col">
+                <h3>{columnName(column.status)} <span class="tf-count">{column.total}</span></h3>
+                <div class="tf-stack">
+                  {#each cards as card (card.entity_id)}
+                    <TicketCard
+                      {card}
+                      typed={filter.text}
+                      selected={current?.card.entity_id === card.entity_id}
+                      onselect={() => select(card)}
+                      onopen={() => openJob(card)}
+                    />
+                  {:else}
+                    <span class="tf-dim tf-nothing">Nothing here</span>
+                  {/each}
+                  {#if more}
+                    <button type="button" class="tf-more" onclick={() => expand(lane, column)}>{more}</button>
+                  {/if}
+                </div>
               </div>
-            </div>
-          {/each}
+            {/each}
+          </div>
         </div>
-      </div>
+      {/each}
     {:else}
       <div class="tf-list">
+        {#snippet sortable(column: SortColumn, label: string)}
+          <th aria-sort={session.sort.column === column ? session.sort.direction : undefined}
+            ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
+          >
+        {/snippet}
         <table class="tf-tbl">
           <thead>
-            <tr><th>Key</th><th>Summary</th><th>Status</th><th>Priority</th><th>Assignee</th><th>Updated</th></tr>
+            <tr>
+              {@render sortable("key", "Key")}
+              {@render sortable("summary", "Summary")}
+              {@render sortable("status", "Status")}
+              {@render sortable("priority", "Priority")}
+              <th>Signals</th>
+              {@render sortable("assignee", "Assignee")}
+              {@render sortable("updated", "Updated")}
+            </tr>
           </thead>
           <tbody>
             {#each rows as { card, status } (card.entity_id)}
@@ -408,6 +526,7 @@
                 data-entity={card.entity_id}
                 tabindex="0"
                 onclick={() => select(card)}
+                ondblclick={() => openJob(card)}
               >
                 <td class="tf-mono tf-nowrap"><Marked text={card.key} typed={filter.text} /></td>
                 <td
@@ -416,6 +535,7 @@
                 >
                 <td class="tf-nowrap">{columnName(status)}</td>
                 <td>{card.priority ?? ""}</td>
+                <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
                 <td>{card.assignee ?? "Unassigned"}</td>
                 <td class="tf-dim">{when(card.updated_at)}</td>
               </tr>

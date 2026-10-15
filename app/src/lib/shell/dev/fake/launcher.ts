@@ -148,6 +148,11 @@ export function handlers(): Record<string, Handler> {
         { key: "sprint", value: "current", detail: "the active sprint" },
         { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },
         { key: "assigned", value: "week", detail: "assigned to you, changed in the last 7 days" },
+        // `has:`'s four (#815), which every installation has.
+        { key: "has", value: "failing-build", detail: "a build around it failed" },
+        { key: "has", value: "blocker", detail: "something blocks it" },
+        { key: "has", value: "open-pr", detail: "a pull request of it is open" },
+        { key: "has", value: "review-for-me", detail: "a review is asked of you" },
       ],
     }),
   };

@@ -651,6 +651,9 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-board-head h1 { font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; }
 .tf-board-head .tf-seg { margin-left: auto; align-self: center; }
 .tf-lane { padding: 14px 22px; }
+/* Lanes (#813): each band headed by what its tickets share and its count. */
+.tf-lane + .tf-lane { padding-top: 4px; }
+.tf-lane > h2 { display: flex; align-items: center; gap: 8px; font-size: var(--t-md); margin: 6px 0 8px; }
 .tf-cols { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(170px, 1fr); gap: 12px; align-items: start; overflow-x: auto; }
 .tf-col h3 { display: flex; align-items: center; gap: 8px; font-size: var(--t-sm); font-weight: 600; margin: 0 2px 8px; color: var(--ink-2); }
 .tf-stack { display: flex; flex-direction: column; gap: 6px; min-height: 44px; padding: 6px; background: var(--sheet-2); border-radius: 6px; }
@@ -687,6 +690,11 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-tbl td { padding: 7px 10px; border-bottom: 1px solid var(--rule-2); vertical-align: middle; font-size: var(--t-sm); }
 .tf-tbl tr:last-child td { border-bottom: 0; }
+/* A sortable header (#813): the sorted one says which way. */
+.tf-tbl th button { border: 0; background: none; padding: 0; cursor: pointer; font: inherit; font-weight: 600; color: inherit; }
+.tf-tbl th[aria-sort] button::after { content: " \25BE"; }
+.tf-tbl th[aria-sort="ascending"] button::after { content: " \25B4"; }
+.tf-sigs { display: flex; gap: 10px; flex-wrap: wrap; }
 .tf-row { cursor: pointer; }
 .tf-row:hover td { background: var(--sheet-2); }
 .tf-row.tf-card td { background: var(--card); color: var(--card-ink); }

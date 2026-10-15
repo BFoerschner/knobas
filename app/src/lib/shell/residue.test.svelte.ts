@@ -673,7 +673,7 @@ const CASES: Case[] = [
                         assignee: null,
                         updated_at: null,
                         path: null,
-                        mine: false,
+                        mine: false, labels: [], signals: [],
                       },
                     ],
                   },

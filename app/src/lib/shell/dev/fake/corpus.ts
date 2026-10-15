@@ -60,6 +60,7 @@ export const CORPUS: {
     story_points: 3,
     estimate_h: 6,
     blocked: false,
+    labels: ["sepa", "psp"],
     description:
       "Payouts to two SEPA banks fail with a 409 on retry. The retry window has to be idempotent before we can turn the scheduler back on.",
     comments: [{ by: "mara" }, { by: "jonas" }],
@@ -81,6 +82,7 @@ export const CORPUS: {
     status: "To Do",
     priority: "Low",
     assignee: null,
+    labels: ["on-call"],
   }),
   // The Tickets view's board (#810) wants more than three tickets to look
   // like prototype-6's: these are its own, in its words, with the type, the
@@ -108,6 +110,8 @@ export const CORPUS: {
       type,
       assignee,
       ...(epic ? { epic } : {}),
+      // prototype-6's one label outside PAY-231 and OPS-77 (#813).
+      ...(key === "PAY-240" ? { labels: ["finance"] } : {}),
       description: `${title}. Finance asked for this; scope is the stage environment first.`,
     }),
   ),
@@ -150,6 +154,14 @@ export const CORPUS: {
     repo: "payout-service",
     state: "open",
     approvals: "1/2",
+  }),
+  // A pull request that asks the fixture's user for a review (#815), so
+  // PAY-236's card says *review asked of you* as prototype-6's does.
+  row("mock:payout-service#150", "pr", "Payout CSV export", "2026-08-20T11:00:00Z", "jonas", {
+    num: 150,
+    repo: "payout-service",
+    state: "open",
+    requested_reviewers: ["mara"],
   }),
   // The commit and the build carry the ticket's key -- in the branch name and
   // in the message body -- because that is the evidence `FAKE_SUGGESTIONS`
@@ -395,7 +407,51 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     updated_at: entry.updated_at,
     path: text(entry.payload["epic"]),
     mine: assignee !== null && assignee.toLowerCase() === FAKE_IDENTITY,
+    labels: Array.isArray(entry.payload["labels"]) ? (entry.payload["labels"] as string[]) : [],
+    signals: fakeSignals(entry.entity_id),
   };
+}
+
+/**
+ * The fixture's confirmed links for the signals (#815): PAY-231's pull
+ * request and red build, OPS-77 blocking PAY-228, and PAY-236's pull
+ * request. `[from, to, relation]`, ids from `CORPUS`.
+ */
+const FAKE_SIGNAL_LINKS: [string, string, string][] = [
+  ["mock:PAY-231", "mock:payout-service#142", "related"],
+  ["mock:payout-service#142", "mock:payout-service#318", "related"],
+  ["mock:OPS-77", "mock:PAY-228", "blocks"],
+  ["mock:PAY-236", "mock:payout-service#150", "related"],
+];
+
+/**
+ * A ticket's signals, restating `knobas_core::signals` over
+ * {@link FAKE_SIGNAL_LINKS} and the fixture's flat payloads: a red build in
+ * reach (links and one hop), each `blocks` link ending at the ticket, each
+ * open pull request it links, and a review asked of the user on one. A
+ * restatement certifies nothing; `signals_ipc.rs` is the witness.
+ */
+function fakeSignals(id: string) {
+  const near = (of: string) =>
+    FAKE_SIGNAL_LINKS.flatMap(([from, to]) => (from === of ? [to] : to === of ? [from] : []));
+  const entry = (of: string) => CORPUS.find((candidate) => candidate.entity_id === of);
+  const direct = near(id);
+  const reach = [...new Set([...direct, ...direct.flatMap(near)])].filter((other) => other !== id);
+  const prs = direct.map(entry).filter((pr) => pr?.kind === "pr" && pr.payload["state"] === "open");
+  const signals: { kind: string; text: string; tone: string }[] = [];
+  if (reach.some((other) => entry(other)?.kind === "build" && entry(other)?.payload["status"] === "failed")) {
+    signals.push({ kind: "failing-build", text: "build failed", tone: "err" });
+  }
+  for (const [from, to, relation] of FAKE_SIGNAL_LINKS) {
+    if (relation === "blocks" && to === id) {
+      signals.push({ kind: "blocker", text: `blocked by ${from.slice(from.indexOf(":") + 1)}`, tone: "err" });
+    }
+  }
+  for (const pr of prs) signals.push({ kind: "open-pr", text: `PR #${String(pr!.payload["num"])} open`, tone: "info" });
+  const asked = (pr: (typeof prs)[number]) =>
+    ((pr?.payload["requested_reviewers"] as string[] | undefined) ?? []).includes(FAKE_IDENTITY);
+  if (prs.some(asked)) signals.push({ kind: "review-for-me", text: "review asked of you", tone: "warn" });
+  return signals;
 }
 
 /** Who `@me` is in the fixture: the username the cards' `mine` matches. */
@@ -406,7 +462,8 @@ const FAKE_IDENTITY = "mara";
  * appear in the key, the title, the assignee or the epic, ignoring case, as
  * `knobas_search::sql::ids_sql` has it, and each ticket key the
  * Tickets view's chips and dropdowns write (`issuetype:`, `priority:`,
- * `assignee:`, `status:`, `project:`, `under:`) must hold, values of one key
+ * `assignee:`, `status:`, `project:`, `under:`), and `label:` and `has:`
+ * (#813, #815), must hold, values of one key
  * meaning any of them. A restatement, which certifies nothing: the real
  * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
  */
@@ -437,6 +494,17 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
   };
   for (const [name, { negated, values }] of keys) {
     const key = name.replace(/^-/, "");
+    // `has:` (#815): the card's own signals, as the real grammar reads them.
+    if (key === "has") {
+      const hit = card.signals.some((signal) => values.includes(signal.kind));
+      if (hit === negated) return false;
+      continue;
+    }
+    if (key === "label") {
+      const hit = card.labels.some((label) => values.includes(label.toLowerCase()));
+      if (hit === negated) return false;
+      continue;
+    }
     if (!(key in field)) continue;
     const have = field[key]?.toLowerCase() ?? null;
     const wanted = values.map((value) => (value === "@me" ? FAKE_IDENTITY : value));

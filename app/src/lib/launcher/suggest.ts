@@ -2,7 +2,7 @@
  * Value suggestions for `kind:`, `source:` and `under:` (#601, spec #591
  * stories 27-30), and for the ticket keys `project:`, `status:`,
  * `issuetype:`, `priority:`, `assignee:`, `label:`, `sprint:` and
- * `assigned:` (#811).
+ * `assigned:` (#811), and `has:` (#815).
  *
  * The values are the backend's (`filter_suggestions`: only values that exist
  * right now); what is here is which token of the box is being typed, which
@@ -26,6 +26,7 @@ const FIELD_KEYS = [
   "label",
   "sprint",
   "assigned",
+  "has",
 ] as const;
 type FieldKey = (typeof FIELD_KEYS)[number];
 

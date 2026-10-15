@@ -2,7 +2,18 @@
 import { expect, test } from "vitest";
 
 import type { MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import { aroundLines, drawnCards, initials, moreLine, previewAction, when } from "./tickets";
+import {
+  aroundLines,
+  drawnCards,
+  initials,
+  laneTitle,
+  moreLine,
+  nextSort,
+  previewAction,
+  sortRows,
+  splitLanes,
+  when,
+} from "./tickets";
 
 function card(n: number): MiniBoardCard {
   return {
@@ -16,6 +27,8 @@ function card(n: number): MiniBoardCard {
     updated_at: null,
     path: null,
     mine: false,
+    labels: [],
+    signals: [],
   };
 }
 
@@ -82,4 +95,88 @@ test("Around this ticket groups the context's kinds as the room's tiles do, and 
     { section: "Monitors", count: "1 monitor", failing: "1 failing or down" },
   ]);
   expect(aroundLines(null)).toEqual([]);
+});
+
+function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {
+  return { ...card(0), entity_id: `jira:${key}`, key, title: key, ...extra };
+}
+
+test("lanes split the board into bands by a field, each with every column and its own count, biggest first", () => {
+  const columns: MiniBoardColumn[] = [
+    {
+      status: "To Do",
+      cards: [
+        ticket("PAY-1", { assignee: "jonas" }),
+        ticket("PAY-2", { assignee: "mara" }),
+        ticket("PAY-3", { assignee: "mara" }),
+      ],
+      total: 3,
+    },
+    { status: "Done", cards: [ticket("PAY-4", { assignee: null }), ticket("PAY-5", { assignee: "mara" })], total: 2 },
+  ];
+  const lanes = splitLanes(columns, "assignee");
+  expect(lanes.map((lane) => [lane.title, lane.count])).toEqual([
+    ["mara", 3],
+    ["jonas", 1],
+    ["Unassigned", 1],
+  ]);
+  expect(lanes[0]!.columns.map((column) => [column.status, column.cards.map((c) => c.key), column.total])).toEqual([
+    ["To Do", ["PAY-2", "PAY-3"], 2],
+    ["Done", ["PAY-5"], 1],
+  ]);
+  // Every lane keeps every column, an empty one included.
+  expect(lanes[1]!.columns.map((column) => [column.status, column.total])).toEqual([
+    ["To Do", 1],
+    ["Done", 0],
+  ]);
+  // None is one band, untitled, that is the board.
+  expect(splitLanes(columns, "none")).toEqual([{ key: null, title: "", count: 5, columns }]);
+});
+
+test("a label lane is the ticket's first label; epic, priority and type lanes read their fields", () => {
+  const columns: MiniBoardColumn[] = [
+    {
+      status: "To Do",
+      cards: [
+        ticket("PAY-1", { labels: ["sepa", "api"], path: "PAY-200", priority: "High", issue_type: "Bug" }),
+        ticket("PAY-2", { labels: ["api"] }),
+        ticket("PAY-3", { labels: [] }),
+      ],
+      total: 3,
+    },
+  ];
+  expect(splitLanes(columns, "label").map((lane) => lane.title)).toEqual(["sepa", "api", "No label"]);
+  expect(splitLanes(columns, "epic").map((lane) => lane.title)).toEqual(["No epic", "PAY-200"]);
+  expect(splitLanes(columns, "priority").map((lane) => lane.title)).toEqual(["No priority", "High"]);
+  expect(splitLanes(columns, "issuetype").map((lane) => lane.title)).toEqual(["No type", "Bug"]);
+  expect(laneTitle("epic", "PAY-300")).toBe("PAY-300");
+});
+
+test("list headers sort by their column, a second press turning the direction, missing values last", () => {
+  const rows = [
+    { card: ticket("PAY-10", { title: "b", priority: "Low", assignee: "mara", updated_at: "2026-08-20T10:00:00Z" }), status: "Done" },
+    { card: ticket("PAY-9", { title: "a", priority: "Highest", assignee: null, updated_at: null }), status: "To Do" },
+    { card: ticket("PAY-11", { title: "c", priority: null, assignee: "jonas", updated_at: "2026-08-22T10:00:00Z" }), status: "In Progress" },
+  ];
+  const order = ["To Do", "In Progress", "Done"];
+  const keys = (column: Parameters<typeof nextSort>[1], direction: "ascending" | "descending") =>
+    sortRows(rows, { column, direction }, order).map((row) => row.card.key);
+  expect(keys("key", "ascending")).toEqual(["PAY-9", "PAY-10", "PAY-11"]);
+  expect(keys("key", "descending")).toEqual(["PAY-11", "PAY-10", "PAY-9"]);
+  expect(keys("summary", "ascending")).toEqual(["PAY-9", "PAY-10", "PAY-11"]);
+  expect(keys("status", "ascending")).toEqual(["PAY-9", "PAY-11", "PAY-10"]);
+  expect(keys("priority", "ascending")).toEqual(["PAY-9", "PAY-10", "PAY-11"]);
+  expect(keys("priority", "descending")).toEqual(["PAY-10", "PAY-9", "PAY-11"]);
+  expect(keys("assignee", "ascending")).toEqual(["PAY-11", "PAY-10", "PAY-9"]);
+  expect(keys("updated", "descending")).toEqual(["PAY-11", "PAY-10", "PAY-9"]);
+  expect(keys("updated", "ascending")).toEqual(["PAY-10", "PAY-11", "PAY-9"]);
+
+  expect(nextSort({ column: "updated", direction: "descending" }, "updated")).toEqual({
+    column: "updated",
+    direction: "ascending",
+  });
+  expect(nextSort({ column: "updated", direction: "descending" }, "key")).toEqual({
+    column: "key",
+    direction: "ascending",
+  });
 });
