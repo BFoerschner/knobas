@@ -57,6 +57,7 @@ The masters are `knobas-implementer-brief.md` and `knobas-merge-manager-brief.md
    - "Review split: run `mattpocock-skills:code-review` on the **Standards axis only**. The merge-manager owns the Spec axis and the deep pass. This replaces 'Standards + Spec axes' above."
    - "Mutation checks: 3 to 6 mutants on the load-bearing logic, not more. Screenshots only when the ticket changes what the app draws."
    - "Live suites: run only the live suite your change exercises, with the narrowest test filter that covers your code. A failure your dispatch names as a known shared-fixture break (with its issue number) is not yours: name the issue in the PR and move on. A new failure that is not yours: file it as a `ready-for-agent` issue titled `Live fixture: …` and name it in your report."
+   - "UI changes: run `(cd app && npx vitest run src/lib/shell/a11y.test.ts)` and the vitest files beside what you changed before `just check`. A missing accessible name has failed whole gates."
    - "*Self-merge*: when your dispatch says so, once the PR is open and your gate is green, merge it yourself by the *Merge and cleanup* section of the merge-manager brief named in your dispatch, and report the merged commit."
 5. Append to the merge-manager copy, verbatim:
    - "Review split: the implementer ran the Standards axis. You run the **Spec axis**, plus the deep pass where the diff touches a frozen surface (§10.8, migrations, the write queue, source adapters, concurrency). Don't redo the implementer's mutants; add one only for a claim you find untested."
@@ -69,8 +70,9 @@ Pass the copy's path in every dispatch, never the memory path.
 Defaults, unless `docs/agents/working-model.md` or Björn's rulings in memory say otherwise:
 
 - **Model per ticket, never Fable.** Opus (`model: "opus"`) for tracers, UI, anything that changes a frozen surface's behaviour, merge-managers of those, and milestone reviewers. **Sonnet** (`model: "sonnet"`) for small mechanical tickets and their merge-managers: docs or ADR wording that records code already merged, a seed or fixture fix, one more test case, a narrow query or sync fix. The dispatch says which model and why.
-- **Five agents at once** (the working model's Opus cap). Implementers, merge-managers and milestone reviewers all count. **At most two gates at once**, which the recipe's slot guard enforces: a third gate waits for a slot. A gate is minutes of an hour-long job, so that wait is expected and is no reason to hold back a dispatch.
-- **One merge-manager per open PR, at most two at once**; implementers fill the other seats. A PR waiting for review takes the next free seat before any new implementer.
+- **Five agents at once** (the working model's Opus cap), and **at most four of them implementers** (Björn, 2026-10-15). Merge-managers and milestone reviewers count too. **At most two gates at once**, which the recipe's slot guard enforces: a third gate waits for a slot. A gate is minutes of an hour-long job, so that wait is expected and is no reason to hold back a dispatch.
+- **One merge-manager per open PR, at most two at once**; implementers fill the other seats up to four. A PR waiting for review takes the next free seat before any new implementer.
+- **Throughput log:** after every merge, append `<ISO time>\t<PR>\t<implementers running>\t<agents running>\t<uptime load 5 min>` to `throughput-<session>.tsv` in the scratchpad. The iteration report gives merges per hour over the last three hours and the seat count they ran at. That is the evidence for changing the seat count; don't change it without that evidence and Björn's say.
 - **Disk:** a Rust worktree grows to 8–26 GB. Before creating one, `df -g /Users/dev` must show at least 20 GB free plus 12 GB for every worktree whose agent has not yet run its first gate. Below that, create none and report the free space to Björn.
 - **Slots** 1 to 5 are the five seats. Each running agent holds one, and its dispatch prompt names it (for ports and Chrome profiles).
 - **One desktop-witness holder at a time.** A ticket whose criteria name `just desktop-witness` waits for the slot.
@@ -108,13 +110,15 @@ An exit ticket is free when every other open issue in its milestone is closed (i
 
 ## Step 4: dispatch the frontier
 
-Take free non-exit candidates in ascending issue number until the ceiling is full, with one exception: a **live-fixture fix** goes first. That is a ticket that repairs a failure every run of a live suite hits (a seed, a shared fixture, a product's state; titles often begin `Live fixture:`). Every implementer whose ticket runs that suite loses time to it until it lands. Name every open live-fixture issue, with its suite, in each dispatch.
+Take free non-exit candidates in ascending issue number until the ceiling is full, with two exceptions, which go first in this order. A **loop ticket** is one whose title begins `Loop:`. It makes every later ticket cheaper (disk, gate time, conflicts), so it goes first. A **live-fixture fix** goes next. That is a ticket that repairs a failure every run of a live suite hits (a seed, a shared fixture, a product's state; titles often begin `Live fixture:`). Every implementer whose ticket runs that suite loses time to it until it lands. Name every open live-fixture issue, with its suite, in each dispatch.
 
 **Bundle tickets that edit the same screen or the same files.** Don't run two of them side by side: each merge forces the other through a rebase. In the new shell, the same screen means the same prototype-6 route or the same view component. Give a bundle to one implementer, in one worktree named for its lowest ticket (`issue-<lowest>`), with one PR that closes each ticket (one `Closes #N` line per ticket). A ticket joins a bundle when it is free or blocked only by tickets in that bundle. Put at most three tickets in a bundle. Claim every ticket in it. A free ticket whose screen is already being edited by a running agent waits for that agent's merge rather than starting beside it.
 
 **Measuring:** a ticket that touches search, queries, `filter_suggestions` or another read on the hot path gets this rule quoted in its dispatch: "Measure on 2–3k items while you work; run the full 22k responsiveness probe once, at the end."
 
-**Self-merge** for the smallest tickets: Sonnet-sized, no frozen surface, no live suite, no visible behaviour change, an expected diff under about 150 lines. Its dispatch says *self-merge* and names both brief paths. It gets no merge-manager.
+**Self-merge** for the smallest tickets: Sonnet-sized, no frozen surface, no live suite, no visible behaviour change, an expected diff under about 150 lines. Its dispatch says *self-merge* and names both brief paths and the merge-tail lock script. It gets no merge-manager. A **docs-only** ticket (it changes only `docs/**`, `.claude/**` or Markdown outside `crates/` and `app/`) also self-merges, and needs no gate, no `node_modules` copy and no Rust build. Its worktree doesn't count against the disk guard.
+
+**New-shell conventions:** every dispatch for a ticket in a ticket-first milestone (TF*) names `docs/specs/2026-10-15-ticket-first-shell-conventions.md` once it is on `main` (#907), and says: "These conventions are already ruled. Follow them, and don't re-record them as your rulings. A new convention you rule goes in that file in your PR."
 
 For each ticket N:
 
@@ -133,4 +137,4 @@ Never commit or stash in the root checkout. If a ticket needs files that are unc
 
 ## Report each iteration, in one short message
 
-Merged (PR, issue, commit) · dispatched (issue, slot) · milestone reviews (exit, verdict) · releases (tag, run) · rulings recorded this iteration (issue, one line) · handed to Björn (by-eye items a reviewer could not witness, reserved steps) · still running · blocked and on what · next wake-up. Never paste agent output.
+Merged (PR, issue, commit) · merges per hour and seat count (from the throughput log) · dispatched (issue, slot) · milestone reviews (exit, verdict) · releases (tag, run) · rulings recorded this iteration (issue, one line) · handed to Björn (by-eye items a reviewer could not witness, reserved steps) · still running · blocked and on what · next wake-up. Never paste agent output.
