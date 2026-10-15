@@ -347,6 +347,8 @@ const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
+const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
+const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
@@ -491,6 +493,56 @@ const LAUNCHER_PORTS = {
   launcherHome: () =>
     deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),
 };
+
+/** Settings' commands (#830), every one answering through `deferred`. */
+function settingsPorts() {
+  return {
+    listSources: () => deferred([]),
+    listAdapters: () => deferred([]),
+    syncStatus: () => deferred([]),
+    listSyncRuns: () => deferred([]),
+    updateSource: () => new Promise<never>(() => {}),
+    backfillSource: () => deferred(1),
+    deleteSource: () => deferred(undefined),
+    setSourceSecret: () => new Promise<never>(() => {}),
+    testSource: () => new Promise<never>(() => {}),
+    syncNow: () => deferred(1),
+    syncAll: () => deferred([]),
+    listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
+  };
+}
+
+function sourcePageProps() {
+  return {
+    source: {
+      id: "jira",
+      adapter_kind: "jira",
+      display_name: "Jira",
+      base_url: "https://jira.tidewater.example",
+      enabled: true,
+      sync_interval_secs: 300,
+      config: {},
+      health: { source_id: "jira", state: "ok" as const, checked_at: null, detail: null, secret_expires_at: null },
+      last_run: null,
+      next_run_at: null,
+      item_count: 0,
+      auth_kind: "UserPassword" as const,
+      kinds: [],
+    },
+    adapter: null,
+    health: null,
+    status: null,
+    finished: 0,
+    now: new Date(),
+    ports: settingsPorts(),
+    layers: createLayers(),
+    onhealth: () => {},
+    onchanged: () => {},
+    onstarted: () => {},
+    onstopped: () => {},
+    onremoved: () => {},
+  };
+}
 
 const CONTEXTS = builtinContexts([{ id: "jira", label: "Tidewater Jira" }]);
 
@@ -693,6 +745,35 @@ const CASES: Case[] = [
     }),
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /**
+     * Settings in the ticket-first shell (#830): the `sync:state` listener,
+     * the 30 s clock and three reads behind a ready database, each late.
+     */
+    name: "TfSettings",
+    source: "lib/tf/settings/TfSettings.svelte",
+    open: (target) => ({
+      app: mount(TfSettings, {
+        target,
+        props: { rest: [], job: null, ready: true, onrooms: () => {}, ports: settingsPorts(), layers: createLayers() },
+      }),
+    }),
+  },
+  {
+    /** A source's page (#830): its sync-runs read lands after the case opens. */
+    name: "TfSourcePage",
+    source: "lib/tf/settings/TfSourcePage.svelte",
+    open: (target) => ({ app: mount(TfSourcePage, { target, props: sourcePageProps() }) }),
+  },
+  {
+    /** The dialog registers a layer and moves focus while it is open (#830). */
+    name: "TfDialog",
+    source: "lib/tf/settings/TfDialog.svelte",
+    open: (target) => ({ app: mount(TfSourcePage, { target, props: sourcePageProps() }) }),
+    exercise: (target) => {
+      [...target.querySelectorAll("button")].find((el) => el.textContent?.trim() === "Remove…")?.click();
     },
   },
   {
