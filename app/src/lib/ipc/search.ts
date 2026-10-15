@@ -308,6 +308,23 @@ export interface FilterSuggestions {
    * listed under `owner/name` and `name` (#761).
    */
   parents: ParentSuggestion[];
+  /**
+   * The values the ticket keys take (#811): per key the most used fifty the
+   * live mirror holds, in the source's spelling; `@me` first for `assignee`;
+   * `current` for `sprint` while a ticket is in an active sprint; `today` and
+   * `week` for `assigned`. Empty from a `parentsOnly` read.
+   */
+  fields: FieldSuggestion[];
+}
+
+/** One value a ticket key can take — `knobas_search::FieldSuggestion` (#811). */
+export interface FieldSuggestion {
+  /** The key as the grammar spells it, without the colon: `status`. */
+  key: string;
+  /** What the key is completed with: `In Review`, `PAY`, `@me`. */
+  value: string;
+  /** Drawn beside it: a project's name, `you` for `@me`, or empty. */
+  detail: string;
 }
 
 /** One kind `kind:` can name — `knobas_search::KindSuggestion`. */

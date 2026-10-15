@@ -486,6 +486,25 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
         display_name: source.display_name,
       })),
       parents: [],
+      // The ticket keys' values (#811), as the Tidewater fixture's Jira holds
+      // them: fixture-only, like the lists above.
+      fields: [
+        { key: "project", value: "PAY", detail: "Payments" },
+        { key: "project", value: "OPS", detail: "Operations" },
+        ...["In Progress", "To Do", "In Review", "Done"].map((value) => ({
+          key: "status",
+          value,
+          detail: "",
+        })),
+        ...["Story", "Bug", "Task"].map((value) => ({ key: "issuetype", value, detail: "" })),
+        ...["High", "Medium", "Low"].map((value) => ({ key: "priority", value, detail: "" })),
+        { key: "assignee", value: "@me", detail: "you" },
+        { key: "assignee", value: "jonas.becker", detail: "" },
+        { key: "label", value: "sepa", detail: "" },
+        { key: "sprint", value: "current", detail: "the active sprint" },
+        { key: "assigned", value: "today", detail: "assigned to you, changed in the last day" },
+        { key: "assigned", value: "week", detail: "assigned to you, changed in the last 7 days" },
+      ],
     }),
   };
 }

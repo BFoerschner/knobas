@@ -498,13 +498,23 @@ mod tests {
                 name: "payout-service".to_owned(),
                 kind: "repo".to_owned(),
             }],
+            fields: vec![knobas_search::FieldSuggestion {
+                key: "project".to_owned(),
+                value: "PAY".to_owned(),
+                detail: "Payments".to_owned(),
+            }],
         };
         let wire = serde_json::to_value(&value).expect("FilterSuggestions serializes");
         for (interface, object, expected) in [
             (
                 "FilterSuggestions",
                 &wire,
-                &["kinds", "parents", "sources"][..],
+                &["fields", "kinds", "parents", "sources"][..],
+            ),
+            (
+                "FieldSuggestion",
+                &wire["fields"][0],
+                &["detail", "key", "value"][..],
             ),
             ("KindSuggestion", &wire["kinds"][0], &["kind", "label"][..]),
             (

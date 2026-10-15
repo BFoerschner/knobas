@@ -52,7 +52,11 @@ use chrono::{DateTime, Utc};
 /// is -- the lesson of #610 -- so the bump is what makes every upgraded
 /// source re-read every issue once, the same full sync #345's bump made. Jira
 /// is `full_sync_exhaustive`, so that one run re-emits the whole corpus.
-pub(crate) const CURSOR_VERSION: u8 = 3;
+///
+/// **4** since #811 stores every ticket's sprints as `sprints: [...]` beside
+/// the record, for #598's reason: an unchanged issue is never emitted again,
+/// so without the bump no stored ticket would gain the key.
+pub(crate) const CURSOR_VERSION: u8 = 4;
 
 /// Interfaces §4.2: "**JQL time resolution is one minute**, so an
 /// exact-boundary watermark drops items. Re-delivery is free -- upserts are
@@ -284,19 +288,29 @@ mod tests {
         );
         let back = JiraCursor::parse(&c.encode()).unwrap();
         assert_eq!(back, c);
-        assert!(c.encode().starts_with(r#"{"v":3,"#), "{}", c.encode());
+        assert!(c.encode().starts_with(r#"{"v":4,"#), "{}", c.encode());
     }
 
     /// Interfaces §4.1: "an unrecognised version means full sync". A corrupt or
     /// future cursor must not wedge a source -- it must re-sync.
     #[test]
     fn an_unreadable_cursor_means_full_sync() {
-        assert!(JiraCursor::parse(r#"{"v":4,"updated_to":null}"#).is_none());
+        assert!(JiraCursor::parse(r#"{"v":5,"updated_to":null}"#).is_none());
         // A *complete* envelope of a version this build does not know: the
         // version check has to be what rejects it, not a missing field.
         assert!(
             JiraCursor::parse(
-                r#"{"v":4,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+                r#"{"v":5,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,"seen":[]}"#
+            )
+            .is_none()
+        );
+        // **A version-3 cursor, which is what every source stored before
+        // #811.** Refusing it is the full sync that gives every stored ticket
+        // its `sprints`.
+        assert!(
+            JiraCursor::parse(
+                r#"{"v":3,"updated_to":"2026-08-22T11:48:00Z","tz_offset_secs":0,
+                    "seen":[{"k":"PAY-231","u":"2026-08-22T11:48:00Z","h":"h-PAY-231"}]}"#
             )
             .is_none()
         );

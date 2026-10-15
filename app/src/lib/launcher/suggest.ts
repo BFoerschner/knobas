@@ -1,6 +1,8 @@
 /**
  * Value suggestions for `kind:`, `source:` and `under:` (#601, spec #591
- * stories 27-30).
+ * stories 27-30), and for the ticket keys `project:`, `status:`,
+ * `issuetype:`, `priority:`, `assignee:`, `label:`, `sprint:` and
+ * `assigned:` (#811).
  *
  * The values are the backend's (`filter_suggestions`: only values that exist
  * right now); what is here is which token of the box is being typed, which
@@ -14,8 +16,21 @@
  */
 import type { FilterSuggestions } from "../ipc";
 
+/** The ticket keys (#811), each drawing from `fields` by its own name. */
+const FIELD_KEYS = [
+  "project",
+  "status",
+  "issuetype",
+  "priority",
+  "assignee",
+  "label",
+  "sprint",
+  "assigned",
+] as const;
+type FieldKey = (typeof FIELD_KEYS)[number];
+
 /** Which list a key draws from. */
-type SuggestKey = "kind" | "source" | "under";
+type SuggestKey = "kind" | "source" | "under" | FieldKey;
 
 const KEYS: Record<string, SuggestKey> = {
   kind: "kind",
@@ -24,6 +39,7 @@ const KEYS: Record<string, SuggestKey> = {
   src: "source",
   in: "source",
   under: "under",
+  ...Object.fromEntries(FIELD_KEYS.map((key) => [key, key])),
 };
 
 /** How many values the list shows at most. */
@@ -68,7 +84,8 @@ export function activeToken(raw: string): ActiveToken | null {
   const colon = token.indexOf(":");
   if (colon <= 0) return null;
   const typedKey = token.slice(0, colon);
-  const key = KEYS[typedKey.toLowerCase()];
+  // A negated ticket key (`-status:`) is offered the same values.
+  const key = KEYS[typedKey.replace(/^-/, "").toLowerCase()];
   if (!key) return null;
   const value = token.slice(colon + 1);
   return {
@@ -91,6 +108,10 @@ function candidates(key: SuggestKey, lists: FilterSuggestions): Suggestion[] {
       }));
     case "under":
       return lists.parents.map((p) => ({ value: p.name, detail: p.kind }));
+    default:
+      return (lists.fields ?? [])
+        .filter((f) => f.key === key)
+        .map((f) => ({ value: f.value, detail: f.detail }));
   }
 }
 

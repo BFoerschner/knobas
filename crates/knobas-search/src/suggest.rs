@@ -32,8 +32,10 @@
 
 use sqlx::PgPool;
 
-use crate::types::{FilterSuggestions, KindSuggestion, ParentSuggestion, SourceSuggestion};
-use crate::{SearchError, Vocabulary};
+use crate::types::{
+    FieldSuggestion, FilterSuggestions, KindSuggestion, ParentSuggestion, SourceSuggestion,
+};
+use crate::{FieldKey, SearchError, Vocabulary};
 
 /// Every kind with at least one row, over the four corpora the launcher
 /// unions.
@@ -195,6 +197,134 @@ const PARENTS_SQL: &str = concat!(
      limit $2"
 );
 
+/// How many values one ticket key is offered with (#811): the most used
+/// this many. The box narrows them as the value is typed.
+pub const FIELD_SUGGESTIONS: i64 = 50;
+
+/// How many live rows of each declaring source and kind the ticket keys'
+/// values are read from (#811): the newest this many.
+///
+/// A sample, and that is the trade: a value that only older tickets carry is
+/// not offered, and typed out it still filters. Measured with `just
+/// responsiveness-probe` (22,000 items, five declaring sources), warm median
+/// of the opening read (kinds, sources, parents and these): the whole mirror
+/// 4,274 ms (load 11 to 29); the newest 1,000 149 ms (load 8 to 10); the
+/// newest 200 62 ms (load 5 to 6), against 28 ms without the ticket keys
+/// (#768's entry).
+pub(crate) const FIELD_SAMPLE: i64 = 200;
+
+/// The values the live mirror holds for each ticket key (#811), the most
+/// used [`FIELD_SUGGESTIONS`] per key, most used first: `(key, value,
+/// detail)`.
+///
+/// Read through the **same** declared reads the keys filter by (ADR-0007):
+/// `crate::corpus::FIELD_PATHS` over the declarations at `$1`, and the
+/// corpus's `field_of!` and `list_of!`, so an offered value is one the key
+/// matches and the two statements cannot read a field two ways. The
+/// declaration is resolved once a source and kind, as the mini board does
+/// (#753), rather than walked per row; and only the newest
+/// [`FIELD_SAMPLE`] (`$3`) live rows of each source and kind that declares
+/// any of these fields are read, each probe ordered as
+/// `item_source_updated_idx` is so it stops early. A row whose record misses
+/// a path contributes nothing for that key: the miss direction, offering
+/// fewer values, never a wrong one.
+///
+/// The value keeps the source's spelling, the way a reader knows it; the key
+/// matches it ignoring case. A project is offered by its key, its name beside
+/// it. `sprint` is offered as `current`, once, when a sampled row is in an
+/// active sprint.
+const FIELDS_SQL: &str = concat!(
+    "with fdecl as (select $1::jsonb as d), ",
+    crate::corpus::field_paths_ctes!(),
+    ", sampled as materialized ( \
+       select r.source_id, r.kind, r.payload \
+         from (select source_id, kind from fp union select source_id, kind from lp) p \
+         cross join lateral (select i.source_id, i.kind, i.payload from sync.item i \
+                              where i.source_id = p.source_id and i.kind = p.kind and ",
+    knobas_core::live_by_exclusion!("i"),
+    " order by i.item_updated_at desc nulls last limit $3) r), \
+     v as ( \
+       select 'project' as key, ",
+    crate::corpus::field_of!("project_key"),
+    " as value, ",
+    crate::corpus::field_of!("project_name"),
+    " as detail from sampled i \
+       union all select 'status', ",
+    crate::corpus::field_of!("status_name"),
+    ", null from sampled i \
+       union all select 'issuetype', ",
+    crate::corpus::field_of!("issue_type"),
+    ", null from sampled i \
+       union all select 'priority', ",
+    crate::corpus::field_of!("priority"),
+    ", null from sampled i \
+       union all select 'assignee', ",
+    crate::corpus::field_of!("assignee"),
+    ", null from sampled i \
+       union all select 'label', l.value, null from sampled i cross join lateral ",
+    crate::corpus::list_of!("labels"),
+    " l \
+       union all select 'sprint', 'current', null from sampled i where exists (select 1 from ",
+    crate::corpus::list_of!("sprint_state"),
+    " s where lower(s.value) = 'active')) \
+     select f.key, f.value, f.detail from ( \
+       select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
+              row_number() over (partition by v.key order by count(*) desc, v.value) as rn \
+         from v where v.value is not null group by v.key, v.value) f \
+      where f.rn <= $2 \
+      order by f.key, f.uses desc, f.value"
+);
+
+/// The ticket keys' values (#811), `@me` first among the assignees while
+/// knobas knows who the user is, and `assigned:`'s windows, which every
+/// installation has.
+async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion>, SearchError> {
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(FIELDS_SQL)
+        .bind(vocab.declarations.as_param())
+        .bind(FIELD_SUGGESTIONS)
+        .bind(FIELD_SAMPLE)
+        // The unnamed statement, planned with the values in hand, for
+        // `parents`' reason below.
+        .persistent(false)
+        .fetch_all(pool)
+        .await?;
+    let mut out: Vec<FieldSuggestion> = Vec::new();
+    let suggestion = |key: &str, value: &str, detail: &str| FieldSuggestion {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        detail: detail.to_owned(),
+    };
+    for field in FieldKey::ALL {
+        let key = field.spelling();
+        match field {
+            FieldKey::Assignee if !vocab.identity.is_empty() => {
+                out.push(suggestion(key, crate::query::ME, "you"));
+            }
+            FieldKey::Assigned => {
+                out.push(suggestion(
+                    key,
+                    "today",
+                    "assigned to you, changed in the last day",
+                ));
+                out.push(suggestion(
+                    key,
+                    "week",
+                    "assigned to you, changed in the last 7 days",
+                ));
+            }
+            _ => {}
+        }
+        for (_, value, detail) in rows.iter().filter(|(k, _, _)| k == key) {
+            let detail = match field {
+                FieldKey::Sprint => "the active sprint",
+                _ => detail.as_deref().unwrap_or(""),
+            };
+            out.push(suggestion(key, value, detail));
+        }
+    }
+    Ok(out)
+}
+
 /// The parents for the prefix `under` (empty for none), and nothing else: the
 /// read the box makes on every keystroke of an `under:` value (#761, #768).
 ///
@@ -266,6 +396,7 @@ pub(crate) async fn read(
             })
             .collect(),
         parents,
+        fields: fields(pool, vocab).await?,
     })
 }
 

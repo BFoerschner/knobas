@@ -162,8 +162,8 @@ pub fn search_sql(
     // Every row's path line reads the parent its kind declares (#596), so the
     // declarations are bound for every search -- once: an `under:` query has
     // already bound them, and the detail stage reads that same placeholder.
-    let path_declarations = match &bound.under {
-        Some((declarations, _)) => declarations.clone(),
+    let path_declarations = match &bound.declarations {
+        Some(declarations) => declarations.clone(),
         None => builder.param(Bind::Json(filters.declarations.as_param())),
     };
 
@@ -203,6 +203,9 @@ pub fn search_sql(
             "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
         );
     }
+
+    // A ticket key's declared paths, resolved once for the statement (#811).
+    sql.push_str(&field_paths(&bound));
 
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
@@ -328,10 +331,54 @@ struct BoundFilters {
     authors: Option<String>,
     /// The declarations and the values, in that order: `under:` needs both.
     under: Option<(String, String)>,
+    /// The ticket-key conditions (#811), each with the placeholders it reads.
+    fields: Vec<BoundField>,
+    /// The declarations' placeholder, once a filter has bound it: `under:`
+    /// and the ticket keys share it, and so does the detail stage's path.
+    declarations: Option<String>,
+}
+
+/// One ticket-key condition's placeholders.
+struct BoundField {
+    key: crate::query::FieldKey,
+    negated: bool,
+    values: String,
+    /// `assigned:`'s window, or `null`.
+    days: String,
 }
 
 /// Allocate one statement's filter binds, in the order they are read.
+///
+/// With a ticket key the declarations come first: the statement's
+/// `fdecl` CTE reads them before any predicate does (`crate::corpus::FIELD_PATHS`).
 fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilters {
+    let declarations = (!filters.fields.is_empty())
+        .then(|| builder.param(Bind::Json(filters.declarations.as_param())));
+    let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
+    bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
+    for filter in &filters.fields {
+        let values = builder.param(Bind::Texts(filter.values.clone()));
+        let days = filter.within_days.map_or_else(
+            || "null".to_owned(),
+            |days| builder.param(Bind::I32(clamp_days(days))),
+        );
+        bound.fields.push(BoundField {
+            key: filter.key,
+            negated: filter.negated,
+            values,
+            days,
+        });
+    }
+    bound
+}
+
+/// [`bind_filters`]' first half: every dimension but the ticket keys,
+/// `under:` reading `declarations` when they are bound already.
+fn bind_dimensions(
+    builder: &mut Builder,
+    filters: &EffectiveFilters,
+    declarations: Option<&String>,
+) -> BoundFilters {
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
@@ -353,10 +400,14 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             .then(|| builder.param(Bind::Texts(filters.authors()))),
         under: filters.filters_by_under().then(|| {
             (
-                builder.param(Bind::Json(filters.declarations.as_param())),
+                declarations
+                    .cloned()
+                    .unwrap_or_else(|| builder.param(Bind::Json(filters.declarations.as_param()))),
                 builder.param(Bind::Texts(filters.under.clone())),
             )
         }),
+        fields: Vec::new(),
+        declarations: None,
     }
 }
 
@@ -420,7 +471,40 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             None => "false".to_owned(),
         });
     }
+    for field in &bound.fields {
+        // `fd` is the one row a fragment reads its binds from, as `ud` is for
+        // `under:`. A fragment that misses yields null, and null is "does not
+        // match": `coalesce` makes it false before a `not` can see it.
+        let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
+            Some((_, fragment)) => format!(
+                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n) fd), \
+                 false)",
+                field.values, field.days
+            ),
+            // A corpus whose rows have no such field matches no value of it.
+            None => "false".to_owned(),
+        };
+        predicates.push(if field.negated {
+            format!("not {matches}")
+        } else {
+            matches
+        });
+    }
     predicates
+}
+
+/// The CTEs a statement with a ticket key needs, each ending in `,\n`, or
+/// nothing: `fdecl` holding the declarations, then
+/// [`crate::corpus::FIELD_PATHS`]. Nothing for a statement without one, so
+/// every other query's text is what it was before #811.
+fn field_paths(bound: &BoundFilters) -> String {
+    match (&bound.declarations, bound.fields.is_empty()) {
+        (Some(declarations), false) => format!(
+            "fdecl as (select {declarations}::jsonb as d),\n{},\n",
+            crate::corpus::FIELD_PATHS
+        ),
+        _ => String::new(),
+    }
 }
 
 /// One saved list, as the summary statement asks about it (#506).
@@ -501,6 +585,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql,
             "select {id} as list_id, count(*) as total, max(m.synced_at) as newest\n  from ("
         );
+        let paths = field_paths(&bound);
+        if let Some(paths) = paths.strip_suffix(",\n") {
+            let _ = writeln!(sql, "  with {paths}");
+        }
         for (index, corpus) in corpora.iter().enumerate() {
             if index > 0 {
                 sql.push_str("  union all\n");
@@ -768,6 +856,19 @@ mod tests {
         // `NAMED`'s last-segment half (#621): the separator a slashed title
         // is split on.
         "/",
+        // The ticket keys' declared reads (#811): the declaration field each
+        // key reads, a list path's `entry`, and the one sprint state
+        // `sprint:current` asks for.
+        "project_key",
+        "project_name",
+        "status_name",
+        "issue_type",
+        "priority",
+        "assignee",
+        "labels",
+        "sprint_state",
+        "entry",
+        "active",
     ];
 
     fn filters(
@@ -857,6 +958,59 @@ mod tests {
                 .binds
                 .iter()
                 .any(|bind| matches!(bind, Bind::Texts(values) if values == &[evil.to_owned()]))
+        );
+    }
+
+    /// The ticket keys (#811) hold the same line: whatever was typed as a
+    /// value travels as a bind, in every key and either sign, and the
+    /// statement's literals stay the closed list.
+    #[test]
+    fn a_ticket_key_value_never_enters_the_sql_string() {
+        use crate::query::{FieldFilter, FieldKey};
+        let evil = "'; drop schema knobas cascade; --";
+        let fields = FieldKey::ALL
+            .into_iter()
+            .enumerate()
+            .map(|(n, key)| FieldFilter {
+                key,
+                negated: n % 2 == 1,
+                values: vec![evil.to_owned()],
+                within_days: (key == FieldKey::Assigned).then_some(7),
+            })
+            .collect();
+        let built = search_sql(
+            &[&LIVE_ITEM],
+            None,
+            false,
+            &EffectiveFilters {
+                fields,
+                // `under:` beside them reads the same declarations bind.
+                under: vec![evil.to_owned()],
+                ..EffectiveFilters::default()
+            },
+            10,
+            50,
+        );
+        assert!(!built.sql.contains("drop schema"), "{}", built.sql);
+        for literal in literals(&built.sql) {
+            assert!(
+                ALLOWED_LITERALS.contains(&literal.as_str()),
+                "unexpected literal {literal:?} in\n{}",
+                built.sql
+            );
+        }
+        // One declarations bind, shared by every key, `under:` and the path line.
+        assert_eq!(
+            built
+                .binds
+                .iter()
+                .filter(|b| matches!(b, Bind::Json(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            placeholders(&built.sql),
+            (1..=built.bind_count()).collect::<Vec<_>>()
         );
     }
 
@@ -1321,6 +1475,7 @@ mod tests {
             state: "null::jsonb",
             scope: Some("o.archived is false"),
             under: None,
+            fields: &[],
         };
         let built = search_sql(
             &[&LIVE_ITEM, &OTHER],

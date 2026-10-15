@@ -25,6 +25,7 @@ mod sql_containment;
 mod sql_shape;
 mod state_chip;
 mod suggest;
+mod ticket_keys;
 mod under;
 mod under_confluence;
 mod under_coverage;

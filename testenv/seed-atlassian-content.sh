@@ -295,7 +295,7 @@ record() {  # record <jq filter with $v bound> <json>
 verify() {
   _fail=0
   _ok=
-  if want jira; then verify_jira; _ok="PAY-231 with its worklogs, $NARROW_KEY's narrowing workflow"; fi
+  if want jira; then verify_jira; _ok="PAY-231 with its worklogs and its active sprint, $NARROW_KEY's narrowing workflow"; fi
   if want confluence; then verify_confluence; _ok="${_ok:+$_ok, }\"$_title\" with its body, and \"$_nested\" under \"$_under\""; fi
   [ "$_fail" -eq 0 ] || die "verify FAILED"
   say "verify ok: $_ok"
@@ -315,6 +315,17 @@ verify_jira() {
     _have=$(printf '%s' "$API_BODY" | jq '.fields.worklog.worklogs | length')
     [ "$_have" -ge "$_want" ] || { echo "  PAY-231 has $_have worklogs, the fixture $_want" >&2; _fail=1; }
     [ "$(printf '%s' "$API_BODY" | jq -r .key)" = "PAY-231" ] || { echo "  key is not PAY-231" >&2; _fail=1; }
+  fi
+
+  # The seed's active sprint (#811): PAY-231 is in it and it is active, read
+  # through the Agile REST the board was made with.
+  say "verify: PAY-231 is in an active sprint"
+  jira GET "/rest/agile/1.0/issue/PAY-231?fields=sprint"
+  if [ "$API_STATUS" != "200" ]; then
+    echo "  PAY-231's sprint: HTTP $API_STATUS" >&2; _fail=1
+  else
+    _sprint=$(printf '%s' "$API_BODY" | jq -r '.fields.sprint.state // empty')
+    [ "$_sprint" = "active" ] || { echo "  PAY-231 is in no active sprint (\"$_sprint\")" >&2; _fail=1; }
   fi
 
   # The narrowing project, and that its workflow is still a narrowing one
@@ -544,6 +555,10 @@ jira GET /rest/api/2/field
 expect "list fields" 200
 EPIC_NAME_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.name=="Epic Name") | .id')
 EPIC_LINK_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.name=="Epic Link") | .id')
+# The Sprint field (#811), by its Greenhopper key: what the adapter's
+# discovery must name too, read here independently as its control.
+SPRINT_FIELD=$(printf '%s' "$API_BODY" | jq -r '.[] | select(.schema.custom? == "com.pyxis.greenhopper.jira:gh-sprint") | .id')
+[ -n "$SPRINT_FIELD" ] || die "the Sprint custom field is missing -- is this a Jira Software instance?"
 # shellcheck disable=SC2015  # `A && B || die`: dying when either test fails is the point; 0.9.0 (ubuntu-latest) flags it, 0.11.0 does not
 [ -n "$EPIC_NAME_FIELD" ] && [ -n "$EPIC_LINK_FIELD" ] \
   || die "the Epic Name / Epic Link custom fields are missing -- is this a Jira Software project?"
@@ -703,6 +718,70 @@ while :; do
 done
 [ "$SWEPT" -eq 0 ] || say "deleted $SWEPT key placeholders"
 
+# -- one Scrum board on PAY with an active sprint (#811) ----------------------
+# The fixture names no sprint, so this is the seed's decision, as the page tree
+# below is: the board `PAY sprint board` over `project = PAY ORDER BY Rank ASC`,
+# and its sprint `PAY Sprint 1`, started, holding PAY-231 -- the fixture's
+# ticket in progress -- and nothing else. What `sprint:current` and the
+# adapter's Sprint field discovery are witnessed against in `jira-live`. Jira
+# Software's Agile REST (`/rest/agile/1.0`, not in the vendored WADL, read off
+# this container): board by name, sprint by name on the board, the issue by
+# the sprint's own issue list, the state by the sprint's own. Each is a skip
+# when it is already so. Adding an issue to a sprint is an edit, so PAY-231's
+# `updated` is the seed's time either way.
+SPRINT_BOARD='PAY sprint board'
+SPRINT_NAME='PAY Sprint 1'
+SPRINT_ISSUES='PAY-231'
+jira GET "/rest/agile/1.0/board?name=$(urlenc "$SPRINT_BOARD")&type=scrum"
+expect "find board $SPRINT_BOARD" 200
+BOARD_ID=$(printf '%s' "$API_BODY" | jq -r --arg n "$SPRINT_BOARD" '[.values[] | select(.name == $n)][0].id // empty')
+if [ -n "$BOARD_ID" ]; then
+  skip "board $SPRINT_BOARD"
+else
+  jira POST /rest/api/2/filter "$(jq -n --arg n "$SPRINT_BOARD"       '{name: "\($n) filter", jql: "project = PAY ORDER BY Rank ASC", favourite: false}')"
+  expect "create the filter of $SPRINT_BOARD" 200
+  _filter=$(printf '%s' "$API_BODY" | jq -r .id)
+  jira POST /rest/agile/1.0/board "$(jq -n --arg n "$SPRINT_BOARD" --arg f "$_filter"       '{name: $n, type: "scrum", filterId: ($f | tonumber)}')"
+  expect "create board $SPRINT_BOARD" 200 201
+  BOARD_ID=$(printf '%s' "$API_BODY" | jq -r .id)
+  created "board $SPRINT_BOARD (id $BOARD_ID, filter $_filter)"
+fi
+jira GET "/rest/agile/1.0/board/$BOARD_ID/sprint?state=future,active,closed"
+expect "sprints of $SPRINT_BOARD" 200
+SPRINT_ID=$(printf '%s' "$API_BODY" | jq -r --arg n "$SPRINT_NAME" '[.values[] | select(.name == $n)][0].id // empty')
+if [ -n "$SPRINT_ID" ]; then
+  skip "sprint $SPRINT_NAME"
+else
+  jira POST /rest/agile/1.0/sprint "$(jq -n --arg n "$SPRINT_NAME" --arg b "$BOARD_ID"       '{name: $n, originBoardId: ($b | tonumber)}')"
+  expect "create sprint $SPRINT_NAME" 200 201
+  SPRINT_ID=$(printf '%s' "$API_BODY" | jq -r .id)
+  created "sprint $SPRINT_NAME (id $SPRINT_ID)"
+fi
+for key in $SPRINT_ISSUES; do
+  jira GET "/rest/agile/1.0/sprint/$SPRINT_ID/issue?fields=key&maxResults=100"
+  expect "issues of $SPRINT_NAME" 200
+  if printf '%s' "$API_BODY" | jq -e --arg k "$key" 'any(.issues[]; .key == $k)' >/dev/null; then
+    skip "$key in $SPRINT_NAME"; continue
+  fi
+  jira POST "/rest/agile/1.0/sprint/$SPRINT_ID/issue" "$(jq -n --arg k "$key" '{issues: [$k]}')"
+  expect "move $key into $SPRINT_NAME" 204
+  created "$key in $SPRINT_NAME"
+done
+jira GET "/rest/agile/1.0/sprint/$SPRINT_ID"
+expect "read $SPRINT_NAME" 200
+if [ "$(printf '%s' "$API_BODY" | jq -r .state)" = "active" ]; then
+  skip "$SPRINT_NAME started"
+else
+  # Two weeks from now: the licence window is three hours, so it never ends
+  # under a run.
+  jira POST "/rest/agile/1.0/sprint/$SPRINT_ID" "$(jq -n \
+      --arg s "$(date -u +%Y-%m-%dT%H:%M:%S.000Z)" \
+      --arg e "$(date -u -v+14d +%Y-%m-%dT%H:%M:%S.000Z 2>/dev/null || date -u -d '+14 days' +%Y-%m-%dT%H:%M:%S.000Z)" \
+      '{state: "active", startDate: $s, endDate: $e}')"
+  expect "start $SPRINT_NAME" 200
+  created "start $SPRINT_NAME"
+fi
+
 # -- jira's ids to seed-state.json --------------------------------------------
 JIRA_IDS='[]'
 for row in $ISSUES; do
@@ -725,15 +804,19 @@ done
 record '.jira += {
   template_key: $v.template, statuses: $v.statuses, author: $v.author,
   epic_link_field: $v.epic_link, projects: $v.projects, issues: $v.issues,
-  unreachable_statuses: $v.unreachable, narrowing: $v.narrowing,
-  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids, worklog ids and custom field ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `epic_link_field` is this instance'"'"'s Epic Link id, which is what a classic Data Center project keeps epic membership in (`fields.parent` is for sub-tasks and is absent here). `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have. `narrowing` is the second project (#522): a Jira Core process-management project whose workflow reaches a proper subset of its own statuses from every one of them, which is what gives the reachable-transition read a live witness for narrowing. It is deliberately empty and is deliberately NOT in `projects` or `issues`, which are the fixture'"'"'s corpus."
+  unreachable_statuses: $v.unreachable, narrowing: $v.narrowing, sprint: $v.sprint,
+  _comment: "Seeded by testenv/seed-atlassian-content.sh. Jira assigns issue ids, comment ids, worklog ids and custom field ids; the keys are the fixture'"'"'s. Comments and worklogs are authored by `author`. `epic_link_field` is this instance'"'"'s Epic Link id, which is what a classic Data Center project keeps epic membership in (`fields.parent` is for sub-tasks and is absent here). `unreachable_statuses` lists fixture statuses the template'"'"'s workflow does not have. `narrowing` is the second project (#522): a Jira Core process-management project whose workflow reaches a proper subset of its own statuses from every one of them, which is what gives the reachable-transition read a live witness for narrowing. It is deliberately empty and is deliberately NOT in `projects` or `issues`, which are the fixture'"'"'s corpus. `sprint` is the seed'"'"'s Scrum board on PAY and its active sprint (#811), with this instance'"'"'s Sprint field id."
 }' "$(jq -n --arg t "$TEMPLATE_KEY" --arg a "$ADMIN_USER" --argjson ids "$JIRA_IDS" \
         --argjson un "${UNREACHABLE:-[]}" --argjson pr "$PROJECTS_JSON" --argjson st "$STATUSES" \
         --arg el "$EPIC_LINK_FIELD" \
+        --argjson sp "$(jq -n --arg f "$SPRINT_FIELD" --arg b "$BOARD_ID" --arg i "$SPRINT_ID" \
+                          --arg n "$SPRINT_NAME" --arg is "$SPRINT_ISSUES" \
+                          '{field: $f, board_id: ($b | tonumber), id: ($i | tonumber), name: $n,
+                            issues: ($is | split(" "))}')" \
         --argjson nw "$(jq -n --arg k "$NARROW_KEY" --arg n "$NARROW_NAME" --arg t "$NARROW_TEMPLATE" \
                           --arg it "$NARROW_TYPE" --argjson st "$NARROW_STATUSES" \
                           '{key: $k, name: $n, template_key: $t, issue_type: $it, statuses: $st}')" \
-        '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un, narrowing: $nw}')"
+        '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un, narrowing: $nw, sprint: $sp}')"
 
 fi  # want jira
 

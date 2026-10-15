@@ -742,7 +742,7 @@
               onmouseenter={() => (suggestionPicked = index)}
             >
               <span class="nm">{suggestion.value}</span>
-              <span class="s"> · {suggestion.detail}</span>
+              {#if suggestion.detail}<span class="s"> · {suggestion.detail}</span>{/if}
             </button>
           {/each}
         </div>

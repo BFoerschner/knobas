@@ -1976,7 +1976,7 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
 
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
-    assert_eq!(keys, ["kinds", "parents", "sources"], "{v}");
+    assert_eq!(keys, ["fields", "kinds", "parents", "sources"], "{v}");
     let kind = v["kinds"]
         .as_array()
         .unwrap()
