@@ -436,6 +436,98 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; }
 .tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
 
+.tf-btn.tf-danger { color: var(--err); }
+.tf-hidden { visibility: hidden; }
+.tf-fhead .tf-acts { margin-left: auto; display: flex; gap: 6px; flex-wrap: wrap; }
+
+/* ---------- tabs ---------- */
+.tf-tabs { display: flex; gap: 2px; padding: 0 22px; border-bottom: 1px solid var(--rule); overflow-x: auto; }
+.tf-tabs a {
+  border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; white-space: nowrap; text-decoration: none;
+}
+.tf-tabs [aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+
+/* ---------- forms in a dialog ---------- */
+.tf-dform { display: contents; }
+.tf-formgrid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+.tf-formgrid select, .tf-formgrid input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink);
+}
+.tf-formgrid input[type="text"] { width: 100%; }
+
+/* ---------- time: the Day tab (#827) ----------
+   The strip is SVG, so its geometry is attributes rather than inline style.
+   Yellow (--card) is the running timer's block alone. */
+.tf-tm-wrap { padding: 16px 22px 40px; max-width: 1240px; }
+.tf-tm-nav { display: flex; align-items: center; gap: 6px; margin-bottom: 14px; }
+.tf-tm-nav h2 { font-size: var(--t-xl); margin: 0 6px; font-weight: 700; }
+.tf-tm-sum { display: flex; gap: 28px; flex-wrap: wrap; margin-bottom: 16px; }
+.tf-tm-sum div { display: flex; flex-direction: column; }
+.tf-tm-sum b {
+  font-size: var(--t-d1); line-height: 1; font-weight: 800; font-variation-settings: "wdth" 62;
+  font-variant-numeric: tabular-nums;
+}
+.tf-tm-sum span { font-size: var(--t-xs); color: var(--ink-2); margin-top: 3px; }
+.tf-tm-sum .tf-warn b { color: var(--warn); }
+.tf .tf-tm-note, .tf .tf-tm-fail {
+  padding: 10px 14px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet);
+  margin-bottom: 14px; font-size: var(--t-sm); color: var(--ink-2);
+}
+.tf .tf-tm-fail { border-left: 3px solid var(--err); color: var(--ink); }
+.tf-tm-strip { display: block; overflow: visible; margin: 0 0 8px; }
+.tf-tm-bed { fill: var(--sheet); stroke: var(--rule); }
+.tf-tm-hr { stroke: var(--rule-2); shape-rendering: crispEdges; }
+.tf-tm-hl { font: var(--t-2xs) var(--mono); fill: var(--ink-2); }
+.tf-tm-b { cursor: pointer; }
+.tf-tm-b text { font: 600 var(--t-2xs) var(--mono); }
+.tf-tm-b:focus-visible { outline: none; }
+.tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
+.tf-tm-b.tf-tm-manual rect { fill: var(--ink); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }
+.tf-tm-b.tf-tm-logged rect { fill: var(--ok-bg); stroke: var(--ok); } .tf-tm-b.tf-tm-logged text { fill: var(--ok); }
+.tf-tm-b.tf-tm-run rect { fill: var(--card); stroke: var(--card-2); } .tf-tm-b.tf-tm-run text { fill: var(--card-ink); }
+.tf-tm-b.tf-tm-label rect { fill: var(--sheet-2); stroke: var(--ink-2); } .tf-tm-b.tf-tm-label text { fill: var(--ink); }
+.tf-tm-b.tf-tm-passive rect { fill: url(#tf-tm-hatch); stroke: var(--info); } .tf-tm-b.tf-tm-passive text { fill: var(--info); }
+.tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; }
+.tf-tm-hatch { fill: var(--info-bg); }
+.tf-tm-now { fill: var(--err); }
+.tf-tm-legend {
+  display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: var(--t-xs); color: var(--ink-2);
+  margin-bottom: 18px;
+}
+.tf-tm-legend span { display: flex; align-items: center; gap: 6px; }
+.tf-tm-legend i { width: 16px; height: 10px; border-radius: 2px; display: inline-block; border: 1px solid transparent; }
+.tf-tm-legend i.tf-tm-manual { background: var(--ink); }
+.tf-tm-legend i.tf-tm-logged { background: var(--ok-bg); border-color: var(--ok); }
+.tf-tm-legend i.tf-tm-run { background: var(--card); }
+.tf-tm-legend i.tf-tm-passive {
+  background: repeating-linear-gradient(135deg, var(--info-bg) 0 3px, transparent 3px 6px); border-color: var(--info);
+}
+.tf-tm-legend i.tf-tm-gap { border: 1px dashed var(--ink-2); }
+.tf-tm-legend .tf-btn { margin-left: auto; }
+.tf-tm-list {
+  display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
+  overflow: hidden;
+}
+.tf-tm-row {
+  display: grid; grid-template-columns: 150px minmax(0, 1fr) 120px auto; gap: 12px; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--rule-2); cursor: pointer;
+}
+.tf-tm-row:last-child { border-bottom: 0; }
+.tf-tm-row:hover { background: var(--sheet-2); }
+.tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-tm-when { font: var(--t-xs) var(--mono); color: var(--ink-2); display: flex; flex-direction: column; }
+.tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
+.tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
+.tf-tm-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
+.tf .tf-tm-foot a { text-decoration: underline; }
+.tf-tm-empty { padding: 28px; border: 1px dashed var(--rule); border-radius: 6px; max-width: 640px; }
+.tf .tf-tm-empty p { margin: 0 0 10px; }
+.tf-tm-on { display: flex; gap: 8px; }
+.tf-tm-on input { flex: 1; }
+.tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
+
 /* ---------- toasts: ink on the page, rising 20px into place ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
@@ -584,7 +676,9 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-nav { flex: 1; }
   .tf-spacer { display: none; }
   .tf-timer-key { display: none; }
-  .tf-crumbs, .tf-fhead { padding-left: 16px; padding-right: 16px; }
+  .tf-crumbs, .tf-fhead, .tf-tabs, .tf-tm-wrap { padding-left: 16px; padding-right: 16px; }
+  .tf-tm-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .tf-tm-acts { grid-column: 1 / -1; justify-content: flex-start; }
   .tf-jobkey { font-size: var(--t-d2); }
   .tf-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
   .tf-jobcard, .tf-work { overflow: visible; }
