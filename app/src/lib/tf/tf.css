@@ -224,7 +224,7 @@
 }
 .tf-fsearch {
   display: flex; align-items: center; gap: 6px; border: 1px solid var(--rule); background: var(--paper);
-  border-radius: 4px; padding: 4px 8px; flex: 1 1 220px; max-width: 360px; color: var(--ink-2);
+  border-radius: 4px; padding: 4px 8px; flex: 1 1 280px; max-width: 360px; color: var(--ink-2);
 }
 .tf-fsearch:focus-within { outline: 2px solid var(--focus); outline-offset: 1px; }
 .tf-fsearch input { border: 0; background: none; outline: none; color: var(--ink); flex: 1; min-width: 0; padding: 1px 0; }
