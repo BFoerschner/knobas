@@ -6,37 +6,66 @@ import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 
 /**
- * `week_timesheet` (#816's *Time this week*): PAY-231 logged on Monday and
- * Tuesday, and tracked but unlogged on the fourth day asked for.
+ * `week_timesheet` (#816's *Time this week*, #828's Week tab): prototype-6's
+ * `tmWeekRows`, Monday first, as [tracked, logged, held] minutes per day.
+ *
+ * Five rows: PAY-231 (Friday unlogged), PAY-228 (an hour held on Thursday),
+ * OPS-77, a label ("Standup and planning") and "No target, app open". A
+ * window past the fifth day is empty, as a weekend is.
+ *
+ * Divergences from prototype-6: its label row's note ("Logged to PAY-200 each
+ * day") has no field in `WeekRow`, so nothing here carries it; the row titles
+ * are the corpus's, not the prototype's shorter ones; and the numbers are the
+ * same whatever week is asked for, where the prototype answers "everything
+ * logged" for the week before. Replaces #816's three-day plan, which nothing
+ * else read.
  */
+const WEEK_PLAN: {
+  target: { kind: "entity"; entity_id: string } | { kind: "label"; label: string };
+  title: string | null;
+  days: [number, number, number][];
+}[] = [
+  {
+    target: { kind: "entity", entity_id: "mock:PAY-231" },
+    title: "Retry failed SEPA payouts",
+    days: [[0, 0, 0], [90, 90, 0], [180, 180, 0], [270, 180, 0], [164, 0, 0]],
+  },
+  {
+    target: { kind: "entity", entity_id: "mock:PAY-228" },
+    title: "Fix ledger drift on partial refunds",
+    days: [[120, 120, 0], [60, 60, 0], [90, 90, 0], [160, 100, 60], [35, 35, 0]],
+  },
+  {
+    target: { kind: "entity", entity_id: "mock:OPS-77" },
+    title: "Rotate the staging database credentials",
+    days: [[60, 60, 0], [30, 30, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],
+  },
+  {
+    target: { kind: "label", label: "Standup and planning" },
+    title: null,
+    days: [[30, 30, 0], [30, 30, 0], [30, 30, 0], [30, 30, 0], [48, 0, 0]],
+  },
+];
+/** Prototype-6's "No target, app open" row, in minutes per day. */
+const WEEK_OPEN = [18, 12, 36, 6, 35];
+
 function fakeWeek(args: Record<string, unknown>) {
-  const days = ((args["days"] as { day: string }[] | undefined) ?? []).map((window) => window.day);
-  const cell = (logged: number, unlogged: number) => ({
-    tracked_seconds: logged + unlogged,
+  const windows = (args["days"] as { day: string }[] | undefined) ?? [];
+  const days = windows.map((window) => window.day);
+  const cell = (tracked: number, logged: number, held: number) => ({
+    tracked_seconds: tracked * 60,
     offered_seconds: 0,
-    logged_seconds: logged,
-    held_seconds: 0,
-    unlogged_seconds: unlogged,
+    logged_seconds: logged * 60,
+    held_seconds: held * 60,
+    unlogged_seconds: Math.max(0, tracked - logged - held) * 60,
   });
-  const PLAN: [number, number][] = [[3 * 3600, 0], [4.5 * 3600, 0], [0, 0], [0, 4 * 3600 + 14 * 60]];
-  // "No target, app open": 35 minutes today, for the Day tab's fifth figure (#827).
-  const now = new Date().toISOString();
-  const windows = (args["days"] as { from: string; to: string }[] | undefined) ?? [];
-  const open = windows.map((window) => (window.from <= now && now < window.to ? 35 * 60 : 0));
-  return {
-    days,
-    rows: [
-      {
-        target: { kind: "entity", entity_id: "mock:PAY-231" },
-        title: "Retry failed SEPA payouts",
-        cells: days.map((_, index) => cell(...(PLAN[index] ?? [0, 0]))),
-      },
-      ...(open.some((seconds) => seconds > 0)
-        ? [{ target: null, title: null, cells: open.map((seconds) => ({ ...cell(0, 0), tracked_seconds: seconds })) }]
-        : []),
-    ],
-    past_horizon: days.map(() => false),
-  };
+  const rows: unknown[] = WEEK_PLAN.map((row) => ({
+    target: row.target,
+    title: row.title,
+    cells: windows.map((_, index) => cell(...(row.days[index] ?? [0, 0, 0]))),
+  }));
+  rows.push({ target: null, title: null, cells: windows.map((_, index) => cell(WEEK_OPEN[index] ?? 0, 0, 0)) });
+  return { days, rows, past_horizon: days.map(() => false) };
 }
 
 // ---------------------------------------------------------- time (#826, #827)
@@ -108,6 +137,8 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
   // also what a stop's draft adds up.
   let blocks: FakeBlock[] = todaysBlocks();
   let running: { target: FakeTarget; started_at: string; last_heartbeat: string } | null = null;
+  let lastWindows: { day: string; from: string; to: string }[] = [];
+  let loggedYesterday = false;
   if (params.has("fake-timer")) {
     const pay: FakeTarget = { kind: "entity", entity_id: "mock:PAY-231" };
     running = { target: pay, started_at: minutesAgo(34), last_heartbeat: minutesAgo(0) };
@@ -258,7 +289,86 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         created_at: new Date().toISOString(),
       };
     },
+    // The week's *Log all* (#828): one worklog per day and ticket from that
+    // day's unlogged **manual** blocks on a ticket; a label or passive block
+    // is never in it, and the running timer is not until it stops. Prototype-6
+    // also lists yesterday's PAY-231 (1h 30m), which no block here backs, so
+    // it is a fixed row for the window whose day is yesterday.
+    log_all_preview: (args) => planLogAll(args),
+    log_all: (args) => {
+      const plan = planLogAll(args);
+      if (plan.some((row) => row.blocks === 0)) loggedYesterday = true;
+      return plan.map((row) => {
+        const spans = row.blocks > 0 ? unloggedOn(row) : [];
+        const id = nextWorklog++;
+        for (const block of spans) block.worklog_id = id;
+        return {
+          id,
+          entity_id: row.entity_id,
+          started_at: row.started_at,
+          seconds: row.seconds,
+          comment: "",
+          block_ids: spans.map((block) => block.id),
+          write_queue_id: null,
+          remote_id: null,
+          created_at: new Date().toISOString(),
+        };
+      });
+    },
   };
+
+  /** The unlogged manual ticket blocks that start inside one planned day. */
+  function unloggedOn(row: { day: string; entity_id: string }, windows = lastWindows) {
+    const window = windows.find((candidate) => candidate.day === row.day);
+    return blocks.filter(
+      (block) =>
+        window !== undefined &&
+        block.worklog_id === null &&
+        block.kind === "manual" &&
+        block.target.kind === "entity" &&
+        block.target.entity_id === row.entity_id &&
+        block.started_at >= window.from &&
+        block.started_at < window.to,
+    );
+  }
+
+  function planLogAll(args: Record<string, unknown>) {
+    const windows = (args["days"] as { day: string; from: string; to: string }[] | undefined) ?? [];
+    lastWindows = windows;
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const plan: { day: string; entity_id: string; title: string | null; started_at: string; seconds: number; blocks: number }[] = [];
+    for (const window of windows) {
+      const ids = new Set<string>();
+      for (const block of blocks) {
+        if (block.worklog_id !== null || block.kind !== "manual" || block.target.kind !== "entity") continue;
+        if (block.started_at < window.from || block.started_at >= window.to) continue;
+        if (/^mock:[A-Z]+-\d+$/.test(block.target.entity_id)) ids.add(block.target.entity_id);
+      }
+      for (const entity_id of [...ids].sort()) {
+        const spans = unloggedOn({ day: window.day, entity_id }, [window]);
+        plan.push({
+          day: window.day,
+          entity_id,
+          title: titleOf({ kind: "entity", entity_id }),
+          started_at: spans[0]!.started_at,
+          seconds: spans.reduce((sum, block) => sum + Math.round((Date.parse(block.ended_at) - Date.parse(block.started_at)) / 1000), 0),
+          blocks: spans.length,
+        });
+      }
+      if (new Date(window.from) <= yesterday && yesterday < new Date(window.to) && !loggedYesterday) {
+        plan.push({
+          day: window.day,
+          entity_id: "mock:PAY-231",
+          title: titleOf({ kind: "entity", entity_id: "mock:PAY-231" }),
+          started_at: new Date(new Date(window.from).getTime() + 10 * 3600_000).toISOString(),
+          seconds: 90 * 60,
+          blocks: 0,
+        });
+      }
+    }
+    return plan;
+  }
 }
 
 /** This feature's commands. */

@@ -2,6 +2,7 @@
  * `?fake-ipc`: One entity: the detail and the job page's reads, the reachable
  * transitions, and the URL resolver.
  */
+import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
@@ -32,6 +33,53 @@ function resolveUrl(args: Record<string, unknown>) {
   return found ? { entity_id: found.entity_id, kind: found.kind } : null;
 }
 
+/**
+ * The link graph, in memory (#835, #867): prototype-6's `s1` and `s3` already
+ * confirmed, over the entities this corpus holds (PR #142 implements PAY-231;
+ * the retry design page documents it), so the job card's connections have rows. A link
+ * made by `create_link` is `manual` and one `unlink` removes goes from both
+ * ends at once, as the real graph is undirected. Reload and it is the seed
+ * again. `delete_note` is not answered: notes are hidden from the new shell
+ * (D10).
+ */
+let nextLink = 1;
+function linkRow(from_id: string, to_id: string, relation: string, origin: LinkRow["origin"], note: string | null): LinkRow {
+  return {
+    id: `link:fake-made-${nextLink++}`,
+    from_id,
+    to_id,
+    relation,
+    origin,
+    note,
+    created_by: origin === "manual" ? "mara" : "knobas",
+    created_at: "2026-08-22T10:30:00Z",
+    confirmed_at: "2026-08-22T10:30:00Z",
+    rule: null,
+    rule_class: null,
+    reason: null,
+  };
+}
+const LINKS: LinkRow[] = [
+  linkRow("mock:payout-service#142", "mock:PAY-231", "implements", "source", null),
+  linkRow("mock:ENG-SEPA", "mock:PAY-231", "documents", "manual", null),
+];
+
+/** One link's far end from `id`, resolved against the corpus. */
+function entryFor(id: string, link: LinkRow): LinkEntry | null {
+  const otherId = link.from_id === id ? link.to_id : link.from_id;
+  const other = CORPUS.find((candidate) => candidate.entity_id === otherId);
+  if (!other) return null;
+  return { link, other: { entity_id: otherId, kind: other.kind, title: other.title, deleted_at: other.deleted_at } };
+}
+
+/** The confirmed links on an entity, newest first, from either end. */
+function linksOf(id: string): LinkEntry[] {
+  return LINKS.filter((link) => link.from_id === id || link.to_id === id)
+    .map((link) => entryFor(id, link))
+    .filter((entry): entry is LinkEntry => entry !== null)
+    .reverse();
+}
+
 /** `get_entity`, including the two refusals the detail view branches on. */
 function getEntity(args: Record<string, unknown>) {
   const id = String(args["entityId"] ?? "");
@@ -55,7 +103,7 @@ function getEntity(args: Record<string, unknown>) {
     payload: entry.payload,
     web_url: entry.web_url,
     deleted_at: entry.deleted_at,
-    links: [],
+    links: linksOf(id),
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
     // The mock corpus gives no build a commit, so nothing ran on any (#710).
     builds: [],
@@ -189,5 +237,23 @@ export function handlers(): Record<string, Handler> {
     reachable_transitions: (args) => fakeTransitions(args),
     entity_view: (args) => entityView(args),
     resolve_url: (args) => resolveUrl(args),
+    create_link: (args) => {
+      const from = String(args["fromId"]);
+      const to = String(args["toId"]);
+      for (const end of [from, to]) {
+        if (!CORPUS.some((candidate) => candidate.entity_id === end)) {
+          throw { code: "not_found", message: `${end} is not in the mirror`, source_id: null };
+        }
+      }
+      const made = linkRow(from, to, String(args["relation"] ?? "related"), "manual", (args["note"] as string | null) ?? null);
+      LINKS.push(made);
+      return made;
+    },
+    unlink: (args) => {
+      const at = LINKS.findIndex((link) => link.id === args["linkId"]);
+      if (at === -1) throw { code: "not_found", message: `${String(args["linkId"])} is not a link`, source_id: null };
+      LINKS.splice(at, 1);
+      return null;
+    },
   };
 }

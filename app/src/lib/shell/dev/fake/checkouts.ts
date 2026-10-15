@@ -282,6 +282,9 @@ function fakeOpen(action: string) {
   return null;
 }
 
+/** The repos a `clone_repo` started and nobody has stopped. */
+const fakeCloning = new Set<string>();
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
@@ -303,6 +306,30 @@ export function handlers(): Record<string, Handler> {
       fakeSetCommand(String(args["action"] ?? ""), args["template"]),
     open_checkout: (args) => fakeOpen(String(args["action"] ?? "")),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
+    // Clone (#846; `clone_repo`, #823). The answers are real, the progress is
+    // not: a handler cannot emit `clone:progress`, so a started clone stays
+    // `cloning` until it is stopped, and the screen's bar, its done state and
+    // its failure causes are witnessed by `clone_ipc.rs` and the component
+    // tests, not by this fixture. A repo the scan already found is `adopted`,
+    // as in the backend; a folder is `<clones root>/<repo name>`.
+    clone_repo: (args) => {
+      const id = String(args["entityId"] ?? "");
+      const entry = CORPUS.find((candidate) => candidate.entity_id === id);
+      if (!entry || entry.kind !== "repo") {
+        throw { code: "invalid", message: `${id} is not a repository in the mirror`, source_id: null };
+      }
+      if (fakeClonesRoot === null) {
+        throw { code: "invalid", message: "set a clones root first", source_id: null };
+      }
+      const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+      if (args["stop"] === true) {
+        const was = fakeCloning.delete(id);
+        return was ? { status: "stopped", path, removed: true } : { status: "not_cloning" };
+      }
+      if (fakeCheckout(id).path !== null) return { status: "adopted", path };
+      fakeCloning.add(id);
+      return { status: "cloning", path };
+    },
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
