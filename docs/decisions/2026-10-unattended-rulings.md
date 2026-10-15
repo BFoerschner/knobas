@@ -1744,9 +1744,11 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
 - **The running timer is a row of its own**, from its start (or midnight) to now, and the only
   yellow. It counts in *tracked*, not in *to log*. **Reversing:** low.
 - ***Log all…* goes to the Week tab**, where #828 builds its dialog. **Reversing:** one link.
-- ***Log…* on an unlogged row opens the worklog draft** for that ticket and day through
-  `App.svelte`, which owns the draft. **Reversing:** low.
 - **Past the horizon with blocks**, the day draws them under a note, and *No record* only when
   there are none. Prototype-6 has only the empty case. **Reversing:** low.
-- **`?fake-timer`** starts a fake timer, so no other screen under `?fake-ipc` changes.
-  **Reversing:** low.
+- **The `?fake-ipc` day is #826's `fakeTime`, grown**, not a second fixture: today always carries
+  prototype-6's Friday (logged, offered, unlogged, a gap, a label block), and `?fake-timer` adds the
+  running timer. #826's own morning block went, since PAY-231's 09:40 to 11:50 gives a stop's draft
+  the same thing to add up. **Reversing:** low.
+- ***Log…* shows the draft through #826's `drafts.show`**, the path the ad-hoc dialog's *Log to a
+  ticket…* takes, so it opens in the new shell's own dialog. **Reversing:** one line.
