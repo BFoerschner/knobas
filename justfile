@@ -1316,6 +1316,11 @@ _require-live-env SOURCE +NAMES:
 # the background -- and the Submit-to-dialog-closed timings it prints. Its
 # branches and pull requests carry the same `knobas-` prefix and are taken back
 # by that file's `Litter`, never touching the default branch.
+#
+# AND CLONE (#823): `crates/knobas-app/tests/clone_live.rs` clones a seeded
+# repository over http (admitted by the test-only door; the app clones over
+# https and ssh only, ADR-0023), refuses a folder that is not a clone and a bad
+# name, and stops a clone. Read-only at Gitea: nothing to take back.
 gitea-live:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -1328,6 +1333,8 @@ gitea-live:
       -- --ignored --nocapture --test-threads=1 --exact a_write_answers_on_queue_and_lands_behind_the_reader
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1 --exact back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_the_second
+    env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
+      -- --ignored --nocapture --test-threads=1
 
 # The same real container, reconfigured to answer FEWER records than the adapter
 # asked for: `testenv/docker-compose.capped.yml` sets Gitea's

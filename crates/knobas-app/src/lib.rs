@@ -79,6 +79,11 @@ pub mod events {
     /// `main` window by label and not broadcast: the capture window is closing
     /// and has no use for it.
     pub const CAPTURE_OPEN_NOTE: &str = "capture:open-note";
+    /// Payload: `checkout::clone::CloneEvent` -- a clone's step and share
+    /// done, at most one per second besides one per change of step, and how
+    /// it ended (#823, ADR-0023). Broadcast: every view that shows the
+    /// repository draws the same button.
+    pub const CLONE_PROGRESS: &str = "clone:progress";
 
     /// Send `payload` to the frontend as `name` -- to every window, or to the
     /// one labelled `target` -- from the main thread, whichever thread asks.
@@ -473,6 +478,9 @@ pub fn run() {
             // #779's read of an action item's ticket, appended at the foot:
             // the list is append-only (§10.8).
             commands::entity::action_item_ticket,
+            // #823's clone, appended at the foot: the list is append-only
+            // (§10.8).
+            commands::entity::clone_repo,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
@@ -818,6 +826,7 @@ mod tests {
             super::events::CONTEXTS_CHANGED,
             super::events::NOTIFICATION_CLICKED,
             super::events::CAPTURE_OPEN_NOTE,
+            super::events::CLONE_PROGRESS,
         ] {
             assert!(
                 mirror.contains(&format!("\"{name}\"")),

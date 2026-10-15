@@ -24,10 +24,12 @@
 //!
 //! # Nothing here writes to a repository, and nothing it runs comes from the mirror (ADR-0016)
 //!
-//! No clone, no checkout, no fetch. `clone_command` produces a **string a
-//! person copies**; it is never spawned, and nothing here writes to a working
-//! tree. The one git command knobas runs is [`working_tree`]'s read-only
-//! `status` at the checkout path (ADR-0021, #704). [`open`] does start a
+//! No checkout, no fetch, and nothing here writes to an existing working tree.
+//! `clone_command` produces a **string a person copies**; it is never spawned.
+//! knobas runs two git commands: [`working_tree`]'s read-only `status` at the
+//! checkout path (ADR-0021, #704), and [`clone`]'s `git clone` into a new
+//! folder under the clones root, whose URL is built from the source's address
+//! and a checked name and never from the mirror (ADR-0023, #823). [`open`] does start a
 //! process -- that is the whole of #501 -- and the rule it keeps is the other
 //! half of the ADR: the *program* is a template a person set in settings, and
 //! the only value substituted into it is the checkout [`view`] resolved off
@@ -45,6 +47,7 @@ use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
+pub mod clone;
 pub mod working_tree;
 
 use working_tree::TreeRead;

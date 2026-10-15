@@ -129,20 +129,10 @@ async fn read_guarded(
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
 ) -> TreeRead {
-    let Some(git) = find_on(search, "git") else {
-        return TreeRead::NoGit;
+    let git = match usable_git(search, shim, probe, timeout).await {
+        Ok(git) => git,
+        Err(read) => return read,
     };
-    if git == shim {
-        match tokio::time::timeout(timeout, probe()).await {
-            Err(_) => {
-                return TreeRead::Failed {
-                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
-                };
-            }
-            Ok(false) => return TreeRead::NoGit,
-            Ok(true) => {}
-        }
-    }
     if !path.is_dir() {
         return TreeRead::NotARepo;
     }
@@ -208,6 +198,43 @@ async fn read_guarded(
             .trim()
             .to_owned(),
     }
+}
+
+/// The `git` to run, or why there is none: [`TreeRead::NoGit`] when none is
+/// on `search` or it is Apple's `shim` without the Command Line Tools, and
+/// [`TreeRead::Failed`] when `probe` did not answer within `timeout`.
+async fn usable_git(
+    search: &OsStr,
+    shim: &Path,
+    probe: impl AsyncFnOnce() -> bool,
+    timeout: Duration,
+) -> Result<PathBuf, TreeRead> {
+    let git = find_on(search, "git").ok_or(TreeRead::NoGit)?;
+    if git == shim {
+        match tokio::time::timeout(timeout, probe()).await {
+            Err(_) => {
+                return Err(TreeRead::Failed {
+                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
+                });
+            }
+            Ok(false) => return Err(TreeRead::NoGit),
+            Ok(true) => {}
+        }
+    }
+    Ok(git)
+}
+
+/// The `git` on this process's `PATH` that [`read`] would run, for the one
+/// other git command knobas runs, `checkout::clone` (#823).
+pub(crate) async fn git_on_path() -> Result<PathBuf, TreeRead> {
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    usable_git(
+        &search,
+        Path::new(APPLE_SHIM),
+        command_line_tools_installed,
+        TIMEOUT,
+    )
+    .await
 }
 
 /// The first executable called `name` in a `PATH`-style list.

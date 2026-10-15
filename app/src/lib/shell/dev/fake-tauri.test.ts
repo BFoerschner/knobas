@@ -821,6 +821,11 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     witnesses: ["crates/knobas-app/tests/it/ipc.rs", "crates/knobas-app/tests/it/sources_crud.rs"],
     commands: ["update_source", "backfill_source"],
   },
+  {
+    surface: "Cloning a repository (#823; the button is #846)",
+    witnesses: ["crates/knobas-app/tests/it/clone_ipc.rs", "crates/knobas-app/tests/clone_live.rs"],
+    commands: ["clone_repo"],
+  },
 ];
 
 /** Every command [`UNANSWERED`] claims the fixture does not answer. */

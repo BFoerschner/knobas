@@ -48,3 +48,9 @@ impl<R: tauri::Runtime> crate::notify::NotificationEvents for TauriEvents<R> {
         );
     }
 }
+
+impl<R: tauri::Runtime> crate::checkout::clone::CloneEvents for TauriEvents<R> {
+    fn clone_progress(&self, event: crate::checkout::clone::CloneEvent) {
+        self.emit(crate::events::CLONE_PROGRESS, event);
+    }
+}
