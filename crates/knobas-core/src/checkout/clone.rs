@@ -228,8 +228,8 @@ pub fn failure_reason(stderr: &str) -> Option<&str> {
     };
     lines()
         .find(|line| line.starts_with("fatal:"))
-        .or_else(|| lines().filter(|line| line.starts_with("error:")).last())
-        .or_else(|| lines().last())
+        .or_else(|| lines().rfind(|line| line.starts_with("error:")))
+        .or_else(|| lines().next_back())
 }
 
 /// Whether the clone at `dir` finished: its `HEAD` names a commit.
