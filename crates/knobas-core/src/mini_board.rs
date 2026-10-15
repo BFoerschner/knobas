@@ -53,6 +53,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use chrono::{DateTime, Utc};
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -154,7 +155,7 @@ macro_rules! priority_read {
 /// `$5` is the per-column cap (#753), `null` for none: each column keeps its
 /// newest `$5` cards, and every row carries `total`, how many its column holds
 /// before the cut. The status is read once a row (`materialized`) and the
-/// priority only for the rows kept: on a room of 15,000 tickets the uncapped
+/// priority, the type, the assignee and the path line (#810) only for the rows kept: on a room of 15,000 tickets the uncapped
 /// board was 2 MB on the bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
     "with ",
@@ -183,7 +184,13 @@ const CARDS: &str = concat!(
      )
      select i.entity_id, i.source_id, i.title, r.status, ",
     priority_read!("$4"),
-    " as priority, r.total
+    " as priority, ",
+    crate::declared_string!("$4", "issue_type"),
+    " as issue_type, ",
+    crate::declared_string!("$4", "assignee"),
+    " as assignee, ",
+    crate::path_line_read!("$4"),
+    " as path, i.item_updated_at as updated_at, r.total
        from ranked r
        join sync.item i on i.entity_id = r.entity_id
       where $5::bigint is null or r.rn <= $5
@@ -270,6 +277,22 @@ pub struct MiniBoardCard {
     /// `None` where the record carries no readable priority; see
     /// [`priority_read!`].
     pub priority: Option<String>,
+    /// The ticket's type in its source's words (`Story`, `Bug`), at the
+    /// declared `issue_type` path (#810); `None` on a miss, drawn as nothing.
+    pub issue_type: Option<String>,
+    /// The account it is assigned to, at the declared `assignee` path, in the
+    /// spelling the source uses for an account; `None` for an unassigned
+    /// ticket and on a miss.
+    pub assignee: Option<String>,
+    /// When the source last changed it, or `None` where it never said.
+    pub updated_at: Option<DateTime<Utc>>,
+    /// The ticket's declared parent chain as one line (its epic, for Jira):
+    /// `knobas_core::path_line_read!`, the line every other row draws.
+    pub path: Option<String>,
+    /// Whether [`Self::assignee`] is one of the configured usernames
+    /// ([`Scope::identity`]), ignoring case. `false` when no identity was
+    /// given, which is every room read: the rooms' board never asks.
+    pub mine: bool,
 }
 
 /// The statuses one source's live ticket corpus shows, in the board's order.
@@ -289,6 +312,10 @@ struct CardRow {
     title: String,
     status: Option<String>,
     priority: Option<String>,
+    issue_type: Option<String>,
+    assignee: Option<String>,
+    path: Option<String>,
+    updated_at: Option<DateTime<Utc>>,
     total: i64,
 }
 
@@ -376,10 +403,69 @@ pub async fn read_capped(
     declarations: &crate::payload::Declarations,
     per_column: Option<u32>,
 ) -> Result<MiniBoard, CoreError> {
-    let members = match ctx_id {
+    let scope = Scope {
+        ctx_id,
+        sources,
+        project,
+        ..Scope::default()
+    };
+    read_scoped(pool, scope, declarations, per_column).await
+}
+
+/// Which tickets a board draws, and whose they are (#810).
+///
+/// The room's three dimensions ([`read`]), plus two the Tickets view of the
+/// ticket-first shell adds: `only`, the tickets a search matched, and
+/// `identity`, the usernames that make a card [`MiniBoardCard::mine`].
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Scope<'a> {
+    /// A stored room's context, or `None`.
+    pub ctx_id: Option<&'a str>,
+    /// A derived room's sources; empty for every source.
+    pub sources: &'a [String],
+    /// A project key, narrowing within `sources`.
+    pub project: Option<&'a str>,
+    /// Only these entity ids, or `None` for no such narrowing. `Some` of an
+    /// empty list is a search that matched nothing, and draws nothing.
+    pub only: Option<&'a [String]>,
+    /// The configured usernames, which [`MiniBoardCard::mine`] is matched
+    /// against ignoring case.
+    pub identity: &'a [String],
+}
+
+/// [`read_capped`] over a [`Scope`]: the room's dimensions and the Tickets
+/// view's two (#810). Every narrowing intersects: a context and `only` both
+/// given draw the tickets in both.
+///
+/// # Errors
+///
+/// [`CoreError::Db`] if a query fails.
+pub async fn read_scoped(
+    pool: &PgPool,
+    scope: Scope<'_>,
+    declarations: &crate::payload::Declarations,
+    per_column: Option<u32>,
+) -> Result<MiniBoard, CoreError> {
+    let Scope {
+        ctx_id,
+        sources,
+        project,
+        only,
+        identity,
+    } = scope;
+    let mut members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
         None => None,
     };
+    if let Some(only) = only {
+        members = Some(match members {
+            Some(members) => {
+                let only: std::collections::HashSet<&String> = only.iter().collect();
+                members.into_iter().filter(|id| only.contains(id)).collect()
+            }
+            None => only.to_vec(),
+        });
+    }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
     // Planned for its parameters every time (#753): reused, the statement
@@ -422,6 +508,13 @@ pub async fn read_capped(
             source_id: row.source_id,
             title: row.title,
             priority: row.priority,
+            issue_type: row.issue_type,
+            mine: row.assignee.as_deref().is_some_and(|assignee| {
+                identity.iter().any(|me| me.eq_ignore_ascii_case(assignee))
+            }),
+            assignee: row.assignee,
+            updated_at: row.updated_at,
+            path: row.path,
         });
     }
     columns.sort_by_key(|column| column_rank(column.status.as_deref()));
