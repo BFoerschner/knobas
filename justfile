@@ -435,6 +435,7 @@ pre-gate:
     just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
+    (cd app && npx vitest run src/lib/shell/a11y.test.ts)
     (cd app && npx svelte-check --tsconfig ./tsconfig.json)
     echo
     if [ "$before" = "$(snapshot)" ]; then
