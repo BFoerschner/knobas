@@ -1868,3 +1868,37 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   in the module that answers that command, so a ticket may edit another feature's module to add a
   row of that module's own command; it still adds no handler outside its feature. The shell
   conventions now say so. **Reversing:** low, revert the one line in the conventions.
+## #819 / #820 Conversation tab and summary, Connections drawer
+
+- **Last visit is one command that records and answers, `visit_entity`.** Opening a job writes a
+  `visited` line (actor `user`) and answers the newest one before it, in one transaction. A
+  separate read and write would be two round trips on every open and a window where two reads
+  answer the same visit. **Reversing:** low, split the command in two.
+- **A visit is bookkeeping.** `recent_activity` (history panel, status bar) and the worklog draft
+  leave `visited` lines out; a line per opened job would push real changes off both. **Reversing:**
+  low, drop the two filters.
+- **Mentions match the identity's accounts, not a display name.** Jira Data Center writes a mention
+  as `[~username]`, and `@me`'s identity (`knobas_search::Vocabulary`) is the one answer to "who am
+  I"; the inbox's mention rule is reused whole. Prototype-6 writes `@Mara`; the fixture writes
+  `@mara`. **Reversing:** medium, a display-name source would need a declaration.
+- **Changes are the status moves knobas sent.** The mirror keeps no Jira changelog and no PR event
+  history, so *Include changes* draws the `transition` writes the queue settled as `sent`, as
+  "You moved this to In Review". Moves made in Jira and PR events are #929. **Reversing:** n/a,
+  #929 adds the rest.
+- **The thread keeps the source's order**, which is oldest first for both spellings, rather than
+  sorting by a stamp that may be missing. **Reversing:** low.
+- **"N connected" counts the links on the ticket whose far end stands.** Link sets and the parent
+  join in TF5 (#867). **Reversing:** low.
+- **Proposals are the promoted context's tray (`room_suggestions`) filtered to the ones touching
+  the ticket.** *Judge them one by one* opens `#/review/<link id>`, which draws "not built yet"
+  until the Proposed links view (TF3). The fixture's `room_suggestions` now scopes a stored context
+  to its anchor. **Reversing:** low.
+- **The drawer's *Hidden on KEY* group is drawn from rows link sets fill (#867)**, so it never
+  shows in TF1: without a set nothing can be hidden. **Reversing:** n/a.
+- ***Link to…* offers prototype-6's relations as stored ids**, without *deploys*: no stored
+  relation reads that way from a ticket (`deployed-from` points from the deploy). **Reversing:**
+  low, one line.
+- **A ticket with no comments offers *Comment* as a link to the Conversation tab**, where the box
+  is, instead of a second comment dialog. **Reversing:** low.
+- **A drawer row's title opens the item's full view** (R-4.10's rule for every row); prototype-6's
+  rows are plain text. **Reversing:** low.
