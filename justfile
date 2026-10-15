@@ -84,10 +84,27 @@ check:
           echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
     }
 
+    # The cargo half as one `just` per recipe rather than one `just` for the
+    # chain, so each recipe's wall time is a line of its own (`step: <recipe>
+    # N s`, #920). The chain still stops at its first red, as `just A B C`
+    # did, and the half's last line is still its status and total.
+    run_cargo_half() {
+        local log=$1
+        shift
+        ( SECONDS=0; status=0
+          for r in "$@"; do
+              start=$SECONDS
+              just "$r" || status=$?
+              echo "step: $r $((SECONDS - start)) s"
+              [ "$status" -eq 0 ] || break
+          done
+          echo "cargo: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
+    }
+
     echo "check: running 'front' beside '${cargo_recipes[*]}';"
     echo "check: each half's output is captured and reported when it finishes."
     run_half front "$front_log" front; front_pid=$!
-    run_half cargo "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
+    run_cargo_half "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
 
     # A passing half is one line of status plus the lines a reader would look
     # for anyway. For `front`: svelte-check's count -- `svelte-check found N
@@ -112,7 +129,11 @@ check:
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
                              if ($(i+1) == "ignored;") g += $i } }
-                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log" ;;
+                           END { printf "  %d test binaries and doc-test crates: %d passed, %d failed, %d ignored\n", n, p, f, g }' "$log"
+                       # Where the half's time went (#920): each recipe's
+                       # wall time, `test`'s build and run, its slowest binaries.
+                       awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log"
+                       grep -E '^test: (build|run) |^test: slowest|^  +[0-9.]+ s ' "$log" || true ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
@@ -648,7 +669,9 @@ test:
     hold_gate_slot test
 
     gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    build_start=$SECONDS
     just _test-executables > "$gate/executables"
+    echo "test: build $((SECONDS - build_start)) s"
     awk -F'\t' '$1 == "test"' "$gate/executables" > "$gate/tests"
     server=$(awk -F'\t' '$1 == "server" { print $4 }' "$gate/executables")
     count=$(wc -l < "$gate/tests" | tr -d ' ')
@@ -732,7 +755,15 @@ test:
         # `</dev/null`: GNU xargs gives a child /dev/null for stdin, BSD xargs
         # hands it its own, which here is the queue of job numbers -- a test
         # that read stdin would eat the queue on macOS and not on Linux.
-        ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1 || status=$?
+        # The wall time, process start to exit, goes to `out/<n>.time` for
+        # the slowest-binaries list; bash's `time` keyword because bash 3.2
+        # has no sub-second clock of its own. libtest's `finished in` leaves
+        # out the binary's start-up and anything it does outside the harness.
+        # `time` is aimed at a function, not at the subshell: bash 3.2 prints
+        # nothing for `{ time ( a; b ); } 2>file` (checked 2026-10-15, #920).
+        run_binary() { ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1; }
+        local TIMEFORMAT=%R
+        { time run_binary; } 2> "$KNOBAS_GATE_DIR/out/$n.time" || status=$?
         echo "$status" > "$KNOBAS_GATE_DIR/out/$n.status"
         summary=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9]* passed; [0-9]* failed; [0-9]* ignored;\).*finished in \([0-9.]*s\)$/\1 \2/p' "$log" | tail -n 1)
         if [ "$status" -eq 0 ] && [ -n "$summary" ]; then
@@ -745,6 +776,7 @@ test:
     mkdir "$gate/out"
 
     echo "test: $count binaries, $jobs at a time, doc-tests alongside; one Postgres for all of them"
+    run_start=$SECONDS
     ( awk '{ print NR }' "$gate/tests" | xargs -P "$jobs" -I{} bash -c 'run_one "$1"' _ {} ) 3>&- &
     pool_pid=$!
     ( env -u RUSTUP_TOOLCHAIN cargo test --workspace --doc ) > "$gate/doc.log" 2>&1 3>&- &
@@ -756,6 +788,20 @@ test:
     pool_pid=
     doc_status=0; wait "$doc_pid" || doc_status=$?
     doc_pid=
+    echo "test: run $((SECONDS - run_start)) s"
+
+    # The ten slowest binaries by wall time (#920), slowest first: what the
+    # pool's length is made of. A binary with no time file never ran and is
+    # reported as a red below, not here.
+    echo "test: slowest binaries"
+    n=0
+    while IFS=$'\t' read -r _ pkg target _ _; do
+        n=$((n + 1))
+        t=$(cat "$gate/out/$n.time" 2>/dev/null || true)
+        [ -z "$t" ] || printf '%s\t%s\t%s\n' "$t" "$pkg" "$target"
+    done < "$gate/tests" \
+      | sort -t $'\t' -k1,1 -rn | sed -n 1,10p \
+      | awk -F'\t' '{ printf "  %7.1f s  %-24s %s\n", $1, $2, $3 }'
 
     # Doc-tests: one line per crate on success, in the same shape as the
     # binaries' lines so `check` adds them up the same way; the whole log on
