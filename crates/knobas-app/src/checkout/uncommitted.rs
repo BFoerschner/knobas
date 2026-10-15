@@ -261,7 +261,10 @@ async fn run_capped(
                 drop(reader);
                 return Ok::<_, std::io::Error>((out, true));
             }
-            if reader.read_until(b'\n', &mut out).await? == 0 {
+            // At most the bytes left under the cap, so one line longer than
+            // the cap is cut inside it rather than read whole.
+            let left = (max_bytes - out.len()) as u64;
+            if (&mut reader).take(left).read_until(b'\n', &mut out).await? == 0 {
                 return Ok((out, false));
             }
             lines += 1;
@@ -462,6 +465,32 @@ mod tests {
         assert_eq!(paths, ["a.txt"]);
         assert!(diff.unstaged.truncated);
         assert!(diff.unstaged.files[0].truncated);
+    }
+
+    /// One line longer than the byte cap is not read whole: the cap holds
+    /// inside a line, not only between lines.
+    #[tokio::test]
+    async fn the_byte_cap_holds_inside_one_long_line() {
+        let dir = two_long_changes();
+        let line = "x".repeat(200_000);
+        std::fs::write(dir.path().join("a.txt"), format!("{line}\n")).unwrap();
+        let caps = ReadCaps { bytes: 300, ..CAPS };
+
+        let diff = read_under(dir.path(), caps).await;
+
+        assert!(diff.unstaged.truncated);
+        let kept: usize = diff
+            .unstaged
+            .files
+            .iter()
+            .flat_map(|f| &f.hunks)
+            .flat_map(|h| &h.lines)
+            .map(|l| l.text.len())
+            .sum();
+        assert!(
+            kept <= 300,
+            "{kept} bytes of line text kept under a 300-byte cap"
+        );
     }
 
     #[tokio::test]
