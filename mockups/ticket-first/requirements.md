@@ -815,6 +815,8 @@ Focus is always visible (2 px outline in the focus colour). Reduced motion turns
 
 ## 16. Visual design
 
+Superseded by `docs/specs/2026-10-15-ticket-first-design-system.md` (2026-10-15), which holds the full token set, the type scale, the contrast check and the porting constraints. The short version below stays for reference.
+
 Taken from the prototypes. Tones stay `ok / warn / err / info / muted` (shell-owned). Adapters never pick colours.
 
 | Token | Light | Dark | Use |
