@@ -523,3 +523,48 @@ async fn no_active_sprint_offers_no_current() {
         lists.fields
     );
 }
+
+/// A list saved from a ticket-key query counts and lists the rows the query
+/// answers with: the rail's count and the rows behind it come from one
+/// predicate (`sql::corpus_predicates`), ticket keys included.
+#[tokio::test]
+async fn a_saved_list_of_ticket_keys_counts_what_it_lists() {
+    let pool = pool().await;
+    let p = project();
+    let done = store(
+        &pool,
+        &p,
+        1,
+        Ticket {
+            status: "Done",
+            ..BASE
+        },
+    )
+    .await;
+    store(&pool, &p, 2, BASE).await;
+    let s = searcher(&pool).await;
+    let saved = s
+        .save_list(
+            &format!("{p} done"),
+            &format!("project:{p} -status:\"To Do\" sprint:current status:done -sprint:current"),
+        )
+        .await
+        .unwrap();
+    // Contradictory on purpose: `sprint:current` and its negation leave nothing.
+    assert_eq!(saved.count, 0);
+    let saved = s
+        .save_list(
+            &format!("{p} done 2"),
+            &format!("project:{p} -status:\"To Do\""),
+        )
+        .await
+        .unwrap();
+    assert_eq!(saved.count, 1);
+    let rows = s.smart_list_items(&saved.id, 10).await.unwrap();
+    assert_eq!(ids(&rows), vec![done]);
+    let rail = s.smart_lists().await.unwrap();
+    assert_eq!(
+        rail.iter().find(|l| l.id == saved.id).map(|l| l.count),
+        Some(1)
+    );
+}

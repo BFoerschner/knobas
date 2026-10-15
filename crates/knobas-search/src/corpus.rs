@@ -191,16 +191,105 @@ pub struct Corpus {
     /// is its `parent_id` column and a route's is the asset exposing it
     /// (ADR-0014), so both read [`estate_subtree!`]'s walk over those columns.
     pub(crate) under: Option<&'static str>,
-    /// What each ticket key matches (#811), as a predicate over a row and a
-    /// relation `fd` carrying the bound declarations (`fd.d`), the
-    /// lowercased values (`fd.v`) and `assigned:`'s window in days (`fd.n`).
-    /// A key with no entry here is a field this corpus's rows do not have:
-    /// the condition fails on every row, and its negation holds on every row.
+    /// What each ticket key matches (#811), as a predicate over a row, the
+    /// statement's [`FIELD_PATHS`] CTEs (`fp`, `lp`) and a relation `fd`
+    /// carrying the lowercased values (`fd.v`) and `assigned:`'s window in
+    /// days (`fd.n`). A key with no entry here is a field this corpus's rows
+    /// do not have: the condition fails on every row, and its negation holds
+    /// on every row.
     ///
     /// For the mirror each is a declared payload read (ADR-0007, through
     /// `knobas_core::payload`'s macros, never a payload key named here), and
     /// a read that misses matches no value: see [`LIVE_ITEM_FIELDS`].
     pub(crate) fields: &'static [(crate::query::FieldKey, &'static str)],
+}
+
+/// One declared scalar field's candidates for every source and kind the
+/// declarations name, as rows of `fp`.
+macro_rules! field_paths {
+    ($field:literal) => {
+        concat!(
+            "select i.source_id, i.kind, '",
+            $field,
+            "'::text as field, c.segs, c.ord from fk i cross join lateral ",
+            knobas_core::declared_candidates!("i.d", $field),
+            " c"
+        )
+    };
+}
+
+/// The same for a declared list field, as rows of `lp`.
+macro_rules! list_paths {
+    ($field:literal) => {
+        concat!(
+            "select i.source_id, i.kind, '",
+            $field,
+            "'::text as field, c.at_segs, c.entry_segs from fk i cross join lateral ",
+            knobas_core::declared_list_candidates!("i.d", $field),
+            " c"
+        )
+    };
+}
+
+/// The CTEs a statement with a ticket key carries (#811), after a CTE
+/// `fdecl(d)` holding the bound declarations, which `crate::sql` writes:
+/// every declared candidate of the fields the keys read, resolved **once a
+/// statement** rather than walked per row -- the mini board's remedy (#753).
+/// `fp (source_id, kind, field, segs, ord)` for the strings,
+/// `lp (source_id, kind, field, at_segs, entry_segs)` for the lists.
+///
+/// Measured on 22,000 Jira-shaped tickets (#811), six runs each on a machine
+/// at load 10 to 18: `status:Done` through `declared_string!` per row took
+/// 171 to 202 ms; through these CTEs 122 to 146 ms, beside 152 to 155 ms for
+/// the text query `payout`, which every row matched. A ticket key over the
+/// whole mirror costs what a text query matching all of it does.
+pub(crate) const FIELD_PATHS: &str = concat!(
+    "fk as materialized (select f.d, s.source_id, k.kind from fdecl f \
+       cross join jsonb_each(case when jsonb_typeof(f.d) = 'object' then f.d \
+                                  else '{}'::jsonb end) as s(source_id, kinds) \
+       cross join lateral jsonb_object_keys(case when jsonb_typeof(s.kinds) = 'object' \
+                                  then s.kinds else '{}'::jsonb end) as k(kind)),\n",
+    "fp as materialized (",
+    field_paths!("project_key"),
+    " union all ",
+    field_paths!("project_name"),
+    " union all ",
+    field_paths!("status_name"),
+    " union all ",
+    field_paths!("issue_type"),
+    " union all ",
+    field_paths!("priority"),
+    " union all ",
+    field_paths!("assignee"),
+    "),\nlp as materialized (",
+    list_paths!("labels"),
+    " union all ",
+    list_paths!("sprint_state"),
+    ")"
+);
+
+/// A row's declared string for one field, through `fp`.
+macro_rules! field_of {
+    ($field:literal) => {
+        knobas_core::first_string_of!(concat!(
+            "(select fp.segs, fp.ord from fp where fp.source_id = i.source_id \
+              and fp.kind = i.kind and fp.field = '",
+            $field,
+            "')"
+        ))
+    };
+}
+
+/// A row's declared list values for one field, through `lp`.
+macro_rules! list_of {
+    ($field:literal) => {
+        knobas_core::list_values_of!(concat!(
+            "(select lp.at_segs, lp.entry_segs from lp where lp.source_id = i.source_id \
+              and lp.kind = i.kind and lp.field = '",
+            $field,
+            "')"
+        ))
+    };
 }
 
 /// The mirror's ticket keys (#811), each the field its source declares.
@@ -221,49 +310,33 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Project,
             concat!(
                 "(lower(",
-                knobas_core::declared_string!("fd.d", "project_key"),
+                field_of!("project_key"),
                 ") = any(fd.v) or lower(",
-                knobas_core::declared_string!("fd.d", "project_name"),
+                field_of!("project_name"),
                 ") = any(fd.v))"
             ),
         ),
         (
             FieldKey::Status,
-            concat!(
-                "lower(",
-                knobas_core::declared_string!("fd.d", "status_name"),
-                ") = any(fd.v)"
-            ),
+            concat!("lower(", field_of!("status_name"), ") = any(fd.v)"),
         ),
         (
             FieldKey::IssueType,
-            concat!(
-                "lower(",
-                knobas_core::declared_string!("fd.d", "issue_type"),
-                ") = any(fd.v)"
-            ),
+            concat!("lower(", field_of!("issue_type"), ") = any(fd.v)"),
         ),
         (
             FieldKey::Priority,
-            concat!(
-                "lower(",
-                knobas_core::declared_string!("fd.d", "priority"),
-                ") = any(fd.v)"
-            ),
+            concat!("lower(", field_of!("priority"), ") = any(fd.v)"),
         ),
         (
             FieldKey::Assignee,
-            concat!(
-                "lower(",
-                knobas_core::declared_string!("fd.d", "assignee"),
-                ") = any(fd.v)"
-            ),
+            concat!("lower(", field_of!("assignee"), ") = any(fd.v)"),
         ),
         (
             FieldKey::Label,
             concat!(
                 "exists (select 1 from ",
-                knobas_core::declared_list!("fd.d", "labels"),
+                list_of!("labels"),
                 " l where lower(l.value) = any(fd.v))"
             ),
         ),
@@ -271,7 +344,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Sprint,
             concat!(
                 "exists (select 1 from ",
-                knobas_core::declared_list!("fd.d", "sprint_state"),
+                list_of!("sprint_state"),
                 " l where lower(l.value) = 'active')"
             ),
         ),
@@ -279,7 +352,7 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             FieldKey::Assigned,
             concat!(
                 "(lower(",
-                knobas_core::declared_string!("fd.d", "assignee"),
+                field_of!("assignee"),
                 ") = any(fd.v) and i.item_updated_at >= now() - make_interval(days => fd.n))"
             ),
         ),

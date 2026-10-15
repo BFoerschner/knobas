@@ -204,6 +204,9 @@ pub fn search_sql(
         );
     }
 
+    // A ticket key's declared paths, resolved once for the statement (#811).
+    sql.push_str(&field_paths(&bound));
+
     // One narrow row per match. MATERIALIZED because `totals` and `top` both
     // read it and the scan must happen once.
     sql.push_str("m as materialized (\n");
@@ -339,21 +342,21 @@ struct BoundFilters {
 struct BoundField {
     key: crate::query::FieldKey,
     negated: bool,
-    declarations: String,
     values: String,
     /// `assigned:`'s window, or `null`.
     days: String,
 }
 
 /// Allocate one statement's filter binds, in the order they are read.
+///
+/// With a ticket key the declarations come first: the statement's
+/// `fdecl` CTE reads them before any predicate does (`crate::corpus::FIELD_PATHS`).
 fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilters {
-    let mut bound = bind_dimensions(builder, filters);
-    bound.declarations = bound.under.as_ref().map(|(d, _)| d.clone());
+    let declarations = (!filters.fields.is_empty())
+        .then(|| builder.param(Bind::Json(filters.declarations.as_param())));
+    let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
+    bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
     for filter in &filters.fields {
-        let declarations = bound
-            .declarations
-            .get_or_insert_with(|| builder.param(Bind::Json(filters.declarations.as_param())))
-            .clone();
         let values = builder.param(Bind::Texts(filter.values.clone()));
         let days = filter.within_days.map_or_else(
             || "null".to_owned(),
@@ -362,7 +365,6 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
         bound.fields.push(BoundField {
             key: filter.key,
             negated: filter.negated,
-            declarations,
             values,
             days,
         });
@@ -370,8 +372,13 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
     bound
 }
 
-/// [`bind_filters`]' first half: every dimension but the ticket keys.
-fn bind_dimensions(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilters {
+/// [`bind_filters`]' first half: every dimension but the ticket keys,
+/// `under:` reading `declarations` when they are bound already.
+fn bind_dimensions(
+    builder: &mut Builder,
+    filters: &EffectiveFilters,
+    declarations: Option<&String>,
+) -> BoundFilters {
     BoundFilters {
         sources: (!filters.sources.is_empty())
             .then(|| builder.param(Bind::Texts(filters.sources.clone()))),
@@ -393,7 +400,9 @@ fn bind_dimensions(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFi
             .then(|| builder.param(Bind::Texts(filters.authors()))),
         under: filters.filters_by_under().then(|| {
             (
-                builder.param(Bind::Json(filters.declarations.as_param())),
+                declarations
+                    .cloned()
+                    .unwrap_or_else(|| builder.param(Bind::Json(filters.declarations.as_param()))),
                 builder.param(Bind::Texts(filters.under.clone())),
             )
         }),
@@ -468,9 +477,9 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         // match": `coalesce` makes it false before a `not` can see it.
         let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
             Some((_, fragment)) => format!(
-                "coalesce((select {fragment} from (select {}::jsonb as d, {}::text[] as v, \
-                 {}::int as n) fd), false)",
-                field.declarations, field.values, field.days
+                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n) fd), \
+                 false)",
+                field.values, field.days
             ),
             // A corpus whose rows have no such field matches no value of it.
             None => "false".to_owned(),
@@ -482,6 +491,20 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         });
     }
     predicates
+}
+
+/// The CTEs a statement with a ticket key needs, each ending in `,\n`, or
+/// nothing: `fdecl` holding the declarations, then
+/// [`crate::corpus::FIELD_PATHS`]. Nothing for a statement without one, so
+/// every other query's text is what it was before #811.
+fn field_paths(bound: &BoundFilters) -> String {
+    match (&bound.declarations, bound.fields.is_empty()) {
+        (Some(declarations), false) => format!(
+            "fdecl as (select {declarations}::jsonb as d),\n{},\n",
+            crate::corpus::FIELD_PATHS
+        ),
+        _ => String::new(),
+    }
 }
 
 /// One saved list, as the summary statement asks about it (#506).
@@ -562,6 +585,10 @@ pub fn saved_summary_sql(corpora: &[&Corpus], queries: &[SavedQuery<'_>]) -> Opt
             sql,
             "select {id} as list_id, count(*) as total, max(m.synced_at) as newest\n  from ("
         );
+        let paths = field_paths(&bound);
+        if let Some(paths) = paths.strip_suffix(",\n") {
+            let _ = writeln!(sql, "  with {paths}");
+        }
         for (index, corpus) in corpora.iter().enumerate() {
             if index > 0 {
                 sql.push_str("  union all\n");
