@@ -106,7 +106,8 @@
     blocks: DayBlock[];
     pastHorizon: boolean;
     offers: Record<number, AdHocBlock | null>;
-    openSeconds: number;
+    /** `null` when the week read failed: absent, not zero. */
+    openSeconds: number | null;
   }
   let loaded = $state<Loaded | null>(null);
   let failure = $state<string | null>(null);
@@ -122,13 +123,13 @@
    */
   async function read(on: string): Promise<Loaded> {
     const { from, to } = dayBounds(on);
-    const window = { day: on, from: from.toISOString(), to: to.toISOString() };
+    const bounds = { day: on, from: from.toISOString(), to: to.toISOString() };
     const [record, openSeconds] = await Promise.all([
-      io.dayBlocks(window.from, window.to),
+      io.dayBlocks(bounds.from, bounds.to),
       io
-        .weekTimesheet([window])
+        .weekTimesheet([bounds])
         .then((week) => week.rows.find((row) => row.target === null)?.cells[0]?.tracked_seconds ?? 0)
-        .catch(() => 0),
+        .catch(() => null),
     ]);
     const offers: Record<number, AdHocBlock | null> = {};
     const when = { day: on, offsetMinutes: offsetMinutes(from) };
@@ -174,9 +175,18 @@
       : dayRows({ day: key, blocks: ready.blocks, offers: ready.offers, running: timer.current, now: clock }),
   );
   const figures = $derived(dayFigures(rows, ready?.openSeconds ?? 0));
-  const window = $derived(stripWindow(key, rows));
-  const hours = $derived(Array.from({ length: window.to - window.from + 1 }, (_, index) => window.from + index));
-  const nowAt = $derived(key === today ? place(key, window, clock.toISOString(), clock.toISOString()).left : null);
+  /**
+   * Past the observation horizon what was in front of you is absent, not zero
+   * (`CONTEXT.md`), so the two figures made from it say so; and so does *open*
+   * when its read failed.
+   */
+  const unknown = $derived({
+    offered: ready?.pastHorizon ?? false,
+    open: (ready?.pastHorizon ?? false) || ready?.openSeconds === null,
+  });
+  const frame = $derived(stripWindow(key, rows));
+  const hours = $derived(Array.from({ length: frame.to - frame.from + 1 }, (_, index) => frame.from + index));
+  const nowAt = $derived(key === today ? place(key, frame, clock.toISOString(), clock.toISOString()).left : null);
   const noRecord = $derived(ready !== null && ready.pastHorizon && ready.blocks.length === 0);
 
   let selected = $state<string | null>(null);
@@ -244,8 +254,9 @@
     dialog = null;
     refusal = null;
     push({ text: said });
-    await load(key);
-    onchanged?.();
+    // `onchanged` bumps the revision this view re-reads on, so one read, not two.
+    if (onchanged) onchanged();
+    else await load(key);
     return true;
   }
 
@@ -286,7 +297,7 @@
     }
     const row = current.row;
     if (current.mode === "assign") {
-      const said = `Made a block on ${targetReading(form.target)}, ${clockReading(row.from)} to ${clockReading(row.to)}`;
+      const said = `Made a block on ${targetReading(form.target)}, ${span(row)}`;
       const block = row.block;
       void write(
         () =>
@@ -347,8 +358,8 @@
     <div><b>{hm(figures.tracked)}</b><span>tracked</span></div>
     <div><b>{hm(figures.logged)}</b><span>logged</span></div>
     <div class={figures.toLog > 0 ? "tf-warn" : ""}><b>{hm(figures.toLog)}</b><span>to log</span></div>
-    <div><b>{hm(figures.offered)}</b><span>offered by knobas</span></div>
-    <div><b>{hm(figures.open)}</b><span>open, app in front</span></div>
+    <div><b>{unknown.offered ? "–" : hm(figures.offered)}</b><span>offered by knobas</span></div>
+    <div><b>{unknown.open ? "–" : hm(figures.open)}</b><span>open, app in front</span></div>
   </div>
 
   {#if ready.pastHorizon}
@@ -366,12 +377,12 @@
     </defs>
     <rect class="tf-tm-bed" x="0" y="22" width="100%" height="62" rx="6" />
     {#each hours as hour (hour)}
-      {@const x = `${Math.round(((hour - window.from) / (window.to - window.from)) * 10_000) / 100}%`}
+      {@const x = `${Math.round(((hour - frame.from) / (frame.to - frame.from)) * 10_000) / 100}%`}
       <line class="tf-tm-hr" x1={x} x2={x} y1="22" y2="84" />
       <text class="tf-tm-hl" {x} y="14" text-anchor="middle">{hourLabel(hour)}</text>
     {/each}
     {#each rows as row (row.key)}
-      {@const at = place(key, window, row.from, row.to)}
+      {@const at = place(key, frame, row.from, row.to)}
       <svg
         class="tf-tm-b {STRIP_CLASS[row.state]} {selected === row.key ? 'tf-on' : ''}"
         x="{at.left}%"
@@ -392,8 +403,8 @@
       >
         <title>{span(row)}</title>
         <rect width="100%" height="100%" rx="4" />
-        <svg width="100%" height="100%">
-          <text x="6" y="50%" dominant-baseline="central">{row.target ? targetReading(row.target) : ""}</text>
+        <svg width="100%" height="100%" aria-hidden="true">
+          <text class={row.target?.kind === "label" ? "tf-tm-plain" : ""} x="6" y="50%" dominant-baseline="central">{row.target ? targetReading(row.target) : ""}</text>
         </svg>
       </svg>
     {/each}
@@ -444,9 +455,10 @@
                 {row.target.label} <span class="tf-dim">(label)</span>
               {/if}
               {#if row.state === "offered"}
+                {@const linked = linkedTo(row)}
                 <small>
                   {targetReading(row.target)} was in front of you.
-                  {#if linkedTo(row)}It is linked to {keyOf(linkedTo(row) ?? "")}.{/if}
+                  {#if linked !== null}It is linked to {keyOf(linked)}.{/if}
                 </small>
               {:else if row.state === "label"}
                 <small>

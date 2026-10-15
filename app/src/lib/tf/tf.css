@@ -446,7 +446,7 @@ a.tf-r:hover { background: var(--sheet-2); }
   border: 0; background: none; padding: 8px 12px; color: var(--ink-2); border-bottom: 2px solid transparent;
   margin-bottom: -1px; white-space: nowrap; text-decoration: none;
 }
-.tf-tabs [aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.tf-tabs [aria-current="page"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
 
 /* ---------- forms in a dialog ---------- */
 .tf-dform { display: contents; }
@@ -478,11 +478,11 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-strip { display: block; overflow: visible; margin: 0 0 8px; }
 .tf-tm-bed { fill: var(--sheet); stroke: var(--rule); }
 .tf-tm-hr { stroke: var(--rule-2); shape-rendering: crispEdges; }
-.tf-tm-hl { font: var(--t-2xs) var(--mono); fill: var(--ink-2); }
+.tf-tm-hl { font-size: var(--t-2xs); font-variant-numeric: tabular-nums; fill: var(--ink-2); }
 .tf-tm-b { cursor: pointer; }
 .tf-tm-b text { font: 600 var(--t-2xs) var(--mono); }
+.tf-tm-b text.tf-tm-plain { font-family: var(--sans); }
 .tf-tm-b:focus-visible { outline: none; }
-.tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
 .tf-tm-b.tf-tm-manual rect { fill: var(--ink); } .tf-tm-b.tf-tm-manual text { fill: var(--sheet); }
 .tf-tm-b.tf-tm-logged rect { fill: var(--ok-bg); stroke: var(--ok); } .tf-tm-b.tf-tm-logged text { fill: var(--ok); }
 .tf-tm-b.tf-tm-run rect { fill: var(--card); stroke: var(--card-2); } .tf-tm-b.tf-tm-run text { fill: var(--card-ink); }
@@ -490,6 +490,10 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-b.tf-tm-passive rect { fill: url(#tf-tm-hatch); stroke: var(--info); } .tf-tm-b.tf-tm-passive text { fill: var(--info); }
 .tf-tm-b.tf-tm-gap rect { fill: transparent; stroke: var(--ink-2); stroke-dasharray: 4 3; }
 .tf-tm-hatch { fill: var(--info-bg); }
+/* After the states, so the ring wins over each state's own edge. */
+.tf-tm-b:focus-visible rect, .tf-tm-b.tf-on rect { stroke: var(--focus); stroke-width: 2; }
+/* On the yellow block the ring is --card-ink: --focus is 1.22:1 on --card in dark. */
+.tf-tm-b.tf-tm-run:focus-visible rect, .tf-tm-b.tf-tm-run.tf-on rect { stroke: var(--card-ink); }
 .tf-tm-now { fill: var(--err); }
 .tf-tm-legend {
   display: flex; gap: 16px; flex-wrap: wrap; align-items: center; font-size: var(--t-xs); color: var(--ink-2);
@@ -516,7 +520,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-row:last-child { border-bottom: 0; }
 .tf-tm-row:hover { background: var(--sheet-2); }
 .tf-tm-row.tf-on { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
-.tf-tm-when { font: var(--t-xs) var(--mono); color: var(--ink-2); display: flex; flex-direction: column; }
+.tf-tm-when { font-size: var(--t-xs); font-variant-numeric: tabular-nums; color: var(--ink-2); display: flex; flex-direction: column; }
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
 .tf-tm-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }

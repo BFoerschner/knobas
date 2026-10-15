@@ -53,11 +53,11 @@
     <div class="tf-acts"><a class="tf-btn tf-primary" href="#/time/week">Log all…</a></div>
   {/if}
 </header>
-<div class="tf-tabs" role="tablist">
+<nav class="tf-tabs" aria-label="Time">
   {#each TABS as [name, label, href] (name)}
-    <a {href} role="tab" aria-selected={name === tab}>{label}</a>
+    <a {href} aria-current={name === tab ? "page" : undefined}>{label}</a>
   {/each}
-</div>
+</nav>
 <div class="tf-tm-wrap">
   {#if tab === "day"}
     <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} />

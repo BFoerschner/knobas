@@ -278,3 +278,11 @@ test("a day with nothing on it says so, and a day before today offers the day af
   expect(target.querySelector('a[aria-label="Day after"]')!.getAttribute("href")).toBe("#/time/2026-08-21");
   expect(squash(target.querySelector('a[href="#/time"]')?.textContent)).toBe("Today");
 });
+
+test("past the horizon, what knobas saw is absent rather than zero, and the blocks you tracked stay", async () => {
+  render({ blocks: [block(3, at(9, 40, 1), at(11, 50, 1))], pastHorizon: true, day: "2026-08-01" });
+  await settle();
+  expect(figures()).toEqual(["2h 10m tracked", "0m logged", "2h 10m to log", "– offered by knobas", "– open, app in front"]);
+  expect(squash(target.textContent)).toContain("No record of what was in front of you.");
+  expect(rows()).toEqual(["unlogged"]);
+});
