@@ -741,23 +741,16 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
   {
     surface: "The timer and the day's blocks",
     witnesses: ["crates/knobas-app/tests/it/time_ipc.rs"],
-    commands: [
-      "current_timer",
-      "start_timer",
-      "stop_timer",
-      "timer_heartbeat",
-      "ad_hoc_block",
-      "create_block",
-      "update_block",
-      "delete_block",
-      "day_blocks",
-    ],
+    // The timer, `ad_hoc_block` and `day_blocks` are answered since #826, so a
+    // stop can open the worklog draft under `?fake-ipc`; editing a block is not.
+    commands: ["create_block", "update_block", "delete_block"],
   },
   {
     surface: "The worklog draft and the week timesheet",
     witnesses: ["crates/knobas-app/tests/it/worklog_ipc.rs", "crates/knobas-app/tests/it/week_ipc.rs"],
-    // `week_timesheet` is answered since #816, for the job card's *Time this week*.
-    commands: ["worklog_draft", "log_work", "log_all_preview", "log_all"],
+    // `week_timesheet` is answered since #816, for the job card's *Time this week*;
+    // `worklog_draft` and `log_work` since #826.
+    commands: ["log_all_preview", "log_all"],
   },
   {
     surface: "The standup digest, its protocol and the action items it publishes",
