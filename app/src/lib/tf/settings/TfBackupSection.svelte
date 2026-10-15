@@ -141,7 +141,7 @@
     <div class="tf-stg-c">
       <select
         id="tf-bak-every"
-        class="tf-stg-in tf-stg-fit"
+        class="tf-stg-in"
         value={current.schedule.enabled ? "daily" : "never"}
         onchange={(event) => void saveSchedule({ ...current.schedule, enabled: event.currentTarget.value === "daily" })}
       >
