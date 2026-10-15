@@ -10,6 +10,11 @@
 import type { EntityDetail, EntityRow, Tone } from "../../ipc/entity";
 import type { Week } from "../../ipc/time";
 
+/** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
+export function isEntityId(segment: string): boolean {
+  return segment.includes(":");
+}
+
 /** The key half of an entity id: `jira:PAY-231` reads `PAY-231`. */
 export function keyOf(entityId: string): string {
   return entityId.slice(entityId.indexOf(":") + 1);
@@ -29,11 +34,19 @@ export async function resolveTicket(
   sources: readonly { id: string }[],
   read: (entityId: string) => Promise<EntityDetail>,
 ): Promise<EntityDetail | null> {
-  const candidates = segment.includes(":") ? [segment] : sources.map((source) => `${source.id}:${segment}`);
+  const candidates = isEntityId(segment) ? [segment] : sources.map((source) => `${source.id}:${segment}`);
   const answers = await Promise.allSettled(candidates.map((id) => read(id)));
   for (const answer of answers) {
     if (answer.status === "fulfilled" && answer.value.row.kind === "ticket") return answer.value;
   }
+  // A source that does not hold the key answers `not_found`, which is the
+  // ordinary miss. Anything else (the database down, the bridge gone) is a
+  // failure to say as one, never "not in the mirror".
+  const failed = answers.find(
+    (answer): answer is PromiseRejectedResult =>
+      answer.status === "rejected" && (answer.reason as { code?: unknown } | null)?.code !== "not_found",
+  );
+  if (failed) throw failed.reason;
   return null;
 }
 
@@ -125,7 +138,8 @@ export function weekLine(reading: WeekReading): string {
 export const CODE_KINDS = ["pr", "branch", "commit", "repo"] as const;
 
 /** How loud a row's state is: what asks for you first (R-4.6). */
-const RANK: Record<Tone, number> = { err: 0, warn: 1, info: 2, ok: 3, muted: 3 };
+const SETTLED = 3;
+const RANK: Record<Tone, number> = { err: 0, warn: 1, info: 2, ok: SETTLED, muted: SETTLED };
 
 /**
  * A section's rows, sorted by what asks for you, then newest first (R-4.6).
@@ -133,7 +147,7 @@ const RANK: Record<Tone, number> = { err: 0, warn: 1, info: 2, ok: 3, muted: 3 }
  * dated sorts last among its rank.
  */
 export function byAttention(rows: readonly EntityRow[]): EntityRow[] {
-  const rank = (row: EntityRow) => (row.state ? RANK[row.state.tone] : 3);
+  const rank = (row: EntityRow) => (row.state ? RANK[row.state.tone] : SETTLED);
   return [...rows].sort(
     (a, b) => rank(a) - rank(b) || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
   );

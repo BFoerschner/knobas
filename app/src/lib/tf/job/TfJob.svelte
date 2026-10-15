@@ -12,17 +12,17 @@
   the Conversation tab #819's, each an empty pane that names itself until then.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import type { CheckoutCommand, CheckoutView, EntityDetail, EntityRow } from "../../ipc/entity";
   import { ipcErrorMessage } from "../../ipc";
-  import type { RunningTimer } from "../../ipc/time";
+  import type { Timer } from "../../shell/timer.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { dayKey } from "../../time/day";
   import { weekWindows } from "../../time/week";
   import type { Layers } from "../layers.svelte";
-  import { CODE_KINDS, byAttention, keyOf, resolveTicket, weekReading, type WeekReading } from "./job";
+  import { CODE_KINDS, byAttention, isEntityId, keyOf, resolveTicket, weekReading, type WeekReading } from "./job";
   import { bridgePorts, type JobPorts } from "./ports";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfJobCard from "./TfJobCard.svelte";
@@ -41,7 +41,7 @@
     segment: string;
     /** The job's tab from the address, `null` for Work. */
     tab: string | null;
-    timer: { current: RunningTimer | null; elapsed: string | null };
+    timer: Pick<Timer, "current" | "elapsed">;
     layers: Layers;
     /** The timer verb: with a timer running, stop it into the worklog draft. */
     ontimer: (() => void) | undefined;
@@ -74,12 +74,14 @@
     checkout = null;
     checkoutOf = null;
     failure = null;
-    void open(wanted, mine);
+    // Only the address re-opens a job: what `open` reads before its first
+    // await (the ports) is not a reason to read again.
+    untrack(() => void open(wanted, mine));
   });
 
   async function open(wanted: string, mine: number) {
     try {
-      const sources = wanted.includes(":") ? [] : await ports.listSources();
+      const sources = isEntityId(wanted) ? [] : await ports.listSources();
       const found = await resolveTicket(wanted, sources, ports.getEntity);
       if (mine !== token) return;
       detail = found;
@@ -174,7 +176,13 @@
     }
   }
 
-  const tabName = $derived(tab === "map" ? "map" : tab === "conversation" ? "conversation" : "work");
+  /** The job's tabs, in prototype-6's order and words; an unknown tab is Work. */
+  const TABS = [
+    { id: "work", name: "Work", path: "" },
+    { id: "map", name: "Map", path: "/map" },
+    { id: "conversation", name: "Conversation", path: "/conversation" },
+  ] as const;
+  const current = $derived(TABS.find((candidate) => candidate.id === tab) ?? TABS[0]);
 
   onMount(() => () => {
     token += 1;
@@ -204,16 +212,16 @@
       {timer}
       onmove={move}
       onstop={() => ontimer?.()}
-      onstart={() => onstarttimer(detail!.row.entity_id, key)}
+      onstart={() => onstarttimer(detail!.row.entity_id, detail!.row.title)}
     />
     <section class="tf-work">
       <div class="tf-wtabs" role="tablist">
-        <a href="#/job/{encodeURIComponent(key)}" role="tab" aria-selected={tabName === "work"}>Work</a>
-        <a href="#/job/{encodeURIComponent(key)}/map" role="tab" aria-selected={tabName === "map"}>Map</a>
-        <a href="#/job/{encodeURIComponent(key)}/conversation" role="tab" aria-selected={tabName === "conversation"}>Conversation</a>
+        {#each TABS as each (each.id)}
+          <a href="#/job/{encodeURIComponent(key)}{each.path}" role="tab" aria-selected={current.id === each.id}>{each.name}</a>
+        {/each}
       </div>
       <div class="tf-wbody">
-        {#if tabName === "work"}
+        {#if current.id === "work"}
           {#if failure !== null}
             <p class="tf-dim">Could not read what this job holds: {failure}</p>
           {/if}
@@ -222,7 +230,7 @@
           </div>
         {:else}
           <div class="tf-empty">
-            <p>{tabName === "map" ? "Map" : "Conversation"} is not built in the new shell yet.</p>
+            <p>{current.name} is not built in the new shell yet.</p>
           </div>
         {/if}
       </div>

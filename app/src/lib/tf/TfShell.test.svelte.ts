@@ -373,5 +373,12 @@ test("a job address draws the job inside the frame, and its Start timer reaches 
   expect(target.querySelector(".tf-jobcard .tf-jobkey")?.textContent).toBe("PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
   [...target.querySelectorAll<HTMLButtonElement>(".tf-jobcard button")].find((b) => b.textContent === "Start timer")!.click();
-  expect(started).toEqual([["jira:PAY-231", "PAY-231"]]);
+  expect(started).toEqual([["jira:PAY-231", "Retry failed SEPA payouts"]]);
+});
+
+test("a job opened by its id names its key on the Job tab", async () => {
+  start();
+  await at("#/job/jira:PAY-231");
+  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
+  expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).not.toContain("jira:");
 });

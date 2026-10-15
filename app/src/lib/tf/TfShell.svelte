@@ -56,6 +56,7 @@
   import { parseTfHash, sectionOf } from "./route";
   import { switchShell } from "./shell-choice";
   import { sourceReadings } from "./status";
+  import { isEntityId, keyOf } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
   import TfPage from "./TfPage.svelte";
   import TfStatusBar from "./TfStatusBar.svelte";
@@ -112,7 +113,8 @@
    */
   let lastJob = $state<string | null>(null);
   $effect(() => {
-    if (route.view === "job" && route.key !== null) lastJob = route.key;
+    // The key, also when the address held an id: the tab names a key (R-1.2).
+    if (route.view === "job" && route.key !== null) lastJob = isEntityId(route.key) ? keyOf(route.key) : route.key;
   });
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */

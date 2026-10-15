@@ -254,6 +254,22 @@ test("a key nothing answers to says so and offers the way back", async () => {
   expect(target.querySelector(".tf-btn")?.getAttribute("href")).toBe("#/tickets");
 });
 
+test("a read that fails for another reason than a miss says it failed, not that the ticket is missing", async () => {
+  open("PAY-231", {
+    ports: ports({ getEntity: () => Promise.reject({ code: "not_ready", message: "the database is starting", source_id: null }) }),
+  });
+  await settle();
+  expect(text()).toContain("Could not open PAY-231: the database is starting");
+  expect(text()).not.toContain("in the mirror");
+  expect(calls.promote).toEqual([]);
+});
+
+test("code rows with no repository name still roll up to a count", async () => {
+  open("PAY-231", { ports: ports({ rows: [code("gitea:x@1", "commit", "fix", "2026-10-15T10:00:00Z", null, null)] }) });
+  await settle();
+  expect(target.querySelector(".tf-roll")?.textContent?.trim()).toBe("1 connected");
+});
+
 test("the status select offers where the ticket stands and the reachable transitions only, and a pick queues it", async () => {
   open();
   await settle();
@@ -282,7 +298,7 @@ test("the clock offers Start timer, and Stop and log while the timer runs on thi
   await settle();
   const start = [...target.querySelectorAll("button")].find((button) => button.textContent === "Start timer")!;
   start.click();
-  expect(calls.start).toEqual([[ID, "PAY-231"]]);
+  expect(calls.start).toEqual([[ID, "Retry failed SEPA payouts"]]);
   unmount(job!);
 
   const current: RunningTimer = {

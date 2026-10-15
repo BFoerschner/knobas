@@ -88,9 +88,11 @@
       <span>…</span>
     {:else if repos.length > 0}
       <span>{repos.length} {repos.length > 1 ? "repos" : "repo"}: {#each repos as repo, index (repo)}{index > 0 ? ", " : ""}<span class="tf-mono">{repo}</span>{/each}</span>
-      {#if open > 0}<span class="tf-signal"><span class="tf-dot tf-info"></span>{open} open PR</span>{/if}
+      {#if open > 0}<span class="tf-signal"><span class="tf-dot tf-info"></span>{open} open {open > 1 ? "PRs" : "PR"}</span>{/if}
     {:else if sorted.length === 0}
       <span>Nothing connected.</span>
+    {:else}
+      <span>{sorted.length} connected</span>
     {/if}
   </div>
   {#if checkout?.path}

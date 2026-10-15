@@ -16,7 +16,7 @@
     where the switch lives and the rooms UI is where every setting still is.
 -->
 <script lang="ts">
-  import type { RunningTimer } from "../ipc/time";
+  import type { Timer } from "../shell/timer.svelte";
   import TfJob from "./job/TfJob.svelte";
   import type { JobPorts } from "./job/ports";
   import type { Layers } from "./layers.svelte";
@@ -44,7 +44,7 @@
     timedTicket: string | null;
     /** Switch back to the rooms UI. */
     onrooms: () => void;
-    timer: { current: RunningTimer | null; elapsed: string | null };
+    timer: Pick<Timer, "current" | "elapsed">;
     layers: Layers;
     /** The timer verb, which stops a running timer into the worklog draft. */
     ontimer: (() => void) | undefined;

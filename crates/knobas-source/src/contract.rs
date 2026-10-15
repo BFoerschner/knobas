@@ -692,7 +692,11 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Text => value.is_string(),
                 Wanted::Flag => value.is_boolean(),
                 Wanted::List => value.is_array(),
-                Wanted::Integer => value.is_i64() || value.is_u64(),
+                // At most 18 digits, as `declared_integer!` reads one: a
+                // value the reader would miss is not one the battery passes.
+                Wanted::Integer => value
+                    .as_i64()
+                    .is_some_and(|n| n.unsigned_abs() < 1_000_000_000_000_000_000),
             }
         }
 

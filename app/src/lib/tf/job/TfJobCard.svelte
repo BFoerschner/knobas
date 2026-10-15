@@ -15,7 +15,7 @@
 -->
 <script lang="ts">
   import type { EntityDetail } from "../../ipc/entity";
-  import type { RunningTimer } from "../../ipc/time";
+  import type { Timer } from "../../shell/timer.svelte";
   import { clockReading } from "../../time/day";
   import { blockers, factsLine, keyOf, weekLine, type WeekReading } from "./job";
 
@@ -32,7 +32,7 @@
     /** Where the ticket can move now, or `null` while the workflow read is out. */
     offered: string[] | null;
     week: WeekReading | null;
-    timer: { current: RunningTimer | null; elapsed: string | null };
+    timer: Pick<Timer, "current" | "elapsed">;
     onmove: (status: string) => void;
     onstop: () => void;
     onstart: () => void;
