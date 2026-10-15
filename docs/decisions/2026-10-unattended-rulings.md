@@ -1458,3 +1458,25 @@ the queue exists to prevent.
 removing the variant touches four matches. The queue changes are one arm in `attempt`, one helper and
 one `case` in `apply_anyway`'s statement. `update_page` and `set_parameter` still refuse on their
 bases and could move to `Moved` in a follow-up.
+
+## #822 — review rulings (merge-manager, PR #887)
+
+Recorded in PR #887 too. Fixed on the branch: the contract battery's `DeleteBranch` comment had
+been left above the new `CommitFile` probe and now sits above its own probe again; the `SourceError`
+doc says again that every variant carries at most a string and a status.
+
+- **The held row is not witnessed against the real Gitea.** The live suite reaches `Moved`; the
+  hold is the DB test over a fake. **Ruling:** merge on the split and file #888 for a
+  `start_work_live` case. The queue code is the same for every source. **Reversing:** #888 itself.
+- **A file deleted on `branch` between the read and the commit** is refused (the re-read's 404), not
+  held. **Ruling:** stays a refusal. There is no "theirs" text to show and no blob for *Apply anyway*
+  to re-send against. **Reversing:** low, one arm in `commit_file`'s 422 branch.
+- **A `new_branch` name a glob protection rule covers** gets Gitea's bare 403, not the guard's
+  reason. **Ruling:** no change. The ticket's case is a commit onto a protected branch, which is
+  guarded. **Reversing:** low, a protection read of `new_branch` too.
+- **A file above Gitea's contents size limit** comes back without `content`, so its "theirs" reads
+  empty and a landed re-send of it would be held rather than delivered. **Ruling:** no change. That
+  fails safe, as a hold the reader can see. **Reversing:** low.
+- **Naming** (`Moved { base }` is the source's current blob, and `moved` builds a snapshot rather
+  than acting). **Ruling:** keep. `base` is what the re-send is made against after *Apply anyway*,
+  which is the same sense as `base_sha`. **Reversing:** low before #845 reads the key, medium after.

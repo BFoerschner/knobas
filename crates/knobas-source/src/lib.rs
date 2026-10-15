@@ -308,9 +308,10 @@ pub type Cursor = String;
 /// `knobas-http` had just built, and 401 and 403 could not be told apart at
 /// all. [`status`](Self::status) is now the one way to ask.
 ///
-/// Every variant carries strings and at most a status (`Moved` carries two
-/// strings), so the error crosses a process boundary as plain data (spec §3a). The serde form is structural, not
-/// the [`Display`](std::fmt::Display) text thiserror generates:
+/// Every variant carries at most a string and a status (`Moved` two strings),
+/// so the error crosses a process boundary as plain data (spec §3a). The serde
+/// form is structural, not the [`Display`](std::fmt::Display) text thiserror
+/// generates:
 /// `{"Unauthorized": {"status": 401}}`, `{"Unreachable": "<detail>"}`. Both
 /// status fields are `#[serde(default)]`, so a peer that sends none -- an
 /// out-of-process adapter built against an older SPI -- still decodes, as the
