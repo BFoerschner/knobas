@@ -88,7 +88,7 @@ function hold() {
  * which is exactly the mismatch a paste-to-reference has to be checked
  * against.
  *
- * `shell/dev/fake-tauri.ts` spells the same rule for the browser walk, and the
+ * `shell/dev/fake/notes.ts` spells the same rule for the browser walk, and the
  * two deliberately do not share — see the note on `noteDetail` there for why
  * neither the dev harness nor a shared module is somewhere this can live.
  */

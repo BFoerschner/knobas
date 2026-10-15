@@ -110,7 +110,7 @@ export function handlers(): Record<string, Handler> {
     // `room_suggestions` on every room, and it renders a rejection rather than
     // an empty state -- so a table without these keys was a standing red line
     // on every room under `?fake-ipc`. Stateful within the session like the
-    // contexts above: a row answered here leaves every later read for as long
+    // stored contexts: a row answered here leaves every later read for as long
     // as the page lives. No event is emitted: the real command emits
     // `activity:new`, but the tray re-reads on its own after answering, and
     // the fixture emits nothing at all.

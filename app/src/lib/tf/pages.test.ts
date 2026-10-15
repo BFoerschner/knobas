@@ -14,7 +14,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(jobPage);
 });
 
-test.each([
+const ADDRESSES = [
   ["#/tickets", "tickets"],
   ["", "tickets"],
   ["#/tickets/PAY-231", "tickets"],
@@ -24,10 +24,19 @@ test.each([
   ["#/time", "shell"],
   ["#/settings", "shell"],
   ["#/nowhere", "shell"],
-])("%s draws the %s page", (hash, expected) => {
+] as const;
+
+test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
   const found = pageFor(parseTfHash(hash));
   const name = found === ticketsPage ? "tickets" : found === jobPage ? "job" : found === undefined ? "shell" : "other";
   expect(name).toBe(expected);
+});
+
+test("no address is matched by two pages", () => {
+  for (const [hash] of ADDRESSES) {
+    const route = parseTfHash(hash);
+    expect(PAGES.filter((page) => page.matches(route)).length, hash).toBeLessThanOrEqual(1);
+  }
 });
 
 test("the job page hands TfJob the address's key and tab", () => {

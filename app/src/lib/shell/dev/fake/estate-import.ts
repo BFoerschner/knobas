@@ -3,7 +3,17 @@
  * file over `estate.ts`'s estate.
  */
 import type { Handler } from "../fake-tauri";
-import { type EstateFileAsset, type EstateFileRoute, ASSET_HISTORY, ESTATE, FIXTURE_ESTATE, FIXTURE_ROUTES, assetFromFile, routeFromFile, typeOf } from "./estate";
+import {
+  type EstateFileAsset,
+  type EstateFileRoute,
+  ASSET_HISTORY,
+  ESTATE,
+  FIXTURE_ESTATE,
+  FIXTURE_ROUTES,
+  assetFromFile,
+  routeFromFile,
+  typeOf,
+} from "./estate";
 
 /**
  * The file an import was handed, or a refusal.

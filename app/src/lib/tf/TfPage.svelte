@@ -68,10 +68,11 @@
       {/if}
     </div>
   </div>
-{:else if route.view === "unknown"}
+{:else}
+  <!-- An unknown address, or a feature whose `page.ts` is missing. -->
   <div class="tf-full">
     <div class="tf-empty">
-      <p>Nothing lives at <span class="tf-mono">{route.hash}</span> in the new shell.</p>
+      <p>Nothing lives at <span class="tf-mono">{route.view === "unknown" ? route.hash : location.hash}</span> in the new shell.</p>
       <a class="tf-btn" href="#/tickets">Go to Tickets</a>
     </div>
   </div>

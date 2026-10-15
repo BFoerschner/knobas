@@ -893,7 +893,7 @@ export function assetPathText(asset: (typeof FIXTURE_ESTATE)[number]): string | 
 export function handlers(): Record<string, Handler> {
   return {
     // The estate (#428, writable since #429). Stateful within the session,
-    // like the contexts above: an asset created, renamed, moved or deleted
+    // like the stored contexts: an asset created, renamed, moved or deleted
     // here stays that way for as long as the page lives, so the whole create /
     // edit / move walk can be driven in a browser. Nothing is persisted --
     // reload and the estate is the fixture again.

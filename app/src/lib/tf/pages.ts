@@ -7,7 +7,11 @@
 import type { TfPageEntry } from "./page-entry";
 import type { TfRoute } from "./route";
 
-/** Every feature's `page.ts`, in path order; the first match draws. */
+/**
+ * Every feature's `page.ts`, in path order. Pages match disjoint routes, so
+ * the order decides nothing; `pages.test.ts` holds that for every address it
+ * draws.
+ */
 export const PAGES: readonly TfPageEntry[] = Object.entries(
   import.meta.glob<{ page: TfPageEntry }>("./*/page.ts", { eager: true }),
 )

@@ -94,7 +94,7 @@ export function handlers(): Record<string, Handler> {
       held: FIXTURE_QUEUE.filter((row) => row.state === "held").length,
       refused: FIXTURE_QUEUE.filter((row) => row.state === "refused").length,
     }),
-    // Answered, never performed -- the same rule as the credential above, and
+    // Answered, never performed -- the same rule as the credential in `sources.ts`, and
     // it matters more here: a fixture that appeared to *send* a held write
     // would be showing a reader the one outcome this feature exists to make
     // impossible without their say-so.

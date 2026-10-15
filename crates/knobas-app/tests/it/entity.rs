@@ -1051,7 +1051,7 @@ async fn an_unknown_id_is_not_found_not_internal() {
     // and until #518 nothing asserted on it. The webview suites that draw it
     // each hard-code their own copy of the literal (`Detail.test.svelte.ts`,
     // `LinkDialog.test.svelte.ts`, `links.test.ts`, `Room.test.svelte.ts`),
-    // and so does `fake-tauri.ts`; none of them reads this statement. Pinning
+    // and so does the `?fake-ipc` fixture; none of them reads this statement. Pinning
     // it here is what makes those copies copies of something.
     assert_eq!(
         err.message, "mock:NOPE-1 is not in the mirror",

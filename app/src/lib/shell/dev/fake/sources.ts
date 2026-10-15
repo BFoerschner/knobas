@@ -7,10 +7,6 @@ import type { Handler } from "../fake-tauri";
 import { CORPUS, SYNCED_AT } from "./corpus";
 
 // -- the sources cockpit's fixture -------------------------------------------
-//
-// Below `CORPUS` and `SYNCED_AT` because it reads them: a `const` is in its
-// temporal dead zone until its declaration runs, and these are evaluated at
-// module load.
 
 /** What the fixture's adapters declare — §3a's display metadata. */
 const KIND_INFO = [
