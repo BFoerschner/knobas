@@ -50,6 +50,16 @@ function createNote(args: Record<string, unknown>) {
   return noteDetail(id);
 }
 
+/**
+ * Put a note in this session's store unless it is there already: the
+ * backend's get-or-create for a note another command owns (the standup
+ * protocol, #829), which then reads and saves through `get_note` and
+ * `save_note` like any other. **Fixture only.**
+ */
+export function seedNote(id: string, title: string, bodyMd: string): void {
+  if (!NOTES.has(id)) NOTES.set(id, { title, body_md: bodyMd, created_at: SYNCED_AT, born: [] });
+}
+
 /** `get_note`. A note this session did not write is a `not_found`, as it is. */
 function getNote(args: Record<string, unknown>) {
   const id = String(args["noteId"] ?? "");

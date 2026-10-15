@@ -376,6 +376,7 @@ const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
 const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
+const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -1075,6 +1076,28 @@ const CASES: Case[] = [
           ports: {
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             pendingWrites: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The new shell's Standup tab (#829): the digest, the protocol and the
+     * publish target, all `deferred`; nothing is followed until a write.
+     */
+    name: "TfStandup",
+    source: "lib/tf/time/TfStandup.svelte",
+    open: (target) => ({
+      app: mount(TfStandup, {
+        target,
+        props: {
+          ports: {
+            standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+            standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null }),
+            getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
+            standupPublishTarget: () => deferred(null),
+            follower: { follow: () => () => {} },
           },
         },
       }),
