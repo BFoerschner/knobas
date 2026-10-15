@@ -1419,3 +1419,64 @@ Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up whil
 - Under the new shell, the chip and `⌘T` with nothing running open the picker, not a timer on the current job (R-1.4's second half). R-1.4 is not in #809's list, and the job page that would supply the current job is #816. Filed as #886, blocked by #816. Reversing: one `foreground` branch.
 - The toasts draw `action` plus `more`, though R-1.8 says "may carry one action". The store is shared with the rooms UI, and #752's refused-write toast needs both buttons. Dropping the extra ones would drop a caller's verb. Reversing: one line in `TfToasts.svelte`.
 - `App.svelte` passing `toggleTimer` as the new shell's `ontimer` has no test of its own. It is one prop, read in review, and `TfShell.test` covers the shell side. Not fixed.
+## #822 — `CommitFile`: how a moved file becomes a held write
+
+Ruled 2026-10-15 by the implementer, under the TF6 milestone's rule (Björn, 2026-10-15: the
+implementer decides the forks that come up while implementing). Recorded in PR for #822 too.
+
+**The fork:** the ticket says a `sha` mismatch "becomes a held write carrying both versions, the
+queue's existing held state". The queue holds only when its own projection of the mirror moved, and
+the mirror holds no files, so nothing in the queue can see a file change. Something has to carry the
+source's "this moved" and the file as it is now from `Source::write` to the flush.
+
+**Ruling:** a new `SourceError::Moved { base, current }`. The adapter answers it when the source
+refused a stale base and the file now reads at another version. The flush holds the write with the
+queued snapshot plus `text` (theirs) and `base`; the reader's version is the payload. *Apply anyway*
+writes `base` into the payload's `base_sha` and keeps the queued snapshot, so the next flush sends
+against their version, and a file that moved again holds it again. The projection is the
+repository's liveness alone. Smaller forks, same PR: the target field is the ticket's `repo` (the
+repository; the queue orders commits per repository); a new branch is Gitea's own `new_branch` in
+the same `PUT`, not a separate `create_branch`; a protected branch the token may not push to is
+refused before the request, since Gitea's 403 says only *user cannot commit to repo*; the moved
+check is a re-read after a 422, not the 422's sentence and not a read before every commit; a file
+missing on the branch is Gitea's 404 refusal, never a create; text only; not an unclaimed-write op;
+the receipt names the commit; `Moved` maps to `IpcErrorCode::Conflict`; a 422 where the file
+already holds this commit's text is a re-send of a commit that landed and is answered as delivered
+(review finding, ADR-0012); *Edit* stays the plain amend, whose caller sets `base_sha` to the held
+`base` (#845). The live suite witnesses
+the adapter half (Moved with Gitea's blob and text); the queue half is witnessed by
+`knobas-sync`'s DB test over a fake answering `Moved`, since the queue's own code is the same for
+every source.
+
+**Reasoning:** the write did not happen, so it is an error and not a receipt. Two strings keep the
+error plain data across a process boundary. Writing `base` into the payload is the only release
+that lets the source's own check pass: copying the held side over the queued snapshot, as for a
+mirror hold, would hold again on every flush, and skipping the check would be the silent overwrite
+the queue exists to prevent.
+
+**If you disagree, the cost of reversing this is:** medium. `SourceError` is a frozen surface, and
+removing the variant touches four matches. The queue changes are one arm in `attempt`, one helper and
+one `case` in `apply_anyway`'s statement. `update_page` and `set_parameter` still refuse on their
+bases and could move to `Moved` in a follow-up.
+
+## #822 — review rulings (merge-manager, PR #887)
+
+Recorded in PR #887 too. Fixed on the branch: the contract battery's `DeleteBranch` comment had
+been left above the new `CommitFile` probe and now sits above its own probe again; the `SourceError`
+doc says again that every variant carries at most a string and a status.
+
+- **The held row is not witnessed against the real Gitea.** The live suite reaches `Moved`; the
+  hold is the DB test over a fake. **Ruling:** merge on the split and file #888 for a
+  `start_work_live` case. The queue code is the same for every source. **Reversing:** #888 itself.
+- **A file deleted on `branch` between the read and the commit** is refused (the re-read's 404), not
+  held. **Ruling:** stays a refusal. There is no "theirs" text to show and no blob for *Apply anyway*
+  to re-send against. **Reversing:** low, one arm in `commit_file`'s 422 branch.
+- **A `new_branch` name a glob protection rule covers** gets Gitea's bare 403, not the guard's
+  reason. **Ruling:** no change. The ticket's case is a commit onto a protected branch, which is
+  guarded. **Reversing:** low, a protection read of `new_branch` too.
+- **A file above Gitea's contents size limit** comes back without `content`, so its "theirs" reads
+  empty and a landed re-send of it would be held rather than delivered. **Ruling:** no change. That
+  fails safe, as a hold the reader can see. **Reversing:** low.
+- **Naming** (`Moved { base }` is the source's current blob, and `moved` builds a snapshot rather
+  than acting). **Ruling:** keep. `base` is what the re-send is made against after *Apply anyway*,
+  which is the same sense as `base_sha`. **Reversing:** low before #845 reads the key, medium after.

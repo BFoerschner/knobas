@@ -2980,6 +2980,7 @@ name = "knobas-source-gitea"
 version = "1.1.0-dev"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
  "flate2",
  "knobas-core",

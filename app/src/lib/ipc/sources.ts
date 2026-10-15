@@ -733,6 +733,28 @@ export type WriteOpPayload =
   | {
       EditPullRequest: { entity: string; title: string | null; body: string | null; state: PullRequestState | null };
     }
+  /**
+   * Commit one file's new text through the source, never the checkout (#822).
+   * `repo` is the **repository**; `new_branch` makes that branch from
+   * `branch` first, `null` commits onto `branch`; `content` is the whole new
+   * text; `base_sha` the blob the edit was made against. A file that changed
+   * since comes back held, theirs in the held snapshot (`text`, `base`) and
+   * this payload as the reader's. *Apply anyway* re-sends against `base` by
+   * itself; an *Edit* (amend) of a moved commit sends `base_sha` set to the
+   * held side's `base`, or it is held again. Mirrors
+   * `knobas_source::WriteOp::CommitFile`.
+   */
+  | {
+      CommitFile: {
+        repo: string;
+        branch: string;
+        new_branch: string | null;
+        path: string;
+        content: string;
+        message: string;
+        base_sha: string;
+      };
+    }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

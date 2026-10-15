@@ -242,7 +242,7 @@ impl Source for GiteaSource {
     /// Perform one of the four writes M2 ratified for Gitea, the merge the
     /// source views added (#667), the review the pull request's toolbar
     /// writes (#705), its edit, close and reopen (#706), the branch delete
-    /// (#707) or the branch update (#708), or refuse.
+    /// (#707), the branch update (#708) or a file commit (#822), or refuse.
     ///
     /// The match unpacks and hands values to [`crate::write`], which never
     /// names `WriteOp`: knobas has one outbound write path and
@@ -335,6 +335,27 @@ impl Source for GiteaSource {
                 )
                 .await?;
                 Ok(WriteReceipt::none())
+            }
+            WriteOp::CommitFile {
+                repo: target,
+                branch,
+                new_branch,
+                path,
+                content,
+                message,
+                base_sha,
+            } => {
+                let (owner, repo) = self.repo_of(target)?;
+                let commit = write::Commit {
+                    branch,
+                    new_branch: new_branch.as_deref(),
+                    path,
+                    content,
+                    message,
+                    base_sha,
+                };
+                let made = write::commit_file(&self.client, &owner, &repo, &commit).await?;
+                Ok(made.map_or_else(WriteReceipt::none, WriteReceipt::id))
             }
             WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
@@ -437,7 +458,8 @@ mod tests {
                 "submit_review",
                 "delete_branch",
                 "edit_pull_request",
-                "update_pull_request_branch"
+                "update_pull_request_branch",
+                "commit_file"
             ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly

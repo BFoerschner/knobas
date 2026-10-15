@@ -542,7 +542,11 @@ fn auth_state_of(error: &knobas_source::SourceError) -> knobas_sync::config::Aut
     use knobas_sync::config::AuthState;
     match error {
         Se::Unauthorized { .. } => AuthState::Unauthorized,
-        Se::Unreachable(_) | Se::Protocol { .. } | Se::Sink(_) => AuthState::Unreachable,
+        // `Moved` answers a write (#822), never a connection test; it says
+        // nothing about the credential either.
+        Se::Unreachable(_) | Se::Protocol { .. } | Se::Sink(_) | Se::Moved { .. } => {
+            AuthState::Unreachable
+        }
     }
 }
 

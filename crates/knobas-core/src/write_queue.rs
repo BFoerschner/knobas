@@ -360,6 +360,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "delete_branch",
     "edit_pull_request",
     "update_pull_request_branch",
+    "commit_file",
 ];
 
 /// What `op` counts as its target having changed.
@@ -492,7 +493,7 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"run_build"`,
 /// `"log_work"`, `"create_page"`, `"pause_monitor"`, `"resume_monitor"`,
-/// `"create_monitor"`.
+/// `"create_monitor"`, `"commit_file"`.
 /// These do not
 /// overwrite anything: they add a ticket, a branch, a pull request, a queued
 /// build or a worklog *beside* whatever the container holds now, so a change to the
@@ -552,6 +553,17 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// request. A duplicate is not a hold either -- Uptime Kuma holds any number
 /// of monitors under one name, so a second create makes a second monitor, and
 /// the queue's own per-entity ordering is what keeps two creates from racing.
+///
+/// **`"commit_file"` is in that group, and not because it overwrites
+/// nothing** (issue #822): it replaces a file. Its target is the repository,
+/// and the mirror holds no file, so nothing this module can read moves when
+/// the file does -- the whole record would hold on every push to every branch
+/// and still miss the one change that matters. The file's own version is the
+/// op's `base_sha`, and the **source** compares it at the flush: a file that
+/// changed since it was read comes back as `SourceError::Moved`, which the
+/// flush turns into a hold through [`moved`] and [`hold`], both versions
+/// carried. What the projection still holds it on is the repository leaving
+/// the mirror.
 ///
 /// `"create_page"` is in that group for the additive reason and not by
 /// analogy: a new page goes *beside* whatever else sits under its parent, so a
@@ -636,7 +648,8 @@ pub fn project(
         | "create_page"
         | "pause_monitor"
         | "resume_monitor"
-        | "create_monitor" => serde_json::json!({
+        | "create_monitor"
+        | "commit_file" => serde_json::json!({
             "op": op,
             "live": live,
         }),
@@ -929,6 +942,52 @@ pub async fn refuse(
     Ok(row)
 }
 
+/// The held side of a write the **source** said moved under it (issue #822):
+/// the snapshot taken when the write was queued, plus what the source holds
+/// now -- `text`, the target's text at that version, and `base`, the version
+/// itself in the source's spelling.
+///
+/// Built on the queued snapshot rather than on a fresh [`project`], because
+/// the mirror did not move: the source did, and the projection's own fields
+/// (`live`) still say what they said. `text` is the key the held panel
+/// already reads for the target as it is now. `base` is what
+/// [`apply_anyway`] re-sends the write against, and its presence is what
+/// marks the hold as the source's rather than the mirror's.
+#[must_use]
+pub fn moved(op: &str, queued: serde_json::Value, base: &str, current: &str) -> serde_json::Value {
+    let mut held = match queued {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    held.insert("op".to_owned(), serde_json::json!(op));
+    held.insert("text".to_owned(), serde_json::json!(current));
+    held.insert("base".to_owned(), serde_json::json!(base));
+    serde_json::Value::Object(held)
+}
+
+/// Where an op's payload says which version of its target it was made
+/// against, for the ops whose source checks it ([`moved`]): the path
+/// [`apply_anyway`] writes the version the reader was shown into. Spelled as
+/// a PostgreSQL `text[]` path for `jsonb_set`.
+///
+/// Only `"commit_file"` (issue #822). `update_page`'s `base_version` and
+/// `set_parameter`'s `base` are refused at the source rather than reported
+/// as moved, so they never reach a hold with a `base`.
+///
+/// It reads knobas' own `WriteOp` serde shape, so ADR-0007's requirement 3
+/// binds it, and a miss **fails safe**: a path that no longer names the field
+/// leaves the stale base in place, the source answers it moved again, and the
+/// write is held again -- a hold the reader can see, never a silent
+/// overwrite. `a_commit_over_a_file_that_moved_is_held_with_both_versions`
+/// (`knobas-sync`) pins the path, since a drifted one keeps that write held.
+#[must_use]
+pub fn base_path(op: &str) -> Option<&'static [&'static str]> {
+    match op {
+        "commit_file" => Some(&["CommitFile", "base_sha"]),
+        _ => None,
+    }
+}
+
 /// The target changed since the write was queued: hold it instead of sending
 /// it.
 ///
@@ -1143,6 +1202,13 @@ pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, Core
 /// against -- `held_snapshot` is copied over `target_snapshot` -- so the flush
 /// that follows sends it rather than holding it on the same change again.
 ///
+/// **A hold the source reported** ([`moved`]: its held side carries a
+/// `base`) is released the same way in the source's terms (issue #822): the
+/// version the user was shown is written into the payload at [`base_path`],
+/// so the source compares against *their* version and takes the write, and
+/// `target_snapshot` stays the queued one, since the mirror never moved. A
+/// write whose payload has no such path keeps its payload.
+///
 /// **A change arriving after the user looked holds it again**, deliberately.
 /// The alternative is a flag that makes the next flush skip hold detection,
 /// which is a door onto exactly the silent last-write-wins this feature
@@ -1154,12 +1220,26 @@ pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, Core
 ///
 /// [`CoreError::Db`] if the statement fails.
 pub async fn apply_anyway(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, CoreError> {
+    let Some(held) = get(pool, id).await? else {
+        return Ok(None);
+    };
+    let path: Vec<&str> = base_path(&held.op)
+        .map(<[&str]>::to_vec)
+        .unwrap_or_default();
+    // One statement, guarded on `held` like every transition: the read above
+    // only picks the payload path for the row's op, which never changes.
     let row = sqlx::query_as::<_, QueuedWrite>(transition!(
-        "state = 'pending', target_snapshot = coalesce(held_snapshot, target_snapshot), \
+        "state = 'pending', \
+         payload = case when held_snapshot ? 'base' and cardinality($2::text[]) > 0 \
+                        then jsonb_set(payload, $2::text[], held_snapshot -> 'base') \
+                        else payload end, \
+         target_snapshot = case when held_snapshot ? 'base' then target_snapshot \
+                                else coalesce(held_snapshot, target_snapshot) end, \
          wait_reason = null, detail = null
           where id = $1 and state = 'held'"
     ))
     .bind(id)
+    .bind(path)
     .fetch_optional(pool)
     .await?;
     Ok(row)
@@ -1471,6 +1551,10 @@ mod tests {
             // write would overwrite -- but a parent that left the mirror is a
             // page nobody would find the new one under (#286).
             "create_page",
+            // A file commit's overwrite is guarded by its `base_sha` at the
+            // source, which the mirror cannot see (#822); a retitled or
+            // re-touched repository is not the file.
+            "commit_file",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_eq!(

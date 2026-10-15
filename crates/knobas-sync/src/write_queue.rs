@@ -214,6 +214,10 @@ pub fn target_entity(op: &WriteOp) -> &str {
         // orders against and what leaving the mirror holds it on. See
         // `WriteOp::CreatePage` for why the field is named for what it is.
         WriteOp::CreatePage { parent, .. } => parent,
+        // The second: a commit goes into a repository, on a branch, at a
+        // path, and the repository is what the queue orders against and
+        // holds on leaving the mirror (#822). See `WriteOp::CommitFile`.
+        WriteOp::CommitFile { repo, .. } => repo,
     }
 }
 
@@ -232,6 +236,9 @@ pub fn target_entity(op: &WriteOp) -> &str {
 /// * anything else -- the source refused *this write*. A 400, a 404, a 422, or
 ///   a fault knobas raised itself. Retrying it forever would be pretending a
 ///   permanent answer is a temporary one, which is what story 19 forbids.
+///
+/// `Moved` waits on neither: [`attempt`] holds the write before it asks here
+/// (#822), and it is listed only so this match stays exhaustive.
 fn retryable(error: &SourceError) -> Option<WaitReason> {
     match error {
         SourceError::Unauthorized { .. } => Some(WaitReason::Unauthorized),
@@ -240,7 +247,7 @@ fn retryable(error: &SourceError) -> Option<WaitReason> {
             status: Some(status),
             ..
         } if *status == 408 || *status == 429 || *status >= 500 => Some(WaitReason::Unreachable),
-        SourceError::Protocol { .. } | SourceError::Sink(_) => None,
+        SourceError::Protocol { .. } | SourceError::Sink(_) | SourceError::Moved { .. } => None,
     }
 }
 
@@ -629,6 +636,18 @@ async fn attempt(
             unclaimed(deps, write, &receipt).await;
             Ok(false)
         }
+        // The source says the target moved under the write (#822): a held
+        // write, exactly as if the mirror had seen it, with what the source
+        // holds now as the other half of "both versions side by side". The
+        // reader's half is the payload. `store::apply_anyway` re-sends it
+        // against `base`.
+        Err(SourceError::Moved { base, current }) => {
+            let theirs = store::moved(&write.op, write.target_snapshot.clone(), &base, &current);
+            if let Some(held) = store::hold(&deps.pool, write.id, theirs).await? {
+                announce(deps, "held", &held).await;
+            }
+            Ok(false)
+        }
         Err(error) => {
             match retryable(&error) {
                 Some(reason) => waited(deps, write, reason, &error.to_string()).await?,
@@ -986,6 +1005,18 @@ mod tests {
                     state: Some(knobas_source::PullRequestState::Closed),
                 },
                 "gitea:tidewater/ledger#144",
+            ),
+            (
+                WriteOp::CommitFile {
+                    repo: "gitea:tidewater/ledger".to_owned(),
+                    branch: "main".to_owned(),
+                    new_branch: None,
+                    path: "README.md".to_owned(),
+                    content: "c".to_owned(),
+                    message: "m".to_owned(),
+                    base_sha: "b".to_owned(),
+                },
+                "gitea:tidewater/ledger",
             ),
         ] {
             assert_eq!(target_entity(&op), expected, "{op:?}");

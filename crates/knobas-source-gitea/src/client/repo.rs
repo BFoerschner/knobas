@@ -276,6 +276,26 @@ impl GiteaClient {
         .await
     }
 
+    /// `PUT /repos/{o}/{r}/contents/{file}` with `body` as JSON (#822): one
+    /// file's new version committed, the commit Gitea made in the answer.
+    /// `file` is escaped as the reads' [`Self::contents_entry_as`] is.
+    ///
+    /// # Errors
+    ///
+    /// The [`SourceError`] the failure maps to, Gitea's sentence in it.
+    pub(crate) async fn put_contents(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        body: &serde_json::Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let path = format!("{API_ROOT}{}", contents_path(owner, repo, file)?);
+        self.http
+            .send(self.http.request(Method::PUT, &path).json(body))
+            .await
+    }
+
     /// `GET /repos/{o}/{r}/raw/{file}?ref={at}` -- one file's bytes at a ref,
     /// read no further than `cap` bytes past which it is cut (#711): a file
     /// many megabytes long costs what is drawn of it, not its whole size.

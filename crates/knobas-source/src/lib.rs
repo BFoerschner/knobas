@@ -308,9 +308,10 @@ pub type Cursor = String;
 /// `knobas-http` had just built, and 401 and 403 could not be told apart at
 /// all. [`status`](Self::status) is now the one way to ask.
 ///
-/// Every variant carries at most a string and a status, so the error crosses a
-/// process boundary as plain data (spec §3a). The serde form is structural, not
-/// the [`Display`](std::fmt::Display) text thiserror generates:
+/// Every variant carries at most a string and a status (`Moved` two strings),
+/// so the error crosses a process boundary as plain data (spec §3a). The serde
+/// form is structural, not the [`Display`](std::fmt::Display) text thiserror
+/// generates:
 /// `{"Unauthorized": {"status": 401}}`, `{"Unreachable": "<detail>"}`. Both
 /// status fields are `#[serde(default)]`, so a peer that sends none -- an
 /// out-of-process adapter built against an older SPI -- still decodes, as the
@@ -346,6 +347,22 @@ pub enum SourceError {
     /// sink, propagated -- never manufactured -- by the adapter.
     #[error("sink: {0}")]
     Sink(String),
+    /// The write was made against a version of its target the source no
+    /// longer holds, so the source did not apply it (issue #822).
+    ///
+    /// `base` is the version the source holds **now**, in its own spelling
+    /// (Gitea's blob `sha` of a file), and `current` the target's text at
+    /// that version: what a reader compares their own against before they
+    /// choose. The write queue holds the write with both rather than
+    /// refusing it, and *Apply anyway* re-sends it against `base`
+    /// (`knobas_core::write_queue::apply_anyway`). Never retried on its own,
+    /// and not a fault of the credential or the network.
+    ///
+    /// Two strings and no status, so it crosses a process boundary as plain
+    /// data like the others: the adapter decides it from the version it read,
+    /// not from a status a server spelt.
+    #[error("moved: the target changed since the write was made against it")]
+    Moved { base: String, current: String },
 }
 
 impl SourceError {
@@ -360,7 +377,7 @@ impl SourceError {
     pub fn status(&self) -> Option<u16> {
         match self {
             Self::Unauthorized { status } | Self::Protocol { status, .. } => *status,
-            Self::Unreachable(_) | Self::Sink(_) => None,
+            Self::Unreachable(_) | Self::Sink(_) | Self::Moved { .. } => None,
         }
     }
 
@@ -407,6 +424,7 @@ impl SourceError {
 /// | [`DeleteBranch`](Self::DeleteBranch) | `"delete_branch"` | source views (Gitea, #707) |
 /// | [`EditPullRequest`](Self::EditPullRequest) | `"edit_pull_request"` | git workflows, spec #701 (Gitea, #706) |
 /// | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
+/// | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -812,6 +830,57 @@ pub enum WriteOp {
     /// in flight leaves no unclaimed write: what is left is the head moved,
     /// which the next sync reads back.
     UpdatePullRequestBranch { entity: String, style: UpdateStyle },
+    /// Identifier `"commit_file"`. Commit a new version of one file through
+    /// the source, never through a checkout (spec #808 D4, R-8.6, issue
+    /// #822). `repo` is the **repository**, an [`EntityRef`] in string form
+    /// (`gitea:tidewater/payout-service`).
+    ///
+    /// `repo` rather than `entity`, the second variant after
+    /// [`CreatePage`](WriteOp::CreatePage) to spell its target under another
+    /// name: the spec names the fields, and the op has a branch and a path
+    /// beside its repository, so naming the container for what it is says
+    /// which of the three the queue orders and holds against.
+    /// `knobas_sync::write_queue::target_entity` has an arm of its own for it.
+    ///
+    /// `branch` is the branch the file was read on. With `new_branch` set,
+    /// the source makes that branch from `branch` first and commits there, so
+    /// `branch` is left as it was (the *Commit to a new branch and open a pull
+    /// request* path; the pull request is a
+    /// [`CreatePullRequest`](WriteOp::CreatePullRequest) of its own). `path`
+    /// is the file's path in the repository; `content` its **whole** new
+    /// text, never a patch; `message` the commit message.
+    ///
+    /// `base_sha` is the version of the file the edit was made **against**,
+    /// in the source's own spelling: Gitea's blob `sha` of the file as it was
+    /// read. The source compares it with what `branch` holds at the flush,
+    /// and a file that changed since comes back as [`SourceError::Moved`]
+    /// with the version it holds now, which the write queue turns into a
+    /// held write carrying both (theirs in the held snapshot, the reader's in
+    /// this payload). That comparison is the whole hold: the mirror does not
+    /// hold files, so the queue's own projection takes only the repository's
+    /// liveness, as for a create.
+    ///
+    /// *Apply anyway* re-sends against their version by itself
+    /// (`knobas_core::write_queue::apply_anyway`). *Edit* is an amend, and an
+    /// amend's payload is the caller's whole: one answering a moved commit
+    /// carries `base_sha` set to the held side's `base`, or the source
+    /// compares it against the stale blob again and it is held again.
+    ///
+    /// Text only: `content` is a `String` and the source is sent its UTF-8
+    /// bytes. A file that does not exist on `branch` is refused rather than
+    /// created: an edit is of a file somebody read.
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    CommitFile {
+        repo: String,
+        branch: String,
+        #[serde(default)]
+        new_branch: Option<String>,
+        path: String,
+        content: String,
+        message: String,
+        base_sha: String,
+    },
 }
 
 /// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
@@ -1005,6 +1074,7 @@ impl WriteOp {
             WriteOp::DeleteBranch { .. } => "delete_branch",
             WriteOp::EditPullRequest { .. } => "edit_pull_request",
             WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
+            WriteOp::CommitFile { .. } => "commit_file",
         }
     }
 }
@@ -1454,6 +1524,15 @@ mod tests {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 style: UpdateStyle::Rebase,
             },
+            WriteOp::CommitFile {
+                repo: "gitea:tidewater/payout-service".into(),
+                branch: "main".into(),
+                new_branch: Some("feature/PAY-231-retry-doc".into()),
+                path: "docs/retry.md".into(),
+                content: "# Retry\n\nThree times, then the dead-letter queue.\n".into(),
+                message: "PAY-231: say how often a payout is retried".into(),
+                base_sha: "986f74b729a686f111e61e07635d01e9bf265198".into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -1477,7 +1556,8 @@ mod tests {
                 | WriteOp::SubmitReview { .. }
                 | WriteOp::DeleteBranch { .. }
                 | WriteOp::EditPullRequest { .. }
-                | WriteOp::UpdatePullRequestBranch { .. } => {}
+                | WriteOp::UpdatePullRequestBranch { .. }
+                | WriteOp::CommitFile { .. } => {}
             }
         }
         probes
@@ -1591,6 +1671,73 @@ mod tests {
             "UpdatePullRequestBranch": { "entity": "gitea:o/r#1", "style": "squash" }
         }));
         assert!(odd.is_err(), "{odd:?}");
+    }
+
+    /// A file commit's wire shape (issue #822), pinned: the frontend builds it
+    /// by hand (#845), so a renamed field is a commit that no longer decodes
+    /// at `submit_write`. `new_branch` is `null` for a commit straight onto
+    /// `branch`, and absent reads the same.
+    #[test]
+    fn a_commit_file_crosses_in_its_own_shape() {
+        let op = WriteOp::CommitFile {
+            repo: "gitea:o/r".into(),
+            branch: "main".into(),
+            new_branch: None,
+            path: "docs/a.md".into(),
+            content: "mine\n".into(),
+            message: "edit a".into(),
+            base_sha: "abc123".into(),
+        };
+        assert_eq!(op.identifier(), "commit_file");
+        assert_eq!(
+            serde_json::to_value(&op).unwrap(),
+            serde_json::json!({ "CommitFile": {
+                "repo": "gitea:o/r", "branch": "main", "new_branch": null,
+                "path": "docs/a.md", "content": "mine\n", "message": "edit a",
+                "base_sha": "abc123"
+            } })
+        );
+        let read = serde_json::from_value::<WriteOp>(serde_json::json!({ "CommitFile": {
+            "repo": "gitea:o/r", "branch": "main", "path": "docs/a.md",
+            "content": "mine\n", "message": "edit a", "base_sha": "abc123"
+        } }))
+        .unwrap();
+        assert!(
+            matches!(
+                &read,
+                WriteOp::CommitFile {
+                    new_branch: None,
+                    ..
+                }
+            ),
+            "{read:?}"
+        );
+    }
+
+    /// A target that moved under a write crosses as data (#822): the version
+    /// the source holds now and its text, both, because the queue holds the
+    /// write with them and the reader is shown the text.
+    #[test]
+    fn a_moved_target_crosses_with_what_the_source_holds_now() {
+        let moved = SourceError::Moved {
+            base: "da0c4e".into(),
+            current: "theirs\n".into(),
+        };
+        let json = serde_json::to_value(&moved).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "Moved": { "base": "da0c4e", "current": "theirs\n" } })
+        );
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert!(
+            matches!(&back, SourceError::Moved { base, current } if base == "da0c4e" && current == "theirs\n"),
+            "{back:?}"
+        );
+        assert_eq!(back.status(), None);
+        assert_eq!(
+            back.to_string(),
+            "moved: the target changed since the write was made against it"
+        );
     }
 
     /// A custom run's wire shape (issue #669), pinned: the frontend builds it
@@ -1752,7 +1899,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 21, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 22, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also
