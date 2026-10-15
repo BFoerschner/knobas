@@ -1510,3 +1510,28 @@ Ruled 2026-10-15 by the merge-manager, in PR #890. Each is finding / ruling / re
 - **The seed is not idempotent after a partial failure.** If the filter is created and the board is not, the next run posts the filter again and Jira refuses the name. *Ruling:* no change. *Reasoning:* it is testenv only, fails loudly, and a fix would need a live Jira run to prove. *Reversing:* low, a filter lookup before the create.
 - **The seed's control finds the Sprint field by the same plugin key the adapter uses**, so the live id equality cannot catch a wrong key. The name fallback has no live witness. *Ruling:* no change. *Reasoning:* the unit tests pin the key (and its mutant dies). A sprint state read through the field, which the live test asserts, would not be "active" if the field were wrong. *Reversing:* low.
 - **Standards smells:** the key→field mapping is written in both `LIVE_ITEM_FIELDS` and `FIELDS_SQL`; `epic_link_field` and `sprint_field` travel together; `bind_dimensions` gets patched after it returns. *Ruling:* no change, apart from `suggest.rs` now using `query::ME` instead of a second `"@me"`. *Reasoning:* both statements go through the same `field_of!`/`list_of!`, so a field is read one way. The rest is judgement, not a rule. *Reversing:* low.
+
+## #823 — clone_repo: one command with a stop argument, an event, and nine smaller forks
+
+Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up while implementing are the implementer's). Recorded in the PR for #823.
+
+**The fork:** a clone has to be cancellable, and ADR-0023 names one IPC command, `clone_repo`. A second command (`cancel_clone`) or an argument on the one.
+
+**Ruling:** one command, `clone_repo(entityId, stop?)`. `stop: true` stops the running clone and answers once the half-made folder is removed.
+
+**Reasoning:** ADR-0023's consequences say "One IPC command, `clone_repo`", and a ruling may not contradict an ADR.
+
+**If you disagree, the cost of reversing this is:** low. A `cancel_clone` command calling `checkout::clone::stop`, its §10.8 file, and one line in `cloneRepo`.
+
+**Smaller forks, same ticket:**
+
+- **An event, not a Channel.** Progress goes on `clone:progress`, broadcast, because every view showing the repository draws the same *Clone* button (R-8.25). It is coalesced to at most one per second plus one per change of step, `activity:new`'s rate, to keep the "events carry coarse state" rule. Reversing: a `Channel` argument and the component listening to it.
+- **One percent for the whole clone.** git counts each step 0–100. The button shows one number, so receiving objects is 0–80, resolving deltas 80–95, writing files 95–100, and the server's own steps 0. Reversing: one table in `parse_progress`.
+- **`.` and `..` are refused as a name half,** though ADR-0023's pattern lets them through: the repository half is the folder name, and `<clones root>/..` is not a new folder. Stricter, so it does not contradict the ADR.
+- **knobas makes the folder itself** with `create_dir`, then git clones into it. That makes "never write into an existing folder" atomic, and a failure or a stop only ever removes a folder this run made. An empty existing folder is refused like any other non-clone, though git would clone into it. A missing clones root is created.
+- **Adoption needs a finished clone.** A clone killed by a quit already has its `origin`, so it would match by remote. Adoption also asks that `HEAD` names a commit; a half-made clone is refused with "did not finish. Remove it and clone again".
+- **The address.** The URL is `base_url` + `/<owner>/<repo>.git`. The scheme must be https or ssh; a query or fragment is refused. The source's `clone_urls` (#683) are not used: they are where CI clones from, not where the person does.
+- **The error line is git's first `fatal:` line,** else its last `error:` line, else its last line. R-8.25 says "git's last line", but for a repository the server does not have the last line is "and the repository exists.", which is advice and not the error. The cause is `auth`, `disk_full` or `other`, matched in English under `LC_ALL=C`.
+- **The environment.** `GIT_ALLOW_PROTOCOL`, `GIT_CONFIG_PARAMETERS` and `GIT_CONFIG_COUNT` are removed, because each would override the `-c protocol.*` flags. `-c submodule.recurse=false` is passed beside `--no-recurse-submodules`. `GIT_TERMINAL_PROMPT=0` makes a missing credential a failure git reports instead of a prompt nobody can answer.
+- **The test-only door.** The testenv Gitea is http with ssh off, so the live suite clones through `start_admitting(.., &["http"])`, behind `test-util` like `AppState::over_pool`. The production path's https half has no live witness; handed to the milestone review.
+- **Small behaviours.** A branch address clones its repository. A second start while a clone runs answers `cloning` and starts nothing. A stop that arrives as git exits is honoured, and the folder goes. The running clones live in a process-wide registry, not Tauri-managed state, so `setup` is unchanged.

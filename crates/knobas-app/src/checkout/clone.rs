@@ -357,7 +357,12 @@ fn adopt_or_refuse(target: &Path, url: &str, shown: String) -> Result<CloneAnswe
     let wanted = core_checkout::remote_key(url);
     let found = core_checkout::clone_at(target).map(|clone| clone.key);
     if wanted.is_some() && found == wanted {
-        return Ok(CloneAnswer::Adopted { path: shown });
+        if clone::is_finished(target) {
+            return Ok(CloneAnswer::Adopted { path: shown });
+        }
+        return Err(IpcError::conflict(format!(
+            "{shown} is a clone of this repository that did not finish. Remove it and clone again"
+        )));
     }
     Err(IpcError::conflict(format!(
         "{shown} exists and is not a clone of this repository. Rename it, or set a path by hand"

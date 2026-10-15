@@ -230,6 +230,46 @@ async fn an_existing_clone_of_the_repository_is_adopted() {
     assert!(seen.all().is_empty(), "nothing ran: {:?}", seen.all());
 }
 
+/// A clone killed half-way (knobas quit while it ran) already has its
+/// `origin`, so it matches by remote; it is refused, not adopted.
+#[tokio::test]
+async fn a_clone_that_did_not_finish_is_not_adopted() {
+    let pool = pool().await;
+    let (_server, base) = upstream("tidewater", "ledger");
+    let id = repo(&pool, "gitea", &base, "tidewater/ledger").await;
+    let (_dir, root) = root(&pool).await;
+    let target = root.join("ledger");
+    std::fs::create_dir_all(&target).unwrap();
+    git(&target, &["init", "-q", "-b", "main"]);
+    git(
+        &target,
+        &[
+            "remote",
+            "add",
+            "origin",
+            &format!("{base}/tidewater/ledger.git"),
+        ],
+    );
+
+    let error = start_admitting(
+        &pool,
+        &Clones::global(),
+        Arc::new(Seen::default()),
+        &id,
+        &["file"],
+    )
+    .await
+    .expect_err("a half-made clone");
+
+    assert_eq!(error.code, IpcErrorCode::Conflict);
+    assert!(
+        error.message.contains("did not finish"),
+        "{}",
+        error.message
+    );
+    assert!(target.join(".git").is_dir(), "the folder was left alone");
+}
+
 #[tokio::test]
 async fn a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone() {
     let pool = pool().await;

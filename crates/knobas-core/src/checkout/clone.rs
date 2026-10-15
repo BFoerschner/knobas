@@ -232,6 +232,38 @@ pub fn failure_reason(stderr: &str) -> Option<&str> {
         .or_else(|| lines().last())
 }
 
+/// Whether the clone at `dir` finished: its `HEAD` names a commit.
+///
+/// A clone that was killed (knobas quit while it ran) keeps the `.git/config`
+/// with its `origin` that git writes first, so it would match by remote and
+/// be adopted. What it lacks is the branch ref git writes at the end, so
+/// `HEAD` names a ref that is not there. Read from files, like the scan: a
+/// detached `HEAD` is a commit; a ref is a loose file or a `packed-refs` line;
+/// a repository on the reftable format cannot be read this way and counts as
+/// finished.
+#[must_use]
+pub fn is_finished(dir: &Path) -> bool {
+    let git = dir.join(".git");
+    let Ok(head) = std::fs::read_to_string(git.join("HEAD")) else {
+        return false;
+    };
+    if git.join("reftable").is_dir() {
+        return true;
+    }
+    let Some(name) = head.trim().strip_prefix("ref:").map(str::trim) else {
+        return !head.trim().is_empty();
+    };
+    if name.contains("..") {
+        return false;
+    }
+    git.join(name).is_file()
+        || std::fs::read_to_string(git.join("packed-refs")).is_ok_and(|packed| {
+            packed
+                .lines()
+                .any(|line| line.split_once(' ').is_some_and(|(_, r)| r == name))
+        })
+}
+
 /// What a failed clone's stderr says went wrong, for the sentence and the
 /// action the row shows (R-8.25).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -415,6 +447,36 @@ mod tests {
         ] {
             assert_eq!(parse_progress(not), None, "{not:?}");
         }
+    }
+
+    #[test]
+    fn a_clone_is_finished_when_its_head_names_a_commit() {
+        let dir = tempfile::tempdir().unwrap();
+        let git = dir.path().join(".git");
+        std::fs::create_dir_all(git.join("refs/heads")).unwrap();
+        assert!(!is_finished(dir.path()), "no HEAD");
+        std::fs::write(git.join("HEAD"), "ref: refs/heads/main\n").unwrap();
+        assert!(
+            !is_finished(dir.path()),
+            "HEAD names a ref that is not there"
+        );
+        std::fs::write(git.join("packed-refs"), "abc refs/heads/mainline\n").unwrap();
+        assert!(!is_finished(dir.path()), "a ref that only starts the same");
+        std::fs::write(
+            git.join("packed-refs"),
+            "# pack-refs\nabc refs/heads/main\n",
+        )
+        .unwrap();
+        assert!(is_finished(dir.path()), "a packed ref");
+        std::fs::remove_file(git.join("packed-refs")).unwrap();
+        std::fs::write(git.join("refs/heads/main"), "abc\n").unwrap();
+        assert!(is_finished(dir.path()), "a loose ref");
+        std::fs::write(
+            git.join("HEAD"),
+            "8a3aaa77d487179f54af3ab02f51f196e4e91373\n",
+        )
+        .unwrap();
+        assert!(is_finished(dir.path()), "a detached HEAD");
     }
 
     #[test]
