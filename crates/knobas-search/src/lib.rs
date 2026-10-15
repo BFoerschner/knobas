@@ -59,7 +59,7 @@ use sqlx::PgPool;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
-pub use query::{EffectiveFilters, Parsed, merge, parse};
+pub use query::{EffectiveFilters, FieldFilter, FieldKey, Parsed, merge, parse};
 pub use saved::{Refusal, SavedList};
 pub use suggest::PARENT_SUGGESTIONS;
 pub use types::{

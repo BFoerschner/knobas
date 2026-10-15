@@ -51,6 +51,84 @@ const LEADING: &[(&str, Prefix)] = &[
     ("?", Prefix::Help),
 ];
 
+/// The ticket keys (#811, R-3.14): one per field the Jira sync keeps in a
+/// ticket's payload, each read through the adapter's declaration
+/// (ADR-0007), never by a payload key named here. `type:` is not one: it
+/// means the entity kind, so the issue type has its own key.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum FieldKey {
+    /// `project:` -- the project's key or name.
+    Project,
+    /// `status:` -- the status name.
+    Status,
+    /// `issuetype:` -- the source's own type (`Bug`, `Story`).
+    IssueType,
+    /// `priority:` -- the priority name.
+    Priority,
+    /// `assignee:` -- the assignee's username; `@me` is the user.
+    Assignee,
+    /// `label:` -- one of the item's labels.
+    Label,
+    /// `sprint:current` -- in a sprint that is active. `current` is the one
+    /// value.
+    Sprint,
+    /// `assigned:<window>` -- assigned to the user and changed within the
+    /// window (`today`, `week`, `7d`, as `updated:` reads them).
+    Assigned,
+}
+
+impl FieldKey {
+    /// Every key, in the order the box offers them.
+    pub const ALL: [FieldKey; 8] = [
+        FieldKey::Project,
+        FieldKey::Status,
+        FieldKey::IssueType,
+        FieldKey::Priority,
+        FieldKey::Assignee,
+        FieldKey::Label,
+        FieldKey::Sprint,
+        FieldKey::Assigned,
+    ];
+
+    /// The key as the grammar spells it, without the colon.
+    #[must_use]
+    pub fn spelling(self) -> &'static str {
+        match self {
+            FieldKey::Project => "project",
+            FieldKey::Status => "status",
+            FieldKey::IssueType => "issuetype",
+            FieldKey::Priority => "priority",
+            FieldKey::Assignee => "assignee",
+            FieldKey::Label => "label",
+            FieldKey::Sprint => "sprint",
+            FieldKey::Assigned => "assigned",
+        }
+    }
+
+    fn from_spelling(key: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|k| k.spelling() == key)
+    }
+}
+
+/// The value `assignee:` takes for the user, whoever the sources say that is.
+const ME: &str = "@me";
+
+/// One ticket-key condition: the field, whether it is negated, and the values
+/// any of which it matches, lowercased.
+///
+/// In [`Parsed::fields`] the values are as typed (lowercased), `@me`
+/// included; in [`EffectiveFilters::fields`] `@me` has been resolved to the
+/// identity's usernames, and `assigned:`'s values are those usernames.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FieldFilter {
+    pub key: FieldKey,
+    /// `-status:Done`: the row must not match.
+    pub negated: bool,
+    pub values: Vec<String>,
+    /// `assigned:`'s window in days; `None` for every other key.
+    pub within_days: Option<u32>,
+}
+
 /// The result of parsing one raw box string.
 ///
 /// [`Self::query`] is the part that goes back over the bridge (interfaces
@@ -83,6 +161,10 @@ pub struct Parsed {
     /// same reason [`Self::identity`] is: [`merge`] hands it to the statement,
     /// which reads the parent each child declares.
     pub declarations: Declarations,
+    /// The ticket-key conditions (#811), one per key and sign, in the order
+    /// first typed. Here and not on [`ParsedQuery`]'s filters for `under:`'s
+    /// reason: no chip carries them.
+    pub fields: Vec<FieldFilter>,
 }
 
 /// The filters a query actually runs with, after the typed grammar and the
@@ -120,6 +202,8 @@ pub struct EffectiveFilters {
     /// the user is. The builder emits an author predicate that matches nothing
     /// rather than dropping the filter -- see `sql::search_sql`.
     pub identity_authors: Vec<String>,
+    /// The ticket-key conditions (#811), `@me` resolved: every one must hold.
+    pub fields: Vec<FieldFilter>,
 }
 
 impl EffectiveFilters {
@@ -183,6 +267,7 @@ impl EffectiveFilters {
             && !self.mine
             && self.named_authors.is_empty()
             && self.under.is_empty()
+            && self.fields.is_empty()
     }
 
     /// What the launcher draws its chips from.
@@ -291,6 +376,36 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
         } else {
             Vec::new()
         },
+        // Typed only, like `under:`. `@me` becomes whoever the identity
+        // names, lowercased as every value here is; with no identity it
+        // becomes nobody, which matches nothing -- not "no filter".
+        fields: parsed
+            .fields
+            .iter()
+            .map(|filter| {
+                let mut values = Vec::new();
+                // `assigned:` is always the user's: its values are the identity.
+                let me = [ME.to_owned()];
+                let typed = if filter.key == FieldKey::Assigned {
+                    &me[..]
+                } else {
+                    &filter.values[..]
+                };
+                for value in typed {
+                    if value == ME {
+                        for name in &parsed.identity {
+                            push_unique(&mut values, &name.to_lowercase());
+                        }
+                    } else {
+                        push_unique(&mut values, value);
+                    }
+                }
+                FieldFilter {
+                    values,
+                    ..filter.clone()
+                }
+            })
+            .collect(),
     }
 }
 
@@ -308,6 +423,36 @@ impl Parsed {
             identity: vocab.identity.clone(),
             under: Vec::new(),
             declarations: vocab.declarations.clone(),
+            fields: Vec::new(),
+        }
+    }
+
+    /// Add one ticket-key condition, joining the values of one already typed
+    /// with the same key and sign: repeated values mean any of them, and two
+    /// `assigned:` windows mean the wider.
+    fn field(&mut self, key: FieldKey, negated: bool, value: Option<String>, days: Option<u32>) {
+        let index = match self
+            .fields
+            .iter()
+            .position(|f| f.key == key && f.negated == negated)
+        {
+            Some(index) => index,
+            None => {
+                self.fields.push(FieldFilter {
+                    key,
+                    negated,
+                    values: Vec::new(),
+                    within_days: None,
+                });
+                self.fields.len() - 1
+            }
+        };
+        let filter = &mut self.fields[index];
+        if let Some(value) = value {
+            push_unique(&mut filter.values, &value);
+        }
+        if let Some(days) = days {
+            filter.within_days = Some(filter.within_days.map_or(days, |d| d.max(days)));
         }
     }
 
@@ -406,6 +551,12 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
         if !rest.is_empty() {
             terms.push(rest.to_owned());
         }
+        return;
+    }
+    if let Some((key, value)) = split_key_value(token.strip_prefix('-').unwrap_or(token))
+        && let Some(field) = FieldKey::from_spelling(&key)
+    {
+        apply_field(field, token.starts_with('-'), value, token, parsed);
         return;
     }
     if let Some((key, value)) = split_key_value(token)
@@ -511,6 +662,30 @@ fn apply_key_value(
         _ => return false,
     }
     true
+}
+
+/// Apply one ticket-key token (#811), `-` already read as `negated`.
+///
+/// The value is unquoted (`status:"In Review"`) and lowercased, since every
+/// one of these matches ignoring case. An empty value is somebody mid-typing.
+/// `sprint:` reads `current` and nothing else, and `assigned:` a window as
+/// `updated:` reads one; any other value of theirs is reported.
+fn apply_field(key: FieldKey, negated: bool, value: &str, token: &str, parsed: &mut Parsed) {
+    let value = unquote(value.trim()).trim().to_lowercase();
+    if value.is_empty() {
+        return;
+    }
+    match key {
+        FieldKey::Sprint if value != "current" => parsed.unknown(token),
+        FieldKey::Assigned => match duration_days(&value) {
+            Some(days) => parsed.field(key, negated, None, Some(days)),
+            None => parsed.unknown(token),
+        },
+        FieldKey::Assignee if value == "me" || value == ME => {
+            parsed.field(key, negated, Some(ME.to_owned()), None);
+        }
+        _ => parsed.field(key, negated, Some(value), None),
+    }
 }
 
 /// The text inside one pair of double quotes around `value`, or `value` as it
@@ -1096,5 +1271,158 @@ mod tests {
         assert!(typing.under.is_empty());
         assert!(typing.query.unknown_tokens.is_empty());
         assert!(typing.query.text.is_empty());
+    }
+
+    fn field(key: FieldKey, negated: bool, values: &[&str]) -> FieldFilter {
+        FieldFilter {
+            key,
+            negated,
+            values: values.iter().map(|v| (*v).to_owned()).collect(),
+            within_days: None,
+        }
+    }
+
+    /// Each of the eight new keys (#811) is a filter on its own field: its
+    /// value lowercased (the match ignores case), a quoted value read inside
+    /// its quotes, never a search word and never a kind.
+    #[test]
+    fn each_ticket_key_is_a_filter_on_its_own_field() {
+        let v = fixture();
+        for (raw, key, value) in [
+            ("project:PAY", FieldKey::Project, "pay"),
+            ("status:Done", FieldKey::Status, "done"),
+            (r#"status:"In Review""#, FieldKey::Status, "in review"),
+            ("issuetype:Bug", FieldKey::IssueType, "bug"),
+            ("priority:High", FieldKey::Priority, "high"),
+            ("assignee:jonas.becker", FieldKey::Assignee, "jonas.becker"),
+            ("label:sepa", FieldKey::Label, "sepa"),
+            ("sprint:current", FieldKey::Sprint, "current"),
+            ("SPRINT:Current", FieldKey::Sprint, "current"),
+        ] {
+            let p = parse(raw, &v);
+            assert_eq!(p.fields, [field(key, false, &[value])], "{raw:?}");
+            assert!(p.query.text.is_empty(), "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+            assert!(p.query.filters.kinds.is_empty(), "{raw:?}");
+        }
+        // `type:` still means the entity kind, and `issuetype:` never does.
+        assert_eq!(parse("type:ticket", &v).query.filters.kinds, ["ticket"]);
+        assert!(parse("type:ticket", &v).fields.is_empty());
+    }
+
+    /// Repeated values of one key mean any of them; the same value twice is
+    /// one; a negated key is a filter of its own, and so is its repetition.
+    #[test]
+    fn repeated_values_mean_any_and_a_minus_negates() {
+        let v = fixture();
+        let p = parse(
+            "status:Done status:\"In Review\" STATUS:done -status:Blocked -status:\"On Hold\" sepa",
+            &v,
+        );
+        assert_eq!(
+            p.fields,
+            [
+                field(FieldKey::Status, false, &["done", "in review"]),
+                field(FieldKey::Status, true, &["blocked", "on hold"]),
+            ]
+        );
+        assert_eq!(p.query.text, "sepa");
+        // A minus on a word is still websearch's own negation, and a minus on
+        // a key that is not one of these stays what it was.
+        assert_eq!(parse("-timeout", &v).query.text, "-timeout");
+        assert_eq!(parse("-kind:pr", &v).query.text, "-kind:pr");
+        assert_eq!(
+            parse("-label:tech-debt -assignee:@me", &v).fields,
+            [
+                field(FieldKey::Label, true, &["tech-debt"]),
+                field(FieldKey::Assignee, true, &["@me"]),
+            ]
+        );
+    }
+
+    /// `assignee:@me` (and `assignee:me`) is the user, resolved by `merge`
+    /// to every username the identity holds, lowercased; anybody else is
+    /// matched by name. With no identity it resolves to nobody, which
+    /// matches nothing, as `@me` does.
+    #[test]
+    fn assignee_me_is_the_identity_and_assigned_is_mine_within_a_window() {
+        let v = fixture();
+        let p = parse("assignee:@me assignee:me assignee:Jonas", &v);
+        assert_eq!(
+            p.fields,
+            [field(FieldKey::Assignee, false, &["@me", "jonas"])]
+        );
+        let eff = merge(&p, &SearchFilters::default());
+        assert_eq!(
+            eff.fields,
+            [field(
+                FieldKey::Assignee,
+                false,
+                &["mara.lindqvist", "jonas"]
+            )]
+        );
+        // Not `mine`: the author filter stays off.
+        assert!(!eff.mine);
+        assert!(!eff.is_empty());
+
+        for (raw, days) in [
+            ("assigned:today", 1),
+            ("assigned:week", 7),
+            ("assigned:30d", 30),
+        ] {
+            let p = parse(raw, &v);
+            assert_eq!(
+                p.fields,
+                [FieldFilter {
+                    within_days: Some(days),
+                    ..field(FieldKey::Assigned, false, &[])
+                }],
+                "{raw:?}"
+            );
+            let eff = merge(&p, &SearchFilters::default());
+            assert_eq!(eff.fields[0].values, ["mara.lindqvist"], "{raw:?}");
+        }
+        // Two windows: either of them, so the wider.
+        assert_eq!(
+            parse("assigned:today assigned:week", &v).fields[0].within_days,
+            Some(7)
+        );
+
+        let mut nobody = Vocabulary::fixture();
+        nobody.identity.clear();
+        let eff = merge(&parse("assignee:@me", &nobody), &SearchFilters::default());
+        assert_eq!(eff.fields, [field(FieldKey::Assignee, false, &[])]);
+        assert!(
+            !eff.is_empty(),
+            "knobas not knowing who you are is still a filter"
+        );
+    }
+
+    /// A value the key cannot read is reported, never guessed at; a key with
+    /// nothing after it is somebody mid-typing, neither a filter nor a
+    /// mistake.
+    #[test]
+    fn an_unreadable_ticket_value_is_reported_and_a_bare_key_is_typing() {
+        let v = fixture();
+        let p = parse("sprint:next assigned:soonish x", &v);
+        assert!(p.fields.is_empty());
+        assert_eq!(p.query.unknown_tokens, ["sprint:next", "assigned:soonish"]);
+        assert_eq!(p.query.text, "x");
+        for raw in ["status:", "-label:", "project:\"\"", "assigned:"] {
+            let p = parse(raw, &v);
+            assert!(p.fields.is_empty(), "{raw:?}");
+            assert!(p.query.unknown_tokens.is_empty(), "{raw:?}");
+            assert!(p.query.text.is_empty(), "{raw:?}");
+        }
+    }
+
+    /// No chip carries these keys: they live in the text, as `under:` does,
+    /// so the echo is unchanged by them.
+    #[test]
+    fn ticket_keys_are_typed_filters_the_echo_does_not_carry() {
+        let v = fixture();
+        let eff = merge(&parse("status:Done", &v), &SearchFilters::default());
+        assert_eq!(eff.echo(), SearchFilters::default());
+        assert!(!eff.is_empty());
     }
 }

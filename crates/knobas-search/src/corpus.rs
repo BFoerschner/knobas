@@ -191,7 +191,100 @@ pub struct Corpus {
     /// is its `parent_id` column and a route's is the asset exposing it
     /// (ADR-0014), so both read [`estate_subtree!`]'s walk over those columns.
     pub(crate) under: Option<&'static str>,
+    /// What each ticket key matches (#811), as a predicate over a row and a
+    /// relation `fd` carrying the bound declarations (`fd.d`), the
+    /// lowercased values (`fd.v`) and `assigned:`'s window in days (`fd.n`).
+    /// A key with no entry here is a field this corpus's rows do not have:
+    /// the condition fails on every row, and its negation holds on every row.
+    ///
+    /// For the mirror each is a declared payload read (ADR-0007, through
+    /// `knobas_core::payload`'s macros, never a payload key named here), and
+    /// a read that misses matches no value: see [`LIVE_ITEM_FIELDS`].
+    pub(crate) fields: &'static [(crate::query::FieldKey, &'static str)],
 }
+
+/// The mirror's ticket keys (#811), each the field its source declares.
+///
+/// **Which way each fails, stated (ADR-0007 requirement 3)**: a row whose
+/// source declares no such path, or whose record misses it, yields `null`,
+/// which `crate::sql` reads as *does not match*. So a miss is left out of
+/// `status:Done` and kept by `-status:Done`: absence, never a wrong value.
+/// Pinned by `knobas-search`'s `tests/it/ticket_keys.rs`.
+///
+/// Every comparison is on `lower(...)` against values the grammar
+/// lowercased: Jira's status, type, priority and project names are
+/// case-insensitive in JQL, and so are its usernames.
+pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
+    use crate::query::FieldKey;
+    &[
+        (
+            FieldKey::Project,
+            concat!(
+                "(lower(",
+                knobas_core::declared_string!("fd.d", "project_key"),
+                ") = any(fd.v) or lower(",
+                knobas_core::declared_string!("fd.d", "project_name"),
+                ") = any(fd.v))"
+            ),
+        ),
+        (
+            FieldKey::Status,
+            concat!(
+                "lower(",
+                knobas_core::declared_string!("fd.d", "status_name"),
+                ") = any(fd.v)"
+            ),
+        ),
+        (
+            FieldKey::IssueType,
+            concat!(
+                "lower(",
+                knobas_core::declared_string!("fd.d", "issue_type"),
+                ") = any(fd.v)"
+            ),
+        ),
+        (
+            FieldKey::Priority,
+            concat!(
+                "lower(",
+                knobas_core::declared_string!("fd.d", "priority"),
+                ") = any(fd.v)"
+            ),
+        ),
+        (
+            FieldKey::Assignee,
+            concat!(
+                "lower(",
+                knobas_core::declared_string!("fd.d", "assignee"),
+                ") = any(fd.v)"
+            ),
+        ),
+        (
+            FieldKey::Label,
+            concat!(
+                "exists (select 1 from ",
+                knobas_core::declared_list!("fd.d", "labels"),
+                " l where lower(l.value) = any(fd.v))"
+            ),
+        ),
+        (
+            FieldKey::Sprint,
+            concat!(
+                "exists (select 1 from ",
+                knobas_core::declared_list!("fd.d", "sprint_state"),
+                " l where lower(l.value) = 'active')"
+            ),
+        ),
+        (
+            FieldKey::Assigned,
+            concat!(
+                "(lower(",
+                knobas_core::declared_string!("fd.d", "assignee"),
+                ") = any(fd.v) and i.item_updated_at >= now() - make_interval(days => fd.n))"
+            ),
+        ),
+    ]
+};
 
 /// The ids of every asset `under:` names and of every asset beneath one, at
 /// any depth: a parenthesised subquery over `ud.v`, the lowercased values.
@@ -256,6 +349,7 @@ pub const LIVE_ITEM: Corpus = Corpus {
           join knobas.source_config s on s.id = x.source_id and s.kind = ip.adapter_kind \
           where lower(ip.name) = any(ud.v))",
     ),
+    fields: LIVE_ITEM_FIELDS,
 };
 
 /// Notes: the corpus of the first kind knobas **owns** rather than mirrors.
@@ -305,6 +399,8 @@ pub const NOTE: Corpus = Corpus {
     // A note is knobas' own and sits inside nothing (see `path`), so it is
     // beneath no parent `under:` could name.
     under: None,
+    // Knobas' own rows carry none of a ticket's fields.
+    fields: &[],
 };
 
 /// Assets: the estate, and the corpus this module's own docs designed (#428).
@@ -360,6 +456,8 @@ pub const ASSET: Corpus = Corpus {
     // Knobas' own rows declare no parent through a payload: an asset's parent
     // is its `parent_id` column (ADR-0014), read directly (#600).
     under: Some(concat!("a.id in ", estate_subtree!())),
+    // Knobas' own rows carry none of a ticket's fields.
+    fields: &[],
 };
 
 /// Routes: what an asset is reachable at, and the second corpus of the estate
@@ -440,6 +538,8 @@ pub const ROUTE: Corpus = Corpus {
     // A route's parent is the asset exposing it (ADR-0014): it is beneath
     // whatever that asset is beneath, and beneath the asset itself (#600).
     under: Some(concat!("r.asset_id in ", estate_subtree!())),
+    // Knobas' own rows carry none of a ticket's fields.
+    fields: &[],
 };
 
 /// Every corpus the launcher searches.
