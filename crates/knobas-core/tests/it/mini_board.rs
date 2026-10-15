@@ -1044,7 +1044,10 @@ async fn a_board_narrowed_to_matches_draws_and_counts_only_them() {
 
     assert_eq!(
         columns(&board),
-        vec![(Some("To Do"), vec!["PAY-1"]), (Some("Done"), vec!["PAY-3"])]
+        vec![
+            (Some("To Do"), vec!["PAY-1"]),
+            (Some("Done"), vec!["PAY-3"])
+        ]
     );
     assert!(board.columns.iter().all(|column| column.total == 1));
 
@@ -1060,5 +1063,8 @@ async fn a_board_narrowed_to_matches_draws_and_counts_only_them() {
     )
     .await
     .unwrap();
-    assert!(empty.columns.is_empty(), "no match is an empty board, not the whole one");
+    assert!(
+        empty.columns.is_empty(),
+        "no match is an empty board, not the whole one"
+    );
 }

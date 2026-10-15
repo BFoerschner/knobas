@@ -243,12 +243,17 @@ async fn the_mini_board_command_narrows_by_a_query_and_marks_my_tickets() {
     assert_eq!(card(&mine).issue_type.as_deref(), Some("Bug"));
     assert_eq!(card(&mine).assignee.as_deref(), Some("mara.lindqvist"));
 
-    let blank = mini_board_inner(&pool, None, &[], None, None, Some("  ")).await.unwrap();
+    let blank = mini_board_inner(&pool, None, &[], None, None, Some("  "))
+        .await
+        .unwrap();
     let all: Vec<&str> = blank
         .columns
         .iter()
         .flat_map(|c| &c.cards)
         .map(|c| c.key.as_str())
         .collect();
-    assert!(all.contains(&other.as_str()), "a blank query narrows nothing");
+    assert!(
+        all.contains(&other.as_str()),
+        "a blank query narrows nothing"
+    );
 }

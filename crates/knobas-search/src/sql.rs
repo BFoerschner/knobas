@@ -349,7 +349,11 @@ pub fn ids_sql(
     sql.push_str(&field_paths(&bound));
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
-    let _ = write!(sql, "select {} as entity_id from {}", corpus.entity_id, corpus.relation);
+    let _ = write!(
+        sql,
+        "select {} as entity_id from {}",
+        corpus.entity_id, corpus.relation
+    );
     if text.is_some() {
         sql.push_str(" cross join q");
     }

@@ -3572,10 +3572,9 @@ pub async fn mini_board_inner(
         }
         None => None,
     };
-    let identity =
-        knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
-            .await?
-            .identity;
+    let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+        .await?
+        .identity;
     Ok(knobas_core::mini_board::read_scoped(
         pool,
         knobas_core::mini_board::Scope {
