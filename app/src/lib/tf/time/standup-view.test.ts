@@ -9,6 +9,7 @@ import type { DigestLine } from "../../ipc/entity";
 import {
   digestText,
   lineHash,
+  ownerOf,
   readProtocol,
   shortDay,
   withActionItem,
@@ -137,4 +138,9 @@ test("the digest copies as text, one line each, with the lists' headings", () =>
       "- None",
     ].join("\n"),
   );
+});
+
+test("an action item's trailing (Owner) is told apart from its words", () => {
+  expect(ownerOf("Decide the manual-review SLA (Priya Nair)")).toEqual({ what: "Decide the manual-review SLA", who: "(Priya Nair)" });
+  expect(ownerOf("Ship (v2) today")).toEqual({ what: "Ship (v2) today", who: null });
 });

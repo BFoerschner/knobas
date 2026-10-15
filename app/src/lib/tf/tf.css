@@ -575,7 +575,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-su-people { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
 .tf-su-val {
   border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); border-radius: 3px;
-  padding: 2px 8px; font-size: var(--t-sm); cursor: pointer;
+  padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
 }
 .tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
 .tf-su-val[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }

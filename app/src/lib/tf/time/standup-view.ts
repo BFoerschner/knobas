@@ -190,6 +190,15 @@ function textOf(line: DigestLine, yesterday: boolean): string {
   return yesterday ? `${head}: ${line.reason}` : `${head} (${line.reason})`;
 }
 
+/**
+ * An action item's words and its trailing `(Owner)`, which prototype-6 dims.
+ * Only a last parenthesis counts; the words are the reader's.
+ */
+export function ownerOf(text: string): { what: string; who: string | null } {
+  const found = /^(.*\S)\s+(\([^()]+\))$/.exec(text);
+  return found ? { what: found[1]!, who: found[2]! } : { what: text, who: null };
+}
+
 /** The yesterday heading: `Yesterday, Thursday 21`, or bare when none was found. */
 export function yesterdayHeading(day: string | null): string {
   return day === null ? "Yesterday" : `Yesterday, ${shortDay(day)}`;

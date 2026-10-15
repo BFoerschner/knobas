@@ -52,6 +52,7 @@
     digestText,
     lineHash,
     lineKey,
+    ownerOf,
     protocolDay,
     readProtocol,
     withActionItem,
@@ -154,7 +155,7 @@
   let publishing = $state(false);
   /** Everyone pressed this session, so someone pressed off stays a chip to press on. */
   let known = $state<string[]>([]);
-  /** What each person's box holds as typed; the bodyMd keeps it on one line. */
+  /** What each person's box holds as typed; the body keeps it on one line. */
   let drafts = $state<Record<string, string>>({});
   let adding = $state<"person" | "item" | null>(null);
   let addText = $state("");
@@ -210,14 +211,14 @@
     void readTarget();
   });
 
-  /** A new bodyMd: drawn at once, saved after a pause. */
+  /** A new body: drawn at once, saved after a pause. */
   function edit(next: string) {
     bodyMd = next;
     if (timer !== null) clearTimeout(timer);
     timer = setTimeout(() => void save(), saveAfterMs);
   }
 
-  /** Write the bodyMd; answers whether it landed. The title is the protocol's identity and stays. */
+  /** Write the body; answers whether it landed. The title is the protocol's identity and stays. */
   async function save(): Promise<boolean> {
     if (timer !== null) clearTimeout(timer);
     timer = null;
@@ -290,7 +291,7 @@
   async function send(chosen: PublishTarget | undefined) {
     publishing = true;
     try {
-      // Save first and stop if it did not land: the page is made from the bodyMd
+      // Save first and stop if it did not land: the page is made from the body
       // the backend holds, and a page cannot be taken back.
       if (!(await save())) return;
       protocol = await io.publishStandupProtocol(day, chosen);
@@ -451,7 +452,7 @@
         Copy as text
       </button>
     </header>
-    <div class="tf-su-bodyMd">
+    <div class="tf-su-body">
       {#if digestFailure}
         <p class="tf-tm-fail" role="alert">{digestFailure}</p>
       {/if}
@@ -505,7 +506,7 @@
         <span class="tf-chip tf-open">{publication.state === "held" ? "held in the queue" : "publishing"}</span>
       {/if}
     </header>
-    <div class="tf-su-bodyMd">
+    <div class="tf-su-body">
       {#if failure}
         <p class="tf-tm-fail" role="alert">{failure}</p>
       {/if}
@@ -554,8 +555,9 @@
       <div class="tf-pane-h tf-su-gap">Action items</div>
       {#each form.items as item, index (index)}
         {@const made = filedFor(item.text)}
+        {@const owner = ownerOf(item.text)}
         <div class="tf-su-ai">
-          <span class:tf-su-done={item.done}>{item.text}</span>
+          <span class:tf-su-done={item.done}>{owner.what}{#if owner.who}{" "}<span class="tf-dim">{owner.who}</span>{/if}</span>
           {#if made === null}
             <button class="tf-btn tf-sm" onclick={() => void openTicketDialog(item.text)}>Create ticket</button>
           {:else if made.ticket === null}
