@@ -99,14 +99,21 @@ async fn a_visit_to_another_ticket_is_not_this_ones() {
 #[tokio::test]
 async fn a_visit_to_nothing_is_refused_and_writes_nothing() {
     let pool = pool().await;
-    assert_eq!(visit(&pool, "no-colon").await.unwrap_err().code, knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(
+        visit(&pool, "no-colon").await.unwrap_err().code,
+        knobas_app::IpcErrorCode::Invalid
+    );
     let missing = format!("jira:{}", key());
-    assert_eq!(visit(&pool, &missing).await.unwrap_err().code, knobas_app::IpcErrorCode::NotFound);
-    let (lines,): (i64,) = sqlx::query_as("select count(*) from knobas.activity where entity_id = $1")
-        .bind(&missing)
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    assert_eq!(
+        visit(&pool, &missing).await.unwrap_err().code,
+        knobas_app::IpcErrorCode::NotFound
+    );
+    let (lines,): (i64,) =
+        sqlx::query_as("select count(*) from knobas.activity where entity_id = $1")
+            .bind(&missing)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(lines, 0);
 }
 
@@ -118,15 +125,32 @@ async fn a_visit_is_not_in_the_recent_activity() {
     let pool = pool().await;
     let id = issue(&pool, serde_json::json!({})).await;
     let entity = EntityRef::parse(&id).unwrap();
-    knobas_core::activity::record(&pool, "user", "linked", Some(&entity), serde_json::json!({}))
-        .await
-        .unwrap();
+    knobas_core::activity::record(
+        &pool,
+        "user",
+        "linked",
+        Some(&entity),
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap();
     visit(&pool, &id).await.unwrap();
 
-    let scoped = knobas_core::activity::recent(&pool, 10, Some(&entity)).await.unwrap();
-    assert_eq!(scoped.iter().map(|line| line.verb.as_str()).collect::<Vec<_>>(), ["linked"]);
+    let scoped = knobas_core::activity::recent(&pool, 10, Some(&entity))
+        .await
+        .unwrap();
+    assert_eq!(
+        scoped
+            .iter()
+            .map(|line| line.verb.as_str())
+            .collect::<Vec<_>>(),
+        ["linked"]
+    );
     let global = knobas_core::activity::recent(&pool, 1, None).await.unwrap();
-    assert_eq!(global[0].verb, "linked", "the newest line drawn is the link, not the visit after it");
+    assert_eq!(
+        global[0].verb, "linked",
+        "the newest line drawn is the link, not the visit after it"
+    );
 }
 
 /// **The thread** (R-5.2): Jira's comments in its order, each with the name a
@@ -160,7 +184,10 @@ async fn a_jira_thread_reads_its_comments_with_mine_and_mentions() {
             ("Mara Lindqvist", true, false),
         ]
     );
-    assert_eq!(read.comments[0].at, Some("2026-08-12T07:14:00Z".parse().unwrap()));
+    assert_eq!(
+        read.comments[0].at,
+        Some("2026-08-12T07:14:00Z".parse().unwrap())
+    );
     assert_eq!(read.comments[1].body, "Yes. [~mara] can you pick this up?");
     assert!(read.changes.is_empty());
 }
@@ -177,10 +204,16 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
         serde_json::json!({ "fields": { "comment": [ { "body": "not where Jira puts it" } ] } }),
     ] {
         let id = issue(&pool, payload.clone()).await;
-        assert!(thread(&pool, &id).await.unwrap().comments.is_empty(), "{payload}");
+        assert!(
+            thread(&pool, &id).await.unwrap().comments.is_empty(),
+            "{payload}"
+        );
     }
     let missing = format!("jira:{}", key());
-    assert_eq!(thread(&pool, &missing).await.unwrap_err().code, knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(
+        thread(&pool, &missing).await.unwrap_err().code,
+        knobas_app::IpcErrorCode::NotFound
+    );
 }
 
 /// **Status changes never count as comments** (R-5.1): a move knobas delivered
@@ -199,7 +232,10 @@ async fn a_status_move_knobas_sent_is_a_change_and_not_a_comment() {
     let entity = EntityRef::parse(&id).unwrap();
     let mut queued = Vec::new();
     for status in ["In Review", "Done"] {
-        let op = knobas_source::WriteOp::Transition { entity: id.clone(), status: status.to_owned() };
+        let op = knobas_source::WriteOp::Transition {
+            entity: id.clone(),
+            status: status.to_owned(),
+        };
         let row = knobas_core::write_queue::queue(
             &pool,
             "jira",
@@ -212,9 +248,18 @@ async fn a_status_move_knobas_sent_is_a_change_and_not_a_comment() {
         .unwrap();
         queued.push(row.id);
     }
-    knobas_core::write_queue::sent(&pool, queued[0], None).await.unwrap().unwrap();
+    knobas_core::write_queue::sent(&pool, queued[0], None)
+        .await
+        .unwrap()
+        .unwrap();
 
     let read = thread(&pool, &id).await.unwrap();
     assert_eq!(read.comments.len(), 1);
-    assert_eq!(read.changes.iter().map(|c| c.status.as_str()).collect::<Vec<_>>(), ["In Review"]);
+    assert_eq!(
+        read.changes
+            .iter()
+            .map(|c| c.status.as_str())
+            .collect::<Vec<_>>(),
+        ["In Review"]
+    );
 }

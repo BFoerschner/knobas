@@ -73,8 +73,14 @@ pub async fn visit(pool: &PgPool, entity_id: &str) -> Result<Option<DateTime<Utc
         .bind(ACTOR)
         .fetch_one(&mut *tx)
         .await?;
-    knobas_core::activity::record_with(&mut *tx, ACTOR, VISITED, Some(&entity), serde_json::json!({}))
-        .await?;
+    knobas_core::activity::record_with(
+        &mut *tx,
+        ACTOR,
+        VISITED,
+        Some(&entity),
+        serde_json::json!({}),
+    )
+    .await?;
     tx.commit().await?;
     Ok(before)
 }
@@ -236,7 +242,12 @@ pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> 
     let me = identity(pool).await?;
     let comments: Vec<ThreadComment> = list
         .as_array()
-        .map(|entries| entries.iter().filter_map(|entry| comment_of(entry, &me)).collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| comment_of(entry, &me))
+                .collect()
+        })
         .unwrap_or_default();
     let changes = sqlx::query(MOVES)
         .bind(&id)
@@ -271,7 +282,10 @@ mod tests {
         assert!(!mentions("@mara.lindqvist is someone else", &me()));
         assert!(!mentions("@marathon", &me()));
         assert!(!mentions("mara wrote this", &me()));
-        assert!(!mentions("@Mara", &me()), "case-sensitive, as the account is spelled");
+        assert!(
+            !mentions("@Mara", &me()),
+            "case-sensitive, as the account is spelled"
+        );
         assert!(!mentions("@mara", &[String::new()]));
     }
 
@@ -288,7 +302,8 @@ mod tests {
         assert!(read.mentions_me);
         assert!(!read.mine);
 
-        let mock = serde_json::json!({ "who": "mara", "when": "2026-08-12T10:02:00Z", "text": "Sure." });
+        let mock =
+            serde_json::json!({ "who": "mara", "when": "2026-08-12T10:02:00Z", "text": "Sure." });
         let read = comment_of(&mock, &me()).unwrap();
         assert_eq!(read.author.as_deref(), Some("mara"));
         assert!(read.mine);
@@ -323,7 +338,10 @@ mod tests {
             .chain(&fields(&thread["comments"][0]))
             .chain(&fields(&thread["changes"][0]))
         {
-            assert!(mirror.contains(&format!("  {key}:")), "{key} is not mirrored");
+            assert!(
+                mirror.contains(&format!("  {key}:")),
+                "{key} is not mirrored"
+            );
         }
         assert!(mirror.contains("export interface Thread {"));
         assert!(mirror.contains("\"visit_entity\""));
@@ -332,9 +350,16 @@ mod tests {
 
     #[test]
     fn a_comment_with_no_text_is_not_a_comment_and_a_bad_stamp_is_no_time() {
-        assert_eq!(comment_of(&serde_json::json!({ "body": "  " }), &me()), None);
+        assert_eq!(
+            comment_of(&serde_json::json!({ "body": "  " }), &me()),
+            None
+        );
         assert_eq!(comment_of(&serde_json::json!({ "body": 4 }), &me()), None);
-        let undated = comment_of(&serde_json::json!({ "body": "x", "created": "yesterday" }), &me()).unwrap();
+        let undated = comment_of(
+            &serde_json::json!({ "body": "x", "created": "yesterday" }),
+            &me(),
+        )
+        .unwrap();
         assert_eq!(undated.at, None);
         assert_eq!(undated.author, None);
     }

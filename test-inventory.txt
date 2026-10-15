@@ -172,6 +172,10 @@ knobas-app	lib/knobas_app	commands::time::tests::the_week_cell_matches_its_types
 knobas-app	lib/knobas_app	commands::time::tests::the_week_matches_its_typescript_mirror
 knobas-app	lib/knobas_app	commands::time::tests::the_week_row_matches_its_typescript_mirror_with_a_target_and_without
 knobas-app	lib/knobas_app	commands::time::tests::the_worklog_shape_matches_its_typescript_mirror
+knobas-app	lib/knobas_app	conversation::tests::a_comment_with_no_text_is_not_a_comment_and_a_bad_stamp_is_no_time
+knobas-app	lib/knobas_app	conversation::tests::a_jira_comment_and_a_mock_comment_read_the_same
+knobas-app	lib/knobas_app	conversation::tests::a_mention_is_the_account_after_an_at_or_a_jira_tilde
+knobas-app	lib/knobas_app	conversation::tests::the_thread_and_its_mirror_agree
 knobas-app	lib/knobas_app	error::tests::a_failed_run_keeps_the_source_it_belongs_to
 knobas-app	lib/knobas_app	error::tests::a_link_endpoint_that_is_not_in_the_mirror_is_not_found
 knobas-app	lib/knobas_app	error::tests::every_code_has_its_snake_case_spelling
@@ -540,6 +544,13 @@ knobas-app	test/it	contexts_ipc::an_unknown_context_is_an_empty_page_not_the_cor
 knobas-app	test/it	contexts_ipc::promote_announces_once_however_often_it_is_pressed
 knobas-app	test/it	contexts_ipc::promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid
 knobas-app	test/it	contexts_ipc::the_tray_scopes_by_the_contexts_membership
+knobas-app	test/it	conversation_ipc::a_jira_thread_reads_its_comments_with_mine_and_mentions
+knobas-app	test/it	conversation_ipc::a_payload_of_another_shape_reads_as_no_comments
+knobas-app	test/it	conversation_ipc::a_status_move_knobas_sent_is_a_change_and_not_a_comment
+knobas-app	test/it	conversation_ipc::a_visit_answers_the_one_before_it
+knobas-app	test/it	conversation_ipc::a_visit_is_not_in_the_recent_activity
+knobas-app	test/it	conversation_ipc::a_visit_to_another_ticket_is_not_this_ones
+knobas-app	test/it	conversation_ipc::a_visit_to_nothing_is_refused_and_writes_nothing
 knobas-app	test/it	demo::a_demo_ticket_carries_its_project_into_the_mirrored_payload
 knobas-app	test/it	demo::a_demo_ticket_with_no_project_syncs_and_its_payload_names_none
 knobas-app	test/it	demo::a_profile_stored_at_an_older_fixture_version_re_syncs_and_gains_the_project
