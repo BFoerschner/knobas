@@ -50,12 +50,20 @@ test("the week and Log all: the label and passive blocks are never planned, and 
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const to = new Date(from.getTime() + 86_400_000);
   const day = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
-  const days = [{ day, from: from.toISOString(), to: to.toISOString() }];
+  const dayBefore = new Date(from.getFullYear(), from.getMonth(), from.getDate() - 1);
+  const dayBeforeName = `${dayBefore.getFullYear()}-${String(dayBefore.getMonth() + 1).padStart(2, "0")}-${String(dayBefore.getDate()).padStart(2, "0")}`;
+  const days = [
+    { day: dayBeforeName, from: dayBefore.toISOString(), to: from.toISOString() },
+    { day, from: from.toISOString(), to: to.toISOString() },
+  ];
   const plan = h["log_all_preview"]!({ days }) as { entity_id: string; seconds: number }[];
-  expect(plan.map((row) => row.entity_id)).toEqual(["mock:PAY-231"]);
-  expect(plan[0]!.seconds).toBe(130 * 60);
+  // Yesterday's fixed 1h 30m row (prototype-6's Thu 21), then today's PAY-231.
+  expect(plan.map((row) => [row.day, row.entity_id, row.seconds])).toEqual([
+    [dayBeforeName, "mock:PAY-231", 90 * 60],
+    [day, "mock:PAY-231", 130 * 60],
+  ]);
   const logged = h["log_all"]!({ days }) as unknown[];
-  expect(logged).toHaveLength(1);
+  expect(logged).toHaveLength(2);
   expect(h["log_all_preview"]!({ days })).toEqual([]);
   const week = h["week_timesheet"]!({ days: [days[0], days[0], days[0], days[0], days[0]] }) as { rows: unknown[] };
   expect(week.rows).toHaveLength(5);
@@ -89,7 +97,7 @@ test("a publish reads pending and then sent, and an action-item ticket likewise"
   expect((h["standup_protocol"]!({ day: "2026-08-22" }) as typeof published).publication.state).toBe("sent");
   const ticket = h["create_action_item_ticket"]!({}) as { write_id: number; ticket_entity_id: string | null };
   expect(ticket.ticket_entity_id).toBeNull();
-  h["action_item_ticket"]!({ noteId: "n", writeId: ticket.write_id });
+  expect((h["action_item_ticket"]!({ noteId: "n", writeId: ticket.write_id }) as typeof ticket).ticket_entity_id).toBeNull();
   expect((h["action_item_ticket"]!({ noteId: "n", writeId: ticket.write_id }) as typeof ticket).ticket_entity_id).not.toBeNull();
   const digest = h["standup_digest"]!({ today: { day: "2026-08-22" }, earlier: [{ day: "2026-08-21" }] }) as {
     yesterday_day: string;
