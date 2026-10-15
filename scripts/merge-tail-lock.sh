@@ -2,8 +2,16 @@
 # Machine-wide merge-tail lock: reviews run in parallel, only rebase + gate +
 # merge + cleanup run one at a time, oldest PR first.
 #
-# Usage: scripts/merge-tail-lock.sh take <PR>   (blocks until held)
+# Usage: scripts/merge-tail-lock.sh ready <PR> <head SHA>   (review done; may be batched)
+#        scripts/merge-tail-lock.sh take <PR>      (blocks until held; exit 3 = merged in a batch)
+#        scripts/merge-tail-lock.sh partner <PR>   (the holder asks: oldest other ready, waiting PR)
+#        scripts/merge-tail-lock.sh merged <PR> <merge SHA>   (the holder merged it in a batch)
 #        scripts/merge-tail-lock.sh release <PR>
+#
+# Batching (Björn, 2026-10-15): the holder may stack one ready waiter on its own
+# head, gate the pair once and merge both. `ready` records the head SHA a
+# waiter's review settled on; `merged` tells that waiter its PR is in, and its
+# `take` then exits 3 with the merge SHA instead of taking the lock.
 #
 # A waiter registers in the queue dir and touches its entry every poll. The lock
 # goes to the lowest-numbered live waiter, since every merge makes the others
@@ -13,8 +21,9 @@
 set -u
 LOCK="${TMPDIR:-/tmp}/knobas-merge-tail.lock"
 QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
-cmd="${1:-}"; pr="${2:-}"
-[ -n "$cmd" ] && [ -n "$pr" ] || { echo "usage: $0 take|release <PR>"; exit 2; }
+READY="${TMPDIR:-/tmp}/knobas-merge-tail.ready"
+cmd="${1:-}"; pr="${2:-}"; arg="${3:-}"
+[ -n "$cmd" ] && [ -n "$pr" ] || { echo "usage: $0 ready|take|partner|merged|release <PR> [SHA]"; exit 2; }
 oldest_live_waiter() {
   local f n best='' now; now=$(date +%s)
   for f in "$QUEUE"/*; do
@@ -26,9 +35,37 @@ oldest_live_waiter() {
   echo "${best:-}"
 }
 case "$cmd" in
+ready)
+  [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA>"; exit 2; }
+  mkdir -p "$READY"; echo "$arg" > "$READY/$pr"
+  echo "merge-tail: PR #$pr ready at $arg"
+  ;;
+partner)
+  now=$(date +%s); best=''
+  for f in "$READY"/*; do
+    [ -e "$f" ] || continue
+    n=${f##*/}
+    case $n in *.merged) continue ;; esac
+    [ "$n" != "$pr" ] || continue
+    [ ! -e "$READY/$n.merged" ] || continue
+    [ -e "$QUEUE/$n" ] && [ $((now - $(stat -f %m "$QUEUE/$n"))) -le 120 ] || continue
+    if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; fi
+  done
+  [ -n "$best" ] && echo "$best $(cat "$READY/$best")"
+  ;;
+merged)
+  [ -n "$arg" ] || { echo "usage: $0 merged <PR> <merge SHA>"; exit 2; }
+  mkdir -p "$READY"; echo "$arg" > "$READY/$pr.merged"; rm -f "$QUEUE/$pr"
+  echo "merge-tail: PR #$pr merged in a batch as $arg"
+  ;;
 take)
   mkdir -p "$QUEUE"; said=""
   while :; do
+    if [ -e "$READY/$pr.merged" ]; then
+      rm -f "$QUEUE/$pr" "$READY/$pr"
+      echo "merge-tail: PR #$pr was merged in a batch as $(cat "$READY/$pr.merged"); do the cleanup only"
+      exit 3
+    fi
     touch "$QUEUE/$pr"
     first=$(oldest_live_waiter)
     if [ "$first" = "$pr" ] && mkdir "$LOCK" 2>/dev/null; then break; fi
@@ -48,10 +85,10 @@ take)
   echo "merge-tail: held by PR #$pr"
   ;;
 release)
-  rm -f "$QUEUE/$pr"
+  rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.merged"
   holder=$(cat "$LOCK/holder" 2>/dev/null || true)
   if [ "$holder" = "$pr" ]; then rm -rf "$LOCK"; echo "merge-tail: released by PR #$pr"
   else echo "merge-tail: PR #$pr does not hold the lock (holder: ${holder:-none})"; fi
   ;;
-*) echo "usage: $0 take|release <PR>"; exit 2 ;;
+*) echo "usage: $0 ready|take|partner|merged|release <PR> [SHA]"; exit 2 ;;
 esac
