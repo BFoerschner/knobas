@@ -1726,3 +1726,42 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
   be photographed at prototype-6's own `#/settings/source/teamcity`. **Reversing:** fixture only.
 - **Sections other than Sources name themselves and offer the rooms UI** until #831 and #844 build
   them. **Reversing:** replaced by those tickets.
+
+## #827 Time: Day (implementer)
+
+- **The strip is SVG.** Prototype-6 positions blocks with inline `left`/`width`, which
+  `style-src 'self'` and `house-rules.test.ts` refuse. SVG's `x` and `width` are attributes and
+  take percentages; a nested `<svg>` per block clips its label. **Reversing:** low, one component.
+- **08:00 to 18:00, widened by whole hours** when a row starts earlier or ends later, so an evening
+  is not clipped off the strip. **Reversing:** one function (`stripWindow`).
+- **Gaps between blocks are *untracked*, not *open*.** No read returns focused no-target stretches,
+  only `week_timesheet`'s day total, which is the fifth figure. A gap may be lunch, so the rows say
+  "Nothing tracked" rather than "app open". Follow-up #901. **Reversing:** with #901.
+- **No *Dismiss* on offered blocks.** No command dismisses one, and `delete_block` would come back
+  on the next read through `passive::materialize`. Follow-up #900. **Reversing:** with #900.
+- **Whether a block is on a ticket is `ad_hoc_block`'s answer**, asked once per unlogged block on
+  each day read. That decides *unlogged* against *needs a ticket* and names the ticket for *Add to*
+  and *Log to*. **Reversing:** low.
+- **The running timer is a row of its own**, from its start (or midnight) to now, and the only
+  yellow. It counts in *tracked*, not in *to log*. **Reversing:** low.
+- ***Log all…* goes to the Week tab**, where #828 builds its dialog. **Reversing:** one link.
+- **Past the horizon with blocks**, the day draws them under a note, and *No record* only when
+  there are none. Prototype-6 has only the empty case. **Reversing:** low.
+- **The `?fake-ipc` day is #826's `fakeTime`, grown**, not a second fixture: today always carries
+  prototype-6's Friday (logged, offered, unlogged, a gap, a label block), and `?fake-timer` adds the
+  running timer. #826's own morning block went, since PAY-231's 09:40 to 11:50 gives a stop's draft
+  the same thing to add up. **Reversing:** low.
+- ***Log…* shows the draft through #826's `drafts.show`**, the path the ad-hoc dialog's *Log to a
+  ticket…* takes, so it opens in the new shell's own dialog. **Reversing:** one line.
+
+## #827 Time: Day (merge-manager, PR #915)
+
+- **One `ad_hoc_block` per unlogged block on each day read stays.** It is a fan-out, not a
+  serial N+1: the calls go out together under one `Promise.all`, and each is a handful of small
+  indexed reads on the local database (the block, the logging sources, then at most a link, a
+  context anchor, the last logged ticket and a title). Passive blocks under two minutes are dropped
+  and adjacent visits merge, which bounds the count. A batched read would be a new command and a
+  §10.8 entry, which this ticket's "no backend change" rules out. The by-eye check on testenv data
+  goes to the milestone review; if the day is slow there, the follow-up is one read that answers
+  the day's offers together and computes the logging sources and the last logged ticket once.
+  **Reversing:** a batched command plus one call site in `TfDay.svelte`'s `read()`.

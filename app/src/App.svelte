@@ -411,6 +411,21 @@
   }
 
   /**
+   * The new shell's Day tab, *Log…* on an unlogged block (#827): the draft a
+   * stop opens, for that ticket and that day, shown the way the ad-hoc
+   * dialog's *Log to a ticket…* shows one. `null` is "nothing left to log
+   * there", which the reader asked about and so is told.
+   */
+  function draftFor(entityId: string, day: string) {
+    void worklogDraft(entityId, { day, offsetMinutes: offsetMinutes(new Date(`${day}T12:00:00`)) })
+      .then((draft) => {
+        if (draft === null) push({ text: "Nothing to log on that ticket that day." });
+        else drafts.show(draft);
+      })
+      .catch(complain);
+  }
+
+  /**
    * **What a stop opens**, decided by the backend and not by a list of kinds
    * here (#281).
    *
@@ -933,7 +948,15 @@
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
 {:else if lifecycle.ready}
   {#if ticketFirst}
-    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} onstarttimer={startTimerOn}>
+    <TfShell
+      {lifecycle}
+      onsearch={openLauncher}
+      ontimer={toggleTimer}
+      onstarttimer={startTimerOn}
+      onlog={draftFor}
+      {timeRevision}
+      ontimechanged={() => (timeRevision += 1)}
+    >
       {#snippet dialogs()}
         {#if drafts.open}
           {#key drafts.open}

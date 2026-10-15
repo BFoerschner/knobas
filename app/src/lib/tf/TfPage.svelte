@@ -24,6 +24,7 @@
   import { jobHash, SECTION_NAME, type TfRoute } from "./route";
   import TicketsPage from "./tickets/TicketsPage.svelte";
   import TfSettings from "./settings/TfSettings.svelte";
+  import TfTime from "./time/TfTime.svelte";
 
   let {
     route,
@@ -36,6 +37,9 @@
     ontimer,
     onstarttimer,
     jobPorts,
+    onlog,
+    timeRevision = 0,
+    ontimechanged,
   }: {
     route: TfRoute;
     /** Whether the database answers yet: a page's reads wait for it. */
@@ -54,6 +58,11 @@
     onstarttimer: (entityId: string, title: string) => void;
     /** The job page's reads. */
     jobPorts: JobPorts;
+    /** Open the worklog draft for a ticket and day (the Time view's *Log…*). */
+    onlog?: ((entityId: string, day: string) => void) | undefined;
+    /** Bumped when something outside the Time view changed a day's blocks. */
+    timeRevision?: number;
+    ontimechanged?: (() => void) | undefined;
   } = $props();
 </script>
 
@@ -86,12 +95,24 @@
       <strong>{name}</strong>
       <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
     </nav>
-    <header class="tf-fhead">
-      <div><h1>{name}</h1></div>
-    </header>
-    <div class="tf-empty">
-      <p>{name} is not built in the new shell yet.</p>
-    </div>
+    {#if route.section === "time"}
+      <TfTime
+        {ready}
+        rest={route.rest}
+        {timer}
+        {ontimer}
+        {onlog}
+        revision={timeRevision}
+        onchanged={ontimechanged}
+      />
+    {:else}
+      <header class="tf-fhead">
+        <div><h1>{name}</h1></div>
+      </header>
+      <div class="tf-empty">
+        <p>{name} is not built in the new shell yet.</p>
+      </div>
+    {/if}
   </div>
 {:else}
   <div class="tf-full">

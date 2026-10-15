@@ -372,6 +372,7 @@ const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
+const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -1001,6 +1002,29 @@ const CASES: Case[] = [
             dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
             updateBlock: () => Promise.reject(new Error("no edit in this test")),
             deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The new shell's Day tab (#827): its clock interval and the day's read,
+     * `deferred` so the answer lands after the unmount.
+     */
+    name: "TfDay",
+    source: "lib/tf/time/TfDay.svelte",
+    open: (target) => ({
+      app: mount(TfDay, {
+        target,
+        props: {
+          day: "2026-08-22",
+          timer: { current: null },
+          ontimer: undefined,
+          ports: {
+            dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
+            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
+            adHocBlock: () => Promise.reject(new Error("no offer in this test")),
           },
         },
       }),

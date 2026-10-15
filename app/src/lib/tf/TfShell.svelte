@@ -88,6 +88,9 @@
     onstarttimer = () => {},
     jobPorts = bridgePorts,
     dialogs,
+    onlog,
+    timeRevision = 0,
+    ontimechanged,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -112,6 +115,11 @@
      * (#826). Each registers itself on `layers` so `Esc` closes it.
      */
     dialogs?: Snippet;
+    /** Open the worklog draft for a ticket and day (the Time view's *Log…*). */
+    onlog?: (entityId: string, day: string) => void;
+    /** Bumped by `App.svelte` when a draft or a dialog changed a day's blocks. */
+    timeRevision?: number;
+    ontimechanged?: () => void;
   } = $props();
 
   let hash = $state(location.hash);
@@ -272,7 +280,21 @@
     ontheme={toggleTheme}
   />
   <main class="tf-main" tabindex="-1">
-    <TfPage {route} ready={lifecycle.ready} job={lastJob} {timedTicket} {onrooms} {timer} {layers} {ontimer} {onstarttimer} {jobPorts} />
+    <TfPage
+      {route}
+      ready={lifecycle.ready}
+      job={lastJob}
+      {timedTicket}
+      {onrooms}
+      {timer}
+      {layers}
+      {ontimer}
+      {onstarttimer}
+      {jobPorts}
+      {onlog}
+      {timeRevision}
+      {ontimechanged}
+    />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
   {@render dialogs?.()}

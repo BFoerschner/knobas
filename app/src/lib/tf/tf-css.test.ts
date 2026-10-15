@@ -149,3 +149,11 @@ function axes(woff2: Buffer): { tag: string; min: number }[] {
   }
   return found;
 }
+
+test("on the Time view's strip, yellow fills the running timer's block and nothing else (#827)", () => {
+  // Every rule of the Day tab that paints with the card's yellow.
+  const yellow = [...code.matchAll(/([^{}]*)\{([^}]*)\}/g)]
+    .filter(([, selector, body]) => selector!.includes("tf-tm-") && /var\(--card(-2)?\)/.test(body!))
+    .map(([, selector]) => selector!.trim());
+  expect(yellow).toEqual([".tf-tm-b.tf-tm-run rect", ".tf-tm-legend i.tf-tm-run"]);
+});
