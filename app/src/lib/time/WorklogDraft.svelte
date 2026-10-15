@@ -41,7 +41,8 @@
 <script lang="ts">
   import { logWork as realLogWork, type Draft, type Worklog } from "../ipc/time";
   import Modal from "../shell/Modal.svelte";
-  import { atClock, clockOf, offsetMinutes } from "./draft";
+  import { offsetMinutes } from "./draft";
+  import { DraftForm } from "./draft-form.svelte";
 
   let {
     draft,
@@ -62,99 +63,17 @@
   const uid = `worklog-${Math.random().toString(36).slice(2, 9)}`;
 
   /**
-   * The ticked candidates, by id.
-   *
-   * A `Set` of ids rather than a flag on a copy of each candidate: the
-   * candidates are the backend's list and this component has no business
-   * holding a second version of them.
+   * The form: the ticks, whether the comment is the reader's, and what is sent.
+   * Shared with the new shell's draft (#826); the rules are explained above.
    */
   // svelte-ignore state_referenced_locally
-  // Read once, at init, on purpose: a draft is one afternoon and this dialog
-  // is opened for one, so a `draft` swapped mid-life would silently discard
-  // whatever the reader had already ticked. The shell closes and reopens.
-  let ticked = $state(new Set(draft.candidates.map((c) => c.id)));
-
-  /**
-   * Whether the reader has taken the comment over.
-   *
-   * Once they have typed, ticking a box no longer rewrites what they wrote —
-   * the alternative is a checkbox silently deleting a sentence somebody
-   * composed, which is the one thing a draft must not do.
-   */
-  let edited = $state(false);
-  // svelte-ignore state_referenced_locally
-  let typed = $state(draft.comment);
-
-  // svelte-ignore state_referenced_locally
-  /** Minutes, because that is the unit a person corrects a clock in. */
-  let minutes = $state(Math.round(draft.seconds / 60));
-
-  // svelte-ignore state_referenced_locally
-  /** When the work began, as the time field shows it. */
-  let began = $state(clockOf(draft.started_at));
-
-  /**
-   * ...and as the instant that is sent. The day never moves; see `atClock`.
-   *
-   * **An untouched field sends the block's own start, verbatim.** A time field
-   * has no seconds, so putting every start through `atClock` would round
-   * 09:00:37 down to 09:00 on a draft nobody edited — knobas quietly changing
-   * a fact it measured. The reading is only replaced once it differs from what
-   * the block says.
-   */
-  const startedAt = $derived(
-    began === clockOf(draft.started_at) ? draft.started_at : atClock(draft.started_at, began),
-  );
+  // Read once, at init, on purpose: a draft swapped mid-life would silently
+  // discard whatever the reader had already ticked. The shell closes and reopens.
+  const form = new DraftForm(draft);
 
   let sending = $state(false);
   /** What the backend said, if it refused. */
   let failed = $state<string | null>(null);
-
-  /** The comment as the ticks make it — the backend's bullets, joined. */
-  const generated = $derived(
-    draft.candidates
-      .filter((c) => ticked.has(c.id))
-      .map((c) => c.bullet)
-      .join("\n"),
-  );
-
-  const comment = $derived(edited ? typed : generated);
-
-  /**
-   * ...and the length that is sent.
-   *
-   * **An untouched field sends the blocks' own sum, verbatim**, for the reason
-   * `startedAt` above does: a block is measured to the second, so a day of two
-   * stretches rarely adds up to a whole minute, and putting every draft
-   * through a minutes field would log a number knobas never measured while
-   * marking those exact blocks spent. The field is minutes because that is the
-   * unit a person corrects a clock in, not because a worklog is one.
-   */
-  const seconds = $derived(
-    minutes === Math.round(draft.seconds / 60)
-      ? draft.seconds
-      : Math.max(0, Math.round(minutes * 60)),
-  );
-
-  /** `2h 30m`, `45m` — the reading on the button. */
-  const reading = $derived.by(() => {
-    const whole = Math.floor(minutes / 60);
-    const rest = minutes % 60;
-    if (whole === 0) return `${rest}m`;
-    return rest === 0 ? `${whole}h` : `${whole}h ${rest}m`;
-  });
-
-  /** `PAY-231` — the half after the first colon, as everywhere else. */
-  const key = $derived(draft.entity_id.slice(draft.entity_id.indexOf(":") + 1));
-
-  function toggle(id: string) {
-    // Reassigned rather than mutated: `$state` over a `Set` tracks the binding,
-    // and `.add()` on the same object re-renders nothing.
-    const next = new Set(ticked);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    ticked = next;
-  }
 
   function send() {
     if (sending) return;
@@ -163,7 +82,7 @@
     void logWork(
       draft.entity_id,
       { day: draft.day, offsetMinutes: offsetMinutes() },
-      { startedAt, seconds, comment },
+      form.work,
     )
       .then((worklog) => {
         onlogged(worklog);
@@ -184,7 +103,7 @@
   }
 </script>
 
-<Modal title="Log time to {key}" subtitle={draft.day} {onclose}>
+<Modal title="Log time to {form.key}" subtitle={draft.day} {onclose}>
   {#snippet body()}
     <p class="lab">
       The day's blocks on this ticket, concatenated — they ran until {clock(draft.ended_at)}.
@@ -193,11 +112,11 @@
     <div class="two">
       <div class="fld">
         <label class="l" for="{uid}-began">Started</label>
-        <input class="inp" id="{uid}-began" type="time" bind:value={began} />
+        <input class="inp" id="{uid}-began" type="time" bind:value={form.began} />
       </div>
       <div class="fld">
         <label class="l" for="{uid}-mins">Time logged (minutes)</label>
-        <input class="inp" id="{uid}-mins" type="number" min="1" step="1" bind:value={minutes} />
+        <input class="inp" id="{uid}-mins" type="number" min="1" step="1" bind:value={form.minutes} />
       </div>
     </div>
 
@@ -209,15 +128,15 @@
             <label class="cand">
               <input
                 type="checkbox"
-                checked={ticked.has(candidate.id)}
-                onchange={() => toggle(candidate.id)}
+                checked={form.ticked.has(candidate.id)}
+                onchange={() => form.toggle(candidate.id)}
               />
               <span class="t">{candidate.bullet.replace(/^- /, "")}</span>
             </label>
           </li>
         {/each}
       </ul>
-      {#if edited}
+      {#if form.edited}
         <p class="lab note">
           The comment is yours now — ticking no longer rewrites it.
         </p>
@@ -232,11 +151,8 @@
         class="inp ta"
         id="{uid}-comment"
         rows="4"
-        value={comment}
-        oninput={(event) => {
-          edited = true;
-          typed = event.currentTarget.value;
-        }}
+        value={form.comment}
+        oninput={(event) => form.type(event.currentTarget.value)}
       ></textarea>
     </div>
 
@@ -252,8 +168,8 @@
     </p>
     <span class="spacer"></span>
     <button class="btn ghost" type="button" onclick={onclose}>Not now</button>
-    <button class="btn pri" type="button" disabled={sending || seconds <= 0} onclick={send}>
-      Log {reading} to {key}
+    <button class="btn pri" type="button" disabled={sending || form.seconds <= 0} onclick={send}>
+      Log {form.reading} to {form.key}
     </button>
   {/snippet}
 </Modal>
