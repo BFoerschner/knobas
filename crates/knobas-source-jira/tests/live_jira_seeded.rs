@@ -174,6 +174,30 @@ struct Seed {
     /// the fixture's -- and asserted empty below, because a non-empty list
     /// would mean issues are not where this suite expects them.
     unreachable_statuses: Vec<serde_json::Value>,
+    /// The seed's Scrum board on PAY and its active sprint (#811), with this
+    /// instance's Sprint field id. `None` in a `seed-state.json` written
+    /// before the seed made one; the sprint tests then say to re-seed.
+    #[serde(default)]
+    sprint: Option<SeededSprint>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededSprint {
+    /// The Sprint custom field's id, found by the seed by its plugin key.
+    field: String,
+    id: u64,
+    name: String,
+    /// The keys the seed put in the sprint.
+    issues: Vec<String>,
+}
+
+impl Seed {
+    fn sprint(&self) -> &SeededSprint {
+        self.sprint.as_ref().expect(
+            "seed-state.json records no sprint: it was written before the seed made one \
+             (#811). Re-run `./seed-atlassian-content.sh jira`.",
+        )
+    }
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1320,6 +1344,78 @@ async fn test_connection_discovers_the_epic_link_field_and_that_id_is_the_one_th
     println!("SEEDED discovery: test_connection found {found}, and PAY-219 -> PAY-200 through it");
 }
 
+/// **The Sprint field is discovered, and a ticket synced through it carries
+/// its active sprint** (#811).
+///
+/// The same round trip as the Epic Link's above: `test_connection` reads the
+/// field table and names the Sprint field, the id must be the one
+/// `seed-atlassian-content.sh` found by its own reading (the control), and a
+/// source configured from the *discovered* id stores each ticket's sprints
+/// beside the record, where the descriptor's `sprint_state` reads them. The
+/// seed's sprint holds PAY-231, started; every other ticket is in none.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn test_connection_discovers_the_sprint_field_and_a_synced_ticket_carries_its_active_sprint()
+{
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let sprint = seeded.seed.sprint();
+
+    let info = seeded
+        .source(serde_json::json!({}))
+        .test_connection()
+        .await
+        .expect("the seeded server answers the field table");
+    let found = info
+        .discovered
+        .get("sprint_field")
+        .unwrap_or_else(|| {
+            panic!(
+                "test_connection discovered no Sprint field on an instance that has one ({}): \
+                 {info:?}",
+                sprint.field
+            )
+        })
+        .clone();
+    assert_eq!(
+        found, sprint.field,
+        "the adapter and the seed must name the same field"
+    );
+    assert_ne!(
+        found, seeded.seed.epic_link_field,
+        "the Sprint field is not Epic Link"
+    );
+
+    let (items, _) = full(&*seeded.source(serde_json::json!({ "sprint_field": found }))).await;
+    let declared = knobas_source_jira::descriptor_template()
+        .payload_paths
+        .into_iter()
+        .find(|p| p.kind == "ticket")
+        .expect("Jira declares its tickets")
+        .sprint_state;
+    for key in seeded.seeded_keys() {
+        let stored = &item(&items, &key).payload["sprints"];
+        let states = knobas_core::payload::resolve_list(&item(&items, &key).payload, &declared);
+        if sprint.issues.contains(&key) {
+            assert_eq!(
+                stored,
+                &serde_json::json!([{ "id": sprint.id, "name": sprint.name, "state": "active" }]),
+                "{key} is in the seed's active sprint"
+            );
+            assert_eq!(states, ["active"], "{key}: what `sprint:current` reads");
+        } else {
+            assert_eq!(stored, &serde_json::json!([]), "{key} is in no sprint");
+            assert!(states.is_empty(), "{key}");
+        }
+    }
+    // What Jira sent, kept as it was beside the copy: the spelling `map` read.
+    println!(
+        "SEEDED sprint: test_connection found {found}; {} carries {}",
+        sprint.issues[0],
+        item(&items, &sprint.issues[0]).payload["fields"][&found]
+    );
+}
+
 /// **Epic membership lives in the Epic Link custom field, and `fields.parent`
 /// is not served at all** -- the largest single divergence this certification
 /// found, and the one the Contexts work reads.
@@ -1921,7 +2017,12 @@ async fn passes_the_contract_battery_against_the_seeded_server() {
     // unconfigured classic source fails clause 6, and correctly: it stores no
     // `epic`, serves no `fields.parent`, and so every `under:` read on it
     // misses (the deputy's ruling of 2026-10-12 on #598).
-    let configured = serde_json::json!({ "epic_link_field": seeded.seed.epic_link_field });
+    // And the Sprint field it discovered (#811): the declared `sprint_state`
+    // then resolves on the seed's active sprint, which clause 3 weighs.
+    let configured = serde_json::json!({
+        "epic_link_field": seeded.seed.epic_link_field,
+        "sprint_field": seeded.seed.sprint().field,
+    });
     battery(move |fault| match fault {
         Fault::None => seeded.source(configured.clone()),
         // A bearer token, not a wrong password: the battery builds a faulted
