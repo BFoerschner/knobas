@@ -56,7 +56,7 @@ test("the week and Log all: the label and passive blocks are never planned, and 
     { day: dayBeforeName, from: dayBefore.toISOString(), to: from.toISOString() },
     { day, from: from.toISOString(), to: to.toISOString() },
   ];
-  const plan = h["log_all_preview"]!({ days }) as { entity_id: string; seconds: number }[];
+  const plan = h["log_all_preview"]!({ days }) as { day: string; entity_id: string; seconds: number }[];
   // Yesterday's fixed 1h 30m row (prototype-6's Thu 21), then today's PAY-231.
   expect(plan.map((row) => [row.day, row.entity_id, row.seconds])).toEqual([
     [dayBeforeName, "mock:PAY-231", 90 * 60],
