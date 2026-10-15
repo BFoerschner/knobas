@@ -1937,3 +1937,45 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   new one goes after the last bullet and its continuation, and written lines follow the body's
   line ending. A replaced note's wrapped tail stays in the body rather than being deleted, since the
   form never showed it. **Reversing:** low.
+## #813 Lanes, list sorting and keyboard selection; #815 Signals on tickets
+
+- **Lanes are split in the browser, over an uncapped read.** R-3.5 says "UI only", and a lane's
+  columns and counts are its own, which `mini_board`'s per-status cap cannot give. So a laned
+  board asks for every ticket and `splitLanes` cuts it; each lane's columns keep the 8/3 caps and
+  *Show N more* locally. **Cost:** a laned board on a large mirror reads it whole (the list's
+  *Show N more* already does). **Reversing:** a lane argument on `mini_board`, partitioning by
+  lane and status in SQL.
+- **Reading order is lane by lane, column by column, top to bottom**, the order prototype-6's
+  `j`/`k` walk (its DOM order); in the list, the rows as sorted. **Reversing:** low.
+- **The list opens newest first and marks Updated `descending`.** Prototype-6 marks the same
+  order ▴ ("ascending") because its time is minutes ago; ours is a date, so newest first is
+  descending. A header pressed for the first time sorts ascending, a second press turns it.
+  **Reversing:** low.
+- **Priority sorts by Jira's default ranking** (Highest, Blocker, Critical, High, Major, Medium,
+  Normal, Minor, Low, Trivial, Lowest), ignoring case; a priority not in it sorts after them by
+  name, and none sorts last either way. Order only, never wording, as the board's leading
+  statuses. **Reversing:** a declared priority order, if a source ever declares one.
+- **The *Board / List*, *Lanes* and sort switches are the page's module state**, never written to
+  storage or a command, so a restart forgets them (R-3.3). Ticket views do not exist yet (#812),
+  so they override the defaults; keying them by view is #812's. **Reversing:** low.
+- **A card carries its labels** (`MiniBoardCard.labels`, §10.8 entry 815), because the *Label*
+  lane is a ticket's first label and the card had none. **Reversing:** drop the field and the lane.
+- **What each signal means** (`knobas_core::signals`): the reach is ADR-0008's walk from the
+  ticket (its confirmed links, one hop further). *Build failed*: the newest build of a
+  configuration in reach is in the `err` tone, so a newer green run puts it out. *Blocked by*:
+  every confirmed `blocks` link ending at the ticket, whatever the blocker's status, because no
+  source declares which statuses are done. *PR #N open*: a pull request the ticket links directly
+  in the `info` tone, the number being its key's trailing `#N`. *Review asked of you*: one of
+  those names the user as a requested reviewer. **Cost:** a build found only by commit (a pull
+  request's head sha, #710) and not by a link gives no signal. **Reversing:** low, one macro.
+- **Prototype-6's other signal words are left out**: *PR #139 merged*, *dashboard 8.4 s*, *new to
+  you*, *blocks PAY-228*. The tickets name four facts and `has:` four values; the others have no
+  read behind them. **Reversing:** add a kind to `SignalKind` and its arm.
+- **`has:` reads its binds in place, not through `fd`.** Through `fd` the walk was a subplan run
+  once per row; in place it is one hashed subplan a statement, over every end of a confirmed link.
+  **Reversing:** low.
+- **The epic lane is headed by the card's path line (`PAY-200`)**, not prototype-6's key and
+  epic name: the card has no declared epic name. **Reversing:** with a declared parent name.
+- **The fixture gains PR #150**, open, asking the fixture user for a review and linked to
+  PAY-236, so the card says *review asked of you* as prototype-6's does; it also says *PR #150
+  open*, which the prototype does not. **Reversing:** low.

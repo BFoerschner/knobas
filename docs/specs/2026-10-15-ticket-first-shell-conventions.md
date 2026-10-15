@@ -39,6 +39,12 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - An estimate reads in hours and minutes (`est. 6h`), never days. (#816, PR #898)
 - Initials come from the account's spelling (`mara.lindqvist` is ML). (#810, PR #895)
 
+## Tickets
+
+- The *Board / List*, *Lanes* and list sort hold for the session as the page's module `$state`, and are never written to storage or a command; a restart forgets them. (#813)
+- A list header that sorts is a `th` carrying `aria-sort` with a button inside; CSS draws ▴ or ▾ on the sorted one. A column that does not sort is a plain `th`. (#813)
+- A signal is drawn through `tickets/Signals.svelte`: a `tf-dot` in its tone, then its words. Cards and list rows draw the read's signals and nothing else. (#815)
+
 ## Filter keys
 
 - Filter keys on the new shell's search use the launcher's grammar, evaluated on the server; a negation is `-key:value` on the keys only, and a row whose field is absent fails the key and passes its negation. (#811, PR #890; #810, PR #895)
