@@ -61,11 +61,11 @@ pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
 pub use query::{EffectiveFilters, FieldFilter, FieldKey, Parsed, merge, parse};
 pub use saved::{Refusal, SavedList};
-pub use suggest::PARENT_SUGGESTIONS;
+pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
-    EntityRow, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions, KindSuggestion,
-    ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit, SearchQuery,
-    SearchResponse, Segment, SourceAnswer, SourceSuggestion,
+    EntityRow, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions,
+    KindSuggestion, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit,
+    SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -392,6 +392,7 @@ impl Searcher {
             kinds: Vec::new(),
             sources: Vec::new(),
             parents: suggest::parents(&self.pool, under).await?,
+            fields: Vec::new(),
         })
     }
 

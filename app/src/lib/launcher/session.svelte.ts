@@ -156,8 +156,8 @@ export class Session {
   suggestions = $state<FilterSuggestions | null>(null);
   /** The `under:` prefix last asked for, or `null` before the first read. */
   #suggestionsFor: string | null = null;
-  /** The opening's first read, whose kinds and sources every later answer keeps. */
-  #lists: Promise<Pick<FilterSuggestions, "kinds" | "sources">> | null = null;
+  /** The opening's first read, whose kinds, sources and ticket-key values every later answer keeps. */
+  #lists: Promise<Pick<FilterSuggestions, "kinds" | "sources" | "fields">> | null = null;
   /** A read failed: nothing is asked again until the next opening. */
   #suggestionsFailed = false;
   /** Orders the reads, so a late answer to an older prefix is dropped. */
@@ -311,7 +311,7 @@ export class Session {
       let answer: FilterSuggestions;
       if (this.#lists === null) {
         const first = read(under, false);
-        this.#lists = first.then(({ kinds, sources }) => ({ kinds, sources }));
+        this.#lists = first.then(({ kinds, sources, fields }) => ({ kinds, sources, fields }));
         // A failed first read is reported by the `await` below; this copy of
         // it has no other reader when no second read follows.
         this.#lists.catch(() => {});
@@ -319,7 +319,7 @@ export class Session {
       } else {
         // The parents alone, beside the opening's read if it is still in flight.
         const [lists, next] = await Promise.all([this.#lists, read(under, true)]);
-        answer = { kinds: lists.kinds, sources: lists.sources, parents: next.parents };
+        answer = { ...lists, parents: next.parents };
       }
       if (id <= this.#suggestionsApplied) return;
       this.#suggestionsApplied = id;

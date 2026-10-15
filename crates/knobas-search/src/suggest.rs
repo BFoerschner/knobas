@@ -32,7 +32,9 @@
 
 use sqlx::PgPool;
 
-use crate::types::{FilterSuggestions, KindSuggestion, ParentSuggestion, SourceSuggestion};
+use crate::types::{
+    FieldSuggestion, FilterSuggestions, KindSuggestion, ParentSuggestion, SourceSuggestion,
+};
 use crate::{SearchError, Vocabulary};
 
 /// Every kind with at least one row, over the four corpora the launcher
@@ -195,6 +197,112 @@ const PARENTS_SQL: &str = concat!(
      limit $2"
 );
 
+/// How many values one ticket key is offered with (#811): the most used
+/// this many. The box narrows them as the value is typed.
+pub const FIELD_SUGGESTIONS: i64 = 50;
+
+/// The values the live mirror holds for each ticket key (#811), the most
+/// used [`FIELD_SUGGESTIONS`] per key, most used first: `(key, value,
+/// detail)`.
+///
+/// Read through the **same declared reads** the keys filter by
+/// (`crate::corpus::LIVE_ITEM_FIELDS`, ADR-0007), with the declarations at
+/// `$1`, so an offered value is one the key matches; a row whose source
+/// declares nothing contributes nothing. The value keeps the source's
+/// spelling, the way a reader knows it, and the key matches it ignoring case.
+/// A project is offered by its key, its name beside it. `sprint` is offered
+/// as `current`, once, when any live row is in an active sprint.
+///
+/// **What it costs**: one pass over the live mirror, reading six declared
+/// fields per row. It rides the opening's read, once per opening, never a
+/// keystroke's (#768), and a row of a kind that declares none of the fields
+/// is passed over by the `where` before any path is walked.
+const FIELDS_SQL: &str = concat!(
+    "select f.key, f.value, f.detail from ( \
+       select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
+              row_number() over (partition by v.key order by count(*) desc, v.value) as rn \
+         from sync.live_item i \
+         cross join lateral (",
+    "select 'project' as key, ",
+    knobas_core::declared_string!("$1", "project_key"),
+    " as value, ",
+    knobas_core::declared_string!("$1", "project_name"),
+    " as detail \
+     union all select 'status', ",
+    knobas_core::declared_string!("$1", "status_name"),
+    ", null \
+     union all select 'issuetype', ",
+    knobas_core::declared_string!("$1", "issue_type"),
+    ", null \
+     union all select 'priority', ",
+    knobas_core::declared_string!("$1", "priority"),
+    ", null \
+     union all select 'assignee', ",
+    knobas_core::declared_string!("$1", "assignee"),
+    ", null \
+     union all select 'label', l.value, null from ",
+    knobas_core::declared_list!("$1", "labels"),
+    " l \
+     union all select 'sprint', 'current', null where exists (select 1 from ",
+    knobas_core::declared_list!("$1", "sprint_state"),
+    " s where lower(s.value) = 'active')) v \
+        where jsonb_typeof($1::jsonb #> array[i.source_id, i.kind]) = 'object' \
+          and v.value is not null \
+        group by v.key, v.value) f \
+      where f.rn <= $2 \
+      order by f.key, f.uses desc, f.value"
+);
+
+/// The keys whose values are offered, in the order the box shows them.
+const FIELD_ORDER: [&str; 8] = [
+    "project",
+    "status",
+    "issuetype",
+    "priority",
+    "assignee",
+    "label",
+    "sprint",
+    "assigned",
+];
+
+/// The ticket keys' values (#811), `@me` first among the assignees while
+/// knobas knows who the user is, and `assigned:`'s windows, which every
+/// installation has.
+async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion>, SearchError> {
+    let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(FIELDS_SQL)
+        .bind(vocab.declarations.as_param())
+        .bind(FIELD_SUGGESTIONS)
+        .fetch_all(pool)
+        .await?;
+    let mut out: Vec<FieldSuggestion> = Vec::new();
+    let suggestion = |key: &str, value: &str, detail: &str| FieldSuggestion {
+        key: key.to_owned(),
+        value: value.to_owned(),
+        detail: detail.to_owned(),
+    };
+    for key in FIELD_ORDER {
+        if key == "assignee" && !vocab.identity.is_empty() {
+            out.push(suggestion(key, "@me", "you"));
+        }
+        if key == "assigned" {
+            out.push(suggestion(key, "today", "assigned to you, changed today"));
+            out.push(suggestion(
+                key,
+                "week",
+                "assigned to you, changed this week",
+            ));
+        }
+        for (_, value, detail) in rows.iter().filter(|(k, _, _)| k == key) {
+            let detail = match key {
+                "sprint" => "the active sprint",
+                _ => detail.as_deref().unwrap_or(""),
+            };
+            out.push(suggestion(key, value, detail));
+        }
+    }
+    Ok(out)
+}
+
 /// The parents for the prefix `under` (empty for none), and nothing else: the
 /// read the box makes on every keystroke of an `under:` value (#761, #768).
 ///
@@ -266,6 +374,7 @@ pub(crate) async fn read(
             })
             .collect(),
         parents,
+        fields: fields(pool, vocab).await?,
     })
 }
 

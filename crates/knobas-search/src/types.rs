@@ -551,6 +551,26 @@ pub struct FilterSuggestions {
     /// kind, newest first (#761). A parent with two names (a Gitea repo's
     /// `owner/name` and `name`) is listed once per name that has the prefix.
     pub parents: Vec<ParentSuggestion>,
+    /// The values the ticket keys can take (#811): for each of `project:`,
+    /// `status:`, `issuetype:`, `priority:`, `assignee:` and `label:` the
+    /// most used [`crate::FIELD_SUGGESTIONS`] values the live mirror holds,
+    /// in the source's spelling; `assignee:`'s `@me` first; `sprint:`'s
+    /// `current` while a ticket is in an active sprint; `assigned:`'s
+    /// `today` and `week`. Read with the kinds and the sources, once per
+    /// opening, and empty from a parents-only read.
+    #[serde(default)]
+    pub fields: Vec<FieldSuggestion>,
+}
+
+/// One value a ticket key can take (#811).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct FieldSuggestion {
+    /// The key as the grammar spells it, without the colon: `status`.
+    pub key: String,
+    /// What the box completes the key with: `In Review`, `PAY`, `@me`.
+    pub value: String,
+    /// What is drawn beside it: a project's name, `you` for `@me`, or empty.
+    pub detail: String,
 }
 
 /// One kind `kind:` can name.

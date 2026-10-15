@@ -423,3 +423,103 @@ async fn a_ticket_key_alone_is_a_query_and_matches_no_note() {
         .unwrap());
     assert!(got.contains(&note), "{got:?}");
 }
+
+/// `filter_suggestions` offers the eight keys' values (#811): the values the
+/// live mirror holds for each field, in the source's own spelling, a
+/// project with its name beside it, `@me` first among the assignees,
+/// `current` for the sprint only while a ticket is in an active one, and
+/// `assigned:`'s two windows. The parents-only read carries none of them.
+#[tokio::test]
+async fn filter_suggestions_offer_each_keys_values() {
+    let pool = pool().await;
+    let p = project();
+    store(
+        &pool,
+        &p,
+        1,
+        Ticket {
+            status: "In Review",
+            issuetype: "Bug",
+            priority: Some("High"),
+            assignee: Some("jonas.becker"),
+            labels: &["sepa", "psp"],
+            sprints: &["active"],
+            ..BASE
+        },
+    )
+    .await;
+    let s = searcher(&pool).await;
+    let lists = s.filter_suggestions("").await.unwrap();
+    let values = |key: &str| -> Vec<(String, String)> {
+        lists
+            .fields
+            .iter()
+            .filter(|f| f.key == key)
+            .map(|f| (f.value.clone(), f.detail.clone()))
+            .collect()
+    };
+    let has = |key: &str, value: &str| values(key).iter().any(|(v, _)| v == value);
+    assert!(
+        values("project").contains(&(p.clone(), format!("{p} Payments"))),
+        "{:?}",
+        values("project")
+    );
+    assert!(has("status", "In Review"), "{:?}", values("status"));
+    assert!(has("issuetype", "Bug"), "{:?}", values("issuetype"));
+    assert!(has("priority", "High"), "{:?}", values("priority"));
+    assert!(
+        has("label", "psp") && has("label", "sepa"),
+        "{:?}",
+        values("label")
+    );
+    let assignees = values("assignee");
+    assert_eq!(
+        assignees.first().map(|(v, _)| v.as_str()),
+        Some("@me"),
+        "{assignees:?}"
+    );
+    assert!(has("assignee", "jonas.becker"), "{assignees:?}");
+    assert_eq!(
+        values("sprint"),
+        [("current".to_owned(), "the active sprint".to_owned())]
+    );
+    let windows: Vec<String> = values("assigned").into_iter().map(|(v, _)| v).collect();
+    assert_eq!(windows, ["today", "week"]);
+    // Every value offered is one the grammar reads as a filter.
+    for f in &lists.fields {
+        let raw = if f.value.contains(' ') {
+            format!("{}:\"{}\"", f.key, f.value)
+        } else {
+            format!("{}:{}", f.key, f.value)
+        };
+        let response = s.search(q(&raw)).await.unwrap();
+        assert!(response.interpreted.unknown_tokens.is_empty(), "{raw}");
+    }
+
+    assert!(
+        s.filter_parent_suggestions("")
+            .await
+            .unwrap()
+            .fields
+            .is_empty()
+    );
+}
+
+/// No ticket in an active sprint, no `current` to offer: picking it would
+/// lead to an empty result.
+#[tokio::test]
+async fn no_active_sprint_offers_no_current() {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    // This file's database holds other tests' active sprints, so the
+    // question is asked with no declaration: nothing reads as a sprint.
+    let lists = Searcher::new(pool.clone())
+        .filter_suggestions("")
+        .await
+        .unwrap();
+    assert!(
+        lists.fields.iter().all(|f| f.key != "sprint"),
+        "{:?}",
+        lists.fields
+    );
+}

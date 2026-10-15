@@ -11,6 +11,12 @@ const LISTS = {
   kinds: [{ kind: "repo", label: "Repository" }],
   sources: [{ id: "jira-eu", display_name: "Jira EU" }],
   parents: [{ name: "Runbooks Overview", kind: "page" }],
+  fields: [
+    { key: "status", value: "In Review", detail: "" },
+    { key: "status", value: "Done", detail: "" },
+    { key: "project", value: "PAY", detail: "Payments" },
+    { key: "assignee", value: "@me", detail: "you" },
+  ],
 };
 
 test("the grammar's other spellings of a key draw from the same list", () => {
@@ -55,4 +61,17 @@ test("a value typed out in full closes the list, even when a longer value contai
     "vm-10",
   ]);
   expect(suggest(activeToken("under:VM-1")!, lists)).toEqual([]);
+});
+
+test("a ticket key draws its own values, negated or not, and quotes one with a space (#811)", () => {
+  expect(activeToken("status:")?.key).toBe("status");
+  expect(activeToken("ASSIGNEE:")?.key).toBe("assignee");
+  const negated = activeToken("sepa -status:rev")!;
+  expect(negated).toMatchObject({ key: "status", typedKey: "-status", partial: "rev" });
+  expect(suggest(negated, LISTS)).toEqual([{ value: "In Review", detail: "" }]);
+  expect(complete("sepa -status:rev", negated, "In Review")).toBe('sepa -status:"In Review" ');
+  expect(suggest(activeToken("project:")!, LISTS)).toEqual([{ value: "PAY", detail: "Payments" }]);
+  expect(suggest(activeToken("assignee:")!, LISTS).map((s) => s.value)).toEqual(["@me"]);
+  // A key with no values in the lists offers nothing.
+  expect(suggest(activeToken("label:")!, LISTS)).toEqual([]);
 });

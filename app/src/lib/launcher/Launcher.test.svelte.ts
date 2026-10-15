@@ -1912,6 +1912,12 @@ const SUGGESTIONS: FilterSuggestions = {
     { name: "Runbooks Overview", kind: "page" },
     { name: "tidewater/payout-service", kind: "repo" },
   ],
+  fields: [
+    { key: "status", value: "In Progress", detail: "" },
+    { key: "status", value: "In Review", detail: "" },
+    { key: "assignee", value: "@me", detail: "you" },
+    { key: "sprint", value: "current", detail: "the active sprint" },
+  ],
 };
 
 /** A launcher whose bridge answers the suggestion read, and records searches. */
@@ -1971,6 +1977,28 @@ test("under: values show their kind, so a repo and a same-named page are told ap
     "payout-service · repo",
     "tidewater/payout-service · repo",
   ]);
+});
+
+test("a ticket key opens the values the mirror holds, a value without a detail drawn alone (#811)", async () => {
+  openSuggesting();
+  await settle();
+  await typeInto("status:in");
+  expect(offered()).toEqual(["In Progress", "In Review"]);
+  await typeInto("sepa -assignee:");
+  expect(offered()).toEqual(["@me · you"]);
+  await typeInto("sprint:");
+  expect(offered()).toEqual(["current · the active sprint"]);
+});
+
+test("picking a ticket-key value with a space quotes it and runs the query (#811)", async () => {
+  const { searched } = openSuggesting();
+  await settle();
+  await typeInto('status:"in r');
+  press("ArrowDown");
+  press("Enter");
+  await settle();
+  expect(target.querySelector("input")!.value).toBe('status:"In Review" ');
+  expect(searched.at(-1)).toBe('status:"In Review" ');
 });
 
 test("a picked value completes the token and runs the query", async () => {

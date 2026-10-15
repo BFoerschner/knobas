@@ -464,3 +464,22 @@ test("a closed launcher forgets the kept kinds and sources, so a reopening reads
   expect(filterSuggestions.mock.calls.map(([, p]) => p)).toEqual([false, true, false]);
   expect(session.suggestions?.kinds.map((k) => k.kind)).toEqual(["ticket", "commit"]);
 });
+
+test("a parents-only read keeps the opening's ticket-key values (#811)", async () => {
+  const fields = [{ key: "status", value: "In Review", detail: "" }];
+  const filterSuggestions = vi.fn(async (_under?: string, parentsOnly?: boolean) =>
+    parentsOnly
+      ? { kinds: [], sources: [], parents: [{ name: "PAY-200", kind: "ticket" }], fields: [] }
+      : { kinds: [], sources: [], parents: [], fields },
+  );
+  const session = new Session({
+    ...ports(async (q) => answer(q.raw)),
+    filterSuggestions,
+  } as never);
+
+  await session.loadSuggestions("");
+  await session.loadSuggestions("PAY");
+  expect(filterSuggestions.mock.calls.map(([, p]) => p)).toEqual([false, true]);
+  expect(session.suggestions?.fields).toEqual(fields);
+  expect(session.suggestions?.parents).toEqual([{ name: "PAY-200", kind: "ticket" }]);
+});
