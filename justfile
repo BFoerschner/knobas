@@ -163,10 +163,59 @@ check:
 # with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
 # `crates/` reads what changed, so the cargo half would run the tree main
 # already passed. Ruling: Björn, 2026-10-15.
-check-front:
+#
+# Its vitest run is the tests the change can reach, not the whole suite
+# (#920): `front-changed` below. `check` still runs every test.
+check-front base="origin/main":
     python3 -I scripts/contract-index.py --check
-    just front
+    just front-changed "{{base}}"
     @echo "check-front: ok"
+
+# `front` with vitest narrowed to what a change since BASE can reach (#920).
+# svelte-check and `vite build` stay whole: together under 10 s, and a type
+# error can surface in a file nothing imports from the change.
+#
+# Vitest runs `vitest related` over the changed `app/src` files -- every test
+# file whose import graph reaches one, and every changed test file -- plus
+# every test that reads source files off disk (`readFileSync`, `readdirSync`,
+# `import.meta.glob`, `?raw`: the a11y, residue, house-rules and CSS guards
+# and their kind). Those see the tree through `fs`, not through imports, so
+# the graph cannot say when one is reached; they are found by that grep on
+# every run, so a new guard is included without a list to keep. The whole
+# suite runs instead when anything changed in `app/` outside `app/src`
+# (config, `package.json`, the lockfile), when the test setup file changed
+# (every test runs it, none imports it), or when an `app/src` file was
+# deleted or renamed (a test that still imports it is reached by nothing).
+#
+# What it stops covering: a test that depends on a changed file other than
+# by import or by reading files -- through a global a changed module sets up
+# at import time in some other test's graph, say. None is known (2026-10-15).
+# `check` runs every test, so the full gate still sees one.
+front-changed base="origin/main": deps
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mb=$(git merge-base "{{base}}" HEAD)
+    cd app
+    npx svelte-check --tsconfig ./tsconfig.json
+    all=
+    changed=()
+    while IFS=$'\t' read -r st f _; do
+        case $f in app/src/*) ;; app/*) all="$f is outside app/src" ;; *) continue ;; esac
+        case $st in D*|R*) all="$f was deleted or renamed" ;; esac
+        [ "$f" != app/src/lib/shell/test-setup.ts ] || all="the test setup file changed"
+        changed+=("${f#app/}")
+    done < <(git diff --name-status "$mb" -- . ; git ls-files --others --exclude-standard --full-name -- . | sed 's/^/A\t/')
+    guards=()
+    while IFS= read -r f; do guards+=("$f"); done \
+      < <(grep -rlE 'readFileSync|readdirSync|import\.meta\.glob|\?raw' src | grep -E '\.test\.(svelte\.)?ts$' | sort)
+    if [ -n "$all" ] || [ ${#guards[@]} -eq 0 ]; then
+        echo "front-changed: the whole vitest suite: ${all:-no fs-reading guard tests found}"
+        npx vitest run
+    else
+        echo "front-changed: vitest related to ${#changed[@]} changed files, plus ${#guards[@]} fs-reading guard tests"
+        npx vitest related --run ${changed[@]+"${changed[@]}"} "${guards[@]}"
+    fi
+    npm run build
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
 # `just shot 3 shots time job/PAY-231`. See scripts/shot.sh for query parameters, size and the rooms UI.
@@ -180,7 +229,7 @@ gate base="origin/main":
     set -euo pipefail
     scope=$(scripts/gate-scope.sh "{{base}}")
     echo "gate: $scope"
-    if [ "$scope" = front ]; then just check-front; else just check; fi
+    if [ "$scope" = front ]; then just check-front "{{base}}"; else just check; fi
 
 # The test inventory: every test this workspace defines, by name, committed.
 #
