@@ -217,6 +217,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     set_checkout_command: (args) =>
       fakeSetCommand(String(args["action"] ?? ""), args["template"]),
     open_checkout: (args) => fakeOpen(String(args["action"] ?? "")),
+    entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
 
     // The capture window (#503). Its own document (`capture.html?fake-ipc`),
     // so these five are what that page's walk answers from: the shortcut the
@@ -2624,6 +2625,53 @@ function fakeCheckout(entityId: string) {
             untracked: 0,
             conflicted: 0,
           },
+  };
+}
+
+/**
+ * `entity_checkout_diff` (#824): the one unstaged change the fixture's working
+ * tree counts, as `git diff` would draw it, and nothing staged or untracked.
+ * Refused as the backend refuses an entity with no checkout.
+ */
+function fakeCheckoutDiff(entityId: string) {
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw {
+      code: "not_found",
+      message: `${entityId} has no checkout on this machine, so there are no local changes to read`,
+      source_id: null,
+    };
+  }
+  return {
+    status: "read",
+    unstaged: {
+      files: [
+        {
+          path: "src/retry.rs",
+          old_path: null,
+          change: "modified",
+          additions: 1,
+          deletions: 1,
+          hunks: [
+            {
+              header: "@@ -12,3 +12,3 @@ fn backoff()",
+              lines: [
+                { kind: "context", old: 12, new: 12, text: "    let base = 200;" },
+                { kind: "del", old: 13, new: null, text: "    let tries = 3;" },
+                { kind: "add", old: null, new: 13, text: "    let tries = 5;" },
+                { kind: "context", old: 14, new: 14, text: "    base * tries" },
+              ],
+            },
+          ],
+          truncated: false,
+          threads: [],
+        },
+      ],
+      truncated: false,
+    },
+    staged: { files: [], truncated: false },
+    untracked: [],
+    untracked_truncated: false,
   };
 }
 

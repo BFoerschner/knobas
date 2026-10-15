@@ -90,7 +90,7 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
 
 /// Apple's `git` on a Mac without the Command Line Tools is a shim that opens
 /// an install dialog instead of running (#715).
-const APPLE_SHIM: &str = "/usr/bin/git";
+pub(super) const APPLE_SHIM: &str = "/usr/bin/git";
 
 /// Whether the Command Line Tools are installed, asked once per process once
 /// it has answered. `xcode-select -p` only prints a path and never opens the
@@ -100,7 +100,7 @@ const APPLE_SHIM: &str = "/usr/bin/git";
 /// knobas runs are noticed after a restart. A probe that has not answered is
 /// not kept (the caller abandons it, `kill_on_drop` ends it) and is asked
 /// again on the next read.
-async fn command_line_tools_installed() -> bool {
+pub(super) async fn command_line_tools_installed() -> bool {
     static ANSWER: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
     *ANSWER
         .get_or_init(|| async {
@@ -129,45 +129,22 @@ async fn read_guarded(
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
 ) -> TreeRead {
-    let git = match usable_git(search, shim, probe, timeout).await {
+    let git = match locate(search, shim, probe, timeout).await {
         Ok(git) => git,
-        Err(read) => return read,
+        Err(Unrunnable::NoGit) => return TreeRead::NoGit,
+        Err(Unrunnable::ProbeFailed(reason)) => return TreeRead::Failed { reason },
     };
     if !path.is_dir() {
         return TreeRead::NotARepo;
     }
 
-    let mut command = tokio::process::Command::new(git);
-    command
-        .arg("-C")
-        .arg(path)
-        .args([
-            "--no-optional-locks",
-            "-c",
-            "core.fsmonitor=false",
-            "status",
-            "--porcelain=v2",
-            "--branch",
-            "--untracked-files=normal",
-        ])
-        .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_TERMINAL_PROMPT", "0")
-        // git's own words, untranslated: `not a git repository` below is
-        // matched in English.
-        .env("LC_ALL", "C")
-        // A repository is named by `-C` and nothing else: an inherited
-        // `GIT_DIR` (or one of its parts) would point the read somewhere the
-        // path does not.
-        .env_remove("GIT_DIR")
-        .env_remove("GIT_WORK_TREE")
-        .env_remove("GIT_INDEX_FILE")
-        .env_remove("GIT_COMMON_DIR")
-        .env_remove("GIT_OBJECT_DIRECTORY")
-        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .kill_on_drop(true);
+    let mut command = git_at(&git, path);
+    command.args([
+        "status",
+        "--porcelain=v2",
+        "--branch",
+        "--untracked-files=normal",
+    ]);
 
     let output = match tokio::time::timeout(timeout, command.output()).await {
         Err(_) => {
@@ -187,37 +164,45 @@ async fn read_guarded(
         return TreeRead::Read(parse(&String::from_utf8_lossy(&output.stdout)));
     }
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if stderr.contains("not a git repository") {
+    if not_a_repo(&stderr) {
         return TreeRead::NotARepo;
     }
     TreeRead::Failed {
-        reason: stderr
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("git refused without saying why")
-            .trim()
-            .to_owned(),
+        reason: refusal(&stderr),
     }
 }
 
-/// The `git` to run, or why there is none: [`TreeRead::NoGit`] when none is
-/// on `search` or it is Apple's `shim` without the Command Line Tools, and
-/// [`TreeRead::Failed`] when `probe` did not answer within `timeout`.
-async fn usable_git(
+/// Why no `git` is run at a checkout.
+pub(super) enum Unrunnable {
+    /// Not on the search path, or Apple's shim on a Mac without the Command
+    /// Line Tools.
+    NoGit,
+    /// The Command Line Tools probe did not answer.
+    ProbeFailed(String),
+}
+
+/// The `git` to run, or why none is.
+///
+/// Shared by every read of a checkout ([`read`] and
+/// [`super::uncommitted::read`]), so each refuses the shim the same way.
+pub(super) async fn locate(
     search: &OsStr,
     shim: &Path,
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
-) -> Result<PathBuf, TreeRead> {
-    let git = find_on(search, "git").ok_or(TreeRead::NoGit)?;
+) -> Result<PathBuf, Unrunnable> {
+    let Some(git) = find_on(search, "git") else {
+        return Err(Unrunnable::NoGit);
+    };
     if git == shim {
         match tokio::time::timeout(timeout, probe()).await {
             Err(_) => {
-                return Err(TreeRead::Failed {
-                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
-                });
+                return Err(Unrunnable::ProbeFailed(format!(
+                    "xcode-select did not answer within {} s",
+                    timeout.as_secs()
+                )));
             }
-            Ok(false) => return Err(TreeRead::NoGit),
+            Ok(false) => return Err(Unrunnable::NoGit),
             Ok(true) => {}
         }
     }
@@ -228,13 +213,64 @@ async fn usable_git(
 /// other git command knobas runs, `checkout::clone` (#823).
 pub(crate) async fn git_on_path() -> Result<PathBuf, TreeRead> {
     let search = std::env::var_os("PATH").unwrap_or_default();
-    usable_git(
+    locate(
         &search,
         Path::new(APPLE_SHIM),
         command_line_tools_installed,
         TIMEOUT,
     )
     .await
+    .map_err(|why| match why {
+        Unrunnable::NoGit => TreeRead::NoGit,
+        Unrunnable::ProbeFailed(reason) => TreeRead::Failed { reason },
+    })
+}
+
+/// `git -C <path>` with ADR-0021's read-only terms, before the subcommand:
+/// no optional locks, no fsmonitor, no terminal prompt, git's own English, an
+/// inherited repository location removed, stdin closed and the process killed
+/// when its future is dropped. The caller adds the subcommand.
+pub(super) fn git_at(git: &Path, path: &Path) -> tokio::process::Command {
+    let mut command = tokio::process::Command::new(git);
+    command
+        .arg("-C")
+        .arg(path)
+        .args(["--no-optional-locks", "-c", "core.fsmonitor=false"])
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        // git's own words, untranslated: `not a git repository` is matched in
+        // English.
+        .env("LC_ALL", "C")
+        // A repository is named by `-C` and nothing else: an inherited
+        // `GIT_DIR` (or one of its parts) would point the read somewhere the
+        // path does not.
+        .env_remove("GIT_DIR")
+        .env_remove("GIT_WORK_TREE")
+        .env_remove("GIT_INDEX_FILE")
+        .env_remove("GIT_COMMON_DIR")
+        .env_remove("GIT_OBJECT_DIRECTORY")
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .kill_on_drop(true);
+    command
+}
+
+/// Whether git's stderr says the path is no repository: `status` says
+/// "not a git repository", `diff` warns "Not a git repository" first.
+pub(super) fn not_a_repo(stderr: &str) -> bool {
+    stderr.to_ascii_lowercase().contains("not a git repository")
+}
+
+/// git's first non-blank line on stderr, as the reason a read failed.
+pub(super) fn refusal(stderr: &str) -> String {
+    stderr
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or("git refused without saying why")
+        .trim()
+        .to_owned()
 }
 
 /// The first executable called `name` in a `PATH`-style list.

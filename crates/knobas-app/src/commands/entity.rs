@@ -2872,6 +2872,28 @@ pub async fn set_checkout_override(
     crate::checkout::view(&pool, &entity_id).await
 }
 
+/// The uncommitted changes at this entity's checkout (#824, ADR-0026): the
+/// unstaged and staged diffs and the untracked paths, read by read-only git
+/// when the *Local changes* tab opens.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an address that
+/// is not an entity id or not a repo or branch,
+/// [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// does not hold it or it has no checkout on this machine,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure. What git answered is the read's own arm, never an error.
+#[tauri::command]
+pub async fn entity_checkout_diff(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::checkout::uncommitted::DiffRead, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::local_changes(&pool, &entity_id).await
+}
+
 // -- opening a checkout (#501) ----------------------------------------------
 //
 // Beside #499's four and for its reason: a repo and a branch are entities, and
