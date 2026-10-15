@@ -137,6 +137,24 @@ check:
     fi
     echo "check: ok in ${SECONDS} s"
 
+# The frontend half of `check` alone, with the contract-index check it starts
+# with. Enough for a head `scripts/gate-scope.sh` calls `front`: nothing in
+# `crates/` reads what changed, so the cargo half would run the tree main
+# already passed. Ruling: Björn, 2026-10-15.
+check-front:
+    python3 -I scripts/contract-index.py --check
+    just front
+    @echo "check-front: ok"
+
+# The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
+# is frontend-only against BASE, the full `check` otherwise.
+gate base="origin/main":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    scope=$(scripts/gate-scope.sh "{{base}}")
+    echo "gate: $scope"
+    if [ "$scope" = front ]; then just check-front; else just check; fi
+
 # The test inventory: every test this workspace defines, by name, committed.
 #
 # `just check` going green is not evidence that the tests you wrote still
