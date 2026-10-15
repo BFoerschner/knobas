@@ -64,8 +64,8 @@ export function actionItems(bodyMd: string): ActionItem[] {
   return out;
 }
 
-/** What follows a list bullet, or `null` for a line that is not one. */
-function bullet(line: string): string | null {
+/** What follows a list bullet, or `null` for a line that is not one. Expects a trimmed line. */
+export function bullet(line: string): string | null {
   for (const marker of ["- ", "* ", "+ "]) {
     if (line.startsWith(marker)) return line.slice(marker.length).trim();
   }

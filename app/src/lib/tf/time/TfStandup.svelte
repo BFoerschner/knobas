@@ -259,6 +259,16 @@
     addText = "";
   }
 
+  /** Enter adds what was typed; Esc drops it without closing the view. */
+  function addKey(event: KeyboardEvent) {
+    if (event.key === "Enter") finishAdding();
+    if (event.key === "Escape") {
+      event.stopPropagation();
+      addText = "";
+      adding = null;
+    }
+  }
+
   // -- publishing ---------------------------------------------------------------
 
   /** The first publish asks where; every later one goes where the first said. */
@@ -529,13 +539,7 @@
             placeholder="Name"
             autofocus
             bind:value={addText}
-            onkeydown={(event) => {
-              if (event.key === "Enter") finishAdding();
-              if (event.key === "Escape") {
-                event.stopPropagation();
-                adding = null;
-              }
-            }}
+            onkeydown={addKey}
             onblur={finishAdding}
           />
         {:else}
@@ -576,13 +580,7 @@
           placeholder="New action item"
           autofocus
           bind:value={addText}
-          onkeydown={(event) => {
-            if (event.key === "Enter") finishAdding();
-            if (event.key === "Escape") {
-              event.stopPropagation();
-              adding = null;
-            }
-          }}
+          onkeydown={addKey}
           onblur={finishAdding}
         />
       {:else}

@@ -23,7 +23,7 @@
  * body keeps the shape a new protocol has.
  */
 import type { DigestLine, StandupDigest } from "../../ipc/entity";
-import { actionItems, type ActionItem } from "../../standup/protocol";
+import { actionItems, bullet, type ActionItem } from "../../standup/protocol";
 import { dayLabel } from "../../time/day";
 import { itemHash, keyOf } from "../job/job";
 
@@ -39,11 +39,9 @@ const ATTENDEES = "Attendees";
 const NOTES = "Notes";
 const ACTION_ITEMS = "Action items";
 
-/** A Markdown list bullet's text, or `null` for a line that is not one. */
+/** A Markdown list bullet's text, or `null` for a line that is not one: `actionItems`' reading. */
 function bulletText(line: string): string | null {
-  const trimmed = line.trim();
-  const found = /^[-*+](?:\s+(.*))?$/.exec(trimmed);
-  return found ? (found[1] ?? "").trim() : null;
+  return bullet(line.trim());
 }
 
 function isHeading(line: string): boolean {
