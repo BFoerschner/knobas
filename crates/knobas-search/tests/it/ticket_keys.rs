@@ -631,3 +631,107 @@ async fn a_saved_list_of_ticket_keys_counts_what_it_lists() {
         Some(1)
     );
 }
+
+/// The Tickets view's server-side filter (#810): every ticket the grammar
+/// admits, past the launcher's ten a kind, and only tickets. A query with
+/// nothing in it narrows nothing.
+#[tokio::test]
+async fn matching_ids_are_every_ticket_the_query_admits() {
+    let pool = pool().await;
+    let p = project();
+    let mut bugs = Vec::new();
+    for n in 1..=12 {
+        bugs.push(
+            store(
+                &pool,
+                &p,
+                n,
+                Ticket {
+                    issuetype: "Bug",
+                    ..BASE
+                },
+            )
+            .await,
+        );
+    }
+    let story = store(&pool, &p, 13, BASE).await;
+    sqlx::query("update sync.item set title = 'Retry failed SEPA payouts' where entity_id = $1")
+        .bind(&story)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let searcher = searcher(&pool).await;
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} payouts retr"), "ticket")
+            .await
+            .unwrap(),
+        Some(vec![story.clone()]),
+        "every word must appear, a part of a word as well"
+    );
+    // The key, the assignee and the epic are words of the row too (R-2.3,
+    // "Filter by key, summary, epic or person"); the body is not.
+    let key = format!("{p}-13");
+    sqlx::query(
+        "update sync.item set payload = payload
+              || jsonb_build_object('epic', jsonb_build_object('key', $2::text))
+              || jsonb_build_object('fields', (payload -> 'fields')
+                   || '{\"assignee\": {\"name\": \"priya.nair\", \"key\": \"priya.nair\"}}'::jsonb),
+              body_text = 'a description that mentions zeppelins'
+          where entity_id = $1",
+    )
+    .bind(&story)
+    .bind(format!("{p}-EPIC"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    for typed in [
+        key.to_lowercase(),
+        "PRIYA sepa".to_owned(),
+        format!("{p}-epic retry"),
+    ] {
+        assert_eq!(
+            searcher
+                .matching_ids(&format!("project:{p} {typed}"), "ticket")
+                .await
+                .unwrap(),
+            Some(vec![story.clone()]),
+            "{typed}"
+        );
+    }
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} zeppelins"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "a word only the description holds is not a word of the row"
+    );
+    // The key is the source's, `PAY-13`: the entity id's namespace is not
+    // drawn, so it is not a word of the row either.
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} jira"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "the namespace is not a word of the row"
+    );
+
+    let matched = searcher
+        .matching_ids(&format!("project:{p} issuetype:bug"), "ticket")
+        .await
+        .unwrap()
+        .expect("a query with keys narrows");
+    assert_eq!(sorted(matched), sorted(bugs));
+
+    assert_eq!(searcher.matching_ids("   ", "ticket").await.unwrap(), None);
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} type:page"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "a query for another kind matches no ticket"
+    );
+}

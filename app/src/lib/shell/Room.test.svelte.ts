@@ -678,6 +678,7 @@ function serveCorpus() {
       key: item.key,
       title: item.key,
       priority: null,
+      issue_type: null, assignee: null, updated_at: null, path: null, mine: false,
     }));
     return Promise.resolve({
       columns: cards.length === 0 ? [] : [{ status: "To Do", cards, total: cards.length }],
@@ -1041,6 +1042,7 @@ test("a room hands its own layout to the mini board it draws", async () => {
             key: status,
             title: status,
             priority: null,
+            issue_type: null, assignee: null, updated_at: null, path: null, mine: false,
           },
         ],
         total: 1,
@@ -1069,7 +1071,7 @@ function statusBoard(n: number): MiniBoard {
     columns: Array.from({ length: n }, (_, at) => ({
       status: `S${at + 1}`,
       cards: [
-        { entity_id: `mock:S${at + 1}`, source_id: "mock", key: `PAY-${at + 1}`, title: `S${at + 1}`, priority: null },
+        { entity_id: `mock:S${at + 1}`, source_id: "mock", key: `PAY-${at + 1}`, title: `S${at + 1}`, priority: null, issue_type: null, assignee: null, updated_at: null, path: null, mine: false },
       ],
       total: 1,
     })),
@@ -1108,7 +1110,7 @@ test("a reader's override redraws the mini board, sticks to its room, and clears
     Promise.resolve({
       columns: STATUSES.map((status) => ({
         status,
-        cards: [{ entity_id: `mock:${status}`, source_id: "mock", key: status, title: status, priority: null }],
+        cards: [{ entity_id: `mock:${status}`, source_id: "mock", key: status, title: status, priority: null, issue_type: null, assignee: null, updated_at: null, path: null, mine: false }],
         total: 1,
       })),
       sources: [],

@@ -4,9 +4,8 @@
   Every route a later ticket builds is an empty page here that names it, so an
   address is never a blank pane and never a page pretending to be another.
 
-  - **Tickets** is home and has no breadcrumb. While a timer runs on a ticket
-    its key is drawn on the yellow card, the job key's own face: Archivo at
-    width 62, weight 800, 64px.
+  - **Tickets** is home and has no breadcrumb: the three panes of #810,
+    `tickets/TicketsPage.svelte`.
   - **Job** has no breadcrumb either: it is the place the breadcrumb leads to.
   - **A full view** starts with the breadcrumb (R-1.6): the job you were last
     in on the card yellow, then the view's name, and *Back to <key>* beside
@@ -16,14 +15,18 @@
 -->
 <script lang="ts">
   import { jobHash, SECTION_NAME, type TfRoute } from "./route";
+  import TicketsPage from "./tickets/TicketsPage.svelte";
 
   let {
     route,
+    ready,
     job,
     timedTicket,
     onrooms,
   }: {
     route: TfRoute;
+    /** Whether the database answers yet: a page's reads wait for it. */
+    ready: boolean;
     /** The job the reader was last in. */
     job: string | null;
     /** The ticket key the timer runs on, or `null`. */
@@ -34,23 +37,7 @@
 </script>
 
 {#if route.view === "tickets"}
-  <div class="tf-full">
-    <header class="tf-fhead">
-      <div>
-        <h1>Tickets</h1>
-        <div class="tf-sub">Your ticket views, as a board or a list, with the selected ticket's preview.</div>
-      </div>
-    </header>
-    <div class="tf-empty">
-      {#if timedTicket !== null}
-        <a class="tf-keycard tf-card" href={jobHash(timedTicket)}>
-          <span class="tf-jobkey">{timedTicket}</span>
-          <span class="tf-dim">The timer is on it.</span>
-        </a>
-      {/if}
-      <p>Tickets is not built in the new shell yet. The rooms UI still has every ticket.</p>
-    </div>
-  </div>
+  <TicketsPage {ready} {timedTicket} />
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">

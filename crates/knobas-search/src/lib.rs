@@ -338,6 +338,54 @@ impl Searcher {
         })
     }
 
+    /// Every entity id of `kind` the query admits, uncapped (#810): the
+    /// ticket-first Tickets view's server-side filter (R-2.7), which hands the
+    /// ids to the board it narrows. `None` for a query with neither text nor a
+    /// filter, which narrows nothing; `Some` of none for one that admits no
+    /// `kind` (a `type:` naming another kind among them).
+    ///
+    /// The keys are the launcher's: [`query::parse`] and [`query::merge`]
+    /// with no chips, matched by the predicates [`sql::search_sql`] uses. The
+    /// words are the view's: each must appear in the row's key, title,
+    /// assignee or epic ([`sql::ids_sql`]). Over the live mirror. A prefix
+    /// (`#`, `>`) and `list:` mean nothing here and are not acted on.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a query past the launcher's length,
+    /// [`SearchError::Db`] if a statement fails.
+    pub async fn matching_ids(
+        &self,
+        raw: &str,
+        kind: &str,
+    ) -> Result<Option<Vec<String>>, SearchError> {
+        let query = validate(SearchQuery {
+            raw: raw.to_owned(),
+            limit: 1,
+            filters: SearchFilters::default(),
+        })?;
+        let vocab = self.vocabulary().await?;
+        let parsed = query::parse(&query.raw, &vocab);
+        let mut filters = query::merge(&parsed, &query.filters);
+        let words = parsed
+            .query
+            .text
+            .to_lowercase()
+            .split_whitespace()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+        if words.is_empty() && filters.is_empty() {
+            return Ok(None);
+        }
+        if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == kind) {
+            return Ok(Some(Vec::new()));
+        }
+        filters.kinds = vec![kind.to_owned()];
+        let built = sql::ids_sql(&words, &filters);
+        let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        Ok(Some(ids.into_iter().map(|(id,)| id).collect()))
+    }
+
     /// What an empty box answers with: the smart lists and the newest items.
     ///
     /// Spec §4's board. Deliberately not a search: a query with no text and no

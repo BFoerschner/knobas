@@ -876,6 +876,7 @@ knobas-app	test/it	suggestions_ipc::drawing_the_reverse_of_a_proposal_empties_th
 knobas-app	test/it	suggestions_ipc::linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing
 knobas-app	test/it	suggestions_ipc::the_tray_is_scoped_to_the_room_it_is_drawn_in
 knobas-app	test/it	ticket_keys_ipc::the_filter_suggestions_command_offers_the_keys_values
+knobas-app	test/it	ticket_keys_ipc::the_mini_board_command_narrows_by_a_query_and_marks_my_tickets
 knobas-app	test/it	ticket_keys_ipc::the_search_command_answers_every_ticket_key
 knobas-app	test/it	time_ipc::a_beat_the_shell_sends_reaches_the_day_read_as_a_passive_block
 knobas-app	test/it	time_ipc::a_block_can_be_deleted_and_the_day_stops_listing_it
@@ -1220,6 +1221,7 @@ knobas-core	test/it	inbox::the_inbox_statements_are_never_kept_as_prepared_state
 knobas-core	test/it	inbox::with_no_identity_only_the_rule_that_needs_none_produces_anything
 knobas-core	test/it	link_reads::only_the_exempt_modules_read_the_base_table
 knobas-core	test/it	link_reads::the_rule_actually_rejects_a_read_of_the_base_table
+knobas-core	test/it	mini_board::a_board_narrowed_to_matches_draws_and_counts_only_them
 knobas-core	test/it	mini_board::a_capped_board_keeps_each_columns_newest_cards_and_counts_them_all
 knobas-core	test/it	mini_board::a_derived_room_scopes_by_its_sources_and_all_work_by_nothing
 knobas-core	test/it	mini_board::a_disabled_sources_ticket_is_off_a_project_rooms_board
@@ -1228,6 +1230,7 @@ knobas-core	test/it	mini_board::a_sources_statuses_are_the_boards_offer_without_
 knobas-core	test/it	mini_board::a_ticket_with_no_readable_project_is_on_no_project_rooms_board
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_priority_carries_none
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_status_lands_in_the_terminal_group
+knobas-core	test/it	mini_board::a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine
 knobas-core	test/it	mini_board::a_tombstoned_ticket_is_off_the_board
 knobas-core	test/it	mini_board::an_unknown_or_empty_context_is_an_empty_board
 knobas-core	test/it	mini_board::cards_in_a_column_come_newest_first
@@ -1805,6 +1808,7 @@ knobas-search	test/it	ticket_keys::assigned_is_mine_and_changed_within_the_windo
 knobas-search	test/it	ticket_keys::each_scalar_key_matches_its_field_any_value_and_negates
 knobas-search	test/it	ticket_keys::filter_suggestions_offer_each_keys_values
 knobas-search	test/it	ticket_keys::label_matches_any_of_an_items_labels
+knobas-search	test/it	ticket_keys::matching_ids_are_every_ticket_the_query_admits
 knobas-search	test/it	ticket_keys::no_active_sprint_offers_no_current
 knobas-search	test/it	ticket_keys::project_matches_the_key_or_the_name
 knobas-search	test/it	ticket_keys::sprint_current_is_a_ticket_in_an_active_sprint

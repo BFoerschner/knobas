@@ -339,6 +339,7 @@ const { builtinContexts } = await import("./contexts");
 
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
+const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const { createBadges } = await import("../tf/badges.svelte");
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
@@ -573,6 +574,54 @@ const CASES: Case[] = [
             proposals: () => deferred(0),
             listen: (event, handler) => mockedListen(event, handler),
           }),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Tickets in the ticket-first shell (#810): its `Enter` and the filter
+     * bar's `/` on the window, and the board, contexts, suggestions and
+     * preview reads behind a ready database, each answering late.
+     */
+    name: "TicketsPage",
+    source: "lib/tf/tickets/TicketsPage.svelte",
+    open: (target) => ({
+      app: mount(TicketsPage, {
+        target,
+        props: {
+          ready: true,
+          timedTicket: null,
+          ports: {
+            board: () =>
+              deferred({
+                columns: [
+                  {
+                    status: "To Do",
+                    total: 1,
+                    cards: [
+                      {
+                        entity_id: "mock:PAY-231",
+                        source_id: "mock",
+                        key: "PAY-231",
+                        title: "Retry failed SEPA payouts",
+                        priority: null,
+                        issue_type: null,
+                        assignee: null,
+                        updated_at: null,
+                        path: null,
+                        mine: false,
+                      },
+                    ],
+                  },
+                ],
+                sources: [],
+              }),
+            detail: () => deferred({ body_text: "" }),
+            contexts: () => deferred([]),
+            tally: () => deferred(null),
+            suggestions: () => deferred({ fields: [], parents: [] }),
+          },
         },
       }),
     }),

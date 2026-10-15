@@ -318,6 +318,64 @@ pub fn search_sql(
     }
 }
 
+/// Every live mirror id a query admits, uncapped and unranked (#810): the
+/// Tickets view's server-side filter, which narrows a board rather than
+/// filling a launcher page.
+///
+/// The grammar's keys match through [`corpus_predicates`], the predicates
+/// [`search_sql`] uses, so a key means the same in the view and the launcher.
+/// **The words do not**: the launcher ranks full-text matches over the title
+/// and the body, and this keeps a row when every word appears, as a
+/// substring ignoring case, in its key (the entity id past its namespace, so
+/// `jira` is not a word of every Jira ticket), title, declared assignee or the names
+/// of its declared parents (a Jira ticket's epic) -- R-2.3's rule and
+/// prototype-6's *Filter by key, summary, epic or person*, which the view
+/// marks. `words` are lowercased by the caller; none is no word filter.
+#[must_use]
+pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
+    let corpus = &crate::corpus::LIVE_ITEM;
+    let mut builder = Builder::default();
+    let bound = bind_filters(&mut builder, filters);
+    let typed = (!words.is_empty()).then(|| {
+        (
+            builder.param(Bind::Texts(words.to_vec())),
+            match &bound.declarations {
+                Some(declarations) => declarations.clone(),
+                None => builder.param(Bind::Json(filters.declarations.as_param())),
+            },
+        )
+    });
+
+    let mut sql = String::from("with\n");
+    sql.push_str(&field_paths(&bound));
+    // `with` needs at least one CTE; this one is free.
+    sql.push_str("nothing as (select 1)\n");
+    let _ = write!(
+        sql,
+        "select {} as entity_id from {}",
+        corpus.entity_id, corpus.relation
+    );
+    let mut predicates = corpus_predicates(corpus, None, &bound);
+    if let Some((words, declarations)) = &typed {
+        let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
+        predicates.push(format!(
+            "not exists (select 1 from unnest({words}::text[]) w(word) where \
+             strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1) || ' ' || i.title || ' ' || coalesce({}, '')), w.word) = 0 \
+             and not exists (select 1 from sync.item_parent ip \
+                             where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0))",
+            knobas_core::declared_string!("pd.d", "assignee")
+        ));
+    }
+    sql.push('\n');
+    if !predicates.is_empty() {
+        let _ = write!(sql, " where {}", predicates.join("\n   and "));
+    }
+    SearchSql {
+        sql,
+        binds: builder.binds,
+    }
+}
+
 /// The filter placeholders one statement has allocated, ready to splice.
 ///
 /// A struct rather than four locals so that [`corpus_predicates`] can be one

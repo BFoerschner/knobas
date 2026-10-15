@@ -6,6 +6,7 @@
 //! This file's database is its own (#572); each test uses a project key
 //! nothing else holds, and scopes every query by it.
 
+use knobas_app::commands::entity::mini_board_inner;
 use knobas_app::commands::search::{filter_suggestions_inner, search_inner};
 use knobas_search::{SearchFilters, SearchQuery};
 
@@ -194,4 +195,65 @@ async fn the_filter_suggestions_command_offers_the_keys_values() {
     }
     let parents_only = filter_suggestions_inner(&pool, "", true).await.unwrap();
     assert!(parents_only.fields.is_empty());
+}
+
+/// The Tickets view's board (#810) through `mini_board`'s `query`: the
+/// search grammar narrows the board to every ticket it admits, and each card
+/// says whose it is by the configured username.
+#[tokio::test]
+async fn the_mini_board_command_narrows_by_a_query_and_marks_my_tickets() {
+    let pool = pool().await;
+    let p = project();
+    let (mine, theirs, other) = (format!("{p}-1"), format!("{p}-2"), format!("{p}-3"));
+    for (key, who, kind) in [
+        (&mine, "mara.lindqvist", "Bug"),
+        (&theirs, "jonas.becker", "Bug"),
+        (&other, "jonas.becker", "Story"),
+    ] {
+        issue(
+            &pool,
+            key,
+            serde_json::json!({
+                "status": { "name": "To Do" }, "issuetype": { "name": kind },
+                "priority": { "name": "High" }, "labels": [],
+                "assignee": { "name": who, "key": who },
+            }),
+            &[],
+        )
+        .await;
+    }
+
+    let board = mini_board_inner(
+        &pool,
+        None,
+        &[],
+        None,
+        None,
+        Some(&format!("project:{p} issuetype:Bug")),
+    )
+    .await
+    .unwrap();
+    let cards: Vec<_> = board.columns.iter().flat_map(|c| &c.cards).collect();
+    let mut keys: Vec<&str> = cards.iter().map(|c| c.key.as_str()).collect();
+    keys.sort_unstable();
+    assert_eq!(keys, vec![mine.as_str(), theirs.as_str()]);
+    let card = |key: &str| cards.iter().find(|c| c.key == key).unwrap();
+    assert!(card(&mine).mine);
+    assert!(!card(&theirs).mine);
+    assert_eq!(card(&mine).issue_type.as_deref(), Some("Bug"));
+    assert_eq!(card(&mine).assignee.as_deref(), Some("mara.lindqvist"));
+
+    let blank = mini_board_inner(&pool, None, &[], None, None, Some("  "))
+        .await
+        .unwrap();
+    let all: Vec<&str> = blank
+        .columns
+        .iter()
+        .flat_map(|c| &c.cards)
+        .map(|c| c.key.as_str())
+        .collect();
+    assert!(
+        all.contains(&other.as_str()),
+        "a blank query narrows nothing"
+    );
 }

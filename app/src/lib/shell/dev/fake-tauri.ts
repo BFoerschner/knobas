@@ -1790,6 +1790,8 @@ const CORPUS: {
     status: "In Progress",
     priority: "High",
     assignee: "mara",
+    type: "Story",
+    epic: "PAY-200",
     story_points: 3,
     blocked: false,
     description:
@@ -1805,6 +1807,7 @@ const CORPUS: {
     status: "In Review",
     priority: "Normal",
     assignee: "jonas",
+    type: "Bug",
   }),
   row("mock:OPS-77", "ticket", "Rotate the staging database credentials", "2026-08-19T09:00:00Z", "priya", {
     key: "OPS-77",
@@ -1813,6 +1816,35 @@ const CORPUS: {
     priority: "Low",
     assignee: null,
   }),
+  // The Tickets view's board (#810) wants more than three tickets to look
+  // like prototype-6's: these are its own, in its words, with the type, the
+  // assignee and the epic its cards draw, flat like the rest of this corpus.
+  ...(
+    [
+      ["PAY-240", "Payout dashboard latency", "To Do", "Medium", "Task", "mara", "PAY-200", "2026-08-22T08:12:00Z"],
+      ["PAY-236", "Payout CSV export for finance", "To Do", "Low", "Story", "jonas", "PAY-200", "2026-08-20T10:00:00Z"],
+      ["PAY-232", "Metrics for SEPA retry attempts", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-21T11:00:00Z"],
+      ["PAY-233", "Document the manual-review SLA", "To Do", "Medium", "Sub-task", "mara", "PAY-200", "2026-08-22T09:20:00Z"],
+      ["PAY-219", "Rotate PSP credentials", "Done", "Medium", "Task", "mara", "PAY-200", "2026-08-18T10:00:00Z"],
+      ["PAY-244", "Refund webhooks retry", "In Progress", "High", "Story", "priya", "PAY-300", "2026-08-21T09:30:00Z"],
+      ["PAY-251", "Validate payout batch limits", "In Review", "Medium", "Task", "jonas", "PAY-300", "2026-08-20T15:10:00Z"],
+      ["PAY-205", "Fix FX rate cache", "Done", "Low", "Bug", "priya", "PAY-150", "2026-08-15T12:00:00Z"],
+      ["PAY-210", "Export settlement report timezone", "Done", "Medium", "Story", "jonas", "PAY-150", "2026-08-14T12:00:00Z"],
+      ["PAY-214", "Monitor PSP client rate limit", "Done", "High", "Task", "mara", "PAY-200", "2026-08-12T12:00:00Z"],
+      ["PAY-216", "Clean up manual payout audit log", "Done", "Low", "Task", "priya", null, "2026-08-11T12:00:00Z"],
+    ] as const
+  ).map(([key, title, status, priority, type, assignee, epic, at]) =>
+    row(`mock:${key}`, "ticket", title, at, assignee, {
+      key,
+      fields: { project: { key: "PAY", name: "Payments Platform" } },
+      status,
+      priority,
+      type,
+      assignee,
+      ...(epic ? { epic } : {}),
+      description: `${title}. Finance asked for this; scope is the stage environment first.`,
+    }),
+  ),
   // The repo and one of its branches (#499). Both are here so a QA pass can
   // see the two checkout states the panel exists to keep apart: this repo has
   // a clone under the fixture's clones root, and `mock:ledger` deliberately
@@ -2080,8 +2112,13 @@ function miniBoard(args: Record<string, unknown>) {
     typeof value === "string" && value.trim() !== "" ? value.trim() : null;
 
   const project = args["project"] as string | null | undefined;
+  const query = typeof args["query"] === "string" ? args["query"].trim() : "";
   const tickets = CORPUS.filter(
-    (entry) => entry.kind === "ticket" && entry.deleted_at === null && inProject(entry, project),
+    (entry) =>
+      entry.kind === "ticket" &&
+      entry.deleted_at === null &&
+      inProject(entry, project) &&
+      (query === "" || fakeQueryMatches(entry, query)),
   )
     .slice()
     .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
@@ -2173,14 +2210,71 @@ function listProjects() {
 
 /** One card of the fixture's board. */
 function boardCard(entry: (typeof CORPUS)[number]) {
-  const priority = entry.payload["priority"];
+  const text = (value: unknown) =>
+    typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+  const assignee = text(entry.payload["assignee"]);
   return {
     entity_id: entry.entity_id,
     source_id: "mock",
     key: entry.entity_id.slice(entry.entity_id.indexOf(":") + 1),
     title: entry.title,
-    priority: typeof priority === "string" && priority.trim() !== "" ? priority.trim() : null,
+    priority: text(entry.payload["priority"]),
+    // The fields the Tickets view's cards draw (#810), read flat because
+    // that is the shape this corpus is in.
+    issue_type: text(entry.payload["type"]),
+    assignee,
+    updated_at: entry.updated_at,
+    path: text(entry.payload["epic"]),
+    mine: assignee !== null && assignee.toLowerCase() === FAKE_IDENTITY,
   };
+}
+
+/** Who `@me` is in the fixture: the username the cards' `mine` matches. */
+const FAKE_IDENTITY = "mara";
+
+/**
+ * `mini_board`'s `query` (#810), restated over the fixture: every word must
+ * appear in the key, the title, the assignee or the epic, ignoring case, as
+ * `knobas_search::sql::ids_sql` has it, and each ticket key the
+ * Tickets view's chips and dropdowns write (`issuetype:`, `priority:`,
+ * `assignee:`, `status:`, `project:`, `under:`) must hold, values of one key
+ * meaning any of them. A restatement, which certifies nothing: the real
+ * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
+ */
+function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
+  const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
+  const keys = new Map<string, { negated: boolean; values: string[] }>();
+  const words: string[] = [];
+  for (const [, minus, key, quoted, bare, word] of tokens) {
+    if (word !== undefined) {
+      words.push(word.toLowerCase());
+      continue;
+    }
+    const name = `${minus}${key!.toLowerCase()}`;
+    const held = keys.get(name) ?? { negated: minus === "-", values: [] };
+    held.values.push((quoted ?? bare ?? "").toLowerCase());
+    keys.set(name, held);
+  }
+  const card = boardCard(entry);
+  const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
+  if (!words.every((word) => haystack.includes(word))) return false;
+  const field: Record<string, string | null> = {
+    issuetype: card.issue_type,
+    priority: card.priority,
+    assignee: card.assignee,
+    status: typeof entry.payload["status"] === "string" ? (entry.payload["status"] as string) : null,
+    project: projectOf(entry)?.key ?? null,
+    under: card.path,
+  };
+  for (const [name, { negated, values }] of keys) {
+    const key = name.replace(/^-/, "");
+    if (!(key in field)) continue;
+    const have = field[key]?.toLowerCase() ?? null;
+    const wanted = values.map((value) => (value === "@me" ? FAKE_IDENTITY : value));
+    const hit = have !== null && wanted.includes(have);
+    if (hit === negated) return false;
+  }
+  return true;
 }
 
 /** `list_entities`, filtered, ordered and paged the way the real one is. */

@@ -3520,6 +3520,12 @@ fn announce_context<R: tauri::Runtime>(
 /// `per_column` cuts each column to its newest cards (#753), the Tickets
 /// tile's read; omitted, the board is whole, which is what the ticket detail's
 /// status select reads.
+///
+/// `query` is the ticket-first Tickets view's filter (#810, R-2.7): search
+/// grammar text, the view's base query and the filter bar's words and chips.
+/// A non-blank one narrows the board to every ticket the grammar admits
+/// ([`knobas_search::Searcher::matching_ids`]); omitted or blank, it narrows
+/// nothing.
 #[tauri::command]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
@@ -3527,14 +3533,58 @@ pub async fn mini_board(
     sources: Vec<String>,
     project: Option<String>,
     per_column: Option<u32>,
+    query: Option<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
-    let declarations = declared_paths(&pool).await?;
-    Ok(knobas_core::mini_board::read_capped(
+    mini_board_inner(
         &pool,
         ctx_id.as_deref(),
         &sources,
         project.as_deref(),
+        per_column,
+        query.as_deref(),
+    )
+    .await
+}
+
+/// [`mini_board`], against a pool.
+///
+/// Every card says whether it is assigned to me, by the usernames the
+/// enabled sources are configured with: the identity `@me` resolves to.
+///
+/// # Errors
+///
+/// See [`mini_board`]; a query past the launcher's length is `invalid`.
+pub async fn mini_board_inner(
+    pool: &PgPool,
+    ctx_id: Option<&str>,
+    sources: &[String],
+    project: Option<&str>,
+    per_column: Option<u32>,
+    query: Option<&str>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    let declarations = declared_paths(pool).await?;
+    let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
+        Some(query) => {
+            crate::commands::search::searcher(pool)
+                .await?
+                .matching_ids(query, "ticket")
+                .await?
+        }
+        None => None,
+    };
+    let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+        .await?
+        .identity;
+    Ok(knobas_core::mini_board::read_scoped(
+        pool,
+        knobas_core::mini_board::Scope {
+            ctx_id,
+            sources,
+            project,
+            only: only.as_deref(),
+            identity: &identity,
+        },
         &declarations,
         per_column,
     )

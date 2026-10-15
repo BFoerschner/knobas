@@ -933,3 +933,138 @@ async fn the_sources_statuses_statement_is_never_kept_as_a_prepared_statement() 
     .unwrap();
     assert_eq!(kept, 0);
 }
+
+// -- the Tickets view's board (#810) ----------------------------------------
+
+/// What the Jira declaration says about a ticket beyond its status (#810):
+/// its type, its assignee and its epic, the fields a ticket card draws.
+fn ticket_declarations() -> Declarations {
+    Declarations::empty().with(
+        SOURCE,
+        vec![KindPaths {
+            kind: "ticket".to_owned(),
+            status_name: vec![PayloadPath::of(["fields", "status", "name"])],
+            priority: vec![PayloadPath::of(["fields", "priority", "name"])],
+            assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
+            issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+            parent: vec![knobas_core::payload::ParentPath {
+                kind: "ticket".to_owned(),
+                at: PayloadPath::of(["epic"]),
+                names: vec![PayloadPath::of(["key"])],
+            }],
+            ..KindPaths::default()
+        }],
+    )
+}
+
+/// A card carries what the Tickets view draws on it: type, assignee, when it
+/// changed, the epic it sits under, and whether it is assigned to me. A
+/// ticket whose record names none of them carries none, never a guess.
+#[tokio::test]
+async fn a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine() {
+    let pool = scratch().await;
+    let full = item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-231",
+        serde_json::json!({
+            "fields": {
+                "status": { "name": "In Progress" },
+                "issuetype": { "name": "Story" },
+                "assignee": { "name": "Mara.Lindqvist" }
+            },
+            "epic": { "key": "PAY-200" }
+        }),
+    )
+    .await;
+    touched(&pool, &full, "2026-08-22T11:48:00Z").await;
+    item(&pool, SOURCE, "ticket", "PAY-1", jira(Some("To Do"), None)).await;
+
+    let board = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope {
+            identity: &["mara.lindqvist".to_owned()],
+            ..mini_board::Scope::default()
+        },
+        &ticket_declarations(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let card = |key: &str| {
+        board
+            .columns
+            .iter()
+            .flat_map(|column| &column.cards)
+            .find(|card| card.key == key)
+            .unwrap()
+            .clone()
+    };
+    let full = card("PAY-231");
+    assert_eq!(full.issue_type.as_deref(), Some("Story"));
+    assert_eq!(full.assignee.as_deref(), Some("Mara.Lindqvist"));
+    assert_eq!(full.path.as_deref(), Some("PAY-200"));
+    assert_eq!(
+        full.updated_at.map(|at| at.to_rfc3339()),
+        Some("2026-08-22T11:48:00+00:00".to_owned())
+    );
+    assert!(full.mine, "the identity matches ignoring case");
+
+    let bare = card("PAY-1");
+    assert_eq!(bare.issue_type, None);
+    assert_eq!(bare.assignee, None);
+    assert_eq!(bare.path, None);
+    assert!(!bare.mine, "an unassigned ticket is nobody's");
+}
+
+/// `only` narrows the board to the tickets a search matched (#810), inside
+/// whatever else the scope narrows by, and every column counts only those.
+#[tokio::test]
+async fn a_board_narrowed_to_matches_draws_and_counts_only_them() {
+    let pool = scratch().await;
+    let a = ticket(&pool, "PAY-1", Some("To Do"), None).await;
+    ticket(&pool, "PAY-2", Some("To Do"), None).await;
+    let c = ticket(&pool, "PAY-3", Some("Done"), None).await;
+    ticket(&pool, "PAY-4", Some("In Review"), None).await;
+
+    let only = vec![a, c];
+    let board = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope {
+            only: Some(&only),
+            ..mini_board::Scope::default()
+        },
+        &declarations(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        columns(&board),
+        vec![
+            (Some("To Do"), vec!["PAY-1"]),
+            (Some("Done"), vec!["PAY-3"])
+        ]
+    );
+    assert!(board.columns.iter().all(|column| column.total == 1));
+
+    let none: Vec<String> = Vec::new();
+    let empty = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope {
+            only: Some(&none),
+            ..mini_board::Scope::default()
+        },
+        &declarations(),
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(
+        empty.columns.is_empty(),
+        "no match is an empty board, not the whole one"
+    );
+}

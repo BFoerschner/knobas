@@ -253,7 +253,7 @@
     ontheme={toggleTheme}
   />
   <main class="tf-main" tabindex="-1">
-    <TfPage {route} job={lastJob} {timedTicket} {onrooms} />
+    <TfPage {route} ready={lifecycle.ready} job={lastJob} {timedTicket} {onrooms} />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
   <TfToasts />

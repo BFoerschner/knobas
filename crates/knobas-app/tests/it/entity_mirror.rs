@@ -1063,7 +1063,18 @@ fn the_context_kinds_match_their_typescript_mirror() {
 
 const MINI_BOARD_FIELDS: &[&str] = &["columns", "sources"];
 const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status", "total"];
-const MINI_BOARD_CARD_FIELDS: &[&str] = &["entity_id", "key", "priority", "source_id", "title"];
+const MINI_BOARD_CARD_FIELDS: &[&str] = &[
+    "assignee",
+    "entity_id",
+    "issue_type",
+    "key",
+    "mine",
+    "path",
+    "priority",
+    "source_id",
+    "title",
+    "updated_at",
+];
 const SOURCE_STATUSES_FIELDS: &[&str] = &["source_id", "statuses"];
 
 /// The mini board's four shapes (#177), each against what `entity.ts`
@@ -1086,6 +1097,11 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
                 key: "PAY-231".to_owned(),
                 title: "Retry failed SEPA payouts".to_owned(),
                 priority: None,
+                issue_type: None,
+                assignee: None,
+                updated_at: None,
+                path: None,
+                mine: false,
             }],
             total: 1,
         }],
@@ -1114,10 +1130,13 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
     );
 
     assert_eq!(wire["columns"][0]["status"], serde_json::Value::Null);
-    assert_eq!(
-        wire["columns"][0]["cards"][0]["priority"],
-        serde_json::Value::Null
-    );
+    for nullable in ["priority", "issue_type", "assignee", "updated_at", "path"] {
+        assert_eq!(
+            wire["columns"][0]["cards"][0][nullable],
+            serde_json::Value::Null,
+            "{nullable}"
+        );
+    }
 }
 
 // -- the standup digest (#288) ----------------------------------------------

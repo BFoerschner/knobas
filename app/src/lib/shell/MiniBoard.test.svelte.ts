@@ -56,6 +56,11 @@ function card(key: string, priority: string | null = null): MiniBoardCard {
     key,
     title: `Title of ${key}`,
     priority,
+    issue_type: null,
+    assignee: null,
+    updated_at: null,
+    path: null,
+    mine: false,
   };
 }
 
