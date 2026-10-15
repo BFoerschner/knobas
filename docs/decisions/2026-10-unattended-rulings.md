@@ -1902,3 +1902,31 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   is, instead of a second comment dialog. **Reversing:** low.
 - **A drawer row's title opens the item's full view** (R-4.10's rule for every row); prototype-6's
   rows are plain text. **Reversing:** low.
+
+## #829 Time > Standup (PR for #829)
+
+- **The protocol stays one Markdown note; the tab is a form over its body.** Prototype-6 draws who
+  was there, a note per person and action items; the backend keeps a note whose template has
+  exactly the headings `Attendees`, `Notes` and `Action items`, and publishes that body. Each edit
+  rewrites the bullets of one section and keeps every other line (`standup-view.ts`). A person's
+  note is the `Notes` bullet that starts with their name and a colon; a note is one bullet, so line
+  breaks become spaces. **Reversing:** medium, a structured protocol would need its own storage
+  and a §10.8 entry.
+- **Who was there is the `Attendees` bullets.** No roster exists, so prototype-6's unpressed
+  Lena Hoffmann cannot be drawn on first open. A person pressed off stays an unpressed chip for the
+  session, and *+ Add someone* (not in prototype-6) adds a name. **Reversing:** low.
+- **A ticket filed for an action item is known for the session only.** `action_item_ticket` needs
+  the write id, and nothing stores which item a ticket was for; the rooms panel had the same limit.
+  The item shows *queued*, then the key and the ticket's status from `get_entity`. **Reversing:**
+  low in the UI; storing the pair needs a backend change.
+- **Published is a link, not *Published. Publish again*.** `publish_standup_protocol` answers the
+  existing publication for a date and queues no second page (`protocol.rs`), so a second press
+  would do nothing. **Reversing:** low.
+- **No *Infrastructure* list.** `StandupDigest` has no field for it, and this ticket adds no IPC.
+  Filed as a follow-up. **Reversing:** n/a.
+- **The first publish asks where in a dialog** (`PublishTargetPicker` in a `TfDialog`), as the
+  rooms panel did; the footer then reads *Publishes under <source> › <page>*. Before a target is
+  stored it reads *The first publish asks where.* (not in prototype-6). **Reversing:** low.
+- **Digest lines read *key title: reason* for yesterday and *key title (reason)* after**, as
+  prototype-6 writes them; the reason is the backend's sentence, never rebuilt from the verb. A
+  page opens `#/page/<entity id>`. **Reversing:** low.
