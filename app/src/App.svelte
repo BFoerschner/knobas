@@ -24,7 +24,8 @@
   import { sourceKinds } from "./lib/shell/source-kinds.svelte";
   import { router } from "./lib/shell/router.svelte";
   import { timer } from "./lib/shell/timer.svelte";
-  import { canBeTarget, roomForeground } from "./lib/shell/timer";
+  import { canBeTarget, roomForeground, targetReading } from "./lib/shell/timer";
+  import { openWriteQueue } from "./lib/shell/write-queue.svelte";
   import TimerPicker from "./lib/shell/TimerPicker.svelte";
   import { push } from "./lib/shell/toasts.svelte";
   import { followWrite } from "./lib/shell/follow-write";
@@ -54,6 +55,7 @@
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
+  import { hoursAndMinutes } from "./lib/time/draft-form.svelte";
 
   /**
    * **Which shell this window draws** (#809): the rooms UI, or the
@@ -468,16 +470,24 @@
     onday: () => (location.hash = "#/time"),
   });
 
-  /** A worklog now exists: one toast and one followed write, in either shell. */
+  /**
+   * A worklog now exists: one toast and one followed write, in either shell.
+   * The new shell's toast says it in the button's words (R-1.8, prototype-6's
+   * `enqueue`): "Queued: log 2h 44m to PAY-231."
+   */
   function onWorklogged(logged: Worklog) {
     timeRevision += 1;
+    const key = targetReading({ kind: "entity", entity_id: logged.entity_id });
     // Queued, not sent (#775): the draft closed on the queue's answer and
     // the send is behind it; only a worklog that will not go is told again.
-    push({
-      text: `Worklog of ${Math.round(logged.seconds / 60)}m queued for ${logged.entity_id.slice(
-        logged.entity_id.indexOf(":") + 1,
-      )}`,
-    });
+    push(
+      ticketFirst
+        ? {
+            text: `Queued: log ${hoursAndMinutes(Math.round(logged.seconds / 60))} to ${key}.`,
+            action: { label: "Show queue", run: openWriteQueue },
+          }
+        : { text: `Worklog of ${Math.round(logged.seconds / 60)}m queued for ${key}` },
+    );
     if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
   }
 
@@ -492,6 +502,9 @@
    * reader can act on.
    */
   function toggleTimer() {
+    // The clock is stopped under an open draft; a start now would collide
+    // with *Keep running* (#826).
+    if (ticketFirst && drafts.busy) return drafts.refuse();
     void timer
       .press()
       .then((pressed) => {

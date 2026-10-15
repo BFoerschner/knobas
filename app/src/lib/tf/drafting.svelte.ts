@@ -11,13 +11,19 @@
  * - *Keep running* starts the clock again on the ticket the stop took it off,
  *   so the next stop's draft covers both stretches (the draft concatenates the
  *   day's blocks);
- * - *Discard* closes a draft that no stop opened, with nothing written.
+ * - *Discard* closes the draft with nothing written and the clock stopped:
+ *   after a stop the time stays in the day, unlogged, as with *Stop, log
+ *   later* but without its toast.
  *
  * **A switch waits for the answer** (R-13.2): starting on another ticket while
  * one runs stops the running one and opens its draft, and the new timer starts
  * only after *Log* or *Stop, log later*. *Keep running* keeps the old ticket
- * and drops the new start. A stop with nothing to draft starts the new timer at
- * once, so a switch never needs a dialog to finish.
+ * and drops the new start, saying so. A stop with nothing to draft starts the
+ * new timer at once, so a switch never needs a dialog to finish.
+ *
+ * **One draft at a time.** While a draft is open or being read the clock is
+ * stopped, and a second start would run under the dialog and collide with
+ * *Keep running*; the flow refuses it with a toast instead.
  */
 import type { AdHocBlock, Block, Draft, ReaderDay, TimerTarget } from "../ipc/time";
 import type { Timer } from "../shell/timer.svelte";
@@ -56,6 +62,10 @@ export interface DraftFlowPorts {
 
 export interface DraftFlow {
   readonly open: Drafting | null;
+  /** A draft is open or being read; a start now would run under it. */
+  readonly busy: boolean;
+  /** Say why a start was refused while {@link busy}. */
+  refuse(): void;
   /** A stop happened (`⌘T`, the chip): offer what its block calls for. */
   stopped(closed: Block | null): void;
   /** Start on `target`, through the running timer's draft when there is one. */
@@ -74,12 +84,16 @@ function same(a: TimerTarget, b: TimerTarget): boolean {
 
 export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   let open = $state.raw<Drafting | null>(null);
+  /** Stops whose draft is still being read. */
+  let reading = $state(0);
+
+  const timing = (title: string) => ports.push({ text: `Timing ${title}.` });
 
   function startWaiting(after: WaitingStart | null) {
     if (after === null) return;
     void ports.timer
       .start(after.target)
-      .then(() => ports.push({ text: `Timing ${after.title}.` }))
+      .then(() => timing(after.title))
       .catch(ports.complain);
   }
 
@@ -91,6 +105,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   function offer(closed: Block | null, after: WaitingStart | null) {
     if (closed === null) return startWaiting(after);
     const day = { day: localDay(new Date(closed.started_at)), offsetMinutes: offsetMinutes() };
+    reading += 1;
     void ports
       .adHocBlock(closed.id, day)
       .then(async (adHoc) => {
@@ -106,31 +121,36 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       .catch((error: unknown) => {
         ports.complain(error);
         startWaiting(after);
-      });
+      })
+      .finally(() => (reading -= 1));
   }
 
   return {
     get open() {
       return open;
     },
+    get busy() {
+      return open !== null || reading > 0;
+    },
+    refuse() {
+      ports.push({ text: "Answer the worklog draft first." });
+    },
     stopped(closed) {
       offer(closed, null);
     },
     async switchTo(target, title) {
+      if (this.busy) return this.refuse();
       const running = ports.timer.current;
       if (running === null) {
         try {
           await ports.timer.start(target);
-          ports.push({ text: `Timing ${title}.` });
+          timing(title);
         } catch (error) {
           ports.complain(error);
         }
         return;
       }
-      if (same(running.target, target)) {
-        ports.push({ text: `Timing ${title}.` });
-        return;
-      }
+      if (same(running.target, target)) return timing(title);
       try {
         offer(await ports.timer.stop(), { target, title });
       } catch (error) {
@@ -146,6 +166,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       if (was === null) return;
       if (outcome === "keep") {
         if (was.stopped !== null) void ports.timer.start(was.stopped).catch(ports.complain);
+        if (was.after !== null) ports.push({ text: `Not started on ${was.after.title}: the timer kept running.` });
         return;
       }
       if (outcome === "later") {
@@ -154,7 +175,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
           action: { label: "Open the day", run: ports.onday },
         });
       }
-      if (outcome !== "discard") startWaiting(was.after);
+      startWaiting(was.after);
     },
   };
 }

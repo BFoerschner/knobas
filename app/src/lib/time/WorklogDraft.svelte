@@ -152,7 +152,7 @@
         id="{uid}-comment"
         rows="4"
         value={form.comment}
-        oninput={(event) => form.type(event.currentTarget.value)}
+        oninput={(event) => form.takeOver(event.currentTarget.value)}
       ></textarea>
     </div>
 

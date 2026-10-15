@@ -1653,17 +1653,24 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
 - ***Keep running* starts the timer again on the ticket the stop took it off.** The next stop's
   draft concatenates the day's blocks, so both stretches are logged together; the seconds spent in
   the dialog are not counted. **Reversing:** low, with the change above.
-- ***Discard* is the button of a draft no stop opened** (the ad-hoc dialog's *Log to a ticket…*),
-  beside *Log*; a stop's draft has prototype-6's three buttons. After a stop *Discard* and *Stop,
-  log later* would do the same thing, and deleting the stopped block is a loss of time the spec's
-  story 62 ("so that I never lose tracked time") argues against. **Reversing:** low, one branch.
+- ***Discard* closes the draft with nothing written**, on every draft: after a stop the clock stays
+  stopped and the time stays in the day, unlogged, as with *Stop, log later* but without its
+  toast; on a switch the waiting timer still starts (*Keep running* is the only cancel). A draft
+  no stop opened (the ad-hoc dialog's *Log to a ticket…*) has only *Discard* and *Log*. Deleting
+  the stopped block was the other reading, and spec story 62 ("so that I never lose tracked
+  time") argues against it. **Reversing:** low.
 - **`Esc` and the backdrop answer quietly**: a stop's draft as *Stop, log later* (the clock is
   already stopped), any other as *Discard*. Prototype-6's backdrop is *Keep running*, which here
   would start a timer on a dismiss. **Reversing:** one line.
 - **A switch waits for the draft (R-13.2).** Under the new shell the launcher's *Start timer* stops
   the running timer, opens its draft, and starts the new one only after *Log* or *Stop, log
-  later*; *Keep running* keeps the old ticket. With nothing to draft it starts at once. The rooms
-  UI is unchanged. **Reversing:** low.
+  later* (or *Discard*); *Keep running* keeps the old ticket and says so in a toast. With nothing to
+  draft it starts at once. While a draft is open or being read, a start (`⌘T`, the chip, the
+  launcher) is refused with "Answer the worklog draft first.", because the clock is stopped under
+  the dialog and a start would collide with *Keep running*. The rooms UI is unchanged.
+  **Reversing:** low.
+- **The new shell's log toast is prototype-6's**: "Queued: log 2h 44m to PAY-231." with *Show
+  queue* (R-1.8). The rooms UI keeps its own words. **Reversing:** one line.
 - **From and minutes, not From and To.** The draft logs a start and a sum of blocks; a To field
   would read as the span, which includes the gaps the sum leaves out. **Reversing:** low.
 - **ADR-0012's sentence is kept** under prototype-6's "Goes to … through the write queue" line, as

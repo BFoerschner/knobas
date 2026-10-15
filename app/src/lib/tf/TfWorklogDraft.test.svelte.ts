@@ -160,12 +160,12 @@ test("it says where the worklog goes, and quotes ADR-0012", async () => {
   );
 });
 
-test("opened by a stop it offers Stop, log later, Keep running and Log", () => {
+test("opened by a stop it offers Stop, log later, Keep running, Discard and Log", () => {
   render({ stopped: true });
   expect(button("Stop, log later")).toBeDefined();
   expect(button("Keep running")).toBeDefined();
+  expect(button("Discard")).toBeDefined();
   expect(button("Log 2h 44m to PAY-231")).toBeDefined();
-  expect(button("Discard")).toBeUndefined();
 });
 
 test("opened without a stop it offers Discard and Log, and nothing about a clock", () => {
@@ -179,7 +179,8 @@ test("each button answers with its outcome", () => {
   const { outcomes } = render();
   button("Keep running")!.click();
   button("Stop, log later")!.click();
-  expect(outcomes).toEqual(["keep", "later"]);
+  button("Discard")!.click();
+  expect(outcomes).toEqual(["keep", "later", "discard"]);
 });
 
 test("Log sends the work for the reader's day and answers logged", async () => {
@@ -208,4 +209,17 @@ test("Esc closes it as a layer: a stop's draft leaves the clock stopped, any oth
     app = undefined;
     expect(layers.open, "the dialog's layer outlived it").toEqual([]);
   }
+});
+
+test("leaving while the log is in flight does nothing: the log answers for itself", async () => {
+  let resolve: (worklog: Worklog) => void = () => {};
+  const layers = createLayers();
+  const { outcomes } = render({ layers, logWork: () => new Promise((done) => (resolve = done)) });
+  button("Log 2h 44m to PAY-231")!.click();
+  flushSync();
+  layers.open[0]!.close();
+  expect(outcomes, "Esc during a send said the time was unlogged").toEqual([]);
+  expect(button("Stop, log later")?.disabled).toBe(true);
+  resolve(WORKLOG);
+  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
 });

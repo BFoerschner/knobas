@@ -10,8 +10,9 @@
   "10:02, Gitea").
 
   **Which buttons depends on what opened it.** After a stop: *Stop, log
-  later*, *Keep running* and *Log*. Without one (the ad-hoc dialog's *Log to a
-  ticket…*): *Discard* and *Log*. What each does to the clock is
+  later*, *Keep running*, *Discard* and *Log*. Without one (the ad-hoc
+  dialog's *Log to a ticket…*): *Discard* and *Log*, with nothing about a
+  clock. What each does to the clock is
   `drafting.svelte.ts`'s; this answers with an outcome. `Esc` and the backdrop
   are the quiet answer: a stop's draft leaves the clock stopped (*Stop, log
   later*), any other is discarded.
@@ -102,6 +103,8 @@
 
   /** Leaving without logging: a stop's draft keeps the time, any other is dropped. */
   function leave() {
+    // A log in flight answers for itself; leaving now would say "unlogged".
+    if (sending) return;
     onoutcome(stopped ? "later" : "discard");
   }
 
@@ -111,15 +114,19 @@
     failed = null;
     void ports
       .logWork(draft.entity_id, { day: draft.day, offsetMinutes: offsetMinutes() }, form.work)
-      .then((worklog) => {
-        onlogged(worklog);
-        onoutcome("logged");
-      })
-      .catch((error: unknown) => {
-        // Said, never swallowed: the blocks are still unlogged.
-        failed = error instanceof Error ? error.message : String(error);
-        sending = false;
-      });
+      .then(
+        (worklog) => {
+          // Outside the rejection handler on purpose: the worklog exists now,
+          // and a throw in the shell's toast must not read as a failed send.
+          onoutcome("logged");
+          onlogged(worklog);
+        },
+        (error: unknown) => {
+          // Said, never swallowed: the blocks are still unlogged.
+          failed = error instanceof Error ? error.message : String(error);
+          sending = false;
+        },
+      );
   }
 
   let first: HTMLInputElement | undefined = $state();
@@ -140,6 +147,7 @@
       .then((rows) => {
         names = Object.fromEntries(rows.map((row) => [row.id, row.display_name]));
       })
+      // The names are a nicety too: without them a source reads as its id.
       .catch(() => {});
     return layers.add({ kind: "dialog", close: leave });
   });
@@ -187,7 +195,7 @@
         rows="3"
         aria-label="Worklog comment"
         value={form.comment}
-        oninput={(event) => form.type(event.currentTarget.value)}
+        oninput={(event) => form.takeOver(event.currentTarget.value)}
       ></textarea>
       <p class="tf-dim tf-note">
         Goes to {sourceName(draft.entity_id)} through the write queue.
@@ -199,11 +207,14 @@
     </div>
     <footer>
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-first" type="button" onclick={() => onoutcome("later")}>Stop, log later</button>
-        <button class="tf-btn tf-ghost" type="button" onclick={() => onoutcome("keep")}>Keep running</button>
-      {:else}
-        <button class="tf-btn tf-ghost" type="button" onclick={() => onoutcome("discard")}>Discard</button>
+        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}
+          >Stop, log later</button
+        >
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("keep")}
+          >Keep running</button
+        >
       {/if}
+      <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
       <button class="tf-btn tf-primary" type="button" disabled={sending || form.seconds <= 0} onclick={send}
         >Log {form.reading} to {form.key}</button
       >

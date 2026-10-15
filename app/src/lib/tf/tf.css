@@ -335,10 +335,10 @@ a.tf-r:hover { background: var(--sheet-2); }
   background: var(--sheet-2);
 }
 .tf-dialog footer .tf-first { margin-right: auto; }
-.tf-dialog textarea, .tf-dialog input[type=text] {
+.tf-dialog textarea {
   border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper); color: var(--ink); width: 100%;
+  resize: vertical;
 }
-.tf-dialog textarea { resize: vertical; }
 .tf-dsub { margin-top: 4px; font-size: var(--t-sm); color: var(--ink-2); }
 .tf-pane-h { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
 .tf-ck { display: flex; gap: 8px; align-items: baseline; font-size: var(--t-sm); }

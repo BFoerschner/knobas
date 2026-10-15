@@ -14,6 +14,14 @@
 import type { Draft, LoggedWork } from "../ipc/time";
 import { atClock, clockOf } from "./draft";
 
+/** `2h 30m`, `45m`, `3h`: a worklog's length as the draft's button says it. */
+export function hoursAndMinutes(minutes: number): string {
+  const whole = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  if (whole === 0) return `${rest}m`;
+  return rest === 0 ? `${whole}h` : `${whole}h ${rest}m`;
+}
+
 export class DraftForm {
   readonly draft: Draft;
 
@@ -63,10 +71,7 @@ export class DraftForm {
 
   /** `2h 30m`, `45m`: the reading on the button. */
   get reading(): string {
-    const whole = Math.floor(this.minutes / 60);
-    const rest = this.minutes % 60;
-    if (whole === 0) return `${rest}m`;
-    return rest === 0 ? `${whole}h` : `${whole}h ${rest}m`;
+    return hoursAndMinutes(this.minutes);
   }
 
   /** `PAY-231`: the half after the first colon, as everywhere else. */
@@ -82,7 +87,7 @@ export class DraftForm {
   }
 
   /** The reader typed in the comment: it is theirs from now on. */
-  type(text: string) {
+  takeOver(text: string) {
     this.edited = true;
     this.typed = text;
   }

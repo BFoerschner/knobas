@@ -143,14 +143,15 @@ test("Stop, log later on a switch starts the waiting timer too", async () => {
   expect(log.at(-1)).toBe("start jira:OPS-12");
 });
 
-test("Keep running on a switch keeps the old ticket and drops the new one", async () => {
-  const { flow, log, running } = rig();
+test("Keep running on a switch keeps the old ticket and drops the new one, saying so", async () => {
+  const { flow, log, running, toasts } = rig();
   await flow.switchTo(OPS, "OPS-12");
   await settle();
   flow.settle("keep");
   await settle();
   expect(log.filter((line) => line.startsWith("start"))).toEqual(["start jira:PAY-231"]);
   expect(running()?.target).toEqual(PAY);
+  expect(toasts.map((toast) => toast.text)).toEqual(["Not started on OPS-12: the timer kept running."]);
 });
 
 test("a switch away from something with no draft starts the new timer at once", async () => {
@@ -184,4 +185,27 @@ test("a draft shown without a stop is not marked as one, and Discard closes it w
   await settle();
   expect(flow.open).toBeNull();
   expect(log).toEqual([]);
+});
+
+test("Discard on a switch's draft still starts the timer it was waiting on", async () => {
+  const { flow, log } = rig();
+  await flow.switchTo(OPS, "OPS-12");
+  await settle();
+  flow.settle("discard");
+  await settle();
+  expect(log.at(-1)).toBe("start jira:OPS-12");
+});
+
+test("a start while a draft is open or being read is refused, so it cannot run under the dialog", async () => {
+  const { flow, log, toasts } = rig();
+  await flow.switchTo(OPS, "OPS-12");
+  expect(flow.busy, "the draft's read is in flight").toBe(true);
+  await flow.switchTo(PAY, "PAY-231");
+  await settle();
+  expect(flow.open).not.toBeNull();
+  await flow.switchTo(PAY, "PAY-231");
+  expect(log.filter((line) => line.startsWith("start"))).toEqual([]);
+  expect(toasts.map((toast) => toast.text)).toEqual(["Answer the worklog draft first.", "Answer the worklog draft first."]);
+  flow.settle("later");
+  expect(flow.busy).toBe(false);
 });
