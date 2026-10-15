@@ -77,7 +77,7 @@
 >
   <div class="tf-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
     <header><h2 id={titleId}>{title}</h2></header>
-    <div class="tf-dialog-body">{@render body()}</div>
+    <div class="tf-body">{@render body()}</div>
     <footer>{@render footer()}</footer>
   </div>
 </div>
