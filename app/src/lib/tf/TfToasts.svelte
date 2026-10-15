@@ -14,7 +14,7 @@
   {#each toasts.items as toast (toast.id)}
     <div class="tf-toast {toast.tone === 'err' ? 'tf-err' : ''}">
       <span>{toast.text}</span>
-      {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action (action.label)}
+      {#each [...(toast.action ? [toast.action] : []), ...(toast.more ?? [])] as action, index (index)}
         <button
           onclick={() => {
             action.run();

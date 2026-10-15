@@ -62,7 +62,8 @@
     const parts = (timer.elapsed ?? "0:00").split(":");
     return parts.length === 2 ? `0:${parts[0]!.padStart(2, "0")}:${parts[1]}` : parts.join(":");
   });
-  const timing = $derived(timer.current === null ? null : targetReading(timer.current.target));
+  /** What the clock runs on, as the chip names it: a ticket key, a label, an asset id. */
+  const clockOn = $derived(timer.current === null ? null : targetReading(timer.current.target));
 </script>
 
 <header class="tf-top">
@@ -88,15 +89,15 @@
     </svg>
     <span class="tf-label">Search</span><kbd>⌘K</kbd>
   </button>
-  {#if timing !== null}
+  {#if clockOn !== null}
     <button
       class="tf-timer tf-card"
       title="Timer (⌘T)"
-      aria-label="Timer on {timing}, {clock}. Stop and log"
+      aria-label="Timer on {clockOn}, {clock}. Stop and log"
       disabled={ontimer === undefined}
       onclick={() => ontimer?.()}
     >
-      <span class="tf-timer-key">{timing}</span>
+      <span class="tf-timer-key">{clockOn}</span>
       <span class="tf-timer-t">{clock}</span>
       <span class="tf-timer-stop" title="Stop and log"><i></i></span>
     </button>

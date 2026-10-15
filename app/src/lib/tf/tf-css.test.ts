@@ -54,6 +54,12 @@ test("dark tokens are the spec's, by the OS unless forced light, and when forced
   }
 });
 
+test("the two dark blocks are one set of tokens, so an edit cannot reach only one", () => {
+  const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
+  const tokens = (body: string) => body.slice(body.indexOf("{") + 1).replace(/\s+/g, " ").trim();
+  expect(tokens(block(media, '.tf:not([data-theme="light"])'))).toBe(tokens(block(code, '.tf[data-theme="dark"]')));
+});
+
 test("no token is set on :root, and the old stylesheet gained no rule for the new shell", () => {
   expect(code).not.toMatch(/:root/);
   expect(appCss).not.toMatch(/\.tf\b|tf-/);

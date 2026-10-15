@@ -39,6 +39,7 @@
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
+  import { inTextField } from "../shell/keys";
   import type { Lifecycle } from "../shell/lifecycle.svelte";
   import { assetTargetId, targetReading } from "../shell/timer";
   import { timer as sharedTimer, type Timer } from "../shell/timer.svelte";
@@ -98,19 +99,23 @@
   let hash = $state(location.hash);
   const route = $derived(parseTfHash(hash));
 
-  /** The job the reader was last in, for the Job tab, the breadcrumb and `Esc`. */
+  /**
+   * The job the reader was last in: the breadcrumb's chip and where `Esc`
+   * returns (R-1.6). Only a job actually opened, as prototype-6's `S.job`.
+   */
   let lastJob = $state<string | null>(null);
   $effect(() => {
     if (route.view === "job" && route.key !== null) lastJob = route.key;
   });
 
   /** What the timer runs on, as a ticket key; an asset or a label is no job. */
-  const timing = $derived.by(() => {
+  const timedTicket = $derived.by(() => {
     const target = timer.current?.target ?? null;
     if (target === null || target.kind !== "entity" || assetTargetId(target) !== null) return null;
     return targetReading(target);
   });
-  const job = $derived(lastJob ?? timing);
+  /** The Job tab's job: the last one opened, else the timer's ticket (R-1.2). */
+  const navJob = $derived(lastJob ?? timedTicket);
 
   /** The session's override of the OS theme, or `null` to follow it (R-1.7). */
   let theme = $state<"light" | "dark" | null>(null);
@@ -142,7 +147,8 @@
     void ports
       .syncStatus()
       .then((rows) => {
-        if (!dead) sync = rows;
+        // A row an event already brought is newer than the seed's.
+        if (!dead) sync = [...sync, ...rows.filter((row) => !sync.some((had) => had.source_id === row.source_id))];
       })
       .catch(() => {});
     void badges.refresh();
@@ -176,13 +182,10 @@
     location.hash = next;
   }
 
-  /** The focused text field `Esc` may clear or leave, or `null`. */
-  function focusedField(): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement | null {
+  /** The focused field that types, which `Esc` may clear or leave, or `null`. */
+  function focusedField(): HTMLElement | null {
     const el = document.activeElement;
-    if (el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement) return el;
-    if (!(el instanceof HTMLInputElement)) return null;
-    const typing = !["button", "checkbox", "radio", "submit", "reset", "range", "color", "file"].includes(el.type);
-    return typing ? el : null;
+    return el instanceof HTMLElement && inTextField(el) ? el : null;
   }
 
   function onkeydown(event: KeyboardEvent) {
@@ -210,14 +213,17 @@
       field:
         field === null
           ? null
-          : { filter: field.hasAttribute("data-filter"), text: "value" in field ? String(field.value) : "" },
+          : {
+              filter: field.hasAttribute("data-filter"),
+              text: field instanceof HTMLInputElement ? field.value : "",
+            },
       route,
-      job,
+      job: lastJob,
     });
     if (step.do === "nothing") return;
     event.preventDefault();
     if (step.do === "close") layers.open[step.index]?.close();
-    else if (step.do === "clear-filter" && field) {
+    else if (step.do === "clear-filter" && field instanceof HTMLInputElement) {
       field.value = "";
       field.dispatchEvent(new Event("input", { bubbles: true }));
     } else if (step.do === "blur") field?.blur();
@@ -238,7 +244,7 @@
 <div class="tf" data-theme={theme ?? undefined}>
   <TfTopBar
     current={sectionOf(route)}
-    {job}
+    job={navJob}
     {inbox}
     {badges}
     {timer}
@@ -247,7 +253,7 @@
     ontheme={toggleTheme}
   />
   <main class="tf-main" tabindex="-1">
-    <TfPage {route} {job} {timing} {onrooms} />
+    <TfPage {route} job={lastJob} {timedTicket} {onrooms} />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
   <TfToasts />

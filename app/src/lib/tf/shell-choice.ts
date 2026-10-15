@@ -50,6 +50,11 @@ export function switchShell(
   storage: Store | null = windowStorage(),
   reload: () => void = () => location.reload(),
 ): void {
-  storage?.setItem(SHELL_KEY, choice);
+  try {
+    storage?.setItem(SHELL_KEY, choice);
+  } catch {
+    // A storage that refuses the write: the reload then starts the shell it
+    // started before, which is the honest answer to a switch that did not take.
+  }
   reload();
 }

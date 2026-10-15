@@ -1410,4 +1410,5 @@ Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up whil
 - A count badge is drawn only once its read has answered and only above zero. Prototype-6 always has something to count; the rooms strip already hides a zero.
 - An unreachable source is plain text in the status bar, with no err tone and no *Re-enter password*. R-1.5 asks for credential failures. The scheduler retries an unreachable server on its own (P7).
 - The write queue, the launcher, the worklog draft and the timer picker stay as the rooms UI draws them. They mount outside `.tf`, so they keep their own tokens. Porting them belongs to the tickets that redraw them (Time is TF2).
-- The Job tab names the job last opened, else the ticket the timer runs on (R-1.2's rule, which this ticket needed for the breadcrumb and `Esc` anyway).
+- The Job tab names the job last opened, else the ticket the timer runs on (R-1.2). The breadcrumb and `Esc` use only a job actually opened (R-1.6, prototype-6's `S.job`).
+- The timer's clock is Archivo with tabular figures, not JetBrains Mono as prototype-6 draws it: the design system says durations are Archivo and mono is for code values, and the design system decides where it and the prototype differ.

@@ -197,8 +197,8 @@ function historyStep(event: KeyboardEvent): "back" | "forward" | null {
   return step;
 }
 
-/** A field that types: its keys are its own. */
-function inTextField(target: EventTarget | null): boolean {
+/** A field that types: its keys are its own. The ticket-first shell's `Esc` asks too. */
+export function inTextField(target: EventTarget | null): boolean {
   if (!(target instanceof HTMLElement)) return false;
   if (target.isContentEditable) return true;
   if (target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return true;

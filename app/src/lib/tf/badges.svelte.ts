@@ -83,12 +83,20 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
   });
   let live = false;
 
-  async function read(key: "builds" | "monitors" | "proposals", run: () => Promise<number>) {
+  async function read(key: keyof typeof state, run: () => Promise<number>) {
     try {
       state[key] = await run();
     } catch {
       // Keep the last answer; see the module note.
     }
+  }
+
+  async function refresh() {
+    await Promise.all([
+      read("builds", ports.failingBuilds),
+      read("monitors", ports.monitorsDown),
+      read("proposals", ports.proposals),
+    ]);
   }
 
   return {
@@ -101,25 +109,22 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
     get proposals() {
       return state.proposals;
     },
-    async refresh() {
-      await Promise.all([
-        read("builds", ports.failingBuilds),
-        read("monitors", ports.monitorsDown),
-        read("proposals", ports.proposals),
-      ]);
-    },
+    refresh,
     start() {
       if (live) return () => {};
       live = true;
+      // This subscription's own flag: a stop and a second start before the
+      // first `listen` resolves must not hand the new one an old unlisten.
+      let dead = false;
       const offs: (() => void)[] = [];
       const subscribe = (event: string, when: (payload: unknown) => boolean) => {
         void ports
           .listen(event, ({ payload }) => {
-            if (live && when(payload)) void this.refresh();
+            if (!dead && when(payload)) void refresh();
           })
           .then((off) => {
-            if (live) offs.push(off);
-            else off();
+            if (dead) off();
+            else offs.push(off);
           })
           .catch(() => {});
       };
@@ -127,6 +132,7 @@ export function createBadges(ports: BadgePorts = REAL_PORTS): Badges {
       subscribe(EVENTS.activityNew, () => true);
       return () => {
         live = false;
+        dead = true;
         for (const off of offs.splice(0)) off();
       };
     },

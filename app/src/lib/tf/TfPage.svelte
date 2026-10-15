@@ -20,14 +20,14 @@
   let {
     route,
     job,
-    timing,
+    timedTicket,
     onrooms,
   }: {
     route: TfRoute;
     /** The job the reader was last in. */
     job: string | null;
     /** The ticket key the timer runs on, or `null`. */
-    timing: string | null;
+    timedTicket: string | null;
     /** Switch back to the rooms UI. */
     onrooms: () => void;
   } = $props();
@@ -42,9 +42,9 @@
       </div>
     </header>
     <div class="tf-empty">
-      {#if timing !== null}
-        <a class="tf-keycard tf-card" href={jobHash(timing)}>
-          <span class="tf-jobkey">{timing}</span>
+      {#if timedTicket !== null}
+        <a class="tf-keycard tf-card" href={jobHash(timedTicket)}>
+          <span class="tf-jobkey">{timedTicket}</span>
           <span class="tf-dim">The timer is on it.</span>
         </a>
       {/if}

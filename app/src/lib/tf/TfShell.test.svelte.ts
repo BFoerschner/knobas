@@ -273,3 +273,16 @@ test("the status bar: sync ages, a 401 with Re-enter password, the queued writes
   expect(bad.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
   expect(bar.querySelector("button.tf-queued")?.textContent).toBe("2 queued writes");
 });
+
+test("a running timer names the Job tab but is not a job the breadcrumb or Esc returns to", async () => {
+  const timer = {
+    current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
+    elapsed: "1:00",
+  };
+  start({ timer });
+  await at("#/builds");
+  expect(target.querySelector(".tf-crumbs .tf-jobchip")).toBeNull();
+  press("Escape");
+  await settle();
+  expect(location.hash).toBe("#/tickets");
+});

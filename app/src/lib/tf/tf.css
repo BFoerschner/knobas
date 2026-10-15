@@ -110,7 +110,7 @@
   display: flex; align-items: center; gap: 6px; padding: 8px 14px;
   background: var(--sheet); border-bottom: 1px solid var(--rule); min-width: 0;
 }
-.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: 19px; margin-right: 10px; }
+.tf-brand { font-weight: 800; font-variation-settings: "wdth" 70; font-size: var(--t-2xl); margin-right: 10px; }
 .tf-nav { display: flex; gap: 2px; min-width: 0; overflow-x: auto; scrollbar-width: none; }
 .tf-nav a {
   display: flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 4px;
@@ -140,7 +140,8 @@
 }
 .tf-timer.tf-off { background: var(--sheet-2); color: var(--ink-2); }
 .tf-timer-key { font-family: var(--mono); font-size: var(--t-xs); }
-.tf-timer-t { font-family: var(--mono); font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
+/* A duration is Archivo with tabular figures, not mono (design system, Type). */
+.tf-timer-t { font-size: var(--t-sm); font-variant-numeric: tabular-nums; }
 .tf-timer-stop { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 3px; background: rgba(0,0,0,.12); }
 .tf-timer.tf-off .tf-timer-stop { background: none; }
 .tf-timer-stop i { width: 9px; height: 9px; background: currentColor; border-radius: 1px; }
