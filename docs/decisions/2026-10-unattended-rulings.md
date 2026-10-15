@@ -1726,6 +1726,7 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
   be photographed at prototype-6's own `#/settings/source/teamcity`. **Reversing:** fixture only.
 - **Sections other than Sources name themselves and offer the rooms UI** until #831 and #844 build
   them. **Reversing:** replaced by those tickets.
+
 ## #827 Time: Day (implementer)
 
 - **The strip is SVG.** Prototype-6 positions blocks with inline `left`/`width`, which
@@ -1752,3 +1753,15 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
   the same thing to add up. **Reversing:** low.
 - ***Log…* shows the draft through #826's `drafts.show`**, the path the ad-hoc dialog's *Log to a
   ticket…* takes, so it opens in the new shell's own dialog. **Reversing:** one line.
+
+## #827 Time: Day (merge-manager, PR #915)
+
+- **One `ad_hoc_block` per unlogged block on each day read stays.** It is a fan-out, not a
+  serial N+1: the calls go out together under one `Promise.all`, and each is a handful of small
+  indexed reads on the local database (the block, the logging sources, then at most a link, a
+  context anchor, the last logged ticket and a title). Passive blocks under two minutes are dropped
+  and adjacent visits merge, which bounds the count. A batched read would be a new command and a
+  §10.8 entry, which this ticket's "no backend change" rules out. The by-eye check on testenv data
+  goes to the milestone review; if the day is slow there, the follow-up is one read that answers
+  the day's offers together and computes the logging sources and the last logged ticket once.
+  **Reversing:** a batched command plus one call site in `TfDay.svelte`'s `read()`.
