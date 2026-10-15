@@ -38,6 +38,11 @@ export interface TfPageContext {
   onstarttimer: (entityId: string, title: string) => void;
   /** The job page's reads. */
   jobPorts: JobPorts;
+  /** Open the worklog draft for a ticket and day (the Time view's *Log…*). */
+  onlog: ((entityId: string, day: string) => void) | undefined;
+  /** Bumped when something outside the Time view changed a day's blocks. */
+  timeRevision: number;
+  ontimechanged: (() => void) | undefined;
 }
 
 /** One registered page, its types erased once {@link definePage} checked them. */
@@ -45,6 +50,11 @@ export interface TfPageEntry {
   /** Whether this page draws `route`. */
   matches: (route: TfRoute) => boolean;
   component: Component<Record<string, unknown>>;
+  /**
+   * Whether the shell draws its breadcrumb (R-1.6) above the page, as for a
+   * full view. A page that draws its own, like Settings, leaves it unset.
+   */
+  crumbs?: boolean;
   /** The component's props, read off the shell's context for a matched route. */
   props: (ctx: TfPageContext) => Record<string, unknown>;
 }
@@ -56,6 +66,7 @@ export interface TfPageEntry {
 export function definePage<Props extends object, Matched extends TfRoute>(page: {
   matches: (route: TfRoute) => route is Matched;
   component: Component<Props>;
+  crumbs?: boolean;
   props: (ctx: TfPageContext & { route: Matched }) => Props;
 }): TfPageEntry {
   return page as unknown as TfPageEntry;

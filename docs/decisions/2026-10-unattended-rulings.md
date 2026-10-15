@@ -1791,3 +1791,8 @@ Ruled 2026-10-15 by the implementer (PR #916).
   seeds are the rooms UI's and TF tickets do not edit them. Per-screen wiring was in `TfPage.svelte`
   and is now per feature. **Reversing:** a follow-up ticket if a TF ticket has to edit `App.svelte`
   for a screen.
+- **After the rebase over #914 and #915 (merge-manager, PR #916), Settings and Time register as
+  pages too**: `settings/page.ts` and `time/page.ts`, instead of the two `{#if}` branches those
+  PRs added to `TfPage.svelte`. Time is drawn under the shell's breadcrumb, so a page entry may
+  set `crumbs: true`; Settings draws its own and leaves it unset. Their fixture changes moved into
+  `fake/sources.ts` and `fake/time.ts` unchanged. **Reversing:** low, the two branches return.

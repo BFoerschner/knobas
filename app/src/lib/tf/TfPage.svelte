@@ -4,7 +4,9 @@
   **Each screen registers itself** in its feature folder's `page.ts`
   (`page-entry.ts`, #908), and the first page whose route matches draws here:
   Tickets is `tickets/page.ts` (#810), the job `#/job/<key>` is
-  `job/page.ts` (#816). A new screen adds a folder and does not edit this
+  `job/page.ts` (#816), Time is `time/page.ts` (#827) and Settings is
+  `settings/page.ts` (#830). A page that sets `crumbs` is drawn under the
+  shell's breadcrumb. A new screen adds a folder and does not edit this
   file. What stays here is the shell's own:
 
   - **A bare `#/job`** with no job opened yet says how to open one. Job has no
@@ -14,8 +16,6 @@
     <key>* beside `Esc` on the right; with no job, the view's own name and
     *Back*. It is an empty page that names itself, so an address is never a
     blank pane and never a page pretending to be another.
-  - **Settings** also offers the way back to the rooms UI, because Settings is
-    where the switch lives and the rooms UI is where every setting still is.
 -->
 <script lang="ts">
   import type { TfPageContext } from "./page-entry";
@@ -31,7 +31,23 @@
   const page = $derived(pageFor(route));
 </script>
 
-{#if page}
+{#snippet crumbs(name: string)}
+  <nav class="tf-crumbs" aria-label="Breadcrumb">
+    {#if job !== null}
+      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+    {/if}
+    <strong>{name}</strong>
+    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
+  </nav>
+{/snippet}
+
+{#if page && page.crumbs && route.view === "full"}
+  {@const Page = page.component}
+  <div class="tf-full">
+    {@render crumbs(SECTION_NAME[route.section])}
+    <Page {...page.props(ctx)} />
+  </div>
+{:else if page}
   {@const Page = page.component}
   <Page {...page.props(ctx)} />
 {:else if route.view === "job"}
@@ -50,22 +66,12 @@
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">
-    <nav class="tf-crumbs" aria-label="Breadcrumb">
-      {#if job !== null}
-        <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
-      {/if}
-      <strong>{name}</strong>
-      <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
-    </nav>
+    {@render crumbs(name)}
     <header class="tf-fhead">
       <div><h1>{name}</h1></div>
     </header>
     <div class="tf-empty">
       <p>{name} is not built in the new shell yet.</p>
-      {#if route.section === "settings"}
-        <p>The rooms UI has every setting today.</p>
-        <button class="tf-btn tf-primary" onclick={ctx.onrooms}>Switch back to the rooms UI</button>
-      {/if}
     </div>
   </div>
 {:else}

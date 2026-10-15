@@ -1,5 +1,5 @@
 /**
- * `?fake-ipc`: The timer, the day's blocks and the worklog draft (#826), and the rooms
+ * `?fake-ipc`: The timer, the day's blocks and their edits (#826, #827), the worklog draft, and the rooms
  * UI's week timesheet.
  */
 import type { Handler } from "../fake-tauri";
@@ -19,6 +19,10 @@ function fakeWeek(args: Record<string, unknown>) {
     unlogged_seconds: unlogged,
   });
   const PLAN: [number, number][] = [[3 * 3600, 0], [4.5 * 3600, 0], [0, 0], [0, 4 * 3600 + 14 * 60]];
+  // "No target, app open": 35 minutes today, for the Day tab's fifth figure (#827).
+  const now = new Date().toISOString();
+  const windows = (args["days"] as { from: string; to: string }[] | undefined) ?? [];
+  const open = windows.map((window) => (window.from <= now && now < window.to ? 35 * 60 : 0));
   return {
     days,
     rows: [
@@ -27,12 +31,15 @@ function fakeWeek(args: Record<string, unknown>) {
         title: "Retry failed SEPA payouts",
         cells: days.map((_, index) => cell(...(PLAN[index] ?? [0, 0]))),
       },
+      ...(open.some((seconds) => seconds > 0)
+        ? [{ target: null, title: null, cells: open.map((seconds) => ({ ...cell(0, 0), tracked_seconds: seconds })) }]
+        : []),
     ],
     past_horizon: days.map(() => false),
   };
 }
 
-// ---------------------------------------------------------------- time (#826)
+// ---------------------------------------------------------- time (#826, #827)
 
 type FakeTarget = { kind: "entity"; entity_id: string } | { kind: "label"; label: string };
 interface FakeBlock {
@@ -40,9 +47,52 @@ interface FakeBlock {
   started_at: string;
   ended_at: string;
   target: FakeTarget;
-  kind: "manual";
+  kind: "manual" | "passive";
   ended_by_relaunch: boolean;
   worklog_id: number | null;
+}
+
+/** Today at `hour:minute`, by the browser's clock. */
+function todayAt(hour: number, minute: number): string {
+  const at = new Date();
+  at.setHours(hour, minute, 0, 0);
+  return at.toISOString();
+}
+
+/**
+ * Today's blocks, prototype-6's Friday (#827): PAY-228 logged, a passive
+ * stretch on PR #142, PAY-231 unlogged, a gap, and a label block. Every row
+ * state the Day tab draws but the running timer, which `fake-timer` adds.
+ */
+function todaysBlocks(): FakeBlock[] {
+  const entity = (entity_id: string): FakeTarget => ({ kind: "entity", entity_id });
+  const manual = { kind: "manual" as const, ended_by_relaunch: false, worklog_id: null };
+  return [
+    { id: 1, started_at: todayAt(8, 50), ended_at: todayAt(9, 25), target: entity("mock:PAY-228"), ...manual, worklog_id: 41 },
+    {
+      id: 2,
+      started_at: todayAt(9, 25),
+      ended_at: todayAt(9, 40),
+      target: entity("mock:payout-service#142"),
+      ...manual,
+      kind: "passive",
+    },
+    { id: 3, started_at: todayAt(9, 40), ended_at: todayAt(11, 50), target: entity("mock:PAY-231"), ...manual },
+    {
+      id: 5,
+      started_at: todayAt(13, 10),
+      ended_at: todayAt(13, 58),
+      target: { kind: "label", label: "Standup and planning" },
+      ...manual,
+    },
+  ];
+}
+
+/** Thirty days back: a day before this is past the observation horizon. */
+function fakeHorizon(): string {
+  const cut = new Date();
+  cut.setDate(cut.getDate() - 30);
+  return cut.toISOString();
 }
 
 /**
@@ -54,21 +104,23 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
   const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
   let nextBlock = 501;
   let nextWorklog = 71;
-  const blocks: FakeBlock[] = [];
+  // The day's blocks are always there (#827); PAY-231's 09:40 to 11:50 is
+  // also what a stop's draft adds up.
+  let blocks: FakeBlock[] = todaysBlocks();
   let running: { target: FakeTarget; started_at: string; last_heartbeat: string } | null = null;
   if (params.has("fake-timer")) {
     const pay: FakeTarget = { kind: "entity", entity_id: "mock:PAY-231" };
-    blocks.push({
-      id: nextBlock++,
-      started_at: minutesAgo(298),
-      ended_at: minutesAgo(168),
-      target: pay,
-      kind: "manual",
-      ended_by_relaunch: false,
-      worklog_id: null,
-    });
     running = { target: pay, started_at: minutesAgo(34), last_heartbeat: minutesAgo(0) };
   }
+  /** A block the reader may change: there, and not logged. */
+  const editable = (id: unknown) => {
+    const block = blocks.find((candidate) => candidate.id === Number(id));
+    if (!block) throw { code: "not_found", message: `there is no block ${String(id)}`, source_id: null };
+    if (block.worklog_id !== null) {
+      throw { code: "invalid", message: "This block is logged, so it is read-only.", source_id: null };
+    }
+    return block;
+  };
   const titleOf = (target: FakeTarget) =>
     target.kind === "entity" ? (CORPUS.find((row) => row.entity_id === target.entity_id)?.title ?? null) : null;
   const unlogged = (entityId: string) =>
@@ -108,17 +160,63 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
       running = null;
       return block;
     },
-    // A block on a ticket: the draft is what opens.
-    ad_hoc_block: () => null,
+    // `null` for a block on a ticket, so the draft is what opens; otherwise
+    // knobas' suggestion: the PR is linked to PAY-231, a label gets the ticket
+    // logged last (#827).
+    ad_hoc_block: (args) => {
+      const block = blocks.find((candidate) => candidate.id === Number(args["blockId"]));
+      if (!block) throw { code: "not_found", message: "there is no such block", source_id: null };
+      if (block.target.kind === "entity" && /^mock:[A-Z]+-\d+$/.test(block.target.entity_id)) return null;
+      const linked = block.target.kind === "entity";
+      const entity_id = linked ? "mock:PAY-231" : "mock:PAY-228";
+      return {
+        suggestion: {
+          entity_id,
+          title: titleOf({ kind: "entity", entity_id }),
+          rule: linked ? "linked_to_target" : "last_logged",
+        },
+      };
+    },
     day_blocks: (args) => {
       const from = String(args["from"]);
       const to = String(args["to"]);
       return {
-        past_horizon: false,
+        past_horizon: from < fakeHorizon(),
         blocks: blocks
           .filter((block) => block.started_at < to && block.ended_at > from)
+          .sort((a, b) => a.started_at.localeCompare(b.started_at))
           .map((block) => ({ block, title: titleOf(block.target) })),
       };
+    },
+    // The Day tab's edits (#827): in memory, so a click visibly does something.
+    update_block: (args) => {
+      const block = editable(args["id"]);
+      Object.assign(block, {
+        started_at: String(args["startedAt"]),
+        ended_at: String(args["endedAt"]),
+        target: args["target"] as FakeTarget,
+        kind: "manual",
+        ended_by_relaunch: false,
+      });
+      return { block, title: titleOf(block.target) };
+    },
+    create_block: (args) => {
+      const block: FakeBlock = {
+        id: nextBlock++,
+        started_at: String(args["startedAt"]),
+        ended_at: String(args["endedAt"]),
+        target: args["target"] as FakeTarget,
+        kind: "manual",
+        ended_by_relaunch: false,
+        worklog_id: null,
+      };
+      blocks.push(block);
+      return { block, title: titleOf(block.target) };
+    },
+    delete_block: (args) => {
+      const block = editable(args["id"]);
+      blocks = blocks.filter((candidate) => candidate !== block);
+      return null;
     },
     worklog_draft: (args) => {
       const entityId = String(args["entityId"]);
