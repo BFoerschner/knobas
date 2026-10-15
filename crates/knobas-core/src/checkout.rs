@@ -36,6 +36,8 @@
 
 use std::path::{Path, PathBuf};
 
+pub mod clone;
+
 /// A remote URL reduced to the three things that identify a repository.
 ///
 /// Two remotes name the same repository exactly when their keys are equal, so
@@ -262,6 +264,16 @@ fn read_clone(dir: &Path) -> Option<FoundClone> {
         remote,
         key,
     })
+}
+
+/// The clone `dir` is, if it is one: the scan's own test, for one folder.
+///
+/// What *Clone* asks of `<clones root>/<name>` before it starts (#823,
+/// ADR-0023): a folder that is a clone of the same repository is adopted, and
+/// anything else is refused.
+#[must_use]
+pub fn clone_at(dir: &Path) -> Option<FoundClone> {
+    read_clone(dir)
 }
 
 /// The `origin` remote's URL out of a git config file.
