@@ -292,6 +292,8 @@ let adHocAsks: { blockId: number; day: string; offsetMinutes: number }[] = [];
  * block is on a ticket*, which is what routes a stop to the worklog draft.
  */
 let adHocOffer: unknown = null;
+/** What `worklog_draft` answers; `null`, the ordinary answer, unless a test drafts. */
+let draftAnswer: unknown = null;
 
 vi.mock("./lib/ipc/time", () => ({
   currentTimer: () => Promise.resolve(timerRunning),
@@ -319,8 +321,9 @@ vi.mock("./lib/ipc/time", () => ({
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),
   worklogDraft: (entityId: string, when: { day: string; offsetMinutes: number }) => {
     draftAsks.push({ entityId, ...when });
-    return Promise.resolve(null);
+    return Promise.resolve(draftAnswer);
   },
+  logWork: () => Promise.reject(new Error("no worklog in this test")),
   adHocBlock: (blockId: number, when: { day: string; offsetMinutes: number }) => {
     adHocAsks.push({ blockId, ...when });
     return Promise.resolve(adHocOffer);
@@ -601,6 +604,7 @@ beforeEach(() => {
   contextRows = [];
   adHocAsks = [];
   adHocOffer = null;
+  draftAnswer = null;
   entityRows = [];
   sourceRows = [];
   inboxRows = [];
@@ -2229,4 +2233,56 @@ test("with the setting unset the rooms UI draws, and no new shell", async () => 
   app = mount(App, { target, props: {} });
   await until(() => target.querySelector(".topbar") !== null, "the rooms strip never drew");
   expect(target.querySelector(".tf")).toBeNull();
+});
+
+/**
+ * **A stop in the new shell opens the new shell's draft** (#826): inside `.tf`,
+ * so it reads the new tokens, and with the stop's buttons. *Keep running* puts
+ * the clock back on the ticket.
+ */
+test("under the new shell a stop opens the ticket-first draft, and Keep running restarts the clock", async () => {
+  dbReady = true;
+  const stored = new Map([["knobas.shell", "tickets"]]);
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} },
+  });
+  const ticket = { kind: "entity", entity_id: "mock:PAY-231" };
+  timerRunning = { target: ticket, started_at: "2026-09-03T09:00:00Z", last_heartbeat: "2026-09-03T10:30:00Z" };
+  timerClosed = {
+    id: 10,
+    started_at: "2026-09-03T09:00:00Z",
+    ended_at: "2026-09-03T10:30:00Z",
+    target: ticket,
+    kind: "manual",
+    ended_by_relaunch: false,
+    worklog_id: null,
+  };
+  draftAnswer = {
+    entity_id: "mock:PAY-231",
+    day: "2026-09-03",
+    started_at: "2026-09-03T09:00:00Z",
+    ended_at: "2026-09-03T10:30:00Z",
+    seconds: 90 * 60,
+    block_ids: [10],
+    candidates: [],
+    comment: "",
+  };
+  try {
+    app = mount(App, { target, props: {} });
+    await until(() => target.querySelector(".tf-timer:not(.tf-off)") !== null, "the timer never read as running");
+    pressTimerKey();
+    await until(() => target.querySelector(".tf .tf-dialog") !== null, "the stop never opened the new draft");
+    expect(target.querySelector(".tf .tf-dialog h2")?.textContent).toBe("Log time to PAY-231");
+    const keep = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
+      (button) => button.textContent?.trim() === "Keep running",
+    );
+    keep!.click();
+    await until(() => timerStarts.length > 0, "Keep running never started the clock again");
+    expect(timerStarts).toEqual([ticket]);
+    expect(target.querySelector(".tf-dialog")).toBeNull();
+  } finally {
+    Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
+  }
 });

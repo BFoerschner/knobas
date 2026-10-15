@@ -16,9 +16,10 @@
   setting `data-theme` here.
 
   **Dialogs styled by the rooms UI are mounted outside `.tf`**, the write
-  queue here and the launcher and worklog draft in `App.svelte`: inside it
-  they would read this shell's `--ok`, `--muted`, `--sans` and `--mono`
-  instead of their own.
+  queue here and the launcher, the picker and the ad-hoc dialog in
+  `App.svelte`: inside it they would read this shell's `--ok`, `--muted`,
+  `--sans` and `--mono` instead of their own. Dialogs ported to this shell
+  arrive through `dialogs` and are drawn inside it: the worklog draft (#826).
 -->
 <script lang="ts" module>
   import type { SourceSummary as Summary, SourceSyncStatus as SyncRow } from "../ipc/sources";
@@ -33,7 +34,7 @@
 
 <script lang="ts">
   import { listen as tauriListen } from "@tauri-apps/api/event";
-  import { onMount } from "svelte";
+  import { onMount, type Snippet } from "svelte";
 
   import { EVENTS } from "../ipc";
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
@@ -83,6 +84,7 @@
     onrooms = () => switchShell("rooms"),
     onstarttimer = () => {},
     jobPorts = bridgePorts,
+    dialogs,
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -102,6 +104,11 @@
     onstarttimer?: (entityId: string, title: string) => void;
     /** The job page's reads (#816); the bridge's when omitted. */
     jobPorts?: JobPorts;
+    /**
+     * Dialogs drawn in this shell's tokens, inside `.tf`: the worklog draft
+     * (#826). Each registers itself on `layers` so `Esc` closes it.
+     */
+    dialogs?: Snippet;
   } = $props();
 
   let hash = $state(location.hash);
@@ -265,6 +272,7 @@
     <TfPage {route} ready={lifecycle.ready} job={lastJob} {timedTicket} {onrooms} {timer} {layers} {ontimer} {onstarttimer} {jobPorts} />
   </main>
   <TfStatusBar {readings} pending={queue.counts.pending} onqueue={openWriteQueue} />
+  {@render dialogs?.()}
   <TfToasts />
 </div>
 {#if writeQueuePanel.open}
