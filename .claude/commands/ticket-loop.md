@@ -67,6 +67,22 @@ The masters are `knobas-implementer-brief.md` and `knobas-merge-manager-brief.md
    - "Gate once: run `just gate` on the final merge head only, never on the head as received (`export CARGO_BUILD_JOBS=4` first). It picks `check-front` for a frontend-only head and the full `just check` otherwise; say in your report which ran. If you change nothing, need no rebase, and the PR body records a green gate of the same kind on that exact head SHA over the same `origin/main`, merge without re-running it."
    - "After the rebase, if `app/package-lock.json` changed and now matches the root checkout's, replace the worktree's `app/node_modules` with `cp -Rpc` from the root's before gating."
    - "Follow-ups: one Björn would notice in the app gets `ready-for-agent`. An internal one gets the `backlog` label and is not dispatched until promoted."
+   - "Batching (Björn, 2026-10-15). When your review and fixes are pushed, run `bash <lock> ready <PR> $(git rev-parse HEAD)`, then `bash <lock> take <PR>`. **Exit 3** means another merge-manager merged your PR in a batch: confirm the issue closed, delete the branch and worktree, run `bash <lock> release <PR>`, and report the merge SHA it printed. Once you hold the lock, rebase onto `origin/main` and record `MAIN=$(git rev-parse origin/main)`. Then run `bash <lock> partner <PR>`. If it prints `<B> <B-sha>`:
+     1. `git fetch origin "pull/<B>/head"`, and check `gh pr view <B> --json headRefOid` still equals `<B-sha>`; if not, merge alone.
+     2. `git switch -c batch-<PR>-<B>` from your rebased head, then `git cherry-pick $(git merge-base $MAIN <B-sha>)..<B-sha>`. On any conflict, `git cherry-pick --abort`, go back to your branch and merge alone.
+     3. Run `just gate $MAIN` once on the batch head, in the foreground.
+     4. Green: push your rebased head, merge yours with `--match-head-commit`, and `git fetch`. Then `git rebase --onto origin/main <your rebased head>` the batch branch. Its `HEAD^{tree}` must equal the gated batch head's tree, which proves the gate covers it. Push it with `git push --force-with-lease=<B branch>:<B-sha> origin HEAD:<B branch>`, merge B with `--match-head-commit`, and run `bash <lock> merged <B> <merge SHA>`. If the trees differ or the push is refused, stop: B's merge-manager carries on alone.
+     5. Red: gate your own rebased head alone and merge it if green. Say in your report which PR the failure came from, if you can tell; B's merge-manager gates its own.
+     B's issue, branch and worktree cleanup stay with B's merge-manager."
+   - "Report in exactly this shape, one line each, `none` where empty:
+     `Merged: #<PR> → <sha> (closes #<N>)[; batched #<B> → <sha>]`
+     `Gate: <check|check-front> exit <n>, <s> s, Rust <passed>/<failed>, front <tests>`
+     `Review: <what the Spec axis and deep pass found>`
+     `Fixes: <commits>`
+     `Rulings: <one line each>`
+     `Follow-ups: <#n>`
+     `Milestone review: <criteria handed on>`
+     `Notes: <one line>`"
 
 Pass the copy's path in every dispatch, never the memory path.
 
@@ -99,7 +115,7 @@ A candidate is **free** when it has no open blocker: `gh api repos/{owner}/{repo
 
 ## Step 2: merge before dispatching
 
-For every open PR without a running merge-manager, in ascending PR number, dispatch one merge-manager (background, model as in *Ceiling*). **Reviews run in parallel; only the merge tail runs one at a time.** The merge tail is the rebase onto `origin/main`, the gate, the squash-merge and the cleanup, and it runs under the machine-wide lock `scripts/merge-tail-lock.sh` (use the root checkout's copy, `/Users/dev/Projects/knobas/scripts/merge-tail-lock.sh`). It hands the lock to the **oldest waiting PR first**, since every merge makes the others rebase, and takes over a lock whose holder PR is merged or closed. Its prompt names the merge-manager brief path, the lock script path, the PR, the issue, the worktree `.worktrees/issue-<N>`, its slot, and: "Review and fix now, in parallel with other merge-managers. Before the rebase, run `bash <lock script> take <PR>` in the foreground; after cleanup, or when you give up, run `bash <lock script> release <PR>`. Squash-merge against an explicit SHA you record after taking the lock. Re-run a live suite only if the fixes or the rebase touched what it exercises." If a merge-manager died mid-turn, dispatch a fresh one; never message a dead agent.
+For every open PR without a running merge-manager, in ascending PR number, dispatch one merge-manager (background, model as in *Ceiling*). **Reviews run in parallel; only the merge tail runs one at a time.** The merge tail is the rebase onto `origin/main`, the gate, the squash-merge and the cleanup, and it runs under the machine-wide lock `scripts/merge-tail-lock.sh` (use the root checkout's copy, `/Users/dev/Projects/knobas/scripts/merge-tail-lock.sh`). It hands the lock to the **oldest waiting PR first**, since every merge makes the others rebase, and takes over a lock whose holder PR is merged or closed. A merge-manager whose review is done marks its PR `ready`. The holder **batches** the oldest ready waiter onto its own head, gates the pair once and merges both, and the waiter's `take` then exits 3 for cleanup only (Björn, 2026-10-15; the steps are in the merge-manager brief). Its prompt names the merge-manager brief path, the lock script path, the PR, the issue, the worktree `.worktrees/issue-<N>`, its slot, and: "Review and fix now, in parallel with other merge-managers. Before the rebase, run `bash <lock script> take <PR>` in the foreground; after cleanup, or when you give up, run `bash <lock script> release <PR>`. Squash-merge against an explicit SHA you record after taking the lock. Re-run a live suite only if the fixes or the rebase touched what it exercises." If a merge-manager died mid-turn, dispatch a fresh one; never message a dead agent.
 
 After a reported merge: if the PR changed `app/package-lock.json`, fast-forward the root and run `npm ci` in the root `app/` before creating any worktree; then, for every live worktree whose `app/package-lock.json` now matches the root's but whose `app/node_modules/.package-lock.json` doesn't, and whose agent isn't gating, replace its `node_modules` with `cp -Rpc` from the root. Confirm the issue closed; if not, close it naming the PR. Remove the worktree. Stop each agent once its report is in.
 
@@ -132,6 +148,8 @@ For each ticket N:
 2. `git -C /Users/dev/Projects/knobas fetch`, then `SHA=$(git -C /Users/dev/Projects/knobas rev-parse origin/main)`. Branch from that SHA, never from a moving ref.
 3. `git -C /Users/dev/Projects/knobas worktree add .worktrees/issue-N -b issue-N "$SHA"`, then `cmp app/package-lock.json .worktrees/issue-N/app/package-lock.json && cp -Rpc app/node_modules .worktrees/issue-N/app/node_modules`.
 4. Dispatch one implementer (background, general-purpose, model as in *Ceiling*) naming: the brief path, the issue, its parent spec (and, when the milestone description has a `## Spec digest`, "read the milestone's digest first and the spec sections it cites; the rest of the spec is context only"), the worktree, the SHA, the scratchpad, its slot, whether it holds the desktop-witness slot, the known live-fixture issues, and *self-merge* when it applies.
+
+**Pre-warm** (Björn, 2026-10-15): when a seat will free soon (an implementer's PR is open, or a merge-manager holds the merge lock), take the next ticket Step 4 would dispatch. If its work will touch Rust (its body names `crates/`, or its milestone is backend), create its worktree now, after the disk guard but without claiming it, and start `nice -n 19 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=2 cargo test --workspace --no-run` there in the background, logging to the scratchpad. Never pre-warm while a machine-holding loop ticket runs. At dispatch, the worktree is reused and the dispatch says the warm-up may still be running; cargo's build lock makes the first build wait for it.
 
 Never commit or stash in the root checkout. If a ticket needs files that are uncommitted there, copy them into the worktree and say they are Björn's text, to be committed as is.
 
