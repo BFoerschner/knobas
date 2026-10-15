@@ -308,8 +308,8 @@ pub type Cursor = String;
 /// `knobas-http` had just built, and 401 and 403 could not be told apart at
 /// all. [`status`](Self::status) is now the one way to ask.
 ///
-/// Every variant carries strings and at most a status (`Moved` two strings), so the error crosses a
-/// process boundary as plain data (spec §3a). The serde form is structural, not
+/// Every variant carries strings and at most a status (`Moved` carries two
+/// strings), so the error crosses a process boundary as plain data (spec §3a). The serde form is structural, not
 /// the [`Display`](std::fmt::Display) text thiserror generates:
 /// `{"Unauthorized": {"status": 401}}`, `{"Unreachable": "<detail>"}`. Both
 /// status fields are `#[serde(default)]`, so a peer that sends none -- an
@@ -858,6 +858,12 @@ pub enum WriteOp {
     /// this payload). That comparison is the whole hold: the mirror does not
     /// hold files, so the queue's own projection takes only the repository's
     /// liveness, as for a create.
+    ///
+    /// *Apply anyway* re-sends against their version by itself
+    /// (`knobas_core::write_queue::apply_anyway`). *Edit* is an amend, and an
+    /// amend's payload is the caller's whole: one answering a moved commit
+    /// carries `base_sha` set to the held side's `base`, or the source
+    /// compares it against the stale blob again and it is held again.
     ///
     /// Text only: `content` is a `String` and the source is sent its UTF-8
     /// bytes. A file that does not exist on `branch` is refused rather than

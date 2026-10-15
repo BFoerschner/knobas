@@ -477,6 +477,15 @@ struct FileAt {
     sha: String,
     #[serde(default)]
     content: Option<String>,
+    /// The commit that last touched the file on the ref read.
+    #[serde(default)]
+    last_commit_sha: Option<String>,
+}
+
+impl FileAt {
+    fn text(&self) -> String {
+        decoded(self.content.as_deref().unwrap_or_default())
+    }
 }
 
 /// What one file commit says (#822), as the source's match unpacks it.
@@ -500,7 +509,12 @@ pub(crate) struct Commit<'a> {
 /// `base_sha` comes back as [`SourceError::Moved`] with that blob and its
 /// text: the write queue holds it with both versions. A 422 over a file that
 /// did not move (a new branch that already exists) stays Gitea's refusal, so
-/// the reading does not rest on the sentence.
+/// the reading does not rest on the sentence. And a 422 where the file
+/// already holds this commit's text -- on `new_branch` when one is named,
+/// else on `branch` -- is a re-send of a commit that landed (ADR-0012's
+/// at-least-once), answered as delivered with the commit that last touched
+/// the file; without that, the reader would be shown their own text as
+/// *theirs*.
 ///
 /// A commit straight onto a **protected** branch this token may not push to is
 /// refused here, before the request, saying what to do instead: Gitea's own
@@ -567,14 +581,29 @@ pub(crate) async fn commit_file(
             Ok(answer["commit"]["sha"].as_str().map(ToOwned::to_owned))
         }
         Err(error) if error.status() == Some(422) => {
+            // A re-send of a commit that already landed -- its answer lost,
+            // or knobas gone before the settle (ADR-0012) -- finds its own
+            // text where it was going: that is the write delivered, not a
+            // file somebody else moved, and not a refusal.
+            if let Some(new_branch) = commit.new_branch
+                && let Ok(there) = client
+                    .contents_entry_as::<FileAt>(owner, repo, commit.path, new_branch)
+                    .await
+                && there.text() == commit.content
+            {
+                return Ok(there.last_commit_sha);
+            }
             let now = client
                 .contents_entry_as::<FileAt>(owner, repo, commit.path, commit.branch)
                 .await?;
+            if commit.new_branch.is_none() && now.text() == commit.content {
+                return Ok(now.last_commit_sha);
+            }
             if now.sha == commit.base_sha {
                 return Err(error);
             }
             Err(SourceError::Moved {
-                current: decoded(now.content.as_deref().unwrap_or_default()),
+                current: now.text(),
                 base: now.sha,
             })
         }

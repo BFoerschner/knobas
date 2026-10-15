@@ -29,7 +29,10 @@
   queued snapshot plus `text` (theirs) and `base`. The reader's version is the payload's
   `content`. `store::apply_anyway`, for a held side carrying `base`, writes it into the payload at
   `store::base_path(op)` (`{CommitFile,base_sha}`) and keeps `target_snapshot`; any other hold is
-  released as before. A file that moved again after the reader looked is held again. Not in
+  released as before. A file that moved again after the reader looked is held again. *Edit* is
+  the ordinary amend: its payload is the caller's whole, so an amend answering a moved commit sets
+  `base_sha` to the held side's `base` (#845's to send; the doc on `CommitFile` and the TS mirror say
+  so). Not in
   `UNCLAIMED_OPS`: the withdrawn row names the branch and path.
 
   **Declared by Gitea:** `PUT /repos/{o}/{r}/contents/{path}` with `{"content": <base64>, "message",
@@ -40,7 +43,10 @@
   own 403 is *user cannot commit to repo*); a new branch reads no protection. A 422 (Gitea 1.27.3:
   *sha does not match*) re-reads `GET contents/{path}?ref={branch}`; a blob other than `base_sha` is
   `Moved` with that blob and its decoded text, otherwise Gitea's 422 refusal stands (a new branch
-  that exists). A missing file or branch is Gitea's 404 refusal; nothing is created. An empty
+  that exists). Before either, a 422 where the file already holds this commit's text (on
+  `new_branch` when named, else on `branch`) is a re-send of a commit that landed (ADR-0012),
+  answered as delivered with the contents record's `last_commit_sha`, so a lost answer never shows
+  the reader their own text as theirs. A missing file or branch is Gitea's 404 refusal; nothing is created. An empty
   branch or path, or a path with an empty, `.` or `..` segment, is refused before any request.
   Jira, Confluence, TeamCity and Kuma refuse the op by name.
 
@@ -62,6 +68,7 @@
   `a_commit_to_a_protected_branch_is_refused_with_the_reason`,
   `a_stale_base_comes_back_moved_with_what_gitea_holds_now`,
   `a_422_over_a_file_that_did_not_move_is_a_refusal`,
+  `a_resent_commit_that_already_landed_is_delivered_not_held`,
   `a_commit_aimed_at_anything_but_a_repository_is_refused_before_a_request`). Witnessed against
   the real server by `just gitea-live`'s
   `a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_refused_when_protected`.

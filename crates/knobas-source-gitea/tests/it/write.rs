@@ -1053,6 +1053,19 @@ const MOVED_TO: &str = "da0c4eb8d9a48d171a33574b380752e183286751";
 /// to it all the same) and `docs/retry.md` on it at `at`, whose contents `PUT`
 /// answers `put_status` -- 200 with the commit it made, or Gitea's sentence.
 async fn holding_file(protected: bool, at: &str, put_status: u16, said: &str) -> MockServer {
+    // "Retry twice.\n" -- what somebody else committed, wrapped the way a
+    // long base64 body may be.
+    holding_text(protected, at, "UmV0cnkg\ndHdpY2UuCg==", put_status, said).await
+}
+
+/// [`holding_file`] with the file's text given, in base64.
+async fn holding_text(
+    protected: bool,
+    at: &str,
+    text: &str,
+    put_status: u16,
+    said: &str,
+) -> MockServer {
     let server = MockServer::start().await;
     let token = format!("token {TOKEN}");
     Mock::given(method("GET"))
@@ -1073,10 +1086,8 @@ async fn holding_file(protected: bool, at: &str, put_status: u16, said: &str) ->
         .and(header("Authorization", token.as_str()))
         .respond_with(ResponseTemplate::new(200).set_body_json(json!({
             "name": "retry.md", "path": "docs/retry.md", "type": "file", "sha": at,
-            "encoding": "base64",
-            // "Retry twice.\n" -- what somebody else committed, wrapped the
-            // way a long base64 body may be.
-            "content": "UmV0cnkg\ndHdpY2UuCg=="
+            "encoding": "base64", "content": text,
+            "last_commit_sha": "657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d"
         })))
         .mount(&server)
         .await;
@@ -1219,6 +1230,35 @@ async fn a_stale_base_comes_back_moved_with_what_gitea_holds_now() {
             if base == MOVED_TO && current == "Retry twice.\n"),
         "{error:?}"
     );
+}
+
+/// A re-send of a commit that already landed (ADR-0012: its answer was lost,
+/// or knobas stopped before the settle) meets Gitea's 422 on the stale
+/// `sha`, and the file already holds this commit's text: delivered, with the
+/// commit that made it -- not the reader's own text held as *theirs*. The
+/// same on a new branch, whose re-send Gitea answers *branch already exists*.
+#[tokio::test]
+async fn a_resent_commit_that_already_landed_is_delivered_not_held() {
+    // "Retry three times.\n", which is what `commit_file` sends.
+    for new_branch in [None, Some("feature/PAY-231-retry-doc")] {
+        let server = holding_text(
+            false,
+            MOVED_TO,
+            "UmV0cnkgdGhyZWUgdGltZXMuCg==",
+            422,
+            "sha does not match",
+        )
+        .await;
+        let receipt = source(&server)
+            .write(commit_file(new_branch))
+            .await
+            .unwrap_or_else(|e| panic!("{new_branch:?}: already landed, not {e:?}"));
+        assert_eq!(
+            receipt.remote_id.as_deref(),
+            Some("657b2a74a98aeb5f75bdb4fb47ba5cf8c25acb1d"),
+            "{new_branch:?}"
+        );
+    }
 }
 
 /// A 422 that is not about the file -- here the new branch already exists --

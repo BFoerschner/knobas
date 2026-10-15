@@ -1440,7 +1440,10 @@ the same `PUT`, not a separate `create_branch`; a protected branch the token may
 refused before the request, since Gitea's 403 says only *user cannot commit to repo*; the moved
 check is a re-read after a 422, not the 422's sentence and not a read before every commit; a file
 missing on the branch is Gitea's 404 refusal, never a create; text only; not an unclaimed-write op;
-the receipt names the commit; `Moved` maps to `IpcErrorCode::Conflict`. The live suite witnesses
+the receipt names the commit; `Moved` maps to `IpcErrorCode::Conflict`; a 422 where the file
+already holds this commit's text is a re-send of a commit that landed and is answered as delivered
+(review finding, ADR-0012); *Edit* stays the plain amend, whose caller sets `base_sha` to the held
+`base` (#845). The live suite witnesses
 the adapter half (Moved with Gitea's blob and text); the queue half is witnessed by
 `knobas-sync`'s DB test over a fake answering `Moved`, since the queue's own code is the same for
 every source.

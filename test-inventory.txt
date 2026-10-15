@@ -2276,6 +2276,7 @@ knobas-source-gitea	test/it	write::a_merge_says_whether_gitea_deletes_the_branch
 knobas-source-gitea	test/it	write::a_protected_branch_is_refused_before_a_delete
 knobas-source-gitea	test/it	write::a_pull_request_carries_its_title_body_head_and_base
 knobas-source-gitea	test/it	write::a_refusal_and_a_blip_arrive_as_different_faults
+knobas-source-gitea	test/it	write::a_resent_commit_that_already_landed_is_delivered_not_held
 knobas-source-gitea	test/it	write::a_review_aimed_at_a_repository_is_refused_before_a_request
 knobas-source-gitea	test/it	write::a_review_carries_its_verdict_as_gitea_event_and_its_body
 knobas-source-gitea	test/it	write::a_review_of_ones_own_pull_request_is_refused_with_gitea_sentence

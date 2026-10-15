@@ -973,6 +973,13 @@ pub fn moved(op: &str, queued: serde_json::Value, base: &str, current: &str) -> 
 /// Only `"commit_file"` (issue #822). `update_page`'s `base_version` and
 /// `set_parameter`'s `base` are refused at the source rather than reported
 /// as moved, so they never reach a hold with a `base`.
+///
+/// It reads knobas' own `WriteOp` serde shape, so ADR-0007's requirement 3
+/// binds it, and a miss **fails safe**: a path that no longer names the field
+/// leaves the stale base in place, the source answers it moved again, and the
+/// write is held again -- a hold the reader can see, never a silent
+/// overwrite. `a_commit_over_a_file_that_moved_is_held_with_both_versions`
+/// (`knobas-sync`) pins the path, since a drifted one keeps that write held.
 #[must_use]
 pub fn base_path(op: &str) -> Option<&'static [&'static str]> {
     match op {
