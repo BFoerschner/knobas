@@ -40,8 +40,8 @@
     <dd>{columnName(status)}</dd>
     <dt>Assignee</dt>
     <dd>{card.assignee ?? "Unassigned"}</dd>
-    {#if card.priority}<dt>Priority</dt>
-      <dd>{card.priority}</dd>{/if}
+    <dt>Priority</dt>
+    <dd>{card.priority ?? "None"}</dd>
     {#if card.path}<dt>Epic</dt>
       <dd>{card.path}</dd>{/if}
     <dt>Updated</dt>

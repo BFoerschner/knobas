@@ -12,12 +12,16 @@
 
   **The match** (`knobas_search::Searcher::matching_ids(raw, kind) -> Option<Vec<String>>`, new).
   The launcher's own parse and merge with no chips, over the live mirror only, every id of `kind`
-  the query admits, uncapped, unranked. `None` for a query with neither text nor a filter. `Some`
+  the query admits, uncapped, unranked. `None` for a query with neither words nor a filter. `Some`
   of none when `type:` names only other kinds. The statement is `knobas_search::sql::ids_sql`, a
-  third builder beside `search_sql` and `saved_summary_sql`, matching through the same
-  `corpus_predicates`, so the view and the launcher cannot disagree about what a query admits. The
-  text matches as the launcher's does (full-text, the last word as a prefix). The `q` CTE is now
-  one function, `tsquery_cte`, shared with `search_sql`, whose statement text is unchanged.
+  third builder beside `search_sql` and `saved_summary_sql`. **The keys** match through the same
+  `corpus_predicates`, so a key means the same in the view and the launcher. **The words do not**:
+  each word (lowercased, split on whitespace) must appear as a substring, ignoring case, in the
+  row's entity id (its key), its title, its declared assignee (`declared_string!` over the bound
+  declarations), or a name of one of its declared parents (`sync.item_parent`, a Jira ticket's
+  epic). R-2.3 and prototype-6's "Filter by key, summary, epic or person"; the body is not
+  searched, no word is stemmed or dropped as a stopword, and the view marks exactly what matched.
+  `search_sql`'s statement text is unchanged.
 
   **The board** (`knobas_core::mini_board`). `read_scoped(pool, Scope, declarations, per_column)`
   is new. `Scope { ctx_id, sources, project, only, identity }` adds `only: Option<&[String]>` (the

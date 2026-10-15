@@ -2234,12 +2234,12 @@ const FAKE_IDENTITY = "mara";
 
 /**
  * `mini_board`'s `query` (#810), restated over the fixture: every word must
- * appear in the key or the title, ignoring case, and each ticket key the
+ * appear in the key, the title, the assignee or the epic, ignoring case, as
+ * `knobas_search::sql::ids_sql` has it, and each ticket key the
  * Tickets view's chips and dropdowns write (`issuetype:`, `priority:`,
  * `assignee:`, `status:`, `project:`, `under:`) must hold, values of one key
- * meaning any of them. The real grammar is `knobas-search`'s, matched by
- * PostgreSQL full-text search with the last word as a prefix; this is a
- * substring match, which is close enough to look at and certifies nothing.
+ * meaning any of them. A restatement, which certifies nothing: the real
+ * match is witnessed in `knobas-search`'s `ticket_keys.rs`.
  */
 function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolean {
   const tokens = [...query.matchAll(/(-?)([a-z]+):(?:"([^"]*)"|(\S+))|(\S+)/gi)];
@@ -2256,7 +2256,7 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
     keys.set(name, held);
   }
   const card = boardCard(entry);
-  const haystack = `${card.key} ${card.title}`.toLowerCase();
+  const haystack = `${card.key} ${card.title} ${card.assignee ?? ""} ${card.path ?? ""}`.toLowerCase();
   if (!words.every((word) => haystack.includes(word))) return false;
   const field: Record<string, string | null> = {
     issuetype: card.issue_type,

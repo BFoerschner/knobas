@@ -666,8 +666,46 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
             .matching_ids(&format!("project:{p} payouts retr"), "ticket")
             .await
             .unwrap(),
-        Some(vec![story]),
-        "every word must match, the last one as a prefix while it is typed"
+        Some(vec![story.clone()]),
+        "every word must appear, a part of a word as well"
+    );
+    // The key, the assignee and the epic are words of the row too (R-2.3,
+    // "Filter by key, summary, epic or person"); the body is not.
+    let key = format!("{p}-13");
+    sqlx::query(
+        "update sync.item set payload = payload
+              || jsonb_build_object('epic', jsonb_build_object('key', $2::text))
+              || jsonb_build_object('fields', (payload -> 'fields')
+                   || '{\"assignee\": {\"name\": \"priya.nair\", \"key\": \"priya.nair\"}}'::jsonb),
+              body_text = 'a description that mentions zeppelins'
+          where entity_id = $1",
+    )
+    .bind(&story)
+    .bind(format!("{p}-EPIC"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    for typed in [
+        key.to_lowercase(),
+        "PRIYA sepa".to_owned(),
+        format!("{p}-epic retry"),
+    ] {
+        assert_eq!(
+            searcher
+                .matching_ids(&format!("project:{p} {typed}"), "ticket")
+                .await
+                .unwrap(),
+            Some(vec![story.clone()]),
+            "{typed}"
+        );
+    }
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} zeppelins"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "a word only the description holds is not a word of the row"
     );
 
     let matched = searcher

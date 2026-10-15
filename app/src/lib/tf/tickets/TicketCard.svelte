@@ -1,8 +1,8 @@
 <!--
   One ticket on the ticket board (#810, R-3.7): key, type and priority, the
   summary, the epic under it, and the assignee's initials. The selected card
-  is the yellow card, lifted off the board. Signals and the comment count
-  come with #815.
+  is the yellow card, lifted off the board. Signals come with #815; the
+  comment count waits for a declared count (see the #810 rulings).
 -->
 <script lang="ts">
   import type { MiniBoardCard } from "../../ipc/entity";

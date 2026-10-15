@@ -170,7 +170,38 @@ pub fn search_sql(
     let mut sql = String::from("with\n");
 
     if let Some(tsquery) = &tsquery {
-        sql.push_str(&tsquery_cte(tsquery, prefix_last));
+        // Computed ONCE, as a FROM item, and never bound as a tsquery
+        // (roadmap §4 gotcha 2): the match, the rank and the headline all read
+        // this one value.
+        sql.push_str("q as not materialized (\n  select ");
+        if prefix_last {
+            // What makes the box answer while the word is still being typed.
+            // `websearch_to_tsquery` output is already a well-formed, quoted
+            // tsquery, so appending ':*' to its *text* and casting back turns
+            // only the last lexeme into a prefix. The guard is for the empty
+            // case -- a query of nothing but stopwords yields the empty
+            // tsquery, and ':*' on its own is a syntax error.
+            sql.push_str(concat!(
+                "case when t.tsq::text = '' then null::tsquery\n",
+                "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
+                // The same words with none of them a prefix: what a row is
+                // ranked by when it holds the last word whole (`RANK_WHOLE`).
+                "         t.tsq as whole,\n"
+            ));
+        } else {
+            sql.push_str("t.tsq as tsq,\n");
+        }
+        // The typed words as `to_tsvector` lexes a name, sorted and distinct,
+        // for `NAMED`: one array per search, compared against each match. It
+        // must lex exactly as `NAMED` does, or no row is ever named.
+        let _ = writeln!(
+            sql,
+            "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
+        );
+        let _ = writeln!(
+            sql,
+            "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
+        );
     }
 
     // A ticket key's declared paths, resolved once for the statement (#811).
@@ -287,65 +318,34 @@ pub fn search_sql(
     }
 }
 
-/// The `q` CTE: the typed words as one tsquery, computed once a statement,
-/// ending in `,\n`. [`search_sql`]'s, and [`ids_sql`]'s since #810.
-fn tsquery_cte(tsquery: &str, prefix_last: bool) -> String {
-    let mut sql = String::new();
-    // Computed ONCE, as a FROM item, and never bound as a tsquery
-    // (roadmap §4 gotcha 2): the match, the rank and the headline all read
-    // this one value.
-    sql.push_str("q as not materialized (\n  select ");
-    if prefix_last {
-        // What makes the box answer while the word is still being typed.
-        // `websearch_to_tsquery` output is already a well-formed, quoted
-        // tsquery, so appending ':*' to its *text* and casting back turns
-        // only the last lexeme into a prefix. The guard is for the empty
-        // case -- a query of nothing but stopwords yields the empty
-        // tsquery, and ':*' on its own is a syntax error.
-        sql.push_str(concat!(
-            "case when t.tsq::text = '' then null::tsquery\n",
-            "              else (t.tsq::text || ':*')::tsquery end as tsq,\n",
-            // The same words with none of them a prefix: what a row is
-            // ranked by when it holds the last word whole (`RANK_WHOLE`).
-            "         t.tsq as whole,\n"
-        ));
-    } else {
-        sql.push_str("t.tsq as tsq,\n");
-    }
-    // The typed words as `to_tsvector` lexes a name, sorted and distinct,
-    // for `NAMED`: one array per search, compared against each match. It
-    // must lex exactly as `NAMED` does, or no row is ever named.
-    let _ = writeln!(
-        sql,
-        "         tsvector_to_array(to_tsvector('english', {tsquery})) as words"
-    );
-    let _ = writeln!(
-        sql,
-        "    from (select websearch_to_tsquery('english', {tsquery}) as tsq) t\n),"
-    );
-    sql
-}
-
-/// Every id a query admits in one corpus, uncapped and unranked (#810): the
+/// Every live mirror id a query admits, uncapped and unranked (#810): the
 /// Tickets view's server-side filter, which narrows a board rather than
-/// filling a launcher page. The same predicates [`search_sql`] matches with,
-/// from the same [`corpus_predicates`], so the view and the launcher cannot
-/// disagree about what a query admits; no rank, no excerpt, no per-kind cap.
+/// filling a launcher page.
+///
+/// The grammar's keys match through [`corpus_predicates`], the predicates
+/// [`search_sql`] uses, so a key means the same in the view and the launcher.
+/// **The words do not**: the launcher ranks full-text matches over the title
+/// and the body, and this keeps a row when every word appears, as a
+/// substring ignoring case, in its key, title, declared assignee or the names
+/// of its declared parents (a Jira ticket's epic) -- R-2.3's rule and
+/// prototype-6's *Filter by key, summary, epic or person*, which the view
+/// marks. `words` are lowercased by the caller; none is no word filter.
 #[must_use]
-pub fn ids_sql(
-    corpus: &Corpus,
-    text: Option<&str>,
-    prefix_last: bool,
-    filters: &EffectiveFilters,
-) -> SearchSql {
+pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
+    let corpus = &crate::corpus::LIVE_ITEM;
     let mut builder = Builder::default();
-    let tsquery = text.map(|raw| builder.param(Bind::Text(raw.to_owned())));
     let bound = bind_filters(&mut builder, filters);
+    let typed = (!words.is_empty()).then(|| {
+        (
+            builder.param(Bind::Texts(words.to_vec())),
+            match &bound.declarations {
+                Some(declarations) => declarations.clone(),
+                None => builder.param(Bind::Json(filters.declarations.as_param())),
+            },
+        )
+    });
 
     let mut sql = String::from("with\n");
-    if let Some(tsquery) = &tsquery {
-        sql.push_str(&tsquery_cte(tsquery, prefix_last));
-    }
     sql.push_str(&field_paths(&bound));
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
@@ -354,11 +354,18 @@ pub fn ids_sql(
         "select {} as entity_id from {}",
         corpus.entity_id, corpus.relation
     );
-    if text.is_some() {
-        sql.push_str(" cross join q");
+    let mut predicates = corpus_predicates(corpus, None, &bound);
+    if let Some((words, declarations)) = &typed {
+        let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
+        predicates.push(format!(
+            "not exists (select 1 from unnest({words}::text[]) w(word) where \
+             strpos(lower(i.entity_id || ' ' || i.title || ' ' || coalesce({}, '')), w.word) = 0 \
+             and not exists (select 1 from sync.item_parent ip \
+                             where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0))",
+            knobas_core::declared_string!("pd.d", "assignee")
+        ));
     }
     sql.push('\n');
-    let predicates = corpus_predicates(corpus, text.is_some().then_some("q.tsq"), &bound);
     if !predicates.is_empty() {
         let _ = write!(sql, " where {}", predicates.join("\n   and "));
     }
