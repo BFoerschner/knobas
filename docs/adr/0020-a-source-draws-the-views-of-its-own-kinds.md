@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, narrowed by ADR-0022
 ---
 
 # A source draws the views of its own kinds

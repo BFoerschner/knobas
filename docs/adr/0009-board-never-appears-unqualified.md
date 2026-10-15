@@ -1,5 +1,5 @@
 ---
-status: accepted
+status: accepted, amended by ADR-0024
 ---
 
 # "Board" never appears unqualified, and the Tickets tile's board is the *mini board*
