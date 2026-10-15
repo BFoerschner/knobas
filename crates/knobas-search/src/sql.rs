@@ -403,6 +403,8 @@ struct BoundField {
     values: String,
     /// `assigned:`'s window, or `null`.
     days: String,
+    /// `has:`'s user (#815), or `null`.
+    me: String,
 }
 
 /// Allocate one statement's filter binds, in the order they are read.
@@ -415,6 +417,12 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
     let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
     bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
     for filter in &filters.fields {
+        // `has:`'s user first: its fragment reads it before the values.
+        let me = if filter.key == crate::query::FieldKey::Has {
+            builder.param(Bind::Texts(filter.me.clone()))
+        } else {
+            "null".to_owned()
+        };
         let values = builder.param(Bind::Texts(filter.values.clone()));
         let days = filter.within_days.map_or_else(
             || "null".to_owned(),
@@ -425,6 +433,7 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
             negated: filter.negated,
             values,
             days,
+            me,
         });
     }
     bound
@@ -534,10 +543,22 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         // `under:`. A fragment that misses yields null, and null is "does not
         // match": `coalesce` makes it false before a `not` can see it.
         let matches = match corpus.fields.iter().find(|(key, _)| *key == field.key) {
+            // `has:` (#815) reads its binds in place rather than from `fd`:
+            // its fragment is a set (`in (select ...)`) that must be read
+            // once per statement, and a reference to `fd` would make it a
+            // subplan run once per row, the whole signal walk each time. The
+            // fragment's only `fd.` references are these two, by
+            // construction (`crate::corpus::LIVE_ITEM_FIELDS`).
+            Some((crate::query::FieldKey::Has, fragment)) => format!(
+                "coalesce({}, false)",
+                fragment
+                    .replace("fd.v", &field.values)
+                    .replace("fd.u", &field.me)
+            ),
             Some((_, fragment)) => format!(
-                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n) fd), \
-                 false)",
-                field.values, field.days
+                "coalesce((select {fragment} from (select {}::text[] as v, {}::int as n, \
+                 {}::text[] as u) fd), false)",
+                field.values, field.days, field.me
             ),
             // A corpus whose rows have no such field matches no value of it.
             None => "false".to_owned(),
@@ -927,6 +948,30 @@ mod tests {
         "sprint_state",
         "entry",
         "active",
+        // `has:`'s reader (#815), `knobas_core::ticket_signals!`: the kinds
+        // it reads, the relation it walks, the reviewers field, the four
+        // signals' kinds, words and tones, and the pull request's number.
+        "ticket",
+        "ctx",
+        "build",
+        "pr",
+        "blocks",
+        "reviewers",
+        "#([0-9]+)$",
+        "failing-build",
+        "build failed",
+        "err",
+        "blocker",
+        "blocked by ",
+        ":",
+        "open-pr",
+        "PR #",
+        " open",
+        "PR open",
+        "info",
+        "review-for-me",
+        "review asked of you",
+        "warn",
     ];
 
     fn filters(
@@ -1034,6 +1079,7 @@ mod tests {
                 negated: n % 2 == 1,
                 values: vec![evil.to_owned()],
                 within_days: (key == FieldKey::Assigned).then_some(7),
+                me: vec![evil.to_owned()],
             })
             .collect();
         let built = search_sql(

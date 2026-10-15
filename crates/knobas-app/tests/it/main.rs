@@ -39,6 +39,7 @@ mod protocol_ipc;
 mod read_plans;
 mod responsiveness_probe;
 mod search_ipc;
+mod signals_ipc;
 mod sources_crud;
 mod sources_mirror;
 mod sources_registry;

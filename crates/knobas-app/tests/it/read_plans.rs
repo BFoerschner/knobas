@@ -215,6 +215,30 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     })
     .await;
     wrong.extend(shapes("mini_board", &plan));
+    // The board's signals (#815), for fifty of its tickets, with a tenth of
+    // the proposals confirmed for the plan so the walk has links to follow,
+    // and put back so the tray's plans below see the mirror as it was.
+    let tickets: Vec<String> = sqlx::query_scalar(
+        "select id from knobas.entity where kind = 'ticket' order by id limit 50",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let confirm = "update knobas.link set confirmed_at = now()
+                    where ctid in (select ctid from knobas.link where confirmed_at is null
+                                    order by from_id limit 1350)";
+    sqlx::query(confirm).execute(&pool).await.unwrap();
+    let plan = explain(&pool, knobas_core::mini_board::planned_signals(), |q| {
+        q.bind(declared.clone())
+            .bind(vec!["mara".to_owned()])
+            .bind(tickets.clone())
+    })
+    .await;
+    sqlx::query("update knobas.link set confirmed_at = null where confirmed_at is not null")
+        .execute(&pool)
+        .await
+        .unwrap();
+    wrong.extend(shapes("mini_board signals", &plan));
     let plan = explain(&pool, knobas_search::home::planned_recent(), |q| {
         q.bind(vec![
             "ticket".to_owned(),

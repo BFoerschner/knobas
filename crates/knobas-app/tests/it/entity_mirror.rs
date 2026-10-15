@@ -1074,13 +1074,16 @@ const MINI_BOARD_CARD_FIELDS: &[&str] = &[
     "entity_id",
     "issue_type",
     "key",
+    "labels",
     "mine",
     "path",
     "priority",
+    "signals",
     "source_id",
     "title",
     "updated_at",
 ];
+const SIGNAL_FIELDS: &[&str] = &["kind", "text", "tone"];
 const SOURCE_STATUSES_FIELDS: &[&str] = &["source_id", "statuses"];
 
 /// The mini board's four shapes (#177), each against what `entity.ts`
@@ -1108,6 +1111,12 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
                 updated_at: None,
                 path: None,
                 mine: false,
+                labels: vec!["sepa".to_owned()],
+                signals: vec![knobas_core::signals::Signal {
+                    kind: knobas_core::signals::SignalKind::Blocker,
+                    text: "blocked by OPS-77".to_owned(),
+                    tone: knobas_core::tone::Tone::Err,
+                }],
             }],
             total: 1,
         }],
@@ -1133,6 +1142,16 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
         "SourceStatuses",
         &wire["sources"][0],
         SOURCE_STATUSES_FIELDS,
+    );
+    assert_shape(
+        "Signal",
+        &wire["columns"][0]["cards"][0]["signals"][0],
+        SIGNAL_FIELDS,
+    );
+    assert_same_members(
+        &knobas_core::signals::SignalKind::ALL.map(knobas_core::signals::SignalKind::as_str),
+        declared_union(MIRROR, "SignalKind"),
+        "a signal kind on one side only is a `has:` value the shell cannot name",
     );
 
     assert_eq!(wire["columns"][0]["status"], serde_json::Value::Null);

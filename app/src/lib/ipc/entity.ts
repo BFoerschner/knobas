@@ -1484,6 +1484,21 @@ export interface MiniBoardCard {
   path: string | null;
   /** Whether `assignee` is one of the configured usernames, ignoring case. */
   mine: boolean;
+  /** Its labels at the declared path, in the record's order; empty on a miss (#813). */
+  labels: string[];
+  /** The signals around it, in the order a card draws them (#815). */
+  signals: Signal[];
+}
+
+/** Which fact a signal states: the values `has:` takes — `knobas_core::signals::SignalKind` (#815). */
+export type SignalKind = "failing-build" | "blocker" | "open-pr" | "review-for-me";
+
+/** One signal on a ticket — `knobas_core::signals::Signal` (#815). */
+export interface Signal {
+  kind: SignalKind;
+  /** The words beside the dot: *build failed*, *PR #142 open*, *blocked by OPS-77*. */
+  text: string;
+  tone: Tone;
 }
 
 /** One status column — `MiniBoardColumn` (#177). */

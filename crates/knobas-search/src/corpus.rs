@@ -368,6 +368,20 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 ") = any(fd.v) and i.item_updated_at >= now() - make_interval(days => fd.n))"
             ),
         ),
+        // The cards' own reader (#815), so `has:` admits exactly the tickets
+        // whose cards show the signal: `fd.u` is the user, lowercased.
+        (
+            FieldKey::Has,
+            concat!(
+                "i.entity_id in (select sg.tid from ",
+                knobas_core::ticket_signals!(
+                    "(select fdecl.d from fdecl)",
+                    "fd.u",
+                    knobas_core::linked_ends!()
+                ),
+                " sg where sg.kind = any(fd.v))"
+            ),
+        ),
     ]
 };
 

@@ -155,8 +155,8 @@ macro_rules! priority_read {
 /// `$5` is the per-column cap (#753), `null` for none: each column keeps its
 /// newest `$5` cards, and every row carries `total`, how many its column holds
 /// before the cut. The status is read once a row (`materialized`) and the
-/// priority, the type, the assignee and the path line (#810) only for the
-/// rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
+/// priority, the type, the assignee, the path line (#810), the labels and
+/// the signals (#813, #815) only for the rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
 /// bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
     "with ",
@@ -191,12 +191,32 @@ const CARDS: &str = concat!(
     crate::declared_string!("$4", "assignee"),
     " as assignee, ",
     crate::path_line_read!("$4"),
-    " as path, i.item_updated_at as updated_at, r.total
+    " as path, array(select l.value from ",
+    crate::declared_list!("$4", "labels"),
+    " l) as labels, i.item_updated_at as updated_at, r.total
        from ranked r
        join sync.item i on i.entity_id = r.entity_id
       where $5::bigint is null or r.rn <= $5
       order by r.at desc, r.entity_id"
 );
+
+/// The signals of the cards a board keeps (#815): [`crate::signals`]' reader
+/// over the kept ids (`$3`), one statement for the whole board, the same
+/// reader `has:` asks. `$1` the declarations, `$2` the configured
+/// usernames, lowercased.
+const SIGNALS: &str = concat!(
+    "select s.tid, s.kind, s.text, s.tone from ",
+    crate::ticket_signals!("$1", "$2", "(select unnest($3::text[]) as tid)"),
+    " s order by s.tid, s.ord, s.text"
+);
+
+/// The board's signals statement, for `knobas-app`'s plan test. It binds
+/// the declarations, the usernames and the ticket ids.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_signals() -> &'static str {
+    SIGNALS
+}
 
 /// The board's card statement, for `knobas-app`'s plan test
 /// (`tests/it/read_plans.rs`, #778). It binds what [`read_capped`] binds.
@@ -295,6 +315,13 @@ pub struct MiniBoardCard {
     /// given ([`read`], [`read_capped`]); the `mini_board` command always
     /// gives it, and the rooms' tile simply does not draw it.
     pub mine: bool,
+    /// The labels it carries, at the declared `labels` path (#811's field),
+    /// in the record's order; empty on a miss. The Tickets view's *Label*
+    /// lanes read the first (#813, R-3.5).
+    pub labels: Vec<String>,
+    /// The signals around it (#815, R-3.8), in the order a card draws them:
+    /// [`crate::signals`]' reader, the one `has:` asks too.
+    pub signals: Vec<crate::signals::Signal>,
 }
 
 /// The statuses one source's live ticket corpus shows, in the board's order.
@@ -317,6 +344,7 @@ struct CardRow {
     issue_type: Option<String>,
     assignee: Option<String>,
     path: Option<String>,
+    labels: Vec<String>,
     updated_at: Option<DateTime<Utc>>,
     total: i64,
 }
@@ -470,6 +498,7 @@ pub async fn read_scoped(
     }
     let scope = (!sources.is_empty()).then(|| sources.to_vec());
     let declared = declarations.as_param();
+    let me: Vec<String> = identity.iter().map(|name| name.to_lowercase()).collect();
     // Planned for its parameters every time (#753): reused, the statement
     // went to PostgreSQL's generic plan on its sixth execution and an All room
     // of 15,000 tickets took 6 s where its own plan takes 0.1 s.
@@ -482,6 +511,8 @@ pub async fn read_scoped(
         .bind(per_column.map(i64::from))
         .fetch_all(pool)
         .await?;
+    let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
+    let mut signals = signals_of(pool, &kept, &declared, &me).await?;
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are
@@ -506,6 +537,7 @@ pub async fn read_scoped(
             // shown whole rather than not at all.
             key: EntityRef::parse(&row.entity_id)
                 .map_or_else(|_| row.entity_id.clone(), |entity| entity.key),
+            signals: signals.remove(&row.entity_id).unwrap_or_default(),
             entity_id: row.entity_id,
             source_id: row.source_id,
             title: row.title,
@@ -517,6 +549,7 @@ pub async fn read_scoped(
             assignee: row.assignee,
             updated_at: row.updated_at,
             path: row.path,
+            labels: row.labels,
         });
     }
     columns.sort_by_key(|column| column_rank(column.status.as_deref()));
@@ -525,6 +558,42 @@ pub async fn read_scoped(
         sources: observed_statuses(pool, &sources, declarations).await?,
         columns,
     })
+}
+
+/// The signals of `tickets`, by ticket, each list in the order a card draws
+/// it: [`SIGNALS`].
+async fn signals_of(
+    pool: &PgPool,
+    tickets: &[String],
+    declared: &sqlx::types::Json<serde_json::Value>,
+    me: &[String],
+) -> Result<HashMap<String, Vec<crate::signals::Signal>>, CoreError> {
+    let mut out: HashMap<String, Vec<crate::signals::Signal>> = HashMap::new();
+    if tickets.is_empty() {
+        return Ok(out);
+    }
+    let rows: Vec<(String, String, String, String)> = sqlx::query_as(SIGNALS)
+        .persistent(false)
+        .bind(declared)
+        .bind(me)
+        .bind(tickets)
+        .fetch_all(pool)
+        .await?;
+    for (tid, kind, text, tone) in rows {
+        // The statement writes only the four kinds and their tones, so a
+        // row that does not decode is a bug here; it is left out rather
+        // than failing the board.
+        let (Some(kind), Ok(tone)) = (
+            crate::signals::SignalKind::from_spelling(&kind),
+            serde_json::from_value::<crate::tone::Tone>(serde_json::Value::String(tone)),
+        ) else {
+            continue;
+        };
+        out.entry(tid)
+            .or_default()
+            .push(crate::signals::Signal { kind, text, tone });
+    }
+    Ok(out)
 }
 
 /// The statuses one source's live ticket corpus shows (#760), in the board's
