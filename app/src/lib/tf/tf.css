@@ -318,6 +318,45 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
 
+/* ---------- dialogs: a sheet over a dimmed page, 8vh from the top ---------- */
+.tf-modal {
+  position: fixed; inset: 0; z-index: 30; display: grid; place-items: start center; padding-top: 8vh;
+  background: rgba(10,15,20,.4);
+}
+.tf-dialog {
+  width: min(620px, calc(100vw - 32px)); max-height: 84vh; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow);
+}
+.tf-dialog header { padding: 14px 18px; border-bottom: 1px solid var(--rule); }
+.tf-dialog header h2 { font-size: var(--t-xl); }
+.tf-dialog .tf-body { padding: 14px 18px; overflow: auto; display: flex; flex-direction: column; gap: 10px; }
+.tf-dialog footer {
+  padding: 12px 18px; border-top: 1px solid var(--rule); display: flex; gap: 8px; justify-content: flex-end;
+  background: var(--sheet-2);
+}
+.tf-dialog footer .tf-first { margin-right: auto; }
+.tf-dialog textarea, .tf-dialog input[type=text] {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper); color: var(--ink); width: 100%;
+}
+.tf-dialog textarea { resize: vertical; }
+.tf-dsub { margin-top: 4px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-pane-h { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-ck { display: flex; gap: 8px; align-items: baseline; font-size: var(--t-sm); }
+.tf-cand .tf-dim { margin-left: auto; font-size: var(--t-xs); white-space: nowrap; }
+.tf-dialog .tf-note { font-size: var(--t-xs); }
+.tf-dialog .tf-fine { font-size: var(--t-2xs); }
+.tf-fail { color: var(--err); font-size: var(--t-sm); }
+
+/* The worklog draft's duration: the start and the minutes, then the reading in the job key's width. */
+.tf-dur { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.tf-dur label { display: flex; flex-direction: column; gap: 2px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dur input {
+  width: 92px; font: 600 var(--t-lg) var(--mono); border: 1px solid var(--rule); border-radius: 4px; padding: 4px 6px;
+  background: var(--paper); color: var(--ink);
+}
+.tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; }
+.tf-dur .tf-dim { font-size: var(--t-xs); flex-basis: 100%; }
+
 /* ---------- toasts: ink on the page, rising 20px into place ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
