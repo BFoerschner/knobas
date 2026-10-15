@@ -294,6 +294,8 @@ let adHocAsks: { blockId: number; day: string; offsetMinutes: number }[] = [];
 let adHocOffer: unknown = null;
 /** What `worklog_draft` answers; `null`, the ordinary answer, unless a test drafts. */
 let draftAnswer: unknown = null;
+/** What `day_blocks` answers: no blocks, unless a test draws a day (#827). */
+let dayAnswer: unknown[] = [];
 
 vi.mock("./lib/ipc/time", () => ({
   currentTimer: () => Promise.resolve(timerRunning),
@@ -313,7 +315,9 @@ vi.mock("./lib/ipc/time", () => ({
   timerHeartbeat: () => Promise.resolve(null),
   // The day review and the settings view are both mounted by the shell; what
   // they call on arrival has to exist here even where no test drives it.
-  dayBlocks: () => Promise.resolve({ blocks: [], past_horizon: false }),
+  dayBlocks: () => Promise.resolve({ blocks: dayAnswer, past_horizon: false }),
+  // The new shell's Day tab reads the day's no-target time from the week (#827).
+  weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
   updateBlock: () => Promise.reject(new Error("no edit in this test")),
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
@@ -605,6 +609,7 @@ beforeEach(() => {
   adHocAsks = [];
   adHocOffer = null;
   draftAnswer = null;
+  dayAnswer = [];
   entityRows = [];
   sourceRows = [];
   inboxRows = [];
@@ -2282,6 +2287,61 @@ test("under the new shell a stop opens the ticket-first draft, and Keep running 
     await until(() => timerStarts.length > 0, "Keep running never started the clock again");
     expect(timerStarts).toEqual([ticket]);
     expect(target.querySelector(".tf-dialog")).toBeNull();
+  } finally {
+    Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
+  }
+});
+
+/**
+ * The new shell's Day tab (#827): *Log…* on an unlogged block asks for that
+ * ticket's draft on the day on screen, and the draft opens in the new shell's
+ * own dialog, the one a stop opens.
+ */
+test("under the new shell, Log… on a day's block opens that ticket's draft for that day", async () => {
+  dbReady = true;
+  const stored = new Map([["knobas.shell", "tickets"]]);
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} },
+  });
+  const ticket = { kind: "entity", entity_id: "mock:PAY-231" };
+  dayAnswer = [
+    {
+      block: {
+        id: 10,
+        started_at: new Date(2026, 8, 3, 9, 0).toISOString(),
+        ended_at: new Date(2026, 8, 3, 10, 30).toISOString(),
+        target: ticket,
+        kind: "manual",
+        ended_by_relaunch: false,
+        worklog_id: null,
+      },
+      title: "Retry failed SEPA payouts",
+    },
+  ];
+  draftAnswer = {
+    entity_id: "mock:PAY-231",
+    day: "2026-09-03",
+    started_at: "2026-09-03T07:00:00Z",
+    ended_at: "2026-09-03T08:30:00Z",
+    seconds: 90 * 60,
+    block_ids: [10],
+    candidates: [],
+    comment: "",
+  };
+  location.hash = "#/time/2026-09-03";
+  try {
+    app = mount(App, { target, props: {} });
+    const log = () =>
+      [...target.querySelectorAll<HTMLButtonElement>(".tf-tm-row button")].find(
+        (button) => button.textContent?.trim() === "Log…",
+      );
+    await until(() => log() !== undefined, "the Day tab never drew the block");
+    log()!.click();
+    await until(() => target.querySelector(".tf .tf-dialog") !== null, "Log… never opened the new draft");
+    expect(draftAsks.map((ask) => [ask.entityId, ask.day])).toEqual([["mock:PAY-231", "2026-09-03"]]);
+    expect(target.querySelector(".tf .tf-dialog h2")?.textContent).toBe("Log time to PAY-231");
   } finally {
     Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
   }
