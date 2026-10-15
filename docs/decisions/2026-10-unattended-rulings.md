@@ -1769,7 +1769,7 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
 
 ## #908 — splitting the fake-IPC fixture and the shell's page wiring per feature
 
-Ruled 2026-10-15 by the implementer (PR for #908).
+Ruled 2026-10-15 by the implementer (PR #916).
 
 - **Feature modules are found by a glob**, not listed in an index: `fake-tauri.ts` collects
   `fake/*.ts` and `tf/pages.ts` collects `tf/*/page.ts`. A hand-kept list is one shared line per
