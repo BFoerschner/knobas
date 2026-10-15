@@ -1,75 +1,55 @@
 <!--
   What the ticket-first shell draws under the top bar (#809).
 
-  Every route a later ticket builds is an empty page here that names it, so an
-  address is never a blank pane and never a page pretending to be another.
+  **Each screen registers itself** in its feature folder's `page.ts`
+  (`page-entry.ts`, #908), and the first page whose route matches draws here:
+  Tickets is `tickets/page.ts` (#810), the job `#/job/<key>` is
+  `job/page.ts` (#816), Time is `time/page.ts` (#827) and Settings is
+  `settings/page.ts` (#830). A page that sets `crumbs` is drawn under the
+  shell's breadcrumb. A new screen adds a folder and does not edit this
+  file. What stays here is the shell's own:
 
-  - **Tickets** is home and has no breadcrumb: the three panes of #810,
-    `tickets/TicketsPage.svelte`.
-  - **Job** has no breadcrumb either: it is the place the breadcrumb leads to.
-    `#/job/<key>` is `TfJob` (#816); a bare `#/job` with no job opened yet
-    says how to open one.
-  - **A full view** starts with the breadcrumb (R-1.6): the job you were last
-    in on the card yellow, then the view's name, and *Back to <key>* beside
-    `Esc` on the right; with no job, the view's own name and *Back*.
-  - **Settings** is `settings/TfSettings.svelte` (#830): its own breadcrumb,
-    its sections, Sources and a source's page. The sections not built yet
-    offer the way back to the rooms UI, which still has them.
+  - **A bare `#/job`** with no job opened yet says how to open one. Job has no
+    breadcrumb: it is the place the breadcrumb leads to.
+  - **A full view not built yet** starts with the breadcrumb (R-1.6): the job
+    you were last in on the card yellow, then the view's name, and *Back to
+    <key>* beside `Esc` on the right; with no job, the view's own name and
+    *Back*. It is an empty page that names itself, so an address is never a
+    blank pane and never a page pretending to be another.
 -->
 <script lang="ts">
-  import type { Timer } from "../shell/timer.svelte";
-  import TfJob from "./job/TfJob.svelte";
-  import type { JobPorts } from "./job/ports";
-  import type { Layers } from "./layers.svelte";
-  import { jobHash, SECTION_NAME, type TfRoute } from "./route";
-  import TicketsPage from "./tickets/TicketsPage.svelte";
-  import TfSettings from "./settings/TfSettings.svelte";
-  import TfTime from "./time/TfTime.svelte";
+  import type { TfPageContext } from "./page-entry";
+  import { pageFor } from "./pages";
+  import { jobHash, SECTION_NAME } from "./route";
 
-  let {
-    route,
-    ready,
-    job,
-    timedTicket,
-    onrooms,
-    timer,
-    layers,
-    ontimer,
-    onstarttimer,
-    jobPorts,
-    onlog,
-    timeRevision = 0,
-    ontimechanged,
-  }: {
-    route: TfRoute;
-    /** Whether the database answers yet: a page's reads wait for it. */
-    ready: boolean;
-    /** The job the reader was last in. */
-    job: string | null;
-    /** The ticket key the timer runs on, or `null`. */
-    timedTicket: string | null;
-    /** Switch back to the rooms UI. */
-    onrooms: () => void;
-    timer: Pick<Timer, "current" | "elapsed">;
-    layers: Layers;
-    /** The timer verb, which stops a running timer into the worklog draft. */
-    ontimer: (() => void) | undefined;
-    /** Start the timer on a ticket (#816's *Start timer*). */
-    onstarttimer: (entityId: string, title: string) => void;
-    /** The job page's reads. */
-    jobPorts: JobPorts;
-    /** Open the worklog draft for a ticket and day (the Time view's *Log…*). */
-    onlog?: ((entityId: string, day: string) => void) | undefined;
-    /** Bumped when something outside the Time view changed a day's blocks. */
-    timeRevision?: number;
-    ontimechanged?: (() => void) | undefined;
-  } = $props();
+  /** Everything the shell hands a page; see `page-entry.ts`. */
+  let { ctx }: { ctx: TfPageContext } = $props();
+
+  const route = $derived(ctx.route);
+  const job = $derived(ctx.job);
+
+  const page = $derived(pageFor(route));
 </script>
 
-{#if route.view === "tickets"}
-  <TicketsPage {ready} {timedTicket} />
-{:else if route.view === "job" && route.key !== null}
-  <TfJob segment={route.key} tab={route.tab} {timer} {layers} {ontimer} {onstarttimer} ports={jobPorts} />
+{#snippet crumbs(name: string)}
+  <nav class="tf-crumbs" aria-label="Breadcrumb">
+    {#if job !== null}
+      <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
+    {/if}
+    <strong>{name}</strong>
+    <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
+  </nav>
+{/snippet}
+
+{#if page && page.crumbs && route.view === "full"}
+  {@const Page = page.component}
+  <div class="tf-full">
+    {@render crumbs(SECTION_NAME[route.section])}
+    <Page {...page.props(ctx)} />
+  </div>
+{:else if page}
+  {@const Page = page.component}
+  <Page {...page.props(ctx)} />
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">
@@ -83,41 +63,22 @@
       <a class="tf-btn" href="#/tickets">All tickets <kbd>Esc</kbd></a>
     </div>
   </div>
-{:else if route.view === "full" && route.section === "settings"}
-  <TfSettings rest={route.rest} {job} {ready} {onrooms} {layers} />
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">
-    <nav class="tf-crumbs" aria-label="Breadcrumb">
-      {#if job !== null}
-        <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
-      {/if}
-      <strong>{name}</strong>
-      <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
-    </nav>
-    {#if route.section === "time"}
-      <TfTime
-        {ready}
-        rest={route.rest}
-        {timer}
-        {ontimer}
-        {onlog}
-        revision={timeRevision}
-        onchanged={ontimechanged}
-      />
-    {:else}
-      <header class="tf-fhead">
-        <div><h1>{name}</h1></div>
-      </header>
-      <div class="tf-empty">
-        <p>{name} is not built in the new shell yet.</p>
-      </div>
-    {/if}
+    {@render crumbs(name)}
+    <header class="tf-fhead">
+      <div><h1>{name}</h1></div>
+    </header>
+    <div class="tf-empty">
+      <p>{name} is not built in the new shell yet.</p>
+    </div>
   </div>
 {:else}
+  <!-- An unknown address, or a feature whose `page.ts` is missing. -->
   <div class="tf-full">
     <div class="tf-empty">
-      <p>Nothing lives at <span class="tf-mono">{route.hash}</span> in the new shell.</p>
+      <p>Nothing lives at <span class="tf-mono">{route.view === "unknown" ? route.hash : location.hash}</span> in the new shell.</p>
       <a class="tf-btn" href="#/tickets">Go to Tickets</a>
     </div>
   </div>

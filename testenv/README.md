@@ -1102,7 +1102,7 @@ From M4 the estate knobas models **is** this infrastructure and not a
 fictional one (#427), so the file is a fixture with readers, not
 documentation: the Import, `--demo` (`knobas_app::sources::demo`),
 `crates/knobas-app/tests/it/estate_exit.rs` (M4.0's exit checklist) and the
-`?fake-ipc` harness (`app/src/lib/shell/dev/fake-tauri.ts`) all read these
+`?fake-ipc` harness (`app/src/lib/shell/dev/fake/estate.ts`) all read these
 bytes. `crates/knobas-core/tests/it/estate_file.rs` keeps it honest in `just
 check`: unique ids, parents and route ends that resolve, one tree, types from
 the table, no unknown keys, every compose service recorded on the notebook's

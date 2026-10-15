@@ -1765,3 +1765,34 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
   goes to the milestone review; if the day is slow there, the follow-up is one read that answers
   the day's offers together and computes the logging sources and the last logged ticket once.
   **Reversing:** a batched command plus one call site in `TfDay.svelte`'s `read()`.
+---
+
+## #908 — splitting the fake-IPC fixture and the shell's page wiring per feature
+
+Ruled 2026-10-15 by the implementer (PR #916).
+
+- **Feature modules are found by a glob**, not listed in an index: `fake-tauri.ts` collects
+  `fake/*.ts` and `tf/pages.ts` collects `tf/*/page.ts`. A hand-kept list is one shared line per
+  feature, and two PRs adding adjacent lines conflict, which is what the ticket is about. Two
+  fixture modules answering one command throw; `fake-features.test.ts` holds that every module
+  under `fake/` has `handlers`. **Reversing:** low, replace each glob with a list.
+- **Smart lists are their own module** (`fake/smart-lists.ts`), because
+  `crates/knobas-search/src/lists.rs` `include_str!`s the file that holds `fakeSmartLists`; every
+  other fixture module is then read by no crate. (Orchestrator's instruction.) **Reversing:** low.
+- **The stored contexts and the link graph live in `fake/corpus.ts`**, beside the mirror, because
+  `list_entities` scopes by them and `promote_context` reads `CORPUS`; split across two modules they
+  formed an import cycle. **Reversing:** low.
+- **`TfPage.svelte` takes one `ctx` prop**, so a page needing a new shell value edits
+  `page-entry.ts`'s `TfPageContext` and `TfShell.svelte`'s `ctx`, not three prop lists. The bare
+  `#/job`, a section not built yet and an unknown address stay in `TfPage.svelte` as the shell's
+  own fallbacks. **Reversing:** low.
+- **`App.svelte` keeps its wiring.** What a TF ticket touched there is the timer verb, the worklog
+  draft flow and the launcher, which serve both shells; the rooms UI's routes, store starts and
+  seeds are the rooms UI's and TF tickets do not edit them. Per-screen wiring was in `TfPage.svelte`
+  and is now per feature. **Reversing:** a follow-up ticket if a TF ticket has to edit `App.svelte`
+  for a screen.
+- **After the rebase over #914 and #915 (merge-manager, PR #916), Settings and Time register as
+  pages too**: `settings/page.ts` and `time/page.ts`, instead of the two `{#if}` branches those
+  PRs added to `TfPage.svelte`. Time is drawn under the shell's breadcrumb, so a page entry may
+  set `crumbs: true`; Settings draws its own and leaves it unset. Their fixture changes moved into
+  `fake/sources.ts` and `fake/time.ts` unchanged. **Reversing:** low, the two branches return.

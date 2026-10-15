@@ -1382,7 +1382,7 @@ mod tests {
 
     /// **The `?fake-ipc` fixture's copy of this registry is the registry.**
     ///
-    /// `app/src/lib/shell/dev/fake-tauri.ts`'s `fakeSmartLists` restates every
+    /// `app/src/lib/shell/dev/fake/smart-lists.ts`'s `fakeSmartLists` restates every
     /// built-in's id, label and blurb so that a browser can be walked over the
     /// rail (#504). It is a hand copy with no compiler between it and this
     /// file, and #504's own doc comment named the gap rather than papering
@@ -1412,7 +1412,7 @@ mod tests {
     ///   is the field the fixture copied, and says nothing about `describe`.
     #[test]
     fn the_builtin_registry_matches_its_typescript_fixture() {
-        let fixture = include_str!("../../../app/src/lib/shell/dev/fake-tauri.ts");
+        let fixture = include_str!("../../../app/src/lib/shell/dev/fake/smart-lists.ts");
         let body = function_body(fixture, "fakeSmartLists");
 
         // The negative control. `FIXTURE_SAVED` -- the fixture's saved lists
@@ -1434,7 +1434,7 @@ mod tests {
         //
         // Asked of `fakeSavedLists`' body and not of the file, because the
         // file is a representation of the fixture and not the fixture: two
-        // words in an unrelated comment anywhere in 3,000 lines would satisfy
+        // words in an unrelated comment anywhere in the file would satisfy
         // a whole-file `contains` while the blurb the rail draws had drifted.
         // `function_body` panics when the function is not there, so a rename
         // fails here rather than passing vacuously.
@@ -1451,7 +1451,7 @@ mod tests {
             .collect();
         assert_eq!(
             found, expected,
-            "app/src/lib/shell/dev/fake-tauri.ts's fakeSmartLists is no longer \
+            "app/src/lib/shell/dev/fake/smart-lists.ts's fakeSmartLists is no longer \
              this registry: every built-in is three literals there -- id, \
              label, blurb -- in declaration order"
         );
@@ -1466,7 +1466,7 @@ mod tests {
         let header = format!("function {name}() {{");
         let start = source
             .find(&header)
-            .unwrap_or_else(|| panic!("`{header}` is not in fake-tauri.ts"))
+            .unwrap_or_else(|| panic!("`{header}` is not in fake/smart-lists.ts"))
             + header.len();
         let rest = &source[start..];
         let end = rest
