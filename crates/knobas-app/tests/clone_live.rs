@@ -254,6 +254,22 @@ async fn stopping_a_clone_leaves_nothing_behind() {
     start_admitting(&pool, &clones, seen.clone(), &id, &["http"])
         .await
         .unwrap();
+    // Stopped once git is talking to the server, not before it has started.
+    for _ in 0..200 {
+        if !seen.all().is_empty() {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    println!("stopping after: {:?}", seen.all());
+    assert!(
+        matches!(
+            seen.all().first().map(|e| &e.state),
+            Some(CloneState::Progress { .. })
+        ),
+        "git reported no progress before the stop: {:?}",
+        seen.all()
+    );
     let answer = stop(&pool, &clones, &id).await.unwrap();
 
     let target = root.join("payout-service");

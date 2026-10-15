@@ -14,7 +14,7 @@
 //! - **The URL is built, never taken from the mirror**: the Gitea source's
 //!   `base_url` from `knobas.source_config`, which a person typed, plus the
 //!   repository's full name, checked by [`clone::FullName::parse`]. The
-//!   repository's mirrored `web_url` is never read here.
+//!   repository's mirrored `web_url` never reaches git.
 //! - **Only https and ssh**: the address's scheme, and git's `protocol.*`
 //!   flags. Inherited `GIT_ALLOW_PROTOCOL` and `GIT_CONFIG_*` would override
 //!   those flags, so they are removed from git's environment.
@@ -86,8 +86,11 @@ pub enum CloneState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum FailureCause {
+    /// git could not sign in with the person's own credentials.
     Auth,
+    /// The disk is full.
     DiskFull,
+    /// The network, the server, or anything else; the reason says which.
     Other,
 }
 
@@ -118,6 +121,7 @@ pub enum CloneAnswer {
 
 /// Where [`CloneEvent`]s go: the Tauri bridge in the app, a list in a test.
 pub trait CloneEvents: Send + Sync {
+    /// One clone's progress, or how it ended.
     fn clone_progress(&self, event: CloneEvent);
 }
 
@@ -128,11 +132,18 @@ pub struct Clones {
 }
 
 struct Running {
+    /// Which start this entry belongs to, so a start that gives up removes its
+    /// own entry and never a later one's.
+    run: u64,
     path: PathBuf,
-    /// Sent a reply channel to stop the clone; the runner answers on it once
-    /// the folder is removed.
-    stop: oneshot::Sender<oneshot::Sender<bool>>,
+    /// Sent a reply channel to stop the clone. The runner answers whether the
+    /// folder is gone, or `None` when git had already finished.
+    stop: oneshot::Sender<Reply>,
 }
+
+/// The runner's answer to a stop: whether the folder is gone, or `None` when
+/// the clone had already finished and was kept.
+type Reply = oneshot::Sender<Option<bool>>;
 
 impl Clones {
     /// The one registry the app's command uses.
@@ -144,6 +155,14 @@ impl Clones {
 
     fn lock(&self) -> std::sync::MutexGuard<'_, HashMap<String, Running>> {
         self.running.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// Remove `repo_id`'s entry if it is still run `run`'s.
+    fn release(&self, repo_id: &str, run: u64) {
+        let mut running = self.lock();
+        if running.get(repo_id).is_some_and(|entry| entry.run == run) {
+            running.remove(repo_id);
+        }
     }
 }
 
@@ -193,11 +212,14 @@ pub async fn start_admitting(
 /// Stop the running clone of `entity_id`'s repository and remove its folder.
 ///
 /// Answers once the folder is gone (or could not be removed, which `removed`
-/// says).
+/// says), and [`CloneAnswer::NotCloning`] when nothing was running or git
+/// finished before the stop reached it.
 ///
 /// # Errors
 ///
-/// What [`super::view`] refuses an address with.
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
+/// repo or branch; [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror
+/// holds neither it nor its repository.
 pub async fn stop(
     pool: &PgPool,
     clones: &Arc<Clones>,
@@ -213,7 +235,12 @@ pub async fn stop(
         // finished or failed, and its own event says which.
         return Ok(CloneAnswer::NotCloning);
     }
-    let removed = removed.await.unwrap_or_else(|_| !running.path.exists());
+    let removed = match removed.await {
+        Ok(Some(removed)) => removed,
+        Ok(None) => return Ok(CloneAnswer::NotCloning),
+        // The start gave up before its runner existed.
+        Err(_) => !running.path.exists(),
+    };
     Ok(CloneAnswer::Stopped {
         path: running.path.to_string_lossy().into_owned(),
         removed,
@@ -278,25 +305,80 @@ async fn start_with(
     let target = root.join(name.repo());
     let shown = target.to_string_lossy().into_owned();
 
-    if clones.lock().contains_key(&repo_id) {
-        return Ok(CloneAnswer::Cloning { path: shown });
+    // Reserved before anything is looked at on disk, under one lock, so two
+    // starts at once cannot both reach the folder.
+    static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let run_id = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let (stop_tx, stop_rx) = oneshot::channel();
+    {
+        let mut running = clones.lock();
+        if running.contains_key(&repo_id) {
+            return Ok(CloneAnswer::Cloning { path: shown });
+        }
+        running.insert(
+            repo_id.clone(),
+            Running {
+                run: run_id,
+                path: target.clone(),
+                stop: stop_tx,
+            },
+        );
     }
 
-    if std::fs::symlink_metadata(&target).is_ok() {
-        return adopt_or_refuse(&target, &url, shown);
+    match spawn_into(&root, &target, &url, protocols, &shown).await {
+        Ok(Ok(child)) => {
+            tokio::spawn(run(
+                Arc::clone(clones),
+                events,
+                repo_id,
+                run_id,
+                target,
+                child,
+                stop_rx,
+            ));
+            Ok(CloneAnswer::Cloning { path: shown })
+        }
+        Ok(Err(answer)) => {
+            clones.release(&repo_id, run_id);
+            Ok(answer)
+        }
+        Err(error) => {
+            clones.release(&repo_id, run_id);
+            Err(error)
+        }
+    }
+}
+
+/// Adopt the folder at `target`, or make it and start git cloning into it.
+async fn spawn_into(
+    root: &Path,
+    target: &Path,
+    url: &str,
+    protocols: &[&str],
+    shown: &str,
+) -> Result<Result<tokio::process::Child, CloneAnswer>, IpcError> {
+    if std::fs::symlink_metadata(target).is_ok() {
+        return adopt_or_refuse(target, url, shown).map(Err);
     }
 
-    let git = find_git().await?;
+    let git = working_tree::git_on_path()
+        .await
+        .map_err(|read| match read {
+            working_tree::TreeRead::Failed { reason } => {
+                IpcError::invalid(format!("git could not be checked: {reason}"))
+            }
+            _ => IpcError::invalid("git is not installed, so knobas cannot clone"),
+        })?;
 
-    std::fs::create_dir_all(&root).map_err(|error| {
+    std::fs::create_dir_all(root).map_err(|error| {
         IpcError::internal(format!(
             "could not make the clones root {}: {error}",
             root.display()
         ))
     })?;
-    if let Err(error) = std::fs::create_dir(&target) {
+    if let Err(error) = std::fs::create_dir(target) {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
-            return adopt_or_refuse(&target, &url, shown);
+            return adopt_or_refuse(target, url, shown).map(Err);
         }
         return Err(IpcError::internal(format!(
             "could not make {shown}: {error}"
@@ -305,7 +387,7 @@ async fn start_with(
 
     let mut command = tokio::process::Command::new(git);
     command
-        .args(clone::clone_args(&url, &target, protocols))
+        .args(clone::clone_args(url, target, protocols))
         .env("GIT_TERMINAL_PROMPT", "0")
         // git's own words, untranslated: `failure_cause` matches English.
         .env("LC_ALL", "C")
@@ -324,41 +406,25 @@ async fn start_with(
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let child = match command.spawn() {
-        Ok(child) => child,
+    match command.spawn() {
+        Ok(child) => Ok(Ok(child)),
         Err(error) => {
-            let _ = std::fs::remove_dir_all(&target);
-            return Err(IpcError::invalid(format!("git could not be run: {error}")));
+            let _ = std::fs::remove_dir_all(target);
+            Err(IpcError::invalid(format!("git could not be run: {error}")))
         }
-    };
-
-    let (stop_tx, stop_rx) = oneshot::channel();
-    clones.lock().insert(
-        repo_id.clone(),
-        Running {
-            path: target.clone(),
-            stop: stop_tx,
-        },
-    );
-    tokio::spawn(run(
-        Arc::clone(clones),
-        events,
-        repo_id,
-        target,
-        child,
-        stop_rx,
-    ));
-    Ok(CloneAnswer::Cloning { path: shown })
+    }
 }
 
 /// A folder is already at the target: adopted if it is a clone of the
 /// repository at `url`, refused otherwise.
-fn adopt_or_refuse(target: &Path, url: &str, shown: String) -> Result<CloneAnswer, IpcError> {
+fn adopt_or_refuse(target: &Path, url: &str, shown: &str) -> Result<CloneAnswer, IpcError> {
     let wanted = core_checkout::remote_key(url);
     let found = core_checkout::clone_at(target).map(|clone| clone.key);
     if wanted.is_some() && found == wanted {
         if clone::is_finished(target) {
-            return Ok(CloneAnswer::Adopted { path: shown });
+            return Ok(CloneAnswer::Adopted {
+                path: shown.to_owned(),
+            });
         }
         return Err(IpcError::conflict(format!(
             "{shown} is a clone of this repository that did not finish. Remove it and clone again"
@@ -369,24 +435,6 @@ fn adopt_or_refuse(target: &Path, url: &str, shown: String) -> Result<CloneAnswe
     )))
 }
 
-/// The `git` on `PATH`, and not Apple's install-dialog shim (#715).
-async fn find_git() -> Result<PathBuf, IpcError> {
-    let search = std::env::var_os("PATH").unwrap_or_default();
-    let no_git = || IpcError::invalid("git is not installed, so knobas cannot clone");
-    let git = working_tree::find_on(&search, "git").ok_or_else(no_git)?;
-    if git == Path::new(working_tree::APPLE_SHIM)
-        && !tokio::time::timeout(
-            working_tree::TIMEOUT,
-            working_tree::command_line_tools_installed(),
-        )
-        .await
-        .unwrap_or(false)
-    {
-        return Err(no_git());
-    }
-    Ok(git)
-}
-
 /// How much of git's stderr is kept for the failure's cause.
 const KEPT: usize = 8 * 1024;
 
@@ -395,9 +443,10 @@ async fn run(
     clones: Arc<Clones>,
     events: Arc<dyn CloneEvents>,
     repo_id: String,
+    run_id: u64,
     target: PathBuf,
     mut child: tokio::process::Child,
-    mut stop: oneshot::Receiver<oneshot::Sender<bool>>,
+    mut stop: oneshot::Receiver<Reply>,
 ) {
     let path = target.to_string_lossy().into_owned();
     let send = |state: CloneState| {
@@ -407,98 +456,38 @@ async fn run(
             state,
         });
     };
-
-    let mut stderr = child.stderr.take();
-    let mut buf = [0_u8; 4096];
-    let mut line = Vec::new();
-    let mut kept = String::new();
-    let mut last_phase = String::new();
-    let mut last_sent: Option<Instant> = None;
-    let mut stop_open = true;
-
-    loop {
-        let read = async {
-            match stderr.as_mut() {
-                Some(stderr) => stderr.read(&mut buf).await.unwrap_or(0),
-                None => 0,
-            }
-        };
-        tokio::select! {
-            asked = &mut stop, if stop_open => {
-                match asked {
-                    Ok(reply) => {
-                        let _ = child.kill().await;
-                        stopped(&send, &target, reply).await;
-                        return;
-                    }
-                    Err(_) => stop_open = false,
-                }
-            }
-            n = read => {
-                if n == 0 {
-                    break;
-                }
-                for &byte in &buf[..n] {
-                    if byte != b'\r' && byte != b'\n' {
-                        line.push(byte);
-                        continue;
-                    }
-                    let text = String::from_utf8_lossy(&line).trim().to_owned();
-                    line.clear();
-                    if text.is_empty() {
-                        continue;
-                    }
-                    if let Some(progress) = clone::parse_progress(&text) {
-                        let due = last_sent.is_none_or(|at| at.elapsed() >= PROGRESS_EVERY);
-                        if progress.phase != last_phase || due {
-                            last_phase.clone_from(&progress.phase);
-                            last_sent = Some(Instant::now());
-                            send(CloneState::Progress {
-                                phase: progress.phase,
-                                percent: progress.percent,
-                            });
-                        }
-                    } else {
-                        kept.push_str(&text);
-                        kept.push('\n');
-                        if kept.len() > KEPT {
-                            let cut = kept.len() - KEPT;
-                            let cut = (cut..kept.len()).find(|&i| kept.is_char_boundary(i)).unwrap_or(0);
-                            kept.drain(..cut);
-                        }
-                    }
-                }
-            }
-        }
-    }
-    if !line.is_empty() {
-        kept.push_str(String::from_utf8_lossy(&line).trim());
-    }
-
-    // stderr is closed; a stop can still arrive while git exits.
-    let status = loop {
-        tokio::select! {
-            asked = &mut stop, if stop_open => match asked {
-                Ok(reply) => {
-                    let _ = child.kill().await;
-                    stopped(&send, &target, reply).await;
-                    return;
-                }
-                Err(_) => stop_open = false,
-            },
-            status = child.wait() => break status,
+    // A stop's sender dropped without a send (the entry was replaced) never
+    // stops anything.
+    let asked = async {
+        match (&mut stop).await {
+            Ok(reply) => reply,
+            Err(_) => std::future::pending().await,
         }
     };
-    // A stop that took the registry entry while git was exiting is honoured:
-    // the person asked for the folder to go.
+
+    let exited = tokio::select! {
+        reply = asked => {
+            let _ = child.kill().await;
+            let removed = remove(&target).await;
+            send(CloneState::Stopped { removed });
+            let _ = reply.send(Some(removed));
+            return;
+        }
+        exited = transfer(&mut child, &send) => exited,
+    };
+    let (success, kept) = exited;
+
+    // A stop that took the registry entry as git exited is answered here: a
+    // finished clone is kept and the stop told so, a failed one is removed
+    // either way.
     stop.close();
-    if stop_open && let Ok(reply) = stop.try_recv() {
-        stopped(&send, &target, reply).await;
-        return;
-    }
-    clones.lock().remove(&repo_id);
-    if status.is_ok_and(|status| status.success()) {
+    let late = stop.try_recv().ok();
+    clones.release(&repo_id, run_id);
+    if success {
         send(CloneState::Done);
+        if let Some(reply) = late {
+            let _ = reply.send(None);
+        }
         return;
     }
     let removed = remove(&target).await;
@@ -510,19 +499,84 @@ async fn run(
         cause: clone::failure_cause(&kept).into(),
         removed,
     });
+    if let Some(reply) = late {
+        let _ = reply.send(Some(removed));
+    }
 }
 
-/// Remove the folder, say so, and answer the stop.
-async fn stopped(send: &impl Fn(CloneState), target: &Path, reply: oneshot::Sender<bool>) {
-    let removed = remove(target).await;
-    send(CloneState::Stopped { removed });
-    let _ = reply.send(removed);
+/// Read git's stderr to its end, sending progress, and wait for git: whether
+/// it succeeded, and the lines that were not progress.
+async fn transfer(child: &mut tokio::process::Child, send: &impl Fn(CloneState)) -> (bool, String) {
+    let mut kept = String::new();
+    let mut line = Vec::new();
+    let mut last_phase = String::new();
+    let mut last_sent: Option<Instant> = None;
+    let keep = |text: &str, kept: &mut String| {
+        kept.push_str(text);
+        kept.push('\n');
+        if kept.len() > KEPT {
+            let cut = kept.len() - KEPT;
+            let cut = (cut..kept.len())
+                .find(|&i| kept.is_char_boundary(i))
+                .unwrap_or(0);
+            kept.drain(..cut);
+        }
+    };
+    if let Some(mut stderr) = child.stderr.take() {
+        let mut buf = [0_u8; 4096];
+        loop {
+            let n = stderr.read(&mut buf).await.unwrap_or(0);
+            if n == 0 {
+                break;
+            }
+            for &byte in &buf[..n] {
+                if byte != b'\r' && byte != b'\n' {
+                    line.push(byte);
+                    continue;
+                }
+                let text = String::from_utf8_lossy(&line).trim().to_owned();
+                line.clear();
+                if text.is_empty() {
+                    continue;
+                }
+                let Some(progress) = clone::parse_progress(&text) else {
+                    keep(&text, &mut kept);
+                    continue;
+                };
+                let due = last_sent.is_none_or(|at| at.elapsed() >= PROGRESS_EVERY);
+                if progress.phase != last_phase || due {
+                    last_phase.clone_from(&progress.phase);
+                    last_sent = Some(Instant::now());
+                    send(CloneState::Progress {
+                        phase: progress.phase,
+                        percent: progress.percent,
+                    });
+                }
+            }
+        }
+    }
+    if !line.is_empty() {
+        keep(String::from_utf8_lossy(&line).trim(), &mut kept);
+    }
+    let success = child.wait().await.is_ok_and(|status| status.success());
+    (success, kept)
 }
 
 /// Remove the folder this run made; whether it is gone.
+///
+/// Tried until the folder stays gone for a moment, up to five seconds: killing
+/// git does not kill the helpers it started (`git-remote-https`,
+/// `index-pack`), and one still writing a pack can put a file back after the
+/// first removal. They exit once their pipes to git close.
 async fn remove(target: &Path) -> bool {
-    let _ = tokio::fs::remove_dir_all(target).await;
-    tokio::fs::symlink_metadata(target).await.is_err()
+    for _ in 0..50 {
+        let _ = tokio::fs::remove_dir_all(target).await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if tokio::fs::symlink_metadata(target).await.is_err() {
+            return true;
+        }
+    }
+    false
 }
 
 #[cfg(test)]

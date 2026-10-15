@@ -521,3 +521,31 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
     );
     server.abort();
 }
+
+/// Two starts at once: one clone, and both answer `cloning`. Neither finds the
+/// other's new folder and refuses it as not a clone.
+#[tokio::test]
+async fn two_starts_at_once_start_one_clone() {
+    let pool = pool().await;
+    let (base, server) = silent_server().await;
+    let id = repo(&pool, "gitea", &base, "tidewater/twice").await;
+    let (_dir, root) = root(&pool).await;
+    let seen = Arc::new(Seen::default());
+    let clones = Clones::global();
+
+    let (a, b) = tokio::join!(
+        start_admitting(&pool, &clones, seen.clone(), &id, &["http"]),
+        start_admitting(&pool, &clones, seen.clone(), &id, &["http"]),
+    );
+
+    let cloning = CloneAnswer::Cloning {
+        path: root.join("twice").to_string_lossy().into_owned(),
+    };
+    assert_eq!(a.unwrap(), cloning);
+    assert_eq!(b.unwrap(), cloning);
+    assert!(matches!(
+        stop(&pool, &clones, &id).await.unwrap(),
+        CloneAnswer::Stopped { removed: true, .. }
+    ));
+    server.abort();
+}

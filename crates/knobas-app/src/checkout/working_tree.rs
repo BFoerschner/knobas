@@ -90,7 +90,7 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
 
 /// Apple's `git` on a Mac without the Command Line Tools is a shim that opens
 /// an install dialog instead of running (#715).
-pub(crate) const APPLE_SHIM: &str = "/usr/bin/git";
+const APPLE_SHIM: &str = "/usr/bin/git";
 
 /// Whether the Command Line Tools are installed, asked once per process once
 /// it has answered. `xcode-select -p` only prints a path and never opens the
@@ -100,7 +100,7 @@ pub(crate) const APPLE_SHIM: &str = "/usr/bin/git";
 /// knobas runs are noticed after a restart. A probe that has not answered is
 /// not kept (the caller abandons it, `kill_on_drop` ends it) and is asked
 /// again on the next read.
-pub(crate) async fn command_line_tools_installed() -> bool {
+async fn command_line_tools_installed() -> bool {
     static ANSWER: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
     *ANSWER
         .get_or_init(|| async {
@@ -129,20 +129,10 @@ async fn read_guarded(
     probe: impl AsyncFnOnce() -> bool,
     timeout: Duration,
 ) -> TreeRead {
-    let Some(git) = find_on(search, "git") else {
-        return TreeRead::NoGit;
+    let git = match usable_git(search, shim, probe, timeout).await {
+        Ok(git) => git,
+        Err(read) => return read,
     };
-    if git == shim {
-        match tokio::time::timeout(timeout, probe()).await {
-            Err(_) => {
-                return TreeRead::Failed {
-                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
-                };
-            }
-            Ok(false) => return TreeRead::NoGit,
-            Ok(true) => {}
-        }
-    }
     if !path.is_dir() {
         return TreeRead::NotARepo;
     }
@@ -210,8 +200,45 @@ async fn read_guarded(
     }
 }
 
+/// The `git` to run, or why there is none: [`TreeRead::NoGit`] when none is
+/// on `search` or it is Apple's `shim` without the Command Line Tools, and
+/// [`TreeRead::Failed`] when `probe` did not answer within `timeout`.
+async fn usable_git(
+    search: &OsStr,
+    shim: &Path,
+    probe: impl AsyncFnOnce() -> bool,
+    timeout: Duration,
+) -> Result<PathBuf, TreeRead> {
+    let git = find_on(search, "git").ok_or(TreeRead::NoGit)?;
+    if git == shim {
+        match tokio::time::timeout(timeout, probe()).await {
+            Err(_) => {
+                return Err(TreeRead::Failed {
+                    reason: format!("xcode-select did not answer within {} s", timeout.as_secs()),
+                });
+            }
+            Ok(false) => return Err(TreeRead::NoGit),
+            Ok(true) => {}
+        }
+    }
+    Ok(git)
+}
+
+/// The `git` on this process's `PATH` that [`read`] would run, for the one
+/// other git command knobas runs, `checkout::clone` (#823).
+pub(crate) async fn git_on_path() -> Result<PathBuf, TreeRead> {
+    let search = std::env::var_os("PATH").unwrap_or_default();
+    usable_git(
+        &search,
+        Path::new(APPLE_SHIM),
+        command_line_tools_installed,
+        TIMEOUT,
+    )
+    .await
+}
+
 /// The first executable called `name` in a `PATH`-style list.
-pub(crate) fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
+fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
     let file: OsString = if cfg!(windows) {
         format!("{name}.exe").into()
     } else {
