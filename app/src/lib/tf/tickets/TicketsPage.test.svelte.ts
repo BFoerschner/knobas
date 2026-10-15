@@ -287,3 +287,20 @@ test("Enter presses the preview's button from a card", async () => {
   first.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   expect(location.hash).toBe("#/job/PAY-1");
 });
+
+test("the preview reads its ticket once, not again on every board answer that keeps it selected", async () => {
+  const h = harness();
+  const asked: string[] = [];
+  const detail = h.ports.detail;
+  h.ports.detail = (id) => {
+    asked.push(id);
+    return detail(id);
+  };
+  await open(h);
+  type(field(), "r");
+  await settle();
+  type(field(), "e");
+  await settle();
+  expect(asked).toEqual(["jira:PAY-1"]);
+  expect(preview().textContent).toContain("The description of jira:PAY-1.");
+});

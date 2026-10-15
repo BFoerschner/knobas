@@ -291,7 +291,8 @@ pub struct MiniBoardCard {
     pub path: Option<String>,
     /// Whether [`Self::assignee`] is one of the configured usernames
     /// ([`Scope::identity`]), ignoring case. `false` when no identity was
-    /// given, which is every room read: the rooms' board never asks.
+    /// given ([`read`], [`read_capped`]); the `mini_board` command always
+    /// gives it, and the rooms' tile simply does not draw it.
     pub mine: bool,
 }
 

@@ -248,8 +248,11 @@
   let contexts = $state<ContextRow[] | null>(null);
   const adhoc = $derived((contexts ?? []).filter((context) => context.kind === "adhoc"));
 
+  /** The selected ticket's id: the preview re-reads when it changes, not when the board answers. */
+  const currentId = $derived(current?.card.entity_id ?? null);
+
   $effect(() => {
-    const id = current?.card.entity_id ?? null;
+    const id = currentId;
     if (!ready || id === null) return;
     description = null;
     around = null;
