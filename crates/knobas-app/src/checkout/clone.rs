@@ -137,8 +137,10 @@ struct Running {
     run: u64,
     path: PathBuf,
     /// Sent a reply channel to stop the clone. The runner answers whether the
-    /// folder is gone, or `None` when git had already finished.
-    stop: oneshot::Sender<Reply>,
+    /// folder is gone, or `None` when git had already finished. Taken by the
+    /// first [`stop`]; the entry itself stays until the folder is removed, so
+    /// no start can make the folder again while a removal is still running.
+    stop: Option<oneshot::Sender<Reply>>,
 }
 
 /// The runner's answer to a stop: whether the folder is gone, or `None` when
@@ -179,7 +181,8 @@ impl Clones {
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold it
 /// or its source is gone;
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the folder exists and is not
-/// a clone of this repository;
+/// a clone of this repository, or another repository of the same name is
+/// cloning into it;
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query or filesystem
 /// failure.
 pub async fn start(
@@ -226,11 +229,19 @@ pub async fn stop(
     entity_id: &str,
 ) -> Result<CloneAnswer, IpcError> {
     let repo_id = repo_id(pool, entity_id).await?;
-    let Some(running) = clones.lock().remove(&repo_id) else {
-        return Ok(CloneAnswer::NotCloning);
+    let (path, sender) = {
+        let mut running = clones.lock();
+        // No entry, or one a stop already took: nothing more to stop.
+        let Some(entry) = running.get_mut(&repo_id) else {
+            return Ok(CloneAnswer::NotCloning);
+        };
+        let Some(sender) = entry.stop.take() else {
+            return Ok(CloneAnswer::NotCloning);
+        };
+        (entry.path.clone(), sender)
     };
     let (reply, removed) = oneshot::channel();
-    if running.stop.send(reply).is_err() {
+    if sender.send(reply).is_err() {
         // The runner ended between the lookup and the send: the clone is
         // finished or failed, and its own event says which.
         return Ok(CloneAnswer::NotCloning);
@@ -239,10 +250,10 @@ pub async fn stop(
         Ok(Some(removed)) => removed,
         Ok(None) => return Ok(CloneAnswer::NotCloning),
         // The start gave up before its runner existed.
-        Err(_) => !running.path.exists(),
+        Err(_) => !path.exists(),
     };
     Ok(CloneAnswer::Stopped {
-        path: running.path.to_string_lossy().into_owned(),
+        path: path.to_string_lossy().into_owned(),
         removed,
     })
 }
@@ -306,7 +317,10 @@ async fn start_with(
     let shown = target.to_string_lossy().into_owned();
 
     // Reserved before anything is looked at on disk, under one lock, so two
-    // starts at once cannot both reach the folder.
+    // starts at once cannot both reach the folder. The entry is held until the
+    // folder is removed, and a folder another repository's run holds (`a/x`
+    // and `b/x` share `<root>/x`) is refused, so a removal still retrying
+    // never removes a folder a later start made.
     static RUNS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let run_id = RUNS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let (stop_tx, stop_rx) = oneshot::channel();
@@ -315,12 +329,17 @@ async fn start_with(
         if running.contains_key(&repo_id) {
             return Ok(CloneAnswer::Cloning { path: shown });
         }
+        if running.values().any(|other| other.path == target) {
+            return Err(IpcError::conflict(format!(
+                "{shown} is being cloned from another repository of the same name"
+            )));
+        }
         running.insert(
             repo_id.clone(),
             Running {
                 run: run_id,
                 path: target.clone(),
-                stop: stop_tx,
+                stop: Some(stop_tx),
             },
         );
     }
@@ -469,6 +488,7 @@ async fn run(
         reply = asked => {
             let _ = child.kill().await;
             let removed = remove(&target).await;
+            clones.release(&repo_id, run_id);
             send(CloneState::Stopped { removed });
             let _ = reply.send(Some(removed));
             return;
@@ -477,13 +497,13 @@ async fn run(
     };
     let (success, kept) = exited;
 
-    // A stop that took the registry entry as git exited is answered here: a
+    // A stop that took the stop sender as git exited is answered here: a
     // finished clone is kept and the stop told so, a failed one is removed
     // either way.
     stop.close();
     let late = stop.try_recv().ok();
-    clones.release(&repo_id, run_id);
     if success {
+        clones.release(&repo_id, run_id);
         send(CloneState::Done);
         if let Some(reply) = late {
             let _ = reply.send(None);
@@ -491,6 +511,7 @@ async fn run(
         return;
     }
     let removed = remove(&target).await;
+    clones.release(&repo_id, run_id);
     let reason = clone::failure_reason(&kept)
         .unwrap_or("git stopped without saying why")
         .to_owned();

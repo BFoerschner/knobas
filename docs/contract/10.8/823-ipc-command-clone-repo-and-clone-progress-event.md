@@ -16,7 +16,8 @@
   https or ssh, no clones root or a relative one, and no git; `not_found` for a repository the
   mirror does not hold or whose source is gone; `conflict` for a folder that exists and is not a
   clone of this repository ("<path> exists and is not a clone of this repository. Rename it, or
-  set a path by hand"). Mirrored in `app/src/lib/ipc/entity.ts` as `cloneRepo` and `CloneAnswer`.
+  set a path by hand"), or for a folder another repository of the same name is cloning into.
+  Mirrored in `app/src/lib/ipc/entity.ts` as `cloneRepo` and `CloneAnswer`.
 
   **One event, `clone:progress`**, `knobas_app::events::CLONE_PROGRESS`, broadcast, mirrored in
   `app/src/lib/ipc/index.ts`'s `EVENTS.cloneProgress`. Payload `CloneEvent { entity_id, path }`

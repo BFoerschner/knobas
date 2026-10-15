@@ -2119,7 +2119,8 @@ export type CloneAnswer =
  * Starting resolves at once with `cloning` (progress follows on
  * `EVENTS.cloneProgress`) or `adopted` (the folder is already a clone of it).
  * Stopping resolves once the half-made folder is removed. A folder that
- * exists and is not a clone of this repository rejects with `conflict`.
+ * exists and is not a clone of this repository, or that another repository
+ * of the same name is cloning into, rejects with `conflict`.
  */
 export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer> {
   return invoke<CloneAnswer>("clone_repo", { entityId, stop: stop ?? null });

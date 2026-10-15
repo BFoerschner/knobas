@@ -509,6 +509,7 @@ knobas-app	test/it	checkout_ipc::the_view_says_where_the_working_tree_stands
 knobas-app	test/it	clone_ipc::a_clone_lands_in_the_root_under_the_repository_name
 knobas-app	test/it	clone_ipc::a_clone_that_did_not_finish_is_not_adopted
 knobas-app	test/it	clone_ipc::a_failed_clone_says_gits_last_line_and_leaves_nothing
+knobas-app	test/it	clone_ipc::a_folder_another_repository_is_cloning_into_is_refused
 knobas-app	test/it	clone_ipc::a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone
 knobas-app	test/it	clone_ipc::a_name_outside_the_pattern_is_refused_before_anything_is_made
 knobas-app	test/it	clone_ipc::an_existing_clone_of_the_repository_is_adopted

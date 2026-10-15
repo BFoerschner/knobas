@@ -549,3 +549,40 @@ async fn two_starts_at_once_start_one_clone() {
     ));
     server.abort();
 }
+
+/// `a/x` and `b/x` both clone into `<root>/x`. While one run holds the folder
+/// the other is refused by name, not by what it finds on disk: a run's entry
+/// lasts until its folder is removed, so a removal still retrying can never
+/// remove a folder the other repository's start made.
+#[tokio::test]
+async fn a_folder_another_repository_is_cloning_into_is_refused() {
+    let pool = pool().await;
+    let (base, server) = silent_server().await;
+    let first = repo(&pool, "gitea", &base, "tidewater/shared").await;
+    let second = repo(&pool, "gitea", &base, "harbour/shared").await;
+    let (_dir, root) = root(&pool).await;
+    let seen = Arc::new(Seen::default());
+    let clones = Clones::global();
+
+    start_admitting(&pool, &clones, seen.clone(), &first, &["http"])
+        .await
+        .unwrap();
+    let error = start_admitting(&pool, &clones, seen.clone(), &second, &["http"])
+        .await
+        .expect_err("the folder is the first run's");
+
+    assert_eq!(error.code, IpcErrorCode::Conflict);
+    assert!(
+        error
+            .message
+            .contains("is being cloned from another repository of the same name"),
+        "{}",
+        error.message
+    );
+    assert!(matches!(
+        stop(&pool, &clones, &first).await.unwrap(),
+        CloneAnswer::Stopped { removed: true, .. }
+    ));
+    assert!(!root.join("shared").exists());
+    server.abort();
+}
