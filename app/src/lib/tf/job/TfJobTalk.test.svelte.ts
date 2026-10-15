@@ -1,0 +1,429 @@
+/**
+ * The job's conversation (#819) and its Connections drawer (#820), mounted
+ * with stand-ins for every read and write. What the backend does with the two
+ * conversation reads is `crates/knobas-app/tests/it/conversation_ipc.rs`'s.
+ *
+ * The suite runs in Europe/Berlin, so the visit at 07:00Z reads 09:00.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type { EntityDetail, LinkEntry, SuggestionEntry, Thread } from "../../ipc/entity";
+import type { WriteOpPayload } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
+import { forgetFilters } from "../filter/filter-state.svelte";
+import { createLayers, type Layers } from "../layers.svelte";
+import type { JobPorts } from "./ports";
+import TfJob from "./TfJob.svelte";
+
+const ID = "jira:PAY-231";
+const VISIT = "2026-10-15T07:00:00Z";
+
+let target: HTMLElement;
+let job: ReturnType<typeof mount> | null = null;
+const calls = {
+  writes: [] as WriteOpPayload[],
+  unlinks: [] as string[],
+  links: [] as [string, string, string | undefined, string | undefined][],
+  reads: 0,
+};
+
+beforeEach(() => {
+  calls.writes.length = 0;
+  calls.unlinks.length = 0;
+  calls.links.length = 0;
+  calls.reads = 0;
+  toasts.items.length = 0;
+  forgetFilters();
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (job) unmount(job);
+  job = null;
+  target.remove();
+});
+
+async function settle() {
+  for (let turn = 0; turn < 8; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+function link(id: string, otherId: string, kind: string, title: string): LinkEntry {
+  return {
+    link: {
+      id,
+      from_id: otherId,
+      to_id: ID,
+      relation: "implements",
+      origin: "manual",
+      note: "why",
+      created_by: "mara",
+      created_at: "2026-10-01T10:00:00Z",
+      confirmed_at: "2026-10-01T10:00:00Z",
+      rule: null,
+      rule_class: null,
+      reason: null,
+    },
+    other: { entity_id: otherId, kind, title, deleted_at: null },
+  };
+}
+
+const PR = link("link:1", "gitea:tidewater/payout-service#142", "pr", "Idempotent retry window");
+const PAGE = link("link:2", "confluence:ENG-SEPA", "page", "SEPA payout retry design");
+
+function ticket(links: LinkEntry[] = [PR, PAGE]): EntityDetail {
+  return {
+    row: {
+      entity_id: ID,
+      kind: "ticket",
+      source_id: "jira",
+      title: "Retry failed SEPA payouts",
+      updated_at: null,
+      synced_at: "2026-10-15T09:00:00Z",
+      path: null,
+      state: null,
+    },
+    source: { id: "jira", display_name: "Jira", adapter_kind: "jira", enabled: true },
+    kind_info: null,
+    body_text: "",
+    author: null,
+    payload: {},
+    web_url: null,
+    deleted_at: null,
+    links,
+    activity: [],
+    builds: [],
+    status: "In Progress",
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
+  };
+}
+
+/** Eight old comments, the reader's own after the visit, and two new ones, one naming the reader. */
+function thread(): Thread {
+  const old = Array.from({ length: 8 }, (_, n) => ({
+    author: n % 2 ? "Priya Nair" : "Lena Hoffmann",
+    at: `2026-08-${12 + n}T08:00:00Z`,
+    body: `old comment ${n}`,
+    mine: false,
+    mentions_me: false,
+  }));
+  return {
+    comments: [
+      ...old,
+      { author: "Mara Lindqvist", at: "2026-10-15T07:30:00Z", body: "Starting.", mine: true, mentions_me: false },
+      { author: "Jonas Becker", at: "2026-10-15T08:00:00Z", body: "Left a comment on the PR.", mine: false, mentions_me: false },
+      { author: "Lena Hoffmann", at: "2026-10-15T10:45:00Z", body: "[~mara] will the queue get an SLA?", mine: false, mentions_me: true },
+    ],
+    changes: [{ at: "2026-08-15T09:00:00Z", status: "In Progress" }],
+    me: ["mara"],
+  };
+}
+
+const PROPOSAL: SuggestionEntry = {
+  link: { ...PR.link, id: "link:p1", from_id: "teamcity:Payout_Build", origin: "suggested", confirmed_at: null },
+  from: { entity_id: "teamcity:Payout_Build", kind: "build", title: "Payout build", deleted_at: null },
+  to: { entity_id: ID, kind: "ticket", title: "Retry failed SEPA payouts", deleted_at: null },
+};
+const ELSEWHERE: SuggestionEntry = {
+  ...PROPOSAL,
+  link: { ...PROPOSAL.link, id: "link:p2", to_id: "jira:PAY-228" },
+};
+
+function ports(over: Partial<JobPorts> = {}): JobPorts {
+  let links = [PR, PAGE];
+  return {
+    listSources: () => Promise.resolve([{ id: "jira" }]),
+    getEntity: (id) => {
+      calls.reads += 1;
+      return id === ID ? Promise.resolve(ticket(links)) : Promise.reject({ code: "not_found", message: "", source_id: null });
+    },
+    promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
+    listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
+    reachableTransitions: () => Promise.resolve([]),
+    submitWrite: (payload) => {
+      calls.writes.push(payload);
+      return Promise.resolve({} as never);
+    },
+    entityCheckout: () => Promise.reject(new Error("none")),
+    checkoutCommands: () => Promise.resolve([]),
+    openCheckout: () => Promise.resolve(),
+    weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
+    visitEntity: () => Promise.resolve(VISIT),
+    entityThread: () => Promise.resolve(thread()),
+    createLink: (from, to, relation, note) => {
+      calls.links.push([from, to, relation, note]);
+      links = [PR, PAGE];
+      return Promise.resolve({} as never);
+    },
+    unlink: (id) => {
+      calls.unlinks.push(id);
+      links = links.filter((entry) => entry.link.id !== id);
+      return Promise.resolve();
+    },
+    roomSuggestions: () => Promise.resolve({ rows: [PROPOSAL, ELSEWHERE], total: 2, more: [] }),
+    search: () => Promise.reject(new Error("not in this test")),
+    launcherHome: () => Promise.resolve({ recent: [], smart_lists: [], stale_sources: [] } as never),
+    ...over,
+  };
+}
+
+function open(tab: string | null = null, over: { ports?: JobPorts; layers?: Layers } = {}) {
+  job = mount(TfJob, {
+    target,
+    props: {
+      segment: "PAY-231",
+      tab,
+      timer: { current: null, elapsed: null },
+      layers: over.layers ?? createLayers(),
+      ontimer: () => {},
+      onstarttimer: () => {},
+      ports: over.ports ?? ports(),
+      today: () => new Date(2026, 9, 15, 14, 0),
+    },
+  });
+  flushSync();
+}
+
+function squash(node: Element | null | undefined): string {
+  return node?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+}
+
+function messages(): string[] {
+  return [...target.querySelectorAll(".tf-convo .tf-msg:not(.tf-event) p")].map((p) => squash(p));
+}
+
+function chip(label: string): HTMLButtonElement {
+  return [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => squash(b) === label)!;
+}
+
+// ---- the card's summary (R-5.1) ----
+
+test("the card says how many comments, how many are new since the visit and how many mention you, with the latest", async () => {
+  open();
+  await settle();
+  const card = target.querySelector("[aria-label='Job card']")!;
+  expect(squash(card)).toContain("11 comments, 2 new since 09:00, 1 mentions you");
+  expect(squash(card.querySelector(".tf-last"))).toBe("Lena, today 12:45: [~mara] will the queue get an SLA?");
+  expect(card.querySelector<HTMLAnchorElement>(".tf-cbtn")?.getAttribute("href")).toBe("#/job/PAY-231/conversation");
+  expect(squash(card.querySelector(".tf-cbtn"))).toBe("Read the conversation");
+  // The tab carries the count and the new ones.
+  const tab = [...target.querySelectorAll("[role='tab']")][2]!;
+  expect(squash(tab)).toBe("Conversation 11 2 new");
+});
+
+test("a ticket nobody commented on says so, and a status change is not a comment", async () => {
+  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], changes: [{ at: VISIT, status: "Done" }], me: [] }) }) });
+  await settle();
+  const card = target.querySelector("[aria-label='Job card']")!;
+  expect(squash(card)).toContain("No comments yet.");
+  expect(squash([...target.querySelectorAll("[role='tab']")][2])).toBe("Conversation");
+});
+
+// ---- the Conversation tab (R-5.2 to R-5.4) ----
+
+test("the tab folds the old part, marks the last visit, edges new comments and mentions", async () => {
+  open("conversation");
+  await settle();
+  const fold = target.querySelector<HTMLButtonElement>(".tf-fold")!;
+  expect(squash(fold)).toBe("Show 6 earlier entries, from 2026-08-12");
+  expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
+  // The rule sits right above the first new comment, not above the reader's own.
+  expect(target.querySelector(".tf-newline + .tf-msg p")?.textContent).toBe("Left a comment on the PR.");
+
+  const fresh = [...target.querySelectorAll(".tf-msg.tf-new p")].map((p) => squash(p));
+  expect(fresh).toEqual(["Left a comment on the PR.", "[~mara] will the queue get an SLA?"]);
+  const mention = target.querySelector(".tf-msg.tf-mention")!;
+  expect(squash(mention.querySelector(".tf-chip"))).toBe("mentions you");
+  expect(squash(mention.querySelector(".tf-at"))).toBe("[~mara]");
+  expect(squash(target.querySelector(".tf-msg .tf-who b"))).not.toBe("");
+  expect([...target.querySelectorAll(".tf-who b")].map((b) => b.textContent)).toContain("You");
+
+  fold.click();
+  flushSync();
+  expect(messages()).toHaveLength(11);
+  expect(squash(target.querySelector(".tf-event"))).toBe("You moved this to In Progress, 2026-08-15 11:00");
+});
+
+test("Include changes starts on; Mentions me keeps only the mentions; the count follows", async () => {
+  open("conversation");
+  await settle();
+  expect(chip("Include changes").getAttribute("aria-pressed")).toBe("true");
+  expect(squash(target.querySelector(".tf-fcount"))).toBe("11 comments");
+
+  chip("Mentions me").click();
+  flushSync();
+  expect(messages()).toEqual(["[~mara] will the queue get an SLA?"]);
+  expect(squash(target.querySelector(".tf-fcount"))).toBe("1 of 11 comments");
+  expect(target.querySelector(".tf-fold")).toBeNull();
+  expect(target.querySelector(".tf-newline")).toBeNull();
+
+  chip("Mentions me").click();
+  chip("New since 09:00").click();
+  flushSync();
+  expect(messages()).toEqual(["Left a comment on the PR.", "[~mara] will the queue get an SLA?"]);
+
+  chip("New since 09:00").click();
+  chip("Include changes").click();
+  target.querySelector<HTMLButtonElement>(".tf-fold")?.click();
+  flushSync();
+  expect(target.querySelector(".tf-event")).toBeNull();
+});
+
+test("a person chip per commenter, by first name", async () => {
+  open("conversation");
+  await settle();
+  const people = [...target.querySelectorAll("[aria-label='People'] button")].map((b) => squash(b));
+  expect(people).toEqual(["Lena", "Priya", "Mara", "Jonas"]);
+  chip("Jonas").click();
+  flushSync();
+  expect(messages()).toEqual(["Left a comment on the PR."]);
+});
+
+test("Comment queues a Comment write and clears the box; a refused one keeps the text", async () => {
+  open("conversation");
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on PAY-231']")!;
+  const send = [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")].find((b) => squash(b) === "Comment")!;
+  expect(send.disabled).toBe(true);
+  box.value = "Priya, can you decide the SLA?";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  send.click();
+  await settle();
+  expect(calls.writes).toEqual([{ Comment: { entity: ID, body: "Priya, can you decide the SLA?" } }]);
+  expect(box.value).toBe("");
+  expect(toasts.items.map((t) => t.text)).toContain("Queued: comment on PAY-231. Sends with the next sync.");
+
+  job && unmount(job);
+  job = null;
+  open("conversation", { ports: ports({ submitWrite: () => Promise.reject({ code: "invalid", message: "no", source_id: null }) }) });
+  await settle();
+  const again = target.querySelector<HTMLTextAreaElement>("textarea")!;
+  again.value = "kept";
+  again.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
+  await settle();
+  expect(again.value).toBe("kept");
+});
+
+// ---- the Connections drawer (R-4.3, R-6.1, R-6.2) ----
+
+test("the button counts the ticket's links and its own proposals, and opens the drawer", async () => {
+  const layers = createLayers();
+  open(null, { layers });
+  await settle();
+  const button = target.querySelector<HTMLButtonElement>(".tf-conn")!;
+  expect(squash(button)).toBe("2 connected, 1 proposed L");
+  button.focus();
+  button.click();
+  flushSync();
+
+  const drawer = target.querySelector("[aria-label='Connections']")!;
+  expect(squash(drawer.querySelector("h2"))).toBe("Connections of PAY-231");
+  expect(squash(drawer.querySelector("h3"))).toBe("Linked on PAY-231 2");
+  expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
+    "Idempotent retry window Code Unlink",
+    "SEPA payout retry design Pages Unlink",
+  ]);
+  expect(squash(drawer.querySelector(".tf-proposed"))).toBe("1 proposed for PAY-231 Judge them one by one");
+  expect(drawer.querySelector(".tf-proposed a")?.getAttribute("href")).toBe("#/review/link%3Ap1");
+  expect(squash(drawer)).toContain("Links and link sets stay in knobas and are never written to a source.");
+  expect(document.activeElement).toBe(drawer.querySelector("input[aria-label='Filter connections']"));
+
+  // `Esc` is the shell's: it closes the drawer layer, and focus goes back to the button.
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["drawer"]);
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector("[aria-label='Connections']")).toBeNull();
+  expect(layers.open).toHaveLength(0);
+  expect(document.activeElement).toBe(button);
+});
+
+test("L opens the drawer, outside a text field; a click on the scrim closes it", async () => {
+  open();
+  await settle();
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+  flushSync();
+  expect(target.querySelector("[aria-label='Connections']")).not.toBeNull();
+  target.querySelector<HTMLElement>(".tf-scrim")!.click();
+  flushSync();
+  expect(target.querySelector("[aria-label='Connections']")).toBeNull();
+
+  const field = document.createElement("input");
+  document.body.appendChild(field);
+  field.focus();
+  field.dispatchEvent(new KeyboardEvent("keydown", { key: "l", bubbles: true }));
+  flushSync();
+  expect(target.querySelector("[aria-label='Connections']")).toBeNull();
+  field.remove();
+});
+
+test("the drawer's filter keeps the rows it matches", async () => {
+  open();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='Filter connections']")!;
+  input.value = "pages";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
+});
+
+test("Unlink withdraws the link in knobas only and Undo draws it again", async () => {
+  open();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  target.querySelector<HTMLButtonElement>("button[aria-label='Unlink Idempotent retry window']")!.click();
+  await settle();
+  expect(calls.unlinks).toEqual(["link:1"]);
+  expect([...target.querySelectorAll(".tf-lk a")].map((a) => squash(a))).toEqual(["SEPA payout retry design"]);
+  expect(squash(target.querySelector(".tf-conn"))).toBe("1 connected, 1 proposed L");
+  const toast = toasts.items.find((t) => t.text === "Unlinked in knobas only.")!;
+  expect(toast.action?.label).toBe("Undo");
+
+  toast.action!.run();
+  await settle();
+  expect(calls.links).toEqual([[PR.link.from_id, ID, "implements", "why"]]);
+  expect([...target.querySelectorAll(".tf-lk a")]).toHaveLength(2);
+});
+
+test("Link to… opens a dialog over the drawer that says the link stays in knobas", async () => {
+  const layers = createLayers();
+  open(null, { layers });
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-dacts button")].find((b) => squash(b) === "Link to…")!.click();
+  flushSync();
+  const dialog = target.querySelector("[role='dialog']")!;
+  expect(squash(dialog.querySelector("h2"))).toBe("Link PAY-231 to…");
+  expect(squash(dialog)).toContain("Links stay in knobas and are never written to a source.");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["drawer", "dialog"]);
+  // `Esc` closes the dialog first and leaves the drawer open.
+  layers.open[1]!.close();
+  flushSync();
+  expect(target.querySelector("[role='dialog']")).toBeNull();
+  expect(target.querySelector("[aria-label='Connections']")).not.toBeNull();
+});
+
+test("a ticket with nothing linked says so, and no proposals draw no box", async () => {
+  open(null, {
+    ports: ports({
+      getEntity: () => Promise.resolve(ticket([])),
+      roomSuggestions: () => Promise.resolve({ rows: [ELSEWHERE], total: 1, more: [] }),
+    }),
+  });
+  await settle();
+  expect(squash(target.querySelector(".tf-conn"))).toBe("0 connected L");
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  expect(squash(target.querySelector(".tf-dbody"))).toContain("Nothing linked on the ticket itself.");
+  expect(target.querySelector(".tf-proposed")).toBeNull();
+});

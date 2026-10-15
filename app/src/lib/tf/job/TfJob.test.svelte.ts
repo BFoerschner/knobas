@@ -34,10 +34,13 @@ const calls = {
   open: [] as [string, string][],
   stop: 0,
   start: [] as [string, string][],
+  visits: [] as string[],
+  unlinks: [] as string[],
+  links: [] as [string, string, string | undefined][],
 };
 
 beforeEach(() => {
-  for (const list of [calls.read, calls.promote, calls.list, calls.writes, calls.checkout, calls.open, calls.start]) {
+  for (const list of [calls.read, calls.promote, calls.list, calls.writes, calls.checkout, calls.open, calls.start, calls.visits, calls.unlinks, calls.links]) {
     list.length = 0;
   }
   calls.stop = 0;
@@ -185,6 +188,22 @@ function ports(over: Partial<JobPorts> & { rows?: EntityRow[]; reachable?: strin
       return Promise.resolve();
     },
     weekTimesheet: () => Promise.resolve(week()),
+    visitEntity: (id) => {
+      calls.visits.push(id);
+      return Promise.resolve(null);
+    },
+    entityThread: () => Promise.resolve({ comments: [], changes: [], me: ["mara"] }),
+    createLink: (from, to, relation) => {
+      calls.links.push([from, to, relation]);
+      return Promise.resolve({} as never);
+    },
+    unlink: (id) => {
+      calls.unlinks.push(id);
+      return Promise.resolve();
+    },
+    roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
+    search: () => Promise.reject(new Error("not in this test")),
+    launcherHome: () => Promise.reject(new Error("not in this test")),
     ...over,
   };
 }
@@ -424,15 +443,15 @@ test("a job with no code says nothing is connected and asks for no checkout", as
   expect(target.querySelector(".tf-checkout")).toBeNull();
 });
 
-test("Map and Conversation are tabs that name themselves until they are built", async () => {
-  open("PAY-231", { tab: "conversation" });
+test("Map is a tab that names itself until it is built", async () => {
+  open("PAY-231", { tab: "map" });
   await settle();
   const tabs = [...target.querySelectorAll("[role='tab']")];
-  expect(tabs.map((tab) => [tab.textContent, tab.getAttribute("aria-selected")])).toEqual([
+  expect(tabs.map((tab) => [tab.textContent?.trim(), tab.getAttribute("aria-selected")])).toEqual([
     ["Work", "false"],
-    ["Map", "false"],
-    ["Conversation", "true"],
+    ["Map", "true"],
+    ["Conversation", "false"],
   ]);
-  expect(text()).toContain("Conversation is not built in the new shell yet.");
+  expect(text()).toContain("Map is not built in the new shell yet.");
   expect(target.querySelector("[aria-labelledby='tf-sec-code']")).toBeNull();
 });
