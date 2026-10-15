@@ -53,8 +53,12 @@ check:
     set -euo pipefail
     # A stale section 10.8 index fails the gate before anything slow runs (#737).
     python3 -I scripts/contract-index.py --check
-    front_log= cargo_log= front_pid= cargo_pid=
-    cargo_recipes=(fmt shell test-layout witness-unit clippy clippy-libs inventory test)
+    front_log= scripts_log= cargo_log= front_pid= scripts_pid= cargo_pid=
+    # The script checks are a half of their own (#920): none of them runs
+    # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
+    # quiet, 2026-10-15) were paid in full ahead of `clippy`.
+    script_recipes=(shell test-layout witness-unit)
+    cargo_recipes=(fmt clippy clippy-libs inventory test)
     descendants() {
         local p
         for p in $(pgrep -P "$1" || true); do descendants "$p"; done
@@ -62,35 +66,27 @@ check:
     }
     stop_halves() {
         local p pids=
-        for p in $front_pid $cargo_pid; do pids="$pids $(descendants "$p")"; done
+        for p in $front_pid $scripts_pid $cargo_pid; do pids="$pids $(descendants "$p")"; done
         [ -z "${pids// /}" ] || kill -TERM $pids 2>/dev/null || true
         wait
     }
-    cleanup() { rm -f "$front_log" "$cargo_log"; }
+    cleanup() { rm -f "$front_log" "$scripts_log" "$cargo_log"; }
     # Traps first, so a second `mktemp` failing cannot leave the first behind.
     trap 'cleanup' EXIT
     trap 'stop_halves; cleanup; trap - INT; kill -INT $$' INT
     trap 'stop_halves; cleanup; trap - TERM; kill -TERM $$' TERM
     front_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-front.XXXXXX")
+    scripts_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-scripts.XXXXXX")
     cargo_log=$(mktemp "${TMPDIR:-/tmp}/knobas-check-cargo.XXXXXX")
 
-    # Starts `just RECIPE...` in the background with everything it prints in
-    # LOG, ending with the half's own exit status and wall time; the caller
-    # takes the pid from `$!`.
+    # Starts the recipes in the background, one `just` each, with
+    # everything they print in LOG; the caller takes the pid from `$!`. Each
+    # recipe's wall time is a line of its own (`step: <recipe> N s`, #920),
+    # the chain stops at its first red as `just A B C` does, and the last line
+    # is the half's own exit status and wall time.
     run_half() {
         local name=$1 log=$2
         shift 2
-        ( SECONDS=0; status=0; just "$@" || status=$?
-          echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
-    }
-
-    # The cargo half as one `just` per recipe rather than one `just` for the
-    # chain, so each recipe's wall time is a line of its own (`step: <recipe>
-    # N s`, #920). The chain still stops at its first red, as `just A B C`
-    # did, and the half's last line is still its status and total.
-    run_cargo_half() {
-        local log=$1
-        shift
         ( SECONDS=0; status=0
           for r in "$@"; do
               start=$SECONDS
@@ -98,13 +94,14 @@ check:
               echo "step: $r $((SECONDS - start)) s"
               [ "$status" -eq 0 ] || break
           done
-          echo "cargo: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
+          echo "$name: exit $status after ${SECONDS} s"; exit "$status" ) >"$log" 2>&1 &
     }
 
-    echo "check: running 'front' beside '${cargo_recipes[*]}';"
+    echo "check: running 'front' and '${script_recipes[*]}' beside '${cargo_recipes[*]}';"
     echo "check: each half's output is captured and reported when it finishes."
     run_half front "$front_log" front; front_pid=$!
-    run_cargo_half "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
+    run_half scripts "$scripts_log" "${script_recipes[@]}"; scripts_pid=$!
+    run_half cargo "$cargo_log" "${cargo_recipes[@]}"; cargo_pid=$!
 
     # A passing half is one line of status plus the lines a reader would look
     # for anyway. For `front`: svelte-check's count -- `svelte-check found N
@@ -125,6 +122,7 @@ check:
             echo "check: $(tail -n 1 "$log")"
             case $name in
                 front) grep -E 'svelte-check found|COMPLETED [0-9]+ FILES|Test Files|^ *Tests |built in' "$log" || tail -n 5 "$log" ;;
+                scripts) awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log" ;;
                 cargo) awk '/^test: (ok|FAILED)  / { n++; for (i = 1; i < NF; i++) {
                              if ($(i+1) == "passed;") p += $i
                              if ($(i+1) == "failed;") f += $i
@@ -133,7 +131,7 @@ check:
                        # Where the half's time went (#920): each recipe's
                        # wall time, `test`'s build and run, its slowest binaries.
                        awk '/^step: / { printf "  step %-13s %4d s\n", $2, $3 }' "$log"
-                       grep -E '^test: (build|run) |^test: slowest|^  +[0-9.]+ s ' "$log" || true ;;
+                       { grep -E '^test: (build|run) |^test: slowest|^  +[0-9.]+ s ' "$log" || true; } | sed 's/^/  /' ;;
             esac
         else
             echo "check: $name FAILED; its full output follows" >&2
@@ -148,12 +146,15 @@ check:
     front_status=0; wait "$front_pid" || front_status=$?
     front_pid=
     report front "$front_log" "$front_status"
+    scripts_status=0; wait "$scripts_pid" || scripts_status=$?
+    scripts_pid=
+    report scripts "$scripts_log" "$scripts_status"
     cargo_status=0; wait "$cargo_pid" || cargo_status=$?
     cargo_pid=
     report cargo "$cargo_log" "$cargo_status"
 
-    if [ "$front_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
-        echo "check: FAILED (front exit $front_status, cargo exit $cargo_status)" >&2
+    if [ "$front_status" -ne 0 ] || [ "$scripts_status" -ne 0 ] || [ "$cargo_status" -ne 0 ]; then
+        echo "check: FAILED (front exit $front_status, scripts exit $scripts_status, cargo exit $cargo_status)" >&2
         exit 1
     fi
     echo "check: ok in ${SECONDS} s"
