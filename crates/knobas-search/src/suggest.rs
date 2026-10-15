@@ -314,13 +314,8 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
             }
             // The signals (#815): the four every installation has.
             FieldKey::Has => {
-                for (value, detail) in [
-                    ("failing-build", "a build around it failed"),
-                    ("blocker", "something blocks it"),
-                    ("open-pr", "a pull request of it is open"),
-                    ("review-for-me", "a review is asked of you"),
-                ] {
-                    out.push(suggestion(key, value, detail));
+                for signal in knobas_core::signals::SignalKind::ALL {
+                    out.push(suggestion(key, signal.as_str(), signal.detail()));
                 }
             }
             _ => {}

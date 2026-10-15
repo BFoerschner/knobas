@@ -259,15 +259,21 @@ export function nextSort(current: ListSort, column: SortColumn): ListSort {
 /**
  * Priorities in the order Jira's defaults rank them, highest first, matched
  * ignoring case. Order only, never wording: a priority not here sorts after
- * these, by name.
+ * these, ties in key order.
  */
 const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medium", "normal", "minor", "low", "trivial", "lowest"];
 
 const byText = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
+/** A card and the status column it stands in: one row of the list. */
+export interface TicketRow {
+  card: MiniBoardCard;
+  status: string | null;
+}
+
 /** One row's value for a column, comparable; `null` for none, which sorts last either way. */
 function sortValue(
-  row: { card: MiniBoardCard; status: string | null },
+  row: TicketRow,
   column: SortColumn,
   statuses: (string | null)[],
 ): string | number | null {
@@ -297,7 +303,7 @@ function sortValue(
  * numerically (`PAY-9` before `PAY-10`), the rest by text. A row with no
  * value sorts last in either direction; ties keep key order.
  */
-export function sortRows<Row extends { card: MiniBoardCard; status: string | null }>(
+export function sortRows<Row extends TicketRow>(
   rows: Row[],
   sort: ListSort,
   statuses: (string | null)[],

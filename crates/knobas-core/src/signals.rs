@@ -37,6 +37,11 @@
 //!   pull requests declares a requested reviewer who is one of the
 //!   configured usernames, ignoring case.
 //!
+//! Two words come from the entity id rather than a declaration: a ticket
+//! blocker's key (the id past its namespace, as every card's key is) and a
+//! pull request's number (the `#N` its key ends in, the grammar interfaces
+//! §4.2 gives proposal keys; a key without one says *PR open*).
+//!
 //! The read names no adapter. It names two kinds (`build`, `pr`) and the
 //! shell's tones, and reads states and reviewers only through the paths a
 //! source declares (ADR-0007): a source that declares no state contributes
@@ -80,6 +85,17 @@ impl SignalKind {
             SignalKind::Blocker => "blocker",
             SignalKind::OpenPr => "open-pr",
             SignalKind::ReviewForMe => "review-for-me",
+        }
+    }
+
+    /// What the search box says beside the value when it offers it.
+    #[must_use]
+    pub fn detail(self) -> &'static str {
+        match self {
+            SignalKind::FailingBuild => "a build around it failed",
+            SignalKind::Blocker => "something blocks it",
+            SignalKind::OpenPr => "a pull request of it is open",
+            SignalKind::ReviewForMe => "a review is asked of you",
         }
     }
 

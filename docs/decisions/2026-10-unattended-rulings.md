@@ -1952,8 +1952,8 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   descending. A header pressed for the first time sorts ascending, a second press turns it.
   **Reversing:** low.
 - **Priority sorts by Jira's default ranking** (Highest, Blocker, Critical, High, Major, Medium,
-  Normal, Minor, Low, Trivial, Lowest), ignoring case; a priority not in it sorts after them by
-  name, and none sorts last either way. Order only, never wording, as the board's leading
+  Normal, Minor, Low, Trivial, Lowest), ignoring case; a priority not in it sorts after them
+  (ties in key order), and none sorts last either way. Order only, never wording, as the board's leading
   statuses. **Reversing:** a declared priority order, if a source ever declares one.
 - **The *Board / List*, *Lanes* and sort switches are the page's module state**, never written to
   storage or a command, so a restart forgets them (R-3.3). Ticket views do not exist yet (#812),
