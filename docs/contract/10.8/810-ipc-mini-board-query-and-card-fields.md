@@ -17,7 +17,8 @@
   third builder beside `search_sql` and `saved_summary_sql`. **The keys** match through the same
   `corpus_predicates`, so a key means the same in the view and the launcher. **The words do not**:
   each word (lowercased, split on whitespace) must appear as a substring, ignoring case, in the
-  row's entity id (its key), its title, its declared assignee (`declared_string!` over the bound
+  row's key (the entity id past its namespace, so `jira` is not a word of every Jira ticket), its
+  title, its declared assignee (`declared_string!` over the bound
   declarations), or a name of one of its declared parents (`sync.item_parent`, a Jira ticket's
   epic). R-2.3 and prototype-6's "Filter by key, summary, epic or person"; the body is not
   searched, no word is stemmed or dropped as a stopword, and the view marks exactly what matched.

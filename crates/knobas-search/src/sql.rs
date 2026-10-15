@@ -326,7 +326,8 @@ pub fn search_sql(
 /// [`search_sql`] uses, so a key means the same in the view and the launcher.
 /// **The words do not**: the launcher ranks full-text matches over the title
 /// and the body, and this keeps a row when every word appears, as a
-/// substring ignoring case, in its key, title, declared assignee or the names
+/// substring ignoring case, in its key (the entity id past its namespace, so
+/// `jira` is not a word of every Jira ticket), title, declared assignee or the names
 /// of its declared parents (a Jira ticket's epic) -- R-2.3's rule and
 /// prototype-6's *Filter by key, summary, epic or person*, which the view
 /// marks. `words` are lowercased by the caller; none is no word filter.
@@ -359,7 +360,7 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
         let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
         predicates.push(format!(
             "not exists (select 1 from unnest({words}::text[]) w(word) where \
-             strpos(lower(i.entity_id || ' ' || i.title || ' ' || coalesce({}, '')), w.word) = 0 \
+             strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1) || ' ' || i.title || ' ' || coalesce({}, '')), w.word) = 0 \
              and not exists (select 1 from sync.item_parent ip \
                              where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0))",
             knobas_core::declared_string!("pd.d", "assignee")

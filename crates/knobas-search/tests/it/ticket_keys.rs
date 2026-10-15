@@ -707,6 +707,16 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
         Some(Vec::new()),
         "a word only the description holds is not a word of the row"
     );
+    // The key is the source's, `PAY-13`: the entity id's namespace is not
+    // drawn, so it is not a word of the row either.
+    assert_eq!(
+        searcher
+            .matching_ids(&format!("project:{p} jira"), "ticket")
+            .await
+            .unwrap(),
+        Some(Vec::new()),
+        "the namespace is not a word of the row"
+    );
 
     let matched = searcher
         .matching_ids(&format!("project:{p} issuetype:bug"), "ticket")

@@ -263,6 +263,25 @@ test("the list draws the same tickets newest first, the selected row yellow", as
   expect(target.querySelector(".tf-list-more")!.textContent).toBe("Show 4 more");
 });
 
+test("the list's Show N more reads every ticket, and the board keeps its caps", async () => {
+  const h = harness();
+  await open(h);
+  const layout = (name: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')]
+      .find((b) => b.textContent === name)!
+      .click();
+  layout("List");
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-list-more")!.click();
+  await settle();
+  expect(h.reads.at(-1)).toEqual({ perColumn: 12, query: null });
+  expect(target.querySelector(".tf-list-more")).toBeNull();
+  layout("Board");
+  await settle();
+  expect(columns()[0]).toEqual({ head: "To Do 12", cards: 8, more: "Show 4 more" });
+  expect(columns()[2]!.cards).toBe(3);
+});
+
 test("Not a ticket lists the ad-hoc contexts, and a ticket's context fills Around this ticket", async () => {
   await open(
     harness([
@@ -286,6 +305,16 @@ test("Enter presses the preview's button from a card", async () => {
   first.focus();
   first.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
   expect(location.hash).toBe("#/job/PAY-1");
+});
+
+test("Enter on a focused card that is not selected opens that card's ticket", async () => {
+  await open(harness());
+  const second = target.querySelectorAll<HTMLButtonElement>(".tf-tcard")[1]!;
+  const key = second.querySelector(".tf-k")!.textContent;
+  expect(second.classList.contains("tf-card")).toBe(false);
+  second.focus();
+  second.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+  expect(location.hash).toBe(`#/job/${key}`);
 });
 
 test("the preview reads its ticket once, not again on every board answer that keeps it selected", async () => {

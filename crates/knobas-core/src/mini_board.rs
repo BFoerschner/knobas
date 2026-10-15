@@ -155,8 +155,9 @@ macro_rules! priority_read {
 /// `$5` is the per-column cap (#753), `null` for none: each column keeps its
 /// newest `$5` cards, and every row carries `total`, how many its column holds
 /// before the cut. The status is read once a row (`materialized`) and the
-/// priority, the type, the assignee and the path line (#810) only for the rows kept: on a room of 15,000 tickets the uncapped
-/// board was 2 MB on the bridge and a card per ticket in the webview.
+/// priority, the type, the assignee and the path line (#810) only for the
+/// rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
+/// bridge and a card per ticket in the webview.
 const CARDS: &str = concat!(
     "with ",
     status_paths!("$4"),

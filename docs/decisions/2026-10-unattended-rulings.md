@@ -1617,3 +1617,13 @@ Ruled 2026-10-15 by the implementer, in the PR for #810. Each is fork / ruling /
 - **Selected card markup.** *Ruling:* `aria-current="true"` and the `tf-card` class (the card's focus ring then follows the design system's `--card-ink` rule), not `aria-selected` on a button. *Reasoning:* `aria-selected` is not allowed on a button. *Reversing:* trivial.
 - **Which card is selected.** *Ruling:* the session's selection when it is on screen, else the first card in reading order. *Reasoning:* prototype-6's rule. *Reversing:* trivial.
 - **The fixture.** *Ruling:* eleven more PAY tickets in the fake IPC's corpus, flat like the rest, with type, assignee and epic. *Reasoning:* a board of three tickets cannot be compared with prototype-6's. *Reversing:* trivial.
+
+## #810 — the merge-manager's review findings (PR #895)
+
+Ruled 2026-10-15 by the merge-manager. Each is finding / ruling / reasoning / cost of reversing.
+
+- **A word matched the entity id's namespace.** `ids_sql` matched words against `i.entity_id` (`jira:PAY-13`), so typing `jira` admitted every Jira ticket and marked nothing. *Ruling:* fixed. The key is the id past its first `:`, which is what the card draws and what the fake IPC matches. *Reasoning:* R-2.3 says every typed word appears in the row, and the namespace is not drawn in the row. *Reversing:* one expression.
+- **`Enter` on a focused card that was not selected opened the selected ticket.** The window's keydown comes before the card's click, so `current` was still the old selection. *Ruling:* fixed. A focused card is the card `Enter` means, and pressing it also selects it. *Reasoning:* R-3.9. *Reversing:* trivial.
+- **The list's *Show N more* lifted the board's caps for the rest of the session.** *Ruling:* fixed. The list keeps its own `listAll` flag, and the board's columns stay at 8 and 3 until their own *Show N more* is pressed. *Reasoning:* R-3.4. *Reversing:* trivial.
+- **The typed read is uncapped, and every keystroke reads per row.** 20k tickets matching one letter came back as 4.1 MB and 575 ms in a debug build. *Ruling:* merged as built, because R-3.4 says every match while there is text, and follow-up #897 owns responsiveness at estate scale. *Reasoning:* this does not contradict the spec, and the cost only shows on broad words over large mirrors. *Reversing:* #897.
+- **Kept:** the identity is loaded twice per filtered read (one small query each time), `ids_sql` hard-codes the `i` alias (which `declared_string!` already requires), and the dummy `nothing` CTE stays.

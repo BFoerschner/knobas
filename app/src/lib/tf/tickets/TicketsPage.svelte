@@ -42,8 +42,10 @@
   const session = $state({
     layout: "board" as "board" | "list",
     selected: null as string | null,
-    /** Expanded columns by status (`""` for *No status*); `"*"` is every one. */
+    /** Expanded board columns by status (`""` for *No status*). */
     expanded: [] as string[],
+    /** Whether the list's *Show N more* was pressed: the list reads every ticket, the board keeps its caps. */
+    listAll: false,
   });
 
   /** A new session: what each test is. */
@@ -51,6 +53,7 @@
     session.layout = "board";
     session.selected = null;
     session.expanded = [];
+    session.listAll = false;
   }
 </script>
 
@@ -159,18 +162,19 @@
   const typing = $derived(filter.text.trim() !== "");
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
   const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
-  const isExpanded = (column: MiniBoardColumn) =>
-    session.expanded.includes("*") || session.expanded.includes(columnKey(column));
+  const isExpanded = (column: MiniBoardColumn) => session.expanded.includes(columnKey(column));
 
   /**
    * The per-column cap a read asks for: none while words filter (every match,
-   * R-3.4), the largest expanded column's count once one is expanded, else
-   * the eight a column draws.
+   * R-3.4), the largest expanded column's count once one is expanded (every
+   * column's once the list is), else the eight a column draws.
    */
   function capFor(): number | null {
     if (typing) return null;
-    if (session.expanded.length === 0 || board === null) return COLUMN_CAP;
-    const wanted = board.columns.filter(isExpanded).map((column) => column.total);
+    if ((session.expanded.length === 0 && !session.listAll) || board === null) return COLUMN_CAP;
+    const wanted = board.columns
+      .filter((column) => session.listAll || isExpanded(column))
+      .map((column) => column.total);
     return Math.max(COLUMN_CAP, ...wanted);
   }
 
@@ -208,7 +212,7 @@
   }
 
   function expandAll() {
-    session.expanded = ["*"];
+    session.listAll = true;
     read();
   }
 
@@ -307,12 +311,16 @@
       if (event.key !== "Enter" || event.metaKey || event.ctrlKey || event.altKey || event.defaultPrevented) return;
       const at = document.activeElement;
       if (at instanceof HTMLElement && inTextField(at)) return;
-      const onCard = at instanceof HTMLElement && at.closest("[data-entity]") !== null;
-      if (at instanceof HTMLElement && at !== document.body && !onCard && at.closest("a, button, select") !== null)
+      const card = at instanceof HTMLElement ? at.closest<HTMLElement>("[data-entity]") : null;
+      if (at instanceof HTMLElement && at !== document.body && card === null && at.closest("a, button, select") !== null)
         return;
-      if (current === null) return;
+      // A focused card is the one Enter means, selected or not: the keydown
+      // comes before its click would have selected it.
+      const entry = card === null ? current : (visible.find((e) => e.card.entity_id === card.dataset.entity) ?? current);
+      if (entry === null) return;
       event.preventDefault();
-      location.hash = jobHash(current.card.key);
+      session.selected = entry.card.entity_id;
+      location.hash = jobHash(entry.card.key);
     };
     window.addEventListener("keydown", onkey);
     return () => window.removeEventListener("keydown", onkey);

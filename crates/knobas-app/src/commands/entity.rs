@@ -3524,7 +3524,8 @@ fn announce_context<R: tauri::Runtime>(
 /// `query` is the ticket-first Tickets view's filter (#810, R-2.7): search
 /// grammar text, the view's base query and the filter bar's words and chips.
 /// A non-blank one narrows the board to every ticket the grammar admits
-/// ([`knobas_search::Searcher::matching_ids`]); omitted or blank, nothing.
+/// ([`knobas_search::Searcher::matching_ids`]); omitted or blank, it narrows
+/// nothing.
 #[tauri::command]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
