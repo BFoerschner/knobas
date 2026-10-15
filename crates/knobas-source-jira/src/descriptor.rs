@@ -87,6 +87,9 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// stores them beside the record as `sprints: [{id, name, state}]`, on every
 /// ticket, empty when the field is not configured or the ticket is in none.
 ///
+/// **The estimate** (#816) is `timeoriginalestimate`, which Jira sends in
+/// seconds and `BASE_FIELDS` has asked for since M1: the job card's *est.*.
+///
 /// **No reviewers and no merged flag**: a Jira issue has neither. A kind that
 /// declares no path for a field is a miss, which is what those readers did
 /// against Jira before this existed.
@@ -127,6 +130,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         project_key: vec![PayloadPath::of(["fields", "project", "key"])],
         project_name: vec![PayloadPath::of(["fields", "project", "name"])],
         issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+        estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
         labels: vec![ListPath {
             at: PayloadPath::of(["fields", "labels"]),
             entry: PayloadPath::default(),

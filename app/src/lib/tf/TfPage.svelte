@@ -7,6 +7,8 @@
   - **Tickets** is home and has no breadcrumb: the three panes of #810,
     `tickets/TicketsPage.svelte`.
   - **Job** has no breadcrumb either: it is the place the breadcrumb leads to.
+    `#/job/<key>` is `TfJob` (#816); a bare `#/job` with no job opened yet
+    says how to open one.
   - **A full view** starts with the breadcrumb (R-1.6): the job you were last
     in on the card yellow, then the view's name, and *Back to <key>* beside
     `Esc` on the right; with no job, the view's own name and *Back*.
@@ -14,6 +16,10 @@
     where the switch lives and the rooms UI is where every setting still is.
 -->
 <script lang="ts">
+  import type { Timer } from "../shell/timer.svelte";
+  import TfJob from "./job/TfJob.svelte";
+  import type { JobPorts } from "./job/ports";
+  import type { Layers } from "./layers.svelte";
   import { jobHash, SECTION_NAME, type TfRoute } from "./route";
   import TicketsPage from "./tickets/TicketsPage.svelte";
 
@@ -23,6 +29,11 @@
     job,
     timedTicket,
     onrooms,
+    timer,
+    layers,
+    ontimer,
+    onstarttimer,
+    jobPorts,
   }: {
     route: TfRoute;
     /** Whether the database answers yet: a page's reads wait for it. */
@@ -33,21 +44,31 @@
     timedTicket: string | null;
     /** Switch back to the rooms UI. */
     onrooms: () => void;
+    timer: Pick<Timer, "current" | "elapsed">;
+    layers: Layers;
+    /** The timer verb, which stops a running timer into the worklog draft. */
+    ontimer: (() => void) | undefined;
+    /** Start the timer on a ticket (#816's *Start timer*). */
+    onstarttimer: (entityId: string, title: string) => void;
+    /** The job page's reads. */
+    jobPorts: JobPorts;
   } = $props();
 </script>
 
 {#if route.view === "tickets"}
   <TicketsPage {ready} {timedTicket} />
+{:else if route.view === "job" && route.key !== null}
+  <TfJob segment={route.key} tab={route.tab} {timer} {layers} {ontimer} {onstarttimer} ports={jobPorts} />
 {:else if route.view === "job"}
   <div class="tf-full">
     <header class="tf-fhead">
       <div>
-        <h1>{route.key ?? "Job"}</h1>
+        <h1>Job</h1>
         <div class="tf-sub">The job: a ticket's card, its sections and its conversation.</div>
       </div>
     </header>
     <div class="tf-empty">
-      <p>Job is not built in the new shell yet.</p>
+      <p>No job is open. Open a ticket from Tickets, or start the timer on one.</p>
       <a class="tf-btn" href="#/tickets">All tickets <kbd>Esc</kbd></a>
     </div>
   </div>

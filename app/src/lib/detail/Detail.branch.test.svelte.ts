@@ -91,6 +91,9 @@ function branch(): EntityDetail {
     activity: [],
     builds: [],
     status: null,
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
   };
 }
 

@@ -68,6 +68,10 @@ const SECTION_OF: Record<string, Section> = {
   code: "code",
   repo: "code",
   pr: "code",
+  // A branch's and a commit's full views (#816's rows open them), until the
+  // Code tickets build them under a repository.
+  branch: "code",
+  commit: "code",
   builds: "builds",
   build: "builds",
   docs: "docs",

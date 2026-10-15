@@ -140,6 +140,9 @@ function page(over: Partial<EntityDetail> = {}, payload: Record<string, unknown>
     activity: [],
     builds: [],
     status: null,
+    issue_type: null,
+    priority: null,
+    estimate_seconds: null,
     ...over,
   };
 }

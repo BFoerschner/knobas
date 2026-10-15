@@ -417,6 +417,18 @@ export interface EntityDetail {
    * once in `get_entity`, so the panel never reads a card list to find it.
    */
   status: string | null;
+  /**
+   * A ticket's type in its source's own word (#816, `Story`), through the
+   * declared `issue_type` path, or `null` on a miss. The job card draws it.
+   */
+  issue_type: string | null;
+  /** A ticket's priority in its source's own word (#816), or `null` on a miss. */
+  priority: string | null;
+  /**
+   * A ticket's original estimate in seconds (#816), or `null`: nothing
+   * declared, nothing recorded, or not a whole number. Never `0` for a miss.
+   */
+  estimate_seconds: number | null;
 }
 
 /**

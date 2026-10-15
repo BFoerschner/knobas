@@ -112,6 +112,8 @@ export interface KindPaths {
   labels: ListPath[];
   /** The states of the sprints an item is in, what `sprint:current` reads (#811). */
   sprint_state: ListPath[];
+  /** A ticket's original estimate in seconds, a whole number (#816). */
+  estimate: PayloadPath[];
 }
 
 /**

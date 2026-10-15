@@ -202,6 +202,122 @@
 .tf-btn.tf-ghost:hover { background: var(--sheet-2); }
 .tf-btn[disabled] { opacity: .55; cursor: not-allowed; }
 
+/* ---------- chips, signals, small text ---------- */
+.tf-chip {
+  display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-xs); font-weight: 600; padding: 1px 7px;
+  border-radius: 3px; white-space: nowrap; background: var(--muted-bg); color: var(--muted);
+}
+.tf-chip.tf-ok { background: var(--ok-bg); color: var(--ok); } .tf-chip.tf-warn { background: var(--warn-bg); color: var(--warn); }
+.tf-chip.tf-err { background: var(--err-bg); color: var(--err); } .tf-chip.tf-info { background: var(--info-bg); color: var(--info); }
+.tf-signal { display: inline-flex; align-items: center; gap: 4px; font-size: var(--t-xs); }
+.tf .tf-small { font-size: var(--t-xs); }
+.tf-btn.tf-sm { padding: 3px 8px; font-size: var(--t-sm); }
+.tf-linkish {
+  border: 0; background: none; padding: 0; cursor: pointer; color: var(--ink-2);
+  text-decoration: underline; text-underline-offset: 2px; font-size: var(--t-sm);
+}
+
+/* ---------- the job: the card on the left, the work on the right (R-4.1) ---------- */
+.tf-ws { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
+.tf-jobcard {
+  padding: 26px 22px 18px; overflow: auto; position: relative; display: flex; flex-direction: column; gap: 14px;
+  border-right: 1px solid var(--card-2);
+}
+/* The punched hole at the top of the card. */
+.tf-jobcard::before {
+  content: ""; position: absolute; top: 10px; left: 50%; width: 12px; height: 12px; margin-left: -6px; border-radius: 50%;
+  background: var(--paper); box-shadow: inset 0 1px 2px rgba(0,0,0,.35);
+}
+.tf-jobcard .tf-back {
+  align-self: flex-start; background: rgba(0,0,0,.08); padding: 3px 9px; border-radius: 3px;
+  font-size: var(--t-sm); text-decoration: none; display: inline-flex; gap: 6px; align-items: center;
+}
+.tf-jobcard .tf-back kbd { background: transparent; border-color: rgba(0,0,0,.25); color: inherit; }
+.tf-jobcard .tf-jobkey { line-height: .9; margin-top: 4px; }
+.tf-jobtitle { font-size: var(--t-2xl); line-height: 1.2; font-weight: 600; }
+.tf-jobrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.tf-jobcard select {
+  font-weight: 600; padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(0,0,0,.25);
+  background: rgba(255,255,255,.35); color: var(--card-ink);
+}
+.tf-jobcard .tf-jobdim, .tf-jobcard p { color: var(--card-ink-2); }
+.tf-jobcard .tf-asks { white-space: pre-line; }
+.tf-jobcard section { border-top: 1px solid rgba(0,0,0,.14); padding-top: 12px; }
+.tf-jobcard h2 { font-size: var(--t-xs); font-weight: 600; color: var(--card-ink-2); margin: 0 0 6px; }
+.tf-jobcard .tf-chip { background: rgba(0,0,0,.1); color: var(--card-ink); }
+.tf-jobcard .tf-chip.tf-err { background: var(--err); color: #fff; }
+.tf-clock {
+  display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,.08); border-radius: 6px;
+  padding: 10px 12px; flex-wrap: wrap;
+}
+/* A duration is Archivo with tabular figures (design system, Type). */
+.tf-clock-t { font-weight: 600; font-size: var(--t-2xl); font-variant-numeric: tabular-nums; }
+.tf-clock .tf-btn { margin-left: auto; background: var(--card-ink); color: var(--card); border-color: var(--card-ink); }
+.tf-week { display: block; width: 100%; height: 34px; margin-top: 6px; }
+.tf-week .tf-week-unlogged { fill: rgba(0,0,0,.12); }
+.tf-week .tf-week-logged { fill: rgba(0,0,0,.24); }
+.tf-week .tf-today .tf-week-unlogged { fill: rgba(0,0,0,.38); }
+.tf-week .tf-today .tf-week-logged { fill: var(--card-ink); }
+.tf-weekends { display: flex; justify-content: space-between; font-size: var(--t-2xs); }
+
+.tf-work { overflow: auto; display: flex; flex-direction: column; min-width: 0; }
+.tf-work > * { flex: none; }
+.tf-wtabs {
+  display: flex; align-items: center; gap: 2px; padding: 10px 22px 0; border-bottom: 1px solid var(--rule);
+  background: var(--paper); position: sticky; top: 0; z-index: 6;
+}
+.tf-wtabs a {
+  padding: 8px 12px; text-decoration: none; color: var(--ink-2); border-bottom: 2px solid transparent;
+  margin-bottom: -1px; white-space: nowrap;
+}
+.tf-wtabs a[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--ink); font-weight: 600; }
+.tf-wbody { padding: 18px 22px 40px; display: flex; flex-direction: column; gap: 18px; }
+.tf-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
+
+/* ---------- a job section (R-4.6) ---------- */
+.tf-panel { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; display: flex; flex-direction: column; min-width: 0; }
+.tf-panel > header { display: flex; align-items: center; gap: 8px; padding: 10px 12px 4px; }
+.tf-panel > header h3 { font-size: var(--t-lg); font-weight: 700; font-variation-settings: "wdth" 88; }
+.tf-open {
+  display: inline-flex; align-items: center; gap: 5px; font-size: var(--t-sm); color: var(--ink-2);
+  text-decoration: none; padding: 3px 7px; border-radius: 3px; white-space: nowrap;
+}
+.tf-panel > header .tf-open { margin-left: auto; }
+.tf-open:hover { background: var(--sheet-2); color: var(--ink); }
+.tf-open svg { width: 12px; height: 12px; }
+.tf-roll { padding: 0 12px 9px; font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 10px; flex-wrap: wrap; align-items: center; }
+.tf-checkout {
+  margin: 0 12px 8px; padding: 8px 10px; border-radius: 6px; background: var(--sheet-2);
+  display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; font-size: var(--t-sm);
+}
+.tf-checkout .tf-acts { margin-left: auto; display: flex; gap: 6px; }
+.tf-openin { position: relative; }
+.tf-menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; min-width: 200px; display: flex; flex-direction: column;
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 8px; box-shadow: var(--shadow); padding: 4px;
+}
+.tf-menu button { border: 0; background: none; text-align: left; padding: 6px 10px; border-radius: 4px; cursor: pointer; }
+.tf-menu button:hover { background: var(--sheet-2); }
+.tf-rows { display: flex; flex-direction: column; }
+.tf-r {
+  display: flex; align-items: center; gap: 9px; padding: 7px 12px; border-top: 1px solid var(--rule-2);
+  text-decoration: none; min-width: 0;
+}
+a.tf-r:hover { background: var(--sheet-2); }
+.tf-r .tf-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-r .tf-rend { margin-left: auto; display: flex; gap: 6px; align-items: center; flex: none; }
+.tf-r .tf-rsub { display: block; font-size: var(--t-xs); color: var(--ink-2); overflow: hidden; text-overflow: ellipsis; }
+.tf-r .tf-repo { font: var(--t-xs) var(--mono); color: var(--ink-2); }
+.tf-secfoot { display: flex; gap: 8px; align-items: center; padding: 7px 12px; border-top: 1px solid var(--rule-2); flex-wrap: wrap; }
+.tf-secfoot .tf-push { margin-left: auto; }
+.tf-minif {
+  display: flex; align-items: center; gap: 5px; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px;
+  padding: 2px 7px; flex: 1; min-width: 120px; max-width: 220px; color: var(--ink-2);
+}
+.tf-minif svg { width: 12px; height: 12px; flex: none; }
+.tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
+.tf-minif:focus-within { outline: 2px solid var(--focus); }
+
 /* ---------- toasts: ink on the page, rising 20px into place ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
@@ -353,6 +469,13 @@
   .tf-timer-key { display: none; }
   .tf-crumbs, .tf-fhead { padding-left: 16px; padding-right: 16px; }
   .tf-jobkey { font-size: var(--t-d2); }
+  .tf-ws { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .tf-jobcard, .tf-work { overflow: visible; }
+  .tf-jobcard { border-right: 0; }
+  .tf-wbody, .tf-wtabs { padding-left: 16px; padding-right: 16px; }
+}
+@media (max-width: 1240px) {
+  .tf-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Reduced motion stops everything above: the pulse, the toast's rise, every transition. */

@@ -277,6 +277,13 @@ pub struct KindPaths {
     /// Empty for a kind with no sprints, and a miss is in no sprint.
     #[serde(default)]
     pub sprint_state: Vec<ListPath>,
+    /// A ticket's original estimate, **in seconds** (#816): Jira's
+    /// `fields.timeoriginalestimate`. A JSON number; the job card draws it.
+    /// Seconds and nothing else, so a source that keeps hours or a phrase
+    /// (`"3h"`) declares no estimate rather than one every reader would
+    /// misread. Empty for every kind with no estimate, and a miss draws none.
+    #[serde(default)]
+    pub estimate: Vec<PayloadPath>,
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -365,6 +372,7 @@ pub mod field {
     pub const ISSUE_TYPE: &str = "issue_type";
     pub const LABELS: &str = "labels";
     pub const SPRINT_STATE: &str = "sprint_state";
+    pub const ESTIMATE: &str = "estimate";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -389,6 +397,7 @@ pub mod field {
         ISSUE_TYPE,
         LABELS,
         SPRINT_STATE,
+        ESTIMATE,
     ];
 }
 
@@ -919,6 +928,22 @@ macro_rules! declares_field {
             "(jsonb_array_length(",
             $crate::declared_array!($decl, $field),
             ") > 0)"
+        )
+    };
+}
+
+/// SQL for "the whole number the declared path leads to, or nothing" -- see
+/// [`declared_string!`] for the arguments (#816). Only a JSON number counts,
+/// and only an integral one: a string that looks like a number is a value the
+/// source did not write as one, and reading it would be knobas guessing.
+#[macro_export]
+macro_rules! declared_integer {
+    ($decl:literal, $field:literal) => {
+        concat!(
+            "(select (i.payload #>> c.segs)::bigint from ",
+            $crate::declared_candidates!($decl, $field),
+            " c where jsonb_typeof(i.payload #> c.segs) = 'number' \
+              and (i.payload #>> c.segs) ~ '^-?[0-9]{1,18}$' order by c.ord limit 1)"
         )
     };
 }

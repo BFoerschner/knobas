@@ -879,7 +879,7 @@
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
 {:else if lifecycle.ready}
   {#if ticketFirst}
-    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} />
+    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} onstarttimer={startTimerOn} />
   {:else}
   <Shell {router} {lifecycle} {contexts} onsearch={openLauncher} {timer} ontimer={toggleTimer}>
     {#snippet main()}

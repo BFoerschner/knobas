@@ -648,6 +648,9 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
         activity: vec![activity_row()],
         builds: vec![row(Some(at()))],
         status: None,
+        issue_type: None,
+        priority: None,
+        estimate_seconds: None,
     };
 
     let wire = serde_json::to_value(detail).unwrap();
@@ -660,9 +663,12 @@ fn the_entity_detail_shape_matches_its_typescript_mirror() {
             "body_text",
             "builds",
             "deleted_at",
+            "estimate_seconds",
+            "issue_type",
             "kind_info",
             "links",
             "payload",
+            "priority",
             "row",
             "source",
             "status",

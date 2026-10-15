@@ -193,6 +193,8 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     mini_board: (args) => miniBoard(args),
     source_statuses: (args) => sourceStatuses(args),
     get_entity: (args) => getEntity(args),
+    reachable_transitions: (args) => fakeTransitions(args),
+    week_timesheet: (args) => fakeWeek(args),
     entity_view: (args) => entityView(args),
     resolve_url: (args) => resolveUrl(args),
     create_note: (args) => createNote(args),
@@ -329,7 +331,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     // empty page for the same reason.
     list_projects: () => listProjects(),
     list_contexts: () => FAKE_CONTEXTS.slice(),
-    context_members: () => [],
+    context_members: (args) => fakeMembers(String(args["ctxId"] ?? "")),
     create_context: (args) => {
       const row = fakeContext("adhoc", String(args["title"] ?? "Untitled"), null);
       FAKE_CONTEXTS.unshift(row);
@@ -1793,6 +1795,7 @@ const CORPUS: {
     type: "Story",
     epic: "PAY-200",
     story_points: 3,
+    estimate_h: 6,
     blocked: false,
     description:
       "Payouts to two SEPA banks fail with a 409 on retry. The retry window has to be idempotent before we can turn the scheduler back on.",
@@ -2295,11 +2298,11 @@ function listEntities(args: Record<string, unknown>) {
   // stands in for the IPC that `ipc/entity.ts` invokes, and imports only its
   // types.
   const tileOrder = filter.order === "attention" || filter.order === "latest_per_parent";
-  // The fixture has no link graph, so a context's membership is honestly
-  // empty — the same answer `context_members` gives.
-  if (filter.context) return { rows: [], total: 0, tally: tileOrder ? [] : null, groups: null };
-
+  // A context's membership is `FAKE_MEMBERS`' (#816): the one small link
+  // graph this fixture has, so a job's Code section has rows to draw.
+  const members = filter.context ? fakeMembers(filter.context) : null;
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
+  if (members !== null) rows = rows.filter((entry) => members.includes(entry.entity_id));
   if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
   if (filter.kinds?.length) rows = rows.filter((entry) => filter.kinds?.includes(entry.kind));
   rows = rows.filter((entry) => inProject(entry, filter.project));
@@ -2531,6 +2534,89 @@ function getEntity(args: Record<string, unknown>) {
     activity: FAKE_ACTIVITY.filter((line) => line.entity_id === id),
     // The mock corpus gives no build a commit, so nothing ran on any (#710).
     builds: [],
+    // The job card's fields (#816), read from the fixture's flat mock shape:
+    // the mock adapter declares `status` and `priority` there. Type and
+    // estimate are this fixture's own (`type`, `estimate_h`), which the mock
+    // adapter does not declare: a demo divergence, so the card has its whole
+    // facts line under `?fake-ipc`.
+    status: entry.kind === "ticket" && entry.deleted_at === null ? fakeText(entry.payload["status"]) : null,
+    issue_type: fakeText(entry.payload["type"]),
+    priority: fakeText(entry.payload["priority"]),
+    estimate_seconds:
+      typeof entry.payload["estimate_h"] === "number" ? Math.round(entry.payload["estimate_h"] * 3600) : null,
+  };
+}
+
+/** A payload value that is non-blank text, trimmed, or `null` (ADR-0007's miss). */
+function fakeText(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value.trim() : null;
+}
+
+/**
+ * Who is in a stored context (#816): the anchor, and what `FAKE_MEMBERS`
+ * links to it. Every other context, and an unknown id, holds nothing.
+ */
+function fakeMembers(ctxId: string): string[] {
+  const anchor = FAKE_CONTEXTS.find((row) => row.id === ctxId)?.anchor_id ?? null;
+  if (anchor === null) return [];
+  return [anchor, ...(FAKE_MEMBERS[anchor] ?? [])];
+}
+
+/**
+ * The fixture's one link graph (#816): what PAY-231 links to, so the job's
+ * Code section draws its repository, branch, pull request and commit. Ids
+ * from `CORPUS`; a promoted PAY-231 context holds exactly these.
+ */
+const FAKE_MEMBERS: Record<string, string[]> = {
+  "mock:PAY-231": [
+    "mock:tidewater/payout-service",
+    "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry",
+    "mock:payout-service#142",
+    "mock:9f2c1ab",
+  ],
+};
+
+/**
+ * `reachable_transitions` (#816's status select). The mock adapter declares no
+ * workflow, so the real command refuses it by name; the fixture answers with
+ * prototype-6's workflow instead, so the select has somewhere to go.
+ */
+function fakeTransitions(args: Record<string, unknown>): string[] {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === String(args["entityId"] ?? ""));
+  const status = fakeText(entry?.payload["status"]);
+  const WORKFLOW: Record<string, string[]> = {
+    "To Do": ["In Progress"],
+    "In Progress": ["In Review", "To Do"],
+    "In Review": ["Done", "In Progress"],
+    Done: ["In Progress"],
+  };
+  return status === null ? [] : (WORKFLOW[status] ?? []);
+}
+
+/**
+ * `week_timesheet` (#816's *Time this week*): PAY-231 logged on Monday and
+ * Tuesday, and tracked but unlogged on the fourth day asked for.
+ */
+function fakeWeek(args: Record<string, unknown>) {
+  const days = ((args["days"] as { day: string }[] | undefined) ?? []).map((window) => window.day);
+  const cell = (logged: number, unlogged: number) => ({
+    tracked_seconds: logged + unlogged,
+    offered_seconds: 0,
+    logged_seconds: logged,
+    held_seconds: 0,
+    unlogged_seconds: unlogged,
+  });
+  const PLAN: [number, number][] = [[3 * 3600, 0], [4.5 * 3600, 0], [0, 0], [0, 4 * 3600 + 14 * 60]];
+  return {
+    days,
+    rows: [
+      {
+        target: { kind: "entity", entity_id: "mock:PAY-231" },
+        title: "Retry failed SEPA payouts",
+        cells: days.map((_, index) => cell(...(PLAN[index] ?? [0, 0]))),
+      },
+    ],
+    past_horizon: days.map(() => false),
   };
 }
 
