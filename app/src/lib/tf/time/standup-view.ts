@@ -68,18 +68,26 @@ function bulletsUnder(body: string, heading: string): string[] {
 
 /**
  * Rewrite the bullet lines under `heading` with `edit`, keeping every other
- * line. `edit` gets the section's non-empty bullet lines and answers the new
- * ones; none left puts back `empty`, the template's placeholder. A missing
- * heading is added at the end of the body.
+ * line where it was. `edit` gets the section's non-empty bullet lines and
+ * answers the new ones; none left puts back `empty`, the template's
+ * placeholder. A missing heading is added at the end of the body.
+ *
+ * Bullets move only as far as the edit needs (#934): a kept bullet stays on
+ * its line, a changed one takes the line of the bullet it replaces, and a new
+ * one goes after the section's last bullet and the lines that continue it. So
+ * prose between bullets, a wrapped bullet's tail and the blank lines stay put.
+ * A body written with CRLF gets CRLF on the lines this writes.
  */
 function editSection(body: string, heading: string, empty: string, edit: (bullets: string[]) => string[]): string {
+  const cr = body.includes("\r\n") ? "\r" : "";
   const lines = body.split("\n");
   const start = lines.findIndex((line) => headingIs(line, heading));
   if (start < 0) {
     const bullets = edit([]);
     if (bullets.length === 0) return body;
-    const base = body.replace(/\n*$/, "");
-    return `${base}\n\n## ${heading}\n\n${bullets.join("\n")}\n`;
+    const nl = `${cr}\n`;
+    const base = body.replace(/(\r?\n)*$/, "");
+    return `${base}${nl}${nl}## ${heading}${nl}${nl}${bullets.join(nl)}${nl}`;
   }
   let end = lines.length;
   for (let index = start + 1; index < lines.length; index++) {
@@ -90,20 +98,48 @@ function editSection(body: string, heading: string, empty: string, edit: (bullet
   }
   const section = lines.slice(start + 1, end);
   const isBullet = (line: string) => bulletText(line) !== null;
-  const first = section.findIndex(isBullet);
-  const kept = section.filter((line) => isBullet(line) && bulletText(line) !== "" && !/^[-*+]\s*\[[ xX]\]\s*$/.test(line.trim()));
+  const isKept = (line: string) =>
+    isBullet(line) && bulletText(line) !== "" && !/^[-*+]\s*\[[ xX]\]\s*$/.test(line.trim());
+  const kept = section.filter(isKept);
   const next = edit(kept);
-  const bullets = next.length === 0 ? [empty] : next;
+  // What `edit` wrote carries no `\r`; a kept line keeps its own.
+  const bullets = (next.length === 0 ? [empty] : next).map((line) => (line.endsWith("\r") ? line : `${line}${cr}`));
   let rebuilt: string[];
-  if (first < 0) {
+  let last = section.length - 1;
+  while (last >= 0 && !isBullet(section[last]!)) last--;
+  if (last < 0) {
     // No bullets at all: after the heading's blank line.
     const lead = section.length > 0 && section[0]!.trim() === "" ? 1 : 0;
-    rebuilt = [...section.slice(0, lead), ...(lead === 0 ? [""] : []), ...bullets, ...section.slice(lead)];
+    rebuilt = [...section.slice(0, lead), ...(lead === 0 ? [cr] : []), ...bullets, ...section.slice(lead)];
     if (section.length === 0) rebuilt.push("");
   } else {
-    const before = section.slice(0, first);
-    const after = section.slice(first).filter((line) => !isBullet(line));
-    rebuilt = [...before, ...bullets, ...after];
+    // New bullets go after the last bullet and the non-blank lines that continue it.
+    let insertAt = last + 1;
+    while (insertAt < section.length && section[insertAt]!.trim() !== "" && !isBullet(section[insertAt]!)) insertAt++;
+    rebuilt = [];
+    let at = 0;
+    let keptSeen = 0;
+    section.forEach((line, index) => {
+      if (index === insertAt) {
+        rebuilt.push(...bullets.slice(at));
+        at = bullets.length;
+      }
+      if (!isBullet(line)) {
+        rebuilt.push(line);
+        return;
+      }
+      if (!isKept(line)) return; // the template's empty bullet
+      keptSeen++;
+      const found = bullets.indexOf(line, at);
+      if (found >= 0) {
+        rebuilt.push(...bullets.slice(at, found + 1));
+        at = found + 1;
+      } else if (at < bullets.length && !kept.slice(keptSeen).includes(bullets[at]!)) {
+        rebuilt.push(bullets[at]!);
+        at++;
+      }
+    });
+    if (insertAt === section.length) rebuilt.push(...bullets.slice(at));
   }
   return [...lines.slice(0, start + 1), ...rebuilt, ...lines.slice(end)].join("\n");
 }

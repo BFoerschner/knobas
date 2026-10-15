@@ -144,3 +144,65 @@ test("an action item's trailing (Owner) is told apart from its words", () => {
   expect(ownerOf("Decide the manual-review SLA (Priya Nair)")).toEqual({ what: "Decide the manual-review SLA", who: "(Priya Nair)" });
   expect(ownerOf("Ship (v2) today")).toEqual({ what: "Ship (v2) today", who: null });
 });
+
+/** A protocol a person wrote by hand: prose and a wrapped tail between bullets, a section knobas does not know, no newline at the end. */
+const HANDWRITTEN = [
+  "# Standup 2026-08-22",
+  "Ran long today.",
+  "",
+  "## Attendees",
+  "- Mara Lindqvist",
+  "(Priya joined late)",
+  "- Tomasz Wójcik",
+  "",
+  "## Notes",
+  "",
+  "- Mara Lindqvist: PAY-231 retries done,",
+  "  review open.",
+  "Context for the room, not anyone's note.",
+  "- Tomasz Wójcik: runbook",
+  "",
+  "### Parking lot",
+  "* rotate the key *later*",
+  "",
+  "## Action items",
+  "",
+  "- [ ] Decide the manual-review SLA",
+  "",
+  "Mara owns the follow-up.",
+].join("\n");
+
+test("an edit changes only the bullets it is about; prose, wrapped tails, other sections and a missing last newline stay byte for byte", () => {
+  expect(withNote(HANDWRITTEN, "Tomasz Wójcik", "runbook done")).toBe(
+    HANDWRITTEN.replace("- Tomasz Wójcik: runbook\n", "- Tomasz Wójcik: runbook done\n"),
+  );
+  expect(withNote(HANDWRITTEN, "Mara Lindqvist", "merged")).toBe(
+    HANDWRITTEN.replace("- Mara Lindqvist: PAY-231 retries done,\n", "- Mara Lindqvist: merged\n"),
+  );
+  expect(withNote(HANDWRITTEN, "Tomasz Wójcik", "")).toBe(HANDWRITTEN.replace("- Tomasz Wójcik: runbook\n", ""));
+  expect(withAttendees(HANDWRITTEN, ["Mara Lindqvist", "Tomasz Wójcik", "Priya Nair"])).toBe(
+    HANDWRITTEN.replace("- Tomasz Wójcik\n", "- Tomasz Wójcik\n- Priya Nair\n"),
+  );
+  expect(withAttendees(HANDWRITTEN, ["Tomasz Wójcik"])).toBe(HANDWRITTEN.replace("- Mara Lindqvist\n", ""));
+  expect(withActionItem(HANDWRITTEN, "Ship it")).toBe(
+    HANDWRITTEN.replace("- [ ] Decide the manual-review SLA\n", "- [ ] Decide the manual-review SLA\n- [ ] Ship it\n"),
+  );
+});
+
+test("a new note goes after the last bullet and the lines that continue it", () => {
+  const body = "## Attendees\n\n- A\n- B\n\n## Notes\n\n- A: long\n  and wrapped\n\nAfterword.\n";
+  expect(withNote(body, "B", "short")).toBe(body.replace("  and wrapped\n", "  and wrapped\n- B: short\n"));
+});
+
+test("a CRLF body stays CRLF, on the lines an edit writes as well as the rest", () => {
+  const crlf = FILLED.replaceAll("\n", "\r\n");
+  expect(withNote(crlf, "Mara Lindqvist", "Merged.")).toBe(
+    crlf.replace("PAY-231 retries done, review open.", "Merged."),
+  );
+  expect(withAttendees(crlf, ["Mara Lindqvist", "Tomasz Wójcik", "Priya Nair"])).toBe(
+    crlf.replace("- Tomasz Wójcik\r\n", "- Tomasz Wójcik\r\n- Priya Nair\r\n"),
+  );
+  expect(withActionItem(crlf, "Ship it")).toBe(crlf.replace("- [x] Rotate the key\r\n", "- [x] Rotate the key\r\n- [ ] Ship it\r\n"));
+  expect(withAttendees("# Standup\r\n", ["A"])).toBe("# Standup\r\n\r\n## Attendees\r\n\r\n- A\r\n");
+  expect(readProtocol(crlf)).toEqual(readProtocol(FILLED));
+});

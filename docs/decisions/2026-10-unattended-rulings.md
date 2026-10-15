@@ -1930,3 +1930,10 @@ Ruled 2026-10-16 by the implementer (PR for #828).
 - **Digest lines read *key title: reason* for yesterday and *key title (reason)* after**, as
   prototype-6 writes them; the reason is the backend's sentence, never rebuilt from the verb. A
   page opens `#/page/<entity id>`. **Reversing:** low.
+- **Merge review (#934): an edit moves only the bullets it changes.** `editSection` used to gather
+  a section's bullets at its first bullet and push every other line of the section below them, so
+  prose between bullets and a wrapped bullet's tail moved, and a CRLF body got bare `\n` on the
+  lines it wrote. Now a kept bullet stays on its line, a changed one takes the line it replaces, a
+  new one goes after the last bullet and its continuation, and written lines follow the body's
+  line ending. A replaced note's wrapped tail stays in the body rather than being deleted, since the
+  form never showed it. **Reversing:** low.
