@@ -105,7 +105,11 @@ impl FullName {
 ///
 /// [`CloneRefusal::BadAddress`] for an address with no scheme, a scheme not in
 /// `protocols`, no host, or a query or fragment.
-pub fn clone_url(base_url: &str, name: &FullName, protocols: &[&str]) -> Result<String, CloneRefusal> {
+pub fn clone_url(
+    base_url: &str,
+    name: &FullName,
+    protocols: &[&str],
+) -> Result<String, CloneRefusal> {
     let base = base_url.trim().trim_end_matches('/');
     let (scheme, rest) = base.split_once("://").ok_or_else(|| {
         CloneRefusal::BadAddress(format!(
@@ -131,7 +135,10 @@ pub fn clone_url(base_url: &str, name: &FullName, protocols: &[&str]) -> Result<
              path cannot be put after it"
         )));
     }
-    Ok(format!("{scheme}://{rest}/{}/{}.git", name.owner, name.repo))
+    Ok(format!(
+        "{scheme}://{rest}/{}/{}.git",
+        name.owner, name.repo
+    ))
 }
 
 /// git's argument list for cloning `url` into `dir`, the program name left
@@ -202,6 +209,27 @@ pub fn parse_progress(line: &str) -> Option<Progress> {
         phase: phase.to_owned(),
         percent,
     })
+}
+
+/// The line of a failed clone's stderr to show: git's first `fatal:` line,
+/// else its last `error:` line, else its last line.
+///
+/// Not simply the last line: a repository the server does not have ends with
+/// "Please make sure you have the correct access rights / and the repository
+/// exists.", which is advice, and the line that says what happened is the
+/// first `fatal:` above it.
+#[must_use]
+pub fn failure_reason(stderr: &str) -> Option<&str> {
+    let lines = || {
+        stderr
+            .lines()
+            .map(str::trim)
+            .filter(|line| !line.is_empty())
+    };
+    lines()
+        .find(|line| line.starts_with("fatal:"))
+        .or_else(|| lines().filter(|line| line.starts_with("error:")).last())
+        .or_else(|| lines().last())
 }
 
 /// What a failed clone's stderr says went wrong, for the sentence and the
@@ -308,7 +336,10 @@ mod tests {
             "https://git.example.com/#x",
         ] {
             assert!(
-                matches!(clone_url(bad, &n, &PROTOCOLS), Err(CloneRefusal::BadAddress(_))),
+                matches!(
+                    clone_url(bad, &n, &PROTOCOLS),
+                    Err(CloneRefusal::BadAddress(_))
+                ),
                 "{bad:?} was accepted"
             );
         }
@@ -384,6 +415,27 @@ mod tests {
         ] {
             assert_eq!(parse_progress(not), None, "{not:?}");
         }
+    }
+
+    #[test]
+    fn a_failure_is_said_with_gits_own_line() {
+        assert_eq!(
+            failure_reason(
+                "Cloning into 'x'...\nfatal: '/srv/x.git' does not appear to be a git repository\n\
+                 fatal: Could not read from remote repository.\n\nPlease make sure you have the \
+                 correct access rights\nand the repository exists.\n"
+            ),
+            Some("fatal: '/srv/x.git' does not appear to be a git repository")
+        );
+        assert_eq!(
+            failure_reason("Cloning into 'x'...\nerror: one\nerror: two\nwarning: three\n"),
+            Some("error: two")
+        );
+        assert_eq!(
+            failure_reason("Cloning into 'x'...\nKilled\n"),
+            Some("Killed")
+        );
+        assert_eq!(failure_reason("\n  \n"), None);
     }
 
     #[test]

@@ -2082,6 +2082,49 @@ export function openCheckout(entityId: string, action: string): Promise<void> {
   return invoke<void>("open_checkout", { entityId, action });
 }
 
+/** Why a clone failed — `knobas_app::checkout::clone::FailureCause` (#823). */
+export type CloneFailureCause = "auth" | "disk_full" | "other";
+
+/**
+ * Where one clone is — `knobas_app::checkout::clone::CloneState` (#823).
+ * `percent` is the whole clone, 0 to 100. `failed` and `stopped` say whether
+ * the half-made folder was removed.
+ */
+export type CloneState =
+  | { state: "progress"; phase: string; percent: number }
+  | { state: "done" }
+  | { state: "failed"; reason: string; cause: CloneFailureCause; removed: boolean }
+  | { state: "stopped"; removed: boolean };
+
+/**
+ * The `clone:progress` payload — `knobas_app::checkout::clone::CloneEvent`
+ * (#823): the repo entity being cloned, the folder, and its state.
+ */
+export type CloneEvent = {
+  entity_id: string;
+  path: string;
+} & CloneState;
+
+/** What {@link cloneRepo} answers — `knobas_app::checkout::clone::CloneAnswer`. */
+export type CloneAnswer =
+  | { status: "cloning"; path: string }
+  | { status: "adopted"; path: string }
+  | { status: "stopped"; path: string; removed: boolean }
+  | { status: "not_cloning" };
+
+/**
+ * Clone a repository into `<clones root>/<name>`, or stop the clone that is
+ * running — `clone_repo` (#823, ADR-0023).
+ *
+ * Starting resolves at once with `cloning` (progress follows on
+ * `EVENTS.cloneProgress`) or `adopted` (the folder is already a clone of it).
+ * Stopping resolves once the half-made folder is removed. A folder that
+ * exists and is not a clone of this repository rejects with `conflict`.
+ */
+export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer> {
+  return invoke<CloneAnswer>("clone_repo", { entityId, stop: stop ?? null });
+}
+
 /**
  * The capture shortcut as the settings pane draws it —
  * `knobas_app::capture::ShortcutView` (#503).

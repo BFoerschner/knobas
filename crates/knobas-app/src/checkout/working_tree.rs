@@ -90,7 +90,7 @@ pub async fn read_with(search: &OsStr, path: &Path) -> TreeRead {
 
 /// Apple's `git` on a Mac without the Command Line Tools is a shim that opens
 /// an install dialog instead of running (#715).
-const APPLE_SHIM: &str = "/usr/bin/git";
+pub(crate) const APPLE_SHIM: &str = "/usr/bin/git";
 
 /// Whether the Command Line Tools are installed, asked once per process once
 /// it has answered. `xcode-select -p` only prints a path and never opens the
@@ -100,7 +100,7 @@ const APPLE_SHIM: &str = "/usr/bin/git";
 /// knobas runs are noticed after a restart. A probe that has not answered is
 /// not kept (the caller abandons it, `kill_on_drop` ends it) and is asked
 /// again on the next read.
-async fn command_line_tools_installed() -> bool {
+pub(crate) async fn command_line_tools_installed() -> bool {
     static ANSWER: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
     *ANSWER
         .get_or_init(|| async {
@@ -211,7 +211,7 @@ async fn read_guarded(
 }
 
 /// The first executable called `name` in a `PATH`-style list.
-fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
+pub(crate) fn find_on(search: &OsStr, name: &str) -> Option<PathBuf> {
     let file: OsString = if cfg!(windows) {
         format!("{name}.exe").into()
     } else {

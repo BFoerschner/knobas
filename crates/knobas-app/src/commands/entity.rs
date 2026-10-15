@@ -2947,6 +2947,35 @@ pub async fn open_checkout(
     crate::checkout::open(&pool, &entity_id, &action).await
 }
 
+/// Clone a repository into the clones root, or stop the clone that is running
+/// (#823, ADR-0023).
+///
+/// One command for both, because ADR-0023 names one: `stop` absent or false
+/// starts (answering at once, with progress on `clone:progress`), `stop` true
+/// stops and answers once the half-made folder is removed. A repo or a
+/// branch; a branch clones its repository.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// and what [`crate::checkout::clone::start`] and
+/// [`crate::checkout::clone::stop`] refuse with.
+#[tauri::command]
+pub async fn clone_repo<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+    stop: Option<bool>,
+) -> Result<crate::checkout::clone::CloneAnswer, IpcError> {
+    let pool = lifecycle.pool()?;
+    let clones = crate::checkout::clone::Clones::global();
+    if stop.unwrap_or(false) {
+        return crate::checkout::clone::stop(&pool, &clones, &entity_id).await;
+    }
+    let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app));
+    crate::checkout::clone::start(&pool, &clones, events, &entity_id).await
+}
+
 // -- the capture window and its shortcut (#503) -----------------------------
 //
 // Here rather than in a module pair of their own, for the reason #499's four

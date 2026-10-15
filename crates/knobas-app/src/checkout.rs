@@ -45,6 +45,7 @@ use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
+pub mod clone;
 pub mod working_tree;
 
 use working_tree::TreeRead;

@@ -47,6 +47,11 @@ export const EVENTS = {
    * capture window is closing and has no use for it.
    */
   captureOpenNote: "capture:open-note",
+  /**
+   * `CloneEvent` — a clone's progress, at most one per second besides one per
+   * change of step, and how it ended (#823).
+   */
+  cloneProgress: "clone:progress",
 } as const;
 
 /** Why a command failed — `knobas_app::IpcErrorCode`. */
