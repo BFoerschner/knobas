@@ -2917,6 +2917,52 @@ pub async fn entity_checkout_diff(
     crate::checkout::local_changes(&pool, &entity_id).await
 }
 
+// -- the job's conversation (#819) ------------------------------------------
+//
+// Two commands, beside the entity reads they belong with (§10.8 freezes the
+// `commands/` + `ipc/` layout). The behaviour is `crate::conversation`.
+
+/// Record that the reader opened this ticket's job, and answer when they last
+/// did before now, or `null` for a first visit (#819, R-5.5's *last visit*).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for something that
+/// is not an entity id, [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
+/// for one the database does not know,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn visit_entity(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Option<DateTime<Utc>>, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::conversation::visit(&pool, &entity_id).await
+}
+
+/// A ticket's thread (#819, R-5.2): its comments in the source's order, each
+/// marked when it is the reader's own or mentions them, and the status moves
+/// knobas delivered on it.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for something that
+/// is not an entity id, [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
+/// for one the mirror does not hold,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
+#[tauri::command]
+pub async fn entity_thread(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::conversation::Thread, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::conversation::thread(&pool, &entity_id).await
+}
+
 // -- opening a checkout (#501) ----------------------------------------------
 //
 // Beside #499's four and for its reason: a repo and a branch are entities, and

@@ -86,16 +86,27 @@ where
     Ok(row)
 }
 
-/// Every line, newest first.
+/// The verb of a job's opening (#819): the reader's own bookkeeping, which
+/// `knobas_app::conversation` writes and reads back as *last visit*.
+///
+/// **Not a change, so [`recent`] leaves it out.** The history panel and the
+/// status bar's latest-change line draw what happened to an item; a line per
+/// opened job would push every real change off both. The literal in the two
+/// statements below is this value, pinned by
+/// `a_visit_is_not_in_the_recent_activity`.
+pub const VISITED: &str = "visited";
+
+/// Every line but a visit, newest first.
 ///
 /// `0002`'s `activity_recent_idx (at desc, id desc)` is what this reads
 /// through.
 const RECENT_GLOBAL: &str = r#"select id, at, actor, verb, entity_id, detail
    from knobas.activity
+   where verb <> 'visited'
    order by at desc, id desc
    limit $1"#;
 
-/// One entity's lines, newest first -- the detail view's history panel
+/// One entity's lines but its visits, newest first -- the detail view's history panel
 /// (spec §12.1).
 ///
 /// A second statement rather than an interpolated `where`, and it reads
@@ -103,7 +114,7 @@ const RECENT_GLOBAL: &str = r#"select id, at, actor, verb, entity_id, detail
 /// desc)`. `$2` is the entity id.
 const RECENT_SCOPED: &str = r#"select id, at, actor, verb, entity_id, detail
    from knobas.activity
-   where entity_id = $2
+   where entity_id = $2 and verb <> 'visited'
    order by at desc, id desc
    limit $1"#;
 

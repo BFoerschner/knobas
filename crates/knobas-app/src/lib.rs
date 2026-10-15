@@ -29,6 +29,7 @@ pub mod backup;
 pub mod capture;
 pub mod checkout;
 pub mod commands;
+pub mod conversation;
 mod error;
 pub mod inbox;
 pub mod logging;
@@ -484,6 +485,10 @@ pub fn run() {
             // #824's uncommitted diff at a checkout, appended at the foot:
             // the list is append-only (§10.8).
             commands::entity::entity_checkout_diff,
+            // #819's two conversation reads, appended at the foot: the list
+            // is append-only (§10.8).
+            commands::entity::visit_entity,
+            commands::entity::entity_thread,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
