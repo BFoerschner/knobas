@@ -462,8 +462,9 @@
    */
   const drafts = createDraftFlow({
     timer,
-    adHocBlock,
-    worklogDraft,
+    // Wrapped, so the bridge is read when a stop happens rather than at mount.
+    adHocBlock: (id, when) => adHocBlock(id, when),
+    worklogDraft: (entityId, when) => worklogDraft(entityId, when),
     onadhoc: (block, offer) => (adHoc = { block, offer }),
     push,
     complain,

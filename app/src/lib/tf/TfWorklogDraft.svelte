@@ -168,8 +168,8 @@
     </header>
     <div class="tf-body">
       <div class="tf-dur">
-        <label><span>From</span><input bind:this={first} type="time" bind:value={form.began} /></label>
-        <label><span>Minutes</span><input type="number" min="1" step="1" bind:value={form.minutes} /></label>
+        <label><span>From</span><input bind:this={first} type="time" aria-label="From" bind:value={form.began} /></label>
+        <label><span>Minutes</span><input type="number" min="1" step="1" aria-label="Minutes" bind:value={form.minutes} /></label>
         <b>{form.reading}</b>
         <span class="tf-dim">{intervals}</span>
       </div>
@@ -207,17 +207,17 @@
     </div>
     <footer>
       {#if stopped}
-        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}
-          >Stop, log later</button
-        >
-        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("keep")}
-          >Keep running</button
-        >
+        <button class="tf-btn tf-ghost tf-first" type="button" disabled={sending} onclick={() => onoutcome("later")}>
+          Stop, log later
+        </button>
+        <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("keep")}>
+          Keep running
+        </button>
       {/if}
       <button class="tf-btn tf-ghost" type="button" disabled={sending} onclick={() => onoutcome("discard")}>Discard</button>
-      <button class="tf-btn tf-primary" type="button" disabled={sending || form.seconds <= 0} onclick={send}
-        >Log {form.reading} to {form.key}</button
-      >
+      <button class="tf-btn tf-primary" type="button" disabled={sending || form.seconds <= 0} onclick={send}>
+        Log {form.reading} to {form.key}
+      </button>
     </footer>
   </div>
 </div>
