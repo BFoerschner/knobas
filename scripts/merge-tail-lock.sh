@@ -16,7 +16,7 @@ QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
 cmd="${1:-}"; pr="${2:-}"
 [ -n "$cmd" ] && [ -n "$pr" ] || { echo "usage: $0 take|release <PR>"; exit 2; }
 oldest_live_waiter() {
-  local f n best= now; now=$(date +%s)
+  local f n best='' now; now=$(date +%s)
   for f in "$QUEUE"/*; do
     [ -e "$f" ] || continue
     n=${f##*/}
