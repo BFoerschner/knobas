@@ -28,7 +28,7 @@
 # cannot happen the frontend half is a red, not a skip.
 #
 # The traps are the inventory recipe's: `INT` and `TERM` stop whatever is
-# left of both halves and remove the scratch files before re-raising, so a
+# left of every half and remove the scratch files before re-raising, so a
 # cancelled gate leaves no cargo or vitest running under nobody and nothing in
 # `$TMPDIR`. The kill is explicit because the halves cannot be relied on to
 # get the signal themselves. Without job control, bash starts a `&` job with
@@ -198,14 +198,20 @@ front-changed base="origin/main": deps
     mb=$(git merge-base "{{base}}" HEAD)
     cd app
     npx svelte-check --tsconfig ./tsconfig.json
+    # Captured before the loop, not read from a process substitution, so a
+    # failing git stops the recipe instead of leaving `changed` empty.
+    # Untracked files count as added (`A`).
+    diff=$(git diff --name-status "$mb" -- .)
+    untracked=$(git ls-files --others --exclude-standard --full-name -- . | awk '{ print "A\t" $0 }')
     all=
     changed=()
     while IFS=$'\t' read -r st f _; do
+        [ -n "$f" ] || continue
         case $f in app/src/*) ;; app/*) all="$f is outside app/src" ;; *) continue ;; esac
         case $st in D*|R*) all="$f was deleted or renamed" ;; esac
         [ "$f" != app/src/lib/shell/test-setup.ts ] || all="the test setup file changed"
         changed+=("${f#app/}")
-    done < <(git diff --name-status "$mb" -- . ; git ls-files --others --exclude-standard --full-name -- . | sed 's/^/A\t/')
+    done <<< "$diff"$'\n'"$untracked"
     guards=()
     while IFS= read -r f; do guards+=("$f"); done \
       < <(grep -rlE 'readFileSync|readdirSync|import\.meta\.glob|\?raw' src | grep -E '\.test\.(svelte\.)?ts$' | sort)
@@ -820,7 +826,7 @@ test:
         # `time` is aimed at a function, not at the subshell: bash 3.2 prints
         # nothing for `{ time ( a; b ); } 2>file` (checked 2026-10-15, #920).
         run_binary() { ( cd "$dir" && exec "$exe" </dev/null ) > "$log" 2>&1; }
-        local TIMEFORMAT=%R
+        local TIMEFORMAT=%R LC_NUMERIC=C
         { time run_binary; } 2> "$KNOBAS_GATE_DIR/out/$n.time" || status=$?
         echo "$status" > "$KNOBAS_GATE_DIR/out/$n.status"
         summary=$(sed -n 's/^test result: [A-Za-z]*\. \([0-9]* passed; [0-9]* failed; [0-9]* ignored;\).*finished in \([0-9.]*s\)$/\1 \2/p' "$log" | tail -n 1)
