@@ -16,7 +16,7 @@
   setting `data-theme` here.
 
   **Dialogs styled by the rooms UI are mounted outside `.tf`**, the write
-  queue here and the launcher, the picker and the ad-hoc dialog in
+  queue and the Add-source dialog (#830) here and the launcher, the picker and the ad-hoc dialog in
   `App.svelte`: inside it they would read this shell's `--ok`, `--muted`,
   `--sans` and `--mono` instead of their own. Dialogs ported to this shell
   arrive through `dialogs` and are drawn inside it: the worklog draft (#826).
@@ -45,12 +45,15 @@
   import { assetTargetId, targetReading } from "../shell/timer";
   import { timer as sharedTimer, type Timer } from "../shell/timer.svelte";
   import WriteQueue from "../shell/WriteQueue.svelte";
+  import { push } from "../shell/toasts.svelte";
+  import AddSource from "../sources/AddSource.svelte";
   import {
     createWriteQueue,
     openWriteQueue,
     writeQueuePanel,
     type WriteQueue as Queue,
   } from "../shell/write-queue.svelte";
+  import { addSourcePanel } from "./settings/add-source.svelte";
   import { badges as sharedBadges, type Badges } from "./badges.svelte";
   import { escStep } from "./escape";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
@@ -275,6 +278,17 @@
   {@render dialogs?.()}
   <TfToasts />
 </div>
+{#if addSourcePanel.open}
+  <!-- The rooms UI's dialog, unported: outside `.tf`, so it reads its own tokens (#809). -->
+  <AddSource
+    onclose={() => (addSourcePanel.open = false)}
+    onsaved={(source) => {
+      addSourcePanel.open = false;
+      addSourcePanel.added += 1;
+      push({ text: `Added ${source.display_name}. The first sync is running.` });
+    }}
+  />
+{/if}
 {#if writeQueuePanel.open}
   <WriteQueue {queue} {now} onclose={() => (writeQueuePanel.open = false)} />
 {/if}
