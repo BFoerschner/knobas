@@ -984,6 +984,8 @@ mod tests {
             false,
             &EffectiveFilters {
                 fields,
+                // `under:` beside them reads the same declarations bind.
+                under: vec![evil.to_owned()],
                 ..EffectiveFilters::default()
             },
             10,
@@ -997,7 +999,7 @@ mod tests {
                 built.sql
             );
         }
-        // One declarations bind, shared by every key and the path line.
+        // One declarations bind, shared by every key, `under:` and the path line.
         assert_eq!(
             built
                 .binds
