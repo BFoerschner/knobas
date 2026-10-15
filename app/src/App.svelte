@@ -49,6 +49,27 @@
   import { addToContext, linkTo } from "./lib/detail/links.svelte";
   import { EVENTS } from "./lib/ipc";
   import { recordCaptureContext } from "./lib/ipc/entity";
+  import { readShellChoice, windowStorage } from "./lib/tf/shell-choice";
+  import TfShell from "./lib/tf/TfShell.svelte";
+
+  /**
+   * **Which shell this window draws** (#809): the rooms UI, or the
+   * ticket-first shell behind the setting, read once at startup. The two own
+   * the same addresses with different meanings, so the rooms router, its
+   * `Esc` ladder and its foreground rule run only for the rooms UI; the new
+   * shell keeps its own keyboard and address. The launcher, the timer verb
+   * and the dialogs it opens stay here and serve both.
+   *
+   * `?shell=` overrides it in a dev build only, for `?fake-ipc` screenshots.
+   */
+  const ticketFirst =
+    readShellChoice(windowStorage(), import.meta.env.DEV ? location.search : null) === "tickets";
+
+  /** Go to an address the launcher or the capture window names. */
+  function navigate(hash: string) {
+    if (ticketFirst) location.hash = hash;
+    else router.go(hash);
+  }
 
   /**
    * The rooms the switcher offers: *All work*, the stored contexts (#47), one
@@ -138,6 +159,7 @@
    * again.
    */
   $effect.pre(() => {
+    if (ticketFirst) return;
     const route = router.route;
     if (route.view !== "room") return;
     const ctx = route.ctx;
@@ -238,6 +260,9 @@
    * the reader was on disagree about one minute.
    */
   const foreground = $derived.by(() => {
+    // The new shell has no rooms; its job page states its own foreground in
+    // the ticket that builds it. Until then ⌘T with nothing running asks.
+    if (ticketFirst) return null;
     const route = router.route;
     if (route.view === "assets") {
       const held = route.assetId;
@@ -597,7 +622,7 @@
       // tick later whatever this line does, so a subscription that lands after
       // the teardown has to be dropped rather than stored.
       void listen<string>(EVENTS.captureOpenNote, (event) => {
-        router.go(`#/entity/${event.payload}`);
+        navigate(`#/entity/${event.payload}`);
       }).then((off) => {
         if (disposed) off();
         else stopCapture = off;
@@ -610,12 +635,15 @@
       await lifecycle.start();
     })();
 
-    const stopRouter = router.start();
-    const stopKeys = installKeys(router, {
-      openLauncher,
-      restoreTile: () => room?.restoreTile() ?? false,
-      toggleTimer,
-    });
+    // The new shell installs its own keyboard and reads its own address.
+    const stopRouter = ticketFirst ? () => {} : router.start();
+    const stopKeys = ticketFirst
+      ? () => {}
+      : installKeys(router, {
+          openLauncher,
+          restoreTile: () => room?.restoreTile() ?? false,
+          toggleTimer,
+        });
 
     return () => {
       disposed = true;
@@ -850,6 +878,9 @@
 {#if lifecycle.ready && firstRun}
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
 {:else if lifecycle.ready}
+  {#if ticketFirst}
+    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} />
+  {:else}
   <Shell {router} {lifecycle} {contexts} onsearch={openLauncher} {timer} ontimer={toggleTimer}>
     {#snippet main()}
       {#if router.route.view === "unknown"}
@@ -943,6 +974,7 @@
       {/if}
     {/snippet}
   </Shell>
+  {/if}
   <!--
     `sources` is supplied, and supplying it is the point: the launcher's rows
     and chips then read the live `source:health` store instead of the copy the
@@ -971,7 +1003,7 @@
       if (room) void addToContext(room.ctxId, targetId, targetTitle, room.label);
     }}
     ontimer={startTimerOn}
-    onnavigate={(hash) => router.go(hash)}
+    onnavigate={navigate}
     onclose={() => {}}
   />
   {#if pickerOpen}
@@ -1027,4 +1059,7 @@
     onretry={() => void onRetry()}
   />
 {/if}
-<Toast />
+{#if !ticketFirst}
+  <!-- The new shell draws the same stack in its own words and tokens. -->
+  <Toast />
+{/if}

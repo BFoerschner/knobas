@@ -338,6 +338,9 @@ const { createRouter } = await import("./router.svelte");
 const { builtinContexts } = await import("./contexts");
 
 const App = (await import("../../App.svelte")).default;
+const TfShell = (await import("../tf/TfShell.svelte")).default;
+const { createBadges } = await import("../tf/badges.svelte");
+const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
@@ -547,6 +550,31 @@ const CASES: Case[] = [
     source: "lib/shell/StatusBar.svelte",
     open: (target) => ({
       app: mount(StatusBar, { target, props: { lifecycle: readyLifecycle() } }),
+    }),
+  },
+  {
+    /**
+     * The ticket-first shell (#809): its keyboard and address listeners, the
+     * status bar's three subscriptions and the badges' two, all behind a
+     * ready lifecycle so each of them is actually installed.
+     */
+    name: "TfShell",
+    source: "lib/tf/TfShell.svelte",
+    open: (target) => ({
+      app: mount(TfShell, {
+        target,
+        props: {
+          lifecycle: readyLifecycle(),
+          onsearch: () => {},
+          ontimer: undefined,
+          badges: createBadges({
+            failingBuilds: () => deferred(0),
+            monitorsDown: () => deferred(0),
+            proposals: () => deferred(0),
+            listen: (event, handler) => mockedListen(event, handler),
+          }),
+        },
+      }),
     }),
   },
   {

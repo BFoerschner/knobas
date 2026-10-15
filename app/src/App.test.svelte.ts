@@ -2190,3 +2190,34 @@ test("the same arrival on a focused window sends nothing", async () => {
     focused.mockRestore();
   }
 });
+
+/**
+ * **The setting picks the shell** (#809, spec #808 story 11): with
+ * `knobas.shell` set to `tickets` the window draws the ticket-first shell and
+ * nothing of the rooms UI; with it unset, every test above is the witness that
+ * the rooms UI is what it was.
+ */
+test("the shell setting draws the ticket-first shell instead of the rooms UI", async () => {
+  dbReady = true;
+  const stored = new Map([["knobas.shell", "tickets"]]);
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} },
+  });
+  try {
+    app = mount(App, { target, props: {} });
+    await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
+    expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
+    expect(target.querySelector(".topbar"), "no rooms strip under the new shell").toBeNull();
+  } finally {
+    Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
+  }
+});
+
+test("with the setting unset the rooms UI draws, and no new shell", async () => {
+  dbReady = true;
+  app = mount(App, { target, props: {} });
+  await until(() => target.querySelector(".topbar") !== null, "the rooms strip never drew");
+  expect(target.querySelector(".tf")).toBeNull();
+});

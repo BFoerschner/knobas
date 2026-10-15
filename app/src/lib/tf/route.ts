@@ -1,0 +1,138 @@
+/**
+ * The ticket-first shell's addresses (#809): prototype-6's hash routes, read
+ * into the place the reader is standing.
+ *
+ * Pure. The shell reads `location.hash` and hands it here; nothing in this
+ * module touches the window, so every rung of the `Esc` ladder and every nav
+ * highlight can be tested as a string.
+ *
+ * Prototype-6 has more first segments than nav entries: a pull request lives
+ * under Code, a run under Builds, a page under Docs, an asset under
+ * Dependencies. {@link SECTION_OF} is that mapping, copied from the
+ * prototype's `renderNav`, so the nav lights the place a deep address belongs
+ * to. `#/map` and `#/assets` are the retired global map and asset page (D13);
+ * they still belong to Dependencies, which took their places.
+ */
+
+/** A place in the main navigation, or Settings, which has its cog instead. */
+export type Section =
+  | "tickets"
+  | "job"
+  | "inbox"
+  | "code"
+  | "builds"
+  | "docs"
+  | "deps"
+  | "monitors"
+  | "sets"
+  | "review"
+  | "time"
+  | "settings";
+
+/** What each section is called, in prototype-6's words. */
+export const SECTION_NAME: Record<Section, string> = {
+  tickets: "Tickets",
+  job: "Job",
+  inbox: "Inbox",
+  code: "Code",
+  builds: "Builds",
+  docs: "Docs",
+  deps: "Dependencies",
+  monitors: "Monitors",
+  sets: "Link sets",
+  review: "Proposed links",
+  time: "Time",
+  settings: "Settings",
+};
+
+/** The main navigation, left to right (R-1.1). Settings is the cog, not a tab. */
+export const NAV: readonly Section[] = [
+  "tickets",
+  "job",
+  "inbox",
+  "code",
+  "builds",
+  "docs",
+  "deps",
+  "monitors",
+  "sets",
+  "review",
+  "time",
+];
+
+/** Which section a first path segment belongs to. */
+const SECTION_OF: Record<string, Section> = {
+  tickets: "tickets",
+  job: "job",
+  inbox: "inbox",
+  code: "code",
+  repo: "code",
+  pr: "code",
+  builds: "builds",
+  build: "builds",
+  docs: "docs",
+  page: "docs",
+  deps: "deps",
+  assets: "deps",
+  asset: "deps",
+  map: "deps",
+  monitors: "monitors",
+  sets: "sets",
+  review: "review",
+  time: "time",
+  settings: "settings",
+};
+
+/**
+ * Where the reader is.
+ *
+ * - `tickets` is home: the empty address lands here, as in the prototype.
+ * - `job` carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
+ *   either of which may be absent.
+ * - `full` is every other section: a full view, with whatever follows its
+ *   first segment kept as `rest` for the ticket that builds it.
+ * - `unknown` is an address this shell has no place for. A launcher row still
+ *   produces rooms-UI addresses (`#/ticket/jira:PAY-231`), and saying so
+ *   beats drawing Tickets under an address that names something else.
+ */
+export type TfRoute =
+  | { view: "tickets"; rest: string[] }
+  | { view: "job"; key: string | null; tab: string | null }
+  | { view: "full"; section: Exclude<Section, "tickets" | "job">; rest: string[] }
+  | { view: "unknown"; hash: string };
+
+/** Read an address. Total: every string is some route. */
+export function parseTfHash(hash: string): TfRoute {
+  const path = hash.replace(/^#\/?/, "");
+  const segments = path === "" ? [] : path.split("/").map(decode);
+  const head = segments[0] ?? "";
+  if (head === "") return { view: "tickets", rest: [] };
+  const section = SECTION_OF[head];
+  if (section === undefined) return { view: "unknown", hash };
+  if (section === "tickets") return { view: "tickets", rest: segments.slice(1) };
+  if (section === "job") {
+    return { view: "job", key: segments[1] || null, tab: segments[2] || null };
+  }
+  return { view: "full", section, rest: segments.slice(1) };
+}
+
+/** The section a route lights in the nav, or `null` for an unknown address. */
+export function sectionOf(route: TfRoute): Section | null {
+  if (route.view === "tickets") return "tickets";
+  if (route.view === "job") return "job";
+  if (route.view === "full") return route.section;
+  return null;
+}
+
+/** The address of a job, or of the bare Job page when no ticket is known. */
+export function jobHash(key: string | null): string {
+  return key === null ? "#/job" : `#/job/${encodeURIComponent(key)}`;
+}
+
+function decode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return segment;
+  }
+}
