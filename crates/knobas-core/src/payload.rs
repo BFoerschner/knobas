@@ -952,18 +952,48 @@ macro_rules! declared_flag {
 #[macro_export]
 macro_rules! declared_list {
     ($decl:literal, $field:literal) => {
+        $crate::list_values_of!($crate::declared_list_candidates!($decl, $field))
+    };
+}
+
+/// [`declared_list!`]'s rule over a relation of list candidates the statement
+/// already holds: `(at_segs, entry_segs)` rows, the shape
+/// [`declared_list_candidates!`] yields (#811). What a statement that reads a
+/// list for many rows uses, resolving the candidates once a source rather
+/// than once a row, as [`first_string_of!`] is for a string. One spelling of
+/// the rule, which both macros share.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! list_values_of {
+    ($($candidates:tt)+) => {
         concat!(
-            "(select nullif(btrim(e.elem #>> c.entry_segs), '') as value from (select ",
+            "(select nullif(btrim(e.elem #>> c.entry_segs), '') as value from ",
+            $($candidates)+,
+            " c cross join lateral jsonb_array_elements(\
+             case when jsonb_typeof(i.payload #> c.at_segs) = 'array' \
+                  then i.payload #> c.at_segs else '[]'::jsonb end) as e(elem) \
+             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
+               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null)"
+        )
+    };
+}
+
+/// The declared list candidates for one field as a relation of `(at_segs,
+/// entry_segs)`, in declaration order. An implementation detail of
+/// [`declared_list!`], exported for a statement that resolves them once a
+/// source (#811).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! declared_list_candidates {
+    ($decl:literal, $field:literal) => {
+        concat!(
+            "(select ",
             $crate::declared_segments!("cand->'at'"),
             " as at_segs, ",
             $crate::declared_segments!("cand->'entry'"),
             " as entry_segs from jsonb_array_elements(",
             $crate::declared_array!($decl, $field),
-            ") as cands(cand)) c cross join lateral jsonb_array_elements(\
-             case when jsonb_typeof(i.payload #> c.at_segs) = 'array' \
-                  then i.payload #> c.at_segs else '[]'::jsonb end) as e(elem) \
-             where jsonb_typeof(e.elem #> c.entry_segs) = 'string' \
-               and nullif(btrim(e.elem #>> c.entry_segs), '') is not null)"
+            ") as cands(cand))"
         )
     };
 }

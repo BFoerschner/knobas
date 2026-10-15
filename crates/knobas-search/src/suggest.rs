@@ -201,54 +201,145 @@ const PARENTS_SQL: &str = concat!(
 /// this many. The box narrows them as the value is typed.
 pub const FIELD_SUGGESTIONS: i64 = 50;
 
+/// How many live rows of each declaring source and kind the ticket keys'
+/// values are read from (#811): the newest this many.
+///
+/// A sample, and that is the trade: a value that only older tickets carry is
+/// not offered, and typed out it still filters. Measured with `just
+/// responsiveness-probe` (22,000 items, five declaring sources), warm median
+/// of the opening read (kinds, sources, parents and these): the whole mirror
+/// 4,274 ms (load 11 to 29); the newest 1,000 149 ms (load 8 to 10); the
+/// newest 200 62 ms (load 5 to 6), against 28 ms without the ticket keys
+/// (#768's entry).
+pub(crate) const FIELD_SAMPLE: i64 = 200;
+
+/// One declared scalar field's candidates for every declaring source and kind
+/// in `dk`, keyed by the suggestion key they serve.
+macro_rules! scalar_candidates {
+    ($key:literal, $field:literal) => {
+        concat!(
+            "select i.source_id, i.kind, '",
+            $key,
+            "'::text as key, c.segs, c.ord from dk i cross join lateral ",
+            knobas_core::declared_candidates!("$1", $field),
+            " c"
+        )
+    };
+}
+
+/// The same for a declared list field.
+macro_rules! list_candidates {
+    ($key:literal, $field:literal) => {
+        concat!(
+            "select i.source_id, i.kind, '",
+            $key,
+            "'::text as key, c.at_segs, c.entry_segs from dk i cross join lateral ",
+            knobas_core::declared_list_candidates!("$1", $field),
+            " c"
+        )
+    };
+}
+
+/// A sampled row's value for one scalar suggestion key.
+macro_rules! scalar_of {
+    ($key:literal) => {
+        knobas_core::first_string_of!(concat!(
+            "(select sp.segs, sp.ord from sp where sp.source_id = i.source_id \
+              and sp.kind = i.kind and sp.key = '",
+            $key,
+            "')"
+        ))
+    };
+}
+
+/// A sampled row's values for one list suggestion key.
+macro_rules! list_of {
+    ($key:literal) => {
+        knobas_core::list_values_of!(concat!(
+            "(select lp.at_segs, lp.entry_segs from lp where lp.source_id = i.source_id \
+              and lp.kind = i.kind and lp.key = '",
+            $key,
+            "')"
+        ))
+    };
+}
+
 /// The values the live mirror holds for each ticket key (#811), the most
 /// used [`FIELD_SUGGESTIONS`] per key, most used first: `(key, value,
 /// detail)`.
 ///
-/// Read through the **same declared reads** the keys filter by
-/// (`crate::corpus::LIVE_ITEM_FIELDS`, ADR-0007), with the declarations at
-/// `$1`, so an offered value is one the key matches; a row whose source
-/// declares nothing contributes nothing. The value keeps the source's
-/// spelling, the way a reader knows it, and the key matches it ignoring case.
-/// A project is offered by its key, its name beside it. `sprint` is offered
-/// as `current`, once, when any live row is in an active sprint.
+/// Read through the **declared** paths the keys filter by (ADR-0007), with
+/// the declarations at `$1`, so an offered value is one the key matches. The
+/// declaration is resolved once a source and kind (`sp`, `lp`), as the mini
+/// board does (#753), rather than walked per row; and only the newest
+/// [`FIELD_SAMPLE`] (`$3`) live rows of each source and kind that declares
+/// any of these fields are read, each probe ordered as
+/// `item_source_updated_idx` is so it stops early. A row whose record misses
+/// a path contributes nothing for that key: the miss direction, offering
+/// fewer values, never a wrong one.
 ///
-/// **What it costs**: one pass over the live mirror, reading six declared
-/// fields per row. It rides the opening's read, once per opening, never a
-/// keystroke's (#768), and a row of a kind that declares none of the fields
-/// is passed over by the `where` before any path is walked.
+/// The value keeps the source's spelling, the way a reader knows it; the key
+/// matches it ignoring case. A project is offered by its key, its name beside
+/// it. `sprint` is offered as `current`, once, when a sampled row is in an
+/// active sprint.
 const FIELDS_SQL: &str = concat!(
-    "select f.key, f.value, f.detail from ( \
+    "with dk as materialized ( \
+       select d.source_id, k.kind \
+         from jsonb_each(case when jsonb_typeof($1::jsonb) = 'object' then $1::jsonb \
+                              else '{}'::jsonb end) as d(source_id, kinds) \
+         cross join lateral jsonb_object_keys(case when jsonb_typeof(d.kinds) = 'object' \
+                              then d.kinds else '{}'::jsonb end) as k(kind)), \
+     sp as materialized (",
+    scalar_candidates!("project", "project_key"),
+    " union all ",
+    scalar_candidates!("project_name", "project_name"),
+    " union all ",
+    scalar_candidates!("status", "status_name"),
+    " union all ",
+    scalar_candidates!("issuetype", "issue_type"),
+    " union all ",
+    scalar_candidates!("priority", "priority"),
+    " union all ",
+    scalar_candidates!("assignee", "assignee"),
+    "), lp as materialized (",
+    list_candidates!("label", "labels"),
+    " union all ",
+    list_candidates!("sprint", "sprint_state"),
+    "), sampled as materialized ( \
+       select r.source_id, r.kind, r.payload \
+         from (select source_id, kind from sp union select source_id, kind from lp) p \
+         cross join lateral (select i.source_id, i.kind, i.payload from sync.item i \
+                              where i.source_id = p.source_id and i.kind = p.kind and ",
+    knobas_core::live_by_exclusion!("i"),
+    " order by i.item_updated_at desc nulls last limit $3) r), \
+     v as ( \
+       select 'project' as key, ",
+    scalar_of!("project"),
+    " as value, ",
+    scalar_of!("project_name"),
+    " as detail from sampled i \
+       union all select 'status', ",
+    scalar_of!("status"),
+    ", null from sampled i \
+       union all select 'issuetype', ",
+    scalar_of!("issuetype"),
+    ", null from sampled i \
+       union all select 'priority', ",
+    scalar_of!("priority"),
+    ", null from sampled i \
+       union all select 'assignee', ",
+    scalar_of!("assignee"),
+    ", null from sampled i \
+       union all select 'label', l.value, null from sampled i cross join lateral ",
+    list_of!("label"),
+    " l \
+       union all select 'sprint', 'current', null from sampled i where exists (select 1 from ",
+    list_of!("sprint"),
+    " s where lower(s.value) = 'active')) \
+     select f.key, f.value, f.detail from ( \
        select v.key, v.value, max(v.detail) as detail, count(*) as uses, \
               row_number() over (partition by v.key order by count(*) desc, v.value) as rn \
-         from sync.live_item i \
-         cross join lateral (",
-    "select 'project' as key, ",
-    knobas_core::declared_string!("$1", "project_key"),
-    " as value, ",
-    knobas_core::declared_string!("$1", "project_name"),
-    " as detail \
-     union all select 'status', ",
-    knobas_core::declared_string!("$1", "status_name"),
-    ", null \
-     union all select 'issuetype', ",
-    knobas_core::declared_string!("$1", "issue_type"),
-    ", null \
-     union all select 'priority', ",
-    knobas_core::declared_string!("$1", "priority"),
-    ", null \
-     union all select 'assignee', ",
-    knobas_core::declared_string!("$1", "assignee"),
-    ", null \
-     union all select 'label', l.value, null from ",
-    knobas_core::declared_list!("$1", "labels"),
-    " l \
-     union all select 'sprint', 'current', null where exists (select 1 from ",
-    knobas_core::declared_list!("$1", "sprint_state"),
-    " s where lower(s.value) = 'active')) v \
-        where jsonb_typeof($1::jsonb #> array[i.source_id, i.kind]) = 'object' \
-          and v.value is not null \
-        group by v.key, v.value) f \
+         from v where v.value is not null group by v.key, v.value) f \
       where f.rn <= $2 \
       order by f.key, f.uses desc, f.value"
 );
@@ -272,6 +363,10 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(FIELDS_SQL)
         .bind(vocab.declarations.as_param())
         .bind(FIELD_SUGGESTIONS)
+        .bind(FIELD_SAMPLE)
+        // The unnamed statement, planned with the values in hand, for
+        // `parents`' reason below.
+        .persistent(false)
         .fetch_all(pool)
         .await?;
     let mut out: Vec<FieldSuggestion> = Vec::new();
