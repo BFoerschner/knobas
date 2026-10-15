@@ -2127,6 +2127,52 @@ export function cloneRepo(entityId: string, stop?: boolean): Promise<CloneAnswer
 }
 
 /**
+ * One half of a checkout's uncommitted diff —
+ * `knobas_app::checkout::uncommitted::CappedDiff` (#824).
+ */
+export interface CappedDiff {
+  files: DiffFile[];
+  /** A cap cut this half: the per-view line cap, or the read cap that stopped git. */
+  truncated: boolean;
+}
+
+/**
+ * What is uncommitted at a checkout —
+ * `knobas_app::checkout::uncommitted::UncommittedDiff` (#824, ADR-0026).
+ */
+export interface UncommittedDiff {
+  /** Changed in the working tree and not staged (`git diff`). */
+  unstaged: CappedDiff;
+  /** Staged and not committed (`git diff --cached`). */
+  staged: CappedDiff;
+  /** Paths git neither tracks nor ignores; a new directory once, with its `/`. */
+  untracked: string[];
+  /** More untracked paths than the list holds. */
+  untracked_truncated: boolean;
+}
+
+/**
+ * The uncommitted diff, or why there is none —
+ * `knobas_app::checkout::uncommitted::DiffRead` (#824). The arms are
+ * {@link TreeRead}'s; none is an error.
+ */
+export type DiffRead =
+  | ({ status: "read" } & UncommittedDiff)
+  | { status: "no_git" }
+  | { status: "not_a_repo" }
+  | { status: "failed"; reason: string };
+
+/**
+ * The uncommitted changes at a repo's or a branch's checkout —
+ * `entity_checkout_diff` (#824, ADR-0026). Read when the *Local changes* tab
+ * opens. Rejects with `not_found` for an entity with no checkout on this
+ * machine and `invalid` for one that is neither a repo nor a branch.
+ */
+export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
+  return invoke<DiffRead>("entity_checkout_diff", { entityId });
+}
+
+/**
  * The capture shortcut as the settings pane draws it —
  * `knobas_app::capture::ShortcutView` (#503).
  *

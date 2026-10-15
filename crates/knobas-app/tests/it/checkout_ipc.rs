@@ -25,10 +25,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
+use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
-    CheckoutView, FoundBy, clones_root, commands, open, set_clones_root, set_command, set_override,
-    view,
+    CheckoutView, FoundBy, clones_root, commands, local_changes, open, set_clones_root,
+    set_command, set_override, view,
 };
 use sqlx::PgPool;
 
@@ -401,6 +402,79 @@ async fn the_view_says_where_the_working_tree_stands() {
         .unwrap();
     let answer = view(&pool, &repo.id).await.unwrap();
     assert_eq!(answer.tree, Some(TreeRead::NotARepo));
+}
+
+/// The uncommitted diff is read at the path the checkout resolved (#824,
+/// ADR-0026), for a repo and for a branch of it; an entity with no checkout
+/// is refused as `open_checkout` refuses it, and a ticket as the view does.
+#[tokio::test]
+async fn the_local_changes_are_read_at_the_resolved_checkout() {
+    let pool = pool().await;
+    let repo = repo(&pool).await;
+    let branch = branch_of(&pool, &repo, "main").await;
+
+    let none = local_changes(&pool, &repo.id)
+        .await
+        .expect_err("no checkout yet");
+    assert_eq!(none.code, IpcErrorCode::NotFound);
+
+    let clone = tempfile::tempdir().unwrap();
+    for args in [
+        &["init", "-q", "-b", "main"][..],
+        &["add", "a.txt"][..],
+        &[
+            "-c",
+            "user.name=t",
+            "-c",
+            "user.email=t@t.invalid",
+            "commit",
+            "-q",
+            "-m",
+            "first",
+        ][..],
+    ] {
+        if args[0] == "add" {
+            fs::write(clone.path().join("a.txt"), "one\n").unwrap();
+        }
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(clone.path())
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    fs::write(clone.path().join("a.txt"), "two\n").unwrap();
+    fs::write(clone.path().join("draft.txt"), "x").unwrap();
+    set_override(&pool, &repo.id, Some(&clone.path().to_string_lossy()))
+        .await
+        .unwrap();
+
+    for entity in [&repo.id, &branch] {
+        match local_changes(&pool, entity).await.unwrap() {
+            DiffRead::Read(diff) => {
+                assert_eq!(diff.unstaged.files.len(), 1, "{entity}");
+                assert_eq!(diff.unstaged.files[0].path, "a.txt");
+                assert_eq!(diff.untracked, ["draft.txt"]);
+            }
+            other => panic!("expected the diff for {entity}, got {other:?}"),
+        }
+    }
+
+    let ticket = item(
+        &pool,
+        &format!("jira-{}", unique()),
+        "ticket",
+        "PAY-232",
+        None,
+    )
+    .await;
+    let wrong = local_changes(&pool, &ticket)
+        .await
+        .expect_err("a ticket has no clone");
+    assert_eq!(wrong.code, IpcErrorCode::Invalid);
 }
 
 /// The three refusals, each with the code the panel branches on.

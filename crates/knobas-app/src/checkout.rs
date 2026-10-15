@@ -26,10 +26,11 @@
 //!
 //! No checkout, no fetch, and nothing here writes to an existing working tree.
 //! `clone_command` produces a **string a person copies**; it is never spawned.
-//! knobas runs two git commands: [`working_tree`]'s read-only `status` at the
-//! checkout path (ADR-0021, #704), and [`clone`]'s `git clone` into a new
-//! folder under the clones root, whose URL is built from the source's address
-//! and a checked name and never from the mirror (ADR-0023, #823). [`open`] does start a
+//! knobas runs three git commands: [`working_tree`]'s read-only `status` at
+//! the checkout path (ADR-0021, #704), [`uncommitted`]'s read-only `diff`
+//! there (ADR-0026, #824), and [`clone`]'s `git clone` into a new folder under
+//! the clones root, whose URL is built from the source's address and a checked
+//! name and never from the mirror (ADR-0023, #823). [`open`] does start a
 //! process -- that is the whole of #501 -- and the rule it keeps is the other
 //! half of the ADR: the *program* is a template a person set in settings, and
 //! the only value substituted into it is the checkout [`view`] resolved off
@@ -48,6 +49,7 @@ use knobas_core::entity::EntityRef;
 use crate::IpcError;
 
 pub mod clone;
+pub mod uncommitted;
 pub mod working_tree;
 
 use working_tree::TreeRead;
@@ -199,6 +201,35 @@ pub async fn view(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcErr
         checkout.tree = Some(working_tree::read(Path::new(path)).await);
     }
     Ok(checkout)
+}
+
+/// The uncommitted changes at a repo's or a branch's checkout (#824,
+/// ADR-0026): what the *Local changes* tab draws.
+///
+/// A command of its own rather than a field of [`CheckoutView`]: the view is
+/// read on every detail open and every window focus, and a diff reads file
+/// contents, so it is read when the tab opens and not before.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) if `entity_id` is not an entity
+/// id or does not name a repo or a branch;
+/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold it
+/// or it has no checkout on this machine;
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure. What git
+/// answered, a failure included, is a [`DiffRead`](uncommitted::DiffRead) and
+/// never an error.
+pub async fn local_changes(
+    pool: &PgPool,
+    entity_id: &str,
+) -> Result<uncommitted::DiffRead, IpcError> {
+    let checkout = resolve(pool, entity_id).await?;
+    let path = checkout.path.ok_or_else(|| {
+        IpcError::not_found(format!(
+            "{entity_id} has no checkout on this machine, so there are no local changes to read"
+        ))
+    })?;
+    Ok(uncommitted::read(Path::new(&path)).await)
 }
 
 /// [`view`] without the working tree read: where the checkout is, and no git.

@@ -49,6 +49,7 @@ mod ticket_keys_ipc;
 mod time_ipc;
 mod ui_pool_probe;
 mod ui_statement_limit;
+mod uncommitted_diff;
 mod url_resolve;
 mod week_ipc;
 mod wiring;

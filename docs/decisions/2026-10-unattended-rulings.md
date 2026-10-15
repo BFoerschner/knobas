@@ -1551,3 +1551,47 @@ Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up whil
 - **Stop kills git, not its process group.** *Ruling:* keep the implementer's retrying removal. *Reasoning:* the helpers exit once their pipes to git close, and with the fix above the retry can no longer touch another run's folder. *Reversing:* low, `process_group(0)` plus `killpg` behind `libc`.
 - **A start future dropped between `create_dir` and the spawn would leave the folder and a registry entry behind.** *Ruling:* no change. *Reasoning:* Tauri does not cancel a running async command; nothing else drops it. *Reversing:* low, a guard that releases and removes on drop.
 - **A `base_url` carrying `user:password@` reaches git's URL.** *Ruling:* no change. *Reasoning:* the address is the one the person typed; knobas adds no credential of its own, which is ADR-0023's rule. *Reversing:* low, refuse userinfo in `clone_url`.
+
+## #824 — the uncommitted diff read
+
+Ruled 2026-10-15 by the implementer, under the TF6 milestone's rule (Björn, 2026-10-15: the
+implementer decides the forks that come up while implementing). Recorded in the PR for #824 too.
+
+- **A command, not a field on `CheckoutView`.** The view is read on every detail open and every
+  window focus; a diff reads file contents (3.7 s worst case measured on a 16,970-file checkout).
+  So `entity_checkout_diff` is read when the *Local changes* tab opens. **Reversing:** medium, move
+  the read into `checkout::view` and drop the command and its mirror.
+- **`-c diff.autoRefreshIndex=false`, a flag ADR-0026 does not list.** The ADR's command as written
+  rewrites `.git/index` when a file's stat is stale, which the same ADR forbids and its own
+  consequence ("`.git/index` unchanged after a read") tests. The forbidden-writes clause wins;
+  #891 amends the ADR's command list. **Reversing:** low, but it would bring back an index write.
+- **`--src-prefix=a/ --dst-prefix=b/`, also not in the ADR.** A checkout's `diff.mnemonicPrefix`
+  or `diff.noprefix` otherwise moves paths through the shared parser, whose strip expects `a/` and
+  `b/`. Constant flags, no value from the mirror. Covered by #891 as well. **Reversing:** low.
+- **Two diff halves, each capped as its own view**, not one per-view cap across both. Each half is
+  its own diff block on the tab, and the parser's per-view cap is not reachable from outside
+  `knobas-source` without a frozen-surface change. **Reversing:** low, a shared budget once the
+  parser takes one.
+- **"Git is stopped past the caps" is a read cap of 24,000 lines or 16 MiB per half**, four views'
+  worth, so a lockfile over the per-file cap does not hide the files after it. Past it git is
+  killed and the half and the file the cut fell in are `truncated`; that file's counts cover only
+  what was read, unlike a file the parser alone cut. **Reversing:** low, one constant.
+- **Untracked paths from a second `status` (`--porcelain=v2 -z`)**, not from the working tree
+  read, which only counts them. `-z` so a path is never quoted; a rename's original path is
+  skipped as its own field. At most 1,000 paths, with `untracked_truncated`. **Reversing:** low.
+- **Timeout 10 s over all three commands**, from the measurement above (0.25 s with fresh stat
+  data, 3.7 s with every stat stale). **Reversing:** one constant.
+- **No checkout is `not_found`**, as `open_checkout` refuses it, rather than an empty answer: the
+  tab draws its empty state from `CheckoutView` and never asks. **Reversing:** low.
+
+### Merge-manager review (PR #893)
+
+- **One line longer than the byte cap was read whole.** `run_capped` checked `READ_BYTES` only
+  between lines, so a 200,000-byte line was read entirely under a 300-byte test cap.
+  *Ruling:* fixed; each read takes at most the bytes left under the cap, witnessed by
+  `the_byte_cap_holds_inside_one_long_line`. *Reversing:* low.
+- **At the cut git is killed only after its stderr closes.** git dies of SIGPIPE on its next
+  write; a git busy before that write (a slow clean filter on the next file) holds the read until
+  the 10 s timeout, which then answers `failed` and drops the partial read. *Ruling:* no change.
+  *Reasoning:* the timeout bounds it and `kill_on_drop` ends git; the common case (more diff to
+  write) ends at once. *Reversing:* low, kill from inside the read on the cut.
