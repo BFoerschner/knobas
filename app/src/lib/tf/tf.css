@@ -351,7 +351,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-dur { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
 .tf-dur label { display: flex; flex-direction: column; gap: 2px; font-size: var(--t-xs); color: var(--ink-2); }
 .tf-dur input {
-  width: 92px; font: 600 var(--t-lg) var(--mono); border: 1px solid var(--rule); border-radius: 4px; padding: 4px 6px;
+  width: 92px; height: 32px; font: 600 var(--t-lg) var(--mono); border: 1px solid var(--rule); border-radius: 4px; padding: 4px 6px;
   background: var(--paper); color: var(--ink);
 }
 .tf-dur b { font-size: var(--t-3xl); font-weight: 800; font-variation-settings: "wdth" 62; margin-left: 6px; font-variant-numeric: tabular-nums; }
