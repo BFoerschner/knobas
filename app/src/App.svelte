@@ -45,12 +45,15 @@
     type AdHocBlock,
     type Block,
     type Draft,
+    type Worklog,
   } from "./lib/ipc/time";
   import { addToContext, linkTo } from "./lib/detail/links.svelte";
   import { EVENTS } from "./lib/ipc";
   import { recordCaptureContext } from "./lib/ipc/entity";
   import { readShellChoice, windowStorage } from "./lib/tf/shell-choice";
   import TfShell from "./lib/tf/TfShell.svelte";
+  import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
+  import { createDraftFlow } from "./lib/tf/drafting.svelte";
 
   /**
    * **Which shell this window draws** (#809): the rooms UI, or the
@@ -450,6 +453,35 @@
   }
 
   /**
+   * What a stop opens in the new shell, and what the draft's answers do to
+   * the clock (#826, R-13.1 to R-13.3): *Keep running*, *Stop, log later*, and
+   * a switch that waits for the running ticket's draft. The rooms UI keeps
+   * `offerOn` above, unchanged.
+   */
+  const drafts = createDraftFlow({
+    timer,
+    adHocBlock,
+    worklogDraft,
+    onadhoc: (block, offer) => (adHoc = { block, offer }),
+    push,
+    complain,
+    onday: () => (location.hash = "#/time"),
+  });
+
+  /** A worklog now exists: one toast and one followed write, in either shell. */
+  function onWorklogged(logged: Worklog) {
+    timeRevision += 1;
+    // Queued, not sent (#775): the draft closed on the queue's answer and
+    // the send is behind it; only a worklog that will not go is told again.
+    push({
+      text: `Worklog of ${Math.round(logged.seconds / 60)}m queued for ${logged.entity_id.slice(
+        logged.entity_id.indexOf(":") + 1,
+      )}`,
+    });
+    if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
+  }
+
+  /**
    * ⌘T, and the strip's timer slot: one verb with three outcomes, all three
    * decided by `timer.press()` — see its documentation for why the rule is
    * there and not in `keys.ts`.
@@ -464,7 +496,10 @@
       .press()
       .then((pressed) => {
         if (pressed.did === "pick") pickerOpen = true;
-        if (pressed.did === "stopped") offerOn(pressed.closed);
+        if (pressed.did === "stopped") {
+          if (ticketFirst) drafts.stopped(pressed.closed);
+          else offerOn(pressed.closed);
+        }
       })
       .catch(complain);
   }
@@ -483,6 +518,11 @@
    * `Enter`, and a chain action is not a navigation.
    */
   function startTimerOn(entityId: string, title: string) {
+    if (ticketFirst) {
+      // R-13.2: the running ticket's draft first, the new timer after it.
+      void drafts.switchTo({ kind: "entity", entity_id: entityId }, title);
+      return;
+    }
     void timer
       .switchTo({ kind: "entity", entity_id: entityId })
       .then((closed) => {
@@ -879,7 +919,20 @@
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
 {:else if lifecycle.ready}
   {#if ticketFirst}
-    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} onstarttimer={startTimerOn} />
+    <TfShell {lifecycle} onsearch={openLauncher} ontimer={toggleTimer} onstarttimer={startTimerOn}>
+      {#snippet dialogs()}
+        {#if drafts.open}
+          {#key drafts.open}
+            <TfWorklogDraft
+              draft={drafts.open.draft}
+              stopped={drafts.open.stopped !== null}
+              onoutcome={(outcome) => drafts.settle(outcome)}
+              onlogged={onWorklogged}
+            />
+          {/key}
+        {/if}
+      {/snippet}
+    </TfShell>
   {:else}
   <Shell {router} {lifecycle} {contexts} onsearch={openLauncher} {timer} ontimer={toggleTimer}>
     {#snippet main()}
@@ -1021,7 +1074,8 @@
       onclose={() => (adHoc = null)}
       onlog={(draft) => {
         timeRevision += 1;
-        worklog = draft;
+        if (ticketFirst) drafts.show(draft);
+        else worklog = draft;
       }}
     />
   {/if}
@@ -1038,17 +1092,7 @@
     <WorklogDraft
       draft={worklog}
       onclose={() => (worklog = null)}
-      onlogged={(logged) => {
-        timeRevision += 1;
-        // Queued, not sent (#775): the draft closed on the queue's answer and
-        // the send is behind it; only a worklog that will not go is told again.
-        push({
-          text: `Worklog of ${Math.round(logged.seconds / 60)}m queued for ${logged.entity_id.slice(
-            logged.entity_id.indexOf(":") + 1,
-          )}`,
-        });
-        if (logged.write_queue_id !== null) followWrite({ id: logged.write_queue_id }, { name: "Worklog" });
-      }}
+      onlogged={onWorklogged}
     />
   {/if}
 {:else}
