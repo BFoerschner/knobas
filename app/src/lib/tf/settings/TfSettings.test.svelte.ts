@@ -45,7 +45,9 @@ function summary(id: string, name: string, state: CredentialHealth["state"], ove
     base_url: id === "jira" ? "https://jira.tidewater.example" : "https://teamcity.tidewater.example",
     enabled: true,
     sync_interval_secs: 300,
-    config: { username: "mara" },
+    // A field besides the user, so Save is seen to send the config whole:
+    // `update_source` replaces it, and a field left out is lost.
+    config: { username: "mara", projects: ["TW", "OPS"] },
     health: healthOf(id, state),
     last_run: {
       id: id === "jira" ? 1 : 2,
@@ -193,7 +195,7 @@ test("Save sends what changed in the connection through update_source", async ()
 
   expect(p.updateSource).toHaveBeenCalledWith("jira", {
     base_url: "https://jira2.tidewater.example",
-    config: { username: "mlindqvist" },
+    config: { username: "mlindqvist", projects: ["TW", "OPS"] },
   });
 });
 
