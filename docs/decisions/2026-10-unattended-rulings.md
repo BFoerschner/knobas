@@ -1831,3 +1831,31 @@ Ruled 2026-10-15 by the implementer (PR #916).
   file is in the change. It stops covering a test that depends on a changed file by neither import
   nor file read. The issue body asked for this exact trade when the saving is real.
   **Reversing:** `check-front` back to `just front`.
+
+## #828 — Week and *Log all* in the new shell
+
+Ruled 2026-10-16 by the implementer (PR for #828).
+
+- ***Log all* sends one `log_work` per ticked row, not `log_all`.** The spec's dialog (story 162)
+  has ticks and editable comments; `log_all` takes neither and sends every worklog with an empty
+  comment. `log_work` already logs one day and ticket with a comment, so the dialog uses it and no
+  command is added. Each row's comment starts from `worklog_draft`'s generated comment for that day
+  and ticket, which the reader sees and can edit or clear before anything is sent. **Reversing:**
+  low, call `log_all` and drop the ticks and comments.
+- **The week is read again at send time.** `log_work` covers every unlogged block of the day on the
+  ticket and logs the seconds it is given, so a timer stopped while the dialog was open would be
+  covered at the old number. The dialog asks `log_all_preview` again and sends that answer's start
+  and seconds. A row the week no longer offers is skipped. **Reversing:** low.
+- **The running timer counts into today's cell on its target**, as tracked and to log, so the Week
+  and Day tabs give the same number for the same morning (prototype-6: "Running time counts as
+  tracked"). It is computed in the view; `week_timesheet` is unchanged. **Reversing:** low, drop the
+  term in `week-view.ts`.
+- **A held worklog's reason** comes from `pending_writes`: a `log_work` row in `held` or `refused`
+  whose start falls in the week. The note uses the source's own words (`detail`) when the row has
+  them. Without them it uses the queue's state ("the source refused it.", "its source is turned
+  off.", "the ticket changed after you logged it."). **Reversing:** low.
+- **The comment field is a two-line text area**, not the prototype's one-line input. A draft's
+  comment has one bullet per line, and an input would drop the line breaks. **Reversing:** low.
+- **`#/time/week/<date>` is the week containing that date**, with *‹* and *›* stepping by seven days
+  and *This week* to return, like the Day tab's *Today*. The prototype's *‹* only toasted.
+  **Reversing:** low.

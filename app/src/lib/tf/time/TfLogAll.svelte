@@ -199,7 +199,7 @@
               <tr>
                 <td><input type="checkbox" aria-label="Log this" bind:checked={row.ticked} /></td>
                 <td class="tf-nowrap">{dayHeading(row.plan.day)}</td>
-                <td class="tf-mono">{targetReading({ kind: "entity", entity_id: row.plan.entity_id })}</td>
+                <td class="tf-mono tf-nowrap">{targetReading({ kind: "entity", entity_id: row.plan.entity_id })}</td>
                 <td class="tf-nowrap tf-tm-num">{hm(minutesOf(row.plan.seconds))}</td>
                 <td class="tf-tm-comment">
                   <textarea

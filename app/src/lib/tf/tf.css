@@ -544,7 +544,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-week .tf-tm-we { background: var(--sheet-2); }
 .tf-tm-t { min-width: 240px; }
 .tf-tm-t small { display: block; font-size: var(--t-xs); color: var(--ink-2); }
-.tf-tm-t a { color: inherit; }
+.tf-tm-t a { color: inherit; text-decoration: underline; }
 .tf-tm-c { min-width: 92px; font-variant-numeric: tabular-nums; }
 .tf-tm-c a { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; }
 .tf-tm-c small { font-size: var(--t-2xs); color: var(--ink-2); }
