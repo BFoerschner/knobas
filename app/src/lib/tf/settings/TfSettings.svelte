@@ -165,7 +165,7 @@
     {#if job !== null}
       <a class="tf-jobchip tf-card" href={jobHash(job)}>{job}</a><span class="tf-sep">›</span>
     {/if}
-    <a href="#/settings">Settings</a><span class="tf-sep">›</span>
+    <a class="tf-crumb" href="#/settings">Settings</a><span class="tf-sep">›</span>
     <strong>{crumbName}</strong>
     <span class="tf-esc">{job !== null ? `Back to ${job}` : "Back"} <kbd>Esc</kbd></span>
   </nav>

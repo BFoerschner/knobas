@@ -3194,7 +3194,9 @@ function fixtureSource(
     base_url: baseUrl,
     enabled: true,
     sync_interval_secs: 900,
-    config: {},
+    // The user a Settings page shows (#830): the config's `username`, which
+    // only a username-and-password source carries here.
+    config: (authKind === "UserPassword" ? { username: "mara.oyelaran" } : {}) as Record<string, unknown>,
     auth_kind: authKind,
     health: {
       source_id: id,

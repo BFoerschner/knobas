@@ -174,6 +174,7 @@
   border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); flex-wrap: wrap;
 }
 .tf-crumbs a { text-decoration: none; }
+.tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-jobchip {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
   font-weight: 600; text-decoration: none; font-family: var(--mono); font-size: var(--t-xs);
@@ -376,7 +377,6 @@ a.tf-r:hover { background: var(--sheet-2); }
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
   font-size: var(--t-md); width: min(420px, 100%);
 }
-.tf-stg-in.tf-stg-narrow { width: auto; }
 .tf-stg-acts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
 .tf-stg-acts.tf-stg-flush { margin: 0; }
 .tf-stg-sw {

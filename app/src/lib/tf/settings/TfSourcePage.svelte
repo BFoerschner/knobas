@@ -316,7 +316,7 @@
     <div class="tf-stg-c">
       <select
         id="tf-src-every"
-        class="tf-stg-in tf-stg-narrow"
+        class="tf-stg-in"
         value={source.sync_interval_secs}
         disabled={saving}
         onchange={(event) => {
