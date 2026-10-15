@@ -195,17 +195,17 @@ fn comment_of(entry: &serde_json::Value, me: &[String]) -> Option<ThreadComment>
 /// The inbox's rule (`knobas_core::inbox`'s `mention!`), so a comment the
 /// inbox calls a mention is one here: the account preceded by `@` or `[~` (Jira
 /// Data Center writes `[~name]`), and **not** followed by another name
-/// character, `.` or `-`, so `mara` does not match `@mara.lindqvist`.
-/// Case-sensitive, as the account is spelled.
+/// character, `.` or `-`, so `mara` does not match `@mara.lindqvist`. A name
+/// character is the inbox's ASCII class `[A-Za-z0-9_]`, so the two rules
+/// agree on every body. Case-sensitive, as the account is spelled.
 pub fn mentions(body: &str, me: &[String]) -> bool {
     me.iter().filter(|name| !name.is_empty()).any(|name| {
         ["@", "[~"].iter().any(|lead| {
             let needle = format!("{lead}{name}");
             body.match_indices(&needle).any(|(at, _)| {
-                body[at + needle.len()..]
-                    .chars()
-                    .next()
-                    .is_none_or(|next| !(next.is_alphanumeric() || matches!(next, '_' | '.' | '-')))
+                body[at + needle.len()..].chars().next().is_none_or(|next| {
+                    !(next.is_ascii_alphanumeric() || matches!(next, '_' | '.' | '-'))
+                })
             })
         })
     })
@@ -287,6 +287,10 @@ mod tests {
             "case-sensitive, as the account is spelled"
         );
         assert!(!mentions("@mara", &[String::new()]));
+        assert!(
+            mentions("@maraé", &me()),
+            "the inbox's ASCII name class, so both call it a mention"
+        );
     }
 
     #[test]

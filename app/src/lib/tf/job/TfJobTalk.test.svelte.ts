@@ -248,6 +248,31 @@ test("the tab folds the old part, marks the last visit, edges new comments and m
   expect(squash(target.querySelector(".tf-event"))).toBe("You moved this to In Progress, 2026-08-15 11:00");
 });
 
+test("a tab change is not a visit: the job records one and keeps what is new", async () => {
+  let visits = 0;
+  const props = $state({
+    segment: "PAY-231",
+    tab: null as string | null,
+    timer: { current: null, elapsed: null },
+    layers: createLayers(),
+    ontimer: () => {},
+    onstarttimer: () => {},
+    ports: ports({
+      visitEntity: () => {
+        visits += 1;
+        return Promise.resolve(VISIT);
+      },
+    }),
+    today: () => new Date(2026, 9, 15, 14, 0),
+  });
+  job = mount(TfJob, { target, props });
+  await settle();
+  props.tab = "conversation";
+  await settle();
+  expect(visits).toBe(1);
+  expect(squash(target.querySelector(".tf-newline"))).toBe("New since your last visit, 09:00");
+});
+
 test("Include changes starts on; Mentions me keeps only the mentions; the count follows", async () => {
   open("conversation");
   await settle();

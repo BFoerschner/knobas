@@ -185,12 +185,12 @@ export interface Run {
 /**
  * `body` cut into runs, each `@name` or `[~name]` of an account in `me` marked
  * (R-5.3's `@name` in blue), by the backend's rule: not followed by another
- * name character, `.` or `-`.
+ * name character (the inbox's ASCII `[A-Za-z0-9_]`), `.` or `-`.
  */
 export function mentionRuns(body: string, me: readonly string[]): Run[] {
   const names = me.filter((name) => name !== "").map((name) => name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
   if (names.length === 0) return [{ text: body, at: false }];
-  const pattern = new RegExp(`(@|\\[~)(?:${names.join("|")})(?![\\p{L}\\p{N}_.-])\\]?`, "gu");
+  const pattern = new RegExp(`(@|\\[~)(?:${names.join("|")})(?![A-Za-z0-9_.-])\\]?`, "g");
   const runs: Run[] = [];
   let last = 0;
   for (const match of body.matchAll(pattern)) {
