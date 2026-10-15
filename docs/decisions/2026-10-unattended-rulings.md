@@ -1863,3 +1863,8 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   conventions say a ticket edits its own feature's module. `pending_writes` is the write queue's
   command, and two modules cannot answer it. The hour it covers is already in `time.ts`'s week
   numbers. **Reversing:** low.
+- **Merge review upholds the `fake/write-queue.ts` row** (merge-manager, PR #928). The convention
+  exists so parallel tickets do not collide in one shared fixture file. A row a command returns lives
+  in the module that answers that command, so a ticket may edit another feature's module to add a
+  row of that module's own command; it still adds no handler outside its feature. The shell
+  conventions now say so. **Reversing:** low, revert the one line in the conventions.

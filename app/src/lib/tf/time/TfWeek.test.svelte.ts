@@ -144,6 +144,8 @@ test("a cell links to its day and says what is left; weekend columns are shaded"
   const cells = [...row.querySelectorAll("td")];
   expect(cells[4]!.querySelector("a")?.getAttribute("href")).toBe("#/time/2026-08-20");
   expect(text(cells[4])).toBe("2h 40m 1h held");
+  expect(cells[4]!.querySelector("svg.tf-tm-bar")).not.toBeNull();
+  expect(cells[6]!.querySelector("svg")).toBeNull();
   expect(text(cells[6])).toBe("–");
   expect(cells[6]!.classList.contains("tf-tm-we")).toBe(true);
   expect(cells[1]!.classList.contains("tf-tm-we")).toBe(false);

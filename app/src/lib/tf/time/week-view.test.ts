@@ -66,6 +66,11 @@ test("the no-target row draws its minutes and no bar or note: nothing on it can 
   expect(open.cells[2]).toMatchObject({ tracked: 36, note: null, bar: false });
 });
 
+test("a ticket's cell with time draws its bar; an empty cell does not", () => {
+  const pay231 = weekView(week(), null, FRIDAY_NOON).rows[1]!;
+  expect(pay231.cells.map((c) => c.bar)).toEqual([false, true, true, true, true, false, false]);
+});
+
 test("Saturday and Sunday are the weekend columns, Monday first", () => {
   const view = weekView(week(), null, FRIDAY_NOON);
   expect(view.rows[0]!.cells.map((c) => c.weekend)).toEqual([false, false, false, false, false, true, true]);

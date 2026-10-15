@@ -92,7 +92,7 @@ function cellView(
   const toLog = minutesOf((cell?.unlogged_seconds ?? 0) + runningSeconds);
   const empty = tracked === 0 && logged === 0 && held === 0;
   const note = noTarget || empty ? null : toLog > 0 ? `${hm(toLog)} to log` : held > 0 ? `${hm(held)} held` : "logged";
-  return { day, weekend: isWeekend(index), tracked, logged, held, toLog, bar: !open && !empty, note };
+  return { day, weekend: isWeekend(index), tracked, logged, held, toLog, bar: !noTarget && !empty, note };
 }
 
 /** The week as the tab draws it, with the running timer counted into today. */
