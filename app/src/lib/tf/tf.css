@@ -174,6 +174,7 @@
   border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); flex-wrap: wrap;
 }
 .tf-crumbs a { text-decoration: none; }
+.tf-crumbs a.tf-crumb { text-decoration: underline; text-underline-offset: 2px; }
 .tf-jobchip {
   display: inline-flex; align-items: center; gap: 6px; padding: 2px 8px; border-radius: 3px;
   font-weight: 600; text-decoration: none; font-family: var(--mono); font-size: var(--t-xs);
@@ -317,6 +318,84 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
+/* ---------- a red button ---------- */
+.tf-btn.tf-danger-t { color: var(--err); }
+.tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }
+
+/* ---------- dialog parts: a form grid and radio cards (the dialog itself is below) ---------- */
+.tf-dlg-note { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-formgrid { display: grid; grid-template-columns: auto 1fr; gap: 8px 12px; align-items: center; }
+.tf-formgrid input, .tf-formgrid select {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); width: 100%;
+}
+.tf-radio { display: flex; flex-direction: column; gap: 6px; }
+.tf-radio label { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
+.tf-radio label:has(input:checked) { border-color: var(--ink); background: var(--sheet-2); }
+.tf-radio small { display: block; color: var(--ink-2); }
+
+/* ---------- settings: prototype-6's .stg ---------- */
+.tf-stg { display: grid; grid-template-columns: 230px minmax(0, 1fr); flex: 1; min-height: 0; }
+.tf-stg-nav { border-right: 1px solid var(--rule); background: var(--sheet); padding: 12px 10px; display: flex; flex-direction: column; gap: 1px; }
+.tf-stg-nav a { padding: 6px 10px; border-radius: 4px; text-decoration: none; color: var(--ink); display: flex; align-items: center; gap: 8px; }
+.tf-stg-nav a:hover { background: var(--sheet-2); }
+.tf-stg-nav a[aria-current="page"] { background: var(--ink); color: var(--sheet); }
+.tf-stg-nav .tf-dot { margin-left: auto; }
+.tf-stg-body { padding: 18px 28px 48px; max-width: 860px; min-width: 0; }
+.tf-stg-h { margin-bottom: 16px; }
+.tf-stg-h h1 {
+  font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; display: flex; align-items: center; gap: 10px;
+}
+.tf-stg-h p { margin-top: 4px; color: var(--ink-2); font-size: var(--t-md); max-width: 70ch; }
+.tf-stg-srch { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; }
+.tf-stg-sec { margin-top: 26px; }
+.tf-stg-sec h2 { font-size: var(--t-lg); margin: 0 0 8px; font-weight: 700; }
+.tf-stg-p { font-size: var(--t-sm); color: var(--ink-2); margin: 0 0 10px; max-width: 72ch; }
+.tf-stg-gap { margin-top: 14px; }
+.tf-stg-row {
+  display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: 16px; padding: 11px 0;
+  border-bottom: 1px solid var(--rule-2); align-items: center;
+}
+.tf-stg-l { font-weight: 500; }
+.tf-stg-l small { display: block; font-weight: 400; font-size: var(--t-sm); color: var(--ink-2); margin-top: 2px; line-height: 1.4; }
+.tf-stg-c { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tf-stg-inl { flex-wrap: wrap; }
+.tf-stg-in {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
+  font-size: var(--t-md); width: min(420px, 100%);
+}
+.tf-stg-acts { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0 0; }
+.tf-stg-acts.tf-stg-flush { margin: 0; }
+.tf-stg-sw {
+  width: 36px; height: 20px; border-radius: 10px; border: 1px solid var(--rule); background: var(--rule-2);
+  position: relative; cursor: pointer; flex: none; padding: 0;
+}
+.tf-stg-sw i {
+  position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--sheet); box-shadow: 0 1px 2px rgba(0,0,0,.25); transition: left .15s;
+}
+.tf-stg-sw[aria-checked="true"] { background: var(--ink); border-color: var(--ink); }
+.tf-stg-sw[aria-checked="true"] i { left: 18px; }
+.tf-stg-srcs {
+  display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 6px; background: var(--sheet);
+  margin-top: 14px; overflow: hidden;
+}
+.tf-stg-src {
+  display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) 150px auto; gap: 12px; align-items: center;
+  padding: 12px 14px; border-bottom: 1px solid var(--rule-2); text-decoration: none; color: var(--ink);
+}
+.tf-stg-src:last-child { border-bottom: 0; }
+.tf-stg-src:hover { background: var(--sheet-2); }
+.tf-stg-sn { display: flex; flex-direction: column; min-width: 0; }
+.tf-stg-sn .tf-dim { font-size: var(--t-sm); }
+.tf-stg-si { font-size: var(--t-sm); color: var(--ink-2); }
+.tf .tf-stg-errt { color: var(--err); }
+.tf-stg-go { color: var(--ink-2); }
+.tf-stg-alert {
+  display: flex; gap: 10px; align-items: center; padding: 10px 14px; border: 1px solid var(--rule);
+  border-left: 3px solid var(--err); border-radius: 4px; background: var(--sheet); font-size: var(--t-md);
+}
+.tf-stg-alert .tf-btn { margin-left: auto; }
+.tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
 
 /* ---------- dialogs: a sheet over a dimmed page, 8vh from the top ---------- */
 .tf-modal {
@@ -484,7 +563,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-go { display: flex; flex-direction: column; gap: 8px; margin-top: auto; padding-top: 8px; }
 .tf-go .tf-btn.tf-primary { justify-content: center; padding: 10px; font-size: var(--t-lg); font-weight: 600; }
 .tf-go small { color: var(--ink-2); text-align: center; }
-.tf-btn.tf-sm { padding: 2px 8px; font-size: var(--t-sm); }
 @media (max-width: 1240px) {
   .tf-tickets { grid-template-columns: 200px minmax(0, 1fr); }
   .tf-tickets .tf-preview { display: none; }
@@ -512,6 +590,12 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-jobcard, .tf-work { overflow: visible; }
   .tf-jobcard { border-right: 0; }
   .tf-wbody, .tf-wtabs { padding-left: 16px; padding-right: 16px; }
+  .tf-stg { grid-template-columns: 1fr; }
+  .tf-stg-nav { flex-direction: row; overflow-x: auto; border-right: 0; border-bottom: 1px solid var(--rule); }
+  .tf-stg-nav a { white-space: nowrap; }
+  .tf-stg-row { grid-template-columns: 1fr; }
+  .tf-stg-src { grid-template-columns: auto 1fr auto; }
+  .tf-stg-src .tf-stg-si { display: none; }
 }
 @media (max-width: 1240px) {
   .tf-grid { grid-template-columns: minmax(0, 1fr); }

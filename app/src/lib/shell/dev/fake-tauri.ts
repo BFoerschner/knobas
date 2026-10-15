@@ -51,7 +51,7 @@ import type {
   SuggestionEntry,
   SuggestionPage,
 } from "../../ipc/entity";
-import { JIRA_SCHEMA } from "../../sources/fixtures";
+import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../sources/fixtures";
 // The estate itself. See `FIXTURE_ESTATE` below for why it is read and not
 // copied, and for the check that it reaches no production bundle.
 import ESTATE_FILE from "../../../../../testenv/estate.json";
@@ -251,7 +251,7 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
       return fakeCheckout(id);
     },
 
-    // The sources cockpit. Three sources, one of them refusing its credential
+    // The sources cockpit. Four sources, one of them refusing its credential
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
@@ -266,6 +266,17 @@ export function demoHandlers(params = new URLSearchParams()): Record<string, Han
     sync_all: () => FIXTURE_SOURCES.map((_, index) => 91 + index),
     reindex_fts: () => null,
     delete_source: () => null,
+    // Answered, never stored: the row the page draws next is the fixture's
+    // with the patch laid over it, which is what `update_source` answers.
+    update_source: (args) => {
+      const id = String(args["id"] ?? "");
+      const source = FIXTURE_SOURCES.find((row) => row.id === id);
+      if (!source) throw { code: "not_found", message: `no source ${id}`, source_id: id };
+      const patch = (args["patch"] ?? {}) as Record<string, unknown>;
+      const set = Object.fromEntries(Object.entries(patch).filter(([, value]) => value !== null && value !== undefined));
+      return { ...source, ...set };
+    },
+    backfill_source: () => 94,
 
     // The write queue (issue #42). Three rows, and the mix is the point: one
     // held write, one refused, one merely waiting -- because the whole surface
@@ -3114,20 +3125,10 @@ const KIND_INFO = [
   { id: "pr", label: "Pull request", plural: "Pull requests", monogram: "PR", full_sync_exhaustive: false },
 ];
 
-/** The three sources the sources view draws. */
+/** The four sources the sources view draws. */
 const FIXTURE_SOURCES = [
   fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
-  {
-    ...fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "unauthorized", 48, 91, "Pat"),
-    health: {
-      source_id: "gitea",
-      state: "unauthorized",
-      checked_at: SYNCED_AT,
-      detail: "401 from /api/v1/user",
-      secret_expires_at: null,
-    },
-    next_run_at: null,
-  },
+  fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
     health: {
@@ -3139,6 +3140,19 @@ const FIXTURE_SOURCES = [
       // screenshot of the expiry countdown needs.
       secret_expires_at: "2026-08-30T14:30:00Z",
     },
+  },
+  // The refusing one is TeamCity, as in prototype-6, so Settings' source page
+  // can be photographed at the prototype's own address (#830).
+  {
+    ...fixtureSource("teamcity", "teamcity", "Tidewater TeamCity", "https://ci.tidewater.example", "unauthorized", 96, 89, "UserPassword"),
+    health: {
+      source_id: "teamcity",
+      state: "unauthorized",
+      checked_at: SYNCED_AT,
+      detail: "401 from /app/rest/server",
+      secret_expires_at: null,
+    },
+    next_run_at: null,
   },
 ];
 
@@ -3180,7 +3194,9 @@ function fixtureSource(
     base_url: baseUrl,
     enabled: true,
     sync_interval_secs: 900,
-    config: {},
+    // The user a Settings page shows (#830): the config's `username`, which
+    // only a username-and-password source carries here.
+    config: (authKind === "UserPassword" ? { username: "mara.oyelaran" } : {}) as Record<string, unknown>,
     auth_kind: authKind,
     health: {
       source_id: id,
@@ -3205,7 +3221,7 @@ function fixtureSource(
       upserted: itemCount,
       deleted: 0,
       swept: 0,
-      error: state === "unauthorized" ? "401 from /api/v1/user" : null,
+      error: state === "unauthorized" ? "401 Unauthorized" : null,
       cursor_after: null as string | null,
     },
     next_run_at: "2026-08-22T14:45:00Z",
@@ -3243,6 +3259,28 @@ const FIXTURE_ADAPTERS = [
     // agreeing with nothing — and this is the import that makes `fixtures.ts`'s
     // "not test-only" true rather than aspirational.
     config_schema: JIRA_SCHEMA,
+  },
+  {
+    id: "gitea",
+    adapter_kind: "gitea",
+    name: "Gitea",
+    capabilities: [],
+    adapter_version: "0.1.0",
+    auth_methods: ["Pat"],
+    write_ops: [],
+    entity_kinds: KIND_INFO,
+    config_schema: GITEA_SCHEMA,
+  },
+  {
+    id: "teamcity",
+    adapter_kind: "teamcity",
+    name: "TeamCity",
+    capabilities: [],
+    adapter_version: "0.1.0",
+    auth_methods: ["UserPassword", "Pat"],
+    write_ops: [],
+    entity_kinds: KIND_INFO,
+    config_schema: TEAMCITY_SCHEMA,
   },
 ];
 

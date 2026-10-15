@@ -1696,3 +1696,33 @@ Ruled 2026-10-15 by the implementer, in the PR for #816. Each is fork / ruling /
 - **The shared Gitea volume was reset** to meet the second criterion (it was the only way to make
   `just gitea-live` green); it now seeds the exact numbers #142 and #144 (the old volume had
   them at #1 and #2). Other worktrees re-mint their token on their next seed (#684).
+## #830 Settings frame and Sources
+
+- **Add a source opens the rooms UI's `AddSource.svelte`, mounted outside `.tf`.** #809 ruled
+  that rooms-styled dialogs stay outside the new shell, unported, until a ticket redraws them.
+  Porting the generated-form flow is a ticket of its own size. Follow-up #903. **Reversing:** low.
+- **What it syncs is the schedule and the pause switch only.** The issue body names those two.
+  R-13a.2 also lists Jira's projects or JQL, which would need the adapter's config form on the
+  page. Follow-up #904. **Reversing:** additive.
+- **The User row is the config's `username`**, the identity convention every adapter follows,
+  drawn only when the adapter's schema declares it. Save sends the whole config with the edited
+  value, because `update_source` replaces `config` whole. **Reversing:** low.
+- **The schedule and the pause switch save as they change. Connection saves on Save**, which is
+  disabled until the address or user differs from what is stored. Prototype-6 draws Save as
+  always enabled. **Reversing:** one attribute.
+- **Holdings say `N tickets` for a source of one kind and `N items` for several.**
+  `SourceSummary.item_count` is one number across kinds, so prototype-6's split ("15 build
+  configurations, 2 400 builds") would be a guess. **Reversing:** low, once a per-kind count exists.
+- **Uptime Kuma's Account row says it is kept beside the token and never shown**, with
+  *Change…*. No command reads a secret back (contract §2.2), so the account's user cannot be
+  drawn as prototype-6 does. **Reversing:** none needed.
+- **"Stored in the macOS keychain" on a Mac, "the system keychain" elsewhere.** The app builds on
+  three platforms. **Reversing:** one line.
+- ***Found when tested* appears after *Test connection* in this visit.** A test result is never
+  stored (#326), so there is nothing to show before one. **Reversing:** none.
+- **A re-entered password the source refuses keeps the dialog open** with "<name> refused it."
+  instead of closing over a still-red source. **Reversing:** one branch.
+- **The fake IPC fixture's refusing source is TeamCity, and Gitea now signs in**, so the page can
+  be photographed at prototype-6's own `#/settings/source/teamcity`. **Reversing:** fixture only.
+- **Sections other than Sources name themselves and offer the rooms UI** until #831 and #844 build
+  them. **Reversing:** replaced by those tickets.

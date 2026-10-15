@@ -12,8 +12,9 @@
   - **A full view** starts with the breadcrumb (R-1.6): the job you were last
     in on the card yellow, then the view's name, and *Back to <key>* beside
     `Esc` on the right; with no job, the view's own name and *Back*.
-  - **Settings** also offers the way back to the rooms UI, because Settings is
-    where the switch lives and the rooms UI is where every setting still is.
+  - **Settings** is `settings/TfSettings.svelte` (#830): its own breadcrumb,
+    its sections, Sources and a source's page. The sections not built yet
+    offer the way back to the rooms UI, which still has them.
 -->
 <script lang="ts">
   import type { Timer } from "../shell/timer.svelte";
@@ -22,6 +23,7 @@
   import type { Layers } from "./layers.svelte";
   import { jobHash, SECTION_NAME, type TfRoute } from "./route";
   import TicketsPage from "./tickets/TicketsPage.svelte";
+  import TfSettings from "./settings/TfSettings.svelte";
 
   let {
     route,
@@ -72,6 +74,8 @@
       <a class="tf-btn" href="#/tickets">All tickets <kbd>Esc</kbd></a>
     </div>
   </div>
+{:else if route.view === "full" && route.section === "settings"}
+  <TfSettings rest={route.rest} {job} {ready} {onrooms} {layers} />
 {:else if route.view === "full"}
   {@const name = SECTION_NAME[route.section]}
   <div class="tf-full">
@@ -87,10 +91,6 @@
     </header>
     <div class="tf-empty">
       <p>{name} is not built in the new shell yet.</p>
-      {#if route.section === "settings"}
-        <p>The rooms UI has every setting today.</p>
-        <button class="tf-btn tf-primary" onclick={onrooms}>Switch back to the rooms UI</button>
-      {/if}
     </div>
   </div>
 {:else}
