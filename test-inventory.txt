@@ -516,6 +516,7 @@ knobas-app	test/it	clone_ipc::git_refuses_any_other_protocol_given_the_productio
 knobas-app	test/it	clone_ipc::only_a_gitea_repository_is_cloned_and_only_with_a_root_set
 knobas-app	test/it	clone_ipc::stopping_kills_git_and_removes_the_half_made_folder
 knobas-app	test/it	clone_ipc::the_app_clones_over_https_and_ssh_only
+knobas-app	test/it	clone_ipc::two_starts_at_once_start_one_clone
 knobas-app	test/it	config_schema_mirror::a_fixture_that_is_gone_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_literal_that_is_not_as_const_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_name_the_fixture_cannot_resolve_stops_the_test

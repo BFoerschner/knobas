@@ -59,5 +59,5 @@
   Pinned by: `knobas_core::checkout::clone`'s nine unit tests (the name, the URL, the argument
   list, the progress weights, a finished clone, the failure line and cause); `knobas_app::checkout::clone`'s
   `the_clone_shapes_serialise_as_the_mirror_declares`; `lib.rs`'s
-  `the_event_names_match_their_typescript_mirror`; ten in `tests/it/clone_ipc.rs`; and five
+  `the_event_names_match_their_typescript_mirror`; eleven in `tests/it/clone_ipc.rs`; and five
   live in `tests/clone_live.rs`, run by `just gitea-live`.
