@@ -21,7 +21,7 @@
 </script>
 
 <footer class="tf-status">
-  <a href="#/settings">Sources</a>
+  <a class="tf-sources" href="#/settings">Sources</a>
   {#each readings as reading (reading.id)}
     {#if reading.failed}
       <span class="tf-bad">

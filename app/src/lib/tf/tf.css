@@ -160,6 +160,8 @@
 .tf-status button, .tf-status a {
   border: 0; background: none; padding: 0; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; color: inherit;
 }
+.tf-status a.tf-sources { font-weight: 600; text-decoration: none; }
+.tf-status a.tf-sources:hover { text-decoration: underline; }
 .tf-status .tf-queue { margin-left: auto; }
 .tf-status button.tf-queued { color: var(--warn); font-weight: 600; }
 
