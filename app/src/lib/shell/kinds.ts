@@ -153,6 +153,22 @@ export function tilesFor(
   return tiles;
 }
 
+/**
+ * The section a kind is drawn under: its bucket's id and heading (*Code* for
+ * a commit, which the Code tile claims without drawing), or the kind's own
+ * plural for an open kind. In `BUCKETS` order first, then the rest. The
+ * ticket-first preview's *Around this ticket* lines (#810) read this, so they
+ * group kinds exactly as a room's tiles do.
+ */
+export function sectionOf(
+  kind: string,
+  declared: (kind: string) => KindInfo | null = () => null,
+): { id: string; label: string; order: number } {
+  const at = BUCKETS.findIndex((bucket) => bucket.kinds.includes(kind));
+  if (at !== -1) return { id: BUCKETS[at]!.id, label: BUCKETS[at]!.label, order: at };
+  return { id: kind, label: kindLabel(kind, declared(kind)), order: BUCKETS.length };
+}
+
 /** What one of these is called — *Pull request*, *Incident*. */
 export function kindSingular(kind: string, info?: KindInfo | null): string {
   return info?.label ?? VOCABULARY[kind]?.label ?? humanise(kind);
