@@ -59,10 +59,8 @@
   let statuses = $state<Record<string, SourceSyncStatus>>({});
   /** Moves on every finished run, so a source's page re-reads its runs. */
   let finished = $state(0);
-  let clock = $state(new Date());
-  $effect(() => {
-    clock = now();
-  });
+  // svelte-ignore state_referenced_locally
+  let clock = $state(now());
 
   const read = latestRead<SourceSummary[]>();
   function load() {
@@ -175,12 +173,16 @@
         <a href="#/settings/{key}" aria-current={key === place.section ? "page" : undefined}>
           {label}
           {#if key === "sources" && anyFailing}
-            <span class="tf-dot tf-err" title="A source needs you"></span>
+            <span class="tf-dot tf-err" role="img" aria-label="A source needs you" title="A source needs you"></span>
           {/if}
         </a>
       {/each}
     </nav>
     <div class="tf-stg-body">
+      {#if place.section === "sources" && error !== null && sources !== null}
+        <!-- A re-read that failed under a list already drawn: the list stays, and says it may be old. -->
+        <p class="tf-stg-p tf-stg-errt" role="status">Could not read the sources again: {error}</p>
+      {/if}
       {#if place.section !== "sources"}
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
         <p class="tf-stg-p">{sectionName} is not built in the new shell yet. The rooms UI has every setting today.</p>

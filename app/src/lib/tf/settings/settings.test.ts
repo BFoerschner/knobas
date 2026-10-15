@@ -90,11 +90,14 @@ test("the line under the name says what it is, what it holds and when it syncs",
 });
 
 test("a credential failure is said on top with what waits for it; a working one says nothing", () => {
-  expect(credentialAlert("TeamCity", health("unauthorized"), null, NOW)).toBe(
+  expect(credentialAlert("TeamCity", "Password", health("unauthorized"), null, NOW)).toBe(
     "Sign-in failed 38 min ago (401). Writes to TeamCity wait in the queue until you re-enter the password.",
   );
-  expect(credentialAlert("TeamCity", health("ok"), null, NOW)).toBeNull();
-  expect(credentialAlert("TeamCity", health("unreachable"), null, NOW)).toBeNull();
+  expect(credentialAlert("TeamCity", "Password", health("ok"), null, NOW)).toBeNull();
+  expect(credentialAlert("Gitea", "Token", health("missing_secret"), null, NOW)).toBe(
+    "No token is stored for Gitea. Writes to Gitea wait in the queue until you enter one.",
+  );
+  expect(credentialAlert("TeamCity", "Password", health("unreachable"), null, NOW)).toBeNull();
 });
 
 test("a sync run reads as started, took and what it did", () => {

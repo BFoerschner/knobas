@@ -82,7 +82,7 @@
 
   const name = $derived(source.display_name || source.id);
   const reading = $derived(sourceState(source, health, status, now));
-  const alert = $derived(credentialAlert(name, health, status, now));
+  const alert = $derived(credentialAlert(name, secretWord(source.auth_kind), health, status, now));
   const word = $derived(secretWord(source.auth_kind));
   const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
@@ -319,9 +319,13 @@
         class="tf-stg-in"
         value={source.sync_interval_secs}
         disabled={saving}
-        onchange={(event) => {
-          const secs = Number(event.currentTarget.value);
-          void update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`);
+        onchange={async (event) => {
+          const select = event.currentTarget;
+          const secs = Number(select.value);
+          // A schedule the backend refused goes back to the stored one.
+          if (!(await update({ sync_interval_secs: secs }, `${name} syncs every ${intervalWords(secs)}`))) {
+            select.value = String(source.sync_interval_secs);
+          }
         }}
       >
         {#each intervalOptions(source.sync_interval_secs) as secs (secs)}
@@ -393,7 +397,7 @@
 </section>
 
 {#if reentering}
-  <TfDialog title="Re-enter the {name} password" {layers} onclose={() => (reentering = false)}>
+  <TfDialog title="Re-enter the {name} {word.toLowerCase()}" {layers} onclose={() => (reentering = false)}>
     {#snippet body()}
       <form
         class="tf-formgrid"

@@ -397,7 +397,6 @@ a.tf-r:hover { background: var(--sheet-2); }
   display: grid; grid-template-columns: auto minmax(0, 1.3fr) minmax(0, 1fr) 150px auto; gap: 12px; align-items: center;
   padding: 12px 14px; border-bottom: 1px solid var(--rule-2); text-decoration: none; color: var(--ink);
 }
-.tf .tf-stg-src { text-decoration: none; }
 .tf-stg-src:last-child { border-bottom: 0; }
 .tf-stg-src:hover { background: var(--sheet-2); }
 .tf-stg-sn { display: flex; flex-direction: column; min-width: 0; }

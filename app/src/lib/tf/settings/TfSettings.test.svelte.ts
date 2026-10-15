@@ -318,3 +318,12 @@ test("Esc closes a dialog through the shell's layer stack", async () => {
   expect(target.querySelector('[role="dialog"]')).toBeNull();
   expect(layers.open).toEqual([]);
 });
+
+test("a schedule the backend refuses goes back to the stored one", async () => {
+  await open(["source", "jira"], ports({ updateSource: vi.fn(() => Promise.reject({ code: "invalid", message: "no", source_id: "jira" })) }));
+  const every = target.querySelector<HTMLSelectElement>("#tf-src-every")!;
+  every.value = "900";
+  every.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(every.value).toBe("300");
+});

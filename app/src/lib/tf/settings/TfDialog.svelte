@@ -26,7 +26,8 @@
     footer: Snippet;
   } = $props();
 
-  const titleId = `tf-dlg-${Math.random().toString(36).slice(2, 9)}`;
+  const uid = $props.id();
+  const titleId = `tf-dlg-${uid}`;
   let dialog = $state<HTMLDivElement | null>(null);
 
   function focusable(): HTMLElement[] {

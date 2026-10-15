@@ -148,16 +148,17 @@ export function sourceLine(
 /** The alert on top of a source's page, or `null` when its credential works. */
 export function credentialAlert(
   name: string,
+  word: "Password" | "Token",
   health: CredentialHealth | null,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
 ): string | null {
   if (health?.state === "unauthorized") {
     const at = status?.last_outcome === "unauthorized" ? status.last_finished_at : health.checked_at;
-    return `Sign-in failed ${ago(at, now)} (401). Writes to ${name} wait in the queue until you re-enter the password.`;
+    return `Sign-in failed ${ago(at, now)} (401). Writes to ${name} wait in the queue until you re-enter the ${word.toLowerCase()}.`;
   }
   if (health?.state === "missing_secret") {
-    return `No password is stored for ${name}. Writes to ${name} wait in the queue until you enter one.`;
+    return `No ${word.toLowerCase()} is stored for ${name}. Writes to ${name} wait in the queue until you enter one.`;
   }
   return null;
 }
