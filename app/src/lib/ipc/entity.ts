@@ -1462,6 +1462,16 @@ export interface MiniBoardCard {
   /** `null` where the mirrored record carries no priority knobas can read —
    * the card simply omits it rather than guessing (ADR-0007). */
   priority: string | null;
+  /** The ticket's type in its source's words (`Story`, `Bug`), or `null` on a miss (#810). */
+  issue_type: string | null;
+  /** The account it is assigned to, as the source spells an account; `null` when unassigned. */
+  assignee: string | null;
+  /** RFC 3339, when the source last changed it, or `null` where it never said. */
+  updated_at: string | null;
+  /** Its declared parent chain as one line (its epic, for Jira), or `null`. */
+  path: string | null;
+  /** Whether `assignee` is one of the configured usernames, ignoring case. */
+  mine: boolean;
 }
 
 /** One status column — `MiniBoardColumn` (#177). */
@@ -1524,18 +1534,25 @@ export interface MiniBoard {
  * for, so a room of thousands of tickets is not thousands of cards. Omitted,
  * the board is whole.
  *
+ * `query` (#810) is search grammar text — the Tickets view's base query and
+ * its filter bar's words and chips. A non-blank one narrows the board to
+ * every ticket the grammar admits; the filtering is the server's, never the
+ * webview's (R-2.7).
+ *
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "sources" | "context" | "project">,
-  perColumn?: number,
+  perColumn?: number | null,
+  query?: string | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
     sources: filter.sources,
     project: filter.project,
     perColumn: perColumn ?? null,
+    query: query ?? null,
   });
 }
 
