@@ -1796,3 +1796,18 @@ Ruled 2026-10-15 by the implementer (PR #916).
   PRs added to `TfPage.svelte`. Time is drawn under the shell's breadcrumb, so a page entry may
   set `crumbs: true`; Settings draws its own and leaves it unset. Their fixture changes moved into
   `fake/sources.ts` and `fake/time.ts` unchanged. **Reversing:** low, the two branches return.
+## #905 Worktree target size
+
+- **Option 3 adopted: `[profile.dev] debug = "line-tables-only"` and `[profile.test]
+  incremental = false`.** It cuts a fresh worktree's `target/` from 7.9 to 5.7 GB and a repeated
+  one from 9.9 to 6.8 GB, for about 14 s on a 3-minute repeat gate; disk is what limits parallel
+  tickets. Table in `testenv/README.md`. **Reversing:** delete one line in `Cargo.toml`.
+- **Incremental is off in the test profile, not by `CARGO_INCREMENTAL=0` in the recipes.** The
+  profile reaches every `cargo test` (the gate, live suites, perf recipes, hand runs), leaves
+  `cargo clippy` incremental, and does not change any dependency's sccache key, so no run
+  re-misses the cache. **Reversing:** low.
+- **Test binaries stay at `debug = 0`.** The criterion "backtraces in test failures still name
+  file and line" holds for the panic message, which names file and line from the panic location;
+  frames named functions only before this change and still do. Line tables in test binaries
+  would add size, which is the opposite of this ticket. **Reversing:** one line, if someone wants
+  file and line per frame in test backtraces.

@@ -51,8 +51,22 @@ sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio",
 reqwest = { version = "0.13.4", default-features = false, features = ["charset", "gzip", "http2", "json", "query", "rustls", "system-proxy"] }
 governor = "0.10.4"
 
+# Dev builds (`cargo build`/`check`/`clippy`, the app under `just dev`) keep
+# line tables only: a backtrace still names file and line, without the full
+# variable and type debuginfo of the default `debug = 2` (#905).
+[profile.dev]
+debug = "line-tables-only"
+
 # Test binaries link the sqlx + postgresql_embedded stack; on Linux their
 # debuginfo dominates the artifact size and exhausted a 14 GB CI runner at 30
-# test binaries (PR #19). Backtraces keep line numbers via debug=1 in dev.
+# test binaries (PR #19). A failing test's panic message still names file and
+# line (that comes from the panic location, not debuginfo); backtrace frames
+# name functions only.
+#
+# No incremental state for test builds (#905, measured in testenv/README.md):
+# it was the largest part of a worktree's `target/` (7.1 GB of 13 GB), and it
+# cost a gate about 14 s of a 3-minute repeat to drop it. `cargo clippy` runs on
+# the dev profile and keeps its (smaller) incremental state.
 [profile.test]
 debug = 0
+incremental = false

@@ -1309,6 +1309,20 @@ The cache's own config is `~/Library/Application Support/Mozilla.sccache/config`
 
 `CARGO_INCREMENTAL=0` was **not** adopted in the recipes: it is no faster for a fresh worktree (the workspace crates miss on the new path either way) and slower for the repeat, where incremental compilation beats a full rebuild of the changed crate and everything above it. One trap when measuring it: sccache folds `CARGO_*` variables into its key, so the first run with `CARGO_INCREMENTAL=0` re-misses every dependency (3.5% Rust hits against 60% warm); compare only a second run.
 
+### Target size per worktree (#905)
+
+Each ticket worktree grew to 8–26 GB, and the loop's disk guard made that the limit on parallel tickets. Measured 2026-10-15 (#905) the same way as the table above: `main` at b7279c27, a fresh worktree's first `just check`, then a repeat after a one-line edit to `knobas-core` (a new `pub const`), `du -sh target` after each, cargo's default jobs (no `CARGO_BUILD_JOBS`), sccache warm for each option's flags (option 2's profile got one throwaway fresh gate first, since a new profile re-misses every dependency). 1-minute load before each run in brackets; the repeat starts straight after the fresh gate, whose own load is still decaying.
+
+| option | fresh: wall | fresh: `target` | repeat: wall | repeat: `target` |
+|---|---|---|---|---|
+| 1. today (`[profile.test] debug = 0`, no `[profile.dev]`) | 303 s (3.6) | 7.9 GB (incremental 3.4) | 174 s (13.5) | 9.9 GB (incremental 5.4) |
+| 2. + `[profile.dev] debug = "line-tables-only"` | 292 s (3.5) | 7.9 GB (incremental 3.4) | 172 s (10.0) | 9.9 GB (incremental 5.4) |
+| 3. 2 + `[profile.test] incremental = false` | 306 s (2.8) | 5.7 GB (incremental 1.1) | 186 s (13.4) | 6.8 GB (incremental 2.2) |
+
+`deps` (3.9 GB) and `build` (525 MB) were the same in every run. **Option 3 is adopted** (`Cargo.toml`): about 2.2 GB less on a fresh worktree and 3.1 GB less after one repeat, for about 14 s on a repeat gate. The saving grows with every repeat, since the test profile's incremental state was what piled up (7.1 GB of `issue-816`'s 13 GB). What is left in `incremental/` is `cargo clippy`'s, which runs on the dev profile.
+
+Option 2 changes nothing in the gate: clippy only checks, so no dev-profile code is generated, and its sccache hits matched option 1's exactly. It is kept because it shrinks what does build on the dev profile (`just dev`, `cargo build -p knobas-app`, the desktop witness), and a dev backtrace still names file and line for each frame. Test binaries stay at `debug = 0`: a failing test's panic message names file and line (from the panic location), and its backtrace frames name functions only, as before.
+
 ## Signed dev build (macOS)
 
 Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed
