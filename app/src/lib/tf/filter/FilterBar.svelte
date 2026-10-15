@@ -130,11 +130,10 @@
     {#if group.options.length > 0}
       <div class="tf-fchips" role="group" aria-label={group.label}>
         {#each group.options as option (option.value)}
-          <button
-            type="button"
-            aria-pressed={(filter.chips[group.key] ?? []).includes(option.value)}
-            onclick={() => toggle(group.key, option.value)}>{option.label}</button
-          >
+          {@const on = (filter.chips[group.key] ?? []).includes(option.value)}
+          <button type="button" aria-pressed={on} onclick={() => toggle(group.key, option.value)}>
+            {option.label}
+          </button>
         {/each}
       </div>
     {/if}
@@ -144,6 +143,7 @@
       <label class="tf-fsel">
         {dropdown.label}
         <select
+          aria-label={dropdown.label}
           class:tf-set={!!filter.dropdowns[dropdown.key]}
           value={filter.dropdowns[dropdown.key] ?? ""}
           onchange={(event) => choose(dropdown.key, event.currentTarget.value)}
