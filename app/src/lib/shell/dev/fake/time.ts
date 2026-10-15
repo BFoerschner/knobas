@@ -3,6 +3,7 @@
  * UI's week timesheet.
  */
 import type { Handler } from "../fake-tauri";
+import { dayKey } from "../../../time/day";
 import { CORPUS } from "./corpus";
 
 /**
@@ -115,6 +116,24 @@ function todaysBlocks(): FakeBlock[] {
       ...manual,
     },
   ];
+}
+
+/**
+ * Prototype-6's Thu 21 PAY-231 row in *Log all*, which no block backs: one
+ * place for its start hour, length and comment (#828).
+ */
+const YESTERDAY_ROW = {
+  entity_id: "mock:PAY-231",
+  hour: 10,
+  seconds: 90 * 60,
+  comment: "Retry classification for TEMP_UNAVAILABLE; review on PR #142.",
+};
+
+/** This time yesterday, by the browser's clock. */
+function yesterdayAt(): Date {
+  const at = new Date();
+  at.setDate(at.getDate() - 1);
+  return at;
 }
 
 /** Thirty days back: a day before this is past the observation horizon. */
@@ -252,6 +271,15 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     worklog_draft: (args) => {
       const entityId = String(args["entityId"]);
       if (!entityId.startsWith("mock:")) return null;
+      const day = String(args["day"]);
+      // Yesterday's PAY-231 (#828): *Log all*'s fixed row, with prototype-6's comment.
+      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt()) && !loggedYesterday) {
+        const at = yesterdayAt();
+        at.setHours(YESTERDAY_ROW.hour, 0, 0, 0);
+        const started_at = at.toISOString();
+        const { seconds, comment } = YESTERDAY_ROW;
+        return { entity_id: entityId, day, started_at, ended_at: started_at, seconds, block_ids: [], candidates: [], comment };
+      }
       const spans = unlogged(entityId);
       if (spans.length === 0) return null;
       const started_at = spans[0]!.started_at;
@@ -272,9 +300,14 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         comment: seen.map((candidate) => candidate.bullet).join("\n"),
       };
     },
+    // The day's unlogged blocks on the ticket, by the browser's clock: *Log all*
+    // sends one per day and ticket (#828). Yesterday's fixed PAY-231 row has no
+    // block, so logging it is remembered instead.
     log_work: (args) => {
       const entityId = String(args["entityId"]);
-      const spans = unlogged(entityId);
+      const day = args["day"] === undefined ? null : String(args["day"]);
+      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt())) loggedYesterday = true;
+      const spans = unlogged(entityId).filter((block) => day === null || dayKey(new Date(block.started_at)) === day);
       const id = nextWorklog++;
       for (const block of spans) block.worklog_id = id;
       return {
@@ -335,8 +368,7 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
   function planLogAll(args: Record<string, unknown>) {
     const windows = (args["days"] as { day: string; from: string; to: string }[] | undefined) ?? [];
     lastWindows = windows;
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterday = dayKey(yesterdayAt());
     const plan: { day: string; entity_id: string; title: string | null; started_at: string; seconds: number; blocks: number }[] = [];
     for (const window of windows) {
       const ids = new Set<string>();
@@ -356,13 +388,13 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
           blocks: spans.length,
         });
       }
-      if (new Date(window.from) <= yesterday && yesterday < new Date(window.to) && !loggedYesterday) {
+      if (window.day === yesterday && !loggedYesterday) {
         plan.push({
           day: window.day,
-          entity_id: "mock:PAY-231",
-          title: titleOf({ kind: "entity", entity_id: "mock:PAY-231" }),
-          started_at: new Date(new Date(window.from).getTime() + 10 * 3600_000).toISOString(),
-          seconds: 90 * 60,
+          entity_id: YESTERDAY_ROW.entity_id,
+          title: titleOf({ kind: "entity", entity_id: YESTERDAY_ROW.entity_id }),
+          started_at: new Date(new Date(window.from).getTime() + YESTERDAY_ROW.hour * 3600_000).toISOString(),
+          seconds: YESTERDAY_ROW.seconds,
           blocks: 0,
         });
       }

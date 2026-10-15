@@ -21,13 +21,14 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A route not built yet draws an empty page that says so (the Job page before #816; the Map and Conversation tabs "not built yet"). (#810, PR #895; #816, PR #898)
 - The job's address is `#/job/<key>`; an ad-hoc context is `#/job/<ctx id>`. An address holding an entity id (`#/job/jira:PAY-231`) is read as one. (#810, PR #895; #816, PR #898)
+- The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
 - A Code row opens `#/pr/<entity id>`, `#/repo/<entity id>`, `#/branch/<entity id>` or `#/commit/<entity id>`. The address carries the entity id, because a pull request's number is unique only inside its repository. `branch` and `commit` light the Code nav. (#816, PR #898)
 
 ## Data, fixtures and screenshots
 
 - The shell reads declared paths only, never a payload (ADR-0007). A field a card needs becomes a declared path, not a payload read. (#810, PR #895; #816, PR #898)
 - `?fake-ipc` fixtures grow with the ticket that needs them: enough rows to compare with prototype-6 (eleven more PAY tickets in #810; a small link graph and the workflow in #816). Where the fixture diverges from the mock adapter, the PR says so. (PR #895; PR #898)
-- The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only. A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
+- The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
 
 ## Copy and display
