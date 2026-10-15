@@ -402,6 +402,7 @@ witness-unit:
     scripts/append-only-merge-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
+    testenv/gitea-pr-state-test.sh
     testenv/live-lock-test.sh
 
 # The step before every `just check` (issue #736): the mechanical misses that
