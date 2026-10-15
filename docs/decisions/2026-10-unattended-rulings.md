@@ -1412,3 +1412,10 @@ Ruled 2026-10-15 by the implementer (Björn, 2026-10-15: forks that come up whil
 - The write queue, the launcher, the worklog draft and the timer picker stay as the rooms UI draws them. They mount outside `.tf`, so they keep their own tokens. Porting them belongs to the tickets that redraw them (Time is TF2).
 - The Job tab names the job last opened, else the ticket the timer runs on (R-1.2). The breadcrumb and `Esc` use only a job actually opened (R-1.6, prototype-6's `S.job`).
 - The timer's clock is Archivo with tabular figures, not JetBrains Mono as prototype-6 draws it: the design system says durations are Archivo and mono is for code values, and the design system decides where it and the prototype differ.
+
+**Merge review, PR #885** (ruled 2026-10-15 by its merge-manager):
+
+- Four acceptance claims had no test that could fail: the rooms router and keys being off under the new shell, the queued-writes count opening the queue, the Monitors badge, and the toasts. Each now has a test, and its mutant dies.
+- Under the new shell, the chip and `⌘T` with nothing running open the picker, not a timer on the current job (R-1.4's second half). R-1.4 is not in #809's list, and the job page that would supply the current job is #816. Filed as #886, blocked by #816. Reversing: one `foreground` branch.
+- The toasts draw `action` plus `more`, though R-1.8 says "may carry one action". The store is shared with the rooms UI, and #752's refused-write toast needs both buttons. Dropping the extra ones would drop a caller's verb. Reversing: one line in `TfToasts.svelte`.
+- `App.svelte` passing `toggleTimer` as the new shell's `ontimer` has no test of its own. It is one prop, read in review, and `TfShell.test` covers the shell side. Not fixed.

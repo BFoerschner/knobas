@@ -2205,12 +2205,21 @@ test("the shell setting draws the ticket-first shell instead of the rooms UI", a
     writable: true,
     value: { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} },
   });
+  const started = vi.spyOn(router, "start");
   try {
     app = mount(App, { target, props: {} });
     await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
+    expect(started, "the rooms router must not read the new shell's address").not.toHaveBeenCalled();
     expect(target.querySelector(".tf-top .tf-brand")?.textContent).toBe("knobas");
     expect(target.querySelector(".topbar"), "no rooms strip under the new shell").toBeNull();
+    // The rooms router and its keyboard stay off: the two shells own the same
+    // addresses with different meanings, so the rooms reading must not run.
+    const back = vi.spyOn(router, "goBack");
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "[", metaKey: true, bubbles: true, cancelable: true }));
+    expect(back, "the rooms keys' ⌘[ must not be installed under the new shell").not.toHaveBeenCalled();
+    back.mockRestore();
   } finally {
+    started.mockRestore();
     Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
   }
 });

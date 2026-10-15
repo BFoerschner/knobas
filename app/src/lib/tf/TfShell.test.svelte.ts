@@ -8,7 +8,8 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
 import type { RunningTimer } from "../ipc/time";
-import type { WriteQueue } from "../shell/write-queue.svelte";
+import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
+import { push, toasts } from "../shell/toasts.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import TfShell from "./TfShell.svelte";
@@ -69,6 +70,7 @@ function start(
     ontimer?: () => void;
     prefersDark?: () => boolean;
     onsearch?: () => void;
+    monitorsDown?: number;
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -86,7 +88,7 @@ function start(
       health: { all: [health("jira", "ok"), health("teamcity", "unauthorized")] },
       badges: createBadges({
         failingBuilds: () => Promise.resolve(2),
-        monitorsDown: () => Promise.resolve(0),
+        monitorsDown: () => Promise.resolve(over.monitorsDown ?? 0),
         proposals: () => Promise.resolve(5),
         listen: () => Promise.resolve(() => {}),
       }),
@@ -274,6 +276,27 @@ test("the status bar: sync ages, a 401 with Re-enter password, the queued writes
   expect(bar.querySelector("button.tf-queued")?.textContent).toBe("2 queued writes");
 });
 
+test("the queued-writes count opens the queue list (R-1.5)", async () => {
+  start();
+  await settle();
+  try {
+    target.querySelector<HTMLButtonElement>(".tf-status button.tf-queued")!.click();
+    flushSync();
+    expect(writeQueuePanel.open).toBe(true);
+  } finally {
+    writeQueuePanel.open = false;
+    flushSync();
+  }
+});
+
+test("the Monitors badge counts monitors down, in the err tone", async () => {
+  start({ monitorsDown: 1 });
+  await settle();
+  const monitors = [...target.querySelectorAll(".tf-nav a")].find((a) => a.firstChild?.textContent?.trim() === "Monitors")!;
+  expect(monitors.querySelector(".tf-count")?.textContent).toBe("1");
+  expect(monitors.querySelector(".tf-count.tf-err"), "down is the err tone").not.toBeNull();
+});
+
 test("a running timer names the Job tab but is not a job the breadcrumb or Esc returns to", async () => {
   const timer = {
     current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
@@ -285,4 +308,23 @@ test("a running timer names the Job tab but is not a job the breadcrumb or Esc r
   press("Escape");
   await settle();
   expect(location.hash).toBe("#/tickets");
+});
+
+test("a toast from anywhere lands in the shell's stack, as text, and its action runs and dismisses it (R-1.8)", async () => {
+  start();
+  const run = vi.fn();
+  push({ text: "Queued: re-run <b>#1187</b>", tone: "err", action: { label: "Show queue", run }, ms: 60_000 });
+  flushSync();
+  try {
+    const toast = target.querySelector(".tf-toasts .tf-toast")!;
+    expect(toast.classList.contains("tf-err")).toBe(true);
+    expect(toast.querySelector("span")?.textContent, "text, never markup").toBe("Queued: re-run <b>#1187</b>");
+    const action = [...toast.querySelectorAll("button")].find((button) => button.textContent === "Show queue")!;
+    action.click();
+    flushSync();
+    expect(run).toHaveBeenCalledOnce();
+    expect(target.querySelector(".tf-toasts .tf-toast"), "the action dismisses its toast").toBeNull();
+  } finally {
+    toasts.items = [];
+  }
 });
