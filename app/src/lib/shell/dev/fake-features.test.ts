@@ -69,6 +69,35 @@ test("the week and Log all: the label and passive blocks are never planned, and 
   expect(week.rows).toHaveLength(5);
 });
 
+test("Log all's dialog path: a draft comment per row, and log_work per row empties the plan (#828)", () => {
+  const h = demoHandlers() as Calls;
+  const key = (at: Date) =>
+    `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+  const from = new Date();
+  from.setHours(0, 0, 0, 0);
+  const before = new Date(from.getFullYear(), from.getMonth(), from.getDate() - 1);
+  const to = new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+  const days = [
+    { day: key(before), from: before.toISOString(), to: from.toISOString() },
+    { day: key(from), from: from.toISOString(), to: to.toISOString() },
+  ];
+  const plan = h["log_all_preview"]!({ days }) as { day: string; entity_id: string; started_at: string; seconds: number }[];
+  const draft = h["worklog_draft"]!({ entityId: "mock:PAY-231", day: key(before), offsetMinutes: 0 }) as { comment: string };
+  expect(draft.comment).toBe("Retry classification for TEMP_UNAVAILABLE; review on PR #142.");
+  for (const row of plan) {
+    h["log_work"]!({ entityId: row.entity_id, day: row.day, offsetMinutes: 0, startedAt: row.started_at, seconds: row.seconds, comment: "" });
+  }
+  expect(h["log_all_preview"]!({ days })).toEqual([]);
+});
+
+test("the write queue holds the Week tab's refused worklog on PAY-228 (#828)", () => {
+  const h = demoHandlers() as Calls;
+  const rows = h["pending_writes"]!({}) as { op: string; entity_id: string; state: string }[];
+  expect(rows.filter((row) => row.op === "log_work")).toEqual([
+    expect.objectContaining({ entity_id: "mock:PAY-228", state: "refused" }),
+  ]);
+});
+
 test("a route can be created, edited and deleted, and a missing exposer is refused", () => {
   const h = demoHandlers() as Calls;
   const exposer = (h["asset_tree"]!({}) as { id: string }[])[0]!.id;

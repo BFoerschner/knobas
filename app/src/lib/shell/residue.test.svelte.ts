@@ -262,6 +262,7 @@ vi.mock("../ipc/sources", () => ({
   addSource: () => deferred(undefined),
   testSource: () => deferred({ ok: true, account: null, server_version: null, secret_expires_at: null, error: null, code: null, elapsed_ms: 1, detail: null, discovered: {} }),
   reindexFts: () => deferred(undefined),
+  pendingWrites: () => deferred([]),
 }));
 
 /**
@@ -373,6 +374,7 @@ const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
 const StartWork = (await import("../start-work/StartWork.svelte")).default;
 const DayReview = (await import("../time/DayReview.svelte")).default;
 const TfDay = (await import("../tf/time/TfDay.svelte")).default;
+const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -1025,6 +1027,27 @@ const CASES: Case[] = [
             dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             adHocBlock: () => Promise.reject(new Error("no offer in this test")),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The new shell's Week tab (#828): its clock interval and the week's read,
+     * `deferred` so the answer lands after the unmount.
+     */
+    name: "TfWeek",
+    source: "lib/tf/time/TfWeek.svelte",
+    open: (target) => ({
+      app: mount(TfWeek, {
+        target,
+        props: {
+          week: "2026-08-22",
+          timer: { current: null },
+          ports: {
+            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
+            pendingWrites: () => deferred([]),
           },
         },
       }),

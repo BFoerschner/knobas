@@ -532,6 +532,37 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-on input { flex: 1; }
 .tf-tm-refusal { color: var(--err); font-size: var(--t-sm); }
 
+/* The Week tab (#828): a row per target, a column per day, the weekend shaded. */
+.tf-tm-held {
+  display: flex; gap: 10px; align-items: baseline; padding: 10px 14px; border: 1px solid var(--rule);
+  border-left: 3px solid var(--warn); border-radius: 4px; background: var(--sheet); margin-bottom: 14px; font-size: var(--t-sm);
+}
+.tf-tm-held .tf-btn { margin-left: 8px; }
+.tf-tm-scroll { overflow-x: auto; }
+.tf-tm-week th a { color: inherit; text-decoration: none; }
+.tf-tm-week th a:hover { text-decoration: underline; }
+.tf-tm-week .tf-tm-we { background: var(--sheet-2); }
+.tf-tm-t { min-width: 240px; }
+.tf-tm-t small { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-tm-t a { color: inherit; }
+.tf-tm-c { min-width: 92px; font-variant-numeric: tabular-nums; }
+.tf-tm-c a { display: flex; flex-direction: column; gap: 3px; text-decoration: none; color: inherit; }
+.tf-tm-c small { font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-tm-c.tf-tm-tot { border-left: 1px solid var(--rule); }
+.tf-tm-bar { display: block; border-radius: 2px; overflow: hidden; }
+.tf-tm-bar-bed { fill: var(--rule-2); }
+.tf-tm-bar-lg { fill: var(--ok); }
+.tf-tm-bar-hd { fill: var(--warn); }
+.tf-tm-bar-un { fill: var(--ink-2); }
+.tf-tm-total td { background: var(--sheet-2); font-weight: 600; }
+/* *Log all…*: wider than a form dialog, for the comment column. */
+.tf-dialog.tf-tm-logall { width: min(720px, calc(100vw - 32px)); }
+.tf-tm-num { font-variant-numeric: tabular-nums; }
+.tf-tm-comment { width: 100%; }
+.tf-tm-comment textarea {
+  width: 100%; resize: vertical; font: inherit; border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--paper); color: var(--ink);
+}
+
 /* ---------- toasts: ink on the page, rising 20px into place ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;

@@ -1,15 +1,25 @@
 <!--
   The Time view (#827, R-13.4): its header with *Log all…*, the three tabs,
   and the tab the address names. `#/time` and `#/time/<date>` are the Day;
-  `#/time/week` and `#/time/standup` are later tickets' (#828, #829) and say
-  so until they land.
+  `#/time/week` and `#/time/week/<date>` the Week (#828); `#/time/standup` is
+  #829's and says so until it lands.
 
-  *Log all…* goes to the Week, where #828 builds its dialog over
-  `log_all_preview` and `log_all`; the Day has no week to preview.
+  *Log all…* previews the week on screen: the Week's, or the week the Day's
+  date falls in (#828). The worklogs it queues are followed here, so one that
+  will not go is told even after the dialog closes.
 -->
 <script lang="ts">
+  import { onDestroy } from "svelte";
+
+  import type { Worklog } from "../../ipc/time";
+  import { followWrite } from "../../shell/follow-write";
   import type { Timer } from "../../shell/timer.svelte";
+  import { dayKey } from "../../time/day";
+  import { weekWindows } from "../../time/week";
+  import { layers } from "../layers.svelte";
   import TfDay from "./TfDay.svelte";
+  import TfLogAll from "./TfLogAll.svelte";
+  import TfWeek from "./TfWeek.svelte";
 
   let {
     ready = true,
@@ -36,6 +46,27 @@
     rest[0] === "week" ? "week" : rest[0] === "standup" ? "standup" : "day",
   );
   const day = $derived(rest[0] !== undefined && DATE.test(rest[0]) ? rest[0] : null);
+  const week = $derived(rest[0] === "week" && rest[1] !== undefined && DATE.test(rest[1]) ? rest[1] : null);
+
+  /** The week *Log all…* previews: the one on screen. */
+  let logAll = $state<ReturnType<typeof weekWindows> | null>(null);
+  function openLogAll() {
+    logAll = weekWindows((tab === "week" ? week : day) ?? dayKey(new Date()));
+  }
+
+  /** The worklogs *Log all* queued, followed until they settle or this view goes (#779). */
+  const following: (() => void)[] = [];
+  onDestroy(() => {
+    for (const stop of following.splice(0)) stop();
+  });
+  function logged(made: Worklog[]) {
+    logAll = null;
+    for (const worklog of made) {
+      if (worklog.write_queue_id !== null) following.push(followWrite({ id: worklog.write_queue_id }, { name: "Worklog" }));
+    }
+    // A refusal still wrote the rest of the week, so the tabs re-read either way.
+    onchanged?.();
+  }
 
   const TABS = [
     ["day", "Day", "#/time"],
@@ -50,7 +81,7 @@
     <div class="tf-sub">What you tracked, what knobas saw while you worked, and what is still to log to Jira.</div>
   </div>
   {#if tab !== "standup"}
-    <div class="tf-acts"><a class="tf-btn tf-primary" href="#/time/week">Log all…</a></div>
+    <div class="tf-acts"><button class="tf-btn tf-primary" onclick={openLogAll}>Log all…</button></div>
   {/if}
 </header>
 <nav class="tf-tabs" aria-label="Time">
@@ -61,9 +92,14 @@
 <div class="tf-tm-wrap">
   {#if tab === "day"}
     <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} />
+  {:else if tab === "week"}
+    <TfWeek databaseReady={ready} {week} {timer} {revision} />
   {:else}
     <div class="tf-tm-empty">
-      <p>{tab === "week" ? "Week" : "Standup"} is not built in the new shell yet. The rooms UI still has it.</p>
+      <p>Standup is not built in the new shell yet. The rooms UI still has it.</p>
     </div>
   {/if}
 </div>
+{#if logAll !== null}
+  <TfLogAll days={logAll} {timer} {layers} onclose={() => (logAll = null)} ondone={logged} />
+{/if}

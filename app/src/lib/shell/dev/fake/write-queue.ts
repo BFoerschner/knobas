@@ -1,11 +1,43 @@
 /**
- * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting.
+ * `?fake-ipc`: The write queue (#42): one held write, one refused, one waiting, and a refused worklog (#828).
  */
 import type { Handler } from "../fake-tauri";
 
+/** Thursday of this week at 14:00, by the browser's clock: the held worklog's day. */
+function thisThursday(): string {
+  const at = new Date();
+  at.setDate(at.getDate() - ((at.getDay() + 6) % 7) + 3);
+  at.setHours(14, 0, 0, 0);
+  return at.toISOString();
+}
+
+/**
+ * Prototype-6's held worklog (#828): an hour of PAY-228 on this week's
+ * Thursday, refused because the ticket moved on. The Week tab draws its reason
+ * and *Open the queue*; the week's numbers (`time.ts`) already hold the hour.
+ */
+const HELD_WORKLOG = {
+  id: 32,
+  source_id: "mock",
+  entity_id: "mock:PAY-228",
+  op: "log_work",
+  payload: { LogWork: { entity: "mock:PAY-228", started: thisThursday(), seconds: 3600, comment: "" } },
+  target_snapshot: null,
+  state: "refused",
+  wait_reason: null,
+  detail: "Jira refused the worklog because the ticket moved to In Review with time tracking closed",
+  queued_at: thisThursday(),
+  attempted_at: thisThursday(),
+  attempts: 1,
+  held_snapshot: null,
+  settled_at: null,
+  source_enabled: true,
+};
+
 /**
  * The write queue a QA pass sees: one write held on a changed target, one the
- * source refused, one still waiting on a server that did not answer.
+ * source refused, one still waiting on a server that did not answer, and the
+ * Week tab's refused worklog.
  *
  * The held row's two snapshots differ by a reply, which is exactly what
  * `knobas_core::write_queue::project` holds a comment against -- so the
@@ -79,7 +111,9 @@ export const FIXTURE_QUEUE = [
     settled_at: null,
     source_enabled: true,
   },
+  HELD_WORKLOG,
 ];
+
 
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {

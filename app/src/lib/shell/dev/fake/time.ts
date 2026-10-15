@@ -117,6 +117,19 @@ function todaysBlocks(): FakeBlock[] {
   ];
 }
 
+/** `YYYY-MM-DD` of an instant, by the browser's clock. */
+function localKey(at: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+/** This time yesterday, by the browser's clock. */
+function yesterdayAt(): Date {
+  const at = new Date();
+  at.setDate(at.getDate() - 1);
+  return at;
+}
+
 /** Thirty days back: a day before this is past the observation horizon. */
 function fakeHorizon(): string {
   const cut = new Date();
@@ -252,6 +265,13 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     worklog_draft: (args) => {
       const entityId = String(args["entityId"]);
       if (!entityId.startsWith("mock:")) return null;
+      const day = String(args["day"]);
+      // Yesterday's PAY-231 (#828): *Log all*'s fixed row, with prototype-6's comment.
+      if (entityId === "mock:PAY-231" && day === localKey(yesterdayAt()) && !loggedYesterday) {
+        const started_at = new Date(`${day}T10:00:00`).toISOString();
+        const comment = "Retry classification for TEMP_UNAVAILABLE; review on PR #142.";
+        return { entity_id: entityId, day, started_at, ended_at: started_at, seconds: 5400, block_ids: [], candidates: [], comment };
+      }
       const spans = unlogged(entityId);
       if (spans.length === 0) return null;
       const started_at = spans[0]!.started_at;
@@ -272,9 +292,14 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         comment: seen.map((candidate) => candidate.bullet).join("\n"),
       };
     },
+    // The day's unlogged blocks on the ticket, by the browser's clock: *Log all*
+    // sends one per day and ticket (#828). Yesterday's fixed PAY-231 row has no
+    // block, so logging it is remembered instead.
     log_work: (args) => {
       const entityId = String(args["entityId"]);
-      const spans = unlogged(entityId);
+      const day = args["day"] === undefined ? null : String(args["day"]);
+      if (entityId === "mock:PAY-231" && day === localKey(yesterdayAt())) loggedYesterday = true;
+      const spans = unlogged(entityId).filter((block) => day === null || localKey(new Date(block.started_at)) === day);
       const id = nextWorklog++;
       for (const block of spans) block.worklog_id = id;
       return {
