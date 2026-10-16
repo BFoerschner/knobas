@@ -808,9 +808,12 @@ async fn what_the_reader_waits_on() {
     // one), `jira0-123` a narrow one, and `zzqx` a word nothing holds, which
     // makes every row's assignee read run.
     let tickets_view = "tickets view: filter";
-    time(tickets_view, "mini_board (no words, 8 a column)", runs, || {
-        knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, Some(8), None)
-    })
+    time(
+        tickets_view,
+        "mini_board (no words, 8 a column)",
+        runs,
+        || knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, Some(8), None),
+    )
     .await;
     for word in ["a", "jira0-123", "zzqx"] {
         time(
