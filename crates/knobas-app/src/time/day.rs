@@ -130,6 +130,23 @@ pub struct DayRecord {
     /// turned the recording off, which is when they are most likely to be
     /// looking at one.
     pub past_horizon: bool,
+    /// The day's **open stretches** (#901): focused time that no block, no
+    /// dismissed offer and not the running timer claims, earliest first.
+    ///
+    /// What the Day tab draws as *open* rows, "knobas was open and in front,
+    /// with no timer and nothing it could name". The same subtraction
+    /// ([`passive::open_spans`](super::passive::open_spans)) the week's
+    /// "no target, app open" row adds up, so the day's *open* figure, the sum
+    /// of these, is the week's number for the day. Empty past the horizon and
+    /// on a day nothing was observed.
+    pub open: Vec<OpenStretch>,
+}
+
+/// One stretch of focused time nothing claims (#901).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+pub struct OpenStretch {
+    pub started_at: DateTime<Utc>,
+    pub ended_at: DateTime<Utc>,
 }
 
 /// The columns every read here selects.
@@ -270,9 +287,23 @@ pub async fn list(
         .bind(to)
         .fetch_all(pool)
         .await?;
+    let blocks: Vec<DayBlock> = rows.iter().map(day_block_of).collect::<Result<_, _>>()?;
+    let covered: Vec<(DateTime<Utc>, DateTime<Utc>)> = blocks
+        .iter()
+        .map(|entry| (entry.block.started_at, entry.block.ended_at))
+        .collect();
+    let open = super::passive::open_in(pool, from, to, &covered)
+        .await?
+        .into_iter()
+        .map(|span| OpenStretch {
+            started_at: span.started_at,
+            ended_at: span.ended_at,
+        })
+        .collect();
     Ok(DayRecord {
-        blocks: rows.iter().map(day_block_of).collect::<Result<_, _>>()?,
+        blocks,
         past_horizon,
+        open,
     })
 }
 

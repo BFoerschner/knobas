@@ -185,6 +185,20 @@ export interface DayRecord {
    * says the strip cannot be added to, never that what is on it is untrue.
    */
   past_horizon: boolean;
+  /**
+   * The day's open stretches (#901): focused time no block, no dismissed
+   * offer and not the running timer claims, earliest first. Their sum is the
+   * week's "no target, app open" number for the day. Empty past the horizon.
+   */
+  open: OpenStretch[];
+}
+
+/** One stretch of focused time nothing claims — `time::day::OpenStretch`. */
+export interface OpenStretch {
+  /** RFC 3339. */
+  started_at: string;
+  /** RFC 3339. */
+  ended_at: string;
 }
 
 /**
@@ -241,6 +255,17 @@ export function updateBlock(
  */
 export function deleteBlock(id: number): Promise<void> {
   return invoke<void>("delete_block", { id });
+}
+
+/**
+ * *Dismiss* an offered (passive) block (#900): it is gone, and the next day
+ * read does not offer that stretch again. `deleteBlock` on an offer only lasts
+ * until the next read, which re-derives the day's offers.
+ *
+ * Rejects `invalid` for a block that is not an offer.
+ */
+export function dismissBlock(id: number): Promise<void> {
+  return invoke<void>("dismiss_block", { id });
 }
 
 /**

@@ -211,6 +211,25 @@ pub async fn delete_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<()
     time::day::remove(&pool, id).await
 }
 
+/// *Dismiss* an offered (passive) block (#900, R-13.4): it is gone, and the
+/// day read does not offer a stretch starting where it did again.
+///
+/// Not `delete_block`, which deletes the row and nothing else: the day read
+/// re-derives passive blocks from the observations before it reads, so a
+/// deleted offer comes back. Nothing comes back from this either; the Day tab
+/// re-reads the day.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a block that is not an offer,
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a block that is not there.
+#[tauri::command]
+pub async fn dismiss_block(lifecycle: State<'_, Lifecycle>, id: i64) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    time::passive::dismiss(&pool, id).await
+}
+
 /// The worklog draft for a ticket and one of the reader's days, or `null`
 /// (issue #280).
 ///
@@ -673,6 +692,7 @@ mod tests {
             "day_blocks",
             "update_block",
             "delete_block",
+            "dismiss_block",
             "create_block",
             "passive_attribution",
             "set_passive_attribution",
@@ -716,6 +736,7 @@ mod tests {
             ("update_block", "endedAt"),
             ("update_block", "target"),
             ("delete_block", "id"),
+            ("dismiss_block", "id"),
             // The same camelCase rename, on the command that carries no id --
             // which is the one place a wrong spelling would arrive as a block
             // starting at the Unix epoch rather than as a refusal.
@@ -819,13 +840,29 @@ mod tests {
     /// against a mirror declaring anything at all.
     #[test]
     fn the_day_record_matches_its_typescript_mirror() {
+        let stretch = crate::time::day::OpenStretch {
+            started_at: at(9, 0),
+            ended_at: at(9, 30),
+        };
         let record = crate::time::day::DayRecord {
             blocks: Vec::new(),
             past_horizon: true,
+            open: vec![stretch],
         };
         let wire = serde_json::to_value(&record).unwrap();
         assert_eq!(wire["past_horizon"], serde_json::Value::Bool(true));
-        assert_shape(MIRROR, "DayRecord", &wire, &["blocks", "past_horizon"]);
+        assert_shape(
+            MIRROR,
+            "DayRecord",
+            &wire,
+            &["blocks", "past_horizon", "open"],
+        );
+        assert_shape(
+            MIRROR,
+            "OpenStretch",
+            &serde_json::to_value(stretch).unwrap(),
+            &["started_at", "ended_at"],
+        );
     }
 
     // -- the worklog (#280) -------------------------------------------------

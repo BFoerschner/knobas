@@ -60,6 +60,7 @@ mod suggestion_pass;
 mod suggestions_ipc;
 mod ticket_keys_ipc;
 mod ticket_views_ipc;
+mod day_offers_ipc;
 mod time_ipc;
 mod ui_pool_probe;
 mod ui_statement_limit;
