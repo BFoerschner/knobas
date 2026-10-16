@@ -2237,3 +2237,16 @@ Implementer, PR for #848.
 - **The run list draws the source's state word** (`SUCCESS`, `FAILURE`) where prototype-6 says
   *passed* and *failed*: the chip is the declared one (#666), and renaming it in the shell would be
   a mapping no source declared. **Reversing:** low, a `shown_as` on TeamCity's state values.
+
+Merge-manager, PR #946 for #848.
+
+- **The tracer meets #848's acceptance criteria with the fields it declares.** The criteria ask for
+  a §10.8 entry per declared field and live coverage of the declared fields, and both hold. The
+  field list in the ticket's *What to build* is wider than the criteria; the eight fields left out
+  are named one by one in #947, which each drawing ticket closes or rules out. A run's duration is
+  `started` and `finished` read together, and its tone map is the existing `state` (#666).
+  **Reversing:** low; reopen #848 or move #947's fields into it.
+- **The join is witnessed across projects and sources.** A run is placed by `(source_id,
+  pipeline)`; TeamCity configuration ids are unique within one server, so the case a reused id can
+  hit is a second server. `a_run_joins_its_pipeline_by_id_within_its_source_only` holds both
+  statements' source predicates (each mutant drops one and fails it). **Reversing:** low.
