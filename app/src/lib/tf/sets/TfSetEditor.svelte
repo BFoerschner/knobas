@@ -201,6 +201,10 @@
     });
   }
 
+  function addRule() {
+    pending = { at: set?.rules.length ?? 0, kind: "epic" };
+  }
+
   function dropRule(at: number) {
     if (pending?.at === at) pending = null;
     if (at >= (set?.rules.length ?? 0)) return;
@@ -305,9 +309,7 @@
           <div class="tf-rule tf-dim">No rule yet. The set shows nowhere until it has one.</div>
         {/each}
         <div class="tf-rule-add">
-          <button type="button" class="tf-btn tf-sm" disabled={pending !== null} onclick={() => (pending = { at: set?.rules.length ?? 0, kind: "epic" })}
-            >Add a rule</button
-          >
+          <button type="button" class="tf-btn tf-sm" disabled={pending !== null} onclick={addRule}>Add a rule</button>
         </div>
       </div>
       <div class="tf-panel">
