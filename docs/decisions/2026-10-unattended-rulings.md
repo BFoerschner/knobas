@@ -2788,3 +2788,19 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   a version with no message reads as prototype-6's *Edited* / *Created*. *Attachments* and
   *compare versions* are out of scope (spec #808) and not drawn. **Reversing:** `blocks::history`,
   `TfDocRail`.
+
+Merge-manager review of PR #980 (2026-10-16):
+
+- **What a reader is shown of `body_text` has no Docs-search marks.** The launcher's excerpt, the
+  proposal evidence and the detail panel read `body_text` through `knobas_core::body_text_shown!`,
+  which drops a comment's author line and a page-link line whole and a heading's mark alone. Before
+  this, a launcher excerpt of a page could read `ENGRetry budget` and *Priya Nair* as words, and
+  the evidence for *this page mentions PAY-231* quoted the link line as a second mention. The index
+  (`fts`) still holds the linked titles and the authors' names. **Reversing:** the macro's three
+  uses.
+- **A numbered list refuses as formatting in *Edit section*.** The editor's text has only `- `
+  items and `from_plain` writes `<ul>`, so saving an unchanged numbered section would have turned it
+  into bullets. Two paragraphs inside one list item now read as two sentences, not one run-together
+  word. **Reversing:** `blocks::refusal_of`'s `ol` arm and `plain_text`'s `p` arm.
+- **Refusing a panel in *Edit section* (#975) is the safe reading of R-10.13** and stays: splicing
+  the editor's plain text over a panel macro would delete the macro.

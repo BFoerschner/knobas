@@ -115,18 +115,25 @@ struct ProposalRow {
 }
 
 /// The proposal, both ends, and each end's mirrored title and body (none for
-/// an end that is not a mirror item: an asset, a note).
-const PROPOSAL: &str = "select l.from_id, l.to_id, l.rule, l.reason,
+/// an end that is not a mirror item: an asset, a note). The body as it is
+/// shown, without a page's Docs-search marks (#860), since it is quoted.
+const PROPOSAL: &str = concat!(
+    "select l.from_id, l.to_id, l.rule, l.reason,
         f.kind as from_kind, f.title as from_title, f.deleted_at is not null as from_gone,
         t.kind as to_kind, t.title as to_title, t.deleted_at is not null as to_gone,
-        (select array[i.title, i.body_text] from sync.item i where i.entity_id = l.from_id)
+        (select array[i.title, ",
+    crate::body_text_shown!("i.body_text"),
+    "] from sync.item i where i.entity_id = l.from_id)
             as from_text,
-        (select array[i.title, i.body_text] from sync.item i where i.entity_id = l.to_id)
+        (select array[i.title, ",
+    crate::body_text_shown!("i.body_text"),
+    "] from sync.item i where i.entity_id = l.to_id)
             as to_text
    from knobas.link l
    join knobas.entity f on f.id = l.from_id
    join knobas.entity t on t.id = l.to_id
-  where l.id = $1";
+  where l.id = $1"
+);
 
 /// Links the same rule found to the same ticket that the reader accepted,
 /// newest first, the first [`NAMED`] of them and how many there are in all:
@@ -179,13 +186,19 @@ const SHARED_LEXEMES: &str = "with common as (
 
 /// One end's text around the shared words, the words marked, and the text it
 /// was cut from. `$2` is the shared lexemes as a `tsquery`, `$3` the
-/// options, `$4` how much of the text is read.
-const HEADLINE: &str = "select ts_headline('english', t.text, $2::tsquery, $3), t.text
+/// options, `$4` how much of the text is read. The body as it is shown,
+/// without a page's Docs-search marks (#860).
+const HEADLINE: &str = concat!(
+    "select ts_headline('english', t.text, $2::tsquery, $3), t.text
      from sync.item i
+     cross join lateral (select ",
+    crate::body_text_shown!("i.body_text"),
+    " as body) b
      cross join lateral (
-            select left(case when i.body_text = '' then i.title
-                             else i.title || E'\\n' || i.body_text end, $4) as text) t
-    where i.entity_id = $1";
+            select left(case when b.body = '' then i.title
+                             else i.title || E'\\n' || b.body end, $4) as text) t
+    where i.entity_id = $1"
+);
 
 /// What was said for and against the proposal `id`.
 ///

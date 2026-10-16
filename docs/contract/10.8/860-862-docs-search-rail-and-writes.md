@@ -16,8 +16,12 @@
   (`storage::to_indexed_text`, `map::indexed_body_text`): every `h1`–`h6` line is marked, a
   `ri:page` link with no body of its own reads as its title in the sentence, and every `ri:page` is
   a link line in the page's own space where it names none. The adapter's cursor goes to `v: 2`, so
-  the first sync after upgrading is a full one and re-indexes every page mirrored before. A launcher
-  excerpt drops the marks (`knobas_search::snippet::segments`).
+  the first sync after upgrading is a full one and re-indexes every page mirrored before. What a reader is
+  shown of `body_text` never carries them: `knobas_core::body_text_shown!(column)` drops an author
+  line and a link line whole and a heading's mark alone, and the launcher's excerpt
+  (`knobas_search::corpus::LIVE_ITEM`), the proposal evidence (`knobas_core::evidence`) and the
+  detail panel (`entity_detail`) read through it; `knobas_search::snippet::segments` drops any mark
+  that is left.
 
   **The grammar key** `space:` is an alias of `project:` (`FieldKey::from_spelling`): a page's space
   is its declared project (ADR-0010). `knobas_search::query::needles(text)` lists the words and
@@ -29,7 +33,8 @@
   (`#[serde(default)]` on both). `SectionRefusal` is `table | code | macro | formatting`
   (snake_case). A section is a top-level heading the reader numbers (1 for the first) and what
   follows it to the next; it is editable when heading and body sit at the top of the body and the
-  body is only paragraphs, line breaks and flat lists of plain text. A new projection-adjacent
+  body is only paragraphs, line breaks and flat bulleted lists of plain text (a numbered list
+  refuses as `formatting`). A new projection-adjacent
   surface, `DocWrites { edit_section: fn(kind, &payload, number: u32, text: &str) ->
   Result<SectionEdit { body, base_version: i64 }, EditRefused::{Section(SectionRefusal), Missing}>,
   body_from_text: fn(&str) -> String }`, named per adapter kind in the registry (a new

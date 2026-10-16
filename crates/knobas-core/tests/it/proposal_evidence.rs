@@ -125,6 +125,36 @@ async fn a_key_in_a_commit_message_is_quoted_with_the_key_marked() {
     );
 }
 
+/// A page's `body_text` carries the Docs search's marks (#860): a heading's
+/// mark, a comment's author line, a line per linked page. The evidence quotes
+/// the page as it reads: the key once, where the text says it, and never a
+/// mark, an author line or the link line that repeats a linked title.
+#[tokio::test]
+async fn a_pages_docs_marks_are_never_quoted() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Retry failed SEPA payouts", "").await;
+    let page = item(
+        &pool,
+        "page",
+        "98307",
+        "SEPA payout retry design",
+        "\u{1e}Rollout\nWe ship PAY-231 now.\n\u{1f}Priya Nair\nAgreed.\n\
+         \u{1d}ENG\u{1d}PAY-231 postmortem\u{1d}",
+    )
+    .await;
+    run_rule(&pool, "page_text_key").await;
+
+    let found = read(&pool, proposal(&pool, &page, &ticket).await).await;
+
+    assert_eq!(marked(&found.excerpts), ["PAY-231"], "{:?}", found.excerpts);
+    let text: String = found.excerpts.iter().map(plain).collect();
+    assert!(text.contains("We ship PAY-231 now."), "{text:?}");
+    assert!(
+        !text.contains(['\u{1d}', '\u{1e}', '\u{1f}']) && !text.contains("Priya"),
+        "{text:?}"
+    );
+}
+
 #[tokio::test]
 async fn items_found_the_same_way_and_already_linked_support_a_proposal() {
     let pool = scratch().await;

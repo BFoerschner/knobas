@@ -945,6 +945,25 @@ macro_rules! path_line_read {
     };
 }
 
+/// A `body_text` column as words a reader is shown: without the Docs search's
+/// marks (#860, `knobas_source::docs::indexed`). A comment's author line
+/// (`U+001F`) and a page-link line (`U+001D`) go whole, a heading's mark
+/// (`U+001E`) alone, so what is left is the text the page held before the
+/// marks. Every reader that shows `body_text` rather than indexing it (the
+/// launcher's excerpt, the proposal evidence, the detail panel) expands this;
+/// `knobas-search`'s `the_shown_body_text_macro_names_the_three_marks` holds
+/// the characters to the SPI's.
+#[macro_export]
+macro_rules! body_text_shown {
+    ($column:literal) => {
+        concat!(
+            "regexp_replace(",
+            $column,
+            ", '[\\x1d\\x1f][^\\n]*\\n?|\\x1e', '', 'g')"
+        )
+    };
+}
+
 /// The line a row draws for a parent chain: each parent's first name,
 /// outermost first, joined by [`ANCESTOR_SEPARATOR`]; `None` when no parent
 /// answers to a name. The Rust side of [`declared_parent_path!`].

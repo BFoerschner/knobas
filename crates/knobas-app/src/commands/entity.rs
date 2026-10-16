@@ -1071,7 +1071,9 @@ select b.* from (
 /// sources.
 const DETAIL: &str = concat!(
     r#"
-select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
+select i.entity_id, i.source_id, i.kind, i.title, "#,
+    knobas_core::body_text_shown!("i.body_text"),
+    r#" as body_text, i.author,
        i.item_updated_at, i.synced_at, i.payload, i.web_url,
        "#,
     knobas_core::path_line_read!("$2"),
