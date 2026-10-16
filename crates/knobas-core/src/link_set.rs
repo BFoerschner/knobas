@@ -32,8 +32,11 @@ pub const DEPTH: i32 = 5;
 /// The sets whose rules match each ticket of `start(t)`, as SQL text.
 ///
 /// Expects a CTE `start(t)` and defines `ticket_up(t, id, d)` (the ticket at
-/// depth 0 and every ancestor its declared parents name) and
-/// `set_applies(t, set_id)`, ending without a trailing comma. Part of
+/// depth 0 and every ancestor its declared parents name),
+/// `rule_applies(t, set_id, position, kind, value)` (each rule that matches,
+/// what the job's *Also on this job* names as the reason, #867) and
+/// `set_applies(t, set_id)` (the sets those rules belong to), ending without a
+/// trailing comma. Part of
 /// [`crate::reach_walk!`]; `d < 5` is [`DEPTH`], spelled as a literal because
 /// `concat!` folds only literals (`the_depth_is_spelled_once` holds them).
 #[doc(hidden)]
@@ -50,8 +53,8 @@ macro_rules! link_sets_applying {
           join knobas.source_config sc on sc.id = ip.source_id and sc.kind = ip.adapter_kind
          where u.d < 5
     ),
-    set_applies(t, set_id) as (
-        select u.t, r.set_id
+    rule_applies(t, set_id, position, kind, value) as (
+        select u.t, r.set_id, r.position, r.kind, r.value
           from ticket_up u
           join knobas.link_set_rule r
             on (r.kind = 'manual' and u.d = 0)
@@ -59,12 +62,15 @@ macro_rules! link_sets_applying {
             or (r.kind = 'epic' and u.d >= 1)
          where r.value = u.id
         union
-        select s.t, r.set_id
+        select s.t, r.set_id, r.position, r.kind, r.value
           from start s
           join sync.item_project p on p.entity_id = s.t
           join knobas.source_config sc on sc.id = p.source_id and sc.kind = p.adapter_kind
           join knobas.link_set_rule r
             on r.kind = 'project' and r.value = p.source_id || ':' || p.key
+    ),
+    set_applies(t, set_id) as (
+        select distinct t, set_id from rule_applies
     )"
     };
 }

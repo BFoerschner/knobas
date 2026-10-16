@@ -590,6 +590,165 @@ pub async fn hide(
     Ok(hidden)
 }
 
+/// One member of a set that applies to a job (#867): what the drawer's
+/// group lists, and whether *Hide here* hid it on this ticket.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobMember {
+    /// The member's kind, one of [`MEMBER_KINDS`]: the row's section.
+    pub kind: String,
+    pub entity_id: String,
+    /// The entity's own kind, what the row links by; `None` when knobas has
+    /// no entity of that id.
+    pub entity_kind: Option<String>,
+    pub title: Option<String>,
+    pub hidden: bool,
+}
+
+/// One set that applies to a job (R-4.4, R-6.2): the chip's name, the reason
+/// (the first of its rules that matches, in the set's order) and its members.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobSet {
+    pub id: String,
+    pub name: String,
+    pub via: RuleRow,
+    pub members: Vec<JobMember>,
+}
+
+/// One of a parent ticket's own links: the far end.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobLink {
+    pub entity_id: String,
+    pub kind: String,
+    pub title: Option<String>,
+}
+
+/// The parent whose own links a sub-task shows (R-7.3).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobParent {
+    /// The parent ticket's entity id.
+    pub ticket: String,
+    pub title: Option<String>,
+    pub links: Vec<JobLink>,
+}
+
+/// What a job shows beside its own links (#867): the sets that apply, by
+/// name, and the parent behind R-7.3's switch.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JobLinkSets {
+    pub sets: Vec<JobSet>,
+    pub parent: Option<JobParent>,
+}
+
+/// The sets applying to `$1`, each once with the first matching rule.
+const JOB_SETS: &str = concat!(
+    "with recursive start(t) as (select $1::text),
+    ",
+    knobas_core::link_sets_applying!(),
+    "
+    select s.id, s.name, a.kind, a.value,
+           coalesce(e.title, (select p.name from sync.item_project p
+                               where a.kind = 'project' and p.source_id || ':' || p.key = a.value
+                                 and p.name is not null limit 1)) as title
+      from (select distinct on (set_id) set_id, kind, value
+              from rule_applies order by set_id, position) a
+      join knobas.link_set s on s.id = a.set_id
+      left join knobas.entity e on a.kind <> 'project' and e.id = a.value
+     order by lower(s.name), s.id"
+);
+
+/// The parent `$1` shows the links of, and each far end of those links
+/// (`entity_id` null for a parent with none): [`knobas_core::reach_walk!`]'s
+/// own `parent` term, so the drawer and the reach never disagree.
+const JOB_PARENT: &str = concat!(
+    "with recursive start(t) as (select $1::text),
+    ",
+    knobas_core::reach_walk!(),
+    "
+    select distinct p.p as ticket, pe.title as ticket_title, o.id as entity_id, o.kind, o.title
+      from parent p
+      join knobas.entity pe on pe.id = p.p
+      left join knobas.confirmed_link l on l.from_id = p.p or l.to_id = p.p
+      left join knobas.entity o
+        on o.id = case when l.from_id = p.p then l.to_id else l.from_id end
+       and o.kind <> 'ctx' and o.id <> p.t
+     order by o.title, o.id"
+);
+
+/// What the job of `ticket_id` shows beside its own links (#867, R-4.4,
+/// R-6.2, R-7.3): every set whose rules match it, with the reason and its
+/// members (hidden ones marked), and its parent's own links while R-7.3's
+/// switch is on. Read when the job is read; nothing is stored. An id nothing
+/// answers to has neither.
+///
+/// # Errors
+///
+/// `internal` if a read fails.
+pub async fn on_job(pool: &PgPool, ticket_id: &str) -> Result<JobLinkSets, IpcError> {
+    crate::commands::search::searcher(pool).await?;
+    let sets = sqlx::query(JOB_SETS)
+        .bind(ticket_id)
+        .fetch_all(pool)
+        .await?;
+    let ids: Vec<String> = sets.iter().map(|row| row.get("id")).collect();
+    let members = sqlx::query(
+        "select m.set_id, m.kind, m.entity_id, e.kind as entity_kind, e.title,
+                exists (select 1 from knobas.link_set_hidden h
+                         where h.ticket_id = $2 and h.member_id = m.entity_id) as hidden
+           from knobas.link_set_member m
+           left join knobas.entity e on e.id = m.entity_id
+          where m.set_id = any($1) and m.entity_id is not null and m.entity_id <> $2
+          order by m.set_id, m.position",
+    )
+    .bind(&ids)
+    .bind(ticket_id)
+    .fetch_all(pool)
+    .await?;
+    let mut out: Vec<JobSet> = sets
+        .iter()
+        .map(|row| JobSet {
+            id: row.get("id"),
+            name: row.get("name"),
+            via: RuleRow {
+                kind: row.get("kind"),
+                value: row.get("value"),
+                title: row.get("title"),
+            },
+            members: Vec::new(),
+        })
+        .collect();
+    for row in &members {
+        let set_id: String = row.get("set_id");
+        if let Some(set) = out.iter_mut().find(|set| set.id == set_id) {
+            set.members.push(JobMember {
+                kind: row.get("kind"),
+                entity_id: row.get("entity_id"),
+                entity_kind: row.get("entity_kind"),
+                title: row.get("title"),
+                hidden: row.get("hidden"),
+            });
+        }
+    }
+    let rows = sqlx::query(JOB_PARENT)
+        .bind(ticket_id)
+        .fetch_all(pool)
+        .await?;
+    let parent = rows.first().map(|first| JobParent {
+        ticket: first.get("ticket"),
+        title: first.get("ticket_title"),
+        links: rows
+            .iter()
+            .filter_map(|row| {
+                Some(JobLink {
+                    entity_id: row.get::<Option<String>, _>("entity_id")?,
+                    kind: row.get("kind"),
+                    title: row.get("title"),
+                })
+            })
+            .collect(),
+    });
+    Ok(JobLinkSets { sets: out, parent })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
