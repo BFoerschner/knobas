@@ -1459,7 +1459,9 @@ mod tests {
         assert_eq!(repo.default_branch.as_deref(), Some("refs/heads/main"));
         assert_eq!(repo.entity_id, None, "the app's to fill, not the adapter's");
 
-        let triggers: Vec<(&str, bool, Vec<(&str, &str)>)> = settings
+        // A trigger as (name, switched off, its facts as label/value pairs).
+        type Drawn<'a> = (&'a str, bool, Vec<(&'a str, &'a str)>);
+        let triggers: Vec<Drawn<'_>> = settings
             .triggers
             .iter()
             .map(|t| {
