@@ -56,6 +56,7 @@
     onlog,
     revision = 0,
     onchanged,
+    job = null,
     ports,
     now = () => new Date(),
     layers = sharedLayers,
@@ -73,6 +74,8 @@
     revision?: number;
     /** Called after a write here, so other time surfaces re-read. */
     onchanged?: (() => void) | undefined;
+    /** The shell's current job, offered on open rows as *Add to <key>* (#1027). */
+    job?: { key: string; entityId: string } | null;
     ports?: Partial<DayPorts>;
     now?: () => Date;
     layers?: Layers;
@@ -266,6 +269,11 @@
     const block = row.block;
     if (block === null) return;
     void write(() => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)), said);
+  }
+
+  /** *Add to <job>* on an open row (#1027): a block on the job over exactly the stretch. */
+  function addOpen(row: DayRow, entityId: string, said: string) {
+    void write(() => io.createBlock(row.from, row.to, entity(entityId)), said);
   }
 
   function extendToNow(row: DayRow) {
@@ -520,7 +528,18 @@
               <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
               <button class="tf-btn tf-sm tf-ghost" onclick={() => dismiss(row)}>Dismiss</button>
             {:else if row.state === "open"}
-              <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+              {#if job !== null}
+                {@const to = job.entityId}
+                <button
+                  class="tf-btn tf-sm"
+                  onclick={() => addOpen(row, to, `Made a block on ${job.key}, ${span(row)}`)}
+                >
+                  Add to {job.key}
+                </button>
+                <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+              {:else}
+                <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
+              {/if}
             {/if}
           </span>
         </div>

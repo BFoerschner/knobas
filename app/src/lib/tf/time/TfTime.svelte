@@ -31,7 +31,10 @@
     onlog,
     revision = 0,
     onchanged,
+    job = null,
   }: {
+    /** The shell's current job, for the Day's *Add to <job>* on open rows (#1027). */
+    job?: { key: string; entityId: string } | null;
     /** Whether the database answers yet: the day's reads wait for it. */
     ready?: boolean;
     /** What follows `time` in the address. */
@@ -97,7 +100,7 @@
 </nav>
 <div class="tf-tm-wrap">
   {#if tab === "day"}
-    <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} />
+    <TfDay databaseReady={ready} {day} {timer} {ontimer} {onlog} {revision} {onchanged} {job} />
   {:else if tab === "week"}
     <TfWeek databaseReady={ready} {week} {timer} {revision} />
   {:else}

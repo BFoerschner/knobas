@@ -29,6 +29,8 @@ export interface TfPageContext {
   job: string | null;
   /** The ticket key the timer runs on, or `null`. */
   timedTicket: string | null;
+  /** The Job tab's job (the last opened, else the timer's) with its entity id, or `null`. */
+  navJob: { key: string; entityId: string } | null;
   /** Switch back to the rooms UI. */
   onrooms: () => void;
   timer: Pick<Timer, "current" | "elapsed">;
