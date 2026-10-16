@@ -117,9 +117,129 @@ macro_rules! link_set_rule_tickets {
     };
 }
 
+/// The entity kinds a `pipeline` member may not be: every other member kind,
+/// and what is never a pipeline. A pipeline's kind is its source's own word
+/// (`build_config` for TeamCity), so the rest is open. Spelled again in
+/// [`link_set_member_fits!`], which `the_pipeline_exclusions_are_spelled_once`
+/// holds to this list.
+pub const NOT_PIPELINE_KINDS: &[&str] = &[
+    "repo", "page", "asset", "monitor", "ticket", "pr", "branch", "commit", "build", "ctx", "note",
+    "route",
+];
+
+/// SQL for "an entity of kind `$entity` can be a member of kind `$member`":
+/// the same kind, except a `pipeline`, which is any kind
+/// [`NOT_PIPELINE_KINDS`] does not name.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! link_set_member_fits {
+    ($member:literal, $entity:literal) => {
+        concat!(
+            "(case when ",
+            $member,
+            " = 'pipeline' then ",
+            $entity,
+            " <> all(array['repo', 'page', 'asset', 'monitor', 'ticket', 'pr', 'branch', \
+             'commit', 'build', 'ctx', 'note', 'route']) else ",
+            $entity,
+            " = ",
+            $member,
+            " end)"
+        )
+    };
+}
+
+/// SQL for "the row's key or title matches the glob `$glob`" (#868, the
+/// grammar's `name:`): whole, ignoring case, `*` any run of characters and
+/// `?` one, every other character itself (`%`, `_` and `\` are escaped
+/// before the glob becomes a `like` pattern). `$id` is the row's entity id,
+/// whose key is what follows the first `:`; `$title` its title. The one
+/// spelling `name:` and a link-set pattern both expand.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! name_glob_matches {
+    ($id:literal, $title:literal, $glob:literal) => {
+        concat!(
+            "exists (select 1 from (select replace(replace(replace(replace(replace(lower(",
+            $glob,
+            "), '\\', '\\\\'), '%', '\\%'), '_', '\\_'), '*', '%'), '?', '_') as l) gl \
+             where lower(substr(",
+            $id,
+            ", strpos(",
+            $id,
+            ", ':') + 1)) like gl.l escape '\\' or lower(",
+            $title,
+            ") like gl.l escape '\\')"
+        )
+    };
+}
+
+/// The live items each pattern member of `$pat` matches now (#868, R-7.2),
+/// as one `select` of `(set_id, position, id)`.
+///
+/// `$pat` is a relation with the columns of `knobas.link_set_member` it
+/// reads: `set_id`, `position`, `kind` and `pattern`, the stored reading of
+/// the member's query (`knobas_search::Pattern`: `sources`, `projects`,
+/// `under`, `names`, each lowercased). Each list ORs its values and the lists
+/// AND, over facts the database keeps: the item's source, its declared
+/// project in `sync.item_project` by key or name (ADR-0010), a declared parent
+/// in `sync.item_parent` (ADR-0018, ADR-0019, `under:`'s read), and
+/// [`name_glob_matches!`]. Both stored tables count a row only while the
+/// item's source is configured with the adapter that wrote it, as `under:`
+/// does. The job's read ([`crate::reach_walk!`]), the editor's read and the
+/// pattern dialog's preview all expand this, so they cannot disagree.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! link_set_pattern_hits {
+    ($pat:literal) => {
+        concat!(
+            "select p.set_id, p.position, i.entity_id as id
+          from ",
+            $pat,
+            " p
+          join sync.live_item i on ",
+            $crate::link_set_member_fits!("p.kind", "i.kind"),
+            "
+         where p.pattern is not null
+           and (jsonb_array_length(coalesce(p.pattern->'sources', '[]')) = 0
+                or i.source_id in (select jsonb_array_elements_text(p.pattern->'sources')))
+           and (jsonb_array_length(coalesce(p.pattern->'projects', '[]')) = 0
+                or exists (select 1 from sync.item_project ip
+                             join knobas.source_config sc
+                               on sc.id = ip.source_id and sc.kind = ip.adapter_kind
+                            where ip.entity_id = i.entity_id
+                              and (lower(ip.key) in (select jsonb_array_elements_text(p.pattern->'projects'))
+                                   or lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'projects')))))
+           and (jsonb_array_length(coalesce(p.pattern->'under', '[]')) = 0
+                or exists (select 1 from sync.item_parent ip
+                             join knobas.source_config sc
+                               on sc.id = i.source_id and sc.kind = ip.adapter_kind
+                            where ip.entity_id = i.entity_id
+                              and lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'under'))))
+           and (jsonb_array_length(coalesce(p.pattern->'names', '[]')) = 0
+                or exists (select 1 from jsonb_array_elements_text(p.pattern->'names') ng(g)
+                            where ",
+            $crate::name_glob_matches!("i.entity_id", "i.title", "ng.g"),
+            "))"
+        )
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use super::DEPTH;
+
+    #[test]
+    fn the_pipeline_exclusions_are_spelled_once() {
+        let fits = crate::link_set_member_fits!("m", "e");
+        for kind in super::NOT_PIPELINE_KINDS {
+            assert!(fits.contains(&format!("'{kind}'")), "{kind}");
+        }
+        assert_eq!(
+            fits.matches("', '").count() + 1,
+            super::NOT_PIPELINE_KINDS.len()
+        );
+    }
 
     #[test]
     fn the_depth_is_spelled_once() {

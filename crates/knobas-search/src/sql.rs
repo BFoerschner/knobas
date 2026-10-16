@@ -402,6 +402,8 @@ struct BoundFilters {
     under: Option<(String, String)>,
     /// The `reach:` values' placeholder (#817).
     reach: Option<String>,
+    /// The `name:` globs' placeholder (#868).
+    names: Option<String>,
     /// The ticket-key conditions (#811), each with the placeholders it reads.
     fields: Vec<BoundField>,
     /// The declarations' placeholder, once a filter has bound it: `under:`
@@ -489,6 +491,8 @@ fn bind_dimensions(
         reach: filters
             .filters_by_reach()
             .then(|| builder.param(Bind::Texts(filters.reach.clone()))),
+        names: (!filters.names.is_empty())
+            .then(|| builder.param(Bind::Texts(filters.names.clone()))),
         fields: Vec::new(),
         declarations: None,
     }
@@ -556,6 +560,16 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
     }
     if let Some(values) = &bound.reach {
         predicates.push(format!("{} in ({})", corpus.entity_id, reach_ids(values)));
+    }
+    if let Some(names) = &bound.names {
+        // `knobas_core::name_glob_matches!`, the text a link-set pattern
+        // matches with (#868), over this corpus's id and title.
+        predicates.push(format!(
+            "exists (select 1 from unnest({names}::text[]) ng(g) where {})",
+            knobas_core::name_glob_matches!("{id}", "{title}", "ng.g")
+                .replace("{id}", corpus.entity_id)
+                .replace("{title}", corpus.title)
+        ));
     }
     for field in &bound.fields {
         // `fd` is the one row a fragment reads its binds from, as `ud` is for

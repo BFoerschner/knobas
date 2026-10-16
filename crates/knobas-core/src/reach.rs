@@ -59,6 +59,11 @@
 //! ticket (`knobas.link_set_hidden`, R-7.5) is left out; hiding reaches only
 //! a set's rows, never the ticket's own links or its parent's.
 //!
+//! Since #868 a set's **patterns** join the same arm: every live item a
+//! pattern member matches when the read runs ([`crate::link_set_pattern_hits!`]),
+//! so a pipeline that appears in the project tomorrow is on the job tomorrow
+//! without anybody editing the set. Same layer, same reason, same hiding.
+//!
 //! ## What each row says
 //!
 //! Each reached entity comes back once, with the **first step** of the path
@@ -173,6 +178,16 @@ macro_rules! reach_walk {
     ",
             $crate::link_sets_applying!(),
             ",
+    set_patterns(set_id, position, kind, pattern) as (
+        select m.set_id, m.position, m.kind, m.pattern
+          from knobas.link_set_member m
+         where m.pattern is not null and m.set_id in (select a.set_id from set_applies a)
+    ),
+    set_pattern_hits(set_id, position, id) as (
+        ",
+            $crate::link_set_pattern_hits!("set_patterns"),
+            "
+    ),
     reached(t, id, step, origin, rank, via) as (
         select t, id, step, 'own', d, null::text from held where id <> t and step is not null
         union all
@@ -182,6 +197,13 @@ macro_rules! reach_walk {
          where m.entity_id <> a.t
            and not exists (select 1 from knobas.link_set_hidden h
                             where h.ticket_id = a.t and h.member_id = m.entity_id)
+        union all
+        select a.t, h.id, h.id, 'link_set', 500, a.set_id
+          from set_applies a
+          join set_pattern_hits h on h.set_id = a.set_id
+         where h.id <> a.t
+           and not exists (select 1 from knobas.link_set_hidden x
+                            where x.ticket_id = a.t and x.member_id = h.id)
         union all
         select p.t, o.id, p.p, 'parent', 1000, p.p
           from parent p

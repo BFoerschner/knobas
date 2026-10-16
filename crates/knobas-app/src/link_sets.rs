@@ -10,8 +10,17 @@
 //! when it runs. Which tickets a rule matches is `knobas_core::link_set`'s SQL,
 //! read the other way round here for the counts.
 //!
-//! **Members are fixed items in this ticket.** The migration has room for a
-//! pattern (a stored query, #868); no command here writes or answers one.
+//! **A member is a fixed item or a pattern** (R-7.2, #868): a stored query in
+//! the search grammar (`project:Payouts name:Payout_*`), read through
+//! [`knobas_search::Searcher::pattern`] when it is saved and kept with that
+//! reading (migration `0040`). What it matches is
+//! `knobas_core::link_set_pattern_hits!`, run when a job, the editor or the
+//! dialog's preview reads it, so a new pipeline in the project joins without
+//! an edit. Patterns are for pipelines and pages ([`PATTERN_KINDS`]).
+//!
+//! **A member row** (#1008) carries what the editor draws beside the name, all
+//! of it read through the declarations (ADR-0007) or off `knobas.asset`: the
+//! line ([`MemberRow::line`]) and the dot ([`MemberRow::state`]).
 //!
 //! **"Yours"** (R-7.6's "39 (10 yours)") is a ticket whose declared assignee
 //! is one of the usernames the sources were configured with: the identity
@@ -28,22 +37,33 @@ pub const MEMBER_KINDS: &[&str] = &["repo", "pipeline", "page", "asset", "monito
 /// What a rule can match on (R-7.1).
 pub const RULE_KINDS: &[&str] = &["epic", "parent", "project", "manual"];
 
+/// The member kinds a pattern may be (R-7.7: *Add a pattern…* for builds and
+/// pages).
+pub const PATTERN_KINDS: &[&str] = &["pipeline", "page"];
+
+/// How many matches a pattern row or a preview carries; [`PatternRow::count`]
+/// is the whole number.
+pub const MATCHES_SHOWN: usize = 200;
+
 /// How long an id may grow before the slug stops, so an address stays short.
 const MAX_ID_CHARS: usize = 48;
 
-/// The entity kinds a `pipeline` member may not be: every other member kind,
-/// and what is never a pipeline. A pipeline's kind is its source's own word
-/// (`build_config` for TeamCity), so the rest is open.
-const NOT_PIPELINES: &[&str] = &[
-    "repo", "page", "asset", "monitor", "ticket", "pr", "branch", "commit", "build", "ctx", "note",
-    "route",
-];
+/// The entity kinds a `pipeline` member may not be (`knobas_core::link_set`).
+const NOT_PIPELINES: &[&str] = knobas_core::link_set::NOT_PIPELINE_KINDS;
 
 /// One fixed member: an entity of one of [`MEMBER_KINDS`].
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct LinkSetMember {
     pub kind: String,
     pub entity_id: String,
+}
+
+/// One pattern member (R-7.2): a kind of [`PATTERN_KINDS`] and a query in the
+/// search grammar that reads as a [`knobas_search::Pattern`].
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkSetPattern {
+    pub kind: String,
+    pub query: String,
 }
 
 /// One rule (R-7.1): a ticket entity id for `epic`, `parent` and `manual`;
@@ -63,16 +83,62 @@ pub struct LinkSetDraft {
     pub name: String,
     pub description: String,
     pub members: Vec<LinkSetMember>,
+    /// The patterns, in order, after the fixed members. Absent reads as
+    /// none, so a draft written before #868 still saves.
+    #[serde(default)]
+    pub patterns: Vec<LinkSetPattern>,
     pub rules: Vec<LinkSetRule>,
 }
 
-/// A member as the views draw it.
+/// A member as the views draw it: a fixed member, or one item a pattern
+/// matches.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct MemberRow {
     pub kind: String,
     pub entity_id: String,
     /// The item's title, or `None` when knobas has no entity of that id.
     pub title: Option<String>,
+    /// The line beside the name (#1008): for an asset its type and
+    /// environment; for a mirrored item its declared chain of groups (a
+    /// pipeline's project path), else its declared project and parent chain
+    /// (a page's space and path). `None` where nothing is declared.
+    pub line: Option<String>,
+    /// The dot (#1008): a pipeline's newest run's declared state, a mirrored
+    /// item's own declared state, an asset's health. `None` draws no tone.
+    pub state: Option<knobas_core::payload::StateChip>,
+}
+
+/// A pattern member as the editor draws it: its query and what it matches
+/// now, "(N match now)".
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PatternRow {
+    pub kind: String,
+    pub query: String,
+    /// How many live items it matches now.
+    pub count: i64,
+    /// The first [`MATCHES_SHOWN`] of them, by title.
+    pub matches: Vec<MemberRow>,
+}
+
+/// A project or space the items of a pattern's kind sit in, for the
+/// pattern dialog's dropdown.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PatternProject {
+    pub source_id: String,
+    pub key: String,
+    pub name: Option<String>,
+}
+
+/// What the pattern dialog shows (R-7.7, "Matches now: N"): what the query
+/// would match, the projects to pick from, and why the query is not a
+/// pattern, if it is not.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct PatternPreview {
+    pub count: i64,
+    pub matches: Vec<MemberRow>,
+    pub projects: Vec<PatternProject>,
+    /// `None` for a query that is a pattern; then *Add pattern* saves it.
+    pub refusal: Option<String>,
 }
 
 /// A rule as the views draw it.
@@ -93,6 +159,8 @@ pub struct LinkSetRow {
     pub name: String,
     pub description: String,
     pub members: Vec<MemberRow>,
+    /// Its patterns, in order (#868).
+    pub patterns: Vec<PatternRow>,
     pub rules: Vec<RuleRow>,
     /// How many live tickets its rules match now.
     pub tickets: i64,
@@ -201,6 +269,16 @@ fn refusal(draft: &LinkSetDraft) -> Option<String> {
             return Some(format!("`{}` is in the set twice", member.entity_id));
         }
     }
+    for (at, pattern) in draft.patterns.iter().enumerate() {
+        if let Some(why) = pattern_refusal(pattern) {
+            return Some(why);
+        }
+        if draft.patterns[..at].iter().any(|earlier| {
+            earlier.kind == pattern.kind && earlier.query.trim() == pattern.query.trim()
+        }) {
+            return Some(format!("the pattern `{}` is there twice", pattern.query.trim()));
+        }
+    }
     for (at, rule) in draft.rules.iter().enumerate() {
         if let Some(why) = rule_refusal(rule) {
             return Some(why);
@@ -222,6 +300,203 @@ fn fits(member_kind: &str, entity_kind: &str) -> bool {
     } else {
         member_kind == entity_kind
     }
+}
+
+/// What each id of `$2` draws as a member row (#1008), in that order; `$1`
+/// is the declarations. Every column of a mirrored item is a declared read
+/// (ADR-0007): its chain of groups, its project, its parent chain, its own
+/// state, and for a pipeline (the Builds frame) the state of its newest run,
+/// a run of its source whose declared `pipeline` is its own -- the rule
+/// `entity::pipelines` reads runs by. An asset's type and environment are its
+/// columns; its health is [`crate::assets`]' rollup, added by [`member_rows`].
+const MEMBER_ROWS: &str = concat!(
+    "with m as (
+  select u.id, u.ord, e.kind, e.title, i.source_id,
+         ($1::jsonb #>> array[i.source_id, i.kind, 'frame']) as frame, ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    knobas_core::project_key_read!("$1"),
+    " as project, ",
+    knobas_core::path_line_read!("$1"),
+    " as parents,
+         (select string_agg(btrim(e.elem #>> c.entry_segs), ' \u{203a} ' order by e.ord) from ",
+    knobas_core::declared_list_candidates!("$1", "group_path"),
+    " c cross join lateral jsonb_array_elements(
+             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
+                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
+           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
+             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) as groups, ",
+    knobas_core::declared_state!("$1"),
+    " as own_state,
+         a.type_id, a.environment
+    from unnest($2::text[]) with ordinality as u(id, ord)
+    left join knobas.entity e on e.id = u.id
+    left join sync.live_item i on i.entity_id = u.id
+    left join knobas.asset a on a.id = u.id
+)
+select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.environment,
+       case when m.frame = 'pipeline' and m.pkey is not null then
+         (select ",
+    knobas_core::declared_state!("$1"),
+    " from sync.live_item i
+           where i.source_id = m.source_id
+             and ($1::jsonb #>> array[i.source_id, i.kind, 'frame']) = 'run'
+             and ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " = m.pkey
+           order by i.item_updated_at desc nulls last, i.entity_id desc limit 1)
+       else m.own_state end as state
+  from m order by m.ord"
+);
+
+/// The line a member row draws beside its name, from [`MEMBER_ROWS`]'
+/// columns: an asset's `type, environment`; a mirrored item's chain of
+/// groups, else its project and parent chain.
+fn line_of(row: &sqlx::postgres::PgRow) -> Option<String> {
+    let text = |column: &str| -> Option<String> {
+        row.get::<Option<String>, _>(column)
+            .filter(|value| !value.trim().is_empty())
+    };
+    if let Some(type_id) = text("type_id") {
+        return Some(match text("environment") {
+            Some(env) => format!("{type_id}, {env}"),
+            None => type_id,
+        });
+    }
+    if let Some(groups) = text("groups") {
+        return Some(groups);
+    }
+    let parts: Vec<String> = [text("project"), text("parents")]
+        .into_iter()
+        .flatten()
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(knobas_core::payload::ANCESTOR_SEPARATOR))
+}
+
+/// The member rows of `ids` (`(member kind, entity id)`), in that order
+/// (#1008).
+async fn member_rows(
+    pool: &PgPool,
+    declarations: &sqlx::types::Json<serde_json::Value>,
+    ids: &[(String, String)],
+) -> Result<Vec<MemberRow>, IpcError> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    let entity_ids: Vec<&str> = ids.iter().map(|(_, id)| id.as_str()).collect();
+    let rows = sqlx::query(MEMBER_ROWS)
+        .bind(declarations)
+        .bind(&entity_ids)
+        .fetch_all(pool)
+        .await?;
+    let assets: Vec<String> = rows
+        .iter()
+        .filter(|row| row.get::<Option<String>, _>("type_id").is_some())
+        .map(|row| row.get("id"))
+        .collect();
+    let health = crate::assets::rollup(pool, &assets).await?;
+    let mut out = Vec::with_capacity(rows.len());
+    for ((kind, _), row) in ids.iter().zip(&rows) {
+        let id: String = row.get("id");
+        let state = match health.get(&id) {
+            Some(rolled) => asset_chip(rolled.health),
+            None => row
+                .try_get::<Option<sqlx::types::Json<knobas_core::payload::StateChip>>, _>("state")?
+                .map(|chip| chip.0),
+        };
+        out.push(MemberRow {
+            kind: kind.clone(),
+            title: row.get("title"),
+            line: line_of(row),
+            state,
+            entity_id: id,
+        });
+    }
+    Ok(out)
+}
+
+/// An asset's health as a dot: the words the estate uses, in its tones.
+fn asset_chip(health: crate::assets::AssetStatus) -> Option<knobas_core::payload::StateChip> {
+    use crate::assets::AssetStatus;
+    use knobas_core::tone::Tone;
+    let tone = match health {
+        AssetStatus::Up => Tone::Ok,
+        AssetStatus::Warn => Tone::Warn,
+        AssetStatus::Down => Tone::Err,
+        AssetStatus::None => return None,
+    };
+    Some(knobas_core::payload::StateChip {
+        text: health.as_str().to_owned(),
+        tone,
+    })
+}
+
+/// The live items each stored pattern of the sets `$1` matches now, with the
+/// pattern's set and position: `knobas_core::link_set_pattern_hits!` over the
+/// stored rows, the text the job's read expands.
+const STORED_PATTERN_HITS: &str = concat!(
+    "with pat as (
+  select set_id, position, kind, pattern from knobas.link_set_member
+   where set_id = any($1) and pattern is not null
+)
+select h.set_id, h.position, h.id, e.title
+  from (",
+    knobas_core::link_set_pattern_hits!("pat"),
+    ") h
+  join knobas.entity e on e.id = h.id
+ order by h.set_id, h.position, lower(e.title), h.id"
+);
+
+/// What one pattern (`$1` its kind, `$2` its reading) matches now: the same
+/// text over one row.
+const PREVIEW_PATTERN_HITS: &str = concat!(
+    "with pat as (select ''::text as set_id, 0 as position, $1::text as kind, $2::jsonb as pattern)
+select h.id, e.title
+  from (",
+    knobas_core::link_set_pattern_hits!("pat"),
+    ") h
+  join knobas.entity e on e.id = h.id
+ order by lower(e.title), h.id"
+);
+
+/// The projects the live items of member kind `$1` sit in, by name, for the
+/// pattern dialog: `sync.item_project` with `under:`'s adapter check.
+const PATTERN_PROJECTS: &str = concat!(
+    "select distinct on (p.source_id, p.key) p.source_id, p.key, p.name
+  from sync.live_item i
+  join sync.item_project p on p.entity_id = i.entity_id
+  join knobas.source_config sc on sc.id = p.source_id and sc.kind = p.adapter_kind
+ where ",
+    knobas_core::link_set_member_fits!("$1", "i.kind"),
+    "
+ order by p.source_id, p.key, (p.name is null), p.at desc nulls last"
+);
+
+/// Why a pattern member cannot be saved, before its query is read, or
+/// `None`.
+fn pattern_refusal(pattern: &LinkSetPattern) -> Option<String> {
+    if !PATTERN_KINDS.contains(&pattern.kind.as_str()) {
+        return Some(format!(
+            "a pattern is for {}, not a {}",
+            PATTERN_KINDS.join(" and "),
+            pattern.kind
+        ));
+    }
+    None
+}
+
+/// Read a pattern's query as the grammar reads it today, or say why not.
+async fn reading(
+    pool: &PgPool,
+    pattern: &LinkSetPattern,
+) -> Result<Result<knobas_search::Pattern, String>, IpcError> {
+    if let Some(why) = pattern_refusal(pattern) {
+        return Ok(Err(why));
+    }
+    Ok(crate::commands::search::searcher(pool)
+        .await?
+        .pattern(pattern.query.trim())
+        .await?)
 }
 
 /// The live tickets each rule of `$2`/`$3`/`$4` (the group, kind and value
@@ -302,15 +577,21 @@ async fn read(
     .await?;
     let ids: Vec<String> = sets.iter().map(|row| row.get("id")).collect();
     let members = sqlx::query(
-        "select m.set_id, m.kind, m.entity_id, e.title
+        "select m.set_id, m.kind, m.entity_id, m.query, m.position
            from knobas.link_set_member m
-           left join knobas.entity e on e.id = m.entity_id
-          where m.set_id = any($1) and m.entity_id is not null
+          where m.set_id = any($1)
           order by m.set_id, m.position",
     )
     .bind(&ids)
     .fetch_all(pool)
     .await?;
+    let hits = sqlx::query(STORED_PATTERN_HITS)
+        .bind(&ids)
+        .fetch_all(pool)
+        .await?;
+    let declarations =
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+    let declarations = declarations.as_param();
     let rules = sqlx::query(
         "select r.set_id, r.kind, r.value,
                 coalesce(e.title, (select p.name from sync.item_project p
@@ -333,6 +614,7 @@ async fn read(
                     name: row.get("name"),
                     description: row.get("description"),
                     members: Vec::new(),
+                    patterns: Vec::new(),
                     rules: Vec::new(),
                     tickets: 0,
                     mine: 0,
@@ -342,12 +624,56 @@ async fn read(
         })
         .collect();
     let at = |id: &str| ids.iter().position(|known| known == id);
+    // Every row to draw, fixed members and the shown matches of each
+    // pattern, read once (#1008), then dealt out in the stored order.
+    let mut wanted: Vec<(String, String)> = Vec::new();
     for row in &members {
+        if let Some(entity_id) = row.get::<Option<String>, _>("entity_id") {
+            wanted.push((row.get("kind"), entity_id));
+        }
+    }
+    let mut shown: std::collections::HashMap<(String, i32), (i64, Vec<String>)> =
+        std::collections::HashMap::new();
+    for hit in &hits {
+        let entry = shown
+            .entry((hit.get("set_id"), hit.get("position")))
+            .or_default();
+        entry.0 += 1;
+        if entry.1.len() < MATCHES_SHOWN {
+            entry.1.push(hit.get("id"));
+        }
+    }
+    for row in &members {
+        if row.get::<Option<String>, _>("query").is_some()
+            && let Some((_, matched)) = shown.get(&(row.get("set_id"), row.get("position")))
+        {
+            let kind: String = row.get("kind");
+            wanted.extend(matched.iter().map(|id| (kind.clone(), id.clone())));
+        }
+    }
+    let mut drawn = member_rows(pool, &declarations, &wanted).await?.into_iter();
+    for row in &members {
+        if row.get::<Option<String>, _>("entity_id").is_none() {
+            continue;
+        }
+        if let (Some(member), Some(index)) = (drawn.next(), at(row.get("set_id"))) {
+            out[index].0.members.push(member);
+        }
+    }
+    for row in &members {
+        let Some(query) = row.get::<Option<String>, _>("query") else {
+            continue;
+        };
+        let (count, shown_count) = shown
+            .get(&(row.get("set_id"), row.get("position")))
+            .map_or((0, 0), |(count, ids)| (*count, ids.len()));
+        let matches: Vec<MemberRow> = drawn.by_ref().take(shown_count).collect();
         if let Some(index) = at(row.get("set_id")) {
-            out[index].0.members.push(MemberRow {
+            out[index].0.patterns.push(PatternRow {
                 kind: row.get("kind"),
-                entity_id: row.get("entity_id"),
-                title: row.get("title"),
+                query,
+                count,
+                matches,
             });
         }
     }
@@ -422,6 +748,67 @@ pub async fn preview(pool: &PgPool, rule: &LinkSetRule) -> Result<Vec<RuleTicket
         .collect())
 }
 
+/// What a pattern of `pattern.kind` with `pattern.query` would match now, the
+/// projects its kind sits in, and why the query is not a pattern if it is not
+/// (R-7.7's dialog, "Matches now: N"). A refusal is an answer, not an error:
+/// the dialog shows it while somebody types.
+///
+/// # Errors
+///
+/// `internal` if a read fails.
+pub async fn preview_pattern(
+    pool: &PgPool,
+    pattern: &LinkSetPattern,
+) -> Result<PatternPreview, IpcError> {
+    let read = reading(pool, pattern).await?;
+    let kind = if PATTERN_KINDS.contains(&pattern.kind.as_str()) {
+        pattern.kind.as_str()
+    } else {
+        ""
+    };
+    let projects = sqlx::query_as::<_, (String, String, Option<String>)>(PATTERN_PROJECTS)
+        .bind(kind)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|(source_id, key, name)| PatternProject {
+            source_id,
+            key,
+            name,
+        })
+        .collect();
+    let read = match read {
+        Ok(read) => read,
+        Err(why) => {
+            return Ok(PatternPreview {
+                count: 0,
+                matches: Vec::new(),
+                projects,
+                refusal: Some(why),
+            });
+        }
+    };
+    let hits: Vec<(String, String)> = sqlx::query_as(PREVIEW_PATTERN_HITS)
+        .bind(kind)
+        .bind(serde_json::to_value(&read).map_err(IpcError::internal)?)
+        .fetch_all(pool)
+        .await?;
+    let count = i64::try_from(hits.len()).map_err(IpcError::internal)?;
+    let wanted: Vec<(String, String)> = hits
+        .into_iter()
+        .take(MATCHES_SHOWN)
+        .map(|(id, _)| (kind.to_owned(), id))
+        .collect();
+    let declarations =
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+    Ok(PatternPreview {
+        count,
+        matches: member_rows(pool, &declarations.as_param(), &wanted).await?,
+        projects,
+        refusal: None,
+    })
+}
+
 /// Save a whole set -- a new one under an id from its name, or over the set
 /// the draft names, its members and rules replaced by the draft's in order --
 /// and answer it as stored. Every job it applies to reads the change on its
@@ -458,6 +845,18 @@ pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, I
                 )));
             }
             Some(_) => {}
+        }
+    }
+    let mut readings: Vec<serde_json::Value> = Vec::with_capacity(draft.patterns.len());
+    for pattern in &draft.patterns {
+        match reading(pool, pattern).await? {
+            Ok(read) => readings.push(serde_json::to_value(read).map_err(IpcError::internal)?),
+            Err(why) => {
+                return Err(IpcError::invalid(format!(
+                    "`{}` is not a pattern: {why}",
+                    pattern.query.trim()
+                )));
+            }
         }
     }
     let mut tx = pool.begin().await?;
@@ -523,6 +922,20 @@ pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, I
     .bind(&id)
     .bind(&kinds)
     .bind(&ids)
+    .execute(&mut *tx)
+    .await?;
+    let pattern_kinds: Vec<&str> = draft.patterns.iter().map(|p| p.kind.as_str()).collect();
+    let queries: Vec<&str> = draft.patterns.iter().map(|p| p.query.trim()).collect();
+    sqlx::query(
+        "insert into knobas.link_set_member (set_id, kind, query, pattern, position)
+         select $1, k, q, r, ($5 + p - 1)::int
+           from unnest($2::text[], $3::text[], $4::jsonb[]) with ordinality as u(k, q, r, p)",
+    )
+    .bind(&id)
+    .bind(&pattern_kinds)
+    .bind(&queries)
+    .bind(&readings)
+    .bind(i32::try_from(ids.len()).map_err(IpcError::internal)?)
     .execute(&mut *tx)
     .await?;
     let rule_kinds: Vec<&str> = draft.rules.iter().map(|r| r.kind.as_str()).collect();
@@ -762,6 +1175,7 @@ mod tests {
                 kind: "repo".to_owned(),
                 entity_id: "gitea:tidewater/payout-service".to_owned(),
             }],
+            patterns: Vec::new(),
             rules: vec![LinkSetRule {
                 kind: "epic".to_owned(),
                 value: "jira:PAY-200".to_owned(),

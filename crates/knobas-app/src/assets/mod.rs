@@ -1662,14 +1662,14 @@ async fn linked_work(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, i6
 /// `row_of` reads off the row it already has, and a `Default` would have made
 /// a live `up` asset report `none` for the one frame it took to vanish.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct Rollup {
-    health: AssetStatus,
+pub(crate) struct Rollup {
+    pub(crate) health: AssetStatus,
     inside: AssetStatus,
     problems_inside: i64,
 }
 
 /// [`ROLLUP`] for `ids`, keyed by asset id.
-async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>, IpcError> {
+pub(crate) async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>, IpcError> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }
