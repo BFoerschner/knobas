@@ -146,3 +146,22 @@ pub struct PipelineTrigger {
     /// Switched off at the source.
     pub disabled: bool,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An answer from before #852 and #857, with neither `parameter_specs`
+    /// nor `chain`, still reads: both come back empty.
+    #[test]
+    fn settings_without_the_later_fields_read_as_empty() {
+        let old = serde_json::json!({
+            "repositories": [],
+            "triggers": [],
+            "parameters": [],
+            "parameter_write_op": null,
+        });
+        let settings: PipelineSettings = serde_json::from_value(old).expect("an older answer");
+        assert_eq!(settings, PipelineSettings::default());
+    }
+}

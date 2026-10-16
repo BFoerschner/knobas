@@ -3165,6 +3165,13 @@ impl ChainProject {
         Self::delete(&seeded.http, &seeded.url, &seeded.token)
             .await
             .expect("a leftover chain is cleared");
+        // The guard comes first, so a setup that fails half-way (the project
+        // made, a configuration refused) is deleted on the unwind too, and no
+        // half chain is left under `Payout` for the suite's later tests.
+        let guard = ChainProject {
+            url: seeded.url.clone(),
+            token: seeded.token.clone(),
+        };
         let post = async |path: String, body: serde_json::Value| {
             let r = seeded
                 .http
@@ -3215,10 +3222,7 @@ impl ChainProject {
             }
             before = Some(id);
         }
-        ChainProject {
-            url: seeded.url.clone(),
-            token: seeded.token.clone(),
-        }
+        guard
     }
 
     /// Queue one build of the chain's `step` on `branch` and wait for it to
