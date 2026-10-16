@@ -14,7 +14,7 @@
 //! [`BYTE_CAP`] bytes and [`LINE_CAP`] lines, cut at a line; either says it
 //! was cut and where the rest is (ADR-0020 rule 6). A file with a NUL byte in
 //! its first [`SNIFF`] bytes is binary (git's own test) and is drawn as its
-//! size and a link. Beside its bytes, a file's own `contents` entry is read
+//! size and a link. Beside its bytes, a file's own `contents-ext` entry is read
 //! for its blob sha at the ref (#883), the base an edit of it commits against.
 
 use knobas_source::SourceError;
@@ -197,9 +197,7 @@ async fn file(
     // `at` (#883), and its size where a cut read cannot say.
     let (raw, own) = tokio::try_join!(
         source.client.raw_capped(owner, repo, path, at, BYTE_CAP),
-        source
-            .client
-            .contents_entry_as::<Listed>(owner, repo, path, at),
+        source.client.file_entry_as::<Listed>(owner, repo, path, at),
     )?;
     let binary = raw.bytes.iter().take(SNIFF).any(|b| *b == 0);
     let (text, truncated) = if binary {
