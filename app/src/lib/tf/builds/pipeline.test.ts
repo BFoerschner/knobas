@@ -195,7 +195,7 @@ test("the warn line: a failing sign-in with its fix, a failed sync without one, 
     fix: "#/settings/source/teamcity",
   });
   expect(staleLine(pipeline, health("ok"), sync("unreachable"), now)).toEqual({
-    text: "TeamCity data is 1 h old: TeamCity cannot be reached.",
+    text: "TeamCity data may be out of date: TeamCity cannot be reached, last tried 1 h ago.",
     fix: null,
   });
   expect(staleLine(pipeline, health("ok"), sync("ok"), now)).toBeNull();

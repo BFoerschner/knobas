@@ -2635,3 +2635,8 @@ Implementer, PR for #851.
   *All*** (prototype-6's default). **Reversing:** low.
 - **#848's test "the source's word appears once" now counts the list only**: the pipeline page's
   header and *Open in <source>* name the source again, as prototype-6 does. **Reversing:** low.
+- **Merge-manager: a failed sync's warn line does not date the data** ("TeamCity data may be out of
+  date: TeamCity cannot be reached, last tried 1 h ago."). An unreachable or erroring source retries
+  on backoff, so `last_finished_at` is the last try, and "data is 1 min old" would understate the
+  age; no status field holds the last good sync. The credential line keeps prototype-6's "data is
+  N old" over the same instant #848's job page uses. **Reversing:** low (copy in `staleLine`).

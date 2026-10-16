@@ -298,8 +298,10 @@ export function staleLine(
   }
   if (run && !run.running && (run.last_outcome === "unreachable" || run.last_outcome === "error")) {
     const why = run.last_outcome === "unreachable" ? `${name} cannot be reached` : "the last sync failed";
-    const lead = run.last_finished_at ? `${name} data is ${age(run.last_finished_at, now)} old: ${why}.` : `${name} data is stale: ${why}.`;
-    return { text: lead, fix: null };
+    // A failing sync retries on backoff, so its last finish is the last try,
+    // not the last data: say when it was tried, never how old the data is.
+    const tried = run.last_finished_at ? `, last tried ${age(run.last_finished_at, now)} ago` : "";
+    return { text: `${name} data may be out of date: ${why}${tried}.`, fix: null };
   }
   return null;
 }

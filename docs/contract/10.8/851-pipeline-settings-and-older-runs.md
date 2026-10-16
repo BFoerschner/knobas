@@ -56,7 +56,7 @@
   kind outside the run frame, and answers at most `limit` (50 when `None`, clamped to
   `OLDER_RUNS_MAX`). `pipeline_settings` fills a repository's `entity_id` where the mirror holds
   the repository whose web page the URL is (canonical over the configured clone addresses, #683,
-  `.git` off, looked up by `RESOLVE_URL`). Both refuse `invalid` for a non-id (and `older` for a
+  `.git` off, looked up by `RESOLVE_URL`). Both refuse `invalid` for a non-id (and `older_pipeline_runs` for a
   `before` of another source), `not_found` when no live pipeline carries the id, and the source's
   own failure as `sources::to_ipc` maps it. Mirrored in `app/src/lib/ipc/entity.ts`
   (`olderPipelineRuns`, `pipelineSettings`, `PipelineSettings`, `PipelineRepository`,
