@@ -2774,7 +2774,7 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   the page.** R-10.13 names panels as editable, but a panel is a Confluence macro and the text box
   would delete it; marks, links, mentions and chips would flatten too. So a panel or any `ac:`
   element refuses as a macro, and marks, links and nested lists refuse as formatting, with a
-  sentence of their own. Follow-up filed to rule whether panels should become editable.
+  sentence of their own. Follow-up #975 rules whether panels become editable.
   **Reversing:** `blocks::refusal_of`.
 - **New page goes under a mirrored page; *Under* has no *Top of the space*.** `CreatePage` names a
   parent page (its SPI doc: every page has one), so the dialog defaults to the open page, else the
