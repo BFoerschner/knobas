@@ -78,6 +78,7 @@ function render(
     pastHorizon?: boolean;
     open?: OpenStretch[];
     day?: string | null;
+    job?: { key: string; entityId: string } | null;
   } = {},
 ) {
   let listed = over.blocks ?? friday();
@@ -94,6 +95,7 @@ function render(
     props: {
       day: over.day === undefined ? DAY : over.day,
       timer: { current: over.running ?? null },
+      job: over.job ?? null,
       ontimer: () => (stops += 1),
       onlog: (entityId: string, day: string) => logs.push([entityId, day]),
       now: () => NOW,
@@ -285,6 +287,25 @@ test("Assign… on an open stretch writes a block over exactly that stretch", as
   button(target, "Assign").click();
   await settle();
   expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
+});
+
+test("an open stretch offers Add to the current job, and makes a block on it over exactly that stretch", async () => {
+  const sent = render({ job: { key: "PAY-231", entityId: "jira:PAY-231" } });
+  await settle();
+  expect(button(row("open"), "Add to PAY-231").className).not.toContain("tf-ghost");
+  expect(button(row("open"), "Assign…").className).toContain("tf-ghost");
+  button(row("open"), "Add to PAY-231").click();
+  await settle();
+  expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:PAY-231" }]]);
+  expect(toasts.items.at(-1)?.text).toBe("Made a block on PAY-231, 12:35 to 13:10");
+});
+
+test("without a current job an open stretch offers Assign… only", async () => {
+  render();
+  await settle();
+  expect(button(row("open"), "Assign…").className).not.toContain("tf-ghost");
+  expect(() => button(row("open"), "Add to PAY-231")).toThrow();
+  expect(row("open").textContent).not.toContain("Add to");
 });
 
 test("Dismiss on an offered block dismisses it, says knobas will not offer it again, and the day re-reads", async () => {
