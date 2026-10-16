@@ -574,7 +574,7 @@
           {#if p.version !== null}<span>version {p.version}</span>{/if}
           {#if p.readable}<span>{readingMinutes(p)} min read</span>{/if}
           {#each p.labels as label (label)}
-            <button type="button" class="tf-chip tf-label" title="Search for {label}" onclick={() => searchLabel(label)}
+            <button type="button" class="tf-chip" title="Search for {label}" onclick={() => searchLabel(label)}
               >{label}</button>
           {/each}
         </div>

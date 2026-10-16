@@ -45,6 +45,11 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A source's markup reaches the shell only as a declared block list (`knobas_source::docs`, ADR-0022): the adapter projects its mirrored payload with a plain function, and the shell draws the blocks as text, never as markup. (#859)
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
 - A read whose answer is sentences (a proposal's reason and evidence) is drawn as the backend wrote it; the view adds prototype-6's headings and no words of its own, and leaves out a heading with nothing under it. (#836)
+- What a docs search needs beyond the words (a section's heading, a comment's author, the pages a
+  body links to) rides in `body_text` as marked lines the adapter writes at sync
+  (`knobas_source::docs::indexed`); the shell never reads the payload for it. (#860, #861)
+- A Docs write in the source's markup (a section edit, a new page's body) is the adapter's
+  (`DocWrites` in the registry); the shell sends plain text. (#862)
 - Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
 ## Copy and display
