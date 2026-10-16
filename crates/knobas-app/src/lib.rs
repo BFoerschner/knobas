@@ -30,6 +30,7 @@ pub mod capture;
 pub mod checkout;
 pub mod commands;
 pub mod conversation;
+pub mod docs;
 mod error;
 pub mod inbox;
 pub mod logging;
@@ -351,6 +352,8 @@ pub fn run() {
             commands::entity::snooze_inbox_item,
             commands::entity::complete_inbox_item,
             commands::entity::list_projects,
+            commands::entity::docs_tree,
+            commands::entity::docs_page,
             commands::entity::clones_root,
             commands::entity::set_clones_root,
             commands::entity::entity_checkout,

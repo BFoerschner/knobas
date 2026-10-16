@@ -26,6 +26,7 @@
 //! response shape is a claim that suite re-makes against Confluence itself.
 
 mod api;
+mod blocks;
 mod config;
 mod cql;
 mod cursor;
@@ -46,6 +47,9 @@ mod write;
 /// record the adapter would never have seen. `crates/knobas-app/tests/
 /// confluence_live.rs` is the one caller (#286); nothing in the app reads it.
 pub use api::EXPAND as EXPAND_FOR_TESTS;
+/// The Docs projection (#859, ADR-0022): a mirrored page as the reader's
+/// blocks, comments, version and labels. The registry's row for this adapter.
+pub use blocks::doc_content;
 pub use config::{ConfluenceConfig, Flavor};
 pub use descriptor::descriptor_template;
 pub use source::{ConfluenceSource, build};

@@ -23,6 +23,8 @@ struct Adapter {
     kind: &'static str,
     template: fn() -> SourceDescriptor,
     build: fn(SourceInstance) -> Result<Box<dyn Source>, SourceError>,
+    /// The Docs projection (#859, ADR-0022), for an adapter that emits pages.
+    doc: Option<knobas_source::docs::DocProjection>,
 }
 
 /// The table. One row per adapter crate.
@@ -37,31 +39,37 @@ const ADAPTERS: &[Adapter] = &[
         kind: "mock",
         template: knobas_source_mock::descriptor_template,
         build: knobas_source_mock::build,
+        doc: None,
     },
     Adapter {
         kind: "jira",
         template: knobas_source_jira::descriptor_template,
         build: knobas_source_jira::build,
+        doc: None,
     },
     Adapter {
         kind: "teamcity",
         template: knobas_source_teamcity::descriptor_template,
         build: knobas_source_teamcity::build,
+        doc: None,
     },
     Adapter {
         kind: "gitea",
         template: knobas_source_gitea::descriptor_template,
         build: knobas_source_gitea::build,
+        doc: None,
     },
     Adapter {
         kind: "confluence",
         template: knobas_source_confluence::descriptor_template,
         build: knobas_source_confluence::build,
+        doc: Some(knobas_source_confluence::doc_content),
     },
     Adapter {
         kind: "kuma",
         template: knobas_source_kuma::descriptor_template,
         build: knobas_source_kuma::build,
+        doc: None,
     },
 ];
 
@@ -85,6 +93,14 @@ impl Registry {
     #[must_use]
     pub fn templates(&self) -> Vec<SourceDescriptor> {
         ADAPTERS.iter().map(|a| (a.template)()).collect()
+    }
+
+    /// The Docs projection of an adapter kind (#859), `None` for a kind that
+    /// draws no pages or is not compiled in. A plain function over the
+    /// mirrored payload, so the reader needs no built source and no secret.
+    #[must_use]
+    pub fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
+        ADAPTERS.iter().find(|a| a.kind == kind).and_then(|a| a.doc)
     }
 }
 

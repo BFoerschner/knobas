@@ -116,7 +116,7 @@ pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
 /// `<img alt="a > b"/>` is one tag, and a scan to the first `>` would cut it
 /// in half and spill `b"/>` into the text. Returns the tag's inside and what
 /// follows it, or `None` for a `<` that never closes.
-fn split_tag(rest: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_tag(rest: &str) -> Option<(&str, &str)> {
     let mut quote: Option<char> = None;
     for (i, ch) in rest.char_indices().skip(1) {
         match quote {
@@ -155,7 +155,7 @@ fn mentioned_name<'a>(tag: &'a str, me: Option<Account<'a>>) -> Option<&'a str> 
 /// costs nothing and needs no second case. Deliberately total: a malformed tag
 /// yields no attribute rather than an error, which is this module's whole
 /// discipline (a body that would not parse is a page that is not searchable).
-fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
+pub(crate) fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let mut rest = tag;
     loop {
         let at = rest.find(name)?;
@@ -177,7 +177,7 @@ fn attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
 }
 
 /// The element name inside a tag body, lowercased and without its `/`.
-fn tag_name(tag: &str) -> String {
+pub(crate) fn tag_name(tag: &str) -> String {
     tag.trim_start_matches('/')
         .split(|c: char| c.is_ascii_whitespace() || c == '/' || c == '>')
         .next()
@@ -235,7 +235,7 @@ fn is_block(name: &str) -> bool {
 /// `&nbsp;` becomes an ordinary space rather than U+00A0: what this feeds is a
 /// full-text index and a launcher excerpt, and a non-breaking space there is a
 /// character no search will ever be typed with.
-fn decode_entities(raw: &str) -> String {
+pub(crate) fn decode_entities(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len());
     let mut rest = raw;
     while let Some(at) = rest.find('&') {
