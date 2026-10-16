@@ -16,6 +16,17 @@ import type { JobPorts } from "./job/ports";
 import TfShell from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
 
+// The Day tab reads the real bridge; its one read here is an open stretch.
+vi.mock("../ipc/time", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ipc/time")>()),
+  dayBlocks: () =>
+    Promise.resolve({
+      blocks: [],
+      past_horizon: false,
+      open: [{ started_at: new Date(2026, 7, 22, 12, 35).toISOString(), ended_at: new Date(2026, 7, 22, 13, 10).toISOString() }],
+    }),
+}));
+
 let target: HTMLElement;
 let shell: ReturnType<typeof mount> | null = null;
 
@@ -422,4 +433,32 @@ test("a job opened by its id names its key on the Job tab", async () => {
   await at("#/job/jira:PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).toContain("PAY-231");
   expect(target.querySelector(".tf-nav a[aria-current='page']")?.textContent).not.toContain("jira:");
+});
+
+function addToButton(): HTMLButtonElement | undefined {
+  return [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim().startsWith("Add to"));
+}
+
+test("the Day tab's open rows offer Add to the job last opened, found by its key (#1027)", async () => {
+  start();
+  await at("#/job/PAY-231");
+  await at("#/time/2026-08-22");
+  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
+});
+
+test("with no job opened, the Day tab's open rows offer Add to the timer's ticket (#1027)", async () => {
+  const timer = {
+    current: { target: { kind: "entity", entity_id: "jira:PAY-231" }, started_at: "2026-08-22T12:00:00Z", last_heartbeat: "2026-08-22T12:00:00Z" } as RunningTimer,
+    elapsed: "1:00",
+  };
+  start({ timer });
+  await at("#/time/2026-08-22");
+  expect(addToButton()?.textContent?.trim()).toBe("Add to PAY-231");
+});
+
+test("with no job and no timer, the Day tab's open rows offer Assign… only (#1027)", async () => {
+  start();
+  await at("#/time/2026-08-22");
+  expect(addToButton()).toBeUndefined();
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Assign…")).toBe(true);
 });
