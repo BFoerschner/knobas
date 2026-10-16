@@ -2749,27 +2749,39 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
     );
 }
 
-/// The run options (#852, R-9.7) against the real server: a `run_build` with
-/// a clean checkout and first in the queue reaches TeamCity as its own
-/// triggering options. The queued build is read back with
-/// `triggeringOptions(cleanSources,queueAtTop)` while it waits, and the
-/// finished build's log says the checkout was clean. Deleted again by
-/// [`Queued`].
+/// The run options (#852, R-9.7) against the real server. TeamCity takes
+/// `triggeringOptions` on the queue and answers none of it back on a read
+/// (measured on the seeded 2026.1.3 server, 2026-10-16: `fields=
+/// triggeringOptions(..)` answers the build without it), so each option is
+/// witnessed by what it does:
+///
+/// * **first in the queue**: two plain builds go on the queue first, so the
+///   one agent is busy and one waits; the adapter's run with `first_in_queue`
+///   then stands ahead of the waiting one in `/app/rest/buildQueue`;
+/// * **clean checkout**: the finished run's log says the checkout was clean.
+///
+/// Every build is deleted again by its [`Queued`] guard.
 #[tokio::test]
 #[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
 async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_options() {
     use knobas_source::WriteOp;
 
+    const BRANCH: &str = "feature/PAY-231-sepa-retry";
     let seeded = seeded();
-    let mut guard = Queued::new(&seeded).await;
+    // All three guards before anything is queued: each clears leftovers.
+    let mut busy = Queued::new(&seeded).await;
+    let mut waiting = Queued::new(&seeded).await;
+    let mut ours = Queued::new(&seeded).await;
     let config = seeded.fixture_build(1187).build_type.clone();
     let entity = format!("teamcity:buildType:{config}");
     let source = seeded.scoped_to(&[config.as_str()]);
 
+    busy.queue(&seeded, &config, BRANCH).await;
+    let waiting_id = id_of(&waiting.queue(&seeded, &config, BRANCH).await);
     let receipt = source
         .write(WriteOp::RunBuild {
             entity,
-            branch: None,
+            branch: Some(BRANCH.to_owned()),
             parameters: Vec::new(),
             clean_checkout: true,
             first_in_queue: true,
@@ -2781,27 +2793,30 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
         .as_deref()
         .and_then(|id| id.parse().ok())
         .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"));
-    guard.adopt(id);
+    ours.adopt(id);
 
-    let (status, options) = seeded
+    let (status, queue) = seeded
         .get(&format!(
-            "app/rest/builds/id:{id}?fields=id,triggeringOptions(cleanSources,queueAtTop)"
+            "app/rest/buildQueue?locator=buildType:(id:{config})&fields=build(id)"
         ))
         .await;
-    println!("SEEDED run options as TeamCity holds them: {status} {options}");
-    assert_eq!(status, 200, "{options}");
-    assert_eq!(
-        options["triggeringOptions"]["cleanSources"],
-        serde_json::json!(true),
-        "the clean checkout reached TeamCity: {options}"
+    println!("SEEDED queue after the run: {status} {queue}");
+    assert_eq!(status, 200, "{queue}");
+    let order: Vec<i64> = queue["build"]
+        .as_array()
+        .map(|rows| rows.iter().map(id_of).collect())
+        .unwrap_or_default();
+    let at = |wanted: i64| order.iter().position(|&queued| queued == wanted);
+    assert!(
+        at(waiting_id).is_some(),
+        "the second plain build waits behind the first: {order:?}"
     );
-    assert_eq!(
-        options["triggeringOptions"]["queueAtTop"],
-        serde_json::json!(true),
-        "first in the queue reached TeamCity: {options}"
+    assert!(
+        at(id) < at(waiting_id),
+        "first in the queue stands ahead of the build that waited: {order:?}"
     );
 
-    let record = guard.wait_finished(&seeded).await;
+    let record = ours.wait_finished(&seeded).await;
     println!("SEEDED run with options: {record}");
     let log = seeded
         .http
@@ -2813,15 +2828,18 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
         .text()
         .await
         .unwrap_or_default();
+    // The agent's own sentence for `cleanSources` (2026.1.3, 2026-10-16):
+    // "Clean build enabled: removing old files from <checkout dir>".
     let clean: Vec<&str> = log
         .lines()
-        .filter(|line| line.to_lowercase().contains("clean"))
+        .filter(|line| line.contains("Clean build enabled"))
         .collect();
     println!("SEEDED log lines naming a clean checkout: {clean:#?}");
     assert!(
         !clean.is_empty(),
         "the agent's log names the clean checkout:\n{log}"
     );
+    drop((busy, waiting, ours));
 }
 
 /// The nested project [`a_configured_project_takes_in_its_nested_projects_and_writes_their_path`]

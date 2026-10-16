@@ -6,6 +6,7 @@ import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
+import { runView } from "./builds";
 import { pullView } from "./views/pulls";
 import { repoView } from "./views/repos";
 
@@ -161,6 +162,9 @@ function entityView(args: Record<string, unknown>) {
   // A pull request: the pull request page (#841).
   const pull = pullView(id, (args["section"] as string | null | undefined) ?? null);
   if (pull !== undefined) return pull;
+  // A run's parameters: the Run… dialog's *#N settings* (#852).
+  const ran = runView(id, (args["section"] as string | null | undefined) ?? null);
+  if (ran !== undefined) return ran;
   if (id !== "mock:9f2c1ab") return null;
   const section = (args["section"] as string | null | undefined) ?? null;
   const overview = {

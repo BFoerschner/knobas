@@ -90,6 +90,21 @@ const SETTINGS: PipelineSettings = {
     { name: "deploy.token", value: "", inherited: true, secret: true, editable: true, description: null },
   ],
   parameter_write_op: "set_parameter",
+  parameter_specs: [
+    {
+      name: "env",
+      label: null,
+      hint: null,
+      kind: {
+        type: "select",
+        options: [
+          { value: "staging", label: null },
+          { value: "prod-dryrun", label: null },
+        ],
+      },
+    },
+    { name: "deploy.token", label: null, hint: null, kind: { type: "text" } },
+  ],
 };
 
 const DESCRIPTOR = {
@@ -132,6 +147,10 @@ function draw(
       return Promise.resolve({ id: 41 } as QueuedWrite);
     },
     openExternal: () => Promise.resolve(),
+    presets: () => Promise.resolve([]),
+    savePreset: (preset) => Promise.resolve(preset),
+    repoBranches: () => Promise.resolve(["main", "feature/PAY-231-sepa-retry", "release/1.9"]),
+    runParameters: () => Promise.resolve([]),
     ...overrides,
   };
   page = mount(TfPipeline, {
@@ -287,4 +306,173 @@ test("settings that cannot be read say so on their tab, and the runs still draw"
   await settle();
   expect(target.textContent).toContain("Triggers could not be read from TeamCity: connection refused");
   expect(target.querySelectorAll(".tf-bars a")).toHaveLength(30);
+});
+
+// -- the Run… dialog (#852) -------------------------------------------------------
+
+const dialog = () => target.querySelector<HTMLElement>('[role="dialog"]');
+const field = <T extends HTMLElement>(label: string) => {
+  const at = [...dialog()!.querySelectorAll("label")].find((l) => l.textContent?.trim() === label);
+  return dialog()!.querySelector<T>(`#${CSS.escape(at!.htmlFor)}`)!;
+};
+function type(input: HTMLInputElement, value: string) {
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+function choose(select: HTMLSelectElement, value: string) {
+  select.value = value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+}
+const summary = () => dialog()!.querySelector(".tf-runsum")!.textContent;
+
+test("Run… opens the dialog on the job's branch with each parameter typed by its spec; Run queues only what changed, drawn queued at once", async () => {
+  const drawn = draw();
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")?.textContent).toBe("Run Payout_IntegrationTests");
+  expect(field<HTMLSelectElement>("Start from").value).toBe("");
+  expect(field<HTMLInputElement>("Branch").value).toBe("feature/PAY-231-sepa-retry");
+  const env = field<HTMLSelectElement>("env");
+  expect([...env.options].map((o) => o.value)).toEqual(["staging", "prod-dryrun"]);
+  expect(field<HTMLInputElement>("deploy.token").type).toBe("password");
+  expect(summary()).toBe("On feature/PAY-231-sepa-retry, defaults");
+  expect(dialog()!.querySelector(".tf-chg")?.textContent).toBe("");
+
+  choose(env, "prod-dryrun");
+  expect(dialog()!.querySelector(".tf-chg")?.textContent).toBe("changed");
+  expect(summary()).toBe("On feature/PAY-231-sepa-retry, with env=prod-dryrun");
+  const clean = [...dialog()!.querySelectorAll<HTMLLabelElement>("label.tf-ck")].find((l) => l.textContent?.includes("Clean checkout"))!;
+  clean.querySelector("input")!.click();
+  flushSync();
+
+  button("Run")!.click();
+  await settle();
+  expect(dialog()).toBeNull();
+  expect(drawn.writes).toEqual([
+    {
+      RunBuild: {
+        entity: PIPELINE.entity_id,
+        branch: "feature/PAY-231-sepa-retry",
+        parameters: [{ name: "env", value: "prod-dryrun" }],
+        clean_checkout: true,
+        first_in_queue: false,
+      },
+    },
+  ]);
+  const first = target.querySelector(".tf-runs tbody tr")!;
+  expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
+});
+
+test("the branch combobox: type-ahead with the default and the job's branch marked, arrows and Enter pick; the default runs as no branch", async () => {
+  const drawn = draw();
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  const branch = field<HTMLInputElement>("Branch");
+  branch.dispatchEvent(new FocusEvent("focus"));
+  type(branch, "");
+  const options = () => [...dialog()!.querySelectorAll('[role="option"]')].map((o) => o.textContent?.replace(/\s+/g, " ").trim());
+  expect(options()).toEqual(["maindefault", "feature/PAY-231-sepa-retryyour job’s branch", "release/1.9"]);
+  type(branch, "rel");
+  expect(options()).toEqual(["release/1.9"]);
+  type(branch, "");
+  branch.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  branch.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+  branch.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+  flushSync();
+  expect(branch.value).toBe("main");
+  expect(summary()).toBe("On main, defaults");
+  button("Run")!.click();
+  await settle();
+  expect(drawn.writes).toEqual([
+    { RunBuild: { entity: PIPELINE.entity_id, branch: null, parameters: [], clean_checkout: false, first_in_queue: false } },
+  ]);
+});
+
+test("Run again… starts from that run's settings; a preset fills the form; Save as preset stores the overrides under the name", async () => {
+  const saved: unknown[] = [];
+  draw(undefined, "PAY-231", {
+    runParameters: (runId) =>
+      Promise.resolve(
+        runId === "teamcity:build:1186"
+          ? [
+              { name: "env", value: "prod-dryrun" },
+              { name: "deploy.token", value: "", secret: true },
+            ]
+          : [],
+      ),
+    presets: () =>
+      Promise.resolve([
+        {
+          pipeline_id: PIPELINE.entity_id,
+          name: "Only staging",
+          branch: "release/1.9",
+          parameters: [{ name: "env", value: "staging" }],
+          clean_checkout: false,
+          first_in_queue: true,
+        },
+      ]),
+    savePreset: (preset) => {
+      saved.push(preset);
+      return Promise.resolve(preset);
+    },
+  });
+  await settle();
+  const again = [...target.querySelectorAll(".tf-runs tbody tr")].find((row) => row.textContent?.includes("#1186"))!;
+  [...again.querySelectorAll("button")].find((b) => b.textContent === "Run again…")!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")?.textContent).toBe("Run Payout_IntegrationTests again, from #1186");
+  const start = field<HTMLSelectElement>("Start from");
+  expect([...start.options].map((o) => o.textContent)).toEqual(["Defaults", "#1186 settings", "Preset: Only staging"]);
+  expect(start.value).toBe("from");
+  expect(field<HTMLInputElement>("Branch").value).toBe("main");
+  expect(field<HTMLSelectElement>("env").value).toBe("prod-dryrun");
+  expect(field<HTMLInputElement>("deploy.token").value).toBe("");
+
+  choose(start, "0");
+  expect(field<HTMLInputElement>("Branch").value).toBe("release/1.9");
+  expect(field<HTMLSelectElement>("env").value).toBe("staging");
+  choose(start, "");
+  expect(summary()).toBe("On release/1.9, defaults");
+
+  choose(field<HTMLSelectElement>("env"), "prod-dryrun");
+  const save = [...dialog()!.querySelectorAll<HTMLLabelElement>("label.tf-ck")].find((l) => l.textContent?.includes("Save these settings"))!;
+  save.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click();
+  type(save.querySelector<HTMLInputElement>('input[type="text"]')!, "Prod dry run");
+  button("Run")!.click();
+  await settle();
+  expect(saved).toEqual([
+    {
+      pipeline_id: PIPELINE.entity_id,
+      name: "Prod dry run",
+      branch: "release/1.9",
+      parameters: [{ name: "env", value: "prod-dryrun" }],
+      clean_checkout: false,
+      first_in_queue: true,
+    },
+  ]);
+});
+
+test("Add a parameter sends a free name and value; a failing sign-in warns that the run waits in the queue", async () => {
+  const drawn = draw(undefined, null, {
+    sources: () => Promise.resolve([{ ...SOURCE, health: { ...SOURCE.health, state: "unauthorized", checked_at: null } }]),
+  });
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  expect(dialog()!.querySelector(".tf-banner.tf-warn")?.textContent?.trim()).toBe(
+    "TeamCity sign-in is failing. The run waits in knobas’s write queue and starts once you re-enter the password.",
+  );
+  button("Add a parameter")!.click();
+  flushSync();
+  type(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name of added parameter 1"]')!, "env.EXTRA");
+  type(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Value of added parameter 1"]')!, "1");
+  expect(summary()).toBe("On main, with env.EXTRA=1");
+  button("Cancel")!.click();
+  await settle();
+  expect(dialog()).toBeNull();
+  expect(drawn.writes).toEqual([]);
 });
