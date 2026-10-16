@@ -72,6 +72,13 @@ export interface ShareParts {
    * archive rewrites a stored query to a newer grammar.
    */
   smart_lists: boolean;
+  /**
+   * The ticket views somebody made (#812). On by default, beside smart lists:
+   * a view is a query and a layout. The dialog offers its toggle only once a
+   * view exists and sends it off while there is none, as with smart lists.
+   * The text crosses exactly as it was saved.
+   */
+  ticket_views: boolean;
 }
 
 /** The ratified defaults, so a caller can start from them and toggle. */
@@ -83,6 +90,7 @@ export const shareDefaults: ShareParts = {
   time: false,
   sources: true,
   smart_lists: true,
+  ticket_views: true,
 };
 
 /** One archive on disk — `backup::ArchiveFile`. */

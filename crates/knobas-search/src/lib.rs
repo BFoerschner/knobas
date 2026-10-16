@@ -107,6 +107,16 @@ pub enum SearchError {
     UnknownList(String),
 }
 
+/// What a stored query reads as today ([`Searcher::readings`], #812).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reading {
+    /// The grammar read all of it, and this many rows match.
+    Count(u64),
+    /// The part the grammar could not read: the tokens it did not know, or
+    /// the bound the text is past.
+    Unreadable(String),
+}
+
 /// The launcher's engine.
 ///
 /// Holds a pool and the kind catalog, and nothing per-query: a `Searcher` is
@@ -384,6 +394,60 @@ impl Searcher {
         let built = sql::ids_sql(&words, &filters);
         let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
         Ok(Some(ids.into_iter().map(|(id,)| id).collect()))
+    }
+
+    /// What each stored text reads as today (#812): how many rows of `kind`
+    /// [`matching_ids`](Self::matching_ids) would admit, or the part the
+    /// grammar could not read. A ticket view's count in the views pane.
+    ///
+    /// One vocabulary for all of them, then one count per readable text. A
+    /// text with neither words nor a filter counts every live row of `kind`,
+    /// which is what its board draws. Nothing is rewritten: the text is read,
+    /// never stored back.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if a statement fails. A text the grammar refuses is
+    /// a [`Reading::Unreadable`], never an error.
+    pub async fn readings(&self, raws: &[&str], kind: &str) -> Result<Vec<Reading>, SearchError> {
+        let vocab = self.vocabulary().await?;
+        let mut out = Vec::with_capacity(raws.len());
+        for raw in raws {
+            if let Err(error) = validate(SearchQuery {
+                raw: (*raw).to_owned(),
+                limit: 1,
+                filters: SearchFilters::default(),
+            }) {
+                out.push(Reading::Unreadable(match error {
+                    SearchError::Invalid(message) => message,
+                    other => other.to_string(),
+                }));
+                continue;
+            }
+            let parsed = query::parse(raw, &vocab);
+            if !parsed.query.unknown_tokens.is_empty() {
+                out.push(Reading::Unreadable(parsed.query.unknown_tokens.join(" ")));
+                continue;
+            }
+            let mut filters = query::merge(&parsed, &SearchFilters::default());
+            if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == kind) {
+                out.push(Reading::Count(0));
+                continue;
+            }
+            filters.kinds = vec![kind.to_owned()];
+            let words = parsed
+                .query
+                .text
+                .to_lowercase()
+                .split_whitespace()
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            let (count,): (i64,) = sql::query_as_with(sql::ids_count_sql(&words, &filters))
+                .fetch_one(&self.pool)
+                .await?;
+            out.push(Reading::Count(u64::try_from(count).unwrap_or(0)));
+        }
+        Ok(out)
     }
 
     /// What an empty box answers with: the smart lists and the newest items.

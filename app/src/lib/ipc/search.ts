@@ -358,3 +358,90 @@ export interface ParentSuggestion {
 export function filterSuggestions(under = "", parentsOnly = false): Promise<FilterSuggestions> {
   return invoke<FilterSuggestions>("filter_suggestions", { under, parentsOnly });
 }
+
+// ---- ticket views (#812) -----------------------------------------------------
+
+/** What a ticket board's lanes split by (R-3.5) — `ticket_views::LANES`. */
+export type ViewLanes = "none" | "epic" | "assignee" | "priority" | "issuetype" | "label";
+/** What a card can show (R-3.16) — `ticket_views::CARD_FIELDS`. */
+export type CardField = "type" | "signals" | "comments" | "assignee" | "epic" | "labels";
+/** The list's columns (R-3.16); `key` is always one — `ticket_views::LIST_COLUMNS`. */
+export type ListColumn = "key" | "summary" | "status" | "priority" | "signals" | "assignee" | "updated" | "epic" | "labels";
+/** What a list header sorts by (R-3.6) — `ticket_views::SORT_COLUMNS`. */
+export type ViewSortColumn = "key" | "summary" | "status" | "priority" | "assignee" | "updated";
+
+/** One ticket board column — `ticket_views::ViewColumn`. */
+export interface ViewColumn {
+  name: string;
+  statuses: string[];
+  /** *At most*, or `null`. */
+  limit: number | null;
+}
+
+/** The list's header sort — `ticket_views::ListSort`. */
+export interface ListSort {
+  column: ViewSortColumn;
+  direction: "ascending" | "descending";
+}
+
+/** One ticket view as stored — `ticket_views::TicketView`. */
+export interface TicketView {
+  /** A slug: `#/tickets/<id>` opens it. */
+  id: string;
+  name: string;
+  group: string;
+  position: number;
+  /** The conditions as search text, exactly as saved; empty is every ticket. */
+  query: string;
+  layout: "board" | "list";
+  /** Empty is one column per status. */
+  columns: ViewColumn[];
+  lanes: ViewLanes;
+  card_fields: CardField[];
+  list_columns: ListColumn[];
+  /** `null` is newest first. */
+  list_sort: ListSort | null;
+  /** The Jira board or filter a Jira view shows (#877); `null` on your own. */
+  jira_ref: string | null;
+}
+
+/** A row of the views pane — `ticket_views::TicketViewRow`. */
+export interface TicketViewRow extends TicketView {
+  /** How many tickets the text admits; `null` when the grammar could not read it. */
+  count: number | null;
+  /** The part of the text the grammar could not read, or `null`. */
+  unreadable: string | null;
+}
+
+/** What `save_ticket_view` takes — `ticket_views::TicketViewDraft`. */
+export interface TicketViewDraft {
+  /** `null` makes a new view; an id saves over it, or puts a deleted one back. */
+  id: string | null;
+  name: string;
+  group: string;
+  /** `null` keeps a saved view's place and puts a new one last. */
+  position: number | null;
+  query: string;
+  layout: "board" | "list";
+  columns: ViewColumn[];
+  lanes: ViewLanes;
+  card_fields: CardField[];
+  list_columns: ListColumn[];
+  list_sort: ListSort | null;
+  jira_ref: string | null;
+}
+
+/** Every ticket view in list order, each with its count (#812). */
+export function ticketViews(): Promise<TicketViewRow[]> {
+  return invoke<TicketViewRow[]>("ticket_views");
+}
+
+/** Save a ticket view, new or over the one the draft names; answers it as stored. */
+export function saveTicketView(view: TicketViewDraft): Promise<TicketView> {
+  return invoke<TicketView>("save_ticket_view", { view });
+}
+
+/** Delete a ticket view; *Undo* saves it back. */
+export function deleteTicketView(id: string): Promise<void> {
+  return invoke<void>("delete_ticket_view", { id });
+}

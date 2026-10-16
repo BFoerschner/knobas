@@ -196,6 +196,7 @@ mod tests {
                 "notes",
                 "smart_lists",
                 "sources",
+                "ticket_views",
                 "time",
             ],
         );
@@ -206,11 +207,15 @@ mod tests {
             json["smart_lists"], true,
             "the ratified default is saved smart lists on (#507)"
         );
+        assert_eq!(
+            json["ticket_views"], true,
+            "the ratified default is ticket views on (#812)"
+        );
 
         let sent = serde_json::json!({
             "links": true, "assets": false, "contexts": false,
             "notes": true, "time": true, "sources": false,
-            "smart_lists": false
+            "smart_lists": false, "ticket_views": false
         });
         let decoded: ShareParts = serde_json::from_value(sent).unwrap();
         assert_eq!(
@@ -223,6 +228,7 @@ mod tests {
                 time: true,
                 sources: false,
                 smart_lists: false,
+                ticket_views: false,
             }
         );
     }
