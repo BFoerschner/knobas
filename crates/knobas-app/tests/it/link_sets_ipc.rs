@@ -43,6 +43,13 @@ fn project() -> String {
     format!("L{letters}")
 }
 
+/// A set name nothing else in this database holds: a set's id is the slug of
+/// its name, so two tests saving "Stack" would take each other's ids (#1039).
+/// `project` is the test's own key, so the prefix is unique per test.
+fn named(project: &str, name: &str) -> String {
+    format!("{project} {name}")
+}
+
 /// One Jira issue in `project`, under `parent` when given, assigned to
 /// `assignee` when given.
 async fn issue(
@@ -160,7 +167,7 @@ async fn an_epic_rule_shows_its_members_on_every_ticket_under_the_epic() {
     let saved = link_sets::save(
         &pool,
         draft(
-            "Payout stack",
+            &named(&p, "Payout stack"),
             vec![member("repo", &repo)],
             vec![rule("epic", &epic)],
         ),
@@ -169,7 +176,7 @@ async fn an_epic_rule_shows_its_members_on_every_ticket_under_the_epic() {
     .unwrap();
     let from_set = Origin::LinkSet {
         set: saved.set.id.clone(),
-        name: "Payout stack".to_owned(),
+        name: named(&p, "Payout stack"),
     };
 
     assert_eq!(reached(&pool, &story).await.get(&repo), Some(&from_set));
@@ -208,7 +215,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     link_sets::save(
         &pool,
         draft(
-            "Children",
+            &named(&p, "Children"),
             vec![member("page", &page)],
             vec![rule("parent", &story)],
         ),
@@ -218,7 +225,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     link_sets::save(
         &pool,
         draft(
-            "Project",
+            &named(&p, "Project"),
             vec![member("monitor", &monitor)],
             vec![rule("project", &format!("jira:{q}"))],
         ),
@@ -228,7 +235,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     link_sets::save(
         &pool,
         draft(
-            "By hand",
+            &named(&p, "By hand"),
             vec![member("asset", &asset)],
             vec![rule("manual", &lone)],
         ),
@@ -263,7 +270,7 @@ async fn an_item_shows_once_with_its_first_reason() {
     link_sets::save(
         &pool,
         draft(
-            "B",
+            &named(&p, "B"),
             vec![member("repo", &own), member("page", &shared)],
             vec![rule("manual", &ticket)],
         ),
@@ -273,7 +280,7 @@ async fn an_item_shows_once_with_its_first_reason() {
     let a = link_sets::save(
         &pool,
         draft(
-            "A",
+            &named(&p, "A"),
             vec![member("page", &shared)],
             vec![rule("manual", &ticket)],
         ),
@@ -294,7 +301,7 @@ async fn an_item_shows_once_with_its_first_reason() {
         first,
         Origin::LinkSet {
             set: a.set.id.clone(),
-            name: "A".to_owned()
+            name: named(&p, "A")
         },
         "of two sets, the one whose id sorts first"
     );
@@ -317,7 +324,7 @@ async fn editing_a_set_changes_every_job_at_once() {
     let saved = link_sets::save(
         &pool,
         draft(
-            "Stack",
+            &named(&p, "Stack"),
             vec![member("repo", &first)],
             vec![rule("epic", &epic)],
         ),
@@ -326,7 +333,7 @@ async fn editing_a_set_changes_every_job_at_once() {
     .unwrap();
 
     let mut edit = draft(
-        "Stack",
+        &named(&p, "Stack"),
         vec![member("monitor", &second)],
         vec![rule("epic", &epic)],
     );
@@ -370,7 +377,7 @@ async fn hiding_a_member_on_one_ticket_leaves_the_set_and_the_others() {
     let saved = link_sets::save(
         &pool,
         draft(
-            "Stack",
+            &named(&p, "Stack"),
             vec![member("repo", &repo)],
             vec![rule("epic", &epic)],
         ),
@@ -441,7 +448,7 @@ async fn sets_never_feed_membership_the_tray_the_inbox_or_the_export() {
     link_sets::save(
         &pool,
         draft(
-            "Set",
+            &named(&p, "Set"),
             vec![member("repo", &from_set)],
             vec![rule("manual", &ticket)],
         ),
@@ -503,7 +510,7 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
         &pool,
         LinkSetDraft {
             id: None,
-            name: "  Payout stack ".to_owned(),
+            name: format!("  {} ", named(&p, "Payout stack")),
             description: "What a payout change touches.".to_owned(),
             members: vec![member("repo", &repo), member("page", &page)],
             patterns: Vec::new(),
@@ -512,8 +519,8 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
     )
     .await
     .unwrap();
-    assert!(saved.set.id.starts_with("payout-stack"), "{}", saved.set.id);
-    assert_eq!(saved.set.name, "Payout stack");
+    assert!(saved.set.id.ends_with("payout-stack"), "{}", saved.set.id);
+    assert_eq!(saved.set.name, named(&p, "Payout stack"));
     let titles: Vec<_> = saved
         .set
         .members
@@ -568,7 +575,11 @@ async fn a_rules_preview_is_exactly_the_tickets_that_show_the_set() {
         let the_rule = rule(kind, &value);
         let saved = link_sets::save(
             &pool,
-            draft(kind, vec![member("repo", &repo)], vec![the_rule.clone()]),
+            draft(
+                &named(&p, kind),
+                vec![member("repo", &repo)],
+                vec![the_rule.clone()],
+            ),
         )
         .await
         .unwrap();
@@ -632,12 +643,20 @@ async fn a_set_knobas_cannot_store_is_refused() {
     // An editor still open on a set somebody deleted cannot bring it back.
     let saved = link_sets::save(
         &pool,
-        draft("Gone soon", vec![], vec![rule("manual", &ticket)]),
+        draft(
+            &named(&p, "Gone soon"),
+            vec![],
+            vec![rule("manual", &ticket)],
+        ),
     )
     .await
     .unwrap();
     link_sets::delete(&pool, &saved.set.id).await.unwrap();
-    let mut stale = draft("Gone soon", vec![], vec![rule("manual", &ticket)]);
+    let mut stale = draft(
+        &named(&p, "Gone soon"),
+        vec![],
+        vec![rule("manual", &ticket)],
+    );
     stale.id = Some(saved.set.id.clone());
     let error = link_sets::save(&pool, stale).await.unwrap_err();
     assert_eq!(error.code, IpcErrorCode::NotFound);
@@ -671,7 +690,7 @@ async fn a_this_job_list_holds_the_sets_members() {
     link_sets::save(
         &pool,
         draft(
-            "Docs",
+            &named(&p, "Docs"),
             vec![member("page", &page)],
             vec![rule("manual", &ticket)],
         ),
@@ -735,7 +754,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     let stack = link_sets::save(
         &pool,
         draft(
-            "Stack",
+            &named(&p, "Stack"),
             vec![member("repo", &repo), member("page", &page)],
             vec![rule("manual", &other_epic), rule("epic", &epic)],
         ),
@@ -745,7 +764,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     link_sets::save(
         &pool,
         draft(
-            "Kit",
+            &named(&p, "Kit"),
             vec![member("page", &page)],
             vec![rule("project", &format!("jira:{p}")), rule("epic", &epic)],
         ),
@@ -755,7 +774,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     link_sets::save(
         &pool,
         draft(
-            "Elsewhere",
+            &named(&p, "Elsewhere"),
             vec![member("page", &page)],
             vec![rule("epic", &other_epic)],
         ),
@@ -766,7 +785,11 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
 
     let read = link_sets::on_job(&pool, &story).await.unwrap();
     let names: Vec<&str> = read.sets.iter().map(|set| set.name.as_str()).collect();
-    assert_eq!(names, ["Kit", "Stack"], "by name, and only what applies");
+    assert_eq!(
+        names,
+        [named(&p, "Kit"), named(&p, "Stack")],
+        "by name, and only what applies"
+    );
     let kit = &read.sets[0];
     assert_eq!(
         (kit.via.kind.as_str(), kit.via.value.clone()),
@@ -823,7 +846,10 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
         .collect();
     assert_eq!(
         names,
-        [("Kit", "project"), ("Stack", "manual")],
+        [
+            (named(&p, "Kit").as_str(), "project"),
+            (named(&p, "Stack").as_str(), "manual")
+        ],
         "the epic itself is not under itself: Elsewhere stays off"
     );
     assert!(
