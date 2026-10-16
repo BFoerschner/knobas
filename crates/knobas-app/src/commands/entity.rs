@@ -4157,6 +4157,80 @@ pub async fn list_projects_inner(
     Ok(knobas_core::project::list(pool).await?)
 }
 
+// -- the Docs reader (#859) -------------------------------------------------
+//
+// Here for the frozen layout's reason (§10.8: no new `commands/` or `ipc/`
+// module). The reads are `crate::docs`; these are the shims.
+
+/// The Docs reader's left pane: every space the mirror holds pages of, each
+/// with its page tree, and the page read last (#859, ADR-0022).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+#[tauri::command]
+pub async fn docs_tree(lifecycle: State<'_, Lifecycle>) -> Result<crate::docs::DocsTree, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_tree_inner(&pool).await
+}
+
+/// [`docs_tree`] with the pool handed in, for a test.
+///
+/// # Errors
+///
+/// As [`docs_tree`].
+pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, IpcError> {
+    // The census table the spaces come from is resolved from the stored
+    // declarations, which every search command writes first (#759).
+    crate::commands::search::searcher(pool).await?;
+    let declarations = declared_paths(pool).await?;
+    crate::docs::tree(pool, &declarations).await
+}
+
+/// One page as the Docs reader draws it: header fields, blocks and comments
+/// (#859, ADR-0022).
+///
+/// # Errors
+///
+/// `invalid` for something that is not an entity id, `not_found` for one the
+/// live mirror does not hold or that is not a page, `internal` for a query
+/// failure, `not_ready` before bring-up.
+#[tauri::command]
+pub async fn docs_page(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::docs::DocPage, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_page_inner(&pool, &entity_id).await
+}
+
+/// [`docs_page`] with the pool handed in, for a test.
+///
+/// # Errors
+///
+/// As [`docs_page`].
+pub async fn docs_page_inner(
+    pool: &PgPool,
+    entity_id: &str,
+) -> Result<crate::docs::DocPage, IpcError> {
+    crate::commands::search::searcher(pool).await?;
+    let declarations = declared_paths(pool).await?;
+    let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+        .await
+        .map_err(IpcError::internal)?
+        .identity;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::page(
+        pool,
+        &declarations,
+        |kind| registry.doc_projection(kind),
+        &me,
+        entity_id,
+    )
+    .await
+}
+
 // -- the standup digest (#288) ----------------------------------------------
 //
 // Here for the reason the two sections above give, and the reason spec #272

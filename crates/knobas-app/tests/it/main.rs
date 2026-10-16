@@ -27,6 +27,7 @@ mod contexts_ipc;
 mod conversation_ipc;
 mod demo;
 mod demo_delete_during_load;
+mod docs_ipc;
 mod entity;
 mod entity_mirror;
 mod entity_view;

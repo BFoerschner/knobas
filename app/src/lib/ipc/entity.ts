@@ -2475,3 +2475,121 @@ export interface NotesExport {
 export function exportNotesMarkdown(): Promise<NotesExport> {
   return invoke<NotesExport>("export_notes_markdown");
 }
+
+// -- the Docs reader (#859, ADR-0022) ----------------------------------------
+
+/** Every space the mirror holds pages of, and the page read last — `DocsTree`. */
+export interface DocsTree {
+  /** Ordered by source, then key. */
+  spaces: DocSpace[];
+  /** The page opened most recently (`visit_entity`) while it is still live; `#/docs` opens it. */
+  last_read: string | null;
+}
+
+/** One space and its pages — `DocSpace`. */
+export interface DocSpace {
+  source_id: string;
+  key: string;
+  /** `null` where no page of it carries a name knobas can read. */
+  name: string | null;
+  /** Every live page of the space, ordered by title. */
+  pages: DocNode[];
+}
+
+/** One page in a space's tree — `DocNode`. */
+export interface DocNode {
+  entity_id: string;
+  title: string;
+  /** The mirrored page above it in the same space, `null` at the top. */
+  parent: string | null;
+}
+
+/** One page as the reader draws it — `DocPage`. */
+export interface DocPage {
+  entity_id: string;
+  source_id: string;
+  /** The source's configured name: *Open in …* and the placeholder's words. */
+  source_name: string;
+  title: string;
+  space: DocSpaceRef | null;
+  /** The parent chain, outermost first. */
+  ancestors: DocAncestor[];
+  /** Who made this version, in the source's account spelling. */
+  editor: string | null;
+  /** The editor's display name, where the source's record carries one. */
+  editor_name: string | null;
+  updated_at: string | null;
+  /** The page in the source. */
+  web_url: string | null;
+  /** Whether the source's adapter projects its pages; `false` leaves the fields below empty. */
+  readable: boolean;
+  version: number | null;
+  labels: string[];
+  blocks: DocBlock[];
+  comments: DocComment[];
+  /** The identity `@me` resolves to. */
+  me: string[];
+}
+
+/** A space, named — `DocSpaceRef`. */
+export interface DocSpaceRef {
+  key: string;
+  name: string | null;
+}
+
+/** One step of a page's parent chain — `DocAncestor`. */
+export interface DocAncestor {
+  title: string;
+  entity_id: string | null;
+}
+
+/** One comment on a page — `knobas_source::docs::DocComment`. */
+export interface DocComment {
+  author: string | null;
+  author_name: string | null;
+  /** RFC 3339, as the source wrote it. */
+  at: string | null;
+  blocks: DocBlock[];
+}
+
+/** Which panel a panel block is — `PanelKind`. */
+export type PanelKind = "info" | "note" | "warning" | "tip";
+
+/** One cell of a table block — `TableCell`. */
+export interface TableCell {
+  header: boolean;
+  text: DocInline[];
+}
+
+/** One block of a page body — `knobas_source::docs::DocBlock`. Source text, never markup. */
+export type DocBlock =
+  | { type: "heading"; level: number; text: DocInline[] }
+  | { type: "paragraph"; text: DocInline[] }
+  | { type: "list"; ordered: boolean; items: DocBlock[][] }
+  | { type: "code"; code: string; language: string | null }
+  | { type: "table"; rows: TableCell[][] }
+  | { type: "panel"; kind: PanelKind; title: string | null; blocks: DocBlock[] }
+  /** A part the reader does not draw, by the source's own name for it. */
+  | { type: "placeholder"; name: string };
+
+/** One run inside a block — `knobas_source::docs::Inline`. */
+export type DocInline =
+  | { type: "text"; text: string; strong: boolean; emphasis: boolean; code: boolean }
+  | { type: "link"; text: string; href: string }
+  | { type: "page_link"; text: string; title: string; space: string | null; entity_id: string | null }
+  | { type: "issue"; key: string; entity_id: string | null; title: string | null; status: string | null }
+  | { type: "mention"; user: string | null; name: string | null; me: boolean }
+  | { type: "break" };
+
+/** The Docs reader's left pane — `docs_tree` (#859). */
+export function docsTree(): Promise<DocsTree> {
+  return invoke<DocsTree>("docs_tree");
+}
+
+/**
+ * One page drawn as blocks — `docs_page` (#859). Rejects with `invalid` for a
+ * non-id and `not_found` for an id that is not a live page.
+ */
+export function docsPage(entityId: string): Promise<DocPage> {
+  return invoke<DocPage>("docs_page", { entityId });
+}

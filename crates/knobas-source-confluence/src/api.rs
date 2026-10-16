@@ -75,8 +75,12 @@ pub(crate) const MENTION_EXPAND: &str = "version,container";
 ///   and one that arrived through completion the same shape downstream. A
 ///   server that will not expand them falls back to the page's own stamp and
 ///   to no byline, which is the behaviour before they were asked for.
+///
+/// * `metadata.labels` -- the page's labels, which the Docs reader draws in
+///   its header (#859). A server that will not expand them reads as a page
+///   with no labels.
 pub const EXPAND: &str = concat!(
-    "body.storage,ancestors,space,version,history,",
+    "body.storage,ancestors,space,version,history,metadata.labels,",
     "children.comment.body.storage,children.comment.version,children.comment.history"
 );
 

@@ -1493,3 +1493,217 @@ fn the_notification_clicked_shape_matches_its_typescript_mirror() {
     .unwrap();
     assert_shape("NotificationClicked", &wire, &["address"]);
 }
+
+/// The Docs reader's shapes (#859), each against what `entity.ts` declares,
+/// with every nullable field `None` somewhere.
+#[test]
+fn the_docs_shapes_match_their_typescript_mirror() {
+    use knobas_app::docs::{DocAncestor, DocNode, DocPage, DocSpace, DocSpaceRef, DocsTree};
+    use knobas_source::docs::{DocBlock, DocComment, Inline, PanelKind, TableCell};
+
+    let tree = DocsTree {
+        spaces: vec![DocSpace {
+            source_id: "confluence".to_owned(),
+            key: "OPS".to_owned(),
+            name: None,
+            pages: vec![DocNode {
+                entity_id: "confluence:1".to_owned(),
+                title: "On-call handbook".to_owned(),
+                parent: None,
+            }],
+        }],
+        last_read: None,
+    };
+    let wire = serde_json::to_value(&tree).unwrap();
+    assert_shape("DocsTree", &wire, &["last_read", "spaces"]);
+    assert_shape(
+        "DocSpace",
+        &wire["spaces"][0],
+        &["key", "name", "pages", "source_id"],
+    );
+    assert_shape(
+        "DocNode",
+        &wire["spaces"][0]["pages"][0],
+        &["entity_id", "parent", "title"],
+    );
+
+    let page = DocPage {
+        entity_id: "confluence:1".to_owned(),
+        source_id: "confluence".to_owned(),
+        source_name: "Confluence".to_owned(),
+        title: "On-call handbook".to_owned(),
+        space: Some(DocSpaceRef {
+            key: "OPS".to_owned(),
+            name: None,
+        }),
+        ancestors: vec![DocAncestor {
+            title: "Ops home".to_owned(),
+            entity_id: None,
+        }],
+        editor: None,
+        editor_name: None,
+        updated_at: None,
+        web_url: None,
+        readable: true,
+        version: None,
+        labels: vec![],
+        blocks: vec![DocBlock::Table {
+            rows: vec![vec![TableCell {
+                header: true,
+                text: vec![Inline::Break],
+            }]],
+        }],
+        comments: vec![DocComment {
+            author: None,
+            author_name: None,
+            at: None,
+            blocks: vec![],
+        }],
+        me: vec![],
+    };
+    let wire = serde_json::to_value(&page).unwrap();
+    assert_shape(
+        "DocPage",
+        &wire,
+        &[
+            "ancestors",
+            "blocks",
+            "comments",
+            "editor",
+            "editor_name",
+            "entity_id",
+            "labels",
+            "me",
+            "readable",
+            "source_id",
+            "source_name",
+            "space",
+            "title",
+            "updated_at",
+            "version",
+            "web_url",
+        ],
+    );
+    assert_shape("DocSpaceRef", &wire["space"], &["key", "name"]);
+    assert_shape(
+        "DocAncestor",
+        &wire["ancestors"][0],
+        &["entity_id", "title"],
+    );
+    assert_shape(
+        "DocComment",
+        &wire["comments"][0],
+        &["at", "author", "author_name", "blocks"],
+    );
+    assert_shape(
+        "TableCell",
+        &wire["blocks"][0]["rows"][0][0],
+        &["header", "text"],
+    );
+
+    let kinds: Vec<String> = [
+        PanelKind::Info,
+        PanelKind::Note,
+        PanelKind::Warning,
+        PanelKind::Tip,
+    ]
+    .iter()
+    .map(|t| {
+        serde_json::to_value(t)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned()
+    })
+    .collect();
+    assert_same_members(
+        &kinds.iter().map(String::as_str).collect::<Vec<_>>(),
+        declared_union(MIRROR, "PanelKind"),
+        "PanelKind in entity.ts must be exactly the Rust enum's spellings",
+    );
+
+    // The two tagged unions: the `type` tags each declares, against what the
+    // Rust enums serialize to.
+    let tags = |name: &str| -> Vec<String> {
+        let start = MIRROR
+            .find(&format!("export type {name} ="))
+            .unwrap_or_else(|| panic!("entity.ts declares {name}"));
+        let body = &MIRROR[start..];
+        let body = &body[..body.find(";\n\n").expect("the union ends")];
+        body.match_indices("type: \"")
+            .map(|(at, m)| {
+                let rest = &body[at + m.len()..];
+                rest[..rest.find('"').unwrap()].to_owned()
+            })
+            .collect()
+    };
+    let tag = |v: serde_json::Value| v["type"].as_str().unwrap().to_owned();
+    let text = || vec![Inline::text("x")];
+    let blocks = [
+        DocBlock::Heading {
+            level: 2,
+            text: text(),
+        },
+        DocBlock::Paragraph { text: text() },
+        DocBlock::List {
+            ordered: false,
+            items: vec![],
+        },
+        DocBlock::Code {
+            code: String::new(),
+            language: None,
+        },
+        DocBlock::Table { rows: vec![] },
+        DocBlock::Panel {
+            kind: PanelKind::Info,
+            title: None,
+            blocks: vec![],
+        },
+        DocBlock::Placeholder {
+            name: "roadmap".to_owned(),
+        },
+    ];
+    let rust: Vec<String> = blocks
+        .iter()
+        .map(|b| tag(serde_json::to_value(b).unwrap()))
+        .collect();
+    assert_same_members(
+        &rust.iter().map(String::as_str).collect::<Vec<_>>(),
+        tags("DocBlock"),
+        "DocBlock's tags in entity.ts must be exactly the Rust enum's",
+    );
+    let inlines = [
+        Inline::text("x"),
+        Inline::Link {
+            text: String::new(),
+            href: String::new(),
+        },
+        Inline::PageLink {
+            text: String::new(),
+            title: String::new(),
+            space: None,
+            entity_id: None,
+        },
+        Inline::Issue {
+            key: String::new(),
+            entity_id: None,
+            title: None,
+            status: None,
+        },
+        Inline::Mention {
+            user: None,
+            name: None,
+            me: false,
+        },
+        Inline::Break,
+    ];
+    let rust: Vec<String> = inlines
+        .iter()
+        .map(|i| tag(serde_json::to_value(i).unwrap()))
+        .collect();
+    assert_same_members(
+        &rust.iter().map(String::as_str).collect::<Vec<_>>(),
+        tags("DocInline"),
+        "DocInline's tags in entity.ts must be exactly the Rust enum's",
+    );
+}
