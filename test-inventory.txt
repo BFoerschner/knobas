@@ -513,6 +513,7 @@ knobas-app	test/it	builds_ipc::a_runs_chain_is_the_sources_answer_read_through_t
 knobas-app	test/it	builds_ipc::older_runs_are_the_sources_answer_read_through_the_run_declarations
 knobas-app	test/it	builds_ipc::older_runs_of_no_pipeline_or_a_foreign_run_are_refused
 knobas-app	test/it	builds_ipc::pipelines_carry_their_name_group_and_last_twelve_runs
+knobas-app	test/it	builds_ipc::runs_carry_their_trigger_who_started_them_and_their_commit
 knobas-app	test/it	builds_ipc::runs_of_something_that_is_no_pipeline_are_refused
 knobas-app	test/it	builds_ipc::settings_name_the_mirrored_repository_by_its_id
 knobas-app	test/it	builds_of_a_commit::a_commits_builds_are_the_walk_after_every_change
@@ -934,6 +935,7 @@ knobas-app	test/it	sources_mirror::the_source_summary_shape_matches_its_typescri
 knobas-app	test/it	sources_mirror::the_state_path_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_summary_auth_kind_is_the_same_union_as_the_input_dtos
 knobas-app	test/it	sources_mirror::the_sync_run_row_shape_matches_its_typescript_mirror
+knobas-app	test/it	sources_mirror::the_trigger_path_shape_matches_its_typescript_mirror
 knobas-app	test/it	sources_mirror::the_write_queue_unions_match_the_rust_enums
 knobas-app	test/it	sources_registry::an_unknown_kind_is_refused_by_name
 knobas-app	test/it	sources_registry::building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_id
@@ -1274,6 +1276,7 @@ knobas-core	lib/knobas_core	payload::tests::a_kind_that_declares_nothing_misses
 knobas-core	lib/knobas_core	payload::tests::a_list_keeps_the_usable_strings_and_drops_the_rest
 knobas-core	lib/knobas_core	payload::tests::a_list_that_is_not_an_array_yields_nothing
 knobas-core	lib/knobas_core	payload::tests::a_miss_is_a_miss_however_the_source_spelled_it
+knobas-core	lib/knobas_core	payload::tests::a_trigger_reads_the_source_word_through_its_map
 knobas-core	lib/knobas_core	payload::tests::a_value_that_is_not_a_usable_string_is_passed_over
 knobas-core	lib/knobas_core	payload::tests::an_instant_reads_in_the_basic_and_the_extended_spelling
 knobas-core	lib/knobas_core	payload::tests::declarations_are_keyed_by_source_then_kind
@@ -2072,6 +2075,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
+knobas-source	lib/knobas_source	contract::tests::accepts_a_started_by_absent_from_runs_nobody_started
 knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for_a_kind_the_corpus_never_populates
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
@@ -2096,9 +2100,11 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_with_no_workflow_that_answers_the_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_time_that_is_no_instant
 knobas-source	lib/knobas_source	contract::tests::rejects_a_state_at_that_leads_to_an_object
 knobas-source	lib/knobas_source	contract::tests::rejects_a_state_no_item_draws_a_chip_for
+knobas-source	lib/knobas_source	contract::tests::rejects_a_trigger_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_view_whose_section_ids_repeat
 knobas-source	lib/knobas_source	contract::tests::rejects_a_write_capability_with_no_write_ops
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_cannot_connect_when_nothing_is_wrong
@@ -2963,6 +2969,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_s
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_declares_its_configuration_as_parent_by_name_and_id
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_draws_running_or_its_outcome
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_ran_on_each_of_its_revisions
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_says_how_it_was_started_and_by_whom
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_configuration_is_a_pipeline_and_a_build_is_a_run_of_it
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_full_sync_is_declared_a_window_not_the_corpus
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::the_template_declares_two_kinds_and_its_write_ops
