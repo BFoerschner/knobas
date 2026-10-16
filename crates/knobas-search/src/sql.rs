@@ -973,6 +973,10 @@ mod tests {
         // `NAMED`'s last-segment half (#621): the separator a slashed title
         // is split on.
         "/",
+        // `body_text_shown!` (#860): the Docs-search marks' pattern and the
+        // flag that drops every one.
+        "[\\x1d\\x1f][^\\n]*\\n?|\\x1e",
+        "g",
         // The ticket keys' declared reads (#811): the declaration field each
         // key reads, a list path's `entry`, and the one sprint state
         // `sprint:current` asks for.
