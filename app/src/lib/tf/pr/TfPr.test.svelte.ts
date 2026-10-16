@@ -20,7 +20,8 @@ import type {
   ViewRow,
 } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
-import TfPr, { forgetPrQueued, type PrPorts } from "./TfPr.svelte";
+import { forgetPrQueued } from "./queued.svelte";
+import TfPr, { type PrPorts } from "./TfPr.svelte";
 
 const REPO = "gitea:tidewater/payout-service";
 const PR = `${REPO}#142`;

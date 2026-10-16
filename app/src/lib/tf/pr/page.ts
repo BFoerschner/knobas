@@ -7,10 +7,10 @@ import { definePage } from "../page-entry";
 import type { TfRoute } from "../route";
 import TfPr from "./TfPr.svelte";
 
-type PrRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "pr" };
+type PrPageRoute = Extract<TfRoute, { view: "full" }> & { section: "code"; head: "pr" };
 
 export const page = definePage({
-  matches: (route): route is PrRoute => route.view === "full" && route.section === "code" && route.head === "pr",
+  matches: (route): route is PrPageRoute => route.view === "full" && route.section === "code" && route.head === "pr",
   component: TfPr,
   props: ({ route, ready, job }) => ({ ready, rest: route.rest, job }),
 });

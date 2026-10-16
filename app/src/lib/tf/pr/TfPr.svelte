@@ -46,20 +46,6 @@
     listSources: () => Promise<SourceFacts[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   }
-
-  /**
-   * What this session queued on each pull request, by its entity id: the
-   * chips beside its state (`close queued`) and the comments not yet in its
-   * conversation. Module `$state`, never stored; a comment's mark goes once
-   * the conversation holds its words.
-   */
-  const queuedChips: Record<string, string[]> = $state({});
-  const queuedComments: Record<string, string[]> = $state({});
-
-  /** Forget every mark: a new session, which is what each test is. */
-  export function forgetPrQueued(): void {
-    for (const bag of [queuedChips, queuedComments]) for (const key of Object.keys(bag)) delete bag[key];
-  }
 </script>
 
 <script lang="ts">
@@ -95,6 +81,7 @@
     tabCounts,
     type PrTab,
   } from "./pr";
+  import { markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
   import TfPrAction from "./TfPrAction.svelte";
 
   let {
@@ -243,7 +230,7 @@
 
   const header = $derived(headerOf(view ?? null));
   const counts = $derived(tabCounts(view ?? null));
-  const ready_ = $derived(readyLines(view ?? null));
+  const readyRows = $derived(readyLines(view ?? null));
   const number = $derived(prId === null ? null : prNumber(prId));
   const title = $derived(detail?.row.title ?? "");
   const messages = $derived(conversationOf(view ?? null));
@@ -252,12 +239,34 @@
   const name = $derived(number === null ? "PR" : `PR ${number}`);
 
   /** The write each toolbar button stands for, where the source offers it. */
-  const find = (test: (action: ViewAction) => boolean) => actions.find(test) ?? null;
-  const update = $derived(find((a) => a.write_op === "update_pull_request_branch"));
-  const edit = $derived(find((a) => a.write_op === "edit_pull_request" && a.values["state"] === undefined));
-  const setState = $derived(find((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined));
-  const merge = $derived(find((a) => a.write_op === "merge_pull_request"));
-  const comment = $derived(find((a) => a.write_op === "comment"));
+  const offered = (test: (action: ViewAction) => boolean) => actions.find(test) ?? null;
+  const merge = $derived(offered((a) => a.write_op === "merge_pull_request"));
+  const comment = $derived(offered((a) => a.write_op === "comment"));
+
+  /** A toolbar write this page queues through its dialog: the button's words and the verb its toast and chip use. */
+  interface Write {
+    action: ViewAction;
+    label: string;
+    /** `update branch of`, `edit`, `close`, `reopen`: what the toast says was queued, before the PR's name. */
+    phrase: string;
+    /** `update`, `edit`, `close`, `reopen`: the chip is `<verb> queued`. */
+    verb: string;
+  }
+
+  /** *Update branch*, *Edit*, then *Close* or *Reopen*, each where the source offers it. */
+  const writes = $derived.by((): Write[] => {
+    const update = offered((a) => a.write_op === "update_pull_request_branch");
+    const edit = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] === undefined);
+    const setState = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined);
+    const list: Write[] = [];
+    if (update) list.push({ action: update, label: "Update branch", phrase: "update branch of", verb: "update" });
+    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit" });
+    if (setState) {
+      const verb = setState.values["state"] === "closed" ? "close" : "reopen";
+      list.push({ action: setState, label: verb === "close" ? "Close" : "Reopen", phrase: verb, verb });
+    }
+    return list;
+  });
   /** *Review…* stands for the verdicts, offered only on somebody else's open pull request. */
   const reviewable = $derived(
     actions.some((a) => a.write_op === "submit_review" && (a.values["verdict"] === "approve" || a.values["verdict"] === "request_changes")),
@@ -265,9 +274,9 @@
 
   /** The comments this session queued that the conversation does not hold yet. */
   const pendingComments = $derived(
-    prId === null ? [] : (queuedComments[prId] ?? []).filter((body) => !messages.some((message) => message.body.trim() === body.trim())),
+    prId === null ? [] : pendingOf(prId, messages.map((message) => message.body)),
   );
-  const chips = $derived(prId === null ? [] : (queuedChips[prId] ?? []));
+  const chips = $derived(prId === null ? [] : queuedChips(prId));
 
   /** Where the reader's checkout stands against this pull request's head. */
   const local = $derived.by(() => {
@@ -279,17 +288,11 @@
     return { path: checkout.path, line: `${where}, ${files}` };
   });
 
-  /** The dialog open: which action, under which heading and toast. */
-  let dialog = $state<{ action: ViewAction; title: string; what: string; chip: string | null } | null>(null);
+  /** The write whose dialog is open. */
+  let shown = $state<Write | null>(null);
 
-  function open(action: ViewAction, heading: string, what: string, chip: string | null) {
-    if (action.disabled !== null) return;
-    dialog = { action, title: heading, what, chip };
-  }
-
-  function mark(chip: string | null) {
-    if (prId === null || chip === null) return;
-    queuedChips[prId] = [...(queuedChips[prId] ?? []).filter((c) => c !== chip), chip];
+  function open(write: Write) {
+    if (write.action.disabled === null) shown = write;
   }
 
   let draft = $state("");
@@ -301,7 +304,7 @@
     sending = true;
     try {
       await ports.submitWrite({ Comment: { entity: prId, body } });
-      queuedComments[prId] = [...(queuedComments[prId] ?? []), body];
+      markComment(prId, body);
       toastQueued(`comment on ${name}`);
       draft = "";
     } catch (cause) {
@@ -361,35 +364,15 @@
         {#if reviewable}
           <button type="button" class="tf-btn" aria-disabled="true" title={NOT_BUILT}>Review…</button>
         {/if}
-        {#if update !== null}
+        {#each writes as write (write.verb)}
           <button
             type="button"
             class="tf-btn"
-            aria-disabled={update.disabled !== null ? "true" : undefined}
-            title={update.disabled ?? undefined}
-            onclick={() => open(update, `Update ${name}`, `update branch of ${name}`, "update queued")}>Update branch</button
+            aria-disabled={write.action.disabled !== null ? "true" : undefined}
+            title={write.action.disabled ?? undefined}
+            onclick={() => open(write)}>{write.label}</button
           >
-        {/if}
-        {#if edit !== null}
-          <button
-            type="button"
-            class="tf-btn"
-            aria-disabled={edit.disabled !== null ? "true" : undefined}
-            title={edit.disabled ?? undefined}
-            onclick={() => open(edit, `Edit ${name}`, `edit ${name}`, "edit queued")}>Edit</button
-          >
-        {/if}
-        {#if setState !== null}
-          {@const verb = setState.values["state"] === "closed" ? "Close" : "Reopen"}
-          <button
-            type="button"
-            class="tf-btn"
-            aria-disabled={setState.disabled !== null ? "true" : undefined}
-            title={setState.disabled ?? undefined}
-            onclick={() => open(setState, `${verb} ${name}`, `${verb.toLowerCase()} ${name}`, `${verb.toLowerCase()} queued`)}
-            >{verb}</button
-          >
-        {/if}
+        {/each}
         {#if merge !== null}
           <button type="button" class="tf-btn tf-primary" aria-disabled="true" title={merge.disabled ?? NOT_BUILT}>Merge…</button>
         {/if}
@@ -502,7 +485,7 @@
           <div class="tf-panel">
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
-              {#each ready_ as line, n (n)}
+              {#each readyRows as line, n (n)}
                 <span><span class="tf-dot tf-{line.tone}"></span> {line.text}</span>
               {/each}
             </div>
@@ -526,15 +509,15 @@
   {/if}
 </div>
 
-{#if dialog !== null && prId !== null}
-  {@const open_ = dialog}
+{#if shown !== null && prId !== null}
+  {@const write = shown}
   <TfPrAction
-    action={open_.action}
+    action={write.action}
     {prId}
-    title={open_.title}
-    what={open_.what}
+    title="{write.label} {name}"
+    what="{write.phrase} {name}"
     submitWrite={ports.submitWrite}
-    onqueued={() => mark(open_.chip)}
-    onclose={() => (dialog = null)}
+    onqueued={() => markQueued(prId, `${write.verb} queued`)}
+    onclose={() => (shown = null)}
   />
 {/if}
