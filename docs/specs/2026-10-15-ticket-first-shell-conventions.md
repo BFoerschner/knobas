@@ -121,3 +121,6 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   segment (`log`, `tests`, `artifacts`, `changes`, `params`); Overview is the run's own address.
   `#/build/<run entity id>` alone moves to the full address. The run page draws from the run's row
   and its source view (`entity_view`), with no command of its own. (#853)
+- A run page panel that needs a read beyond the run's row and view is its own component with its
+  own read, injectable for its test (`TfRunChain` reads `run_chain`); a pipeline's chain rides on
+  its settings (`PipelineSettings.chain`). (#857)

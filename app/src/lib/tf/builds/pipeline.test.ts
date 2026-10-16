@@ -167,6 +167,7 @@ test("settings: the default branch by name, the triggers switched on in a senten
     parameters: [],
     parameter_write_op: null,
     parameter_specs: [],
+    chain: [],
   };
   expect(defaultBranch(settings)).toBe("main");
   expect(defaultBranch(null)).toBeNull();

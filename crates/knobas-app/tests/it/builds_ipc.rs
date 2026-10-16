@@ -526,7 +526,75 @@ impl knobas_source::Source for Answers {
             parameters: vec![],
             parameter_write_op: Some("set_parameter".to_owned()),
             parameter_specs: vec![],
+            chain: vec![],
         }))
+    }
+    async fn run_chain(
+        &self,
+        run: &str,
+    ) -> Result<Option<Vec<knobas_source::pipeline::RunChainStep>>, knobas_source::SourceError>
+    {
+        use knobas_source::pipeline::{ChainStep, RunChainStep};
+        if run.ends_with(":build:404") {
+            return Err(knobas_source::SourceError::Unreachable(
+                "connection refused".to_owned(),
+            ));
+        }
+        if !run.ends_with(":build:1200") {
+            return Ok(Some(vec![]));
+        }
+        let step = |key: &str, name: &str| ChainStep {
+            pipeline: format!("{}:buildType:{key}", self.id),
+            name: name.to_owned(),
+        };
+        let item = |key: &str, kind: &str, payload: serde_json::Value| knobas_source::SyncItem {
+            entity: knobas_core::entity::EntityRef::parse(&format!("{}:{key}", self.id)).unwrap(),
+            kind: kind.to_owned(),
+            title: key.to_owned(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload,
+            web_url: None,
+            deleted: false,
+        };
+        Ok(Some(vec![
+            RunChainStep {
+                step: step("Payout_Build", "Build"),
+                run: Some(item(
+                    "build:1199",
+                    "build",
+                    serde_json::json!({
+                        "id": 1199, "number": "1199", "buildTypeId": "Payout_Build",
+                        "state": "finished", "status": "SUCCESS", "branchName": "feature/x"
+                    }),
+                )),
+            },
+            RunChainStep {
+                step: step("Payout_IntegrationTests", "Integration Tests"),
+                run: Some(item(
+                    "build:1200",
+                    "build",
+                    serde_json::json!({
+                        "id": 1200, "number": "1200", "buildTypeId": "Payout_IntegrationTests",
+                        "state": "running", "branchName": "feature/x"
+                    }),
+                )),
+            },
+            // A kind outside the run frame is no run.
+            RunChainStep {
+                step: step("Payout_Docker", "Docker"),
+                run: Some(item(
+                    "buildType:Payout_Docker",
+                    "build_config",
+                    serde_json::json!({ "id": "Payout_Docker" }),
+                )),
+            },
+            RunChainStep {
+                step: step("Payout_Deploy", "Deploy"),
+                run: None,
+            },
+        ]))
     }
     async fn older_runs(
         &self,
@@ -729,4 +797,71 @@ async fn settings_name_the_mirrored_repository_by_its_id() {
         .await
         .unwrap_err();
     assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
+}
+
+/// **Build chains** (#857): the source's chain of a run, each step's run read
+/// through the run kind's declarations; a step that has not run on the branch,
+/// or whose answer is no run, has none. A run in no chain has an empty chain,
+/// and the source's failure keeps its code.
+#[tokio::test]
+async fn a_runs_chain_is_the_sources_answer_read_through_the_run_declarations() {
+    use knobas_app::commands::entity::run_chain_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+
+    let chain = run_chain_inner(
+        &pool,
+        &no_secrets(),
+        &Answering,
+        &format!("{tc}:build:1200"),
+    )
+    .await
+    .unwrap();
+    let got: Vec<(&str, &str, Option<&str>)> = chain
+        .iter()
+        .map(|s| {
+            (
+                s.pipeline_id.as_str(),
+                s.name.as_str(),
+                s.run.as_ref().map(|r| r.entity_id.as_str()),
+            )
+        })
+        .collect();
+    let (build, tests, docker, deploy) = (
+        format!("{tc}:buildType:Payout_Build"),
+        format!("{tc}:buildType:Payout_IntegrationTests"),
+        format!("{tc}:buildType:Payout_Docker"),
+        format!("{tc}:buildType:Payout_Deploy"),
+    );
+    let (b1199, b1200) = (format!("{tc}:build:1199"), format!("{tc}:build:1200"));
+    assert_eq!(
+        got,
+        [
+            (build.as_str(), "Build", Some(b1199.as_str())),
+            (tests.as_str(), "Integration Tests", Some(b1200.as_str())),
+            (docker.as_str(), "Docker", None),
+            (deploy.as_str(), "Deploy", None),
+        ]
+    );
+    let first = chain[0].run.as_ref().unwrap();
+    assert_eq!(first.number.as_deref(), Some("1199"));
+    assert_eq!(first.branch.as_deref(), Some("feature/x"));
+    assert_eq!(
+        first.state.as_ref().map(|s| s.text.as_str()),
+        Some("SUCCESS")
+    );
+
+    let none = run_chain_inner(&pool, &no_secrets(), &Answering, &format!("{tc}:build:7"))
+        .await
+        .unwrap();
+    assert!(none.is_empty());
+
+    let failed = run_chain_inner(&pool, &no_secrets(), &Answering, &format!("{tc}:build:404"))
+        .await
+        .unwrap_err();
+    assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
+    let bad = run_chain_inner(&pool, &no_secrets(), &Answering, "not an id")
+        .await
+        .unwrap_err();
+    assert_eq!(bad.code, knobas_app::IpcErrorCode::Invalid);
 }

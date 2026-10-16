@@ -28,6 +28,7 @@
 //! exists; ADR-0003 moved it onto the kind, for adapters that need to answer
 //! both ways at once, and left TeamCity's answer where it was.
 
+mod chain;
 mod client;
 mod config;
 mod cursor;

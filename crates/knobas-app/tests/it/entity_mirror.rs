@@ -910,12 +910,19 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
                 kind: ParameterKind::Text,
             },
         ],
+        chain: vec![knobas_source::pipeline::ChainStep {
+            pipeline: "teamcity:buildType:Payout_Build".to_owned(),
+            name: "Build".to_owned(),
+        }],
     };
     let wire = serde_json::to_value(&settings).unwrap();
+    // #857's chain.
+    assert_shape("ChainStep", &wire["chain"][0], &["name", "pipeline"]);
     assert_shape(
         "PipelineSettings",
         &wire,
         &[
+            "chain",
             "parameter_specs",
             "parameter_write_op",
             "parameters",
@@ -959,6 +966,19 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
         &wire["triggers"][0],
         &["disabled", "facts", "name"],
     );
+}
+
+/// #857's chain step of a run.
+#[test]
+fn the_chain_step_row_shape_matches_its_typescript_mirror() {
+    let row = knobas_app::commands::entity::ChainStepRow {
+        pipeline_id: "teamcity:buildType:Payout_Build".to_owned(),
+        name: "Build".to_owned(),
+        run: None,
+    };
+    let wire = serde_json::to_value(&row).unwrap();
+    assert_shape("ChainStepRow", &wire, &["name", "pipeline_id", "run"]);
+    assert!(MIRROR.contains(r#"invoke<ChainStepRow[]>("run_chain", { runId })"#));
 }
 
 /// #852's Run… preset, and the two commands by their registered names.

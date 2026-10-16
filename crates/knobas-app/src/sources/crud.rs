@@ -860,6 +860,22 @@ pub async fn older_runs(
         .unwrap_or_default())
 }
 
+/// The chain the run `entity_id` is in, asked of its own source (ADR-0022,
+/// #857), routed like [`view`]. Nothing is stored.
+///
+/// # Errors
+///
+/// As [`view`]. A source that keeps no pipelines answers no chain.
+pub async fn run_chain(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<Vec<knobas_source::pipeline::RunChainStep>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    Ok(source.run_chain(entity_id).await?.unwrap_or_default())
+}
+
 /// A repository's web page from a clone URL: its `.git` and trailing slash
 /// taken off, `None` for a remote that is not `http`/`https` ([`commit_page`]'s
 /// rule).

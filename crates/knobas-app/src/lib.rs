@@ -563,6 +563,9 @@ pub fn run() {
             commands::entity::delete_link_set,
             commands::entity::preview_link_set_rule,
             commands::entity::hide_link_set_member,
+            // #857's build chain read, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::run_chain,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

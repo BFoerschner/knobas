@@ -105,6 +105,7 @@ const SETTINGS: PipelineSettings = {
     },
     { name: "deploy.token", label: null, hint: null, kind: { type: "text" } },
   ],
+  chain: [],
 };
 
 const DESCRIPTOR = {
@@ -162,6 +163,21 @@ function draw(
 
 const button = (words: string) =>
   [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.replace(/\s+/g, " ").trim() === words);
+
+test("a chained pipeline's header names its step and the chain (R-9.13)", async () => {
+  const chain = [
+    { pipeline: "teamcity:buildType:Payout_Build", name: "Payout_Build" },
+    { pipeline: PIPELINE.entity_id, name: "Payout_IntegrationTests" },
+    { pipeline: "teamcity:buildType:Payout_Deploy_Staging", name: "Payout_Deploy_Staging" },
+  ];
+  draw([PIPELINE.entity_id], "PAY-231", { settings: () => Promise.resolve({ ...SETTINGS, chain }) });
+  await settle();
+  const sub = target.querySelector(".tf-bhead .tf-sub")!;
+  expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule. " +
+      "Step 2 of the chain Payout_Build › Payout_IntegrationTests › Payout_Deploy_Staging.",
+  );
+});
 
 test("the header says what it is in the source's word, the repository it builds and what triggers it", async () => {
   draw();

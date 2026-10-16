@@ -8,6 +8,7 @@ license.workspace = true
 # every response trimmed with an explicit `fields=`.
 [dependencies]
 async-trait.workspace = true
+base64 = "0.22"
 chrono.workspace = true
 knobas-core = { path = "../knobas-core" }
 knobas-http = { path = "../knobas-http" }

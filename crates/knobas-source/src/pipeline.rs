@@ -48,6 +48,37 @@ pub struct PipelineSettings {
     /// older peer's answer, which reads as every parameter plain text.
     #[serde(default)]
     pub parameter_specs: Vec<ParameterSpec>,
+    /// The chain the pipeline is a step of (#857, R-9.13): every pipeline it
+    /// is joined to by the source's dependencies (TeamCity's snapshot
+    /// dependencies), this one included, in the order they run. Empty for a
+    /// pipeline in no chain, and absent from an older peer's answer.
+    #[serde(default)]
+    pub chain: Vec<ChainStep>,
+}
+
+/// One pipeline of a chain (#857).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChainStep {
+    /// The pipeline's [`EntityRef`](knobas_core::entity::EntityRef) in string
+    /// form, of the same source.
+    pub pipeline: String,
+    /// What the source calls the pipeline.
+    pub name: String,
+}
+
+/// One step of the chain a run is in (#857), as [`Source::run_chain`]
+/// answers it: the step, and its run on the run's branch.
+///
+/// [`Source::run_chain`]: crate::Source::run_chain
+#[derive(Debug, Clone)]
+pub struct RunChainStep {
+    pub step: ChainStep,
+    /// The step's run: the run asked about for its own step, the run it built
+    /// on for an earlier step, else the step's newest run on the same branch.
+    /// The [`SyncItem`](crate::SyncItem) the sync would have made of it, so
+    /// the app reads it through the run kind's declared paths. `None` where
+    /// the step has not run on the branch.
+    pub run: Option<crate::SyncItem>,
 }
 
 /// How one parameter is asked for when a run is started (#852): the
@@ -114,4 +145,23 @@ pub struct PipelineTrigger {
     pub facts: Vec<Fact>,
     /// Switched off at the source.
     pub disabled: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// An answer from before #852 and #857, with neither `parameter_specs`
+    /// nor `chain`, still reads: both come back empty.
+    #[test]
+    fn settings_without_the_later_fields_read_as_empty() {
+        let old = serde_json::json!({
+            "repositories": [],
+            "triggers": [],
+            "parameters": [],
+            "parameter_write_op": null,
+        });
+        let settings: PipelineSettings = serde_json::from_value(old).expect("an older answer");
+        assert_eq!(settings, PipelineSettings::default());
+    }
 }

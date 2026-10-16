@@ -1684,6 +1684,73 @@ pub async fn pipeline_settings_inner(
         .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))
 }
 
+/// One step of the chain a run is in (#857, R-9.13): the step's pipeline,
+/// its name in the source's word, and its run on the run's branch read
+/// through the run kind's declarations (`None` where it has not run there).
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+pub struct ChainStepRow {
+    pub pipeline_id: String,
+    pub name: String,
+    pub run: Option<RunRow>,
+}
+
+/// The chain the run `run_id` is in, read live from its source (ADR-0022,
+/// #857): one row per step in running order, each with its run (see
+/// [`knobas_source::pipeline::RunChainStep::run`]). Empty for a run of a
+/// pipeline in no chain, and for a source that keeps no pipelines.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not an
+/// entity id; [`NotFound`](crate::IpcErrorCode::NotFound) when its source is
+/// not configured; the source's own failure as [`crate::sources::to_ipc`]
+/// maps it.
+pub async fn run_chain_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+) -> Result<Vec<ChainStepRow>, IpcError> {
+    let run = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let steps = crate::sources::crud::run_chain(pool, secrets, registry, &run.to_string())
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&run.namespace)))?;
+    Ok(steps
+        .into_iter()
+        .map(|step| ChainStepRow {
+            pipeline_id: step.step.pipeline,
+            name: step.step.name,
+            run: step
+                .run
+                .as_ref()
+                .and_then(|item| run_of_item(&declarations, item)),
+        })
+        .collect())
+}
+
+/// The chain one run is in, read live (#857).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and whatever
+/// [`run_chain_inner`] refuses with.
+#[tauri::command]
+pub async fn run_chain<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+) -> Result<Vec<ChainStepRow>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    run_chain_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+    )
+    .await
+}
+
 /// Older runs of one pipeline, beyond the mirror's window (#851).
 ///
 /// # Errors

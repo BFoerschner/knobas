@@ -36,6 +36,7 @@
   import { chipTone, defaultBranch, jobBranchFor, queuedRunText, resultWord, staleLine } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
+  import TfRunChain from "./TfRunChain.svelte";
   import TfRunDialog from "./TfRunDialog.svelte";
   import {
     RUN_TABS,
@@ -349,6 +350,7 @@
               <dd>{tookLine(run, previous)}</dd>
             </dl>
           </section>
+          <TfRunChain {runId} branch={run.branch} />
           <section class="tf-panel" aria-label="Artifacts">
             <header>
               <h3>Artifacts</h3>

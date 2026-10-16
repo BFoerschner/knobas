@@ -162,6 +162,7 @@ vi.mock("../ipc/entity", () => ({
   // The pipeline page's two live reads (#851), answering late.
   pipelineSettings: () => deferred(null),
   olderPipelineRuns: () => deferred([]),
+  runChain: () => deferred([]),
   // The desktop notification send (#339): the notifier store imports it at
   // module level. Nothing here notifies, so it refuses.
   notify: () => Promise.reject(new Error("no notification in this test")),
@@ -357,6 +358,7 @@ const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
+const TfRunChain = (await import("../tf/builds/TfRunChain.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -989,6 +991,14 @@ const CASES: Case[] = [
           crumbs: createRawSnippet(() => ({ render: () => "<nav></nav>" })),
         },
       }),
+    }),
+  },
+  {
+    /** The run's chain panel (#857): its `run_chain` read answering late, through the real bridge. */
+    name: "TfRunChain",
+    source: "lib/tf/builds/TfRunChain.svelte",
+    open: (target) => ({
+      app: mount(TfRunChain, { target, props: { runId: "teamcity:build:1", branch: "main" } }),
     }),
   },
   {
