@@ -57,6 +57,7 @@ const {
   decisionsIn,
   demandOf,
   editableBody,
+  movedFile,
   readSnapshot,
   withBody,
   withdrawnWorklog,
@@ -793,5 +794,68 @@ test("flush now disables nothing while the send it asked for is out", async () =
   } finally {
     flushHold = null;
   }
+  screen.done();
+});
+
+// -- a commit that lost a race (#845, on #822's hold) ---------------------------
+
+const COMMIT = {
+  CommitFile: {
+    repo: "gitea:tidewater/payout-service",
+    branch: "main",
+    new_branch: null,
+    path: "README.md",
+    content: "# payout\nmine\n",
+    message: "PAY-231: update README.md",
+    base_sha: "blob-1",
+  },
+};
+
+function movedCommit(): QueuedWrite {
+  return held({
+    id: 7,
+    source_id: "gitea",
+    entity_id: "gitea:tidewater/payout-service",
+    op: "commit_file",
+    payload: COMMIT,
+    target_snapshot: { op: "commit_file", live: true },
+    held_snapshot: { op: "commit_file", live: true, text: "# payout\ntheirs\n", base: "blob-2" },
+  });
+}
+
+test("a held commit's text is its file, and its edit is made against the version the source holds now", () => {
+  expect(editableBody(COMMIT)).toBe("# payout\nmine\n");
+  expect(withBody(COMMIT, "# payout\nboth\n", { op: "commit_file", live: true, text: "x", base: "blob-2" })).toEqual({
+    CommitFile: { ...COMMIT.CommitFile, content: "# payout\nboth\n", base_sha: "blob-2" },
+  });
+  // Held for another reason (no `base`): the base it was made against stays.
+  expect(withBody(COMMIT, "y", { op: "commit_file", live: true })).toEqual({ CommitFile: { ...COMMIT.CommitFile, content: "y" } });
+  expect(movedFile(movedCommit())).toEqual({ path: "README.md", mine: "# payout\nmine\n", theirs: "# payout\ntheirs\n" });
+  expect(movedFile(held())).toBeNull();
+});
+
+test("a commit over a file that moved shows both versions of the file, and Edit sends against the new one", async () => {
+  rows = [movedCommit()];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+  const sides = [...document.querySelectorAll(".grid2 > div")].map((side) => (side.textContent ?? "").replace(/\s+/g, " ").trim());
+  expect(sides).toEqual(["Yours, README.md # payout mine", "On the source now # payout theirs"]);
+  expect(screen.button("Send mine anyway")).toBeDefined();
+  expect(screen.button("Discard")).toBeDefined();
+
+  screen.button("Edit")!.click();
+  flushSync();
+  const box = document.querySelector("textarea")!;
+  expect(box.value).toBe("# payout\nmine\n");
+  box.value = "# payout\nmine and theirs\n";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  calls.length = 0;
+  screen.button("Send this instead")!.click();
+  await vi.waitFor(() => expect(calls.some((c) => c.command === "amend_write")).toBe(true));
+  expect(calls.find((c) => c.command === "amend_write")!.args).toEqual({
+    id: 7,
+    payload: { CommitFile: { ...COMMIT.CommitFile, content: "# payout\nmine and theirs\n", base_sha: "blob-2" } },
+  });
   screen.done();
 });

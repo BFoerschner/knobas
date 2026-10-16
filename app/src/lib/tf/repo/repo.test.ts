@@ -5,10 +5,20 @@
  */
 import { expect, test } from "vitest";
 
-import type { DiffFile, DiffRead, EntityRow, ViewSection } from "../../ipc/entity";
+import type { DiffFile, DiffRead, EntityRow, SourceView, ViewAction, ViewSection } from "../../ipc/entity";
 import {
   ancestors,
   branchOptions,
+  branchStanding,
+  type BranchRow,
+  commitPrefill,
+  compareHash,
+  editHash,
+  branchFrom,
+  keyIn,
+  newBranchName,
+  proposal,
+  visibleBranches,
   changedPaths,
   checkoutSentence,
   commitHash,
@@ -190,4 +200,156 @@ test("a view's rows filter on every word typed across chip, title and meta", () 
   expect(visibleViewRows(rows, "jonas").map((r) => r.chip)).toEqual(["a41f2c"]);
   expect(visibleViewRows(rows, "c90 jitter").map((r) => r.chip)).toEqual(["c90d11"]);
   expect(visibleViewRows(rows, "")).toHaveLength(2);
+});
+
+// ---- Branches, compare and edit (#839, #840, #845) ----
+
+const BRANCH = `${REPO}@refs/heads/feature/PAY-231-sepa-retry`;
+
+const action = (write_op: string, disabled: string | null = null): ViewAction => ({
+  write_op,
+  label: write_op,
+  fields: [],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled,
+  with_settings: false,
+  values: {},
+  entity: null,
+  comments: null,
+} as unknown as ViewAction);
+
+/** A branch's whole view as `knobas-source-gitea`'s `view/branch.rs` draws it. */
+function branchView(over: { pr?: boolean; ahead?: string; behind?: string; actions?: ViewAction[] } = {}): SourceView {
+  const facts = [
+    { label: "Base", value: "main", tone: null },
+    { label: "Ahead", value: over.ahead ?? "3", tone: null },
+    { label: "Behind", value: over.behind ?? "1", tone: null },
+    ...(over.pr ? [] : [{ label: "Pull request", value: "none", tone: "muted" as const }]),
+  ];
+  return {
+    sections: [
+      {
+        id: "overview",
+        title: "Overview",
+        count: null,
+        deferred: false,
+        blocks: [
+          ...(over.pr
+            ? [
+                {
+                  type: "entities" as const,
+                  title: "Pull request",
+                  rows: [{ entity_id: `${REPO}#142`, title: "SEPA retry", meta: "#142 · feature → main · mara", tone: "info" as const, chip: "open", url: null }],
+                },
+              ]
+            : []),
+          { type: "facts" as const, facts },
+          {
+            type: "entities" as const,
+            title: "Last commit",
+            rows: [{ entity_id: `${REPO}@c90d11e4`, title: "jitter", meta: "mara · 2 hours ago", tone: null, chip: "c90d11e4", url: null }],
+          },
+        ],
+      },
+      {
+        id: "commits",
+        title: "Commits",
+        count: 1,
+        deferred: false,
+        blocks: [
+          {
+            type: "entities",
+            title: null,
+            rows: [{ entity_id: `${REPO}@c90d11e4`, title: "jitter", meta: "mara · 2 hours ago", tone: null, chip: "c90d11e4", url: null }],
+          },
+        ],
+      },
+      { id: "diff", title: "Diff", count: 2, deferred: true, blocks: [] },
+    ],
+    actions: over.actions ?? [action("create_pull_request"), action("create_branch"), action("delete_branch")],
+  };
+}
+
+test("a branch's standing is read off its view: ahead and behind, its open pull request, its commits and what it offers", () => {
+  const standing = branchStanding(branchView({ pr: true, actions: [action("create_branch"), action("delete_branch")] }));
+  expect(standing).toMatchObject({ ahead: 3, behind: 1, merged: false, canOpenPr: false, deletable: true, deleteBlocked: null, files: 2 });
+  expect(standing.pr).toEqual({ entityId: `${REPO}#142`, number: "#142", state: "open", tone: "info" });
+  expect(standing.commits.map((row) => row.title)).toEqual(["jitter"]);
+
+  const none = branchStanding(branchView({ ahead: "0", behind: "4" }));
+  expect(none).toMatchObject({ ahead: 0, behind: 4, merged: true, pr: null, canOpenPr: true, deletable: true });
+
+  // Disabled by the source: no PR offered; a protected branch says why it stays.
+  const held = branchStanding(
+    branchView({ actions: [action("create_pull_request", "No commits ahead of main"), action("delete_branch", "Protected branch: lift its protection on Gitea to delete it")] }),
+  );
+  expect(held).toMatchObject({ canOpenPr: false, deletable: true, deleteBlocked: "Protected branch: lift its protection on Gitea to delete it" });
+
+  // The default branch: no ahead, nothing to propose or delete.
+  const main = branchStanding({
+    sections: [{ id: "overview", title: "Overview", count: null, deferred: false, blocks: [{ type: "facts", facts: [{ label: "Branch", value: "default branch", tone: null }] }] }],
+    actions: [action("create_branch")],
+  });
+  expect(main).toMatchObject({ ahead: null, behind: null, merged: false, pr: null, canOpenPr: false, deletable: false, files: null });
+});
+
+test("the Branches filter keeps by name, by No PR and by Merged, the default branch only by name", () => {
+  const rows: BranchRow[] = [
+    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true, meta: null, standing: null },
+    { name: "feature/PAY-231-sepa-retry", entityId: BRANCH, isDefault: false, meta: null, standing: branchStanding(branchView({ pr: true })) },
+    { name: "spike/sepa-instant", entityId: "x", isDefault: false, meta: null, standing: branchStanding(branchView()) },
+    { name: "chore/bump-tokio", entityId: "y", isDefault: false, meta: null, standing: branchStanding(branchView({ ahead: "0" })) },
+    { name: "unread", entityId: null, isDefault: false, meta: null, standing: null },
+  ];
+  const names = (show: string[], text = "") => visibleBranches(rows, show, text).map((row) => row.name);
+  expect(names([])).toEqual(["main", "feature/PAY-231-sepa-retry", "spike/sepa-instant", "chore/bump-tokio", "unread"]);
+  expect(names([], "sepa")).toEqual(["feature/PAY-231-sepa-retry", "spike/sepa-instant"]);
+  expect(names(["No PR"])).toEqual(["spike/sepa-instant", "chore/bump-tokio"]);
+  expect(names(["Merged"])).toEqual(["chore/bump-tokio"]);
+  expect(names(["No PR", "Merged"])).toEqual(["chore/bump-tokio"]);
+});
+
+test("a ticket key is found in a branch name; the pull request is proposed from its ticket", () => {
+  expect(keyIn("feature/PAY-231-sepa-retry")).toBe("PAY-231");
+  expect(keyIn("fix/OPS2-9")).toBe("OPS2-9");
+  expect(keyIn("spike/sepa-instant")).toBeNull();
+
+  expect(proposal("feature/PAY-231-sepa-retry", { key: "PAY-231", summary: "Retry failed SEPA payouts", description: "The batch leaves 14 unsettled." })).toEqual({
+    title: "PAY-231: Retry failed SEPA payouts",
+    body: "The batch leaves 14 unsettled.\n\nCloses PAY-231.",
+  });
+  expect(proposal("feature/PAY-231-x", { key: "PAY-231", summary: "Retry", description: "" })).toEqual({ title: "PAY-231: Retry", body: "Closes PAY-231." });
+  expect(proposal("spike/sepa-instant", null)).toEqual({ title: "sepa-instant", body: "" });
+});
+
+test("a new branch and a commit are prefilled from the job", () => {
+  expect(newBranchName("PAY-231")).toBe("feature/PAY-231-");
+  expect(newBranchName(null)).toBe("feature/");
+  expect(commitPrefill("PAY-231", "src/sepa/retry.rs")).toEqual({ message: "PAY-231: update retry.rs", branch: "fix/PAY-231-retry" });
+  expect(commitPrefill(null, "README.md")).toEqual({ message: "update README.md", branch: "fix/README" });
+});
+
+test("the edit and compare addresses", () => {
+  expect(editHash(REPO, "src/a b.rs")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/edit/src/a%20b.rs");
+  expect(compareHash(REPO, "feature/x")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2Fx");
+  expect(readRepoRoute([REPO, "edit", "src", "a b.rs"])).toMatchObject({ tab: "edit", path: "src/a b.rs" });
+});
+
+test("a branch from a commit starts where the commit's own New branch… starts, disabled where the source says", () => {
+  const newBranch = (disabled: string | null): ViewAction =>
+    ({
+      ...action("create_branch", disabled),
+      fields: [
+        { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null },
+        { name: "from_ref", label: "From", kind: { type: "choice", options: [{ value: "c90d11e4a7b2f00d", label: "c90d11e4a7" }] }, value: null, required: true, placeholder: null },
+      ],
+    }) as ViewAction;
+  expect(branchFrom({ sections: [], actions: [newBranch(null)] })).toEqual({ from: { value: "c90d11e4a7b2f00d", label: "c90d11e4a7" }, disabled: null });
+  expect(branchFrom({ sections: [], actions: [newBranch("A mirror: its branches come from upstream")] })?.disabled).toBe(
+    "A mirror: its branches come from upstream",
+  );
+  expect(branchFrom({ sections: [], actions: [] })).toBeNull();
+  expect(branchFrom(null)).toBeNull();
 });

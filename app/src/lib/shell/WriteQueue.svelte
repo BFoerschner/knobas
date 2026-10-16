@@ -35,6 +35,7 @@
   import {
     demandOf,
     editableBody,
+    movedFile,
     readSnapshot,
     withBody,
     withdrawnWorklog,
@@ -95,7 +96,7 @@
   }
 
   async function save(row: QueuedWrite) {
-    const payload = withBody(row.payload, draft);
+    const payload = withBody(row.payload, draft, row.held_snapshot);
     if (payload === null) return;
     await queue.amend(row.id, payload);
     editing = null;
@@ -186,6 +187,7 @@
           {@const before = readSnapshot(row.target_snapshot)}
           {@const nowSide = readSnapshot(row.held_snapshot)}
           {@const body = editableBody(row.payload)}
+          {@const file = movedFile(row)}
           <article class="wq-row {row.state}">
             <header class="wq-row-h">
               <b class="wq-op">{row.op}</b>
@@ -208,6 +210,24 @@
                 knobas is holding this because its source is turned off. Re-enable it in Sources
                 to send it — or edit or discard it here.
               </p>
+            {:else if row.state === "held" && file !== null}
+              <!--
+                A commit over a file that moved (#822, #845): the queue
+                projected only the repository's liveness when it was queued,
+                so "when you queued it" has nothing to show. The two versions
+                that matter are the reader's file and the source's.
+              -->
+              <p class="wq-why">The file changed on the source after you queued this.</p>
+              <div class="grid2">
+                <div>
+                  <span class="wq-side">Yours, {file.path}</span>
+                  <pre class="log">{file.mine}</pre>
+                </div>
+                <div>
+                  <span class="wq-side">On the source now</span>
+                  <pre class="log">{file.theirs}</pre>
+                </div>
+              </div>
             {:else if row.state === "held"}
               <p class="wq-why">The target changed after you queued this.</p>
               <div class="grid2">
@@ -259,7 +279,7 @@
                   rows="4"
                 ></textarea>
               </div>
-            {:else if body !== null}
+            {:else if body !== null && file === null}
               <pre class="log wq-mine">{body}</pre>
             {/if}
 

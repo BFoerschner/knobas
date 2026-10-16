@@ -1109,6 +1109,8 @@ const CASES: Case[] = [
       ["TfRepoCommits", "lib/tf/repo/TfRepoCommits.svelte", ["commits"]],
       ["TfRepoCommit", "lib/tf/repo/TfRepoCommit.svelte", ["commits", "gitea:tidewater/payout-service@c90d11"]],
       ["TfRepoPrs", "lib/tf/repo/TfRepoPrs.svelte", ["prs"]],
+      ["TfRepoBranches", "lib/tf/repo/TfRepoBranches.svelte", ["branches"]],
+      ["TfRepoCompare", "lib/tf/repo/TfRepoCompare.svelte", ["compare", "feature", "PAY-231-x"]],
     ] as const
   ).map(
     ([name, source, tail]): Case => ({
@@ -1157,6 +1159,7 @@ const CASES: Case[] = [
               listContexts: () => deferred([]),
               listSources: () => deferred([]),
               jobReach: () => deferred([]),
+              submitWrite: () => deferred({} as never),
             },
           },
         }),

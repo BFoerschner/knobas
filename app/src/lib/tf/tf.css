@@ -1536,3 +1536,36 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-mon-acts .tf-btn + .tf-btn { margin-left: 4px; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ---------- Branches, compare and edit (#839, #840, #845, R-8.6, R-8.8, R-8.11) ---------- */
+.tf-rbranches td:first-child { width: 34%; }
+.tf-rbranches .tf-racts { text-align: right; }
+.tf-rbranches-note { margin: 8px 0 0; }
+.tf-rdel footer .tf-danger { border-color: var(--err); }
+/* A banner inside a dialog's body: a rounded block, not a strip across a panel. */
+.tf-dialog .tf-dbanner { border: 0; border-radius: 4px; }
+.tf-compare { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.tf-compare .tf-cform { padding: 14px; }
+.tf-compare .tf-formgrid textarea {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 8px; background: var(--paper); color: var(--ink); width: 100%;
+  font: inherit; resize: vertical;
+}
+.tf-compare .tf-ctop { align-self: start; padding-top: 6px; }
+.tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
+.tf .tf-compare .tf-cchanges { margin-top: 18px; }
+.tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
+.tf-compare .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
+.tf-editor { display: grid; grid-template-columns: 48px 1fr; font: var(--t-sm)/1.6 var(--mono); }
+.tf-editor .tf-nums {
+  color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);
+}
+.tf-editor textarea {
+  border: 0; outline: none; background: var(--paper); color: var(--ink); font: inherit; padding: 8px 10px; resize: vertical;
+  min-height: 420px; white-space: pre; overflow: auto; tab-size: 4;
+}
+.tf-editor textarea:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.tf-dialog.tf-cf-dialog { width: min(760px, calc(100vw - 32px)); }
+.tf-cf-dialog .tf-radio small input { margin-top: 4px; width: 100%; border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); }
+@media (max-width: 900px) {
+  .tf-compare { grid-template-columns: minmax(0, 1fr); }
+}

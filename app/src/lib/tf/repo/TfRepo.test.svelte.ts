@@ -18,6 +18,7 @@ import type {
   EntityRow,
   SourceView,
   TreeEntry,
+  ViewAction,
   ViewBlock,
   ViewRow,
 } from "../../ipc/entity";
@@ -57,6 +58,24 @@ const section = (id: string, blocks: ViewBlock[]): SourceView => ({
   sections: [{ id, title: id, count: null, deferred: false, blocks }],
   actions: [],
 });
+
+/** A commit's whole view carries *New branch…* from it (#707), its whole sha the value. */
+const withActions = (view: SourceView): SourceView => ({ ...view, actions: [NEW_BRANCH] });
+const NEW_BRANCH = {
+  write_op: "create_branch",
+  label: "New branch…",
+  fields: [
+    { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null },
+    { name: "from_ref", label: "From", kind: { type: "choice", options: [{ value: "c90d11e4a7b2", label: "c90d11e4a7" }] }, value: null, required: true, placeholder: null },
+  ],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled: null,
+  with_settings: false,
+  values: {},
+  entity: REPO,
+} as unknown as ViewAction;
 
 const entry = (name: string, kind: TreeEntry["kind"], at: string): TreeEntry => ({
   name,
@@ -161,8 +180,8 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
                 : [vrow(null, "Only on the feature", "7be0e40000", "mara · 1 day ago")],
           },
         ]);
-      if (id === C1 && sectionId === "diff")
-        return section("diff", [
+      if (id === C1 && sectionId === null)
+        return withActions(section("diff", [
           {
             type: "diff",
             truncated: false,
@@ -190,7 +209,7 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
               },
             ],
           },
-        ]);
+        ]));
       const tree = TREES[at];
       if (tree && sectionId !== null && tree[sectionId])
         return section(sectionId, [{ type: "tree", trail: [], entries: tree[sectionId]!, truncated: false, url: null }]);
@@ -221,6 +240,9 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
     listContexts: async () => [],
     listSources: async () => [],
     jobReach: async () => [],
+    submitWrite: async () => {
+      throw { code: "invalid", message: "no write in this suite" };
+    },
     ...over,
   };
 }
@@ -325,7 +347,7 @@ test("Commits lists sha, message and who and when; the filter narrows; a mirrore
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
 });
 
-test("a commit draws its sha, message, author and time, its diff per file, and the later New branch", async () => {
+test("a commit draws its sha, message, author and time, its diff per file, and New branch from here", async () => {
   await draw([REPO, "commits", C1]);
   expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
   const diff = target.querySelector(".tf-diff")!;
@@ -333,7 +355,7 @@ test("a commit draws its sha, message, author and time, its diff per file, and t
   expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["1 fn retry() {", "2− 3", "2+ 5"]);
   expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();
   const branch = [...target.querySelectorAll("button")].find((b) => text(b) === "New branch from here…")!;
-  expect(branch.getAttribute("aria-disabled")).toBe("true");
+  expect(branch.getAttribute("aria-disabled")).toBeNull();
   expect(target.querySelector(".tf-tabs a[aria-current='page']")!.textContent).toContain("Commits");
 });
 
@@ -347,13 +369,8 @@ test("Pull requests lists this repository's, with a state filter", async () => {
   expect(rows()).toEqual(["#139"]);
 });
 
-test("Branches, Local changes, an edit and the compare page say they are not built yet, under their tab", async () => {
-  for (const [rest, lit, name] of [
-    [[REPO, "branches"], "Branches", "Branches"],
-    [[REPO, "local"], "Local changes", "Local changes"],
-    [[REPO, "edit", "README.md"], "Files", "Editing a file"],
-    [[REPO, "compare", "feature/x"], "Pull requests", "Comparing a branch"],
-  ] as const) {
+test("Local changes says it is not built yet, under its tab", async () => {
+  for (const [rest, lit, name] of [[[REPO, "local"], "Local changes", "Local changes"]] as const) {
     await draw([...rest]);
     expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain(lit);
     expect(text(target.querySelector(".tf-cbody .tf-empty"))).toBe(`${name} is not built in the new shell yet.`);

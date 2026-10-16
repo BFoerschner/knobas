@@ -6,8 +6,16 @@
   section a listing names, #711): the top directory first, then each directory
   opened, and every directory above the file the address names. A file the
   local checkout changed is marked `M`; open, it warns above its text. The
-  file is drawn with its line numbers; *History* goes to Commits. *Edit*
-  (#845) and *Open in…* (#844) are not built yet.
+  file is drawn with its line numbers; *History* goes to Commits. *Open in…*
+  (#844) is not built yet.
+
+  *Edit* (#845, R-8.6) is the file's address under `edit/`: the file turns
+  into an editor with line numbers under the banner that the commit goes to
+  the source and the checkout is never written, and *Commit change…* opens
+  `TfCommitFile`. Only a file the source gave a blob sha for (#883) can be
+  edited, since that is what the commit is checked against; a binary or cut
+  file cannot either, and *Edit* says why. A commit queued this session is a
+  banner on the file until the source holds a newer blob.
 
   With no file in the address the top directory's README opens.
 -->
@@ -17,8 +25,11 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { TreeEntry, ViewBlock } from "../../ipc/entity";
+  import { push } from "../../shell/toasts.svelte";
+  import { queuedCommit } from "./queued.svelte";
+  import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { ancestors, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
+  import { ancestors, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -29,8 +40,11 @@
     branch,
     path,
     changed,
+    editing = false,
+    job = null,
+    checkoutBranch = null,
   }: {
-    ports: Pick<RepoPorts, "entityView">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite">;
     repoId: string;
     /** The entity the tree is read at: the repository, or the branch picked. */
     at: string;
@@ -40,6 +54,12 @@
     path: string | null;
     /** The paths the local checkout changed. */
     changed: ReadonlySet<string>;
+    /** The address is the file's edit (`edit/<path>`). */
+    editing?: boolean;
+    /** The job's key, for the commit's message. */
+    job?: string | null;
+    /** The branch the local checkout is on, `null` without one. */
+    checkoutBranch?: string | null;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -131,7 +151,9 @@
     let live = true;
     readSection(section, where).then(
       (block) => {
-        if (live) file = block?.type === "file" ? block : null;
+        if (!live) return;
+        file = block?.type === "file" ? block : null;
+        draft = null;
       },
       (error) => {
         if (live) fileFailed = ipcErrorMessage(error);
@@ -143,6 +165,44 @@
   });
 
   const lines = $derived(file === null || file.binary ? [] : fileLines(file.text));
+
+  /** Why the file shown cannot be edited, `null` where it can. */
+  const notEditable = $derived(
+    file === null
+      ? null
+      : file.binary
+        ? "A binary file is not edited here"
+        : file.truncated
+          ? "The file is longer than knobas shows, so it is not edited here"
+          : file.sha === null
+            ? "The source did not say which version of the file this is, so a commit could not be checked against it"
+            : null,
+  );
+  const editable = $derived(file !== null && notEditable === null);
+
+  /** The editor's text, `null` until the reader types: the file as read. */
+  let draft = $state<string | null>(null);
+  const text = $derived(draft ?? file?.text ?? "");
+  const lineCount = $derived(text.split("\n").length);
+  const numbers = $derived(Array.from({ length: lineCount }, (_, n) => n + 1).join("\n"));
+  let committing = $state(false);
+
+  // Leaving the edit drops what was typed, as *Cancel* does.
+  $effect(() => {
+    if (!editing) draft = null;
+  });
+
+  function openCommit() {
+    if (file === null || text === file.text) {
+      push({ text: "Nothing changed yet." });
+      return;
+    }
+    committing = true;
+  }
+
+  const queued = $derived(
+    file === null || branch === null ? null : queuedCommit(repoId, branch, file.path, file.sha),
+  );
 
   function toggle(dir: string) {
     if (open.has(dir)) open.delete(dir);
@@ -185,20 +245,51 @@
     {@render listing("", 0)}
   </nav>
   <div class="tf-fileview">
-    {#if file !== null}
+    {#if file !== null && editing && editable && branch !== null}
+      <header>
+        <span class="tf-p">{file.path}</span>
+        <span class="tf-chip tf-warn">editing on {branch}</span>
+        <span class="tf-acts">
+          <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, file.path)}>Cancel</a>
+          <button type="button" class="tf-btn tf-sm tf-primary" onclick={openCommit}>Commit change…</button>
+        </span>
+      </header>
+      <div class="tf-banner tf-info">
+        <span>The edit is committed to <span class="tf-mono">{branch}</span> on Gitea. Your local checkout is never written to.</span>
+      </div>
+      <div class="tf-editor">
+        <div class="tf-nums" aria-hidden="true">{numbers}</div>
+        <textarea
+          spellcheck="false"
+          rows={lineCount}
+          aria-label="Edit {file.path}"
+          value={text}
+          oninput={(event) => (draft = (event.currentTarget as HTMLTextAreaElement).value)}
+        ></textarea>
+      </div>
+    {:else if file !== null}
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-dim tf-small"
           >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
         <span class="tf-acts">
-          <button type="button" class="tf-btn tf-sm" aria-disabled="true" title="Not built in the new shell yet">Edit</button>
+          {#if editable}
+            <a class="tf-btn tf-sm" href={editHash(repoId, file.path)}>Edit</a>
+          {:else}
+            <button type="button" class="tf-btn tf-sm" aria-disabled="true" title={notEditable}>Edit</button>
+          {/if}
           <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>History</a>
           <button type="button" class="tf-btn tf-sm tf-ghost" aria-disabled="true" title="Not built in the new shell yet"
             >Open in…</button
           >
         </span>
       </header>
+      {#if queued !== null}
+        <div class="tf-banner tf-warn">
+          A commit of this file is queued: “{queued.message}”. It shows here once Gitea has it.
+        </div>
+      {/if}
       {#if changed.has(file.path)}
         <div class="tf-banner tf-warn">
           Your checkout has an uncommitted change to this file.
@@ -223,3 +314,18 @@
     {/if}
   </div>
 </div>
+
+{#if committing && file !== null && file.sha !== null && branch !== null}
+  <TfCommitFile
+    {repoId}
+    {branch}
+    path={file.path}
+    before={file.text}
+    after={text}
+    baseSha={file.sha}
+    {job}
+    {checkoutBranch}
+    {ports}
+    onclose={() => (committing = false)}
+  />
+{/if}

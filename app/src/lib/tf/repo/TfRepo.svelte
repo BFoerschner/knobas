@@ -9,10 +9,13 @@
     on this machine yet*); the *Branch* dropdown, which sets the branch every
     tab reads at and is held per repository for the session; *New branch…*,
     *New pull request* (the compare page, #840) and *Open in…* (#844).
-  - **The tabs**, `REPO_TABS` in `repo.ts`: Files, Commits and Pull requests
-    are drawn here; Branches (#839) and Local changes (#847), and the edit
-    (#845) and compare (#840) places, say they are not built yet. A ticket that
+  - **The tabs**, `REPO_TABS` in `repo.ts`: Files (and its edit, #845),
+    Commits, Branches (#839) and Pull requests (and the compare page, #840) are
+    drawn here; Local changes (#847) says it is not built yet. A ticket that
     builds one replaces its `NOT_BUILT` entry below with its component.
+  - **Writes** go through the write queue (`submit_write`): *New branch…*
+    (`CreateBranch`), a branch's *Delete…* (`DeleteBranch`), *Create pull
+    request* (`CreatePullRequest`) and an edit's commit (`CommitFile`).
 
   The repository is read through its source's own view (`entity_view`), so a
   repository nobody cloned reads the same as one on this disk; the checkout
@@ -21,12 +24,14 @@
 <script lang="ts" module>
   import type {
     CheckoutView,
+    ChoiceOption,
     DiffRead,
     EntityDetail,
     EntityFilter,
     EntityPage,
     SourceView,
   } from "../../ipc/entity";
+  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -36,6 +41,7 @@
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
+    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   }
 
   /**
@@ -60,6 +66,7 @@
     jobReach,
     listContexts,
     listEntities,
+    submitWrite,
     type EntityRow,
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
@@ -81,6 +88,9 @@
   import TfRepoCommit from "./TfRepoCommit.svelte";
   import TfRepoCommits from "./TfRepoCommits.svelte";
   import TfRepoFiles from "./TfRepoFiles.svelte";
+  import TfNewBranch from "./TfNewBranch.svelte";
+  import TfRepoBranches from "./TfRepoBranches.svelte";
+  import TfRepoCompare from "./TfRepoCompare.svelte";
   import TfRepoPrs from "./TfRepoPrs.svelte";
 
   let {
@@ -96,6 +106,7 @@
       listContexts: () => listContexts(),
       listSources: () => listSources(),
       jobReach: (entityId) => jobReach(entityId),
+      submitWrite: (payload) => submitWrite(payload),
     },
     now: fixedNow,
   }: {
@@ -232,11 +243,11 @@
   }
 
   const NOT_BUILT: Partial<Record<RepoTab, string>> = {
-    branches: "Branches",
     local: "Local changes",
-    edit: "Editing a file",
-    compare: "Comparing a branch",
   };
+
+  /** *New branch…*'s dialog, open from the header or from a commit. */
+  let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
 </script>
 
 <div class="tf-full">
@@ -275,7 +286,12 @@
             {/each}
           </select></label
         >
-        <button type="button" class="tf-btn" aria-disabled="true" title="Not built in the new shell yet">New branch…</button>
+        <button
+          type="button"
+          class="tf-btn"
+          disabled={branches === null || branches.length === 0}
+          onclick={() => (newBranch = { from: null })}>New branch…</button
+        >
         {#if proposed !== null}
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
@@ -296,10 +312,30 @@
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
       {:else if branches === null || at === null}
         <!-- The branch every tab reads at is not known yet. -->
-      {:else if route.tab === "files"}
-        <TfRepoFiles {ports} {repoId} {at} branch={branchName} path={route.path} {changed} />
+      {:else if route.tab === "files" || route.tab === "edit"}
+        <TfRepoFiles
+          {ports}
+          {repoId}
+          {at}
+          branch={branchName}
+          path={route.path}
+          {changed}
+          editing={route.tab === "edit"}
+          {job}
+          checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
+        />
       {:else if route.tab === "commits" && route.commit !== null}
-        <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} />
+        <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} onNewBranch={(from) => (newBranch = { from })} />
+      {:else if route.tab === "branches"}
+        <TfRepoBranches {ports} {repoId} />
+      {:else if route.tab === "compare"}
+        <TfRepoCompare
+          {ports}
+          {repoId}
+          branches={branches}
+          head={route.branch ?? proposed}
+          defaultBranch={defaultBranch?.name ?? null}
+        />
       {:else if route.tab === "commits"}
         <TfRepoCommits {ports} {repoId} {at} branch={branchName} defaultBranch={defaultBranch?.name ?? null} />
       {:else if route.tab === "prs"}
@@ -308,3 +344,15 @@
     </div>
   {/if}
 </div>
+
+{#if newBranch !== null && repoId !== null}
+  <TfNewBranch
+    {repoId}
+    repoName={repo?.title ?? repoId}
+    branches={(branches ?? []).map((option) => option.name)}
+    from={newBranch.from}
+    {job}
+    {ports}
+    onclose={() => (newBranch = null)}
+  />
+{/if}

@@ -173,7 +173,24 @@ function pageVersion(bag: Record<string, unknown>): number | null {
 export function editableBody(payload: unknown): string | null {
   if (typeof payload !== "object" || payload === null) return null;
   const comment = (payload as { Comment?: { body?: unknown } }).Comment;
-  return comment && typeof comment.body === "string" ? comment.body : null;
+  if (comment) return typeof comment.body === "string" ? comment.body : null;
+  // A file's commit (#845): its words are the file's whole new text.
+  const commit = (payload as { CommitFile?: { content?: unknown } }).CommitFile;
+  return commit && typeof commit.content === "string" ? commit.content : null;
+}
+
+/**
+ * A commit the source held because the file moved since it was read (#822,
+ * #845): the reader's version of the file and the source's, side by side.
+ * `null` for any other write, and for a commit held for another reason (the
+ * held side names no `base`).
+ */
+export function movedFile(row: Pick<QueuedWrite, "payload" | "held_snapshot">): { path: string; mine: string; theirs: string } | null {
+  const commit = (row.payload as { CommitFile?: { path?: unknown; content?: unknown } } | null)?.CommitFile;
+  const held = row.held_snapshot as { text?: unknown; base?: unknown } | null;
+  if (!commit || typeof commit.content !== "string" || typeof commit.path !== "string") return null;
+  if (held === null || typeof held !== "object" || typeof held.text !== "string" || typeof held.base !== "string") return null;
+  return { path: commit.path, mine: commit.content, theirs: held.text };
 }
 
 /** What a queued `log_work` write would put on a ticket, read off its payload. */
@@ -285,12 +302,21 @@ export function withdrawnWorklog(row: QueuedWrite): WithdrawnWorklog | null {
   };
 }
 
-/** The same payload with its text replaced, ready for `amendWrite`. */
-export function withBody(payload: unknown, body: string): WriteOpPayload | null {
+/**
+ * The same payload with its text replaced, ready for `amendWrite`.
+ *
+ * A commit's edit answers the version the source holds now: where the held
+ * side names the blob it found (`base`, #822), the amended commit is made
+ * against that blob, or the source would hold it again over the same move.
+ */
+export function withBody(payload: unknown, body: string, heldSnapshot: unknown = null): WriteOpPayload | null {
   if (typeof payload !== "object" || payload === null) return null;
   const comment = (payload as { Comment?: { entity?: unknown } }).Comment;
-  if (!comment || typeof comment.entity !== "string") return null;
-  return { Comment: { entity: comment.entity, body } };
+  if (comment) return typeof comment.entity === "string" ? { Comment: { entity: comment.entity, body } } : null;
+  const commit = (payload as { CommitFile?: Extract<WriteOpPayload, { CommitFile: unknown }>["CommitFile"] }).CommitFile;
+  if (!commit || typeof commit.repo !== "string") return null;
+  const base = (heldSnapshot as { base?: unknown } | null)?.base;
+  return { CommitFile: { ...commit, content: body, base_sha: typeof base === "string" ? base : commit.base_sha } };
 }
 
 export interface WriteQueue {

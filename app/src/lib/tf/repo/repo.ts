@@ -8,7 +8,7 @@
  * commit's diff, all read live, so a repository nobody cloned reads the same
  * as one on this disk. Section ids are the source's and never taken apart.
  */
-import type { CheckoutView, DiffRead, EntityRow, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
+import type { CheckoutView, ChoiceOption, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
 
@@ -208,4 +208,157 @@ export function visibleRepoPrs(rows: readonly EntityRow[], states: readonly stri
     if (wanted.length > 0 && !wanted.includes(row.state?.text.toLowerCase() ?? "")) return false;
     return matchesAll(`${prNumber(row.entity_id) ?? ""} ${row.title}`, text);
   });
+}
+
+/** The edit of a file (#845): the Files tab's file, turned into an editor. */
+export function editHash(repoId: string, path: string): string {
+  return repoHash(repoId, "edit", ...path.split("/").map(encodeURIComponent));
+}
+
+/** The compare page of a branch (#840, #837's `compare/<branch>`), the name one segment. */
+export function compareHash(repoId: string, branch: string): string {
+  return repoHash(repoId, "compare", encodeURIComponent(branch));
+}
+
+/**
+ * Where *New branch from here…* starts, from the commit's own view: its
+ * toolbar's *New branch…* (`create_branch`), whose `from_ref` the source fills
+ * with the commit's whole sha as the value and its short sha as the label
+ * (#707). `null` where the view offers none; `disabled` is the source's reason
+ * (a mirror) where it offers one it would refuse.
+ */
+export function branchFrom(view: SourceView | null): { from: ChoiceOption; disabled: string | null } | null {
+  const action = view?.actions.find((candidate) => candidate.write_op === "create_branch");
+  const field = action?.fields.find((candidate) => candidate.name === "from_ref");
+  const from = field?.kind.type === "choice" ? field.kind.options[0] : undefined;
+  return action && from ? { from, disabled: action.disabled } : null;
+}
+
+/**
+ * Where a branch stands, read off its source's own view (`entity_view` of the
+ * branch, `knobas-source-gitea`'s `view/branch.rs`): ahead and behind the
+ * default branch, the pull request open from it, what it carries, and which
+ * of its writes the source offers right now.
+ *
+ * Whether *Open PR* and *Delete…* are offered is the source's answer, its
+ * toolbar's actions (ADR-0020 rule 4), never this reading of a fact. Ahead and
+ * behind are drawn, and *merged* is how a branch with nothing ahead is drawn.
+ */
+export interface BranchStanding {
+  /** Commits it carries over the default branch; `null` for that branch itself. */
+  ahead: number | null;
+  /** Commits the default branch has that it lacks; `null` for that branch itself. */
+  behind: number | null;
+  /** Nothing on it that the default branch lacks. */
+  merged: boolean;
+  /** The pull request open from it, as the overview lists it. */
+  pr: { entityId: string | null; number: string | null; state: string | null; tone: string | null } | null;
+  /** The source offers a pull request from it now (*Open pull request…*, enabled). */
+  canOpenPr: boolean;
+  /** The source offers a delete at all: never for the default branch. */
+  deletable: boolean;
+  /** Why the delete cannot be taken now (a protected branch), in the source's words. */
+  deleteBlocked: string | null;
+  /** What it carries over the default branch, as its *Commits* lists it. */
+  commits: ViewRow[];
+  /** How many files its diff against the default branch touches; `null` where it has none. */
+  files: number | null;
+}
+
+function count(value: string | undefined): number | null {
+  return value !== undefined && /^\d+$/.test(value.trim()) ? Number(value.trim()) : null;
+}
+
+/** A branch's standing from its whole view; an empty one where the view holds nothing. */
+export function branchStanding(view: SourceView | null): BranchStanding {
+  const section = (id: string) => view?.sections.find((candidate) => candidate.id === id);
+  const overview = section("overview")?.blocks ?? [];
+  const facts = new Map<string, string>();
+  let pr: BranchStanding["pr"] = null;
+  for (const block of overview) {
+    if (block.type === "facts") for (const fact of block.facts) facts.set(fact.label, fact.value);
+    if (block.type === "entities" && pr === null) {
+      const row = block.rows.find((candidate) => candidate.entity_id !== null && prNumber(candidate.entity_id) !== null);
+      if (row) pr = { entityId: row.entity_id, number: prNumber(row.entity_id!), state: row.chip, tone: row.tone };
+    }
+  }
+  const ahead = count(facts.get("Ahead"));
+  const actions = view?.actions ?? [];
+  const offer = actions.find((candidate) => candidate.write_op === "create_pull_request");
+  const remove = actions.find((candidate) => candidate.write_op === "delete_branch");
+  const diff = section("diff");
+  return {
+    ahead,
+    behind: count(facts.get("Behind")),
+    merged: ahead === 0,
+    pr,
+    canOpenPr: offer !== undefined && offer.disabled === null,
+    deletable: remove !== undefined,
+    deleteBlocked: remove?.disabled ?? null,
+    commits: viewRows(section("commits")),
+    files: diff?.count ?? null,
+  };
+}
+
+/** One row of the *Branches* tab. */
+export interface BranchRow {
+  name: string;
+  /** Its entity id, `null` where the mirror does not hold it yet. */
+  entityId: string | null;
+  isDefault: boolean;
+  /** The listing's line: its tip and when it was committed. */
+  meta: string | null;
+  /** `null` until its view answers, and for a branch with no id to read at. */
+  standing: BranchStanding | null;
+}
+
+/** The rows the *Branches* filter keeps: every word typed in the name, and each chip set. */
+export function visibleBranches(rows: readonly BranchRow[], show: readonly string[], text: string): BranchRow[] {
+  return rows.filter((row) => {
+    if (show.includes("No PR") && (row.isDefault || row.standing === null || row.standing.pr !== null)) return false;
+    if (show.includes("Merged") && !row.standing?.merged) return false;
+    return matchesAll(row.name, text);
+  });
+}
+
+/** The ticket key a branch name holds (`feature/PAY-231-sepa-retry`), or `null`. */
+export function keyIn(name: string): string | null {
+  const found = /(?:^|[^A-Za-z0-9])([A-Z][A-Z0-9]+-\d+)(?![0-9])/.exec(name);
+  return found ? found[1]! : null;
+}
+
+/** The ticket a pull request is proposed from: its key, summary and description. */
+export interface ProposedFrom {
+  key: string;
+  summary: string;
+  description: string;
+}
+
+/**
+ * The compare page's title and description (R-8.11): `<key>: <summary>` and
+ * the ticket's description ending `Closes <key>.` where the branch holds a
+ * key the mirror has; else the branch's last segment and nothing.
+ */
+export function proposal(head: string, ticket: ProposedFrom | null): { title: string; body: string } {
+  if (ticket === null) return { title: head.slice(head.lastIndexOf("/") + 1), body: "" };
+  const description = ticket.description.trim();
+  return {
+    title: `${ticket.key}: ${ticket.summary}`,
+    body: description === "" ? `Closes ${ticket.key}.` : `${description}\n\nCloses ${ticket.key}.`,
+  };
+}
+
+/** *New branch…*'s name, prefilled with the job's key (R-8.8). */
+export function newBranchName(job: string | null): string {
+  return job === null ? "feature/" : `feature/${job}-`;
+}
+
+/** The commit dialog's message and new branch, prefilled with the job's key (R-8.6). */
+export function commitPrefill(job: string | null, path: string): { message: string; branch: string } {
+  const file = path.slice(path.lastIndexOf("/") + 1);
+  const stem = file.includes(".") && !file.startsWith(".") ? file.slice(0, file.indexOf(".")) : file;
+  return {
+    message: job === null ? `update ${file}` : `${job}: update ${file}`,
+    branch: job === null ? `fix/${stem}` : `fix/${job}-${stem}`,
+  };
 }
