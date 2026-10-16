@@ -3788,3 +3788,9 @@ Ruled by the merge-manager (PR #1034).
 - **The `note:` row in the launcher's static syntax list and Help card stays** while notes are
   hidden. Hiding it needs the frontend to know the setting (a field on `launcher_home`, a §10.8
   entry); filed as a follow-up. **Reversing:** n/a.
+- **An absent `capture.notes_shown` row hides notes from search, for fresh and existing databases
+  alike (merge-manager, PR #1037).** #832 and R-13a.6 say the setting is off by default and
+  `capture::shown` already reads an absent row as off; #940 says notes leave search while it is
+  off. Upgrading therefore hides notes from search until the user turns the setting on; the notes
+  and commands stay (D10). No change made. **Reversing:** low (read the absent row as on in
+  `capture::shown`, which would also arm the capture shortcut, contradicting #832).
