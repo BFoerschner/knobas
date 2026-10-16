@@ -276,7 +276,10 @@ fn refusal(draft: &LinkSetDraft) -> Option<String> {
         if draft.patterns[..at].iter().any(|earlier| {
             earlier.kind == pattern.kind && earlier.query.trim() == pattern.query.trim()
         }) {
-            return Some(format!("the pattern `{}` is there twice", pattern.query.trim()));
+            return Some(format!(
+                "the pattern `{}` is there twice",
+                pattern.query.trim()
+            ));
         }
     }
     for (at, rule) in draft.rules.iter().enumerate() {
@@ -1134,10 +1137,10 @@ pub async fn on_job(pool: &PgPool, ticket_id: &str) -> Result<JobLinkSets, IpcEr
         .await?;
     let ids: Vec<String> = sets.iter().map(|row| row.get("id")).collect();
     let members = sqlx::query(JOB_MEMBERS)
-    .bind(&ids)
-    .bind(ticket_id)
-    .fetch_all(pool)
-    .await?;
+        .bind(&ids)
+        .bind(ticket_id)
+        .fetch_all(pool)
+        .await?;
     let mut out: Vec<JobSet> = sets
         .iter()
         .map(|row| JobSet {

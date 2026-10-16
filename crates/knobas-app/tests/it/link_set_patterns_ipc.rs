@@ -133,7 +133,12 @@ fn pattern(kind: &str, query: &str) -> LinkSetPattern {
     }
 }
 
-fn draft(name: &str, members: Vec<LinkSetMember>, patterns: Vec<LinkSetPattern>, on: &str) -> LinkSetDraft {
+fn draft(
+    name: &str,
+    members: Vec<LinkSetMember>,
+    patterns: Vec<LinkSetPattern>,
+    on: &str,
+) -> LinkSetDraft {
     LinkSetDraft {
         id: None,
         name: name.to_owned(),
@@ -190,7 +195,10 @@ async fn a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit() {
     assert_eq!(from_sets(&pool, &job).await, ids(&[&build, &deploy]));
 
     let later = pipeline(&pool, &p, &format!("{p}_Payout_Smoke")).await;
-    assert_eq!(from_sets(&pool, &job).await, ids(&[&build, &deploy, &later]));
+    assert_eq!(
+        from_sets(&pool, &job).await,
+        ids(&[&build, &deploy, &later])
+    );
 }
 
 /// The job's *Also on this job* group (#867) lists what a pattern matches as
@@ -204,7 +212,12 @@ async fn the_jobs_set_group_lists_a_patterns_matches_and_hides_one() {
     let job = ticket(&pool).await;
     link_sets::save(
         &pool,
-        draft("Hide", vec![], vec![pattern("pipeline", &format!("project:{p}"))], &job),
+        draft(
+            "Hide",
+            vec![],
+            vec![pattern("pipeline", &format!("project:{p}"))],
+            &job,
+        ),
     )
     .await
     .unwrap();
@@ -226,10 +239,31 @@ async fn a_page_pattern_is_a_space_and_a_parent_page() {
     let pool = pool().await;
     let space = format!("OPS{}", tag());
     let runbooks = page(&pool, &space, &format!("{space}1"), "Runbooks", &[]).await;
-    let restart = page(&pool, &space, &format!("{space}2"), "Restart", &["Runbooks"]).await;
-    let deep = page(&pool, &space, &format!("{space}3"), "Deep", &["Runbooks", "Restart"]).await;
+    let restart = page(
+        &pool,
+        &space,
+        &format!("{space}2"),
+        "Restart",
+        &["Runbooks"],
+    )
+    .await;
+    let deep = page(
+        &pool,
+        &space,
+        &format!("{space}3"),
+        "Deep",
+        &["Runbooks", "Restart"],
+    )
+    .await;
     let other = page(&pool, &space, &format!("{space}4"), "Onboarding", &[]).await;
-    let _else = page(&pool, &format!("X{space}"), &format!("{space}5"), "Elsewhere", &["Runbooks"]).await;
+    let _else = page(
+        &pool,
+        &format!("X{space}"),
+        &format!("{space}5"),
+        "Elsewhere",
+        &["Runbooks"],
+    )
+    .await;
     let job = ticket(&pool).await;
     let whole = ticket(&pool).await;
 
@@ -246,11 +280,19 @@ async fn a_page_pattern_is_a_space_and_a_parent_page() {
     .unwrap();
     link_sets::save(
         &pool,
-        draft("Space", vec![], vec![pattern("page", &format!("project:{space}"))], &whole),
+        draft(
+            "Space",
+            vec![],
+            vec![pattern("page", &format!("project:{space}"))],
+            &whole,
+        ),
     )
     .await
     .unwrap();
-    assert_eq!(from_sets(&pool, &job).await, ids(&[&runbooks, &restart, &deep]));
+    assert_eq!(
+        from_sets(&pool, &job).await,
+        ids(&[&runbooks, &restart, &deep])
+    );
     assert_eq!(
         from_sets(&pool, &whole).await,
         ids(&[&runbooks, &restart, &deep, &other])
@@ -283,8 +325,11 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
         .await
         .unwrap();
     assert_eq!(preview.refusal, None);
-    let previewed: BTreeSet<String> =
-        preview.matches.iter().map(|m| m.entity_id.clone()).collect();
+    let previewed: BTreeSet<String> = preview
+        .matches
+        .iter()
+        .map(|m| m.entity_id.clone())
+        .collect();
     let launcher: BTreeSet<String> = knobas_app::commands::search::searcher(&pool)
         .await
         .unwrap()
@@ -305,7 +350,10 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
     assert_eq!(from_sets(&pool, &job).await, editor);
     assert_eq!(launcher, editor);
     assert!(
-        preview.projects.iter().any(|x| x.key == p && x.source_id == "tc"),
+        preview
+            .projects
+            .iter()
+            .any(|x| x.key == p && x.source_id == "tc"),
         "the dialog offers the project the pipelines sit in"
     );
 }
@@ -323,9 +371,12 @@ async fn a_pattern_knobas_cannot_read_is_refused() {
         ("pipeline", "name:x status:done"),
         ("repo", "name:x"),
     ] {
-        let refused = link_sets::save(&pool, draft("Bad", vec![], vec![pattern(kind, query)], &job))
-            .await
-            .unwrap_err();
+        let refused = link_sets::save(
+            &pool,
+            draft("Bad", vec![], vec![pattern(kind, query)], &job),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(refused.code, IpcErrorCode::Invalid, "{kind} {query:?}");
     }
     let twice = link_sets::save(
@@ -388,7 +439,14 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     run(&pool, &config, 1, "SUCCESS", 30).await;
     run(&pool, &config, 2, "FAILURE", 5).await;
     let space = format!("OPS{}", tag());
-    let doc = page(&pool, &space, &format!("{space}9"), "Restart", &["Runbooks", "Payouts"]).await;
+    let doc = page(
+        &pool,
+        &space,
+        &format!("{space}9"),
+        "Restart",
+        &["Runbooks", "Payouts"],
+    )
+    .await;
     let asset = format!("asset:{}", uuid::Uuid::new_v4());
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'asset','pve-02')")
         .bind(&asset)
@@ -427,7 +485,10 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     let view = |i: usize| {
         (
             rows[i].line.clone(),
-            rows[i].state.as_ref().map(|chip| (chip.text.clone(), chip.tone)),
+            rows[i]
+                .state
+                .as_ref()
+                .map(|chip| (chip.text.clone(), chip.tone)),
         )
     };
     use knobas_core::tone::Tone;
@@ -441,11 +502,17 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     );
     assert_eq!(
         view(1),
-        (Some(format!("{space} \u{203a} Runbooks \u{203a} Payouts")), None)
+        (
+            Some(format!("{space} \u{203a} Runbooks \u{203a} Payouts")),
+            None
+        )
     );
     assert_eq!(
         view(2),
-        (Some("vm, prod".to_owned()), Some(("down".to_owned(), Tone::Err)))
+        (
+            Some("vm, prod".to_owned()),
+            Some(("down".to_owned(), Tone::Err))
+        )
     );
 
     // A member whose item knobas no longer has keeps its place and reads as
@@ -462,7 +529,12 @@ async fn a_member_row_carries_its_line_and_its_dot() {
     let again = link_sets::get(&pool, &saved.set.id).await.unwrap();
     let last = again.set.members.last().unwrap();
     assert_eq!(
-        (last.entity_id.as_str(), &last.title, &last.line, &last.state),
+        (
+            last.entity_id.as_str(),
+            &last.title,
+            &last.line,
+            &last.state
+        ),
         (gone.as_str(), &None, &None, &None)
     );
 }

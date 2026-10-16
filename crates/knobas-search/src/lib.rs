@@ -59,7 +59,9 @@ use sqlx::PgPool;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
-pub use query::{EffectiveFilters, FieldFilter, FieldKey, Parsed, Pattern, merge, parse, pattern_of};
+pub use query::{
+    EffectiveFilters, FieldFilter, FieldKey, Parsed, Pattern, merge, parse, pattern_of,
+};
 pub use saved::{Refusal, SavedList};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
@@ -282,7 +284,9 @@ impl Searcher {
     /// not a pattern is the inner `Err`, never an error.
     pub async fn pattern(&self, raw: &str) -> Result<Result<Pattern, String>, SearchError> {
         if raw.chars().count() > MAX_RAW_CHARS {
-            return Ok(Err(format!("a pattern is at most {MAX_RAW_CHARS} characters")));
+            return Ok(Err(format!(
+                "a pattern is at most {MAX_RAW_CHARS} characters"
+            )));
         }
         let vocab = self.vocabulary().await?;
         Ok(query::pattern_of(&query::parse(raw, &vocab)))

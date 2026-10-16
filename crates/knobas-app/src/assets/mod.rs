@@ -1669,7 +1669,10 @@ pub(crate) struct Rollup {
 }
 
 /// [`ROLLUP`] for `ids`, keyed by asset id.
-pub(crate) async fn rollup(pool: &PgPool, ids: &[String]) -> Result<HashMap<String, Rollup>, IpcError> {
+pub(crate) async fn rollup(
+    pool: &PgPool,
+    ids: &[String],
+) -> Result<HashMap<String, Rollup>, IpcError> {
     if ids.is_empty() {
         return Ok(HashMap::new());
     }

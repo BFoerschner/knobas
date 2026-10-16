@@ -937,7 +937,11 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
             .iter()
             .flat_map(|field| field.values.iter().cloned())
             .collect(),
-        under: parsed.under.iter().map(|(_, value)| value.clone()).collect(),
+        under: parsed
+            .under
+            .iter()
+            .map(|(_, value)| value.clone())
+            .collect(),
         names: parsed.names.clone(),
     };
     if pattern == Pattern::default() {
@@ -1480,7 +1484,10 @@ mod tests {
     #[test]
     fn name_is_a_typed_glob_that_ignores_case() {
         let v = fixture();
-        let p = parse(r#"name:Payout_* retry NAME:"Dash board?" name:payout_*"#, &v);
+        let p = parse(
+            r#"name:Payout_* retry NAME:"Dash board?" name:payout_*"#,
+            &v,
+        );
         assert_eq!(p.query.text, "retry");
         assert_eq!(p.names, ["payout_*", "dash board?"]);
         assert!(p.query.unknown_tokens.is_empty());

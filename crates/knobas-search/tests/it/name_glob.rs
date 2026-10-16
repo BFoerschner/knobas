@@ -73,25 +73,45 @@ async fn a_name_glob_matches_a_key_or_a_title_whole() {
     let deploy = item(&pool, &format!("Payout{tag}_Deploy"), "Payouts / Deploy").await;
     // `_` is a character here, not `like`'s one-character wildcard.
     let no_underscore = item(&pool, &format!("Payout{tag}XBuild"), "Payouts / X").await;
-    let titled = item(&pool, &format!("Other{tag}"), &format!("Dashboard {tag} 100%")).await;
+    let titled = item(
+        &pool,
+        &format!("Other{tag}"),
+        &format!("Dashboard {tag} 100%"),
+    )
+    .await;
 
     let mut both = vec![build.clone(), deploy.clone()];
     both.sort();
     assert_eq!(search(&pool, &format!("name:payout{tag}_*")).await, both);
-    assert_eq!(search(&pool, &format!("name:PAYOUT{tag}_B?ild")).await, [build.clone()]);
+    assert_eq!(
+        search(&pool, &format!("name:PAYOUT{tag}_B?ild")).await,
+        std::slice::from_ref(&build)
+    );
     // Whole, not a substring: no `*` at the end, no match on a prefix.
-    assert!(search(&pool, &format!("name:Payout{tag}_")).await.is_empty());
+    assert!(
+        search(&pool, &format!("name:Payout{tag}_"))
+            .await
+            .is_empty()
+    );
     // A title, quoted for its space; `%` is itself.
     assert_eq!(
         search(&pool, &format!("name:\"dashboard {tag} 100%\"")).await,
-        [titled.clone()]
+        std::slice::from_ref(&titled)
     );
-    assert!(search(&pool, &format!("name:\"dashboard {tag} 1%\"")).await.is_empty());
+    assert!(
+        search(&pool, &format!("name:\"dashboard {tag} 1%\""))
+            .await
+            .is_empty()
+    );
     // Repeated globs OR.
     let mut two = vec![build, no_underscore];
     two.sort();
     assert_eq!(
-        search(&pool, &format!("name:Payout{tag}_Build name:Payout{tag}XB*")).await,
+        search(
+            &pool,
+            &format!("name:Payout{tag}_Build name:Payout{tag}XB*")
+        )
+        .await,
         two
     );
 }
