@@ -3420,3 +3420,9 @@ Ruled by the implementer (PR for #866).
   **Reversing:** low.
 - ***Apply a link set…* (the bar and the drawer) and *Save as a link set…* are #869's**, so the
   bar ends at its chips. **Reversing:** n/a.
+- **Merge-manager (PR #1014): *Undo* writes to the ticket the hide wrote to.** The toast lives
+  6.5 s at module level and outlives a move to another job, and `showAgain` took the page's
+  current ticket, so an *Undo* pressed after following the parent chip un-hid the member on the
+  wrong ticket and left the original hidden. `hideHere` now passes its ticket to *Undo*, and
+  `rereadReach` drops a re-read for a job the page has left. Pinned by `Undo after moving to
+  another job…` in `TfJobTalk.test.svelte.ts`. **Reversing:** low.
