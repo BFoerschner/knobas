@@ -1994,3 +1994,49 @@ Ruled 2026-10-16 by the implementer (PR for #828).
   than testenv has, the laned board reads 1.1 s and 4.2 MB, against 68 ms capped. Lanes are a
   switch the user turns on, and testenv is far smaller; the milestone review's by-eye check
   decides whether it gets promoted. **Reversing:** #939's lane argument on `mini_board`.
+
+## #831 — the other Settings sections in the new shell
+
+Implementer, PR for #831. The sections are prototype-6's `STGV` pages over commands that already
+exist; no command is added.
+
+- **The theme is one store, `tf/theme.svelte.ts`, handed to pages on the shell's context.** The top
+  bar's toggle and *Appearance* both write it, so they cannot disagree. Session only, as R-1.7 says;
+  nothing is stored. **Reversing:** low.
+- ***Restore from a file…* and *Import…* list the archives in the backup folder.** knobas has no file
+  picker, and `restore_backup` takes the name of an archive in that folder. *Restore* lists the
+  backups, *Import* the share exports, and both say they work only into a knobas with no data yet
+  (`restore_backup`'s refusal), since a merge with a preview is not built. Prototype-6's "shows what
+  the import adds" is not drawn. **Reversing:** medium, needs the dialog plugin and a path-taking
+  restore.
+- ***Back up* offers "Every day at <stored time>" and *Never*.** `BackupSchedule` has no weekday, so
+  prototype-6's *Every week* has nothing to store. **Reversing:** low, once the schedule has a field.
+- **Share ticks are the parts of `ShareParts`.** *Link sets* and *Ticket views* are no part yet, so
+  they are not drawn (the ticket's criterion); *Smart lists* is drawn only when a saved list exists,
+  and the part is sent off otherwise (CONTEXT.md, *Share export*). **Reversing:** low.
+- **"search index up to date" is not drawn** on *Logs and database*: no command reports the index's
+  state. Size and count are `db_stats`, the version `app_status`. **Reversing:** low.
+- ***Send a test notification* calls the `notify` command** with the Notifications page as its
+  address, and toasts the platform's refusal when the OS refuses. **Reversing:** low.
+- **Standup names the target page by its mirror row** (`path › title`, both declared, ADR-0007) and
+  by its entity id when the mirror lacks it. **Reversing:** low.
+- ***A source cannot sign in* is the `credential_expiry` category**, prototype-6's words for the
+  rooms UI's "Credentials about to expire". **Reversing:** low.
+
+Merge-manager, PR #938 for #831.
+
+- **The restore dialog's per-file button restores without a second confirm.** The rooms UI asks
+  "Restore <file>?" first. Here the press is already two steps (*Restore from a file…*, then the
+  file's own button), the backend refuses any knobas that holds data (`TargetNotEmpty`, witnessed by
+  `a_restore_refuses_a_database_that_already_holds_knobas_data`), and the refusal keeps the dialog
+  open with the reason (`TfSettingsSections.test`). Into an empty knobas nothing is overwritten, so
+  no misclick destroys data. **Reversing:** low, a confirm row inside the dialog.
+- **Standup's `PublishTargetPicker` (rooms) stays inside a `TfDialog`.** The convention mounts
+  rooms-styled *dialogs* outside `.tf`; this is a component inside a tf dialog, and porting it would
+  copy the publish picker's search and its story-68 rules into a second place. `app.css` strips bare
+  `select` and `input` and the rooms `--link` is dark-only, so `.tf-stg-pick` now draws the fields
+  as `.tf-stg-in` and sets `--link` to `--info`. **Reversing:** low, port the picker when the
+  Standup page is redrawn.
+- **Monitoring's bounds are the rooms section's** (days 1–3650, ms 0–600 000), not one 1–1 000 000
+  for both: the backend clamps to these, and a warning threshold of 0 was settable in the rooms UI.
+  **Reversing:** low.

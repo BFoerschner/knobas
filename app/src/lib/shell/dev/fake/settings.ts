@@ -51,10 +51,11 @@ export function handlers(): Record<string, Handler> {
   let monitoring: MonitoringSettings = { sample_retention_days: 30, response_time_warn_ms: 2000 };
   let schedule: BackupSchedule = { enabled: true, hour: 2, minute: 0, keep: 14 };
   const taken = todayAt(2, 0);
-  const archives = [record(taken, 48_000_000)];
+  const MB = 1024 * 1024;
+  const archives = [record(taken, 48 * MB)];
   for (const back of [1, 2, 3]) {
     const earlier = new Date(taken.getTime() - back * 86_400_000);
-    archives.push(record(earlier, 47_000_000 - back * 200_000));
+    archives.push(record(earlier, 47 * MB - back * 200_000));
   }
 
   const status = (): BackupStatus => {
@@ -90,7 +91,7 @@ export function handlers(): Record<string, Handler> {
     },
     backup_status: () => status(),
     backup_now: () => {
-      const made = record(new Date(), 48_100_000);
+      const made = record(new Date(), 48 * MB + 100_000);
       archives.unshift(made);
       return made;
     },

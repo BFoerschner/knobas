@@ -16,6 +16,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The switch between the rooms UI and the new shell is `localStorage` `knobas.shell`, read at startup; switching reloads. A dev build also takes `?shell=tickets`. No command, so a share export does not carry it. (#809, PR #885)
 - Rooms-styled dialogs (write queue, launcher, worklog draft, timer picker) mount outside `.tf` and keep their own tokens. A ticket that redraws one ports it. (#809, PR #885)
 - Under the new shell `Esc` on a full view with no job goes to Tickets. (#809, PR #885)
+- A setting the shell and a page both change (the colour theme) is one store under `tf/`, passed to pages on the shell's context (`TfPageContext`), so a test can hand both the same instance. (#831)
 
 ## Routes and addresses
 

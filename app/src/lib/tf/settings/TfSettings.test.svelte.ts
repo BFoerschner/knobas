@@ -297,10 +297,10 @@ test("a source's page shows its runs, and a section not built yet offers the roo
   const onrooms = vi.fn();
   view = mount(TfSettings, {
     target,
-    props: { rest: ["standup"], job: null, ready: true, onrooms, ports: ports(), health: createHealthStub(), layers: createLayers() },
+    props: { rest: ["checkouts"], job: null, ready: true, onrooms, ports: ports(), health: createHealthStub(), layers: createLayers() },
   });
   await settle();
-  expect(target.querySelector(".tf-stg-body")?.textContent).toContain("Standup is not built in the new shell yet.");
+  expect(target.querySelector(".tf-stg-body")?.textContent).toContain("Checkouts and Open in… is not built in the new shell yet.");
   button("Switch back to the rooms UI").click();
   expect(onrooms).toHaveBeenCalledOnce();
 });

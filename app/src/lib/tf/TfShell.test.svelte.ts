@@ -14,6 +14,7 @@ import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import TfShell from "./TfShell.svelte";
+import { createTheme, type Theme } from "./theme.svelte";
 
 let target: HTMLElement;
 let shell: ReturnType<typeof mount> | null = null;
@@ -107,6 +108,7 @@ const JOB_PORTS: JobPorts = {
 function start(
   over: {
     layers?: Layers;
+    theme?: Theme;
     timer?: { current: RunningTimer | null; elapsed: string | null };
     ontimer?: () => void;
     prefersDark?: () => boolean;
@@ -135,6 +137,7 @@ function start(
         listen: () => Promise.resolve(() => {}),
       }),
       layers: over.layers ?? createLayers(),
+      theme: over.theme ?? createTheme(),
       queue,
       ports: {
         listSources: () =>
@@ -246,6 +249,25 @@ test("the theme follows the OS until the toggle overrides it, both ways", async 
   toggle.click();
   flushSync();
   expect(root.getAttribute("data-theme")).toBe("dark");
+});
+
+test("the top bar's toggle and Settings › Appearance are one setting", async () => {
+  location.hash = "#/settings/appearance";
+  start({ prefersDark: () => false });
+  await settle();
+  const root = target.querySelector(".tf")!;
+  const choice = (label: string) =>
+    [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Theme"] button')].find((b) => b.textContent === label)!;
+  choice("Dark").click();
+  flushSync();
+  expect(root.getAttribute("data-theme")).toBe("dark");
+  target.querySelector<HTMLButtonElement>('[aria-label="Toggle colour theme"]')!.click();
+  flushSync();
+  expect(root.getAttribute("data-theme")).toBe("light");
+  expect(choice("Light").getAttribute("aria-pressed")).toBe("true");
+  choice("Like the system").click();
+  flushSync();
+  expect(root.hasAttribute("data-theme")).toBe(false);
 });
 
 test("a light OS toggles to dark first", async () => {

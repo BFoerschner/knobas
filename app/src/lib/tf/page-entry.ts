@@ -17,6 +17,7 @@ import type { Component } from "svelte";
 import type { Timer } from "../shell/timer.svelte";
 import type { JobPorts } from "./job/ports";
 import type { Layers } from "./layers.svelte";
+import type { Theme } from "./theme.svelte";
 import type { TfRoute } from "./route";
 
 /** What the shell hands every page. */
@@ -32,6 +33,8 @@ export interface TfPageContext {
   onrooms: () => void;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;
+  /** The colour theme the top bar toggles and Settings › Appearance sets. */
+  theme: Theme;
   /** The timer verb, which stops a running timer into the worklog draft. */
   ontimer: (() => void) | undefined;
   /** Start the timer on a ticket (#816's *Start timer*). */

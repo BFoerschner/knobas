@@ -517,6 +517,72 @@ function settingsPorts() {
   };
 }
 
+/** The other Settings sections' commands (#831), every read late. */
+function sectionPorts() {
+  return {
+    passiveAttribution: () => deferred(true),
+    setPassiveAttribution: (on: boolean) => deferred(on),
+    notify: () => deferred(undefined),
+    standupPublishTarget: () => deferred({ source_id: "mock", parent: "mock:PAY-231" }),
+    setStandupPublishTarget: (target: { source_id: string; parent: string }) => deferred(target),
+    getEntity: () => deferred(DETAIL),
+    search: () => new Promise<never>(() => {}),
+    listSources: () => deferred([]),
+    listAdapters: () => deferred([]),
+    monitoringSettings: () => deferred({ sample_retention_days: 30, response_time_warn_ms: 2000 }),
+    setMonitoringSettings: (settings: { sample_retention_days: number; response_time_warn_ms: number }) => deferred(settings),
+    backupStatus: () =>
+      deferred({
+        schedule: { enabled: true, hour: 2, minute: 0, keep: 14 },
+        directory: "/backups",
+        last: null,
+        next_due_at: null,
+        archives: [],
+      }),
+    backupNow: () => new Promise<never>(() => {}),
+    setBackupSchedule: () => new Promise<never>(() => {}),
+    shareExport: () => new Promise<never>(() => {}),
+    restoreBackup: () => new Promise<never>(() => {}),
+    smartLists: () => deferred([]),
+    appStatus: () => deferred({ app_version: "1.6.0" }),
+    dbStats: () =>
+      deferred({ db_bytes: 1, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
+    reindexFts: () => deferred(undefined),
+    openLogs: () => deferred(undefined),
+  };
+}
+
+/** Settings opened on one of #831's sections, every read late. */
+function sectionCase(name: string, section: string): Case {
+  return {
+    name,
+    source: `lib/tf/settings/${name}.svelte`,
+    open: (target) => ({
+      app: mount(TfSettings, {
+        target,
+        props: {
+          rest: [section],
+          job: null,
+          ready: true,
+          onrooms: () => {},
+          ports: settingsPorts(),
+          sectionPorts: sectionPorts(),
+          notifications: {
+            kinds: [],
+            loaded: false,
+            permission: null,
+            error: null,
+            busy: false,
+            reseed: () => deferred(undefined),
+            choose: () => deferred(undefined),
+          },
+          layers: createLayers(),
+        },
+      }),
+    }),
+  };
+}
+
 function sourcePageProps() {
   return {
     source: {
@@ -798,6 +864,13 @@ const CASES: Case[] = [
     source: "lib/tf/settings/TfSourcePage.svelte",
     open: (target) => ({ app: mount(TfSourcePage, { target, props: sourcePageProps() }) }),
   },
+  // The other Settings sections (#831): reads only, each landing late.
+  sectionCase("TfTimeSection", "time"),
+  sectionCase("TfNotificationsSection", "notifications"),
+  sectionCase("TfStandupSection", "standup"),
+  sectionCase("TfMonitoringSection", "monitoring"),
+  sectionCase("TfBackupSection", "backup"),
+  sectionCase("TfLogsSection", "logs"),
   {
     /** The dialog registers a layer and moves focus while it is open (#830). */
     name: "TfDialog",

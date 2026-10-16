@@ -1,0 +1,374 @@
+/**
+ * The Settings sections besides Sources (#831), against stand-ins for every
+ * command, so what each control sends is what the test reads.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+
+import type { BackupStatus } from "../../ipc/backup";
+import type { InboxCategory } from "../../ipc/entity";
+import { toasts } from "../../shell/toasts.svelte";
+import { createLayers } from "../layers.svelte";
+import { createTheme, type Theme } from "../theme.svelte";
+import type { SectionPorts, SettingsPorts } from "./ports";
+import TfSettings from "./TfSettings.svelte";
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+
+beforeEach(() => {
+  location.hash = "";
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+});
+
+const NOW = new Date(2026, 9, 15, 14, 30);
+const DIR = "~/Library/Application Support/knobas/backups";
+
+function status(over: Partial<BackupStatus["schedule"]> = {}): BackupStatus {
+  return {
+    schedule: { enabled: true, hour: 2, minute: 0, keep: 14, ...over },
+    directory: DIR,
+    last: { taken_at: new Date(2026, 9, 15, 2, 0).toISOString(), file: "knobas-20261015-020000.knobas", bytes: 48 * 1024 * 1024 },
+    next_due_at: null,
+    archives: [
+      { file: "knobas-20261015-020000.knobas", bytes: 48 * 1024 * 1024, share: false },
+      { file: "knobas-share-20261012-101500.knobas", bytes: 2 * 1024 * 1024, share: true },
+    ],
+  };
+}
+
+const sourcePorts: SettingsPorts = {
+  listSources: () => Promise.resolve([]),
+  listAdapters: () => Promise.resolve([]),
+  syncStatus: () => Promise.resolve([]),
+  listSyncRuns: () => Promise.resolve([]),
+  updateSource: () => Promise.reject(new Error("unused")),
+  backfillSource: () => Promise.resolve(0),
+  deleteSource: () => Promise.resolve(),
+  setSourceSecret: () => Promise.reject(new Error("unused")),
+  testSource: () => Promise.reject(new Error("unused")),
+  syncNow: () => Promise.resolve(0),
+  syncAll: () => Promise.resolve([]),
+  listen: () => Promise.resolve(() => {}),
+};
+
+function sectionPorts(over: Partial<SectionPorts> = {}) {
+  return {
+    passiveAttribution: vi.fn(() => Promise.resolve(true)),
+    setPassiveAttribution: vi.fn((on: boolean) => Promise.resolve(on)),
+    notify: vi.fn(() => Promise.resolve()),
+    standupPublishTarget: vi.fn(() => Promise.resolve({ source_id: "confluence", parent: "confluence:98400" })),
+    setStandupPublishTarget: vi.fn((target) => Promise.resolve(target)),
+    getEntity: vi.fn(() =>
+      Promise.resolve({
+        row: {
+          entity_id: "confluence:98400",
+          kind: "page",
+          source_id: "confluence",
+          title: "Standups",
+          updated_at: null,
+          synced_at: "2026-10-15T00:00:00Z",
+          path: "Payments",
+          state: null,
+        },
+      }),
+    ),
+    search: vi.fn(() => Promise.resolve({ groups: [] })) as unknown as SectionPorts["search"],
+    listSources: vi.fn(() => Promise.resolve([])),
+    listAdapters: vi.fn(() => Promise.resolve([])),
+    monitoringSettings: vi.fn(() => Promise.resolve({ sample_retention_days: 30, response_time_warn_ms: 2000 })),
+    setMonitoringSettings: vi.fn((settings) => Promise.resolve(settings)),
+    backupStatus: vi.fn(() => Promise.resolve(status())),
+    backupNow: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-new.knobas", bytes: 48 * 1024 * 1024 })),
+    setBackupSchedule: vi.fn((schedule) => Promise.resolve({ ...status(), schedule })),
+    shareExport: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-share-new.knobas", bytes: 1024 })),
+    restoreBackup: vi.fn(() => Promise.resolve()),
+    smartLists: vi.fn(() => Promise.resolve([{ saved: false }])),
+    appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
+    dbStats: vi.fn(() =>
+      Promise.resolve({
+        db_bytes: 1.2 * 1024 ** 3,
+        entity_count: 400,
+        item_count: 18400,
+        per_source: [],
+        oldest_synced_at: null,
+        newest_synced_at: null,
+      }),
+    ),
+    reindexFts: vi.fn(() => Promise.resolve()),
+    openLogs: vi.fn(() => Promise.resolve()),
+    ...over,
+  } satisfies SectionPorts;
+}
+
+function notificationsStub(on: InboxCategory[]) {
+  let kinds = $state(on);
+  return {
+    get kinds() {
+      return kinds;
+    },
+    loaded: true,
+    permission: null,
+    error: null,
+    busy: false,
+    reseed: vi.fn(() => Promise.resolve()),
+    choose: vi.fn((kind: InboxCategory, yes: boolean) => {
+      kinds = yes ? [...kinds, kind] : kinds.filter((k) => k !== kind);
+      return Promise.resolve();
+    }),
+  };
+}
+
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+async function open(
+  section: string,
+  p = sectionPorts(),
+  extra: { theme?: Theme; notifications?: ReturnType<typeof notificationsStub> } = {},
+) {
+  view = mount(TfSettings, {
+    target,
+    props: {
+      rest: [section],
+      job: null,
+      ready: true,
+      onrooms: () => {},
+      ports: sourcePorts,
+      sectionPorts: p,
+      layers: createLayers(),
+      now: () => NOW,
+      theme: extra.theme ?? createTheme(),
+      ...(extra.notifications ? { notifications: extra.notifications } : {}),
+    },
+  });
+  await settle();
+  return p;
+}
+
+const body = () => target.querySelector(".tf-stg-body")!;
+
+function button(text: string): HTMLButtonElement {
+  const found = [...target.querySelectorAll("button")].find((el) => el.textContent?.trim() === text);
+  if (!found) throw new Error(`no button "${text}"`);
+  return found;
+}
+
+function switchFor(label: string): HTMLButtonElement {
+  const found = target.querySelector<HTMLButtonElement>(`[role="switch"][aria-label="${label}"]`);
+  if (!found) throw new Error(`no switch "${label}"`);
+  return found;
+}
+
+function rowValue(label: string): string {
+  const row = [...target.querySelectorAll(".tf-stg-row")].find((el) =>
+    el.querySelector(".tf-stg-l")?.firstChild?.textContent?.trim().startsWith(label),
+  );
+  return row?.querySelector(".tf-stg-c")?.textContent?.trim() ?? "";
+}
+
+test("Appearance and the top bar's toggle are the same setting", async () => {
+  const theme = createTheme();
+  await open("appearance", sectionPorts(), { theme });
+  const pressed = () => target.querySelector('[aria-label="Theme"] [aria-pressed="true"]')?.textContent;
+  expect(pressed()).toBe("Like the system");
+
+  button("Dark").click();
+  flushSync();
+  expect(theme.choice).toBe("dark");
+
+  // The top bar's toggle, from dark: light, and Appearance says so.
+  theme.toggle(false);
+  flushSync();
+  expect(pressed()).toBe("Light");
+});
+
+test("Time: the passive switch writes passive_attribution and draws what came back", async () => {
+  const p = await open("time");
+  expect(body().querySelector("h1")?.textContent).toBe("Time");
+  expect(switchFor("Passive blocks").getAttribute("aria-checked")).toBe("true");
+  expect(rowValue("Kept for")).toBe("About a month");
+  switchFor("Passive blocks").click();
+  await settle();
+  expect(p.setPassiveAttribution).toHaveBeenCalledWith(false);
+  expect(switchFor("Passive blocks").getAttribute("aria-checked")).toBe("false");
+});
+
+test("Notifications: a switch per inbox kind over the notifier's store, and a test notification", async () => {
+  const store = notificationsStub(["review_request", "mention"]);
+  const p = await open("notifications", sectionPorts(), { notifications: store });
+  expect([...target.querySelectorAll('[role="switch"]')].map((el) => el.getAttribute("aria-label"))).toEqual([
+    "Review asked of you",
+    "You are mentioned",
+    "A build you started or care about failed",
+    "A ticket is assigned to you",
+    "A source cannot sign in",
+    "A monitor goes down",
+  ]);
+  switchFor("You are mentioned").click();
+  await settle();
+  expect(store.choose).toHaveBeenCalledWith("mention", false);
+  expect(switchFor("You are mentioned").getAttribute("aria-checked")).toBe("false");
+
+  button("Send a test notification").click();
+  await settle();
+  expect(p.notify).toHaveBeenCalledWith(expect.objectContaining({ address: "#/settings/notifications" }));
+});
+
+test("Standup: the target named by its page, and Change… asks with the publish picker", async () => {
+  const p = await open("standup");
+  expect(p.getEntity).toHaveBeenCalledWith("confluence:98400");
+  expect(rowValue("Publish under")).toContain("Payments › Standups");
+  button("Change…").click();
+  await settle();
+  expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Publish standups under");
+  expect(p.listAdapters).toHaveBeenCalled();
+});
+
+test("Monitoring: a field left with a new value saves both settings", async () => {
+  const p = await open("monitoring");
+  const slow = target.querySelector<HTMLInputElement>("#tf-mon-slow")!;
+  expect(slow.value).toBe("2000");
+  slow.value = "1500";
+  slow.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setMonitoringSettings).toHaveBeenCalledWith({ sample_retention_days: 30, response_time_warn_ms: 1500 });
+});
+
+test("Backup: the last backup, the schedule and keep, and Back up now", async () => {
+  const p = await open("backup");
+  expect(rowValue("Last backup")).toBe(`today 02:00, 48 MB, in ${DIR}`);
+  const every = target.querySelector<HTMLSelectElement>("#tf-bak-every")!;
+  expect([...every.options].map((o) => o.textContent)).toEqual(["Every day at 02:00", "Never"]);
+  every.value = "never";
+  every.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setBackupSchedule).toHaveBeenLastCalledWith({ enabled: false, hour: 2, minute: 0, keep: 14 });
+
+  const keep = target.querySelector<HTMLInputElement>("#tf-bak-keep")!;
+  keep.value = "7";
+  keep.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+  expect(p.setBackupSchedule).toHaveBeenLastCalledWith({ enabled: false, hour: 2, minute: 0, keep: 7 });
+
+  button("Back up now").click();
+  await settle();
+  expect(p.backupNow).toHaveBeenCalledOnce();
+  expect(p.backupStatus).toHaveBeenCalledTimes(2);
+});
+
+test("Share ticks map to the export's parts, and a part that does not exist is not drawn", async () => {
+  const p = await open("backup");
+  const ticks = () => [...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim());
+  // No saved smart list: no tick for it. Link sets and ticket views are no part yet.
+  expect(ticks()).toEqual(["Links", "Contexts", "Assets and routes", "Sources, without passwords", "Notes", "Time"]);
+  const notes = [...target.querySelectorAll<HTMLLabelElement>(".tf-stg-checks label")].find((el) =>
+    el.textContent?.includes("Notes"),
+  )!;
+  notes.querySelector("input")!.click();
+  flushSync();
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith({
+    links: true,
+    contexts: true,
+    assets: true,
+    sources: true,
+    smart_lists: false,
+    notes: true,
+    time: false,
+  });
+  expect(toasts.items.some((toast) => toast.text === `Saved knobas-share-new.knobas to ${DIR}`)).toBe(true);
+});
+
+test("a saved smart list draws its tick, on by default", async () => {
+  const p = await open("backup", sectionPorts({ smartLists: vi.fn(() => Promise.resolve([{ saved: true }])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Smart lists");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {
+  const p = await open("backup");
+  button("Restore from a file…").click();
+  flushSync();
+  const files = () => [...target.querySelectorAll('[role="dialog"] tbody tr td:first-child')].map((el) => el.textContent);
+  expect(files()).toEqual(["knobas-20261015-020000.knobas"]);
+  button("Restore").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenCalledWith("knobas-20261015-020000.knobas");
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+
+  button("Import…").click();
+  flushSync();
+  expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Import a share export");
+  expect(files()).toEqual(["knobas-share-20261012-101500.knobas"]);
+  button("Import").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
+});
+
+test("a restore into a knobas that holds data is refused: the dialog stays and says why", async () => {
+  const refusal = {
+    code: "conflict",
+    message: "the database already holds knobas data. Merge-restore is not built yet -- restore into an empty knobas instead",
+  };
+  const p = await open("backup", sectionPorts({ restoreBackup: vi.fn(() => Promise.reject(refusal)) }));
+  // Opening the dialog writes nothing; only a file's own button does.
+  button("Restore from a file…").click();
+  flushSync();
+  expect(p.restoreBackup).not.toHaveBeenCalled();
+  // The toast store is the app's one, so count only what this press adds.
+  const before = toasts.items.length;
+  button("Restore").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenCalledOnce();
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
+    ["err", `Restore refused: ${refusal.message}`],
+  ]);
+});
+
+test("Keyboard lists the fixed shortcuts", async () => {
+  await open("keyboard");
+  const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
+  expect(rows).toHaveLength(10);
+  expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
+    "⌘K",
+    "Anywhere",
+    "Search everything",
+  ]);
+  expect([...rows[9]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
+});
+
+test("Logs and database: size, items and version; the folder and the re-index", async () => {
+  const p = await open("logs");
+  expect(rowValue("Database")).toBe("1.2 GB, 18 400 items");
+  expect(rowValue("Version")).toBe("knobas 1.6.0");
+  button("Open the log folder").click();
+  button("Re-index search").click();
+  await settle();
+  expect(p.openLogs).toHaveBeenCalledOnce();
+  expect(p.reindexFts).toHaveBeenCalledOnce();
+});
+
+test("no section reads before the database answers", async () => {
+  const p = sectionPorts();
+  view = mount(TfSettings, {
+    target,
+    props: { rest: ["backup"], job: null, ready: false, onrooms: () => {}, ports: sourcePorts, sectionPorts: p, layers: createLayers() },
+  });
+  await settle();
+  expect(p.backupStatus).not.toHaveBeenCalled();
+  expect(body().querySelector("h1")?.textContent).toBe("Backup and export");
+});

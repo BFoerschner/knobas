@@ -396,6 +396,21 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-stg-alert .tf-btn { margin-left: auto; }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
+/* the other sections (#831): prototype-6's inline widths, .stg-checks and .stg-keys */
+.tf-stg-in.tf-stg-n70 { width: 70px; }
+.tf-stg-in.tf-stg-n90 { width: 90px; }
+.tf-stg-checks { display: flex; flex-wrap: wrap; gap: 6px 18px; margin: 14px 0 4px; }
+.tf-stg-checks .tf-ck { font-size: var(--t-md); }
+.tf-tbl.tf-stg-keys td { padding: 8px 10px; font-size: var(--t-md); }
+.tf-stg-kk { white-space: nowrap; }
+.tf-stg-r { text-align: right; }
+.tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
+/* the rooms PublishTargetPicker inside a tf dialog: app.css strips bare fields, and --link is the rooms' dark-only blue */
+.tf-stg-pick { --link: var(--info); }
+.tf-stg-pick select, .tf-stg-pick input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
+  font-size: var(--t-md); width: min(420px, 100%);
+}
 
 /* ---------- dialogs: a sheet over a dimmed page, 8vh from the top ---------- */
 .tf-modal {

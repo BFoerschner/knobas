@@ -8,5 +8,5 @@ type SettingsRoute = Extract<TfRoute, { view: "full" }> & { section: "settings" 
 export const page = definePage({
   matches: (route): route is SettingsRoute => route.view === "full" && route.section === "settings",
   component: TfSettings,
-  props: ({ route, job, ready, onrooms, layers }) => ({ rest: route.rest, job, ready, onrooms, layers }),
+  props: ({ route, job, ready, onrooms, layers, theme }) => ({ rest: route.rest, job, ready, onrooms, layers, theme }),
 });

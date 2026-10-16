@@ -13,7 +13,8 @@
   it into the app*): `.tf` sets them, paints its own paper and fills the
   window, and the rooms UI's `app.css` is untouched. The theme follows the OS
   through `prefers-color-scheme`; the toggle overrides it for the session by
-  setting `data-theme` here.
+  setting `data-theme` here, from the one theme setting Settings › Appearance
+  also writes (`theme.svelte.ts`, #831).
 
   **Dialogs styled by the rooms UI are mounted outside `.tf`**, the write
   queue and the Add-source dialog (#830) here and the launcher, the picker and the ad-hoc dialog in
@@ -59,6 +60,7 @@
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { parseTfHash, sectionOf } from "./route";
   import { switchShell } from "./shell-choice";
+  import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { isEntityId, keyOf } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
@@ -77,6 +79,7 @@
     health = sharedHealth,
     badges = sharedBadges,
     layers = sharedLayers,
+    theme = sharedTheme,
     queue = createWriteQueue(),
     ports = {
       listSources,
@@ -102,6 +105,8 @@
     health?: Pick<Health, "all">;
     badges?: Badges;
     layers?: Layers;
+    /** The colour theme, which Settings › Appearance writes too (#831). */
+    theme?: Theme;
     queue?: Queue;
     ports?: TfShellPorts;
     prefersDark?: () => boolean;
@@ -144,12 +149,6 @@
   /** The Job tab's job: the last one opened, else the timer's ticket (R-1.2). */
   const navJob = $derived(lastJob ?? timedTicket);
 
-  /** The session's override of the OS theme, or `null` to follow it (R-1.7). */
-  let theme = $state<"light" | "dark" | null>(null);
-  function toggleTheme() {
-    const dark = theme !== null ? theme === "dark" : prefersDark();
-    theme = dark ? "light" : "dark";
-  }
 
   // ---- the status bar's reads, once the database can answer ----
   let sources = $state<Pick<SourceSummary, "id" | "display_name">[] | null>(null);
@@ -268,7 +267,7 @@
   });
 </script>
 
-<div class="tf" data-theme={theme ?? undefined}>
+<div class="tf" data-theme={theme.choice === "system" ? undefined : theme.choice}>
   <TfTopBar
     current={sectionOf(route)}
     job={navJob}
@@ -277,7 +276,7 @@
     {timer}
     {onsearch}
     {ontimer}
-    ontheme={toggleTheme}
+    ontheme={() => theme.toggle(prefersDark())}
   />
   <main class="tf-main" tabindex="-1">
     <TfPage
@@ -289,6 +288,7 @@
         onrooms,
         timer,
         layers,
+        theme,
         ontimer,
         onstarttimer,
         jobPorts,
