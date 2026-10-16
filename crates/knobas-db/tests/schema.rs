@@ -2009,20 +2009,8 @@ async fn scratch_databases_are_migrated_copies_of_one_template_and_stay_apart() 
         .await
         .unwrap();
 
-    let migrations = i64::try_from(
-        std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
-            .unwrap()
-            .filter(|entry| {
-                entry
-                    .as_ref()
-                    .unwrap()
-                    .path()
-                    .extension()
-                    .is_some_and(|e| e == "sql")
-            })
-            .count(),
-    )
-    .unwrap();
+    // What `migrate::run` applies: the same macro over the same directory.
+    let migrations = i64::try_from(sqlx::migrate!("./migrations").migrations.len()).unwrap();
     assert_eq!(
         applied(one.clone()).await,
         migrations,

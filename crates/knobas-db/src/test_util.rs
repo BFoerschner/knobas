@@ -312,21 +312,19 @@ fn identifier_slug(text: &str) -> String {
 /// counter or a nonce, so there is no caller-supplied text in it -- `create
 /// database` takes no parameter.
 ///
+/// The database is a copy of this process's migrated template (#925): the
+/// migrations run once per process, into [`template_name`], and every database
+/// after that is `create database ... template` of it, instead of a fresh
+/// `create database` plus every migration for each one.
+///
 /// # Panics
 ///
 /// Panics if the database cannot be created, connected to, or migrated.
-///
-/// The database is a copy of this process's migrated template (#925): the
-/// migrations run once per process, into [`migrated_template`], and every
-/// database after that is `create database ... template` of it. A fresh
-/// `create database` plus all migrations cost about 0.15 s, most of it waiting
-/// on the disk, and `knobas-app`'s test binary paid it several hundred times
-/// per run.
 async fn create_migrated_database(
     server: &crate::embedded::Connector,
     name: &str,
 ) -> crate::embedded::Connector {
-    let template = migrated_template(server).await;
+    let template = template_name(server).await;
     create_database(server, name, Some(template)).await;
     server.with_database(name)
 }
@@ -337,9 +335,9 @@ async fn create_migrated_database(
 ///
 /// One per process rather than one per server: the binaries of a run share the
 /// gate's server, and a template they all copied would need them to agree on
-/// who migrates it. Fifty-odd migrations per run instead of several hundred is
-/// the saving that matters.
-async fn migrated_template(server: &crate::embedded::Connector) -> &'static str {
+/// who migrates it. One migration per binary instead of one per scratch
+/// database is the saving that matters.
+async fn template_name(server: &crate::embedded::Connector) -> &'static str {
     static TEMPLATE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     TEMPLATE
         .get_or_init(|| async {
