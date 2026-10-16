@@ -103,6 +103,14 @@ async fn a_name_glob_matches_a_key_or_a_title_whole() {
             .await
             .is_empty()
     );
+    // `\` is itself too, not `like`'s escape: unescaped, `\s` would read as
+    // `s` and the glob would match the title without the backslash.
+    let slashed = item(&pool, &format!("Slash{tag}A"), &format!("back{tag}\\slash")).await;
+    let _plain = item(&pool, &format!("Slash{tag}B"), &format!("back{tag}slash")).await;
+    assert_eq!(
+        search(&pool, &format!("name:back{tag}\\slash")).await,
+        std::slice::from_ref(&slashed)
+    );
     // Repeated globs OR.
     let mut two = vec![build, no_underscore];
     two.sort();

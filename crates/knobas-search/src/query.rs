@@ -914,7 +914,9 @@ pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
             query.text.trim()
         ));
     }
-    let foreign = query.prefix.is_some()
+    // `source:` and `/alias` claim `Prefix::Source` when they come first,
+    // and they are a pattern's own key; every other prefix is foreign.
+    let foreign = query.prefix.is_some_and(|prefix| prefix != Prefix::Source)
         || parsed.list_id.is_some()
         || !filters.kinds.is_empty()
         || filters.updated_within_days.is_some()
@@ -1520,6 +1522,15 @@ mod tests {
             read(r#"project:OPS under:"Runbooks""#).map(|p| (p.projects, p.under)),
             Ok((vec!["ops".to_owned()], vec!["runbooks".to_owned()]))
         );
+        // `source:` and `/alias` claim the source prefix; they are still a
+        // pattern's key.
+        for raw in ["source:teamcity name:Payout_*", "/teamcity name:Payout_*"] {
+            assert_eq!(
+                read(raw).map(|p| (p.sources, p.names)),
+                Ok((vec!["teamcity".to_owned()], vec!["payout_*".to_owned()])),
+                "{raw:?}"
+            );
+        }
         for refused in [
             "",
             "payout",
