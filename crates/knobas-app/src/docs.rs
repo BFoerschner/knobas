@@ -422,3 +422,431 @@ pub async fn page(
         me: me.to_vec(),
     })
 }
+
+// -- the Docs search (#860) -------------------------------------------------
+
+/// How many hits the Docs search draws. The header counts every match.
+pub const SEARCH_LIMIT: u32 = 50;
+
+/// The space the Docs search is kept to: the picker's space.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct DocsScope {
+    pub source_id: String,
+    pub key: String,
+}
+
+/// The Docs search's answer (#860, R-10.3).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DocsHits {
+    /// Every page the query admits, before the limit.
+    pub total: u32,
+    pub took_ms: u32,
+    /// The words and phrases the reader marks, lowercased: each word, each
+    /// quoted phrase whole, never one left out.
+    pub needles: Vec<String>,
+    /// What the grammar could not read.
+    pub unknown_tokens: Vec<String>,
+    /// The best pages, best first.
+    pub hits: Vec<DocHit>,
+}
+
+/// One page the Docs search found.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct DocHit {
+    pub entity_id: String,
+    pub title: String,
+    pub space: Option<DocSpaceRef>,
+    /// The parent chain as one line (`Engineering › Payments`), `None` at the
+    /// top of a space.
+    pub path: Option<String>,
+    /// The best sentence, cut around its first match.
+    pub snippet: DocSnippet,
+    /// How often the needles occur in the title and the indexed text.
+    pub matches: u32,
+    pub editor: Option<String>,
+    pub editor_name: Option<String>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// A hit's snippet: where it is, and its text with the matches marked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocSnippet {
+    /// The section heading it sits under, `None` before the first one.
+    pub section: Option<String>,
+    /// The comment's author's display name when it is a comment's; `Some("")`
+    /// for a comment whose record named nobody.
+    pub comment_by: Option<String>,
+    pub segments: Vec<knobas_search::Segment>,
+}
+
+/// The rows a set of hits draws from. `$1` the ids.
+const HIT_ROWS: &str = "\
+select i.entity_id, i.body_text, i.author, i.payload, s.kind as adapter_kind, p.key, p.name
+  from sync.live_item i
+  join knobas.source_config s on s.id = i.source_id
+  left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind
+ where i.entity_id = any($1)";
+
+/// The Docs search (#860): the pages `raw` admits, in `scope` when given,
+/// each with its snippet, match count, space, path and editor.
+///
+/// `None` for a query with neither words nor a filter.
+///
+/// # Errors
+///
+/// `invalid` for a query past the launcher's length, `internal` for a query
+/// failure.
+pub async fn search(
+    pool: &PgPool,
+    searcher: &knobas_search::Searcher,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    raw: &str,
+    scope: Option<&DocsScope>,
+) -> Result<Option<DocsHits>, IpcError> {
+    let found = searcher
+        .page_search(
+            raw,
+            scope.map(|s| (s.source_id.as_str(), s.key.as_str())),
+            SEARCH_LIMIT,
+        )
+        .await?;
+    let Some(found) = found else {
+        return Ok(None);
+    };
+    let ids: Vec<String> = found.hits.iter().map(|h| h.row.entity_id.clone()).collect();
+    let rows = sqlx::query(HIT_ROWS).bind(&ids).fetch_all(pool).await?;
+    let by_id: HashMap<String, sqlx::postgres::PgRow> = rows
+        .into_iter()
+        .map(|r| (r.get::<String, _>("entity_id"), r))
+        .collect();
+    let stems: Vec<Vec<char>> = found.needles.iter().map(|n| stem(n)).collect();
+    let hits = found
+        .hits
+        .iter()
+        .filter_map(|hit| {
+            let row = by_id.get(&hit.row.entity_id)?;
+            let body: String = row.get("body_text");
+            let title = &hit.row.title;
+            let adapter_kind: String = row.get("adapter_kind");
+            let payload: serde_json::Value = row.get("payload");
+            let editor_name = project(&adapter_kind)
+                .and_then(|projection| projection(PAGE_KIND, &payload))
+                .and_then(|c| c.editor_name);
+            Some(DocHit {
+                entity_id: hit.row.entity_id.clone(),
+                title: title.clone(),
+                space: row.get::<Option<String>, _>("key").map(|key| DocSpaceRef {
+                    key,
+                    name: row.get("name"),
+                }),
+                path: hit.row.path.clone().filter(|p| !p.trim().is_empty()),
+                snippet: snippet(title, &body, &stems),
+                matches: matches(title, &body, &stems),
+                editor: row.get("author"),
+                editor_name,
+                updated_at: hit.row.updated_at,
+            })
+        })
+        .collect();
+    Ok(Some(DocsHits {
+        total: found.total,
+        took_ms: found.took_ms,
+        needles: found.needles,
+        unknown_tokens: found.unknown_tokens,
+        hits,
+    }))
+}
+
+/// A needle as the reader matches it: lowercased, and a word longer than four
+/// letters without one `ing`, `es`, `ed` or `s` at its end, so "reviews"
+/// finds "review" and "retrying" finds "retry" (prototype-6's stemming; the
+/// shell marks with the same rule).
+fn stem(needle: &str) -> Vec<char> {
+    let lower: Vec<char> = needle.chars().map(lower).collect();
+    if lower.len() > 4 {
+        for suffix in ["ing", "es", "ed", "s"] {
+            let suffix: Vec<char> = suffix.chars().collect();
+            if lower.ends_with(&suffix) {
+                return lower[..lower.len() - suffix.len()].to_vec();
+            }
+        }
+    }
+    lower
+}
+
+/// One character lowercased to one character, so offsets survive.
+fn lower(c: char) -> char {
+    c.to_lowercase().next().unwrap_or(c)
+}
+
+/// Where each needle starts in `text` (already lowercased), in order.
+fn starts(text: &[char], needle: &[char]) -> Vec<usize> {
+    if needle.is_empty() || needle.len() > text.len() {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + needle.len() <= text.len() {
+        if text[i..i + needle.len()] == *needle {
+            out.push(i);
+            i += needle.len();
+        } else {
+            i += 1;
+        }
+    }
+    out
+}
+
+/// How often the needles occur in the title and the indexed words.
+fn matches(title: &str, body: &str, stems: &[Vec<char>]) -> u32 {
+    let read = knobas_source::docs::indexed::read(body);
+    // A source that opens `body_text` with the title (Confluence does) has
+    // counted it already.
+    let mut all = if body.starts_with(title) {
+        String::new()
+    } else {
+        title.to_owned()
+    };
+    for run in &read.runs {
+        all.push('\n');
+        if let knobas_source::docs::indexed::Part::Section(heading) = &run.part {
+            all.push_str(heading);
+            all.push('\n');
+        }
+        all.push_str(&run.text);
+    }
+    let lowered: Vec<char> = all.chars().map(lower).collect();
+    let count: usize = stems.iter().map(|s| starts(&lowered, s).len()).sum();
+    u32::try_from(count).unwrap_or(u32::MAX)
+}
+
+/// The best sentence for a hit (R-10.3): the one holding the most needles,
+/// from a section or a comment, cut around its first match and prefixed with
+/// where it is. With no needle anywhere (a hit by its title alone), the first
+/// sentence of the page.
+fn snippet(title: &str, body: &str, stems: &[Vec<char>]) -> DocSnippet {
+    use knobas_source::docs::indexed::Part;
+    let read = knobas_source::docs::indexed::read(body);
+    let mut best: Option<(usize, String, &Part)> = None;
+    let mut first: Option<(String, &Part)> = None;
+    for run in &read.runs {
+        let text = match &run.part {
+            // The lead opens with the page's title, which is not a sentence
+            // of the page.
+            Part::Lead => run
+                .text
+                .strip_prefix(title)
+                .unwrap_or(&run.text)
+                .trim()
+                .to_owned(),
+            _ => run.text.clone(),
+        };
+        for sentence in sentences(&text) {
+            if first.is_none() {
+                first = Some((sentence.clone(), &run.part));
+            }
+            let lowered: Vec<char> = sentence.chars().map(lower).collect();
+            let k = stems
+                .iter()
+                .filter(|s| !starts(&lowered, s).is_empty())
+                .count();
+            if k > 0 && best.as_ref().is_none_or(|(b, _, _)| k > *b) {
+                best = Some((k, sentence, &run.part));
+            }
+        }
+    }
+    let (sentence, part) = match best {
+        Some((_, sentence, part)) => (sentence, Some(part)),
+        None => match first {
+            Some((sentence, part)) => (sentence, Some(part)),
+            None => (String::new(), None),
+        },
+    };
+    let (section, comment_by) = match part {
+        Some(Part::Section(heading)) => (Some(heading.clone()), None),
+        Some(Part::Comment(by)) => (None, Some(by.clone())),
+        _ => (None, None),
+    };
+    DocSnippet {
+        section,
+        comment_by,
+        segments: marked(&cut(&sentence, stems), stems),
+    }
+}
+
+/// A run's sentences: split after `.`, `!` or `?` and at line ends.
+fn sentences(text: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let mut current = String::new();
+        let mut chars = line.chars().peekable();
+        while let Some(c) = chars.next() {
+            current.push(c);
+            if matches!(c, '.' | '!' | '?') && chars.peek().is_some_and(|n| n.is_whitespace()) {
+                out.push(std::mem::take(&mut current).trim().to_owned());
+            }
+        }
+        out.push(current.trim().to_owned());
+    }
+    out.retain(|s| !s.is_empty());
+    out
+}
+
+/// At most 150 characters of `sentence`, starting a little before its first
+/// match when that is far in, with `…` where it was cut (prototype-6).
+fn cut(sentence: &str, stems: &[Vec<char>]) -> String {
+    const SPAN: usize = 150;
+    let chars: Vec<char> = sentence.chars().collect();
+    let lowered: Vec<char> = chars.iter().copied().map(lower).collect();
+    let at = stems
+        .iter()
+        .filter_map(|s| starts(&lowered, s).first().copied())
+        .min();
+    let start = match at {
+        Some(at) if at > 60 => chars[..at - 50]
+            .iter()
+            .rposition(|c| *c == ' ')
+            .map_or(0, |space| space + 1),
+        _ => 0,
+    };
+    let end = (start + SPAN).min(chars.len());
+    let mut out = String::new();
+    if start > 0 {
+        out.push('…');
+    }
+    out.extend(&chars[start..end]);
+    if end < chars.len() {
+        out.push('…');
+    }
+    out
+}
+
+/// `text` as segments, each needle's occurrence and the rest of its word
+/// marked as a hit.
+fn marked(text: &str, stems: &[Vec<char>]) -> Vec<knobas_search::Segment> {
+    let chars: Vec<char> = text.chars().collect();
+    let lowered: Vec<char> = chars.iter().copied().map(lower).collect();
+    let mut hit = vec![false; chars.len()];
+    for s in stems {
+        for at in starts(&lowered, s) {
+            let mut end = at + s.len();
+            while end < chars.len() && chars[end].is_alphanumeric() {
+                end += 1;
+            }
+            hit[at..end].iter_mut().for_each(|h| *h = true);
+        }
+    }
+    let mut out: Vec<knobas_search::Segment> = Vec::new();
+    for (c, h) in chars.into_iter().zip(hit) {
+        match out.last_mut() {
+            Some(last) if last.hit == h => last.text.push(c),
+            _ => out.push(knobas_search::Segment {
+                text: c.to_string(),
+                hit: h,
+            }),
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod search_tests {
+    use super::*;
+    use knobas_source::docs::indexed::{comment_line, link_line, section_line};
+
+    fn plain(segments: &[knobas_search::Segment]) -> String {
+        segments
+            .iter()
+            .map(|s| {
+                if s.hit {
+                    format!("[{}]", s.text)
+                } else {
+                    s.text.clone()
+                }
+            })
+            .collect()
+    }
+
+    fn stems(needles: &[&str]) -> Vec<Vec<char>> {
+        needles.iter().map(|n| stem(n)).collect()
+    }
+
+    fn body() -> String {
+        [
+            "SEPA payout retry design".to_owned(),
+            "Why we built it.".to_owned(),
+            section_line("Backoff policy"),
+            "Base 30 s, factor 2. Retries stop after five attempts and the batch is parked."
+                .to_owned(),
+            comment_line(Some("Priya Nair")),
+            "Should the retry cap be six attempts?".to_owned(),
+            link_line("ENG", "Retry budget"),
+        ]
+        .join("\n")
+    }
+
+    #[test]
+    fn stemming_is_prototype_sixes() {
+        assert_eq!(stem("Reviews"), "review".chars().collect::<Vec<_>>());
+        assert_eq!(stem("retrying"), "retry".chars().collect::<Vec<_>>());
+        assert_eq!(stem("cases"), "cas".chars().collect::<Vec<_>>());
+        assert_eq!(stem("runs"), "runs".chars().collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn the_snippet_is_the_sentence_with_the_most_needles_and_says_its_section() {
+        let s = snippet(
+            "SEPA payout retry design",
+            &body(),
+            &stems(&["retries", "attempts"]),
+        );
+        assert_eq!(s.section.as_deref(), Some("Backoff policy"));
+        assert_eq!(s.comment_by, None);
+        assert_eq!(
+            plain(&s.segments),
+            "[Retries] stop after five [attempts] and the batch is parked."
+        );
+    }
+
+    #[test]
+    fn a_comment_is_a_snippet_by_its_author() {
+        let s = snippet("SEPA payout retry design", &body(), &stems(&["cap", "six"]));
+        assert_eq!(s.comment_by.as_deref(), Some("Priya Nair"));
+        assert_eq!(s.section, None);
+        assert_eq!(
+            plain(&s.segments),
+            "Should the retry [cap] be [six] attempts?"
+        );
+    }
+
+    #[test]
+    fn a_hit_by_title_alone_shows_the_first_sentence_not_the_title() {
+        let s = snippet("SEPA payout retry design", &body(), &stems(&["sepa"]));
+        assert_eq!(s.section, None);
+        assert_eq!(plain(&s.segments), "Why we built it.");
+    }
+
+    #[test]
+    fn a_far_match_is_cut_around_with_ellipses() {
+        let long = format!(
+            "{} retry {}",
+            "word ".repeat(30).trim(),
+            "tail ".repeat(40).trim()
+        );
+        let s = cut(&long, &stems(&["retry"]));
+        assert!(s.starts_with('…'), "{s}");
+        assert!(s.ends_with('…'), "{s}");
+        assert!(s.contains("retry"), "{s}");
+        assert!(s.chars().count() <= 152, "{s}");
+    }
+
+    #[test]
+    fn matches_count_title_sections_and_comments_but_not_link_lines() {
+        // title 1 and comment 1 ("Retries" stems apart); the link line's "Retry
+        // budget" is not text.
+        assert_eq!(
+            matches("SEPA payout retry design", &body(), &stems(&["retry"])),
+            2
+        );
+    }
+}

@@ -66,6 +66,29 @@ pub(crate) struct Account<'a> {
 /// direction the misses fall in.
 #[must_use]
 pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
+    scan(storage, me, None)
+}
+
+/// [`to_text`] with the Docs search's marks (#860, #861;
+/// `knobas_source::docs::indexed`): each heading's line opens with
+/// [`SECTION`](knobas_source::docs::indexed::SECTION), and every `ri:page`
+/// the body links to is returned as `(space key, title)`, the space `None`
+/// where the link names none (the page's own).
+#[must_use]
+pub(crate) fn to_indexed_text(
+    storage: &str,
+    me: Option<Account<'_>>,
+) -> (String, Vec<(Option<String>, String)>) {
+    let mut links = Vec::new();
+    let text = scan(storage, me, Some(&mut links));
+    (text, links)
+}
+
+fn scan(
+    storage: &str,
+    me: Option<Account<'_>>,
+    mut links: Option<&mut Vec<(Option<String>, String)>>,
+) -> String {
     let mut out = String::with_capacity(storage.len());
     let mut rest = storage;
     while let Some(open) = rest.find('<') {
@@ -104,6 +127,26 @@ pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
             }
         } else if is_block(&name) {
             out.push('\n');
+            if links.is_some()
+                && !tag.starts_with('/')
+                && matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+            {
+                out.push(knobas_source::docs::indexed::SECTION);
+            }
+        } else if name == "ri:page"
+            && let Some(links) = links.as_deref_mut()
+            && let Some(title) = attr(tag, "ri:content-title").filter(|t| !t.trim().is_empty())
+        {
+            let space = attr(tag, "ri:space-key")
+                .filter(|k| !k.trim().is_empty())
+                .map(|k| decode_entities(k).trim().to_owned());
+            let title = decode_entities(title).trim().to_owned();
+            // A link with no body of its own reads as the page's title, as
+            // Confluence draws it, so the sentence keeps its words.
+            if tail.trim_start().starts_with("</ac:link>") {
+                out.push_str(&title.replace('&', "&amp;"));
+            }
+            links.push((space, title));
         }
         rest = tail;
     }

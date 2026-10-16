@@ -7,7 +7,9 @@
 //! identity `@me` resolves to includes `mara`, the username the Confluence
 //! sources here are configured with.
 
-use knobas_app::commands::entity::{docs_page_inner, docs_tree_inner};
+use knobas_app::commands::entity::{docs_page_inner, docs_search_inner, docs_tree_inner};
+use knobas_app::docs::DocsScope;
+use knobas_source::docs::indexed::{comment_line, link_line, section_line};
 use knobas_source::docs::{DocBlock, Inline};
 use serde_json::{Value, json};
 
@@ -427,4 +429,211 @@ async fn a_page_under_a_parent_loop_keeps_its_parent() {
     assert_eq!(parent_of(&a), None);
     assert_eq!(parent_of(&b), None);
     assert_eq!(parent_of(&c), Some(a.clone()), "Gamma hangs under Alpha");
+}
+
+// -- the Docs search (#860) --------------------------------------------------
+
+/// Give a page the `body_text` its adapter writes (title, sections, comments,
+/// links), its editor and its age in days.
+async fn indexed(pool: &sqlx::PgPool, id: &str, lines: &[String], author: &str, days: i32) {
+    sqlx::query(
+        "update sync.item set body_text = $2, author = $3, \
+           item_updated_at = now() - make_interval(days => $4) where entity_id = $1",
+    )
+    .bind(id)
+    .bind(lines.join("\n"))
+    .bind(author)
+    .bind(days)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+fn word() -> String {
+    // A word no other test's page holds, so the whole mirror can be searched.
+    format!("zq{}", &uuid::Uuid::new_v4().simple().to_string()[..8])
+}
+
+fn scope(source: &str, key: &str) -> DocsScope {
+    DocsScope {
+        source_id: source.to_owned(),
+        key: key.to_owned(),
+    }
+}
+
+/// Every word must appear, the snippet is the best sentence and says its
+/// section, and a hit carries its space, path, match count and editor.
+#[tokio::test]
+async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let sepa = page(
+        &pool,
+        &src,
+        "1",
+        "SEPA payout retry design",
+        "ENG",
+        &["Payments"],
+        "",
+    )
+    .await;
+    indexed(
+        &pool,
+        &sepa,
+        &[
+            "SEPA payout retry design".into(),
+            "Why we retry.".into(),
+            section_line("Backoff policy"),
+            format!("Retries stop after five {w} attempts. Then the batch is parked."),
+            comment_line(Some("Priya Nair")),
+            format!("Is {w} right?"),
+        ],
+        "tomasz",
+        1,
+    )
+    .await;
+    let other = page(&pool, &src, "2", "Unrelated", "ENG", &[], "").await;
+    indexed(
+        &pool,
+        &other,
+        &["Unrelated".into(), format!("Only {w} here.")],
+        "priya",
+        1,
+    )
+    .await;
+
+    let found = docs_search_inner(&pool, &format!("{w} attempts"), None)
+        .await
+        .unwrap()
+        .expect("words are a query");
+    assert_eq!(found.total, 1);
+    assert_eq!(found.needles, [w.clone(), "attempts".to_owned()]);
+    let hit = &found.hits[0];
+    assert_eq!(hit.entity_id, sepa);
+    assert_eq!(hit.space.as_ref().map(|s| s.key.as_str()), Some("ENG"));
+    assert_eq!(hit.path.as_deref(), Some("Payments"));
+    assert_eq!(hit.snippet.section.as_deref(), Some("Backoff policy"));
+    let text: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
+    assert_eq!(text, format!("Retries stop after five {w} attempts."));
+    assert!(hit.snippet.segments.iter().any(|s| s.hit && s.text == w));
+    assert_eq!(hit.matches, 3, "{w} twice, attempts once");
+    assert_eq!(hit.editor.as_deref(), Some("tomasz"));
+    assert_eq!(hit.editor_name.as_deref(), Some("Tomasz Wójcik"));
+
+    // A comment's sentence is the snippet when it holds the most words.
+    let found = docs_search_inner(&pool, &format!("{w} right"), None)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        found.hits[0].snippet.comment_by.as_deref(),
+        Some("Priya Nair")
+    );
+}
+
+/// The picker keeps the search to its space; a typed `space:` wins over it;
+/// `space:` is `project:` by another name; `-word`, `by:` and `updated:`
+/// filter; a phrase is a phrase; a query of nothing is the tree's.
+#[tokio::test]
+async fn the_space_the_grammar_and_the_empty_query() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let eng = page(&pool, &src, "1", "Eng page", "ENG", &[], "").await;
+    indexed(
+        &pool,
+        &eng,
+        &["Eng page".into(), format!("{w} backoff policy here.")],
+        "tomasz",
+        2,
+    )
+    .await;
+    let ops = page(&pool, &src, "2", "Ops page", "OPS", &[], "").await;
+    indexed(
+        &pool,
+        &ops,
+        &["Ops page".into(), format!("{w} policy of backoff, cron.")],
+        "priya",
+        60,
+    )
+    .await;
+
+    let ids = |hits: Option<knobas_app::docs::DocsHits>| -> Vec<String> {
+        let mut ids: Vec<String> = hits
+            .unwrap()
+            .hits
+            .into_iter()
+            .map(|h| h.entity_id)
+            .collect();
+        ids.sort();
+        ids
+    };
+    let mut both = vec![eng.clone(), ops.clone()];
+    both.sort();
+    assert_eq!(ids(docs_search_inner(&pool, &w, None).await.unwrap()), both);
+    assert_eq!(
+        ids(docs_search_inner(&pool, &w, Some(&scope(&src, "ENG")))
+            .await
+            .unwrap()),
+        [eng.clone()]
+    );
+    assert_eq!(
+        ids(
+            docs_search_inner(&pool, &format!("{w} space:OPS"), Some(&scope(&src, "ENG")))
+                .await
+                .unwrap()
+        ),
+        [ops.clone()],
+        "the typed space wins over the picker"
+    );
+    assert_eq!(
+        ids(docs_search_inner(&pool, &format!("{w} project:ops"), None)
+            .await
+            .unwrap()),
+        [ops.clone()]
+    );
+    assert_eq!(
+        ids(docs_search_inner(&pool, &format!("{w} -cron"), None)
+            .await
+            .unwrap()),
+        [eng.clone()]
+    );
+    assert_eq!(
+        ids(
+            docs_search_inner(&pool, &format!("{w} \"backoff policy\""), None)
+                .await
+                .unwrap()
+        ),
+        [eng.clone()]
+    );
+    assert_eq!(
+        ids(docs_search_inner(&pool, &format!("{w} by:priya"), None)
+            .await
+            .unwrap()),
+        [ops.clone()]
+    );
+    assert_eq!(
+        ids(docs_search_inner(&pool, &format!("{w} updated:30d"), None)
+            .await
+            .unwrap()),
+        [eng.clone()]
+    );
+    assert!(
+        ids(docs_search_inner(&pool, &format!("{w} type:ticket"), None)
+            .await
+            .unwrap())
+        .is_empty()
+    );
+    assert!(
+        docs_search_inner(&pool, "   ", None)
+            .await
+            .unwrap()
+            .is_none()
+    );
 }

@@ -354,6 +354,7 @@ pub fn run() {
             commands::entity::list_projects,
             commands::entity::docs_tree,
             commands::entity::docs_page,
+            commands::entity::docs_search,
             commands::entity::clones_root,
             commands::entity::set_clones_root,
             commands::entity::entity_checkout,

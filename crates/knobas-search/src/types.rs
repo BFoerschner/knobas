@@ -602,3 +602,18 @@ pub struct ParentSuggestion {
     /// children declare, which is why `ParentPath` carries one (#594).
     pub kind: String,
 }
+
+/// The Docs search's answer (#860): what [`crate::Searcher::page_search`]
+/// found, before the app adds each page's snippet, space and editor.
+#[derive(Debug, Clone)]
+pub struct PageSearch {
+    /// Every live page the query admits, before the limit.
+    pub total: u32,
+    /// The best of them, at most the limit, best first.
+    pub hits: Vec<SearchHit>,
+    /// The words and phrases a reader marks ([`crate::query::needles`]).
+    pub needles: Vec<String>,
+    /// What the grammar could not read, as the launcher reports it.
+    pub unknown_tokens: Vec<String>,
+    pub took_ms: u32,
+}

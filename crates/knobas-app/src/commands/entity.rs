@@ -4721,6 +4721,47 @@ pub async fn docs_page_inner(
     .await
 }
 
+/// The Docs search (#860, R-10.3, R-10.4): the pages a query admits, best
+/// first, each with its snippet, match count, space, path and editor; `None`
+/// for a query with neither words nor a filter, which the pane answers with
+/// its tree. `space` is the picker's space; a typed `space:` wins over it.
+///
+/// # Errors
+///
+/// `invalid` for a query past the launcher's length, `internal` for a query
+/// failure, `not_ready` before bring-up.
+#[tauri::command]
+pub async fn docs_search(
+    lifecycle: State<'_, Lifecycle>,
+    query: String,
+    space: Option<crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_search_inner(&pool, &query, space.as_ref()).await
+}
+
+/// [`docs_search`] with the pool handed in, for a test.
+///
+/// # Errors
+///
+/// As [`docs_search`].
+pub async fn docs_search_inner(
+    pool: &PgPool,
+    query: &str,
+    space: Option<&crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let searcher = crate::commands::search::searcher(pool).await?;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::search(
+        pool,
+        &searcher,
+        |kind| registry.doc_projection(kind),
+        query,
+        space,
+    )
+    .await
+}
+
 // -- the standup digest (#288) ----------------------------------------------
 //
 // Here for the reason the two sections above give, and the reason spec #272

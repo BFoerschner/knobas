@@ -28,20 +28,14 @@ pub(crate) fn to_sync_item(
 ) -> SyncItem {
     let content = &raw.content;
     let title = content.title.clone().unwrap_or_default();
-    let body = crate::storage::to_text(raw.storage(), me);
+    let (body, links) = crate::storage::to_indexed_text(raw.storage(), me);
     let comments = content
         .children
         .as_ref()
         .and_then(|c| c.comment.as_ref())
         .map(|c| c.results.as_slice())
         .unwrap_or_default();
-    let body_text = join(
-        [title.clone(), body].into_iter().chain(
-            comments
-                .iter()
-                .map(|c| crate::storage::to_text(c.storage(), me)),
-        ),
-    );
+    let body_text = indexed_body_text(raw, &title, body, comments, &links, me);
     SyncItem {
         // **The content id, never the title.** A page renamed in Confluence
         // keeps its id, so every link, note and worklog knobas drew to it
@@ -144,6 +138,49 @@ fn created_by(raw: &RawContent) -> Option<String> {
         .as_ref()
         .and_then(|h| h.created_by.as_ref())
         .and_then(|u| u.username.clone())
+}
+
+/// `body_text` with the Docs search's marks (#860, #861;
+/// `knobas_source::docs::indexed`): the title and the body, each heading's
+/// line marked; then each comment under a line naming its author; then one
+/// line per page the body links to, in the page's own space where the link
+/// names none. What FTS indexes is the words it indexed before, plus each
+/// linked page's title.
+fn indexed_body_text(
+    raw: &RawContent,
+    title: &str,
+    body: String,
+    comments: &[RawContent],
+    links: &[(Option<String>, String)],
+    me: Option<Account<'_>>,
+) -> String {
+    use knobas_source::docs::indexed;
+    let mut parts = vec![title.to_owned(), body];
+    for c in comments {
+        let text = crate::storage::to_text(c.storage(), me);
+        if text.trim().is_empty() {
+            continue;
+        }
+        let author = c
+            .raw
+            .pointer("/history/createdBy/displayName")
+            .or_else(|| c.raw.pointer("/version/by/displayName"))
+            .and_then(serde_json::Value::as_str);
+        parts.push(format!("{}\n{text}", indexed::comment_line(author)));
+    }
+    let own = raw
+        .raw
+        .pointer("/space/key")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default();
+    let mut seen = std::collections::BTreeSet::new();
+    let lines: Vec<String> = links
+        .iter()
+        .map(|(space, title)| indexed::link_line(space.as_deref().unwrap_or(own), title))
+        .filter(|line| seen.insert(line.clone()))
+        .collect();
+    parts.push(lines.join("\n"));
+    join(parts)
 }
 
 /// Join the non-empty parts into the blob FTS indexes -- the same rule
@@ -257,16 +294,64 @@ mod tests {
 
     /// `body_text` = title + the storage format **stripped to text** + the
     /// comment texts, blank-line joined. No markup reaches it: that is the
-    /// criterion, and it is roadmap §4 gotcha 7 at the same time.
+    /// criterion, and it is roadmap §4 gotcha 7 at the same time. Since #860
+    /// a heading's line carries the section mark and a comment opens under a
+    /// line naming its author (here nobody), so a snippet can say where it is.
     #[test]
     fn body_text_is_the_stripped_body_and_the_discussion() {
         let item = to_sync_item("confluence", "http://x.example", &a_page());
         assert_eq!(
             item.body_text,
-            "SEPA payout retry design\n\nBackoff policy\nbase 30 s, factor 2, max 5 \
-             attempts.\n\n@Mara can you add the SLA?"
+            "SEPA payout retry design\n\n\u{1e}Backoff policy\nbase 30 s, factor 2, max 5 \
+             attempts.\n\n\u{1f}\n@Mara can you add the SLA?"
         );
         assert!(!item.body_text.contains('<'), "{}", item.body_text);
+    }
+
+    /// The section heading is kept beside the indexed text, a comment's
+    /// author beside its words, and every page the body links to is a line
+    /// of its own, in the page's space where the link names none (#860, #861).
+    #[test]
+    fn body_text_keeps_sections_commenters_and_page_links() {
+        use knobas_source::docs::indexed::{Part, read};
+        let mut raw = a_page();
+        raw.raw["body"]["storage"]["value"] = json!(
+            "<p>Why.</p><h2>Backoff policy</h2><p>See <ac:link><ri:page ri:content-title=\"Retry budget\" /></ac:link> \
+             and <ac:link><ri:page ri:space-key=\"OPS\" ri:content-title=\"Payout &amp; worker\" /></ac:link>.</p>\
+             <h3>Cap</h3><p>Five, see <ac:link><ri:page ri:content-title=\"Retry budget\" /></ac:link>.</p>"
+        );
+        raw.raw["children"]["comment"]["results"][0]["history"] =
+            json!({"createdBy": {"username": "priya", "displayName": "Priya Nair"}});
+        let raw: RawContent = serde_json::from_value(raw.raw).unwrap();
+        let item = to_sync_item("confluence", "http://x.example", &raw);
+        let read = read(&item.body_text);
+        let parts: Vec<(Part, &str)> = read
+            .runs
+            .iter()
+            .map(|r| (r.part.clone(), r.text.as_str()))
+            .collect();
+        assert_eq!(
+            parts,
+            vec![
+                (Part::Lead, "SEPA payout retry design\n\nWhy."),
+                (
+                    Part::Section("Backoff policy".into()),
+                    "See Retry budget and Payout & worker."
+                ),
+                (Part::Section("Cap".into()), "Five, see Retry budget."),
+                (
+                    Part::Comment("Priya Nair".into()),
+                    "@Mara can you add the SLA?"
+                ),
+            ]
+        );
+        assert_eq!(
+            read.links,
+            vec![
+                ("ENG".to_owned(), "Retry budget".to_owned()),
+                ("OPS".to_owned(), "Payout & worker".to_owned()),
+            ]
+        );
     }
 
     /// **`updated_at` follows the discussion** -- the fix the inbox's mention

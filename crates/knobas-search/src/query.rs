@@ -112,6 +112,12 @@ impl FieldKey {
     }
 
     fn from_spelling(key: &str) -> Option<Self> {
+        // `space:` is the Docs search's word for a page's project (#860, spec
+        // #808 *Docs*: "`space:` is a grammar alias"); a space is what a
+        // Confluence page's declared project is (ADR-0010).
+        if key == "space" {
+            return Some(FieldKey::Project);
+        }
         Self::ALL.into_iter().find(|k| k.spelling() == key)
     }
 }
@@ -603,6 +609,29 @@ fn apply_token(token: &str, vocab: &Vocabulary, parsed: &mut Parsed, terms: &mut
         return;
     }
     terms.push(token.to_owned());
+}
+
+/// The words and phrases a query's text asks for, as a reader marks them
+/// (#860): each word, and each quoted phrase whole, lowercased and in the
+/// order typed, once each. What it leaves out is left out (`-word`,
+/// `-"a phrase"`), and so is `or`, which `websearch_to_tsquery` reads as the
+/// operator. `text` is [`ParsedQuery::text`](crate::types::ParsedQuery), the
+/// grammar's keys already taken out.
+#[must_use]
+pub fn needles(text: &str) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    for token in tokenize(text) {
+        if token.starts_with('-') || token.eq_ignore_ascii_case("or") {
+            continue;
+        }
+        let needle = token
+            .trim_matches(|c: char| !c.is_alphanumeric())
+            .to_lowercase();
+        if !needle.is_empty() && !out.contains(&needle) {
+            out.push(needle);
+        }
+    }
+    out
 }
 
 /// `key:value`, if the token is one at all.
@@ -1386,6 +1415,35 @@ mod tests {
         // `type:` still means the entity kind, and `issuetype:` never does.
         assert_eq!(parse("type:ticket", &v).query.filters.kinds, ["ticket"]);
         assert!(parse("type:ticket", &v).fields.is_empty());
+    }
+
+    /// `space:` is the Docs search's alias of `project:` (#860): a page's
+    /// space is its declared project.
+    #[test]
+    fn space_is_an_alias_of_project() {
+        let v = fixture();
+        assert_eq!(
+            parse("space:ENG", &v).fields,
+            parse("project:ENG", &v).fields
+        );
+        assert_eq!(
+            parse("-space:\"Ops Team\"", &v).fields,
+            [field(FieldKey::Project, true, &["ops team"])]
+        );
+        assert!(parse("space:ENG retry", &v).query.unknown_tokens.is_empty());
+        assert_eq!(parse("space:ENG retry", &v).query.text, "retry");
+    }
+
+    /// What a reader marks: the words and phrases asked for, never one left
+    /// out, never `or`.
+    #[test]
+    fn needles_are_what_the_text_asks_for() {
+        assert_eq!(
+            needles(r#"Retry "backoff policy" -cron -"dead letter" OR sepa, retry"#),
+            ["retry", "backoff policy", "sepa"]
+        );
+        assert!(needles("").is_empty());
+        assert!(needles("-only").is_empty());
     }
 
     /// Repeated values of one key mean any of them; the same value twice is
