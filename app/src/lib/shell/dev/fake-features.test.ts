@@ -315,6 +315,17 @@ test("link sets: the job's reach carries a set's members under its name, a save 
   expect(reach().some((row) => row.entity_id === "asset:knobas-jira-db")).toBe(true);
 });
 
+test("builds: a fixture run's log answers the steps bar its steps' durations, the running one without (#1003)", () => {
+  const h = demoHandlers() as Calls;
+  const steps = (runId: string) => (h["run_log"]!({ runId, from: null, count: 1 }) as { steps: { name: string; seconds: number | null }[] }).steps;
+  expect(steps("teamcity:build:Payout_IntegrationTests-1187").map((s) => s.seconds)).toEqual([12, 20, 130, 82, 8]);
+  expect(steps("teamcity:build:Payout_Build-1188").map((s) => [s.name, s.seconds])).toEqual([
+    ["Checkout", 14],
+    ["cargo build --release", 98],
+    ["cargo test", null],
+  ]);
+});
+
 test("builds: a fixture run answers its log, tests, a test's history, artifacts, a preview and downloads (#854, #855, #856)", () => {
   const h = demoHandlers() as Calls;
   const runId = "teamcity:build:Payout_IntegrationTests-1187";

@@ -6,7 +6,7 @@
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { DownloadTarget, PipelineRow, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
+import type { DownloadTarget, PipelineRow, RunLog, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import type { RunPorts } from "./pipeline-ports";
@@ -169,10 +169,13 @@ interface Drawn {
   writes: WriteOpPayload[];
   opened: string[];
   views: string[];
+  /** Moves the page to another tab of the same run, as the address does. */
+  go: (tab?: string) => void;
 }
 
 function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<RunPorts> = {}, runs: RunRow[] = RUNS): Drawn {
-  const drawn: Drawn = { downloads: [], writes: [], opened: [], views: [] };
+  const props = $state({ rest: [PIPE, runId, ...(tab ? [tab] : [])] });
+  const drawn: Drawn = { downloads: [], writes: [], opened: [], views: [], go: (to) => (props.rest = [PIPE, runId, ...(to ? [to] : [])]) };
   const ports: RunPorts = {
     older: () => Promise.resolve([]),
     settings: () => Promise.resolve(SETTINGS),
@@ -220,7 +223,16 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
   }));
   page = mount(TfRun, {
     target,
-    props: { pipeline: PIPELINE, rest: [PIPE, runId, ...(tab ? [tab] : [])], job: "PAY-231", runs: () => Promise.resolve(runs), crumbs, ports },
+    props: {
+      pipeline: PIPELINE,
+      get rest() {
+        return props.rest;
+      },
+      job: "PAY-231",
+      runs: () => Promise.resolve(runs),
+      crumbs,
+      ports,
+    },
   });
   return drawn;
 }
@@ -387,7 +399,7 @@ test("Parameters pairs each value in this run with its default, then the branch,
   expect(target.querySelector(".tf-run-dialog")).not.toBeNull();
 });
 
-test("the Log, Tests and Artifacts tabs read the run live, each by its own read", async () => {
+test("the Log, Tests and Artifacts tabs read the run live; the log is read once, for the steps bar and the Log tab", async () => {
   const asked: string[] = [];
   for (const tab of ["log", "tests", "artifacts"]) {
     draw("teamcity:build:1187", tab, {
@@ -400,5 +412,87 @@ test("the Log, Tests and Artifacts tabs read the run live, each by its own read"
     unmount(page!);
     page = null;
   }
-  expect(asked).toEqual(["log teamcity:build:1187", "tests teamcity:build:1187", 'artifacts teamcity:build:1187 ""']);
+  expect(asked).toEqual([
+    "log teamcity:build:1187",
+    "log teamcity:build:1187",
+    "tests teamcity:build:1187",
+    "log teamcity:build:1187",
+    'artifacts teamcity:build:1187 ""',
+  ]);
+});
+
+// -- the steps bar (#1003, R-9.10) ---------------------------------------------
+
+const STEPPED: RunLog = {
+  total: 9,
+  steps: [
+    { name: "Checkout", first: 1, last: 2, seconds: 12, tone: null },
+    { name: "cargo build --tests", first: 3, last: 5, seconds: 130, tone: "warn" },
+    { name: "cargo test --test sepa_retry", first: 6, last: 9, seconds: 82, tone: "err" },
+  ],
+  lines: Array.from({ length: 9 }, (_, i) => ({
+    number: i + 1,
+    time: "10:06:00",
+    text: i === 8 ? "Process exited with code 101" : `line ${i + 1}`,
+    tone: i === 8 ? ("err" as const) : null,
+    step: i < 2 ? 0 : i < 5 ? 1 : 2,
+  })),
+};
+
+function segments(): SVGAElement[] {
+  return [...target.querySelectorAll<SVGAElement>('[aria-label="Steps"] a')];
+}
+
+test("under the header, the steps bar draws one segment per step of the run's log, toned by result, the duration as its tip", async () => {
+  draw("teamcity:build:1187", undefined, { log: () => Promise.resolve(STEPPED) });
+  await settle();
+  const drawn = segments();
+  expect(drawn.map((a) => a.querySelector("text")?.textContent)).toEqual(["Checkout", "cargo build --tests", "cargo test --test sepa_retry"]);
+  expect(drawn.map((a) => a.querySelector("title")?.textContent)).toEqual([
+    "Checkout, 12 s",
+    "cargo build --tests, 2 m 10 s",
+    "cargo test --test sepa_retry, 1 m 22 s",
+  ]);
+  expect(drawn.map((a) => a.querySelector("rect")?.getAttribute("class"))).toEqual(["tf-sbseg tf-ok", "tf-sbseg tf-ok", "tf-sbseg tf-err"]);
+  // Width by duration: 130 s of 224 s.
+  expect(parseFloat(drawn[1]!.querySelector("svg")!.getAttribute("width")!)).toBeCloseTo(58.04, 1);
+  expect(drawn.every((a) => a.getAttribute("href") === `#/build/${encodeURIComponent(PIPE)}/${encodeURIComponent("teamcity:build:1187")}/log`)).toBe(true);
+});
+
+test("a run in flight draws its last step running", async () => {
+  const live: RunLog = { ...STEPPED, steps: STEPPED.steps.map((s, i) => (i === 2 ? { ...s, tone: null, seconds: null } : s)) };
+  draw("teamcity:build:1188", undefined, { log: () => Promise.resolve(live) });
+  await settle();
+  const last = segments().at(-1)!;
+  expect(last.querySelector("rect")?.getAttribute("class")).toBe("tf-sbseg tf-run");
+  expect(last.querySelector("title")?.textContent).toBe("cargo test --test sepa_retry, running");
+});
+
+test("a run whose source keeps no log, or whose log has no steps, draws no steps bar", async () => {
+  draw("teamcity:build:1187", undefined, { log: () => Promise.resolve(null) });
+  await settle();
+  expect(target.querySelector("h1")).not.toBeNull();
+  expect(target.querySelector('[aria-label="Steps"]')).toBeNull();
+  unmount(page!);
+  page = null;
+  draw("teamcity:build:1187", undefined, { log: () => Promise.resolve({ ...STEPPED, steps: [] }) });
+  await settle();
+  expect(target.querySelector('[aria-label="Steps"]')).toBeNull();
+});
+
+test("a click on a step opens the Log tab at that step, open and scrolled to", async () => {
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.getAttribute("data-s") ?? "");
+  };
+  const drawn = draw("teamcity:build:1187", undefined, { log: () => Promise.resolve(STEPPED) });
+  await settle();
+  segments()[1]!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  drawn.go("log");
+  await settle();
+  const fold = target.querySelector<HTMLDetailsElement>('details[data-s="1"]')!;
+  expect(fold.open).toBe(true);
+  expect(scrolled).toEqual(["1"]);
+  // The failed step opens by itself; the first stays shut.
+  expect(target.querySelector<HTMLDetailsElement>('details[data-s="0"]')!.open).toBe(false);
 });

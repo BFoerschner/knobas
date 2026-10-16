@@ -1075,6 +1075,18 @@ a.tf-r:hover { background: var(--sheet-2); }
 /* ---------- Builds, the run page (#853): prototype-6's .bhead chip, .problem and the Run panel ---------- */
 .tf-bhead h1 .tf-run-chip { font-size: var(--t-sm); vertical-align: 4px; }
 .tf-runbody { padding: 16px 22px 24px; }
+/* The run page's steps bar (#1003, R-9.10): prototype-6's `.steps2`, one SVG so widths are attributes. */
+.tf-stepsbar { margin: 0 22px 14px; height: 30px; border-radius: 5px; overflow: hidden; }
+.tf-stepsbar > svg { display: block; }
+.tf-sbseg { fill: var(--ok); }
+.tf-sbgap { fill: var(--sheet); }
+.tf-sbseg.tf-err { fill: var(--err); }
+.tf-sbseg.tf-run { fill: var(--info); }
+.tf-stepsbar text { fill: var(--sheet); font-size: var(--t-2xs); pointer-events: none; }
+.tf-stepsbar a { cursor: pointer; }
+.tf-stepsbar a:hover .tf-sbseg, .tf-stepsbar a:focus-visible .tf-sbseg { opacity: .85; }
+.tf-stepsbar a:focus-visible { outline: none; }
+.tf-stepsbar a:focus-visible .tf-sbseg { stroke: var(--ink); stroke-width: 4px; }
 .tf-runbody > .tf-dim { font-size: var(--t-sm); margin: 0 0 10px; }
 .tf-runov { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
 .tf-problem {

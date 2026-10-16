@@ -21,13 +21,18 @@
     `run_tests`, `run_artifacts`). A download, here and on the Overview, goes
     through knobas into the downloads folder (`download_run_file`, D8).
 
-  The steps bar (R-9.10) is #1003's, over #854's step boundaries.
+  - **Steps bar** (#1003, R-9.10), under the header on every tab: one
+    segment per step of the run's log (`run_log`'s steps, #854), as wide as
+    its time, toned by result, the duration as its tip. A click opens the
+    Log tab at that step. The page reads the log once and hands that read to
+    the Log tab; a run in flight is read again when the Log tab opens. No
+    log, or a log without steps, draws no bar.
 -->
 <script lang="ts">
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { PipelineRow, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
+  import type { PipelineRow, PipelineSettings, RunLog, RunRow, SourceView } from "../../ipc/entity";
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
@@ -42,7 +47,7 @@
   import TfRunDialog from "./TfRunDialog.svelte";
   import TfRunLog from "./TfRunLog.svelte";
   import TfRunTests from "./TfRunTests.svelte";
-  import { downloadAndSay } from "./run-reads";
+  import { downloadAndSay, stepSegments } from "./run-reads";
   import {
     RUN_TABS,
     artifactsOf,
@@ -98,6 +103,13 @@
   let sources = $state<SourceSummary[]>([]);
   let sync = $state<SourceSyncStatus[]>([]);
   let jobBranches = $state<string[]>([]);
+  let log = $state<RunLog | null>(null);
+  /** The run's one log read: the steps bar draws over it, and the Log tab is handed it. */
+  let logRead: Promise<RunLog | null> | null = null;
+  let logSettled = false;
+  /** The step a click on the bar opens the Log tab at; `seq` tells two clicks on one step apart. */
+  let focus = $state<{ step: number; seq: number } | null>(null);
+  let focusSeq = 0;
   let token = 0;
 
   $effect(() => {
@@ -114,7 +126,9 @@
     viewFailed = null;
     failure = null;
     settings = null;
+    log = null;
     void findRun(pipe, id, mine);
+    void readLog(id, mine);
     ports.view(id).then(
       (answer) => {
         if (mine !== token) return;
@@ -150,6 +164,37 @@
       if (mine === token) runsFailed = ipcErrorMessage(cause);
     }
   }
+
+  function readLog(id: string, mine: number): Promise<RunLog | null> {
+    const read = ports.log(id);
+    logRead = read;
+    logSettled = false;
+    read.then(
+      (answer) => {
+        if (mine !== token) return;
+        log = answer;
+        logSettled = true;
+      },
+      () => {
+        if (mine === token) logSettled = true;
+      },
+    );
+    return read;
+  }
+
+  /**
+   * The Log tab's reads: the page's own log read, or a new one for a run in
+   * flight whose read has come back (its log has grown since).
+   */
+  const logPorts: Pick<RunPorts, "log" | "download"> = {
+    log: (id) => (logRead !== null && id === runId && !(inFlight && logSettled) ? logRead : readLog(id, token)),
+    download: (id, target) => ports.download(id, target),
+  };
+
+  // A step asked for is the Log tab's only while the reader stays on it.
+  $effect(() => {
+    if (tab !== "log") focus = null;
+  });
 
   function readFailure(id: string, mine: number) {
     ports.view(id, "tests").then(
@@ -198,6 +243,7 @@
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources.map((s) => s.health), sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
+  const segments = $derived(stepSegments(log, inFlight));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
   function chipWord(r: RunRow): string {
@@ -297,6 +343,27 @@
       {/if}
     </div>
   </header>
+
+  {#if segments.length > 0}
+    <div class="tf-stepsbar">
+      <svg role="group" aria-label="Steps" width="100%" height="30">
+        {#each segments as segment (segment.index)}
+          <a
+            href={runTabHash(pipelineId, runId, "log")}
+            aria-label={segment.tip}
+            onclick={() => (focus = { step: segment.index, seq: ++focusSeq })}
+          >
+            <title>{segment.tip}</title>
+            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="30" aria-hidden="true">
+              <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="30" />
+              {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="30" />{/if}
+              <text x="10" y="19">{segment.name}</text>
+            </svg>
+          </a>
+        {/each}
+      </svg>
+    </div>
+  {/if}
 
   {#if stale !== null}
     <div class="tf-stale tf-bstale">
@@ -425,7 +492,7 @@
         {/if}
       {/if}
     {:else if tab === "log"}
-      <TfRunLog {runId} {inFlight} {failed} {ports} />
+      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {focus} />
     {:else if tab === "tests"}
       <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} />
     {:else if tab === "artifacts"}

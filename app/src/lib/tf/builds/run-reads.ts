@@ -55,6 +55,57 @@ export function stepSummary(step: LogStep, state: StepState): string {
   return took === null ? count : `${took}, ${count}`;
 }
 
+/** One segment of the run page's steps bar (#1003, R-9.10), placed in percent of the bar. */
+export interface StepSegment {
+  /** The step's place in `RunLog.steps`: the Log tab's fold it opens. */
+  index: number;
+  name: string;
+  state: StepState;
+  /** The name and how long it took: "Checkout, 12 s", or "cargo test, running". */
+  tip: string;
+  x: number;
+  width: number;
+}
+
+/** The narrowest a segment is drawn, in percent of the bar, so a 0 s step can still be seen and clicked. */
+const SEGMENT_MIN = 2;
+
+/**
+ * The steps bar over the log's steps: one segment per step, as wide as its
+ * share of the time. A step with no duration (running, or unstamped) takes
+ * the mean of the others'. No read or no steps is no bar.
+ */
+export function stepSegments(log: RunLog | null, inFlight: boolean): StepSegment[] {
+  if (log === null || log.steps.length === 0) return [];
+  const known = log.steps.flatMap((s) => (s.seconds === null ? [] : [s.seconds]));
+  const mean = known.length === 0 ? 1 : known.reduce((a, b) => a + b, 0) / known.length || 1;
+  const weights = log.steps.map((s) => s.seconds ?? mean);
+  const total = weights.reduce((a, b) => a + b, 0);
+  const raw = weights.map((w) => (total === 0 ? 100 / weights.length : (w / total) * 100));
+  // The slivers get the minimum; the rest share what is left by their time,
+  // until none of those falls under it.
+  const floor = Math.min(SEGMENT_MIN, 100 / raw.length);
+  const pinned = new Set<number>();
+  let shares = raw;
+  for (;;) {
+    const free = 100 - floor * pinned.size;
+    const freeRaw = raw.reduce((sum, share, i) => (pinned.has(i) ? sum : sum + share), 0);
+    shares = raw.map((share, i) => (pinned.has(i) ? floor : freeRaw === 0 ? free / (raw.length - pinned.size) : (share / freeRaw) * free));
+    const under = shares.findIndex((share, i) => !pinned.has(i) && share < floor);
+    if (under === -1) break;
+    pinned.add(under);
+  }
+  let x = 0;
+  return log.steps.map((step, index) => {
+    const state = stepState(log, index, inFlight);
+    const took = state === "run" ? "running" : step.seconds === null ? null : duration(step.seconds);
+    const width = shares[index]!;
+    const segment = { index, name: step.name, state, tip: took === null ? step.name : `${step.name}, ${took}`, x, width };
+    x += width;
+    return segment;
+  });
+}
+
 /** How many find hits a line holds: the marked runs `marks` draws. */
 export function hitsIn(text: string, typed: string): number {
   return typed.trim() === "" ? 0 : marks(text, typed).filter((run) => run.hit).length;

@@ -15,6 +15,7 @@ import {
   sizeText,
   stepMatch,
   stepOpens,
+  stepSegments,
   stepState,
   stepSummary,
 } from "./run-reads";
@@ -53,6 +54,38 @@ test("the log is its steps' folds with the lines outside them loose, in order", 
     "step cargo test 3",
     "loose 1",
   ]);
+});
+
+test("the steps bar is one segment per step, as wide as its share of the time, toned by result, with the duration as its tip", () => {
+  const segments = stepSegments(LOG, false);
+  expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
+    [0, "Checkout", "ok", "Checkout, 12 s"],
+    [1, "cargo test", "err", "cargo test, 1 m 22 s"],
+  ]);
+  // 12 s of 94 s, then 82 s of 94 s: each starts where the one before ends.
+  expect(segments[0]!.x).toBe(0);
+  expect(segments[0]!.width).toBeCloseTo(12.77, 1);
+  expect(segments[1]!.x).toBeCloseTo(12.77, 1);
+  expect(segments[1]!.width).toBeCloseTo(87.23, 1);
+});
+
+test("a running step has no duration yet: it says running, and takes the mean of the others' time", () => {
+  const passing: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
+  const segments = stepSegments(passing, true);
+  expect(segments.map((s) => [s.state, s.tip])).toEqual([
+    ["ok", "Checkout, 12 s"],
+    ["run", "cargo test, running"],
+  ]);
+  expect(segments[1]!.width).toBeCloseTo(50, 1);
+});
+
+test("a step too short to see keeps a sliver, and a log without steps draws no bar", () => {
+  const long: RunLog = { ...LOG, steps: [{ ...LOG.steps[0]!, seconds: 0 }, { ...LOG.steps[1]!, seconds: 3600 }] };
+  const [short, rest] = stepSegments(long, false);
+  expect(short!.width).toBeGreaterThanOrEqual(2);
+  expect(short!.width + rest!.width).toBeCloseTo(100, 5);
+  expect(stepSegments({ ...LOG, steps: [] }, false)).toEqual([]);
+  expect(stepSegments(null, false)).toEqual([]);
 });
 
 test("a step is err with an error in it, running when it is the last of a run in flight, else ok", () => {

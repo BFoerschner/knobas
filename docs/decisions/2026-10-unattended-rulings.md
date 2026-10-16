@@ -3426,3 +3426,29 @@ Ruled by the implementer (PR for #866).
   wrong ticket and left the original hidden. `hideHere` now passes its ticket to *Undo*, and
   `rereadReach` drops a re-read for a job the page has left. Pinned by `Undo after moving to
   another job…` in `TfJobTalk.test.svelte.ts`. **Reversing:** low.
+
+## #1003 — Run page steps bar (2026-10-16)
+
+- **The bar draws `run_log`'s steps (#854); no new read or field.** The issue offers #854's read
+  or a declared `steps` run field; #854 declared none, and its steps already carry name, duration
+  and tone over the whole log. **Reversing:** low (`stepSegments`, `TfRun`).
+- **The run page reads the log once, on open, and hands that read to the Log tab.** The bar is on
+  every tab, so the page needs the read anyway; the Log tab reusing it means one source request
+  per run page, not two. A run in flight is read again when the Log tab opens (its log has grown),
+  and the bar follows that read. **Reversing:** low (`logPorts` in `TfRun`).
+- **Not-started steps are not drawn.** A log names a step only once it starts, and no read names
+  the steps ahead of it; drawing grey segments would invent them. A running run shows its
+  finished steps and its last one running (`stepState`, the Log tab's rule). Follow-up #1016.
+  **Reversing:** low, with #1016's read.
+- **Width by duration, with a floor.** A step with no duration (running, or unstamped) takes the
+  mean of the others' time; a segment is at least 2 % of the bar so a 0 s step can be seen and
+  clicked. Prototype-6's `min-width: 24px` needs an inline style, which the CSP refuses.
+  **Reversing:** low.
+- **One SVG, segments are links.** Widths are SVG attributes (the conventions' rule for a
+  duration bar); each segment is an `<a>` to `#/build/<pipeline>/<run>/log` with the step as its
+  accessible name and `<title>` tip ("Checkout, 12 s", "cargo test, running"). The name is
+  clipped at the segment's edge, not ellipsised (SVG text has no ellipsis). **Reversing:** low.
+- **A click opens the Log tab at that step** by page state, not the address: the page keeps the
+  asked-for step while the Log tab is open, and the Log tab opens that fold and scrolls it into
+  view once its log is read, as prototype-6 does. The address stays `…/log`, as #1003's criterion
+  names it. **Reversing:** low.
