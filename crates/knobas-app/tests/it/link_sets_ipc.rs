@@ -628,9 +628,12 @@ async fn a_set_knobas_cannot_store_is_refused() {
     assert_eq!(missing.code, IpcErrorCode::NotFound);
 
     // An editor still open on a set somebody deleted cannot bring it back.
-    let saved = link_sets::save(&pool, draft("Gone soon", vec![], vec![rule("manual", &ticket)]))
-        .await
-        .unwrap();
+    let saved = link_sets::save(
+        &pool,
+        draft("Gone soon", vec![], vec![rule("manual", &ticket)]),
+    )
+    .await
+    .unwrap();
     link_sets::delete(&pool, &saved.set.id).await.unwrap();
     let mut stale = draft("Gone soon", vec![], vec![rule("manual", &ticket)]);
     stale.id = Some(saved.set.id.clone());
