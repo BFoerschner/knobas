@@ -6,7 +6,14 @@
  * these; the backend (`knobas_app::link_sets`) is the one that matches rules.
  */
 import { keyOf } from "../job/job";
-import type { LinkSetMemberKind, LinkSetRow, LinkSetRuleKind, LinkSetRuleRow } from "../../ipc/entity";
+import type {
+  LinkSetMemberKind,
+  LinkSetMemberRow,
+  LinkSetRow,
+  LinkSetRuleKind,
+  LinkSetRuleRow,
+  StateChip,
+} from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 
 /** The editor's panels, in prototype-6's order (R-7.7). */
@@ -64,20 +71,62 @@ export function ruleLabel(rule: LinkSetRuleRow): string {
   }
 }
 
-/** *What is in it*: one line per kind that holds anything, "2 repositories". */
-export function contentLines(set: Pick<LinkSetRow, "members">): string[] {
-  return MEMBER_KINDS.map((kind) => [kind, set.members.filter((member) => member.kind === kind).length] as const)
+/**
+ * Everything a set holds now: its fixed members, then what each pattern
+ * matches (#868), each item once (prototype-6's `setItems`).
+ */
+export function itemsOf(set: Pick<LinkSetRow, "members" | "patterns">): LinkSetMemberRow[] {
+  const seen = new Set<string>();
+  return [...set.members, ...set.patterns.flatMap((pattern) => pattern.matches)].filter((item) => {
+    if (seen.has(item.entity_id)) return false;
+    seen.add(item.entity_id);
+    return true;
+  });
+}
+
+/** *What is in it*: one line per kind that holds anything, "2 repositories", patterns' matches counted. */
+export function contentLines(set: Pick<LinkSetRow, "members" | "patterns">): string[] {
+  const items = itemsOf(set);
+  return MEMBER_KINDS.map((kind) => [kind, items.filter((member) => member.kind === kind).length] as const)
     .filter(([, count]) => count > 0)
     .map(([kind, count]) => `${count} ${KIND_LABEL[kind].toLowerCase()}`);
 }
 
-/** The sets the filter keeps: every word in the name, description or a member, and any chip's rule kind. */
+/** The sets the filter keeps: every word in the name, description or an item, and any chip's rule kind. */
 export function visibleSets(sets: readonly LinkSetRow[], text: string, by: readonly string[]): LinkSetRow[] {
   return sets.filter(
     (set) =>
       (by.length === 0 || set.rules.some((rule) => by.includes(rule.kind))) &&
-      matchesAll([set.name, set.description, ...set.members.map((member) => member.title ?? member.entity_id)].join(" "), text),
+      matchesAll([set.name, set.description, ...itemsOf(set).map((member) => member.title ?? member.entity_id)].join(" "), text),
   );
+}
+
+/** The member kinds with *Add a pattern…* (R-7.7: builds and pages). */
+export const PATTERN_KINDS: readonly LinkSetMemberKind[] = ["pipeline", "page"];
+
+/** A value as the grammar takes it: quoted when it holds a space or a quote-free colon. */
+function grammarValue(value: string): string {
+  return /[\s:]/.test(value) ? `"${value.replace(/"/g, "")}"` : value;
+}
+
+/**
+ * The query the pattern dialog's fields stand for (#868), in the search
+ * grammar the backend reads it with: a pipeline's `project:` (or none for
+ * *Any*) and `name:` glob; a page's `project:` (its space) and `under:` page.
+ * The backend parses it (ruling P2); this only writes it.
+ */
+export function patternQuery(kind: LinkSetMemberKind, project: string, text: string): string {
+  const parts: string[] = [];
+  const typed = text.trim();
+  if (project) parts.push(`project:${grammarValue(project)}`);
+  if (kind === "pipeline") parts.push(`name:${grammarValue(typed || "*")}`);
+  else if (typed) parts.push(`under:${grammarValue(typed)}`);
+  return parts.join(" ");
+}
+
+/** A dot's tone class from a member row's state (#1008); none draws the muted dot. */
+export function dotClass(state: StateChip | null): string {
+  return state ? `tf-${state.tone}` : "";
 }
 
 /** How many of a list the editor shows before *and N more* (R-7.7). */

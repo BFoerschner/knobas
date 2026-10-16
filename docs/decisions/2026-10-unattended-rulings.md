@@ -3509,3 +3509,44 @@ Ruled by the merge-manager (PR #1018).
 - **A reader saving the whole config mid-sync from a form opened earlier can blank the recorded
   ids** (`config::patch` replaces `config`). The next sync records them again, at the cost of a
   second backfill. Accepted: rare, and self-healing. **Reversing:** n/a.
+
+## #868 and #1008 — Link set patterns, and member rows' line and dot (2026-10-16)
+
+- **A pattern's reading is stored beside its query (migration `0040`, `pattern jsonb`).** The
+  job's read is one static SQL text shared with `reach:`, and the grammar has one parser in Rust
+  (ruling P2). Parsing the stored text in SQL would be a second parser; evaluating patterns in
+  Rust would split the reach read from the `reach:` filter. So the save parses once and stores
+  `{sources, projects, under, names}`; `query` stays what the member is and what the editor shows.
+  A grammar change that alters what a stored query means is not re-read until the set is saved
+  again. **Reversing:** medium (a migration dropping the column, and a read that parses on each
+  job read).
+- **A pattern is `source:`, `project:`/`space:`, `under:` and `name:` only, at least one, no
+  negation and no search words.** A pattern is a filter that picks up new items (R-7.2); words
+  rank, `type:` is the member's kind, and persons and windows change by themselves. The preview
+  answers a refusal as data, so the dialog says why while somebody types. **Reversing:** low.
+- **`name:` matches the key or the title, whole.** A TeamCity configuration's title is
+  `<project> / <name>`, while prototype-6's globs (`Payout_*`) are the configuration id, which is
+  the entity key. Whole, not a substring, so `Payout_*` means what a shell glob means.
+  **Reversing:** low.
+- **`project:` is the item's own project; subprojects are not included.** That is what `project:`
+  means in the grammar today (ADR-0010). Prototype-6's "under TeamCity project Payments" takes a
+  subtree; that needs a declaration TeamCity does not make, filed as #1019. **Reversing:** low.
+- **Patterns for pipelines and pages only.** R-7.7 offers *Add a pattern…* for builds and pages;
+  assets are not in the live mirror the pattern reads. **Reversing:** low (`PATTERN_KINDS`).
+- **The draft and the row carry patterns as their own list, after the fixed members.** Fewer
+  changes to `LinkSetMember` and its readers than an optional `entity_id`; the editor draws a
+  panel's patterns before its fixed members. **Reversing:** low.
+- **A pattern row and the preview carry the first 200 matches and the whole count.** A page
+  pattern over a large space would otherwise ship every page on each editor read. **Reversing:**
+  low (`MATCHES_SHOWN`).
+- **The pattern dialog says *Project*, not *TeamCity project*, and *pipelines*, not
+  *configurations*.** `CONTEXT.md`'s **pipeline**, as #866 ruled for the panel heading. The name
+  field starts empty with the placeholder *e.g. Payout_\**, not prototype-6's fixture value
+  *Dashboard_\**. It adds one line, *Stored as `<query>`*, so the grammar text the row will show is
+  seen before it is saved. The row shows `Pattern: <query>` in the grammar, not prototype-6's
+  English phrase, because the frontend does not parse the grammar (P2). **Reversing:** low.
+- **A member row's line and dot (#1008) are declared reads only, so monitors and repositories
+  draw no line.** Kuma declares no type and no state chip, Gitea nothing for a repository's
+  owner; filed as #1020. A pipeline's dot is its newest run's declared state, its line the declared
+  `group_path`; a page's line its declared project and parent chain; an asset's its `type_id` and
+  environment, its dot the health rollup the Assets view draws. **Reversing:** low.

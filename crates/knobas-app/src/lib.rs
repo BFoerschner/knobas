@@ -563,6 +563,7 @@ pub fn run() {
             commands::entity::save_link_set,
             commands::entity::delete_link_set,
             commands::entity::preview_link_set_rule,
+            commands::entity::preview_link_set_pattern,
             commands::entity::hide_link_set_member,
             // #857's build chain read, appended at the foot: the list is
             // append-only (§10.8).

@@ -126,6 +126,7 @@ fn draft(name: &str, members: Vec<LinkSetMember>, rules: Vec<LinkSetRule>) -> Li
         name: name.to_owned(),
         description: String::new(),
         members,
+        patterns: Vec::new(),
         rules,
     }
 }
@@ -505,6 +506,7 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
             name: "  Payout stack ".to_owned(),
             description: "What a payout change touches.".to_owned(),
             members: vec![member("repo", &repo), member("page", &page)],
+            patterns: Vec::new(),
             rules: vec![rule("epic", &epic), rule("manual", &lone)],
         },
     )

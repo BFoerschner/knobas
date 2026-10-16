@@ -789,6 +789,12 @@ knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
 knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
+knobas-app	test/it	link_set_patterns_ipc::a_member_row_carries_its_line_and_its_dot
+knobas-app	test/it	link_set_patterns_ipc::a_page_pattern_is_a_space_and_a_parent_page
+knobas-app	test/it	link_set_patterns_ipc::a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit
+knobas-app	test/it	link_set_patterns_ipc::a_pattern_knobas_cannot_read_is_refused
+knobas-app	test/it	link_set_patterns_ipc::the_editor_the_preview_the_job_and_the_launcher_agree
+knobas-app	test/it	link_set_patterns_ipc::the_jobs_set_group_lists_a_patterns_matches_and_hides_one
 knobas-app	test/it	link_sets_ipc::a_rules_preview_is_exactly_the_tickets_that_show_the_set
 knobas-app	test/it	link_sets_ipc::a_set_knobas_cannot_store_is_refused
 knobas-app	test/it	link_sets_ipc::a_set_reads_with_its_contents_rules_and_tickets_now
@@ -1227,6 +1233,7 @@ knobas-core	lib/knobas_core	link::tests::origin_roundtrips_through_its_column_va
 knobas-core	lib/knobas_core	link::tests::origin_serializes_as_its_column_value
 knobas-core	lib/knobas_core	link::tests::the_origins_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	link_set::tests::the_depth_is_spelled_once
+knobas-core	lib/knobas_core	link_set::tests::the_pipeline_exclusions_are_spelled_once
 knobas-core	lib/knobas_core	markdown::tests::a_file_name_keeps_letters_and_digits
 knobas-core	lib/knobas_core	markdown::tests::a_file_name_stays_in_its_folder_and_writable
 knobas-core	lib/knobas_core	markdown::tests::a_heading_is_hashes_by_level_and_clamped
@@ -1810,6 +1817,7 @@ knobas-search	lib/knobas_search	lists::tests::the_roster_rule_is_spelled_the_way
 knobas-search	lib/knobas_search	lists::tests::the_summary_projects_every_lists_three_columns
 knobas-search	lib/knobas_search	lists::tests::the_two_statements_agree_on_the_seen_key
 knobas-search	lib/knobas_search	query::tests::a_named_person_is_an_author_filter_in_every_spelling
+knobas-search	lib/knobas_search	query::tests::a_pattern_reads_four_keys_and_refuses_the_rest
 knobas-search	lib/knobas_search	query::tests::an_unreadable_ticket_value_is_reported_and_a_bare_key_is_typing
 knobas-search	lib/knobas_search	query::tests::assignee_me_is_the_identity_and_assigned_is_mine_within_a_window
 knobas-search	lib/knobas_search	query::tests::each_dimension_alone_makes_a_query_filtered
@@ -1819,6 +1827,7 @@ knobas-search	lib/knobas_search	query::tests::inline_key_values_fill_the_filters
 knobas-search	lib/knobas_search	query::tests::leading_prefixes_are_exclusive_and_consume_their_marker
 knobas-search	lib/knobas_search	query::tests::me_and_a_name_are_both_bound_but_only_the_name_is_echoed
 knobas-search	lib/knobas_search	query::tests::mine_without_an_identity_resolves_to_no_authors_but_stays_set
+knobas-search	lib/knobas_search	query::tests::name_is_a_typed_glob_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::needles_are_what_the_text_asks_for
 knobas-search	lib/knobas_search	query::tests::reach_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::repeated_values_mean_any_and_a_minus_negates
@@ -1924,6 +1933,7 @@ knobas-search	test/it	lists::the_change_badge_clears_when_the_list_is_opened
 knobas-search	test/it	lists::the_limit_cuts_the_page_and_not_the_count
 knobas-search	test/it	lists::typing_a_list_in_the_box_answers_like_the_command
 knobas-search	test/it	lists_no_identity::a_list_with_no_identity_configured_says_so_instead_of_reading_empty
+knobas-search	test/it	name_glob::a_name_glob_matches_a_key_or_a_title_whole
 knobas-search	test/it	parent_key_pin::a_keyless_fields_parent_stops_under_and_falls_through_to_epic_for_contexts
 knobas-search	test/it	parent_key_pin::the_first_candidate_carrying_a_key_wins_in_sql_and_for_under
 knobas-search	test/it	parent_key_pin::the_macros_arms_are_the_ticket_parent_candidates_in_declared_order

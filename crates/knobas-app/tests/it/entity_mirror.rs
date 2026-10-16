@@ -2067,21 +2067,35 @@ fn the_docs_shapes_match_their_typescript_mirror() {
 }
 
 /// #866's link sets: every DTO the six commands answer or take, and the
-/// commands by their registered names.
+/// commands by their registered names; #868's patterns and their preview,
+/// and #1008's member line and dot.
 #[test]
 fn the_link_set_shapes_match_their_typescript_mirror() {
     use knobas_app::link_sets::{
         JobLink, JobLinkSets, JobMember, JobParent, JobSet, LinkSetDetail, LinkSetDraft,
-        LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow, RuleTicket,
+        LinkSetMember, LinkSetPattern, LinkSetRow, LinkSetRule, MemberRow, PatternPreview,
+        PatternProject, PatternRow, RuleRow, RuleTicket,
+    };
+    let member = MemberRow {
+        kind: "repo".to_owned(),
+        entity_id: "gitea:tidewater/payout-service".to_owned(),
+        title: None,
+        line: None,
+        state: Some(knobas_core::payload::StateChip {
+            text: "up".to_owned(),
+            tone: knobas_core::tone::Tone::Ok,
+        }),
     };
     let row = LinkSetRow {
         id: "payout-stack".to_owned(),
         name: "Payout stack".to_owned(),
         description: String::new(),
-        members: vec![MemberRow {
-            kind: "repo".to_owned(),
-            entity_id: "gitea:tidewater/payout-service".to_owned(),
-            title: None,
+        members: vec![member.clone()],
+        patterns: vec![PatternRow {
+            kind: "pipeline".to_owned(),
+            query: "project:Payouts name:Payout_*".to_owned(),
+            count: 1,
+            matches: vec![member.clone()],
         }],
         rules: vec![RuleRow {
             kind: "epic".to_owned(),
@@ -2097,6 +2111,7 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         "members",
         "mine",
         "name",
+        "patterns",
         "rules",
         "tickets",
     ];
@@ -2105,7 +2120,12 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
     assert_shape(
         "LinkSetMemberRow",
         &wire["members"][0],
-        &["entity_id", "kind", "title"],
+        &["entity_id", "kind", "line", "state", "title"],
+    );
+    assert_shape(
+        "LinkSetPatternRow",
+        &wire["patterns"][0],
+        &["count", "kind", "matches", "query"],
     );
     assert_shape(
         "LinkSetRuleRow",
@@ -2138,6 +2158,10 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
             kind: "page".to_owned(),
             entity_id: "confluence:1".to_owned(),
         }],
+        patterns: vec![LinkSetPattern {
+            kind: "page".to_owned(),
+            query: "project:OPS under:Runbooks".to_owned(),
+        }],
         rules: vec![LinkSetRule {
             kind: "manual".to_owned(),
             value: "jira:PAY-231".to_owned(),
@@ -2147,7 +2171,29 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
     assert_shape(
         "LinkSetDraft",
         &draft,
-        &["description", "id", "members", "name", "rules"],
+        &["description", "id", "members", "name", "patterns", "rules"],
+    );
+    assert_shape("LinkSetPattern", &draft["patterns"][0], &["kind", "query"]);
+    let preview = serde_json::to_value(PatternPreview {
+        count: 1,
+        matches: vec![member],
+        projects: vec![PatternProject {
+            source_id: "teamcity".to_owned(),
+            key: "Payouts".to_owned(),
+            name: None,
+        }],
+        refusal: None,
+    })
+    .unwrap();
+    assert_shape(
+        "LinkSetPatternPreview",
+        &preview,
+        &["count", "matches", "projects", "refusal"],
+    );
+    assert_shape(
+        "LinkSetPatternProject",
+        &preview["projects"][0],
+        &["key", "name", "source_id"],
     );
     assert_shape(
         "LinkSetMember",
@@ -2210,6 +2256,7 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         "\"save_link_set\"",
         "\"delete_link_set\"",
         "\"preview_link_set_rule\"",
+        "\"preview_link_set_pattern\"",
         "\"hide_link_set_member\"",
         "\"job_link_sets\"",
     ] {

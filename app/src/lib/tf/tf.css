@@ -1876,6 +1876,17 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-picks-more { padding: 6px 10px; margin: 0; }
 .tf-picked { margin-right: auto; align-self: center; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }
+.tf-member-line { font-size: var(--t-xs); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-pattern { align-items: flex-start; }
+.tf-pattern details { min-width: 0; }
+.tf-pattern summary { cursor: pointer; }
+.tf-pattern code, .tf-pat-query code { font: var(--t-xs) var(--mono); }
+.tf-pattern ul { margin: 6px 0 2px; padding-left: 18px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pat-intro, .tf-pat-query { margin: 0; font-size: var(--t-sm); }
+.tf-pat-query { font-size: var(--t-xs); }
+.tf-pat-matches { max-height: 30vh; }
+.tf-pat-match { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-pat-match .tf-dim { margin-left: auto; font-size: var(--t-xs); }
 @media (max-width: 900px) {
   .tf-cbody.tf-set { grid-template-columns: minmax(0, 1fr); }
 }

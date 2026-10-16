@@ -3,7 +3,8 @@ import { expect, test } from "vitest";
 
 import { reasonLabel } from "../builds/builds";
 import { originLabel } from "../job/job";
-import { contentLines, ruleLabel } from "./sets";
+import type { LinkSetMemberKind } from "../../ipc/entity";
+import { contentLines, patternQuery, ruleLabel } from "./sets";
 
 test("a rule reads as prototype-6 writes it, the epic's title only when it is not its key", () => {
   expect(ruleLabel({ kind: "epic", value: "jira:PAY-200", title: "Payout reliability" })).toBe(
@@ -15,16 +16,25 @@ test("a rule reads as prototype-6 writes it, the epic's title only when it is no
   expect(ruleLabel({ kind: "manual", value: "jira:PAY-240", title: null })).toBe("PAY-240, applied by hand");
 });
 
-test("what is in a set is one line per kind that holds anything, in panel order", () => {
+const row = (kind: LinkSetMemberKind, entity_id: string) => ({ kind, entity_id, title: null, line: null, state: null });
+
+test("what is in a set is one line per kind that holds anything, in panel order, a pattern's matches counted once", () => {
   expect(
     contentLines({
-      members: [
-        { kind: "monitor", entity_id: "kuma:1", title: null },
-        { kind: "repo", entity_id: "gitea:a", title: null },
-        { kind: "repo", entity_id: "gitea:b", title: null },
+      members: [row("monitor", "kuma:1"), row("repo", "gitea:a"), row("repo", "gitea:b"), row("pipeline", "tc:A")],
+      patterns: [
+        { kind: "pipeline", query: "name:*", count: 2, matches: [row("pipeline", "tc:A"), row("pipeline", "tc:B")] },
       ],
     }),
-  ).toEqual(["2 repositories", "1 monitors"]);
+  ).toEqual(["2 repositories", "2 pipelines", "1 monitors"]);
+});
+
+test("the pattern dialog's fields are written in the search grammar the backend reads", () => {
+  expect(patternQuery("pipeline", "Payouts", "Payout_*")).toBe("project:Payouts name:Payout_*");
+  expect(patternQuery("pipeline", "", "")).toBe("name:*");
+  expect(patternQuery("pipeline", "PSP client", "Psp*")).toBe('project:"PSP client" name:Psp*');
+  expect(patternQuery("page", "OPS", "")).toBe("project:OPS");
+  expect(patternQuery("page", "OPS", "On-call handbook")).toBe('project:OPS under:"On-call handbook"');
 });
 
 test("a row a link set brought is labelled with the set's name, on the job's sections and on Builds", () => {

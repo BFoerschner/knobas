@@ -6285,6 +6285,21 @@ pub async fn preview_link_set_rule(
     crate::link_sets::preview(&lifecycle.pool()?, &rule).await
 }
 
+/// What a pattern would match now, for the pattern dialog (#868, R-7.7):
+/// [`crate::link_sets::preview_pattern`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::preview_pattern`] refuses with.
+#[tauri::command]
+pub async fn preview_link_set_pattern(
+    lifecycle: State<'_, Lifecycle>,
+    pattern: crate::link_sets::LinkSetPattern,
+) -> Result<crate::link_sets::PatternPreview, IpcError> {
+    crate::link_sets::preview_pattern(&lifecycle.pool()?, &pattern).await
+}
+
 /// *Hide here* or *Show again* on one ticket (#866, R-7.5):
 /// [`crate::link_sets::hide`].
 ///

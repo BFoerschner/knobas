@@ -177,6 +177,9 @@ pub struct Parsed {
     /// ticket key or id whose job-reach read the row must be in. Typed only,
     /// for `under:`'s reason.
     pub reach: Vec<String>,
+    /// The `name:` globs (#868), lowercased, in the order typed. Typed only,
+    /// for `under:`'s reason.
+    pub names: Vec<String>,
     /// What every source declares, carried over from the vocabulary for the
     /// same reason [`Self::identity`] is: [`merge`] hands it to the statement,
     /// which reads the parent each child declares.
@@ -213,6 +216,10 @@ pub struct EffectiveFilters {
     /// one of these tickets reaches, by `knobas_core::reach_walk!` -- the
     /// same walk the job-reach read makes.
     pub reach: Vec<String>,
+    /// The `name:` globs (#868), lowercased, OR-ed: the row's key or title
+    /// matches one of them whole, `*` any run of characters and `?` one
+    /// (`knobas_core::name_glob_matches!`).
+    pub names: Vec<String>,
     /// The declarations every row's path line reads the parent through
     /// (#596). Carried whether or not [`Self::under`] is set, since every hit
     /// draws its path. The `under:` predicate read them too until #627; it
@@ -298,6 +305,7 @@ impl EffectiveFilters {
             && self.named_authors.is_empty()
             && self.under.is_empty()
             && self.reach.is_empty()
+            && self.names.is_empty()
             && self.fields.is_empty()
     }
 
@@ -399,6 +407,8 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             .collect(),
         // Typed only, like `under:`.
         reach: parsed.reach.clone(),
+        // Typed only, like `under:`.
+        names: parsed.names.clone(),
         // Always: every row's path line reads the parent its kind declares
         // (#596), not only an `under:` predicate.
         declarations: parsed.declarations.clone(),
@@ -465,6 +475,7 @@ impl Parsed {
             identity: vocab.identity.clone(),
             under: Vec::new(),
             reach: Vec::new(),
+            names: Vec::new(),
             declarations: vocab.declarations.clone(),
             fields: Vec::new(),
         }
@@ -734,6 +745,16 @@ fn apply_key_value(
                 parsed.reach.push(value);
             }
         }
+        // A name glob (#868, spec #808 *Link sets*: "a name glob is added to
+        // the grammar"): the row's key or title, whole, `*` any run and `?`
+        // one character, ignoring case; repeated globs OR. Quoted when it
+        // holds a space. A bare `name:` is somebody mid-typing.
+        "name" => {
+            let value = unquote(value.trim()).trim().to_lowercase();
+            if !value.is_empty() && !parsed.names.contains(&value) {
+                parsed.names.push(value);
+            }
+        }
         // The estate's own keys. They have no home before M4, and demoting
         // them to search words would quietly widen the result set.
         "env" | "health" => parsed.unknown(token),
@@ -848,6 +869,87 @@ fn push_unique(into: &mut Vec<String>, value: &str) {
     if !into.iter().any(|existing| existing == value) {
         into.push(value.to_owned());
     }
+}
+
+/// What a link-set pattern matches (#868, R-7.2): a stored query read down
+/// to the four keys a pattern may use. Each list ORs its values and the lists
+/// AND; an empty list does not narrow. Every value is lowercased, as the
+/// grammar reads it. Serialized as the `pattern` column of
+/// `knobas.link_set_member` (migration `0040`), which
+/// `knobas_core::link_set_pattern_hits!` matches.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Pattern {
+    /// `source:` (or `/alias`): the item's source id.
+    pub sources: Vec<String>,
+    /// `project:` (or `space:`): the item's declared project, by key or name
+    /// (ADR-0010).
+    pub projects: Vec<String>,
+    /// `under:`: a parent the item declares, at any depth, or the item itself
+    /// as that parent (ADR-0018).
+    pub under: Vec<String>,
+    /// `name:`: a glob over the item's key or title.
+    pub names: Vec<String>,
+}
+
+/// Read a parsed query as a link-set pattern, or say why it is not one.
+///
+/// A pattern is a filter that picks up new items as they appear, so it is
+/// `source:`, `project:`, `under:` and `name:` and nothing else: no search
+/// words (a ranking, not a filter), no `type:` (the member's kind says it), no
+/// person, window, ticket key, `reach:` or negation, and no token the grammar
+/// could not read. It must narrow by at least one of the four.
+///
+/// # Errors
+///
+/// The reason, in words a dialog can show, for anything else.
+pub fn pattern_of(parsed: &Parsed) -> Result<Pattern, String> {
+    let query = &parsed.query;
+    let filters = &query.filters;
+    if let Some(token) = query.unknown_tokens.first() {
+        return Err(format!("`{token}` is not something a pattern can read"));
+    }
+    if !query.text.trim().is_empty() {
+        return Err(format!(
+            "a pattern filters and does not search: `{}` is not one of its keys",
+            query.text.trim()
+        ));
+    }
+    // `source:` and `/alias` claim `Prefix::Source` when they come first,
+    // and they are a pattern's own key; every other prefix is foreign.
+    let foreign = query.prefix.is_some_and(|prefix| prefix != Prefix::Source)
+        || parsed.list_id.is_some()
+        || !filters.kinds.is_empty()
+        || filters.updated_within_days.is_some()
+        || filters.mine
+        || !filters.authors.is_empty()
+        || !parsed.reach.is_empty()
+        || parsed
+            .fields
+            .iter()
+            .any(|field| field.key != FieldKey::Project || field.negated);
+    if foreign {
+        return Err(
+            "a pattern reads source:, project:, under: and name: and nothing else".to_owned(),
+        );
+    }
+    let pattern = Pattern {
+        sources: filters.sources.clone(),
+        projects: parsed
+            .fields
+            .iter()
+            .flat_map(|field| field.values.iter().cloned())
+            .collect(),
+        under: parsed
+            .under
+            .iter()
+            .map(|(_, value)| value.clone())
+            .collect(),
+        names: parsed.names.clone(),
+    };
+    if pattern == Pattern::default() {
+        return Err("a pattern needs a project, a parent or a name to match".to_owned());
+    }
+    Ok(pattern)
 }
 
 #[cfg(test)]
@@ -1377,6 +1479,71 @@ mod tests {
         let typing = parse("reach:", &v);
         assert!(typing.reach.is_empty());
         assert!(typing.query.unknown_tokens.is_empty());
+    }
+
+    /// `name:` (#868) is a typed filter like `reach:`: a glob, lowercased,
+    /// each once, quoted when it holds a space; a bare one is mid-typing.
+    #[test]
+    fn name_is_a_typed_glob_that_ignores_case() {
+        let v = fixture();
+        let p = parse(
+            r#"name:Payout_* retry NAME:"Dash board?" name:payout_*"#,
+            &v,
+        );
+        assert_eq!(p.query.text, "retry");
+        assert_eq!(p.names, ["payout_*", "dash board?"]);
+        assert!(p.query.unknown_tokens.is_empty());
+        let merged = merge(&p, &SearchFilters::default());
+        assert_eq!(merged.names, ["payout_*", "dash board?"]);
+        assert!(!merged.is_empty());
+        assert_eq!(merged.echo(), SearchFilters::default());
+
+        let typing = parse("name:", &v);
+        assert!(typing.names.is_empty());
+        assert!(typing.query.unknown_tokens.is_empty());
+    }
+
+    /// A link-set pattern (#868, R-7.2) reads `source:`, `project:`,
+    /// `under:` and `name:` and nothing else: each list ORs, the lists AND.
+    #[test]
+    fn a_pattern_reads_four_keys_and_refuses_the_rest() {
+        let v = fixture();
+        let read = |raw: &str| pattern_of(&parse(raw, &v));
+        assert_eq!(
+            read(r#"project:"Payouts" name:Payout_* name:PspClient_*"#),
+            Ok(Pattern {
+                sources: vec![],
+                projects: vec!["payouts".to_owned()],
+                under: vec![],
+                names: vec!["payout_*".to_owned(), "pspclient_*".to_owned()],
+            })
+        );
+        assert_eq!(
+            read(r#"project:OPS under:"Runbooks""#).map(|p| (p.projects, p.under)),
+            Ok((vec!["ops".to_owned()], vec!["runbooks".to_owned()]))
+        );
+        // `source:` and `/alias` claim the source prefix; they are still a
+        // pattern's key.
+        for raw in ["source:teamcity name:Payout_*", "/teamcity name:Payout_*"] {
+            assert_eq!(
+                read(raw).map(|p| (p.sources, p.names)),
+                Ok((vec!["teamcity".to_owned()], vec!["payout_*".to_owned()])),
+                "{raw:?}"
+            );
+        }
+        for refused in [
+            "",
+            "payout",
+            "name:x status:done",
+            "name:x -project:ops",
+            "name:x @me",
+            "name:x updated:7d",
+            "name:x reach:PAY-1",
+            "name:x type:ticket",
+            "name:x bogus:1",
+        ] {
+            assert!(read(refused).is_err(), "{refused:?} read as a pattern");
+        }
     }
 
     fn field(key: FieldKey, negated: bool, values: &[&str]) -> FieldFilter {

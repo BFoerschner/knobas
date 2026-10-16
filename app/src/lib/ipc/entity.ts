@@ -3178,6 +3178,16 @@ export interface LinkSetRule {
   value: string;
 }
 
+/**
+ * One pattern member — `knobas_app::link_sets::LinkSetPattern` (#868, R-7.2):
+ * a query in the search grammar (`project:Payouts name:Payout_*`), for
+ * pipelines and pages.
+ */
+export interface LinkSetPattern {
+  kind: LinkSetMemberKind;
+  query: string;
+}
+
 /** What `save_link_set` takes — `LinkSetDraft`: the whole set, in order. */
 export interface LinkSetDraft {
   /** `null` makes a new set with an id from its name. */
@@ -3185,15 +3195,50 @@ export interface LinkSetDraft {
   name: string;
   description: string;
   members: LinkSetMember[];
+  /** The patterns, after the fixed members (#868). */
+  patterns: LinkSetPattern[];
   rules: LinkSetRule[];
 }
 
-/** A member as the views draw it — `MemberRow`. */
+/** A member as the views draw it — `MemberRow`: a fixed member, or one item a pattern matches. */
 export interface LinkSetMemberRow {
   kind: LinkSetMemberKind;
   entity_id: string;
   /** `null` when knobas has no entity of that id. */
   title: string | null;
+  /**
+   * The line beside the name (#1008): an asset's type and environment, a
+   * pipeline's project path, a page's space and path. `null` where nothing is declared.
+   */
+  line: string | null;
+  /** The dot (#1008): a pipeline's newest run, a mirrored item's state, an asset's health. */
+  state: StateChip | null;
+}
+
+/** A pattern member as the editor draws it — `PatternRow`: "(N match now)". */
+export interface LinkSetPatternRow {
+  kind: LinkSetMemberKind;
+  query: string;
+  /** How many live items it matches now. */
+  count: number;
+  /** The first 200 of them, by title. */
+  matches: LinkSetMemberRow[];
+}
+
+/** A project or space a pattern's kind sits in — `PatternProject`. */
+export interface LinkSetPatternProject {
+  source_id: string;
+  key: string;
+  name: string | null;
+}
+
+/** The pattern dialog's "Matches now: N" — `PatternPreview`. */
+export interface LinkSetPatternPreview {
+  count: number;
+  matches: LinkSetMemberRow[];
+  projects: LinkSetPatternProject[];
+  /** Why the query is not a pattern; `null` when *Add pattern* can save it. */
+  refusal: string | null;
 }
 
 /** A rule as the views draw it — `RuleRow`: its ticket's title or project's name. */
@@ -3210,6 +3255,8 @@ export interface LinkSetRow {
   name: string;
   description: string;
   members: LinkSetMemberRow[];
+  /** Its patterns, in order (#868). */
+  patterns: LinkSetPatternRow[];
   rules: LinkSetRuleRow[];
   /** Live tickets its rules match now. */
   tickets: number;
@@ -3253,6 +3300,11 @@ export function deleteLinkSet(id: string): Promise<void> {
 /** The live tickets one rule applies to now, yours marked (R-7.7's live counts). */
 export function previewLinkSetRule(rule: LinkSetRule): Promise<RuleTicket[]> {
   return invoke<RuleTicket[]>("preview_link_set_rule", { rule });
+}
+
+/** What a pattern would match now, the projects to pick from, and why it is not a pattern (#868, R-7.7). */
+export function previewLinkSetPattern(pattern: LinkSetPattern): Promise<LinkSetPatternPreview> {
+  return invoke<LinkSetPatternPreview>("preview_link_set_pattern", { pattern });
 }
 
 /** *Hide here* (`hidden`) or *Show again* one set member on one ticket (R-7.5); answers the new state. */

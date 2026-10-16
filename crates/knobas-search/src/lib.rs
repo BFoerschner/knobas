@@ -59,7 +59,9 @@ use sqlx::PgPool;
 pub use group::RawHit;
 pub use home::LauncherBoard;
 pub use lists::{BuiltinList, SmartListSummary};
-pub use query::{EffectiveFilters, FieldFilter, FieldKey, Parsed, merge, parse};
+pub use query::{
+    EffectiveFilters, FieldFilter, FieldKey, Parsed, Pattern, merge, parse, pattern_of,
+};
 pub use saved::{Refusal, SavedList};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
@@ -270,6 +272,24 @@ impl Searcher {
         Ok(Vocabulary::load(&self.pool, self.kinds.clone())
             .await?
             .declaring(&self.payload_paths))
+    }
+
+    /// Read `raw` as a link-set pattern (#868, R-7.2) with this
+    /// installation's vocabulary (`/alias` and `source:` resolved), or say why
+    /// it is not one: [`query::pattern_of`].
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Db`] if the vocabulary cannot be read. A text that is
+    /// not a pattern is the inner `Err`, never an error.
+    pub async fn pattern(&self, raw: &str) -> Result<Result<Pattern, String>, SearchError> {
+        if raw.chars().count() > MAX_RAW_CHARS {
+            return Ok(Err(format!(
+                "a pattern is at most {MAX_RAW_CHARS} characters"
+            )));
+        }
+        let vocab = self.vocabulary().await?;
+        Ok(query::pattern_of(&query::parse(raw, &vocab)))
     }
 
     /// The pool this searcher reads through.
