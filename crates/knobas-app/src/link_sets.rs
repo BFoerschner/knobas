@@ -206,7 +206,10 @@ fn refusal(draft: &LinkSetDraft) -> Option<String> {
             return Some(why);
         }
         if draft.rules[..at].contains(rule) {
-            return Some(format!("the rule `{} {}` is there twice", rule.kind, rule.value));
+            return Some(format!(
+                "the rule `{} {}` is there twice",
+                rule.kind, rule.value
+            ));
         }
     }
     None
@@ -380,7 +383,11 @@ async fn read(
 ///
 /// `internal` if a read fails.
 pub async fn list(pool: &PgPool) -> Result<Vec<LinkSetRow>, IpcError> {
-    Ok(read(pool, None).await?.into_iter().map(|(row, _)| row).collect())
+    Ok(read(pool, None)
+        .await?
+        .into_iter()
+        .map(|(row, _)| row)
+        .collect())
 }
 
 /// One link set with the tickets it shows on now (R-7.7).
@@ -609,11 +616,26 @@ mod tests {
         type Change = fn(&mut LinkSetDraft);
         let cases: [(Change, &str); 6] = [
             (|d| d.name = "  ".to_owned(), "a link set needs a name"),
-            (|d| d.id = Some("Not A Slug".to_owned()), "is not a link set id"),
-            (|d| d.members[0].kind = "build".to_owned(), "member kind `build`"),
-            (|d| d.members.push(d.members[0].clone()), "is in the set twice"),
-            (|d| d.rules[0].kind = "label".to_owned(), "rule kind `label`"),
-            (|d| d.rules[0].value = "PAY-200".to_owned(), "is not a ticket id"),
+            (
+                |d| d.id = Some("Not A Slug".to_owned()),
+                "is not a link set id",
+            ),
+            (
+                |d| d.members[0].kind = "build".to_owned(),
+                "member kind `build`",
+            ),
+            (
+                |d| d.members.push(d.members[0].clone()),
+                "is in the set twice",
+            ),
+            (
+                |d| d.rules[0].kind = "label".to_owned(),
+                "rule kind `label`",
+            ),
+            (
+                |d| d.rules[0].value = "PAY-200".to_owned(),
+                "is not a ticket id",
+            ),
         ];
         for (change, why) in cases {
             let mut refused = draft();

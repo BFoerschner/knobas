@@ -158,7 +158,11 @@ async fn an_epic_rule_shows_its_members_on_every_ticket_under_the_epic() {
 
     let saved = link_sets::save(
         &pool,
-        draft("Payout stack", vec![member("repo", &repo)], vec![rule("epic", &epic)]),
+        draft(
+            "Payout stack",
+            vec![member("repo", &repo)],
+            vec![rule("epic", &epic)],
+        ),
     )
     .await
     .unwrap();
@@ -174,7 +178,11 @@ async fn an_epic_rule_shows_its_members_on_every_ticket_under_the_epic() {
         "a sub-task is under its story's epic"
     );
     assert_eq!(reached(&pool, &elsewhere).await.get(&repo), None);
-    assert_eq!(reached(&pool, &epic).await.get(&repo), None, "the epic is not under itself");
+    assert_eq!(
+        reached(&pool, &epic).await.get(&repo),
+        None,
+        "the epic is not under itself"
+    );
 
     let late = issue(&pool, &p, 6, Some(&epic), None).await;
     assert_eq!(reached(&pool, &late).await.get(&repo), Some(&from_set));
@@ -196,23 +204,47 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     let monitor = thing(&pool, "monitor", "payouts-health").await;
     let asset = thing(&pool, "asset", "vm-pay-01").await;
 
-    link_sets::save(&pool, draft("Children", vec![member("page", &page)], vec![rule("parent", &story)]))
-        .await
-        .unwrap();
     link_sets::save(
         &pool,
-        draft("Project", vec![member("monitor", &monitor)], vec![rule("project", &format!("jira:{q}"))]),
+        draft(
+            "Children",
+            vec![member("page", &page)],
+            vec![rule("parent", &story)],
+        ),
     )
     .await
     .unwrap();
-    link_sets::save(&pool, draft("By hand", vec![member("asset", &asset)], vec![rule("manual", &lone)]))
-        .await
-        .unwrap();
+    link_sets::save(
+        &pool,
+        draft(
+            "Project",
+            vec![member("monitor", &monitor)],
+            vec![rule("project", &format!("jira:{q}"))],
+        ),
+    )
+    .await
+    .unwrap();
+    link_sets::save(
+        &pool,
+        draft(
+            "By hand",
+            vec![member("asset", &asset)],
+            vec![rule("manual", &lone)],
+        ),
+    )
+    .await
+    .unwrap();
 
     assert!(reached(&pool, &child).await.contains_key(&page));
-    assert!(!reached(&pool, &grandchild).await.contains_key(&page), "one level only");
+    assert!(
+        !reached(&pool, &grandchild).await.contains_key(&page),
+        "one level only"
+    );
     assert!(reached(&pool, &in_q).await.contains_key(&monitor));
-    assert!(!reached(&pool, &story).await.contains_key(&monitor), "another project");
+    assert!(
+        !reached(&pool, &story).await.contains_key(&monitor),
+        "another project"
+    );
     assert!(reached(&pool, &lone).await.contains_key(&asset));
     assert!(!reached(&pool, &child).await.contains_key(&asset));
 }
@@ -229,13 +261,24 @@ async fn an_item_shows_once_with_its_first_reason() {
     link(&pool, &ticket, &own).await;
     link_sets::save(
         &pool,
-        draft("B", vec![member("repo", &own), member("page", &shared)], vec![rule("manual", &ticket)]),
+        draft(
+            "B",
+            vec![member("repo", &own), member("page", &shared)],
+            vec![rule("manual", &ticket)],
+        ),
     )
     .await
     .unwrap();
-    let a = link_sets::save(&pool, draft("A", vec![member("page", &shared)], vec![rule("manual", &ticket)]))
-        .await
-        .unwrap();
+    let a = link_sets::save(
+        &pool,
+        draft(
+            "A",
+            vec![member("page", &shared)],
+            vec![rule("manual", &ticket)],
+        ),
+    )
+    .await
+    .unwrap();
 
     let rows = reach::reach(&pool, &ticket).await.unwrap();
     assert_eq!(rows.iter().filter(|r| r.entity_id == own).count(), 1);
@@ -270,17 +313,31 @@ async fn editing_a_set_changes_every_job_at_once() {
     let second = thing(&pool, "monitor", "second").await;
     let own = thing(&pool, "page", "own").await;
     link(&pool, &one, &own).await;
-    let saved = link_sets::save(&pool, draft("Stack", vec![member("repo", &first)], vec![rule("epic", &epic)]))
-        .await
-        .unwrap();
+    let saved = link_sets::save(
+        &pool,
+        draft(
+            "Stack",
+            vec![member("repo", &first)],
+            vec![rule("epic", &epic)],
+        ),
+    )
+    .await
+    .unwrap();
 
-    let mut edit = draft("Stack", vec![member("monitor", &second)], vec![rule("epic", &epic)]);
+    let mut edit = draft(
+        "Stack",
+        vec![member("monitor", &second)],
+        vec![rule("epic", &epic)],
+    );
     edit.id = Some(saved.set.id.clone());
     link_sets::save(&pool, edit).await.unwrap();
     for ticket in [&one, &two] {
         let got = reached(&pool, ticket).await;
         assert!(got.contains_key(&second), "{ticket} sees the added member");
-        assert!(!got.contains_key(&first), "{ticket} no longer sees the removed one");
+        assert!(
+            !got.contains_key(&first),
+            "{ticket} no longer sees the removed one"
+        );
     }
     let links: i64 = sqlx::query_scalar(
         "select count(*) from knobas.link where from_id in ($1, $2) or to_id in ($1, $2)",
@@ -309,18 +366,35 @@ async fn hiding_a_member_on_one_ticket_leaves_the_set_and_the_others() {
     let one = issue(&pool, &p, 2, Some(&epic), None).await;
     let two = issue(&pool, &p, 3, Some(&epic), None).await;
     let repo = thing(&pool, "repo", "hidden-here").await;
-    let saved = link_sets::save(&pool, draft("Stack", vec![member("repo", &repo)], vec![rule("epic", &epic)]))
-        .await
-        .unwrap();
+    let saved = link_sets::save(
+        &pool,
+        draft(
+            "Stack",
+            vec![member("repo", &repo)],
+            vec![rule("epic", &epic)],
+        ),
+    )
+    .await
+    .unwrap();
 
     assert!(link_sets::hide(&pool, &one, &repo, true).await.unwrap());
     assert!(!reached(&pool, &one).await.contains_key(&repo));
     assert!(reached(&pool, &two).await.contains_key(&repo));
-    assert_eq!(link_sets::get(&pool, &saved.set.id).await.unwrap().set.members.len(), 1);
+    assert_eq!(
+        link_sets::get(&pool, &saved.set.id)
+            .await
+            .unwrap()
+            .set
+            .members
+            .len(),
+        1
+    );
 
     assert!(!link_sets::hide(&pool, &one, &repo, false).await.unwrap());
     assert!(reached(&pool, &one).await.contains_key(&repo));
-    let refused = link_sets::hide(&pool, "PAY-1", &repo, true).await.unwrap_err();
+    let refused = link_sets::hide(&pool, "PAY-1", &repo, true)
+        .await
+        .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Invalid);
 }
 
@@ -353,31 +427,61 @@ async fn sets_never_feed_membership_the_tray_the_inbox_or_the_export() {
     .await
     .unwrap();
 
-    let members_before = knobas_core::context::member_ids(&pool, &context.context.id).await.unwrap();
-    let held_before = knobas_core::context::held_by_any_context(&pool).await.unwrap();
-    let tray_before = room_suggestions_inner(&pool, &[], Some(&context.context.id), 500).await.unwrap();
-
-    link_sets::save(&pool, draft("Set", vec![member("repo", &from_set)], vec![rule("manual", &ticket)]))
+    let members_before = knobas_core::context::member_ids(&pool, &context.context.id)
+        .await
+        .unwrap();
+    let held_before = knobas_core::context::held_by_any_context(&pool)
+        .await
+        .unwrap();
+    let tray_before = room_suggestions_inner(&pool, &[], Some(&context.context.id), 500)
         .await
         .unwrap();
 
-    assert!(reached(&pool, &ticket).await.contains_key(&from_set), "the job shows it");
+    link_sets::save(
+        &pool,
+        draft(
+            "Set",
+            vec![member("repo", &from_set)],
+            vec![rule("manual", &ticket)],
+        ),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        reached(&pool, &ticket).await.contains_key(&from_set),
+        "the job shows it"
+    );
     assert!(
         !reached(&pool, &ticket).await.contains_key(&beyond),
         "and the walk takes no hop from it"
     );
-    let members = knobas_core::context::member_ids(&pool, &context.context.id).await.unwrap();
+    let members = knobas_core::context::member_ids(&pool, &context.context.id)
+        .await
+        .unwrap();
     assert_eq!(members, members_before);
     assert!(!members.contains(&from_set));
-    let held = knobas_core::context::held_by_any_context(&pool).await.unwrap();
+    let held = knobas_core::context::held_by_any_context(&pool)
+        .await
+        .unwrap();
     assert_eq!(held, held_before);
     assert!(!held.contains(&from_set));
-    let tray = room_suggestions_inner(&pool, &[], Some(&context.context.id), 500).await.unwrap();
+    let tray = room_suggestions_inner(&pool, &[], Some(&context.context.id), 500)
+        .await
+        .unwrap();
     assert_eq!(tray.total, tray_before.total);
-    assert_eq!(tray.total, 1, "the own repo's proposal, never the set member's");
+    assert_eq!(
+        tray.total, 1,
+        "the own repo's proposal, never the set member's"
+    );
 
     let parts = knobas_app::backup::share::ShareParts::default();
-    assert!(parts.tables().iter().all(|table| !table.starts_with("link_set")));
+    assert!(
+        parts
+            .tables()
+            .iter()
+            .all(|table| !table.starts_with("link_set"))
+    );
 }
 
 /// The list and the editor's read (R-7.6, R-7.7): contents and rules in the
@@ -408,12 +512,31 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
     .unwrap();
     assert!(saved.set.id.starts_with("payout-stack"), "{}", saved.set.id);
     assert_eq!(saved.set.name, "Payout stack");
-    let titles: Vec<_> = saved.set.members.iter().map(|m| m.title.clone().unwrap()).collect();
+    let titles: Vec<_> = saved
+        .set
+        .members
+        .iter()
+        .map(|m| m.title.clone().unwrap())
+        .collect();
     assert_eq!(titles, ["payout-service", "PSP error codes"]);
-    assert_eq!(saved.set.rules[0].title.as_deref(), Some(format!("{p}-1").as_str()));
+    assert_eq!(
+        saved.set.rules[0].title.as_deref(),
+        Some(format!("{p}-1").as_str())
+    );
     assert_eq!((saved.set.tickets, saved.set.mine), (3, 2));
-    let keys: Vec<_> = saved.shows_on.iter().map(|t| (t.entity_id.clone(), t.mine)).collect();
-    assert_eq!(keys, [(mine.clone(), true), (lone.clone(), true), (theirs.clone(), false)]);
+    let keys: Vec<_> = saved
+        .shows_on
+        .iter()
+        .map(|t| (t.entity_id.clone(), t.mine))
+        .collect();
+    assert_eq!(
+        keys,
+        [
+            (mine.clone(), true),
+            (lone.clone(), true),
+            (theirs.clone(), false)
+        ]
+    );
 
     let listed = link_sets::list(&pool).await.unwrap();
     let row = listed.iter().find(|row| row.id == saved.set.id).unwrap();
@@ -441,9 +564,12 @@ async fn a_rules_preview_is_exactly_the_tickets_that_show_the_set() {
     ] {
         let repo = thing(&pool, "repo", kind).await;
         let the_rule = rule(kind, &value);
-        let saved = link_sets::save(&pool, draft(kind, vec![member("repo", &repo)], vec![the_rule.clone()]))
-            .await
-            .unwrap();
+        let saved = link_sets::save(
+            &pool,
+            draft(kind, vec![member("repo", &repo)], vec![the_rule.clone()]),
+        )
+        .await
+        .unwrap();
         let previewed: Vec<String> = link_sets::preview(&pool, &the_rule)
             .await
             .unwrap()
@@ -473,14 +599,30 @@ async fn a_set_knobas_cannot_store_is_refused() {
     let ticket = issue(&pool, &p, 1, None, None).await;
     let page = thing(&pool, "page", "a page").await;
     for (refused, why) in [
-        (draft("X", vec![member("repo", "gitea:nobody")], vec![]), "knobas has no item"),
-        (draft("X", vec![member("repo", &page)], vec![]), "is a page, not a repo"),
-        (draft("X", vec![], vec![rule("epic", "PAY-1")]), "is not a ticket id"),
-        (draft(" ", vec![], vec![rule("manual", &ticket)]), "needs a name"),
+        (
+            draft("X", vec![member("repo", "gitea:nobody")], vec![]),
+            "knobas has no item",
+        ),
+        (
+            draft("X", vec![member("repo", &page)], vec![]),
+            "is a page, not a repo",
+        ),
+        (
+            draft("X", vec![], vec![rule("epic", "PAY-1")]),
+            "is not a ticket id",
+        ),
+        (
+            draft(" ", vec![], vec![rule("manual", &ticket)]),
+            "needs a name",
+        ),
     ] {
         let error = link_sets::save(&pool, refused).await.unwrap_err();
         assert_eq!(error.code, IpcErrorCode::Invalid);
-        assert!(error.message.contains(why), "{} should say {why}", error.message);
+        assert!(
+            error.message.contains(why),
+            "{} should say {why}",
+            error.message
+        );
     }
     let missing = link_sets::get(&pool, "no-such-set").await.unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
@@ -507,9 +649,16 @@ async fn a_this_job_list_holds_the_sets_members() {
     .execute(&pool)
     .await
     .unwrap();
-    link_sets::save(&pool, draft("Docs", vec![member("page", &page)], vec![rule("manual", &ticket)]))
-        .await
-        .unwrap();
+    link_sets::save(
+        &pool,
+        draft(
+            "Docs",
+            vec![member("page", &page)],
+            vec![rule("manual", &ticket)],
+        ),
+    )
+    .await
+    .unwrap();
     let filter = EntityFilter {
         sources: Vec::new(),
         kinds: vec!["page".to_owned()],
@@ -520,9 +669,19 @@ async fn a_this_job_list_holds_the_sets_members() {
         include_deleted: false,
         reach: Some(ticket.clone()),
     };
-    let page_rows = list_entities_inner(&pool, &filter, 50, 0, &knobas_core::payload::Declarations::empty())
-        .await
-        .unwrap();
-    let ids: Vec<_> = page_rows.rows.iter().map(|row| row.entity_id.clone()).collect();
+    let page_rows = list_entities_inner(
+        &pool,
+        &filter,
+        50,
+        0,
+        &knobas_core::payload::Declarations::empty(),
+    )
+    .await
+    .unwrap();
+    let ids: Vec<_> = page_rows
+        .rows
+        .iter()
+        .map(|row| row.entity_id.clone())
+        .collect();
     assert_eq!(ids, [page]);
 }

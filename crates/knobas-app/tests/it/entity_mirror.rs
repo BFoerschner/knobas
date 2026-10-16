@@ -326,9 +326,11 @@ fn the_reached_shape_matches_its_typescript_mirror() {
         ticket: "jira:PAY-231".into(),
     })
     .unwrap();
-    assert!(MIRROR.contains(r#"| { kind: "own" }
+    assert!(MIRROR.contains(
+        r#"| { kind: "own" }
   | { kind: "parent"; ticket: string }
-  | { kind: "link_set"; set: string; name: string };"#));
+  | { kind: "link_set"; set: string; name: string };"#
+    ));
     assert_eq!(
         serde_json::to_value(ReachOrigin::LinkSet {
             set: "payout-stack".into(),
@@ -2070,12 +2072,26 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         mine: 1,
     };
     let fields = [
-        "description", "id", "members", "mine", "name", "rules", "tickets",
+        "description",
+        "id",
+        "members",
+        "mine",
+        "name",
+        "rules",
+        "tickets",
     ];
     let wire = serde_json::to_value(&row).unwrap();
     assert_shape("LinkSetRow", &wire, &fields);
-    assert_shape("LinkSetMemberRow", &wire["members"][0], &["entity_id", "kind", "title"]);
-    assert_shape("LinkSetRuleRow", &wire["rules"][0], &["kind", "title", "value"]);
+    assert_shape(
+        "LinkSetMemberRow",
+        &wire["members"][0],
+        &["entity_id", "kind", "title"],
+    );
+    assert_shape(
+        "LinkSetRuleRow",
+        &wire["rules"][0],
+        &["kind", "title", "value"],
+    );
     let detail = serde_json::to_value(LinkSetDetail {
         set: row,
         shows_on: vec![RuleTicket {
@@ -2085,8 +2101,15 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         }],
     })
     .unwrap();
-    assert_eq!(detail["id"], "payout-stack", "the row is flattened into the detail");
-    assert_shape("RuleTicket", &detail["shows_on"][0], &["entity_id", "mine", "title"]);
+    assert_eq!(
+        detail["id"], "payout-stack",
+        "the row is flattened into the detail"
+    );
+    assert_shape(
+        "RuleTicket",
+        &detail["shows_on"][0],
+        &["entity_id", "mine", "title"],
+    );
     let draft = serde_json::to_value(LinkSetDraft {
         id: None,
         name: "Payout stack".to_owned(),
@@ -2101,8 +2124,16 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         }],
     })
     .unwrap();
-    assert_shape("LinkSetDraft", &draft, &["description", "id", "members", "name", "rules"]);
-    assert_shape("LinkSetMember", &draft["members"][0], &["entity_id", "kind"]);
+    assert_shape(
+        "LinkSetDraft",
+        &draft,
+        &["description", "id", "members", "name", "rules"],
+    );
+    assert_shape(
+        "LinkSetMember",
+        &draft["members"][0],
+        &["entity_id", "kind"],
+    );
     assert_shape("LinkSetRule", &draft["rules"][0], &["kind", "value"]);
     for command in [
         "\"link_sets\"",

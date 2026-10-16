@@ -259,7 +259,14 @@ const REACH: &str = concat!(
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn reach(pool: &PgPool, ticket_id: &str) -> Result<Vec<Reached>, CoreError> {
-    type Row = (String, String, String, String, Option<String>, Option<String>);
+    type Row = (
+        String,
+        String,
+        String,
+        String,
+        Option<String>,
+        Option<String>,
+    );
     let rows: Vec<Row> = sqlx::query_as(REACH)
         .bind(ticket_id)
         .fetch_all(pool)
