@@ -4,18 +4,39 @@
  * yellow selected card, the preview and *Not a ticket*.
  */
 import { flushSync, mount, unmount } from "svelte";
-import { afterEach, beforeEach, expect, test } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { ContextRow, MiniBoard, MiniBoardCard } from "../../ipc/entity";
+import type {
+  ContextRow,
+  EntityFilter,
+  EntityRow,
+  MiniBoard,
+  MiniBoardCard,
+  Reached,
+  StateChip,
+} from "../../ipc/entity";
 import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 
+// Every command that reaches the bridge past the page's ports, by name: the
+// page takes its reads through `ports`, so the list stays empty unless a read
+// bypasses them (as `promote_context` would to draw the preview, #1030).
+const bridged = vi.hoisted(() => [] as string[]);
+vi.mock("@tauri-apps/api/core", async (original) => ({
+  ...(await original<typeof import("@tauri-apps/api/core")>()),
+  invoke:(command: string) => {
+    bridged.push(command);
+    return Promise.reject(new Error("no bridge in this suite"));
+  },
+}));
+
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
 
 beforeEach(() => {
+  bridged.length = 0;
   location.hash = "#/tickets";
   target = document.createElement("div");
   document.body.appendChild(target);
@@ -93,6 +114,37 @@ interface Harness {
   views: TicketViewRow[];
   saved: TicketViewDraft[];
   deleted: string[];
+  /** The mirror rows a reach or a context can hold. */
+  rows: EntityRow[];
+  /** What each ticket reaches (`job_reach`), by entity id. */
+  reach: Record<string, Reached[]>;
+  /** A stored context's members, by context id. */
+  members: Record<string, string[]>;
+  /** Every `list_entities` filter the page sent. */
+  lists: EntityFilter[];
+}
+
+function row(entity_id: string, kind: string, tone: StateChip["tone"] | null = null): EntityRow {
+  return {
+    entity_id,
+    kind,
+    source_id: kind === "build" ? "teamcity" : "gitea",
+    title: entity_id,
+    updated_at: null,
+    synced_at: "",
+    path: null,
+    state: tone === null ? null : { text: tone === "err" ? "failed" : "success", tone },
+  };
+}
+
+const PR = row("gitea:payout-service#142", "pr", "info");
+const BUILD_FAILED = row("teamcity:it#1187", "build", "err");
+const BUILD_OK = row("teamcity:lint#904", "build", "ok");
+/** What the reads above can answer with. */
+const AROUND_ROWS = [PR, BUILD_FAILED, BUILD_OK];
+
+function own(of: EntityRow): Reached {
+  return { entity_id: of.entity_id, kind: of.kind, step: of.entity_id, origin: { kind: "own" } };
 }
 
 /** Board reads answered over {@link CORPUS}, the query read as words that must all appear. */
@@ -103,6 +155,10 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
     views,
     saved: [],
     deleted: [],
+    rows: [...AROUND_ROWS],
+    reach: {},
+    members: {},
+    lists: [],
     ports: {
       views: () => Promise.resolve(h.views.map((row) => ({ ...row }))),
       saveView: (draft) => {
@@ -147,12 +203,23 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
       },
       detail: (id) => Promise.resolve({ body_text: `The description of ${id}.` }),
       contexts: () => Promise.resolve(contexts),
-      tally: () =>
-        Promise.resolve([
-          { kind: "build", tone: "err" as const, count: 1 },
-          { kind: "build", tone: "ok" as const, count: 6 },
-          { kind: "page", tone: null, count: 3 },
-        ]),
+      // The mirror's rows, as the job's section reads ask for them: scoped by
+      // what a ticket reaches, or (what no read should ask any more) by a
+      // stored context's membership.
+      listEntities: (filter) => {
+        h.lists.push(filter);
+        const ids =
+          filter.reach != null
+            ? new Set((h.reach[filter.reach] ?? []).map((row) => row.entity_id))
+            : filter.context !== null
+              ? new Set(h.members[filter.context] ?? [])
+              : new Set(h.rows.map((row) => row.entity_id));
+        const rows = h.rows.filter(
+          (row) => ids.has(row.entity_id) && (filter.kinds.length === 0 || filter.kinds.includes(row.kind)),
+        );
+        return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
+      },
+      jobReach: (id) => Promise.resolve(h.reach[id] ?? []),
       suggestions: () =>
         Promise.resolve({
           fields: [
@@ -366,7 +433,7 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   expect(columns()[2]!.cards).toBe(3);
 });
 
-test("Not a ticket lists the ad-hoc contexts, and a ticket's context fills Around this ticket", async () => {
+test("Not a ticket lists the ad-hoc contexts", async () => {
   await open(
     harness([
       { id: "ctx:1", kind: "adhoc", title: "Staging DB configuration", anchor_id: null, created_at: "", archived_at: null },
@@ -379,8 +446,54 @@ test("Not a ticket lists the ad-hoc contexts, and a ticket's context fills Aroun
     "All tickets 18",
     "Staging DB configuration",
   ]);
-  const lines = [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
-  expect(lines).toEqual(["Builds7 builds, 1 failing or down", "Docs3 pages"]);
+});
+
+const around = () => [...preview().querySelectorAll(".tf-rollup > div")].map((d) => d.textContent);
+
+// #1030: the preview counts what the job's sections show, from the job-reach
+// read, whether or not anybody has opened the ticket's job yet.
+test("Around this ticket counts what the ticket reaches, with no context stored for it", async () => {
+  const h = harness();
+  h.reach["jira:PAY-1"] = [own(PR), own(BUILD_FAILED)];
+  await open(h);
+  expect(around()).toEqual(["Code1 pull request", "Builds1 build, 1 failing or down"]);
+});
+
+test("Around this ticket counts a parent's link the reach brings in and the context's membership does not", async () => {
+  const h = harness([{ id: "ctx:2", kind: "ticket", title: "PAY-1", anchor_id: "jira:PAY-1", created_at: "", archived_at: null }]);
+  // The job's Builds section draws both builds: one the ticket's own, one its parent's (R-7.3).
+  h.reach["jira:PAY-1"] = [
+    own(PR),
+    own(BUILD_OK),
+    { entity_id: BUILD_FAILED.entity_id, kind: "build", step: "jira:PAY-200", origin: { kind: "parent", ticket: "jira:PAY-200" } },
+  ];
+  h.members["ctx:2"] = [PR.entity_id, BUILD_OK.entity_id];
+  await open(h);
+  expect(around()).toEqual(["Code1 pull request", "Builds2 builds, 1 failing or down"]);
+});
+
+test("Around this ticket says Nothing connected yet only when the reach is empty", async () => {
+  const h = harness();
+  h.reach["jira:PAY-2"] = [own(PR)];
+  await open(h);
+  expect(around()).toEqual([]);
+  expect(preview().textContent).toContain("Nothing connected yet.");
+  target.querySelector<HTMLButtonElement>('.tf-tcard[data-entity="jira:PAY-2"]')!.click();
+  await settle();
+  expect(around()).toEqual(["Code1 pull request"]);
+});
+
+test("selecting a card never creates a context", async () => {
+  const h = harness();
+  h.reach["jira:PAY-1"] = [own(PR)];
+  await open(h);
+  for (const key of ["PAY-2", "PAY-40", "PAY-1"]) {
+    target.querySelector<HTMLButtonElement>(`.tf-tcard[data-entity="jira:${key}"]`)!.click();
+    await settle();
+  }
+  expect(around()).toEqual(["Code1 pull request"]);
+  expect(bridged).not.toContain("promote_context");
+  expect(h.lists.every((filter) => filter.context === null)).toBe(true);
 });
 
 test("Enter presses the preview's button from a card", async () => {

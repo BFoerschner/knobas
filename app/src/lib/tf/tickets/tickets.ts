@@ -132,8 +132,9 @@ export interface AroundLine {
 
 /**
  * *Around this ticket* (R-3.9): one line per section of what the ticket's
- * context holds, from the tally a `latest_per_parent` room read counts — so
- * a build is its configuration's latest — grouped the way the room's tiles
+ * job would show, from the tally of the job's section reads
+ * (`reachTally`, #1030) — so a build is its configuration's latest, and a
+ * ticket nobody has opened yet counts what it reaches — grouped the way the room's tiles
  * group kinds (`sectionOf`). Tickets are the view's own and not a section
  * here. A section of one kind says that kind's plural; a mixed one (Code)
  * says *items*. Tone `err` is what fails or is down.

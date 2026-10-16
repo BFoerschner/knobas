@@ -41,10 +41,10 @@
   import type {
     ContextRow,
     EntityDetail,
-    EntityPage,
     MiniBoard,
   } from "../../ipc/entity";
   import type { FilterSuggestions, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
+  import type { ReachPorts } from "../job/sections";
   import type { LaneField, ListSort } from "./tickets";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
@@ -54,8 +54,10 @@
     /** The selected ticket's description. */
     detail: (entityId: string) => Promise<Pick<EntityDetail, "body_text">>;
     contexts: () => Promise<ContextRow[]>;
-    /** A context's room, counted by kind and tone under `latest_per_parent`. */
-    tally: (ctxId: string) => Promise<EntityPage["tally"]>;
+    /** The job's section reads, scoped by what a ticket reaches: *Around this ticket* (#1030). */
+    listEntities: ReachPorts["listEntities"];
+    /** What a ticket reaches (`job_reach`, #817), for the Assets line. */
+    jobReach: ReachPorts["jobReach"];
     suggestions: () => Promise<Pick<FilterSuggestions, "fields" | "parents">>;
     /** Every ticket view, each with its count (#812). */
     views: () => Promise<TicketViewRow[]>;
@@ -96,6 +98,7 @@
 
   import {
     getEntity,
+    jobReach,
     listContexts,
     listEntities,
     miniBoard,
@@ -109,6 +112,7 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
+  import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
@@ -152,20 +156,8 @@
       board: (perColumn, query) => miniBoard({ sources: [], context: null, project: null }, perColumn, query),
       detail: getEntity,
       contexts: listContexts,
-      tally: (ctxId) =>
-        listEntities(
-          {
-            sources: [],
-            kinds: [],
-            updated_within_days: null,
-            order: "latest_per_parent",
-            context: ctxId,
-            project: null,
-            include_deleted: false,
-          },
-          1,
-          0,
-        ).then((page) => page.tally),
+      listEntities,
+      jobReach,
       suggestions: () => filterSuggestions(),
       views: ticketViews,
       saveView: saveTicketView,
@@ -507,19 +499,11 @@
         if (!dead) description = detail.body_text;
       })
       .catch(() => {});
-    const anchored = contexts?.find((context) => context.anchor_id === id) ?? null;
-    if (contexts === null) return () => (dead = true);
-    if (anchored === null) around = [];
-    else {
-      ports
-        .tally(anchored.id)
-        .then((tally) => {
-          if (!dead) around = aroundLines(tally);
-        })
-        .catch(() => {
-          if (!dead) around = [];
-        });
-    }
+    // What the job's sections would show, through the job-reach read: no
+    // context is needed, and none is promoted to draw this (#1030).
+    void reachTally(ports, id).then((tally) => {
+      if (!dead) around = aroundLines(tally);
+    });
     return () => (dead = true);
   });
 

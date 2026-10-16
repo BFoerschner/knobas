@@ -32,7 +32,6 @@
   import type {
     CheckoutView,
     EntityDetail,
-    EntityFilter,
     EntityOrder,
     EntityRow,
     JobLinkSets,
@@ -63,7 +62,6 @@
   } from "./connections";
   import { summary } from "./conversation";
   import {
-    CODE_KINDS,
     assetTone,
     assetsRollup,
     blockerEntries,
@@ -86,6 +84,7 @@
     type WeekReading,
   } from "./job";
   import { bridgePorts, type JobPorts } from "./ports";
+  import { ASSET_LIMIT, reachFilter, SECTION_LIMIT, SECTION_READS } from "./sections";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import { clones } from "../openin/clones.svelte";
@@ -216,29 +215,14 @@
     }
   }
 
-  /** How many rows a section reads: a job reaches tens, not thousands. */
-  const SECTION_LIMIT = 200;
-  /** How many reached assets are read one by one for the Assets section. */
-  const ASSET_LIMIT = 50;
-
-  /** A read of `kinds`, scoped to what `id` reaches, or unscoped with `null`. */
-  function filterOf(id: string | null, kinds: string[], order: EntityOrder): EntityFilter {
-    return {
-      sources: [],
-      kinds,
-      updated_within_days: null,
-      order,
-      context: null,
-      project: null,
-      include_deleted: false,
-      reach: id,
-    };
-  }
-
   /** One section's rows, through the reach; `[]` when the read fails. */
-  async function readRows(id: string, kinds: string[], order: EntityOrder, mine: number): Promise<EntityRow[] | null> {
+  async function readRows(
+    id: string,
+    { kinds, order }: { kinds: readonly string[]; order: EntityOrder },
+    mine: number,
+  ): Promise<EntityRow[] | null> {
     try {
-      const page = await ports.listEntities(filterOf(id, kinds, order), SECTION_LIMIT, 0);
+      const page = await ports.listEntities(reachFilter(id, kinds, order), SECTION_LIMIT, 0);
       return mine === token ? page.rows : null;
     } catch {
       // A section that cannot be read draws as having nothing; the Work tab's
@@ -298,20 +282,20 @@
     void readInherited(id, mine);
     void readReach(id, mine);
     readSections(id, mine);
-    void readRows(id, [...CODE_KINDS], "updated_desc", mine).then((rows) => {
+    void readRows(id, SECTION_READS.code, mine).then((rows) => {
       if (mine === token && rows) code = rows;
     });
   }
 
   /** Builds, Pages and Monitors, each through the reach. */
   function readSections(id: string, mine: number) {
-    void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
+    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
       if (mine === token && rows) builds = rows;
     });
-    void readRows(id, ["page"], "updated_desc", mine).then((rows) => {
+    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
       if (mine === token && rows) pages = rows;
     });
-    void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
+    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
       if (mine === token && rows) monitors = rows;
     });
   }
@@ -360,7 +344,7 @@
 
   async function readRepos(mine: number) {
     try {
-      const page = await ports.listEntities(filterOf(null, ["repo"], "title_asc"), SECTION_LIMIT, 0);
+      const page = await ports.listEntities(reachFilter(null, ["repo"], "title_asc"), SECTION_LIMIT, 0);
       if (mine === token) repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
     } catch {
       if (mine === token) repos = [];
@@ -457,13 +441,15 @@
     }
   }
 
-  /** How many rows the section reads: the membership is one hop, so this holds it. */
-  const CODE_LIMIT = 200;
   /** How many branches and repositories are asked for a clone before giving up. */
   const CHECKOUT_TRIES = 3;
 
   async function readCode(id: string, mine: number) {
-    const page = await ports.listEntities(filterOf(id, [...CODE_KINDS], "updated_desc"), CODE_LIMIT, 0);
+    const page = await ports.listEntities(
+      reachFilter(id, SECTION_READS.code.kinds, SECTION_READS.code.order),
+      SECTION_LIMIT,
+      0,
+    );
     if (mine !== token) return;
     code = page.rows;
     const sorted = byAttention(page.rows);
