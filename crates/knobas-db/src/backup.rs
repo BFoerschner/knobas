@@ -78,7 +78,10 @@ pub const ARCHIVE_EXTENSION: &str = "knobas";
 /// replaces with the archive's when the archive carries it. Counted as
 /// content, they would make every restore refuse, as `setting` would.
 /// Children before parents, so a clear never trips a foreign key.
-const BOOKKEEPING_TABLES: &[&str] = &["setting", "dep_layer_kind", "dep_layer"];
+///
+/// **The saved views of Dependencies** (`dep_view`, migration `0038`, #873)
+/// are seeded with the four built-in views for the same reason.
+const BOOKKEEPING_TABLES: &[&str] = &["setting", "dep_layer_kind", "dep_layer", "dep_view"];
 
 const PG_DUMP: &str = if cfg!(windows) {
     "pg_dump.exe"

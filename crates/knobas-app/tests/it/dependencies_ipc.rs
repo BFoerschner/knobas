@@ -558,3 +558,281 @@ fn the_dependencies_shape_matches_its_typescript_mirror() {
         &["from", "to", "relation"],
     );
 }
+
+// -- #873: the layer writes and the saved views ------------------------------
+
+fn names(layers: &[dependencies::Layer]) -> Vec<String> {
+    layers.iter().map(|layer| layer.name.clone()).collect()
+}
+
+fn code_of(error: &knobas_app::IpcError) -> knobas_app::IpcErrorCode {
+    error.code
+}
+
+/// A layer's name stays unique on every write that sets one: adding and
+/// renaming both refuse a name already taken, by case and outer spaces, with
+/// R-11.13's sentence; a blank name is refused as invalid.
+#[tokio::test]
+async fn adding_and_renaming_a_layer_keep_the_names_unique() {
+    let pool = pool("deps_layer_names").await;
+    let added = dependencies::create_layer(&pool, "  Service mesh ")
+        .await
+        .expect("a new name is a new layer");
+    let mesh = added.last().expect("the new layer is last");
+    assert_eq!(mesh.name, "Service mesh", "stored trimmed");
+    assert!(mesh.kinds.is_empty());
+
+    let refused = dependencies::create_layer(&pool, " services ")
+        .await
+        .expect_err("Services is taken");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Conflict);
+    assert_eq!(
+        refused.message,
+        "There is already a layer called services. Names are unique, so a name always means the same things."
+    );
+
+    let refused = dependencies::rename_layer(&pool, &mesh.id, "WORK")
+        .await
+        .expect_err("Work is taken");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Conflict);
+
+    let refused = dependencies::rename_layer(&pool, &mesh.id, "   ")
+        .await
+        .expect_err("blank");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(refused.message, "A layer needs a name.");
+
+    // Renaming a layer to its own name in another case is not a clash with itself.
+    let renamed = dependencies::rename_layer(&pool, "work", "WORK")
+        .await
+        .expect("its own name");
+    assert_eq!(renamed[0].name, "WORK");
+
+    let missing = dependencies::rename_layer(&pool, "nope", "Nope")
+        .await
+        .expect_err("no such layer");
+    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+}
+
+/// Reordering takes every layer once; removing one sends its kinds to no layer;
+/// placing a kind moves it, or takes it out of every layer.
+#[tokio::test]
+async fn layers_reorder_remove_and_place_kinds() {
+    let pool = pool("deps_layer_writes").await;
+    let seeded = dependencies::layers(&pool).await.expect("layers");
+    let mut ids: Vec<String> = seeded.iter().map(|layer| layer.id.clone()).collect();
+    ids.swap(0, 1);
+    let ordered = dependencies::order_layers(&pool, &ids)
+        .await
+        .expect("a permutation");
+    assert_eq!(names(&ordered)[..2], ["Code".to_owned(), "Work".to_owned()]);
+
+    let refused = dependencies::order_layers(&pool, &ids[1..])
+        .await
+        .expect_err("one layer missing");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+
+    let placed = dependencies::place_kind(&pool, "vm", Some("services"))
+        .await
+        .expect("vm into Services");
+    let services = placed.iter().find(|l| l.id == "services").unwrap();
+    assert_eq!(services.kinds.last().map(String::as_str), Some("vm"));
+    assert!(
+        placed
+            .iter()
+            .find(|l| l.id == "machines")
+            .unwrap()
+            .kinds
+            .is_empty()
+    );
+
+    let unplaced = dependencies::place_kind(&pool, "network", None)
+        .await
+        .expect("network into no layer");
+    assert!(
+        unplaced
+            .iter()
+            .all(|l| !l.kinds.iter().any(|k| k == "network"))
+    );
+
+    let refused = dependencies::place_kind(&pool, "spaceship", Some("services"))
+        .await
+        .expect_err("not a kind");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+    let refused = dependencies::place_kind(&pool, "vm", Some("nope"))
+        .await
+        .expect_err("not a layer");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::NotFound);
+
+    let left = dependencies::delete_layer(&pool, "data")
+        .await
+        .expect("removed");
+    assert!(left.iter().all(|l| l.id != "data"));
+    let read = dependencies::read(&pool).await.expect("the read");
+    for kind in ["database_server", "database", "schema", "table"] {
+        assert!(
+            read.layers
+                .iter()
+                .all(|l| !l.kinds.iter().any(|k| k == kind)),
+            "{kind} sits in no layer once Data is gone"
+        );
+    }
+    let missing = dependencies::delete_layer(&pool, "data")
+        .await
+        .expect_err("gone");
+    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+}
+
+/// The four built-in views are seeded, *This ticket* opens from a ticket and
+/// *Everything* from the top bar; *Everything* hides Work.
+#[tokio::test]
+async fn the_built_in_views_are_seeded_with_their_defaults() {
+    use dependencies::{Group, Tiles};
+    let pool = pool("deps_views_seed").await;
+    let read = dependencies::views(&pool).await.expect("views");
+    let named: Vec<&str> = read.views.iter().map(|v| v.name.as_str()).collect();
+    assert_eq!(
+        named,
+        [
+            "Everything",
+            "This ticket",
+            "Runtime by environment",
+            "Code and delivery"
+        ]
+    );
+    assert_eq!(read.opens_from_ticket, "ticket");
+    assert_eq!(read.opens_from_top, "everything");
+    let everything = &read.views[0].settings;
+    assert!(everything.layers["work"].hidden);
+    assert_eq!(everything.layers["services"].group, Group::Environment);
+    assert_eq!(everything.layers["containers"].group, Group::Parent);
+    assert_eq!(everything.tiles, Tiles::Auto);
+    assert_eq!(everything.fold_at, 24);
+    assert!(read.views[1].settings.layers.is_empty());
+}
+
+/// Save as a new view, save changes, rename, choose which opens first, and
+/// delete: a deleted default falls back to the first view, and the last view
+/// is never deleted.
+#[tokio::test]
+async fn views_are_saved_renamed_chosen_and_deleted() {
+    use dependencies::{DepViewSettings, Group, LayerInView, Tiles};
+    let pool = pool("deps_views_writes").await;
+    let mut settings = DepViewSettings::default();
+    settings.layers.insert(
+        "services".to_owned(),
+        LayerInView {
+            hidden: false,
+            folded: true,
+            group: Group::Owner,
+        },
+    );
+    settings.environments = vec!["prod".to_owned()];
+    settings.problems = true;
+    settings.tiles = Tiles::Compact;
+    settings.fold_at = 50;
+
+    let mine = dependencies::save_view(&pool, None, "  My view ", &settings)
+        .await
+        .expect("saved as new");
+    assert_eq!(mine.name, "My view");
+    assert_eq!(mine.settings, settings);
+
+    settings.problems = false;
+    let saved = dependencies::save_view(&pool, Some(&mine.id), "Mine", &settings)
+        .await
+        .expect("saved changes and renamed");
+    assert_eq!(saved.id, mine.id);
+    assert_eq!(saved.name, "Mine");
+
+    let blank = dependencies::save_view(&pool, Some(&mine.id), " ", &settings)
+        .await
+        .expect_err("blank");
+    assert_eq!(code_of(&blank), knobas_app::IpcErrorCode::Invalid);
+    let missing = dependencies::save_view(&pool, Some("nope"), "x", &settings)
+        .await
+        .expect_err("no such view");
+    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+
+    let read = dependencies::set_view_defaults(&pool, &mine.id, "runtime")
+        .await
+        .expect("defaults");
+    assert_eq!(read.opens_from_ticket, mine.id);
+    assert_eq!(read.opens_from_top, "runtime");
+    assert_eq!(read.views.last().unwrap().settings, settings);
+    let refused = dependencies::set_view_defaults(&pool, "nope", "runtime")
+        .await
+        .expect_err("no such view");
+    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::NotFound);
+
+    let read = dependencies::delete_view(&pool, &mine.id)
+        .await
+        .expect("deleted");
+    assert_eq!(
+        read.opens_from_ticket, "everything",
+        "falls back to the first view"
+    );
+    assert_eq!(read.views.len(), 4);
+    for id in ["everything", "ticket", "runtime"] {
+        dependencies::delete_view(&pool, id).await.expect("deleted");
+    }
+    let last = dependencies::delete_view(&pool, "code")
+        .await
+        .expect_err("the last view");
+    assert_eq!(code_of(&last), knobas_app::IpcErrorCode::Conflict);
+}
+
+/// A settings object that does not read as one is refused before it is stored.
+#[test]
+fn view_settings_refuse_an_unknown_group() {
+    let parsed: Result<dependencies::DepViewSettings, _> =
+        serde_json::from_value(serde_json::json!({
+            "layers": {"work": {"hidden": false, "folded": false, "group": "colour"}},
+            "environments": [], "problems": false, "tiles": "auto", "fold_at": 24
+        }));
+    assert!(parsed.is_err());
+}
+
+/// The views' answer, serialized, is what `app/src/lib/ipc/assets.ts` declares.
+#[test]
+fn the_views_shape_matches_its_typescript_mirror() {
+    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/assets.ts");
+    let mut settings = dependencies::DepViewSettings::default();
+    settings
+        .layers
+        .insert("work".to_owned(), dependencies::LayerInView::default());
+    let read = dependencies::DepViews {
+        views: vec![dependencies::DepView {
+            id: "everything".to_owned(),
+            name: "Everything".to_owned(),
+            settings,
+        }],
+        opens_from_ticket: "everything".to_owned(),
+        opens_from_top: "everything".to_owned(),
+    };
+    let value = serde_json::to_value(&read).unwrap();
+    knobas_sync::mirror::assert_shape(
+        MIRROR,
+        "DepViews",
+        &value,
+        &["views", "opens_from_ticket", "opens_from_top"],
+    );
+    knobas_sync::mirror::assert_shape(
+        MIRROR,
+        "DepView",
+        &value["views"][0],
+        &["id", "name", "settings"],
+    );
+    knobas_sync::mirror::assert_shape(
+        MIRROR,
+        "DepViewSettings",
+        &value["views"][0]["settings"],
+        &["layers", "environments", "problems", "tiles", "fold_at"],
+    );
+    knobas_sync::mirror::assert_shape(
+        MIRROR,
+        "LayerInView",
+        &value["views"][0]["settings"]["layers"]["work"],
+        &["hidden", "folded", "group"],
+    );
+}

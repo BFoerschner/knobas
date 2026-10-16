@@ -505,6 +505,143 @@ pub async fn dependencies(
     assets::dependencies::read(&pool).await
 }
 
+/// The shared layers' writes and the saved views of Dependencies (#873,
+/// R-11.13, R-11.16). Shims over [`assets::dependencies`], where each one
+/// says what it refuses. A layer write answers with every layer, top to
+/// bottom; a view write with what it saved, or every view.
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and the
+/// refusals [`assets::dependencies::create_layer`] names.
+#[tauri::command]
+pub async fn create_dep_layer(
+    lifecycle: State<'_, Lifecycle>,
+    name: String,
+) -> Result<Vec<assets::dependencies::Layer>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::create_layer(&pool, &name).await
+}
+
+/// Rename a shared layer (#873). See [`assets::dependencies::rename_layer`].
+///
+/// # Errors
+///
+/// `not_ready`, `invalid`, `conflict`, `not_found`.
+#[tauri::command]
+pub async fn rename_dep_layer(
+    lifecycle: State<'_, Lifecycle>,
+    layer_id: String,
+    name: String,
+) -> Result<Vec<assets::dependencies::Layer>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::rename_layer(&pool, &layer_id, &name).await
+}
+
+/// Remove a shared layer (#873). See [`assets::dependencies::delete_layer`].
+///
+/// # Errors
+///
+/// `not_ready`, `not_found`.
+#[tauri::command]
+pub async fn delete_dep_layer(
+    lifecycle: State<'_, Lifecycle>,
+    layer_id: String,
+) -> Result<Vec<assets::dependencies::Layer>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::delete_layer(&pool, &layer_id).await
+}
+
+/// Reorder the shared layers (#873). See [`assets::dependencies::order_layers`].
+///
+/// # Errors
+///
+/// `not_ready`, `invalid`.
+#[tauri::command]
+pub async fn order_dep_layers(
+    lifecycle: State<'_, Lifecycle>,
+    layer_ids: Vec<String>,
+) -> Result<Vec<assets::dependencies::Layer>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::order_layers(&pool, &layer_ids).await
+}
+
+/// Put a kind in a layer, or in none (#873). See
+/// [`assets::dependencies::place_kind`].
+///
+/// # Errors
+///
+/// `not_ready`, `invalid`, `not_found`.
+#[tauri::command]
+pub async fn place_dep_kind(
+    lifecycle: State<'_, Lifecycle>,
+    kind: String,
+    layer_id: Option<String>,
+) -> Result<Vec<assets::dependencies::Layer>, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::place_kind(&pool, &kind, layer_id.as_deref()).await
+}
+
+/// Every saved view of Dependencies and the two that open first (#873).
+///
+/// # Errors
+///
+/// `not_ready`, `internal`.
+#[tauri::command]
+pub async fn dep_views(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<assets::dependencies::DepViews, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::views(&pool).await
+}
+
+/// Save a view of Dependencies, new when `viewId` is omitted (#873). See
+/// [`assets::dependencies::save_view`].
+///
+/// # Errors
+///
+/// `not_ready`, `invalid`, `not_found`.
+#[tauri::command]
+pub async fn save_dep_view(
+    lifecycle: State<'_, Lifecycle>,
+    view_id: Option<String>,
+    name: String,
+    settings: assets::dependencies::DepViewSettings,
+) -> Result<assets::dependencies::DepView, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::save_view(&pool, view_id.as_deref(), &name, &settings).await
+}
+
+/// Delete a view of Dependencies (#873). See
+/// [`assets::dependencies::delete_view`].
+///
+/// # Errors
+///
+/// `not_ready`, `conflict`, `not_found`.
+#[tauri::command]
+pub async fn delete_dep_view(
+    lifecycle: State<'_, Lifecycle>,
+    view_id: String,
+) -> Result<assets::dependencies::DepViews, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::delete_view(&pool, &view_id).await
+}
+
+/// Choose which view opens from a ticket and which from the top bar (#873).
+///
+/// # Errors
+///
+/// `not_ready`, `not_found`.
+#[tauri::command]
+pub async fn set_dep_view_defaults(
+    lifecycle: State<'_, Lifecycle>,
+    from_ticket: String,
+    from_top: String,
+) -> Result<assets::dependencies::DepViews, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::set_view_defaults(&pool, &from_ticket, &from_top).await
+}
+
 /// What importing `file` would do, having written nothing.
 ///
 /// The argument is the file's **text**, not a path: reading a file off the

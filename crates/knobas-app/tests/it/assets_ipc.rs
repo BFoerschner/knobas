@@ -4718,6 +4718,15 @@ fn invoke_over(
             knobas_app::commands::assets::depends_on_this,
             knobas_app::commands::assets::produce_estate_file,
             knobas_app::commands::assets::dependencies,
+            knobas_app::commands::assets::create_dep_layer,
+            knobas_app::commands::assets::rename_dep_layer,
+            knobas_app::commands::assets::delete_dep_layer,
+            knobas_app::commands::assets::order_dep_layers,
+            knobas_app::commands::assets::place_dep_kind,
+            knobas_app::commands::assets::dep_views,
+            knobas_app::commands::assets::save_dep_view,
+            knobas_app::commands::assets::delete_dep_view,
+            knobas_app::commands::assets::set_dep_view_defaults,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4771,6 +4780,38 @@ use tauri::Manager;
 fn every_asset_command_is_registered_and_its_arguments_decode() {
     for (cmd, args) in [
         ("dependencies", serde_json::json!({})),
+        ("dep_views", serde_json::json!({})),
+        ("create_dep_layer", serde_json::json!({ "name": "Mesh" })),
+        (
+            "rename_dep_layer",
+            serde_json::json!({ "layerId": "work", "name": "Work" }),
+        ),
+        ("delete_dep_layer", serde_json::json!({ "layerId": "work" })),
+        (
+            "order_dep_layers",
+            serde_json::json!({ "layerIds": ["work"] }),
+        ),
+        ("place_dep_kind", serde_json::json!({ "kind": "vm" })),
+        (
+            "place_dep_kind",
+            serde_json::json!({ "kind": "vm", "layerId": "machines" }),
+        ),
+        (
+            "save_dep_view",
+            serde_json::json!({ "name": "Mine", "settings": {
+                "layers": { "work": { "hidden": true, "folded": false, "group": "status" } },
+                "environments": ["prod"], "problems": false, "tiles": "auto", "fold_at": 24 } }),
+        ),
+        (
+            "save_dep_view",
+            serde_json::json!({ "viewId": "everything", "name": "Mine", "settings": {
+                "layers": {}, "environments": [], "problems": true, "tiles": "compact", "fold_at": 9 } }),
+        ),
+        ("delete_dep_view", serde_json::json!({ "viewId": "x" })),
+        (
+            "set_dep_view_defaults",
+            serde_json::json!({ "fromTicket": "a", "fromTop": "b" }),
+        ),
         ("asset_tree", serde_json::json!({})),
         (
             "asset_tree",
