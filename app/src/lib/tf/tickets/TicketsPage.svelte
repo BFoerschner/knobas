@@ -110,7 +110,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
-    import TicketCard from "./TicketCard.svelte";
+  import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
   import {

@@ -36,6 +36,7 @@
     CONDITION_FIELDS,
     conditionsText,
     editColumns,
+    keyOf,
     looseStatuses,
     moveColumn,
     onePerStatus,
@@ -145,7 +146,7 @@
     else if (field === "epic")
       offered = parents.filter((parent) => parent.kind === "ticket").map((parent) => [parent.name, parent.name]);
     else {
-      const key = CONDITION_FIELDS.find((entry) => entry.field === field)!.key;
+      const key = keyOf(field);
       offered = fields
         .filter((suggestion) => suggestion.key === key)
         .map((suggestion): [string, string] => {
@@ -179,11 +180,15 @@
     conditions = [...conditions, { field: free?.field ?? "status", negated: false, values: [] }];
   }
 
+  function setCondition(at: number, change: Partial<Condition>) {
+    conditions = conditions.map((condition, index) => (index === at ? { ...condition, ...change } : condition));
+  }
+
   function toggleValue(at: number, value: string) {
     const condition = conditions[at]!;
     const held = condition.values.find((v) => same(v, value));
     const values = held === undefined ? [...condition.values, value] : condition.values.filter((v) => v !== held);
-    conditions = conditions.map((c, index) => (index === at ? { ...c, values } : c));
+    setCondition(at, { values });
   }
 
   // ---- the columns ----
@@ -349,11 +354,7 @@
                   aria-label="Field"
                   value={condition.field}
                   onchange={(event) =>
-                    (conditions = conditions.map((c, index) =>
-                      index === at
-                        ? { field: event.currentTarget.value as ConditionField, negated: false, values: [] }
-                        : c,
-                    ))}
+                    setCondition(at, { field: event.currentTarget.value as ConditionField, negated: false, values: [] })}
                 >
                   {#each fieldChoices(condition) as entry (entry.field)}
                     <option value={entry.field}>{entry.label}</option>
@@ -363,13 +364,13 @@
                   <button
                     type="button"
                     aria-pressed={!condition.negated}
-                    onclick={() => (conditions = conditions.map((c, i) => (i === at ? { ...c, negated: false } : c)))}
+                    onclick={() => setCondition(at, { negated: false })}
                     >is</button
                   >
                   <button
                     type="button"
                     aria-pressed={condition.negated}
-                    onclick={() => (conditions = conditions.map((c, i) => (i === at ? { ...c, negated: true } : c)))}
+                    onclick={() => setCondition(at, { negated: true })}
                     >is not</button
                   >
                 </div>
