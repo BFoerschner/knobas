@@ -1569,3 +1569,27 @@ a.tf-r:hover { background: var(--sheet-2); }
 @media (max-width: 900px) {
   .tf-compare { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Pull request page (#841, R-8.15, R-8.16, R-8.20) ---------- */
+/* prototype-6's `.fbody`: the tab's body beside a 300px side column. */
+.tf-cbody.tf-pr { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
+.tf-pr .tf-side { display: flex; flex-direction: column; gap: 14px; }
+.tf-pr .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
+.tf-prready, .tf-prlocal { padding: 0 12px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--t-sm); }
+.tf-prready > span { display: flex; gap: 6px; align-items: baseline; }
+.tf-prlocal { gap: 6px; }
+.tf-prlocal-acts { display: flex; gap: 6px; }
+.tf-prchecks td:first-child { white-space: nowrap; }
+.tf-prchecks td:first-child .tf-dot { margin-right: 6px; }
+.tf-prdesc { padding: 12px 14px; }
+.tf-prdesc p { white-space: pre-line; overflow-wrap: anywhere; font-size: var(--t-sm); }
+.tf-dialog.tf-pr-dialog { width: min(620px, calc(100vw - 32px)); }
+.tf-pra { display: flex; flex-direction: column; gap: 8px; }
+.tf-pra input[type="text"], .tf-pra textarea {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; width: 100%;
+}
+.tf-pra textarea { resize: vertical; }
+.tf-pra fieldset { border: 0; padding: 0; margin: 0; }
+@media (max-width: 900px) {
+  .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
+}

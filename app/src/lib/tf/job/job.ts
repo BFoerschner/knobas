@@ -395,7 +395,7 @@ export function staleBuilds(
 }
 
 /** The username knobas knows the reader by in a source, or `null`. */
-function username(source: SourceFacts | undefined): string | null {
+export function username(source: SourceFacts | undefined): string | null {
   const config = source?.config as Record<string, unknown> | null | undefined;
   const name = config?.["username"];
   return typeof name === "string" && name.trim() !== "" ? name.trim() : null;

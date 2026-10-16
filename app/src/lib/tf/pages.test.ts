@@ -12,6 +12,7 @@ import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
 import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
+import { page as prPage } from "./pr/page";
 import { page as repoPage } from "./repo/page";
 import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
@@ -53,7 +54,8 @@ const ADDRESSES = [
   ["#/code/prs", "code"],
   ["#/repo/gitea%3Atidewater%2Fpayout-service", "repo"],
   ["#/repo/gitea%3Atidewater%2Fpayout-service/files/src/lib.rs", "repo"],
-  ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "shell"],
+  ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "pr"],
+  ["#/pr/gitea%3Atidewater%2Fpayout-service%23142/commits", "pr"],
   ["#/deps", "deps"],
   ["#/map", "deps"],
   ["#/assets", "asset tree"],
@@ -77,6 +79,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [inboxPage, "inbox"],
     [codePage, "code"],
     [repoPage, "repo"],
+    [prPage, "pr"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);

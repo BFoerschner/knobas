@@ -370,6 +370,9 @@ test("only the launcher and the note editor resolve a pasted URL to an entity", 
     "lib/launcher/Launcher.svelte",
     "lib/launcher/session.svelte.ts",
     "lib/notes/NoteView.svelte",
+    // Not a pasted text (#841): a pull request's check links its run, and the
+    // page opens the run the mirror holds at that link. No text is rewritten.
+    "lib/tf/pr/TfPr.svelte",
   ]);
 });
 

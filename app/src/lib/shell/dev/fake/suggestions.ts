@@ -46,6 +46,10 @@ const FAKE_SUGGESTIONS: LinkRow[] = [
     "both mention metric, payout, retry, sepa", "2026-08-22T14:27:00Z"),
   proposal(7, "mock:PAY-231", "mock:PAY-244", "similar_text", "similarity",
     "both mention fail, payout, retry, window", "2026-08-22T14:26:00Z"),
+  // PR #142's second commit (#841), so its Commits tab says *proposed link,
+  // judge it* where prototype-6's `a41f2c` does.
+  proposal(8, "mock:tidewater/payout-service@a41f2c08d3e9", "mock:PAY-231", "commit_message_key", "exact_key",
+    "the commit message mentions PAY-231", "2026-08-22T14:25:00Z"),
 ];
 
 /** The proposals answered this session, by link id. Accepted or dismissed is
