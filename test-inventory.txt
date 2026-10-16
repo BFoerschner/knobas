@@ -2893,6 +2893,7 @@ knobas-source-mock	test/it	contract::the_opt_in_tombstone_reports_one_determinis
 knobas-source-mock	test/it	contract::the_tombstoning_mock_passes_the_contract_battery
 knobas-source-mock	test/it	contract::write_records_the_comment
 knobas-source-teamcity	lib/knobas_source_teamcity	chain::tests::a_branch_goes_by_name_in_base64_and_the_default_branch_as_default
+knobas-source-teamcity	lib/knobas_source_teamcity	chain::tests::a_builds_chain_is_asked_for_both_ways_with_the_syncs_facets_and_every_state
 knobas-source-teamcity	lib/knobas_source_teamcity	chain::tests::a_configuration_alone_is_no_chain
 knobas-source-teamcity	lib/knobas_source_teamcity	chain::tests::a_configuration_listed_by_both_listings_is_one_step
 knobas-source-teamcity	lib/knobas_source_teamcity	chain::tests::a_dependency_outside_the_listings_does_not_hold_a_step_back

@@ -483,7 +483,7 @@ impl HttpRest {
     pub(crate) async fn build_branch(&self, id: i64) -> Result<Build, SourceError> {
         self.one(
             &format!("app/rest/builds/id:{id}"),
-            &[("fields", "id,buildTypeId,branchName,defaultBranch")],
+            &[("fields", crate::chain::BUILD_BRANCH_FIELDS)],
         )
         .await
     }

@@ -52,6 +52,10 @@ pub(crate) const CHAIN_TYPE_FIELDS: &str = concat!(
     "snapshot-dependencies(snapshot-dependency(source-buildType(id))))"
 );
 
+/// What one build is asked for to find its chain: its configuration and
+/// branch, and whether that is the default branch.
+pub(crate) const BUILD_BRANCH_FIELDS: &str = "id,buildTypeId,branchName,defaultBranch";
+
 /// The configurations in running order, each once (the first listing of an
 /// id wins). Fewer than two is no chain, and answers nothing.
 pub(crate) fn order(types: Vec<ChainType>) -> Vec<ChainType> {
@@ -99,17 +103,16 @@ const EVERY_BUILD: &str = "state:any,canceled:any,failedToStart:any";
 
 /// The builds the build `id` built on and the build itself, however far back.
 pub(crate) fn upstream_builds(id: i64) -> String {
-    format!(
-        "snapshotDependency:(to:(id:{id}),includeInitial:true,recursive:true),\
-         branch:default:any,{EVERY_BUILD},count:100"
-    )
+    chain_builds(&format!("to:(id:{id}),includeInitial:true,recursive:true"))
 }
 
 /// The builds that built on the build `id`, however far on.
 pub(crate) fn downstream_builds(id: i64) -> String {
-    format!(
-        "snapshotDependency:(from:(id:{id}),recursive:true),branch:default:any,{EVERY_BUILD},count:100"
-    )
+    chain_builds(&format!("from:(id:{id}),recursive:true"))
+}
+
+fn chain_builds(dependency: &str) -> String {
+    format!("snapshotDependency:({dependency}),branch:default:any,{EVERY_BUILD},count:100")
 }
 
 /// The newest build of configuration `id` on the branch: by name, base64 so
@@ -237,6 +240,20 @@ mod tests {
         ];
         let got = pick(&steps, &builds, |b| Some(b.1), |b| b.0);
         assert_eq!(got, [Some(&(10, "Build")), Some(&(12, "Tests")), None]);
+    }
+
+    #[test]
+    fn a_builds_chain_is_asked_for_both_ways_with_the_syncs_facets_and_every_state() {
+        assert_eq!(
+            upstream_builds(5),
+            "snapshotDependency:(to:(id:5),includeInitial:true,recursive:true),branch:default:any,\
+             state:any,canceled:any,failedToStart:any,count:100"
+        );
+        assert_eq!(
+            downstream_builds(5),
+            "snapshotDependency:(from:(id:5),recursive:true),branch:default:any,\
+             state:any,canceled:any,failedToStart:any,count:100"
+        );
     }
 
     #[test]
