@@ -3503,8 +3503,8 @@ Ruled by the merge-manager (PR #1018).
   which would have passed without the backfill. **Reversing:** n/a.
 - **Visibility is filed, not built here.** The ticket asks that "the change to the config is
   visible"; the TF source page shows only the address and username, so the recorded ids are not
-  on screen. Building a settings field is UI work outside this ticket's diff; filed as a
-  `ready-for-agent` follow-up. **Reversing:** n/a. Pinned by `a_discovery_that_never_answers_does_not_hold_the_sync`.
+  on screen. Building a settings field is UI work outside this ticket's diff; filed as #1021
+  (`ready-for-agent`, no milestone, so it does not hold TF1's release). **Reversing:** n/a. Pinned by `a_discovery_that_never_answers_does_not_hold_the_sync`.
   **Reversing:** low.
 - **A reader saving the whole config mid-sync from a form opened earlier can blank the recorded
   ids** (`config::patch` replaces `config`). The next sync records them again, at the cost of a
