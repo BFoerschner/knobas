@@ -5,8 +5,9 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { DocPage, DocsTree } from "../../ipc/entity";
+import type { DocPage, DocsTree, Reached } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
+import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -101,6 +102,7 @@ afterEach(() => {
   if (view) unmount(view);
   view = null;
   target.remove();
+  forgetFilters();
 });
 
 function ports(over: Partial<DocsPorts> = {}): DocsPorts {
@@ -113,6 +115,7 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
     docsCreatePage: vi.fn(async () => QUEUED),
     submitWrite: vi.fn(async () => QUEUED),
     visitEntity: vi.fn(async () => null),
+    jobReach: vi.fn(async () => []),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
     ...over,
@@ -445,4 +448,121 @@ test("For you lists the pages that mention me, with who asked", async () => {
   const forYou = target.querySelector(".tf-dl-for")!;
   expect(forYou.querySelector("h4")?.textContent).toBe("For you");
   expect(forYou.querySelector("a")?.textContent).toBe("Ops homePriya mentioned you");
+});
+
+// ---- *This job* (#863, R-2.5, R-2.8) ----
+
+/** PAY-231 reaches *On-call handbook* itself, and *Eng home* through PAY-230, its parent. */
+const REACH: Reached[] = [
+  { entity_id: "confluence:2", kind: "page", step: "confluence:2", origin: { kind: "own" } },
+  { entity_id: "jira:PAY-1", kind: "ticket", step: "jira:PAY-1", origin: { kind: "own" } },
+  { entity_id: "confluence:9", kind: "page", step: "confluence:9", origin: { kind: "parent", ticket: "jira:PAY-230" } },
+];
+
+function linkPorts() {
+  return {
+    listSources: vi.fn(async () => [{ id: "jira" }] as never),
+    getEntity: vi.fn(async (id: string) => {
+      if (id !== "jira:PAY-231") throw { code: "not_found", message: id, source_id: null };
+      return { row: { entity_id: id, kind: "ticket", title: "SEPA retry" } } as never;
+    }),
+    createLink: vi.fn(async () => null as never),
+    search: vi.fn(async () => null as never),
+    launcherHome: vi.fn(async () => null as never),
+  };
+}
+
+async function drawJob(rest: string[], links?: unknown, io = ports({ jobReach: vi.fn(async () => REACH) })): Promise<DocsPorts> {
+  view = mount(TfDocs, {
+    target,
+    props: { ready: true, rest, job: "PAY-231", ports: io, linkPorts: (links ?? linkPorts()) as never },
+  });
+  await settle();
+  return io;
+}
+
+const scope = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-dl-scope button")];
+
+test("This job is off by default; on, it lists the job's pages by reason and hides the space picker", async () => {
+  const io = await drawJob(["confluence:2"]);
+  expect(io.jobReach).toHaveBeenCalledWith("jira:PAY-231");
+  expect(scope().map((b) => [b.textContent?.replace(/\s+/g, " ").trim(), b.getAttribute("aria-pressed")])).toEqual([
+    ["This job PAY-231 2", "false"],
+    ["All pages", "true"],
+  ]);
+  expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
+
+  scope()[0]!.click();
+  await settle();
+  expect(target.querySelector("select[aria-label='Space']")).toBeNull();
+  const groups = [...target.querySelectorAll(".tf-dl-body .tf-dl-for")];
+  expect(groups.map((g) => g.querySelector("h4")?.textContent)).toEqual(["Linked to PAY-231", "Parent PAY-230"]);
+  expect([...groups[0]!.querySelectorAll("a")].map((a) => [a.getAttribute("href"), a.textContent])).toEqual([
+    ["#/page/confluence%3A2", "On-call handbookOPS › Ops home"],
+  ]);
+  expect(groups[0]!.querySelector("a")?.getAttribute("aria-current")).toBe("true");
+  expect(groups[1]!.querySelector("a")?.textContent).toBe("Eng homeENG");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")?.placeholder).toBe("Search PAY-231's pages");
+});
+
+test("with This job on, the search reads every space and keeps the job's pages, with Search all pages", async () => {
+  const io = await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => REACH), docsSearch: vi.fn(async () => HITS) }));
+  scope()[0]!.click();
+  await settle();
+  type("ledger");
+  await settle();
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in PAY-231's pages, 3 ms. Search all pages");
+  const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["OPS › Ops home"]);
+
+  button("Search all pages")!.click();
+  await settle();
+  expect(scope()[1]!.getAttribute("aria-pressed")).toBe("true");
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
+  expect(target.querySelectorAll("a.tf-dl-hit")).toHaveLength(2);
+});
+
+test("a job that reaches no page says so and offers Search all pages; the count waits for a page", async () => {
+  await drawJob(["confluence:2"], undefined, ports({ jobReach: vi.fn(async () => [REACH[1]!]) }));
+  expect(scope()[0]!.textContent?.replace(/\s+/g, " ").trim()).toBe("This job PAY-231");
+  scope()[0]!.click();
+  await settle();
+  expect(target.querySelector(".tf-dl-body")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "Nothing in Docs is on PAY-231 yet. Use Link to PAY-231 on a page. Search all pages",
+  );
+  button("Search all pages")!.click();
+  await settle();
+  expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
+});
+
+test("a page reached through another entity is grouped under Via and that entity's title", async () => {
+  const links = linkPorts();
+  const getTicket = links.getEntity;
+  links.getEntity = vi.fn(async (id: string) =>
+    id === "jira:PAY-1" ? ({ row: { entity_id: id, kind: "ticket", title: "Retry epic" } } as never) : getTicket(id),
+  );
+  await drawJob(
+    ["confluence:2"],
+    links,
+    ports({ jobReach: vi.fn(async () => [{ ...REACH[0]!, step: "jira:PAY-1" }]) }),
+  );
+  scope()[0]!.click();
+  await settle();
+  expect(target.querySelector(".tf-dl-for h4")?.textContent).toBe("Via Retry epic");
+});
+
+test("the choice is kept for the session, and without a job there is no switch", async () => {
+  await drawJob(["confluence:2"]);
+  scope()[0]!.click();
+  await settle();
+  unmount(view!);
+  view = null;
+  await drawJob(["confluence:2"]);
+  expect(scope()[0]!.getAttribute("aria-pressed")).toBe("true");
+  unmount(view!);
+  view = null;
+  await draw(["confluence:2"]);
+  expect(scope()).toHaveLength(0);
+  expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
 });

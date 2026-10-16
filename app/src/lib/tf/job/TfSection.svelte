@@ -26,6 +26,7 @@
     roll,
     before,
     view = title.split(" ")[0]!,
+    onopen,
   }: {
     /** The section's id: `tf-sec-<id>` names it for assistive tech. */
     id: string;
@@ -45,6 +46,8 @@
     before?: Snippet;
     /** The full view *All in … view* names: the title's first word unless said. */
     view?: string;
+    /** Called as the header link is followed: the view opens set to *This job* (R-2.5). */
+    onopen?: () => void;
   } = $props();
 
   const CAP = 4;
@@ -60,7 +63,7 @@
 <article class="tf-panel" aria-labelledby="tf-sec-{id}">
   <header>
     <h3 id="tf-sec-{id}">{title}</h3>
-    <a class="tf-open" href={openHref}>{openLabel} <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 1.5h3.5V5M10.5 1.5 6 6M5 2H1.5v8.5H10V7" /></svg></a>
+    <a class="tf-open" href={openHref} onclick={() => onopen?.()}>{openLabel} <svg viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 1.5h3.5V5M10.5 1.5 6 6M5 2H1.5v8.5H10V7" /></svg></a>
   </header>
   <div class="tf-roll">
     {#if rows === null}

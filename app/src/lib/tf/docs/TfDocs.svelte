@@ -21,8 +21,14 @@
   page opened is a visit (`visit_entity`), which is what "read last" reads.
 
   Drawn over the declared Docs frame (ADR-0022): `docs_tree`, `docs_page`,
-  `docs_search`; the writes go through the write queue. The *This job* scope
-  is #863's.
+  `docs_search`; the writes go through the write queue.
+
+  **This job** (#863, R-2.5, R-2.8): with a job current, *This job <key> N /
+  All pages* sits above the space picker. On, the left column lists the pages
+  the ticket reaches (`job_reach`, read once per job), grouped by reason, the
+  space picker hides, and the search is kept to those pages with *Search all
+  pages*. Off by default; the job's Pages section opens Docs with it on, and
+  the choice is kept for the session (`sessionFilter("docs")`).
 -->
 <script lang="ts">
   import { tick, untrack } from "svelte";
@@ -35,16 +41,19 @@
     docsPage as realDocsPage,
     docsSearch as realDocsSearch,
     docsTree as realDocsTree,
+    jobReach as realJobReach,
     submitWrite as realSubmitWrite,
     visitEntity as realVisitEntity,
     type DocPage,
     type DocsHits,
     type DocsTree,
     type NewPage,
+    type Reached,
   } from "../../ipc/entity";
   import { drawn } from "../../detail/relations";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
@@ -65,10 +74,12 @@
     firstName,
     forYouWhy,
     inlineWords,
+    jobPageGroups,
     pageHash,
     pageToOpen,
     person,
     placeOf,
+    reachedPages,
     readingMinutes,
     scopeName,
     sectionsOf,
@@ -88,6 +99,8 @@
     docsCreatePage: typeof realDocsCreatePage;
     submitWrite: typeof realSubmitWrite;
     visitEntity: typeof realVisitEntity;
+    /** What a ticket reaches, for *This job* (#863). */
+    jobReach: typeof realJobReach;
     openExternal: (url: string) => Promise<void>;
     copy: (text: string) => Promise<void>;
   }
@@ -122,6 +135,7 @@
       docsCreatePage: realDocsCreatePage,
       submitWrite: realSubmitWrite,
       visitEntity: realVisitEntity,
+      jobReach: realJobReach,
       openExternal: realOpenExternal,
       copy: (text) => navigator.clipboard.writeText(text),
     },
@@ -140,6 +154,56 @@
   /** What the find bar marks: the needles a hit was opened with. */
   let find = $state("");
   let field = $state<HTMLInputElement | null>(null);
+
+  // ---- *This job* (#863) ----
+  const filter = sessionFilter("docs");
+  const jobOn = $derived(job !== null && filter.scope === "job");
+  /** What the job's ticket reaches, `null` until the read answers. */
+  let reach = $state<Reached[] | null>(null);
+  /** The titles of the first steps a page is reached through, for *Via …*. */
+  let stepTitles = $state<Map<string, string>>(new Map());
+
+  async function readReach(key: string): Promise<{ reach: Reached[]; titles: Map<string, string> }> {
+    const ticket = await jobTicket(key);
+    const rows = ticket === null ? [] : await io.jobReach(ticket);
+    const steps = [...new Set(rows.filter((r) => r.step !== r.entity_id).map((r) => r.step))];
+    const titles = new Map<string, string>();
+    if (linkPorts && steps.length > 0) {
+      const read = await Promise.allSettled(steps.map((id) => linkPorts!.getEntity(id)));
+      read.forEach((answer, i) => {
+        if (answer.status === "fulfilled") titles.set(steps[i]!, answer.value.row.title);
+      });
+    }
+    return { reach: rows, titles };
+  }
+
+  $effect(() => {
+    const key = job;
+    reach = null;
+    if (!ready || key === null) return;
+    let live = true;
+    untrack(() =>
+      readReach(key).then(
+        (answer) => {
+          if (!live) return;
+          reach = answer.reach;
+          stepTitles = answer.titles;
+        },
+        // A reach that cannot be read lists nothing; *All pages* still reads.
+        () => {
+          if (live) reach = [];
+        },
+      ),
+    );
+    return () => {
+      live = false;
+    };
+  });
+
+  const jobIds = $derived(tree === null || reach === null ? null : reachedPages(reach, tree));
+  const jobGroups = $derived(
+    tree === null || reach === null || job === null ? [] : jobPageGroups(reach, tree, job, stepTitles),
+  );
 
   const place = $derived(placeOf(rest));
   const target = $derived(tree === null ? null : pageToOpen(place, tree));
@@ -198,7 +262,7 @@
   let asked = 0;
   $effect(() => {
     const text = query;
-    const scope = shownSpace ? { source_id: shownSpace.source_id, key: shownSpace.key } : null;
+    const scope = !jobOn && shownSpace ? { source_id: shownSpace.source_id, key: shownSpace.key } : null;
     if (!ready || text.trim() === "") {
       found = null;
       searchError = null;
@@ -217,6 +281,14 @@
     );
   });
 
+  /** The hits, kept to the job's pages while *This job* is on. */
+  const hits = $derived.by((): DocsHits | null => {
+    if (found === null || !jobOn) return found;
+    const kept = found.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
+    return { ...found, total: kept.length, hits: kept };
+  });
+  const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace));
+
   function pick(event: Event): void {
     const value = (event.currentTarget as HTMLSelectElement).value;
     picked = value;
@@ -232,7 +304,7 @@
     const value = (event.currentTarget as HTMLInputElement).value;
     // Typing keeps the search in the space the picker shows, so opening a hit
     // in another space does not narrow the hits under the reader.
-    if (picked === null && value.trim() !== "" && shownSpace) picked = spaceId(shownSpace);
+    if (!jobOn && picked === null && value.trim() !== "" && shownSpace) picked = spaceId(shownSpace);
     query = value;
     // Clearing the field brings the tree back and drops the highlighting.
     if (value.trim() === "") find = "";
@@ -245,16 +317,16 @@
   }
 
   function onsearchkey(event: KeyboardEvent): void {
-    const hits = found?.hits ?? [];
-    if (!searching || hits.length === 0) return;
+    const list = hits?.hits ?? [];
+    if (!searching || list.length === 0) return;
     if (event.key !== "ArrowDown" && event.key !== "ArrowUp" && event.key !== "Enter") return;
     event.preventDefault();
-    const at = hits.findIndex((h) => h.entity_id === current);
+    const at = list.findIndex((h) => h.entity_id === current);
     const to =
       event.key === "Enter"
         ? Math.max(at, 0)
-        : Math.max(0, Math.min(hits.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)));
-    openHit(hits[to]!.entity_id);
+        : Math.max(0, Math.min(list.length - 1, at + (event.key === "ArrowDown" ? 1 : -1)));
+    openHit(list[to]!.entity_id);
   }
 
   function searchLabel(label: string): void {
@@ -438,12 +510,22 @@
 <div class="tf-rd">
   <nav class="tf-rd-tree" aria-label="Docs">
     <div class="tf-dl-head">
-      <select aria-label="Space" value={pickerValue} onchange={pick}>
-        <option value="*">All spaces ({total})</option>
-        {#each tree?.spaces ?? [] as space (spaceId(space))}
-          <option value={spaceId(space)}>{spaceLabel(space)}</option>
-        {/each}
-      </select>
+      {#if job !== null}
+        <div class="tf-seg tf-dl-scope" role="group" aria-label="Scope">
+          <button type="button" aria-pressed={jobOn} onclick={() => (filter.scope = "job")}
+            >This job <span class="tf-jobk">{job}</span>{#if jobIds !== null && jobIds.size > 0}{" "}{jobIds.size}{/if}</button
+          >
+          <button type="button" aria-pressed={!jobOn} onclick={() => (filter.scope = "all")}>All pages</button>
+        </div>
+      {/if}
+      {#if !jobOn}
+        <select aria-label="Space" value={pickerValue} onchange={pick}>
+          <option value="*">All spaces ({total})</option>
+          {#each tree?.spaces ?? [] as space (spaceId(space))}
+            <option value={spaceId(space)}>{spaceLabel(space)}</option>
+          {/each}
+        </select>
+      {/if}
       <label class="tf-fsearch">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
           ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
@@ -454,7 +536,7 @@
           oninput={typed}
           onkeydown={onsearchkey}
           data-filter
-          placeholder="Search {scopeName(shownSpace)}"
+          placeholder="Search {searchScope}"
           aria-label="Search pages"
           autocomplete="off"
         />
@@ -468,17 +550,39 @@
       {:else if searching}
         {#if searchError !== null}
           <p class="tf-dl-note">Could not search: {searchError}</p>
-        {:else if found !== null}
+        {:else if hits !== null}
           <TfDocHits
-            {found}
+            found={hits}
             {current}
-            scope={scopeName(shownSpace)}
-            inSpace={shownSpace !== undefined}
+            scope={searchScope}
+            inSpace={!jobOn && shownSpace !== undefined}
+            inJob={jobOn}
             me={page?.me ?? []}
-            onall={() => (picked = "*")}
+            onall={() => {
+              if (jobOn) filter.scope = "all";
+              else picked = "*";
+            }}
             onpick={openHit}
           />
         {/if}
+      {:else if jobOn}
+        {#each jobGroups as group (group.reason)}
+          <div class="tf-dl-for">
+            <h4>{group.reason}</h4>
+            {#each group.pages as item (item.entity_id)}
+              <a href={pageHash(item.entity_id)} aria-current={item.entity_id === current ? "true" : undefined}
+                >{item.title}<span class="tf-why">{item.where}</span></a
+              >
+            {/each}
+          </div>
+        {:else}
+          {#if jobIds !== null}
+            <p class="tf-dl-note">
+              Nothing in Docs is on {job} yet. Use Link to {job} on a page.
+              <button type="button" class="tf-linkish" onclick={() => (filter.scope = "all")}>Search all pages</button>
+            </p>
+          {/if}
+        {/each}
       {:else}
         {#if forYou.length > 0}
           <div class="tf-dl-for">

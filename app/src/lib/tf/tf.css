@@ -1229,6 +1229,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-cmts .tf-cmt-body p { margin: 2px 0 6px; }
 /* The Docs search, the rail, the find bar and the writes (#860 to #862) */
 .tf-dl-head .tf-fsearch { max-width: none; flex: none; padding: 6px 9px; }
+.tf-dl-head .tf-dl-scope { display: flex; }
+.tf-dl-scope button { flex: 1; }
 .tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }
 .tf-dl-hint code { font: var(--t-2xs) var(--mono); background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
 .tf-dl-foot { padding: 10px 12px; border-top: 1px solid var(--rule-2); }

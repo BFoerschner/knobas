@@ -22,6 +22,7 @@ import type {
 import type { CredentialHealth, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
+import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
 import type { JobPorts } from "./ports";
@@ -618,6 +619,18 @@ test("Monitors and Pages roll up in prototype-6's words", async () => {
   expect(section("monitors").querySelector(".tf-rows a")?.getAttribute("href")).toBe("#/monitors");
   expect(roll("pages")).toBe("1 page in ENG 1 ask something of you");
   expect(section("pages").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Docs view");
+});
+
+test("Open Docs view opens Docs with This job on (R-2.5); the other sections' links leave it", async () => {
+  open("PAY-231", { ports: ports({ others: [PAGE] }) });
+  await settle();
+  expect(sessionFilter("docs").scope).toBeNull();
+  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("docs").scope).toBeNull();
+  sessionFilter("docs").scope = "all";
+  section("pages").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("docs").scope).toBe("job");
+  forgetFilters();
 });
 
 test("a section with nothing in it says so", async () => {

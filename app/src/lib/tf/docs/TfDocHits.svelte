@@ -3,7 +3,8 @@
   line, then each page with its title in the reading face, its space (when
   searching all) and path, the snippet with its section or commenter, and
   the match count, editor and time. The open page's hit has the bar. With no
-  hit, the AND rule, and *Search all spaces* in one space.
+  hit, the AND rule, and *Search all spaces* in one space. Kept to the job's
+  pages (#863), the header line offers *Search all pages* instead.
 
   Every string is source text; the matches are the backend's segments.
 -->
@@ -18,6 +19,7 @@
     current,
     scope,
     inSpace,
+    inJob = false,
     me,
     onall,
     onpick,
@@ -28,7 +30,10 @@
     scope: string;
     /** Whether the search is kept to one space, which offers *Search all spaces*. */
     inSpace: boolean;
+    /** Whether the search is kept to the job's pages, which offers *Search all pages*. */
+    inJob?: boolean;
     me: string[];
+    /** Widen the search: to every space, or from the job's pages to all pages. */
     onall: () => void;
     /** A hit is opened: the reader keeps the query. */
     onpick: (entityId: string) => void;
@@ -39,7 +44,8 @@
 
 <div class="tf-dl-meta">
   {hitsLine(found.total, scope, found.took_ms)}{#if inSpace}. <button type="button" class="tf-linkish" onclick={onall}
-      >Search all spaces</button>{/if}
+      >Search all spaces</button>{:else if inJob}. <button type="button" class="tf-linkish" onclick={onall}
+      >Search all pages</button>{/if}
 </div>
 {#each found.hits as hit (hit.entity_id)}
   {@const label = snippetLabel(hit.snippet)}

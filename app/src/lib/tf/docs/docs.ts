@@ -17,8 +17,10 @@ import type {
   DocSpace,
   DocsTree,
   PanelKind,
+  Reached,
   SectionRefusal,
 } from "../../ipc/entity";
+import { keyOf } from "../job/job";
 import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
@@ -346,4 +348,79 @@ export function refusalReason(refusal: SectionRefusal, source: string): string {
 /** What *Copy link* copies: the knobas address, then the page in the source. */
 export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">): string {
   return [pageHash(page.entity_id), page.web_url].filter((x): x is string => x !== null).join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// *This job* (#863, R-2.8): the job's pages, grouped by the reason it reaches them.
+// ---------------------------------------------------------------------------
+
+/** One page of the job: its title and where it sits, *OPS › Runbooks*. */
+export interface JobPage {
+  entity_id: string;
+  title: string;
+  where: string;
+}
+
+/** The job's pages under one reason: *Linked to PAY-231*, *Parent PAY-230*. */
+export interface JobPageGroup {
+  reason: string;
+  pages: JobPage[];
+}
+
+/**
+ * Why the job reaches a page, as its group's heading: one of the parent's own
+ * links is *Parent PAY-230* (the job sections' label); a page linked to the
+ * ticket is *Linked to PAY-231*; a page further down the walk names its first
+ * step, *Via <title>*, when `titles` has the step's title.
+ */
+export function reachReason(reached: Reached, job: string, titles: ReadonlyMap<string, string>): string {
+  if (reached.origin.kind === "parent") return `Parent ${keyOf(reached.origin.ticket)}`;
+  const step = reached.step === reached.entity_id ? undefined : titles.get(reached.step);
+  return step === undefined ? `Linked to ${job}` : `Via ${step}`;
+}
+
+/** The ids of the reached pages the tree holds. */
+export function reachedPages(reach: readonly Reached[], tree: DocsTree): Set<string> {
+  const ids = new Set(reach.map((r) => r.entity_id));
+  return new Set(tree.spaces.flatMap((s) => s.pages.filter((p) => ids.has(p.entity_id)).map((p) => p.entity_id)));
+}
+
+/** A page's place: its space's key, then its ancestors' titles from the top. */
+function whereOf(space: DocSpace, page: DocNode): string {
+  const byId = new Map(space.pages.map((p) => [p.entity_id, p]));
+  const path: string[] = [];
+  const seen = new Set<string>([page.entity_id]);
+  for (let up = page.parent; up !== null && !seen.has(up); ) {
+    seen.add(up);
+    const node = byId.get(up);
+    if (!node) break;
+    path.unshift(node.title);
+    up = node.parent;
+  }
+  return [space.key, ...path].join(" › ");
+}
+
+/**
+ * The job's pages the tree holds, grouped by reason; the groups in the order
+ * their first page comes in the tree, the pages in tree order. A reached id
+ * the tree does not hold (not a page, or not synced) is left out.
+ */
+export function jobPageGroups(
+  reach: readonly Reached[],
+  tree: DocsTree,
+  job: string,
+  titles: ReadonlyMap<string, string> = new Map(),
+): JobPageGroup[] {
+  const why = new Map(reach.map((r) => [r.entity_id, reachReason(r, job, titles)]));
+  const groups = new Map<string, JobPage[]>();
+  for (const space of tree.spaces) {
+    for (const page of space.pages) {
+      const reason = why.get(page.entity_id);
+      if (reason === undefined) continue;
+      const list = groups.get(reason) ?? [];
+      list.push({ entity_id: page.entity_id, title: page.title, where: whereOf(space, page) });
+      groups.set(reason, list);
+    }
+  }
+  return [...groups].map(([reason, pages]) => ({ reason, pages }));
 }

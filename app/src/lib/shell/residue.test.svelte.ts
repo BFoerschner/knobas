@@ -1790,6 +1790,7 @@ const CASES: Case[] = [
             docsCreatePage: () => new Promise(() => {}),
             submitWrite: () => new Promise(() => {}),
             visitEntity: () => deferred(null),
+            jobReach: () => deferred([]),
             openExternal: async () => {},
             copy: async () => {},
           },

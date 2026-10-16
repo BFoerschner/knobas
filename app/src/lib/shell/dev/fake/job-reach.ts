@@ -122,6 +122,11 @@ const PAY_231: [id: string, kind: string, step: string][] = [
   ["mock:ENG-SEPA", "page", "mock:ENG-SEPA"],
   ["mock:ENG-PSP-codes", "page", "mock:ENG-PSP-codes"],
   ["mock:OPS-manual-review", "page", "mock:OPS-manual-review"],
+  // The Docs fixture's pages of the job (`docs.ts`, #863): the mock adapter
+  // emits no pages, so Docs' *This job* reads these, which no `list_entities`
+  // row answers to.
+  ["confluence:sepa", "page", "confluence:sepa"],
+  ["confluence:manual-review", "page", "confluence:manual-review"],
   ["asset:knobas-gitea", "asset", "asset:knobas-gitea"],
   ["mock:flows-stage", "monitor", "asset:knobas-gitea"],
   ["mock:payouts-stage-health", "monitor", "asset:knobas-gitea"],
