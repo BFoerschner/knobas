@@ -50,6 +50,7 @@ use knobas_source::{Cursor, Sink, SourceError, SyncItem};
 
 use crate::client::{Page, Rec, Rest};
 use crate::config::TeamCityConfig;
+use crate::projects::ProjectTree;
 use crate::rest::{Build, BuildType, Locator, StateFilter};
 use crate::{cursor, map};
 
@@ -95,6 +96,10 @@ pub(crate) async fn execute(
     let previous = cursor_in.as_deref().and_then(cursor::parse);
     let before = previous.map_or(0, |p| p.since_build_id);
     let mut configs: BTreeMap<String, Rec<BuildType>> = BTreeMap::new();
+    // The project tree (#849): read at most once a run, and only by a run
+    // that needs it -- one that lists configurations, or a scoped one that
+    // has builds to place. See [`crate::projects`].
+    let mut tree: Option<ProjectTree> = None;
 
     // 1. The opening probe: one page of builds, whatever their state.
     //
@@ -145,7 +150,7 @@ pub(crate) async fn execute(
             // This is a *window*, not the corpus, which is why the descriptor
             // declares `full_sync_exhaustive: false`: the engine must not
             // tombstone the builds this deliberately did not re-list.
-            for t in scope(rest, cfg).await? {
+            for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
                 configs.insert(t.rec.id.clone(), t);
             }
             let ids: Vec<String> = configs.keys().cloned().collect();
@@ -217,13 +222,19 @@ pub(crate) async fn execute(
     for b in in_flight.iter().chain(finished.iter()) {
         observed.insert(b.rec.id, b);
     }
+    // A configured project takes in its subprojects (#849), so placing a
+    // build in a scoped source needs the tree; an unscoped one never does.
+    if !cfg.project_ids.is_empty() && !observed.is_empty() {
+        read_tree(rest, &mut tree).await?;
+    }
+    let no_tree = ProjectTree::default();
 
     let mut builds: Vec<SyncItem> = Vec::new();
     let mut touched: BTreeSet<String> = BTreeSet::new();
     let mut max_finished: Option<i64> = None;
     let mut min_unfinished: Option<i64> = None;
     for b in observed.values() {
-        let in_scope = in_scope_build(cfg, &b.rec);
+        let in_scope = in_scope_build(cfg, tree.as_ref().unwrap_or(&no_tree), &b.rec);
         if StateFilter::Finished.matches(b.rec.state.as_deref()) {
             // Counted whether or not it is in scope. A finished build outside
             // the scope will never be emitted, so it never needs to be
@@ -256,14 +267,20 @@ pub(crate) async fn execute(
     //    alternates between a rich and a lean shape -- and only when something
     //    moved, so an idle poll stays silent.
     if previous.is_some() && !touched.is_empty() {
-        for t in scope(rest, cfg).await? {
+        for t in scope(rest, cfg, read_tree(rest, &mut tree).await?).await? {
             configs.insert(t.rec.id.clone(), t);
         }
     }
     let mut pushed = 0usize;
     for (id, t) in &configs {
         if previous.is_none() || touched.contains(id) {
-            sink.item(map::build_config_item(source_id, base_url, &t.raw, &t.rec))
+            // The chain of projects beside the record (#849). Every config
+            // here came through `scope`, which read the tree.
+            let raw = tree
+                .as_ref()
+                .unwrap_or(&no_tree)
+                .annotate(&t.raw, t.rec.project_id.as_deref());
+            sink.item(map::build_config_item(source_id, base_url, &raw, &t.rec))
                 .await?;
             pushed += 1;
         }
@@ -792,7 +809,11 @@ async fn in_flight(rest: &dyn Rest) -> Result<Vec<Rec<Build>>, SourceError> {
 /// widening as [`all_of`] does -- is a locator on an endpoint the contract
 /// lists without one, and is the deliberate change to make when a server that
 /// pages this is actually met.
-async fn scope(rest: &dyn Rest, cfg: &TeamCityConfig) -> Result<Vec<Rec<BuildType>>, SourceError> {
+async fn scope(
+    rest: &dyn Rest,
+    cfg: &TeamCityConfig,
+    tree: &ProjectTree,
+) -> Result<Vec<Rec<BuildType>>, SourceError> {
     let page = rest.build_types().await?;
     if page.more {
         return Err(SourceError::protocol(format!(
@@ -808,7 +829,7 @@ async fn scope(rest: &dyn Rest, cfg: &TeamCityConfig) -> Result<Vec<Rec<BuildTyp
     Ok(page
         .items
         .into_iter()
-        .filter(|t| in_scope_type(cfg, &t.rec))
+        .filter(|t| in_scope_type(cfg, tree, &t.rec))
         .collect())
 }
 
@@ -818,12 +839,38 @@ fn type_id_of(b: &Build) -> Option<&str> {
         .or_else(|| b.build_type.as_ref().map(|t| t.id.as_str()))
 }
 
-fn in_scope_type(cfg: &TeamCityConfig, t: &BuildType) -> bool {
+/// The project tree, read on the first call of a run and kept for the rest.
+///
+/// Refused when the listing reports a further page, for [`scope`]'s reason:
+/// a tree read in part would silently drop subprojects from the scope.
+async fn read_tree<'a>(
+    rest: &dyn Rest,
+    slot: &'a mut Option<ProjectTree>,
+) -> Result<&'a ProjectTree, SourceError> {
+    if slot.is_none() {
+        let page = rest.projects().await?;
+        if page.more {
+            return Err(SourceError::protocol(format!(
+                "teamcity: `/app/rest/projects` answered {} projects and reported a further \
+                 page. This adapter asks that endpoint for the whole tree and has no second \
+                 request to make for the rest, so carrying on would leave subprojects out of \
+                 the scope and paths short. Refusing instead.",
+                page.items.len()
+            )));
+        }
+        *slot = Some(ProjectTree::new(page.items));
+    }
+    Ok(slot.as_ref().expect("filled above"))
+}
+
+/// Whether a configured project, or a project beneath one (#849), holds `p`.
+fn in_projects(cfg: &TeamCityConfig, tree: &ProjectTree, p: Option<&str>) -> bool {
+    cfg.project_ids.is_empty() || p.is_some_and(|p| tree.within(p, &cfg.project_ids))
+}
+
+fn in_scope_type(cfg: &TeamCityConfig, tree: &ProjectTree, t: &BuildType) -> bool {
     (cfg.build_type_ids.is_empty() || cfg.build_type_ids.iter().any(|id| id == &t.id))
-        && (cfg.project_ids.is_empty()
-            || t.project_id
-                .as_deref()
-                .is_some_and(|p| cfg.project_ids.iter().any(|x| x == p)))
+        && in_projects(cfg, tree, t.project_id.as_deref())
 }
 
 /// The same scope, applied to a build.
@@ -832,13 +879,12 @@ fn in_scope_type(cfg: &TeamCityConfig, t: &BuildType) -> bool {
 /// builds from outside the scope -- project filtering has no locator dimension
 /// in the contract, so it happens here, off the nested `buildType(projectId)`
 /// the `fields=` selector asks for.
-fn in_scope_build(cfg: &TeamCityConfig, b: &Build) -> bool {
+fn in_scope_build(cfg: &TeamCityConfig, tree: &ProjectTree, b: &Build) -> bool {
     let type_id = type_id_of(b);
     let project = b.build_type.as_ref().and_then(|t| t.project_id.as_deref());
     (cfg.build_type_ids.is_empty()
         || type_id.is_some_and(|id| cfg.build_type_ids.iter().any(|x| x == id)))
-        && (cfg.project_ids.is_empty()
-            || project.is_some_and(|p| cfg.project_ids.iter().any(|x| x == p)))
+        && in_projects(cfg, tree, project)
 }
 
 #[cfg(test)]
@@ -868,6 +914,9 @@ mod tests {
         /// Does `/app/rest/buildTypes` report a page after the one it serves?
         /// No TeamCity has been seen to; `scope` refuses one that does.
         paged_build_types: bool,
+        /// `/app/rest/projects` (#849). `None` answers the flat tree the
+        /// configurations name: each `projectId` straight under `_Root`.
+        projects: Option<Vec<serde_json::Value>>,
         /// A server that never sends `nextHref` at all -- see
         /// [`FakeRest::silent`].
         silent: bool,
@@ -904,6 +953,7 @@ mod tests {
                 order: PageOrder::NewestFirst,
                 cap: None,
                 paged_build_types: false,
+                projects: None,
                 silent: false,
                 calls: Mutex::new(Vec::new()),
             }
@@ -973,6 +1023,12 @@ mod tests {
             self
         }
 
+        /// A server with this project tree (#849).
+        fn with_projects(mut self, projects: Vec<serde_json::Value>) -> Self {
+            self.projects = Some(projects);
+            self
+        }
+
         fn calls(&self) -> Vec<String> {
             self.calls.lock().expect("not poisoned").clone()
         }
@@ -1011,6 +1067,36 @@ mod tests {
                     })
                     .collect(),
                 more: self.paged_build_types,
+            })
+        }
+        async fn projects(&self) -> Result<Page<crate::rest::Project>, SourceError> {
+            self.calls
+                .lock()
+                .expect("not poisoned")
+                .push("projects".to_owned());
+            let listed = self.projects.clone().unwrap_or_else(|| {
+                let mut ids: Vec<String> = self
+                    .build_types
+                    .iter()
+                    .filter_map(|t| t["projectId"].as_str().map(str::to_owned))
+                    .collect();
+                ids.sort();
+                ids.dedup();
+                std::iter::once(serde_json::json!({ "id": "_Root", "name": "<Root project>" }))
+                    .chain(ids.into_iter().map(|id| {
+                        serde_json::json!({ "id": id, "name": id, "parentProjectId": "_Root" })
+                    }))
+                    .collect()
+            });
+            Ok(Page {
+                items: listed
+                    .into_iter()
+                    .map(|raw| Rec {
+                        rec: serde_json::from_value(raw.clone()).expect("fixture parses"),
+                        raw,
+                    })
+                    .collect(),
+                more: false,
             })
         }
         async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
@@ -1357,6 +1443,7 @@ mod tests {
             [
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
+                "projects",
                 "buildTypes",
                 concat!(
                     "buildType:(id:Ledger_Deploy_Staging),state:finished,",
@@ -1409,10 +1496,11 @@ mod tests {
         assert_eq!(second, first, "byte-identical, not merely equivalent");
         // Three requests and no `/buildTypes`: an idle poll costs the
         // ceiling, the in-flight query and the finished one, in that order.
-        // (The full sync above made four: those three, with the listing and
-        // one per-configuration query in place of the last.)
+        // (The full sync above made five: those three, with the project
+        // tree, the listing and one per-configuration query in place of the
+        // last. An unscoped source reads no tree when nothing moved, #849.)
         assert_eq!(
-            rest.calls()[4..],
+            rest.calls()[5..],
             [
                 "defaultFilter:false,count:100",
                 "state:(queued:true,running:true),count:100",
@@ -1536,6 +1624,92 @@ mod tests {
             items.iter().any(|i| i.entity.key == "build:1188"),
             "the in-flight poll is global, so its result is filtered client-side"
         );
+    }
+
+    /// A nested TeamCity (#849): `Payments` holds `Payouts`, which holds
+    /// `Deploy`, and `Data` sits beside it.
+    fn nested() -> FakeRest {
+        FakeRest::new(
+            vec![
+                build_type("Payout_Build", "Payments_Payouts"),
+                build_type("Payout_Deploy_Prod", "Payments_Payouts_Deploy"),
+                build_type("Dbt_Test", "Data"),
+            ],
+            vec![
+                build(10, "Payout_Build", "Payments_Payouts", "finished"),
+                build(11, "Payout_Deploy_Prod", "Payments_Payouts_Deploy", "finished"),
+                build(12, "Dbt_Test", "Data", "finished"),
+                build(13, "Payout_Deploy_Prod", "Payments_Payouts_Deploy", "running"),
+            ],
+        )
+        .with_projects(vec![
+            serde_json::json!({ "id": "_Root", "name": "<Root project>" }),
+            serde_json::json!({ "id": "Payments", "name": "Payments", "parentProjectId": "_Root" }),
+            serde_json::json!({ "id": "Payments_Payouts", "name": "Payouts", "parentProjectId": "Payments" }),
+            serde_json::json!({ "id": "Payments_Payouts_Deploy", "name": "Deploy", "parentProjectId": "Payments_Payouts" }),
+            serde_json::json!({ "id": "Data", "name": "Data", "parentProjectId": "_Root" }),
+        ])
+    }
+
+    /// A configured project takes in its subprojects at every depth (#849):
+    /// configurations two levels down, their finished builds and their
+    /// running ones, which the global in-flight poll places by the tree.
+    #[tokio::test]
+    async fn a_configured_project_takes_in_its_subprojects_at_every_depth() {
+        let cfg = TeamCityConfig::from_json(&serde_json::json!({ "project_ids": ["Payments"] }))
+            .expect("config");
+        let rest = nested();
+        let (items, first) = run(&rest, &cfg, None).await;
+        let mut got = keys(&items);
+        got.sort();
+        assert_eq!(
+            got,
+            [
+                "build:10",
+                "build:11",
+                "build:13",
+                "buildType:Payout_Build",
+                "buildType:Payout_Deploy_Prod"
+            ]
+        );
+        assert_eq!(
+            rest.calls().iter().filter(|c| *c == "projects").count(),
+            1,
+            "the tree is read once a run"
+        );
+        // An incremental run that saw builds reads it again, to place them.
+        let (_, _) = run(&rest, &cfg, Some(first)).await;
+        assert_eq!(rest.calls().iter().filter(|c| *c == "projects").count(), 2);
+    }
+
+    /// Every configuration a run emits carries its chain of projects, below
+    /// the root and outermost first (#849): what the pipeline's declared
+    /// `group_path` reads.
+    #[tokio::test]
+    async fn a_configuration_carries_its_project_path() {
+        let (items, _) = run(&nested(), &TeamCityConfig::default(), None).await;
+        let path = |key: &str| {
+            items
+                .iter()
+                .find(|i| i.entity.key == key)
+                .map(|i| i.payload["projectPath"].clone())
+                .expect(key)
+        };
+        assert_eq!(
+            path("buildType:Payout_Deploy_Prod"),
+            serde_json::json!([
+                { "id": "Payments", "name": "Payments" },
+                { "id": "Payments_Payouts", "name": "Payouts" },
+                { "id": "Payments_Payouts_Deploy", "name": "Deploy" },
+            ])
+        );
+        assert_eq!(
+            path("buildType:Dbt_Test"),
+            serde_json::json!([{ "id": "Data", "name": "Data" }])
+        );
+        // A build's own record is left verbatim.
+        let b = items.iter().find(|i| i.entity.key == "build:12").expect("build");
+        assert!(b.payload.get("projectPath").is_none());
     }
 
     /// A scoped source must not be held back by a build it will never emit.
@@ -2132,6 +2306,9 @@ mod tests {
         }
         async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
             self.snapshot(&self.before).build_types().await
+        }
+        async fn projects(&self) -> Result<Page<crate::rest::Project>, SourceError> {
+            self.snapshot(&self.before).projects().await
         }
         async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError> {
             let at_t0 = {

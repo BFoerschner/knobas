@@ -109,6 +109,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// `finishDate`, all of them in the record `BUILD_FIELDS` already fetches.
 /// TeamCity writes its dates in ISO 8601's basic form (`20260822T102000+0000`).
 ///
+/// **A pipeline's chain of groups** (#849) is its `projectPath`, which the
+/// sync writes beside the record from `/app/rest/projects`
+/// (`crate::projects`): every project from below the root down to the
+/// configuration's own, by name.
+///
 /// **A build ran on its revisions** (#710): `revisions.revision[].version`,
 /// one full sha per VCS root, which is what the detail of a pull request, a
 /// branch or a commit finds the builds of its commit by.
@@ -145,6 +150,10 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             frame: Some(Frame::Pipeline),
             name: vec![PayloadPath::of(["name"])],
             group: vec![PayloadPath::of(["projectName"])],
+            group_path: vec![ListPath {
+                at: PayloadPath::of(["projectPath"]),
+                entry: PayloadPath::of(["name"]),
+            }],
             pipeline: vec![PayloadPath::of(["id"])],
             ..KindPaths::default()
         },
@@ -345,6 +354,21 @@ mod tests {
             resolve_string(&config, &pipeline.group).as_deref(),
             Some("Payout")
         );
+        // The chain of projects the sync writes beside the record (#849),
+        // outermost first, by name; a record without one has no chain.
+        let nested = serde_json::json!({
+            "id": "Payout_Deploy_Prod", "name": "Deploy to prod",
+            "projectPath": [
+                { "id": "Payments", "name": "Payments" },
+                { "id": "Payments_Payouts", "name": "Payouts" },
+                { "id": "Payments_Payouts_Deploy", "name": "Deploy" }
+            ]
+        });
+        assert_eq!(
+            knobas_core::payload::resolve_list(&nested, &pipeline.group_path),
+            ["Payments", "Payouts", "Deploy"]
+        );
+        assert!(knobas_core::payload::resolve_list(&config, &pipeline.group_path).is_empty());
         assert_eq!(
             resolve_string(&config, &pipeline.pipeline),
             resolve_string(&build, &run.pipeline),

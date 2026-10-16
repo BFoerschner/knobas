@@ -62,6 +62,13 @@ pub(crate) const BUILD_ID_FIELDS: &str = "id";
 pub(crate) const BUILD_TYPE_FIELDS: &str =
     "count,nextHref,buildType(id,name,projectId,projectName,description)";
 
+/// What `/app/rest/projects` is asked for (#849): each project's id, its
+/// name, and the project it sits in, which is the whole tree in one listing.
+/// What the sync reads to write a configuration's `projectPath` and to take a
+/// configured project's subprojects into the scope. `nextHref` for the reason
+/// every collection selector asks for it (issue #114).
+pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentProjectId)";
+
 /// What `/app/rest/builds` is asked for. The nested `buildType(...)` is what
 /// makes client-side project scoping possible: the locator grammar has no
 /// project dimension.
@@ -429,7 +436,7 @@ pub(crate) struct VcsRoot {
 /// One type for both collections -- the element key is the only difference.
 #[derive(Debug, Clone, serde::Deserialize)]
 pub(crate) struct ListEnvelope {
-    #[serde(default, rename = "build", alias = "buildType")]
+    #[serde(default, rename = "build", alias = "buildType", alias = "project")]
     pub items: Vec<serde_json::Value>,
     /// **The server's own statement that this page is not the whole answer**,
     /// and the one thing in the response that says so (issue #114).
@@ -491,6 +498,16 @@ pub(crate) struct BuildType {
     /// Prose a human wrote about the configuration, and part of what
     /// `map::build_config_item` puts in the search blob.
     pub description: Option<String>,
+}
+
+/// One project as [`PROJECT_FIELDS`] answers it (#849). The server's own
+/// root project is `_Root` and has no parent.
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct Project {
+    pub id: String,
+    pub name: Option<String>,
+    pub parent_project_id: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1105,6 +1122,10 @@ mod tests {
                  on every configuration"
             );
         }
+        // The tree (#849): `crate::projects` reads all three.
+        for needed in ["project(", "id", "name", "parentProjectId"] {
+            assert!(PROJECT_FIELDS.contains(needed), "PROJECT_FIELDS misses {needed}");
+        }
         assert!(SERVER_FIELDS.contains("version"));
         assert!(USER_FIELDS.contains("username"));
         // Every collection selector must ask for `count` and `nextHref` too,
@@ -1118,7 +1139,7 @@ mod tests {
         // selector would put every walk back on the page-length assumption
         // alone, silently, with the suite still green because the fakes
         // answer the field either way.
-        for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS] {
+        for f in [BUILD_FIELDS, BUILD_TYPE_FIELDS, PROJECT_FIELDS] {
             assert!(
                 f.starts_with("count,nextHref,"),
                 "{f:?} must select the envelope, `nextHref` included: without it the server \

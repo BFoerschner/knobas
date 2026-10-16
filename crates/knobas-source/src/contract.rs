@@ -800,13 +800,14 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::FINISHED, &paths.finished, Wanted::Instant),
         ];
         // The list fields: who a review is asked of, the commits a build ran
-        // on (#710), a ticket's labels and its sprints' states (#811). One
-        // rule for all four.
-        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 4] = [
+        // on (#710), a ticket's labels and its sprints' states (#811), a
+        // pipeline's chain of groups (#849). One rule for all five.
+        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 5] = [
             (field::REVIEWERS, &paths.reviewers),
             (field::REVISION, &paths.revision),
             (field::LABELS, &paths.labels),
             (field::SPRINT_STATE, &paths.sprint_state),
+            (field::GROUP_PATH, &paths.group_path),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants

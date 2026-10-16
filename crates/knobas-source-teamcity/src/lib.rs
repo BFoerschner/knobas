@@ -35,6 +35,7 @@ mod descriptor;
 mod http;
 mod ids;
 mod map;
+mod projects;
 mod rest;
 mod source;
 mod sync;

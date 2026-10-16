@@ -298,6 +298,15 @@ pub struct KindPaths {
     /// TeamCity project, a Jenkins folder. TeamCity's `projectName`.
     #[serde(default)]
     pub group: Vec<PayloadPath>,
+    /// The chain of groups a pipeline sits in, **outermost first**, ending in
+    /// the one [`group`](Self::group) names (#849, R-9.3): a TeamCity project
+    /// and every project above it, below the server's root. What the Builds
+    /// list draws its project tree from. A list of names, so a [`ListPath`];
+    /// TeamCity's `projectPath[].name`, which the adapter writes beside the
+    /// record from `/app/rest/projects`. Empty for every kind that is not a
+    /// pipeline, and a miss draws the pipeline under its `group` alone.
+    #[serde(default)]
+    pub group_path: Vec<ListPath>,
     /// The pipeline's identity as **both** of its kinds spell it (#848): on a
     /// pipeline its own id, on a run the id of the pipeline it ran. A run
     /// belongs to the pipeline of its own source whose `pipeline` is equal.
@@ -434,6 +443,7 @@ pub mod field {
     pub const ESTIMATE: &str = "estimate";
     pub const NAME: &str = "name";
     pub const GROUP: &str = "group";
+    pub const GROUP_PATH: &str = "group_path";
     pub const PIPELINE: &str = "pipeline";
     pub const NUMBER: &str = "number";
     pub const BRANCH: &str = "branch";
@@ -466,6 +476,7 @@ pub mod field {
         ESTIMATE,
         NAME,
         GROUP,
+        GROUP_PATH,
         PIPELINE,
         NUMBER,
         BRANCH,
