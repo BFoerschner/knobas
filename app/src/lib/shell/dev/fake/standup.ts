@@ -20,8 +20,15 @@
  *   PR, not invented here).
  * - Prototype-6 draws the protocol as an attendee list with notes per person
  *   and action items; `Protocol` is a note id, a page title and a
- *   `publication`. Those people and items are the note's body, which the
- *   notes commands carry, and not this module's.
+ *   `publication`. Those people and items are the note's body, seeded here
+ *   into `notes.ts`'s store (`seedNote`) the way the backend makes the note
+ *   on first read, and then read and saved through the notes commands. The
+ *   body is prototype-6's: four of five people there, two notes, two action
+ *   items. Lena Hoffmann, absent in the prototype, is not in it: the body
+ *   records who was there, not who was not.
+ * - Prototype-6's first action item already has OPS-131; here neither has a
+ *   ticket until *Create ticket*, because which item a ticket was filed for is
+ *   not stored anywhere.
  * - The publish target is the mock source and a page id, not "Confluence,
  *   Payments > Standups": the fixture has no Confluence source (`sources.ts`).
  * - A publish and an action-item ticket start `pending` and read `sent` on the
@@ -31,6 +38,7 @@
 import type { Handler } from "../fake-tauri";
 import type { ActionItemTicket, DigestLine, Protocol, PublishTarget } from "../../../ipc/entity";
 import { CORPUS } from "./corpus";
+import { seedNote } from "./notes";
 
 /** The mirror's title for an entity, else the given one. */
 function titled(entityId: string, fallback: string): string {
@@ -56,6 +64,31 @@ function line(
   };
 }
 
+/** prototype-6's protocol, in the shape `knobas_app::protocol::template_of` starts. */
+function protocolBody(day: string): string {
+  return [
+    `# Standup ${day}`,
+    "",
+    "## Attendees",
+    "",
+    "- Mara Lindqvist",
+    "- Jonas Becker",
+    "- Priya Nair",
+    "- Tomasz Wójcik",
+    "",
+    "## Notes",
+    "",
+    "- Mara Lindqvist: PAY-231 retries done, review open. PAY-240 next.",
+    "- Tomasz Wójcik: Runbook update this afternoon.",
+    "",
+    "## Action items",
+    "",
+    "- [ ] Update the on-call runbook for the new ledger topology (Tomasz Wójcik)",
+    "- [ ] Decide the manual-review SLA (Priya Nair)",
+    "",
+  ].join("\n");
+}
+
 /** `HH:MM` on `day`, as the instant the browser's clock reads it. */
 function on(day: string, hour: number, minute: number): string {
   const at = new Date(`${day}T00:00:00`);
@@ -70,7 +103,11 @@ export function handlers(): Record<string, Handler> {
   /** Writes by id, and how many times each was asked about. */
   const asked = new Map<number, number>();
 
-  const protocol = (day: string): Protocol => ({
+  const protocol = (day: string): Protocol => {
+    seedNote(`note:standup-${day}`, `Standup ${day}`, protocolBody(day));
+    return protocolOf(day);
+  };
+  const protocolOf = (day: string): Protocol => ({
     day,
     note_id: `note:standup-${day}`,
     page_title: day,

@@ -1,8 +1,8 @@
 <!--
   The Time view (#827, R-13.4): its header with *Log all…*, the three tabs,
   and the tab the address names. `#/time` and `#/time/<date>` are the Day;
-  `#/time/week` and `#/time/week/<date>` the Week (#828); `#/time/standup` is
-  #829's and says so until it lands.
+  `#/time/week` and `#/time/week/<date>` the Week (#828); `#/time/standup` the
+  Standup (#829).
 
   *Log all…* previews the week on screen: the Week's, or the week the Day's
   date falls in (#828). The worklogs it queues are followed here, so one that
@@ -19,7 +19,9 @@
   import { layers } from "../layers.svelte";
   import TfDay from "./TfDay.svelte";
   import TfLogAll from "./TfLogAll.svelte";
+  import TfStandup from "./TfStandup.svelte";
   import TfWeek from "./TfWeek.svelte";
+  import { protocolDay } from "./standup-view";
 
   let {
     ready = true,
@@ -78,7 +80,11 @@
 <header class="tf-fhead">
   <div>
     <h1>Time</h1>
-    <div class="tf-sub">What you tracked, what knobas saw while you worked, and what is still to log to Jira.</div>
+    <div class="tf-sub">
+      {tab === "standup"
+        ? `Your standup for ${protocolDay(dayKey(new Date()))}, from what knobas saw since your last working day.`
+        : "What you tracked, what knobas saw while you worked, and what is still to log to Jira."}
+    </div>
   </div>
   {#if tab !== "standup"}
     <div class="tf-acts"><button class="tf-btn tf-primary" onclick={openLogAll}>Log all…</button></div>
@@ -95,9 +101,7 @@
   {:else if tab === "week"}
     <TfWeek databaseReady={ready} {week} {timer} {revision} />
   {:else}
-    <div class="tf-tm-empty">
-      <p>Standup is not built in the new shell yet. The rooms UI still has it.</p>
-    </div>
+    <TfStandup databaseReady={ready} />
   {/if}
 </div>
 {#if logAll !== null}

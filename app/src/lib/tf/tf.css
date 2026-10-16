@@ -563,6 +563,34 @@ a.tf-r:hover { background: var(--sheet-2); }
   width: 100%; resize: vertical; font: inherit; border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--paper); color: var(--ink);
 }
 
+/* ---------- time: the Standup tab (#829) ---------- */
+.tf-su { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tf-su-body { padding: 4px 14px 14px; }
+.tf-su-body h4 { font-size: var(--t-sm); margin: 12px 0 4px; color: var(--ink-2); font-weight: 600; }
+.tf-su-body ul { margin: 0; padding: 0; list-style: none; }
+.tf-su-body li > a, .tf-su-body li > span { display: block; padding: 5px 6px; border-radius: 4px; color: var(--ink); text-decoration: none; line-height: 1.4; }
+.tf-su-body li > a:hover { background: var(--sheet-2); }
+.tf .tf-su-none { margin: 0; padding: 5px 6px; color: var(--ink-2); font-size: var(--t-sm); }
+.tf-su-day { font-size: var(--t-sm); }
+.tf-su-people { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+.tf-su-val {
+  border: 1px solid var(--rule); background: var(--sheet); color: var(--ink-2); border-radius: 3px;
+  padding: 2px 8px; font-size: var(--t-sm); line-height: 1.35; cursor: pointer;
+}
+.tf-su-val:hover { border-color: var(--ink-2); color: var(--ink); }
+.tf-su-val[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--sheet); }
+.tf-su-add { border: 1px solid var(--rule); border-radius: 4px; padding: 2px 8px; background: var(--paper); color: var(--ink); font-size: var(--t-sm); }
+.tf-su-add.tf-su-wide { width: 100%; margin: 6px 0; }
+.tf-su-pn { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-sm); color: var(--ink-2); margin-top: 8px; }
+.tf-su-pn textarea { border: 1px solid var(--rule); border-radius: 4px; padding: 6px 8px; background: var(--paper); color: var(--ink); font: inherit; font-size: var(--t-md); resize: vertical; }
+.tf .tf-su-gap { margin-top: 12px; }
+.tf-su-ai { display: flex; gap: 8px; align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule-2); font-size: var(--t-md); }
+.tf-su-ai > span:first-child { flex: 1; }
+.tf-su-done { text-decoration: line-through; color: var(--ink-2); }
+.tf .tf-su-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 10px 0 0; }
+.tf .tf-su-foot a { text-decoration: underline; }
+@media (max-width: 900px) { .tf-su { grid-template-columns: 1fr; } }
+
 /* ---------- toasts: ink on the page, rising 20px into place ---------- */
 .tf-toasts {
   position: fixed; left: 50%; bottom: 44px; transform: translateX(-50%); z-index: 40;
