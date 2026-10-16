@@ -1271,6 +1271,18 @@ pub struct RunRow {
     /// The source's own timestamp for the row, what runs are ordered by.
     pub updated_at: Option<DateTime<Utc>>,
     pub web_url: Option<String>,
+    /// How the run was started (#961): the declared `trigger`, in the
+    /// shell's words.
+    pub trigger: Option<knobas_core::payload::Trigger>,
+    /// Who started it, as the source spells the account: the declared
+    /// `started_by`. A run a change or a schedule started has none.
+    pub started_by: Option<String>,
+    /// Whether `started_by` is one of the configured usernames, the identity
+    /// behind `@me` (*Started by me*, *you*).
+    pub started_by_me: bool,
+    /// The commit it built: the first of the declared `revision`s (#710), a
+    /// full sha.
+    pub revision: Option<String>,
 }
 
 /// One pipeline in the Builds list (R-9.4a, #848).
@@ -1343,7 +1355,13 @@ macro_rules! run_columns {
             knobas_core::declared_string!("$1", "started"),
             " as started, ",
             knobas_core::declared_string!("$1", "finished"),
-            " as finished"
+            " as finished, ",
+            knobas_core::declared_trigger!("$1"),
+            " as trig, ",
+            knobas_core::declared_string!("$1", "started_by"),
+            " as started_by, (select l.value from ",
+            knobas_core::declared_list!("$1", "revision"),
+            " l limit 1) as revision"
         )
     };
 }
@@ -1400,7 +1418,9 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
        coalesce((select jsonb_agg(jsonb_build_object(
                    'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
                    'branch', r.branch, 'started', r.started, 'finished', r.finished,
-                   'updated_at', r.item_updated_at, 'web_url', r.web_url) order by r.rn)
+                   'updated_at', r.item_updated_at, 'web_url', r.web_url,
+                   'trigger', r.trig, 'started_by', r.started_by,
+                   'revision', r.revision) order by r.rn)
                    from r
                   where r.source_id = p.source_id and r.pkey = p.pkey and r.rn <= $2),
                 '[]'::jsonb) as recent
@@ -1451,15 +1471,30 @@ struct RawRun {
     finished: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     web_url: Option<String>,
+    #[serde(default)]
+    trigger: Option<knobas_core::payload::Trigger>,
+    #[serde(default)]
+    started_by: Option<String>,
+    #[serde(default)]
+    revision: Option<String>,
 }
 
-impl From<RawRun> for RunRow {
-    fn from(raw: RawRun) -> Self {
+impl RunRow {
+    /// A run as a statement or a source answered it, `identity` being the
+    /// configured usernames ([`identity_of`]).
+    fn read(raw: RawRun, identity: &[String]) -> Self {
         let instant =
             |t: Option<String>| t.as_deref().and_then(knobas_core::payload::parse_instant);
         let started = instant(raw.started);
         let finished = instant(raw.finished);
         RunRow {
+            started_by_me: raw
+                .started_by
+                .as_ref()
+                .is_some_and(|who| identity.contains(who)),
+            trigger: raw.trigger,
+            started_by: raw.started_by,
+            revision: raw.revision,
             entity_id: raw.entity_id,
             number: raw.number,
             state: raw.state,
@@ -1482,6 +1517,7 @@ impl From<RawRun> for RunRow {
 /// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
 pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError> {
     let declarations = declared_paths(pool).await?;
+    let identity = identity_of(pool).await?;
     let rows = sqlx::query(PIPELINES)
         .bind(declarations.as_param())
         .bind(PIPELINE_RECENT)
@@ -1500,7 +1536,11 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
                 path: path.0,
                 pinned: row.get("pinned"),
                 web_url: row.get("web_url"),
-                recent: recent.0.into_iter().map(RunRow::from).collect(),
+                recent: recent
+                    .0
+                    .into_iter()
+                    .map(|raw| RunRow::read(raw, &identity))
+                    .collect(),
             })
         })
         .collect()
@@ -1521,6 +1561,7 @@ pub async fn pipeline_runs_inner(
 ) -> Result<Vec<RunRow>, IpcError> {
     let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
     let declarations = declared_paths(pool).await?;
+    let identity = identity_of(pool).await?;
     let rows = sqlx::query(PIPELINE_RUNS_OF)
         .bind(declarations.as_param())
         .bind(entity.to_string())
@@ -1536,18 +1577,28 @@ pub async fn pipeline_runs_inner(
         .iter()
         .filter_map(|row| {
             let entity_id: Option<String> = row.get("entity_id");
-            Some(RunRow::from(RawRun {
-                entity_id: entity_id?,
-                number: row.get("number"),
-                state: row
-                    .get::<Option<sqlx::types::Json<knobas_core::payload::StateChip>>, _>("state")
-                    .map(|chip| chip.0),
-                branch: row.get("branch"),
-                started: row.get("started"),
-                finished: row.get("finished"),
-                updated_at: row.get("item_updated_at"),
-                web_url: row.get("web_url"),
-            }))
+            Some(RunRow::read(
+                RawRun {
+                    entity_id: entity_id?,
+                    number: row.get("number"),
+                    state: row
+                        .get::<Option<sqlx::types::Json<knobas_core::payload::StateChip>>, _>(
+                            "state",
+                        )
+                        .map(|chip| chip.0),
+                    branch: row.get("branch"),
+                    started: row.get("started"),
+                    finished: row.get("finished"),
+                    updated_at: row.get("item_updated_at"),
+                    web_url: row.get("web_url"),
+                    trigger: row
+                        .get::<Option<String>, _>("trig")
+                        .and_then(|word| serde_json::from_value(serde_json::Value::String(word)).ok()),
+                    started_by: row.get("started_by"),
+                    revision: row.get("revision"),
+                },
+                &identity,
+            ))
         })
         .collect())
 }
@@ -1591,24 +1642,31 @@ const OLDER_RUNS: u32 = 50;
 /// declarations put outside the run frame.
 fn run_of_item(
     declarations: &knobas_core::payload::Declarations,
+    identity: &[String],
     item: &knobas_source::SyncItem,
 ) -> Option<RunRow> {
-    use knobas_core::payload::{Frame, resolve_state, resolve_string};
+    use knobas_core::payload::{Frame, resolve_list, resolve_state, resolve_string, resolve_trigger};
     let paths = declarations.get(&item.entity.namespace, &item.kind)?;
     if paths.frame != Some(Frame::Run) {
         return None;
     }
     let payload = &item.payload;
-    Some(RunRow::from(RawRun {
-        entity_id: item.entity.to_string(),
-        number: resolve_string(payload, &paths.number),
-        state: resolve_state(payload, &paths.state),
-        branch: resolve_string(payload, &paths.branch),
-        started: resolve_string(payload, &paths.started),
-        finished: resolve_string(payload, &paths.finished),
-        updated_at: item.updated_at,
-        web_url: item.web_url.clone(),
-    }))
+    Some(RunRow::read(
+        RawRun {
+            entity_id: item.entity.to_string(),
+            number: resolve_string(payload, &paths.number),
+            state: resolve_state(payload, &paths.state),
+            branch: resolve_string(payload, &paths.branch),
+            started: resolve_string(payload, &paths.started),
+            finished: resolve_string(payload, &paths.finished),
+            updated_at: item.updated_at,
+            web_url: item.web_url.clone(),
+            trigger: resolve_trigger(payload, &paths.trigger),
+            started_by: resolve_string(payload, &paths.started_by),
+            revision: resolve_list(payload, &paths.revision).into_iter().next(),
+        },
+        identity,
+    ))
 }
 
 /// A pipeline's runs older than the run `before`, asked of its source: the
@@ -1641,6 +1699,7 @@ pub async fn older_pipeline_runs_inner(
     }
     let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
     live_pipeline(pool, &declarations, &entity).await?;
+    let identity = identity_of(pool).await?;
     let count = limit
         .unwrap_or(OLDER_RUNS)
         .clamp(1, knobas_source::pipeline::OLDER_RUNS_MAX);
@@ -1657,7 +1716,7 @@ pub async fn older_pipeline_runs_inner(
     Ok(items
         .iter()
         .filter(|item| item.entity != run)
-        .filter_map(|item| run_of_item(&declarations, item))
+        .filter_map(|item| run_of_item(&declarations, &identity, item))
         .take(count as usize)
         .collect())
 }
@@ -1714,6 +1773,7 @@ pub async fn run_chain_inner(
 ) -> Result<Vec<ChainStepRow>, IpcError> {
     let run = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
     let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    let identity = identity_of(pool).await?;
     let steps = crate::sources::crud::run_chain(pool, secrets, registry, &run.to_string())
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&run.namespace)))?;
@@ -1725,7 +1785,7 @@ pub async fn run_chain_inner(
             run: step
                 .run
                 .as_ref()
-                .and_then(|item| run_of_item(&declarations, item)),
+                .and_then(|item| run_of_item(&declarations, &identity, item)),
         })
         .collect())
 }

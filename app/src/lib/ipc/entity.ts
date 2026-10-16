@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 // write-back is an operation on an entity, which is why `submitWrite` is here;
 // what it hands over and what comes back are the queue's, and a second
 // declaration of either would be two shapes for one wire format.
-import type { BuildParameter, QueuedWrite, ReviewSide, WriteOpPayload, WriteState } from "./sources";
+import type { BuildParameter, QueuedWrite, ReviewSide, Trigger, WriteOpPayload, WriteState } from "./sources";
 // A day is a day wherever it is asked for: the digest takes the same
 // `DayWindow` the timesheet does rather than declaring a second shape for one
 // wire format, which is the rule the import above follows for the queue's.
@@ -466,6 +466,14 @@ export interface RunRow {
   /** The source's own timestamp, what runs are ordered by. */
   updated_at: string | null;
   web_url: string | null;
+  /** How it was started (#961), or `null` where the declaration misses. */
+  trigger: Trigger | null;
+  /** Who started it, as the source spells the account; none for a change or a schedule. */
+  started_by: string | null;
+  /** Whether `started_by` is one of the configured usernames (*Started by me*, *you*). */
+  started_by_me: boolean;
+  /** The commit it built, a full sha: the first declared revision. */
+  revision: string | null;
 }
 
 /**
