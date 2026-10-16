@@ -1103,6 +1103,11 @@ export type ViewBlock =
       binary: boolean;
       /** The file's page at its source. */
       url: string | null;
+      /**
+       * The file's blob sha at the ref drawn (#883): what an edit of it sends
+       * as `CommitFile`'s `base_sha`. `null` where the source has none.
+       */
+      sha: string | null;
     };
 
 /**

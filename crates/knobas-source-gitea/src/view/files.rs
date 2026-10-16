@@ -14,7 +14,8 @@
 //! [`BYTE_CAP`] bytes and [`LINE_CAP`] lines, cut at a line; either says it
 //! was cut and where the rest is (ADR-0020 rule 6). A file with a NUL byte in
 //! its first [`SNIFF`] bytes is binary (git's own test) and is drawn as its
-//! size and a link.
+//! size and a link. Beside its bytes, a file's own `contents-ext` entry is read
+//! for its blob sha at the ref (#883), the base an edit of it commits against.
 
 use knobas_source::SourceError;
 use knobas_source::view::{Block, Crumb, EntryKind, TreeEntry, ViewSection};
@@ -117,7 +118,7 @@ pub(super) async fn read(
     })
 }
 
-/// One entry of a listing, as `contents` answers it.
+/// One entry of a listing, or a file's own entry, as `contents` answers it.
 #[derive(Debug, serde::Deserialize)]
 struct Listed {
     name: String,
@@ -125,6 +126,9 @@ struct Listed {
     kind: String,
     #[serde(default)]
     size: u64,
+    /// The blob sha, for a file: what an edit of it is made against.
+    #[serde(default)]
+    sha: Option<String>,
 }
 
 async fn directory(
@@ -189,6 +193,13 @@ async fn file(
     at: &str,
     path: &str,
 ) -> Result<Block, SourceError> {
+    // The file's own entry first: its blob sha at `at` (#883), and its size
+    // where a cut read cannot say. Then its bytes. Read in this order, a push
+    // between the two leaves an older blob beside newer text, and an edit
+    // made against it is held as moved (#822). The other order, or both at
+    // once, could draw a newer blob beside older text, and an edit of that
+    // text would land over the push unseen.
+    let own: Listed = source.client.file_entry_as(owner, repo, path, at).await?;
     let raw = source
         .client
         .raw_capped(owner, repo, path, at, BYTE_CAP)
@@ -199,18 +210,9 @@ async fn file(
     } else {
         capped(&raw.bytes, raw.cut)
     };
-    let size = match raw.size {
-        Some(size) => size,
-        // Cut, and the answer had no length (a compressing proxy): the
-        // file's own entry says, rather than the megabyte that was read.
-        None => {
-            let listed: Listed = source
-                .client
-                .contents_entry_as(owner, repo, path, at)
-                .await?;
-            listed.size
-        }
-    };
+    // Cut, and the answer had no length (a compressing proxy): the file's
+    // own entry says, rather than the megabyte that was read.
+    let size = raw.size.unwrap_or(own.size);
     let url = page(record, at, path);
     Ok(Block::File {
         trail: trail(at, path, true),
@@ -221,6 +223,7 @@ async fn file(
         truncated,
         binary,
         url,
+        sha: own.sha,
     })
 }
 

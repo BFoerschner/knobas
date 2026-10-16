@@ -61,8 +61,15 @@ async fn listing(server: &MockServer, dir: &str, at: &str, listing: Value) {
         .await;
 }
 
-/// `raw/{file}?ref={at}` answers `body`.
+/// `raw/{file}?ref={at}` answers `body`, and the file's own
+/// `contents-ext/{file}?ref={at}` entry its size and [`blob`]`(file, at)`.
 async fn raw(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
+    own_entry(server, file, at, body.len() as u64).await;
+    raw_only(server, file, at, body).await;
+}
+
+/// `raw/{file}?ref={at}` answers `body`, and nothing else is mounted.
+async fn raw_only(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/raw/{file}")))
         .and(query_param("ref", at))
@@ -70,6 +77,40 @@ async fn raw(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
         .respond_with(ResponseTemplate::new(200).set_body_bytes(body))
         .mount(server)
         .await;
+}
+
+/// `contents-ext/{file}?ref={at}` answers the file's own entry, without
+/// its bytes: `size`, and [`blob`]`(file, at)` as its sha.
+async fn own_entry(server: &MockServer, file: &str, at: &str, size: u64) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/contents-ext/{file}")))
+        .and(query_param("ref", at))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!({ "file_contents": own(file, at, size) })),
+        )
+        .mount(server)
+        .await;
+}
+
+/// The entry [`own_entry`] answers for `file` at `at`.
+fn own(file: &str, at: &str, size: u64) -> Value {
+    let name = file.rsplit('/').next().unwrap_or(file);
+    let mut own = entry(name, file, "file", size);
+    own["sha"] = json!(blob(file, at));
+    own
+}
+
+/// The blob sha [`own_entry`] gives `file` at `at`: 40 hex digits folded
+/// from both names, so a sha read at the wrong ref shows.
+fn blob(file: &str, at: &str) -> String {
+    let fold = |seed: u64| {
+        format!("{file}@{at}").bytes().fold(seed, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    };
+    format!("{:016x}{:016x}{:08x}", fold(1), fold(2), fold(3) as u32)
 }
 
 fn source(server: &MockServer) -> Box<dyn Source> {
@@ -119,6 +160,7 @@ struct Drawn {
     truncated: bool,
     binary: bool,
     url: Option<String>,
+    sha: Option<String>,
 }
 
 fn file(section: ViewSection) -> Drawn {
@@ -132,6 +174,7 @@ fn file(section: ViewSection) -> Drawn {
             truncated,
             binary,
             url,
+            sha,
         }) => Drawn {
             trail,
             path,
@@ -141,6 +184,7 @@ fn file(section: ViewSection) -> Drawn {
             truncated,
             binary,
             url,
+            sha,
         },
         other => panic!("one file block, not {other:#?}"),
     }
@@ -374,6 +418,43 @@ async fn a_file_is_read_raw_at_the_ref() {
         drawn.url.as_deref(),
         Some(format!("{WEB}/src/branch/main/src/main.rs").as_str())
     );
+    assert_eq!(
+        drawn.sha,
+        Some(blob("src/main.rs", "main")),
+        "the blob an edit is made against, from the file's contents entry"
+    );
+}
+
+/// A branch's file is drawn with the blob the branch holds, not the default
+/// branch's (#883): the base an edit on that branch is made against.
+#[tokio::test]
+async fn a_branch_file_carries_the_blob_at_the_branch() {
+    let server = gitea().await;
+    let at = "feature/PAY-231-sepa-retry";
+    raw(&server, "retry.rs", "main", b"old\n".to_vec()).await;
+    raw(&server, "retry.rs", at, b"new\n".to_vec()).await;
+    let drawn = file(read(&server, BRANCH, "file:retry.rs").await);
+    assert_eq!(drawn.text, "new\n");
+    assert_eq!(drawn.sha, Some(blob("retry.rs", at)));
+    assert_ne!(blob("retry.rs", at), blob("retry.rs", "main"));
+}
+
+/// A Gitea from before `contents-ext` (1.24) answers its route 404: the
+/// file's `contents` entry is read for the blob instead (#883).
+#[tokio::test]
+async fn a_gitea_without_contents_ext_draws_the_blob_from_contents() {
+    let server = gitea().await;
+    raw_only(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
+    listing(
+        &server,
+        "src/main.rs",
+        "main",
+        own("src/main.rs", "main", 13),
+    )
+    .await;
+    let drawn = file(read(&server, ENTITY, "file:src/main.rs").await);
+    assert_eq!(drawn.text, "fn main() {}\n");
+    assert_eq!(drawn.sha, Some(blob("src/main.rs", "main")));
 }
 
 /// A Markdown file says so, so the shell can draw it rendered.
@@ -448,17 +529,12 @@ async fn a_cut_file_without_a_length_asks_gitea_its_size() {
         )
         .mount(&server)
         .await;
-    listing(
-        &server,
-        "big.txt",
-        "main",
-        entry("big.txt", "big.txt", "file", text.len() as u64),
-    )
-    .await;
+    own_entry(&server, "big.txt", "main", text.len() as u64).await;
     let drawn = file(read(&server, ENTITY, "file:big.txt").await);
     assert!(drawn.truncated);
     assert_eq!(drawn.text, line.repeat(1_003));
     assert_eq!(drawn.size, text.len() as u64, "the whole file's size");
+    assert_eq!(drawn.sha, Some(blob("big.txt", "main")));
 }
 
 /// A file with a NUL byte is binary: no text, its size, its page.

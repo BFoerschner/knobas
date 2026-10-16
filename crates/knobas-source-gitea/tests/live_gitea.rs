@@ -4724,3 +4724,94 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
         "{branch}: committed onto, to {fresh} with a pull request, held when moved, refused when protected"
     );
 }
+
+/// Issue #883, against the real server: the Files tab draws a file's blob
+/// sha, and it is the one an edit commits against.
+///
+/// 1. The seeded `README.md` (`auto_init`'s) read through the adapter's file
+///    view at `main` carries the `sha` Gitea's contents API answers for it.
+///    Read only; nothing touches `main`.
+/// 2. On a `knobas-` branch of this test's own, made off `main`, the file
+///    view's sha for the same file is the base of a `WriteOp::CommitFile`,
+///    which lands: the branch holds the new text, and the file view drawn
+///    again carries the blob the commit made, not the one it replaced.
+///
+/// [`Litter`] deletes the branch whether this passes or panics.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
+    use knobas_source::WriteOp;
+    use knobas_source::view::Block;
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let repo_id = format!("gitea:{}", env.full_name());
+    let drawn_file = |entity: String, section: &'static str| {
+        let source = &source;
+        async move {
+            let view = source
+                .view(&entity, Some(section))
+                .await
+                .unwrap_or_else(|error| panic!("{entity} {section}: {error:?}"))
+                .expect("drawn");
+            let Block::File { sha, text, .. } = view.sections[0].blocks[0].clone() else {
+                panic!("a file block at {entity} {section}");
+            };
+            (sha, text)
+        }
+    };
+
+    // 1. The seeded file at `main`.
+    let (on_main, _) = file_on(&http, &env, "main", "README.md").await;
+    let (sha, text) = drawn_file(repo_id.clone(), "file:README.md").await;
+    println!("LIVE README.md at main: drawn {sha:?}, contents API {on_main}");
+    assert_eq!(
+        sha.as_deref(),
+        Some(on_main.as_str()),
+        "the drawn blob is the contents API's"
+    );
+    assert!(text.starts_with(&format!("# {}", env.repo)), "{text:?}");
+
+    // 2. A commit made against the drawn blob, on a branch of this test's own.
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let branch = format!("knobas-blob-{stamp}");
+    litter.branch_off_main(&branch).await;
+    let entity = format!("{repo_id}@refs/heads/{branch}");
+    let (base, _) = drawn_file(entity.clone(), "file:README.md").await;
+    let base = base.expect("the branch's file carries its blob");
+    assert_eq!(base, on_main, "a branch off main holds main's blob");
+    let content = format!("edited against the drawn blob {stamp}\n");
+    let receipt = source
+        .write(WriteOp::CommitFile {
+            repo: repo_id.clone(),
+            branch: branch.clone(),
+            new_branch: None,
+            path: "README.md".to_owned(),
+            content: content.clone(),
+            message: format!("knobas blob check {stamp}"),
+            base_sha: base.clone(),
+        })
+        .await
+        .expect("a commit against the drawn blob lands");
+    println!("LIVE commit_file against the drawn blob: {receipt:?}");
+    let (now, text) = file_on(&http, &env, &branch, "README.md").await;
+    assert_eq!(text, content, "the branch holds the edit");
+    let (redrawn, drawn_text) = drawn_file(entity, "file:README.md").await;
+    assert_eq!(drawn_text, content);
+    assert_eq!(
+        redrawn.as_deref(),
+        Some(now.as_str()),
+        "drawn again, the file carries the commit's blob"
+    );
+    assert_ne!(now, base, "the commit made a new blob");
+    assert_eq!(
+        file_on(&http, &env, "main", "README.md").await.0,
+        on_main,
+        "main is left as it was"
+    );
+}

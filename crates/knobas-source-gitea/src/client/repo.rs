@@ -259,9 +259,59 @@ impl GiteaClient {
             .await
     }
 
+    /// `GET /repos/{o}/{r}/contents-ext/{file}?ref={at}` -- one file's own
+    /// entry at a ref without its bytes (its size and blob sha, among
+    /// others): read beside every file's [`Self::raw_capped`] for the blob an
+    /// edit is made against (#883), and its size where a cut answer did not
+    /// say how long it is.
+    ///
+    /// `contents-ext` rather than `contents`, which answers the whole file
+    /// as base64 up to Gitea's 10 MiB blob limit and walks the history for
+    /// the file's last commit: a 10 MB file came back as 13.5 MB of JSON
+    /// beside a raw read capped at 1 MB (1.27.3, measured 2026-10-16), and
+    /// `contents-ext` answered the same entry in 784 bytes. A Gitea from
+    /// before `contents-ext` (1.24) answers its route 404, and the file's
+    /// [`Self::contents_entry_as`] is read instead.
+    pub(crate) async fn file_entry_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+        file: &str,
+        at: &str,
+    ) -> Result<T, SourceError> {
+        #[derive(serde::Deserialize)]
+        struct Ext<T> {
+            file_contents: Option<T>,
+        }
+        let route = format!(
+            "/repos/{}/{}/contents-ext/{}",
+            segment(owner)?,
+            segment(repo)?,
+            escaped_path(file)?
+        );
+        match self
+            .get_json::<Ext<T>>(&route, &[("ref", at.to_owned())])
+            .await
+        {
+            Ok(Ext {
+                file_contents: Some(entry),
+            }) => Ok(entry),
+            Ok(Ext {
+                file_contents: None,
+            }) => Err(SourceError::protocol(format!(
+                "gitea: {file:?} at {at:?} is not a file"
+            ))),
+            Err(error) if error.status() == Some(404) => {
+                self.contents_entry_as(owner, repo, file, at).await
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// `GET /repos/{o}/{r}/contents/{file}?ref={at}` -- one file's own entry
-    /// at a ref (its size, among others): what a cut [`Self::raw_capped`]
-    /// read asks when Gitea's answer did not say how long the file is.
+    /// at a ref, its bytes as base64 among it: what a commit's re-read
+    /// compares (#822), and [`Self::file_entry_as`] on a Gitea without
+    /// `contents-ext`.
     pub(crate) async fn contents_entry_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,
