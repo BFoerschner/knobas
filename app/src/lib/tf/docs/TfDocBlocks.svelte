@@ -10,7 +10,7 @@
   import Self from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import type { DocBlock } from "../../ipc/entity";
-  import { headed, pageHash, panelLabel, panelTone, sectionNumbers } from "./docs";
+  import { headed, markText, pageHash, panelLabel, panelTone, sectionNumbers } from "./docs";
 
   let {
     blocks,
@@ -20,6 +20,7 @@
     onopen,
     oncopy,
     anchors = false,
+    stems = [],
   }: {
     blocks: DocBlock[];
     entityId: string;
@@ -29,6 +30,8 @@
     oncopy: (code: string) => void;
     /** Whether headings are the page's sections (the body, not a panel or a comment). */
     anchors?: boolean;
+    /** What the find bar marks (#860). */
+    stems?: string[];
   } = $props();
 
   const sections = $derived(anchors ? sectionNumbers(blocks) : new Map<number, number>());
@@ -38,23 +41,23 @@
   {#if block.type === "heading"}
     {@const n = sections.get(index)}
     <h2 id={n === undefined ? undefined : `s-${n}`}>
-      <TfDocInlines text={block.text} {onopen} />
+      <TfDocInlines text={block.text} {onopen} {stems} />
       {#if n !== undefined}
         <span class="tf-tools"><a href={pageHash(entityId, n)} title="Link to this section">#</a></span>
       {/if}
     </h2>
   {:else if block.type === "paragraph"}
-    <p><TfDocInlines text={block.text} {onopen} /></p>
+    <p><TfDocInlines text={block.text} {onopen} {stems} /></p>
   {:else if block.type === "list"}
     <svelte:element this={block.ordered ? "ol" : "ul"}>
       {#each block.items as item, i (i)}
-        <li><Self blocks={item} {entityId} {sourceName} {webUrl} {onopen} {oncopy} /></li>
+        <li><Self blocks={item} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></li>
       {/each}
     </svelte:element>
   {:else if block.type === "code"}
     {@const code = block.code}
     <pre><button type="button" class="tf-btn tf-sm tf-ghost tf-copy" onclick={() => oncopy(code)}>Copy</button><code
-        >{code}</code
+        >{#each markText(code, stems) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</code
       >{#if block.language}<span class="tf-lang">{block.language}</span>{/if}</pre>
   {:else if block.type === "table"}
     {@const head = headed(block.rows)}
@@ -62,7 +65,7 @@
       {#if head}
         <thead>
           <tr>
-            {#each block.rows[0] ?? [] as cell, c (c)}<th><TfDocInlines text={cell.text} {onopen} /></th>{/each}
+            {#each block.rows[0] ?? [] as cell, c (c)}<th><TfDocInlines text={cell.text} {onopen} {stems} /></th>{/each}
           </tr>
         </thead>
       {/if}
@@ -70,8 +73,8 @@
         {#each head ? block.rows.slice(1) : block.rows as row, r (r)}
           <tr>
             {#each row as cell, c (c)}
-              {#if cell.header}<th><TfDocInlines text={cell.text} {onopen} /></th>{:else}<td
-                  ><TfDocInlines text={cell.text} {onopen} /></td
+              {#if cell.header}<th><TfDocInlines text={cell.text} {onopen} {stems} /></th>{:else}<td
+                  ><TfDocInlines text={cell.text} {onopen} {stems} /></td
                 >{/if}
             {/each}
           </tr>
@@ -81,7 +84,7 @@
   {:else if block.type === "panel"}
     <div class="tf-callout tf-{panelTone(block.kind)}">
       <span class="tf-lbl">{panelLabel(block)}</span>
-      <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} /></div>
+      <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} {stems} /></div>
     </div>
   {:else if block.type === "placeholder"}
     <div class="tf-macro">

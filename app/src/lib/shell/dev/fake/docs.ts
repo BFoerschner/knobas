@@ -1,7 +1,9 @@
 /**
  * `?fake-ipc`: Docs, the reader over declared docs (#859).
  *
- * Answers `docs_tree` and `docs_page`.
+ * Answers `docs_tree`, `docs_page`, `docs_search` (#860), and the writes
+ * `docs_export_markdown` (#861), `docs_edit_section` and `docs_create_page`
+ * (#862), which answer as queued and change nothing.
  *
  * **Shape from prototype-6's Docs data**: its five spaces and their trees
  * (`tree`), the editors and times of its pages (`pageMeta`), and the bodies
@@ -23,9 +25,30 @@
  *   ticket (PAY-231, PAY-228, OPS-77), so a chip cannot disagree with the
  *   board; a key `CORPUS` lacks draws as a bare key, as the real read does.
  * - Pages with prototype-6's generic body carry no comments.
+ * - The search is a small stand-in for the backend's (`docs_search`): every
+ *   word must appear (prototype-6's stemming), `"…"`, `-word`, `by:`,
+ *   `updated:` and `space:` as the grammar reads them; ranking is title
+ *   first, then the number of matches.
+ * - *For you* is prototype-6's mention on *SEPA payout retry design* only;
+ *   its *Manual review queue* "SLA section is empty" is a reason no source
+ *   declares, so it is not here.
+ * - A section is refused for a table, code or a panel or macro, which the
+ *   Confluence projection calls a macro; links, chips and marks refuse as
+ *   formatting.
  */
 import type { Handler } from "../fake-tauri";
-import type { DocBlock, DocInline, DocPage, DocsTree, DocSpace } from "../../../ipc/entity";
+import type {
+  DocBlock,
+  DocHit,
+  DocInline,
+  DocPage,
+  DocSection,
+  DocsHits,
+  DocsTree,
+  DocSpace,
+  SectionRefusal,
+} from "../../../ipc/entity";
+import { blockWords, inlineWords, sectionsOf, stem } from "../../../tf/docs/docs";
 import { CORPUS } from "./corpus";
 
 const HOST = "http://127.0.0.1:5399/confluence";
@@ -319,7 +342,84 @@ function tree(): DocsTree {
       .map((p) => ({ entity_id: p.id, title: p.title, parent: p.parent }))
       .sort((a, b) => a.title.toLowerCase().localeCompare(b.title.toLowerCase())),
   }));
-  return { spaces, last_read: "confluence:sepa" };
+  return {
+    spaces,
+    last_read: "confluence:sepa",
+    for_you: [{ entity_id: "confluence:sepa", title: "SEPA payout retry design", space_key: "ENG", by_name: "Priya Nair" }],
+  };
+}
+
+/** Why knobas would not edit a section, as the Confluence projection says. */
+function refusal(blocks: DocBlock[]): SectionRefusal | null {
+  let worst: SectionRefusal | null = null;
+  const rank: SectionRefusal[] = ["table", "code", "macro", "formatting"];
+  const note = (r: SectionRefusal) => {
+    if (worst === null || rank.indexOf(r) < rank.indexOf(worst)) worst = r;
+  };
+  const inlines = (text: DocInline[]) => {
+    for (const run of text) {
+      if (run.type === "text" && !run.strong && !run.emphasis && !run.code) continue;
+      if (run.type === "break") continue;
+      note(run.type === "issue" || run.type === "mention" || run.type === "page_link" ? "macro" : "formatting");
+    }
+  };
+  for (const b of blocks) {
+    if (b.type === "table") note("table");
+    else if (b.type === "code") note("code");
+    else if (b.type === "panel" || b.type === "placeholder") note("macro");
+    else if (b.type === "paragraph") inlines(b.text);
+    else if (b.type === "list") {
+      for (const item of b.items) {
+        for (const inner of item) {
+          if (inner.type === "paragraph") inlines(inner.text);
+          else note("formatting");
+        }
+      }
+    }
+  }
+  return worst;
+}
+
+function sections(blocks: DocBlock[]): DocSection[] {
+  return sectionsOf(blocks)
+    .filter((s) => s.heading !== null)
+    .map((s) => {
+      const why = refusal(s.blocks);
+      const text = s.blocks
+        .map((b) =>
+          b.type === "list" ? b.items.map((item) => `- ${item.map(blockWords).join(" ")}`).join("\n") : blockWords(b),
+        )
+        .join("\n\n");
+      return { number: s.number, refusal: why, text: why === null ? text : null };
+    });
+}
+
+/** The tickets a body's chips name, with their status. */
+function work(blocks: DocBlock[]): DocPage["work"] {
+  const out: DocPage["work"] = [];
+  const walk = (text: DocInline[]) => {
+    for (const run of text) {
+      if (run.type === "issue" && run.entity_id && !out.some((w) => w.entity_id === run.entity_id)) {
+        out.push({ entity_id: run.entity_id, key: run.key, title: run.title ?? run.key, status: run.status, linked: false });
+      }
+    }
+  };
+  const visit = (b: DocBlock) => {
+    if (b.type === "heading" || b.type === "paragraph") walk(b.text);
+    else if (b.type === "list") b.items.flat().forEach(visit);
+    else if (b.type === "panel") b.blocks.forEach(visit);
+    else if (b.type === "table") b.rows.flat().forEach((c) => walk(c.text));
+  };
+  blocks.forEach(visit);
+  return out;
+}
+
+/** The pages whose prototype body links to `title`. */
+function backlinks(title: string): DocPage["backlinks"] {
+  return PAGES.filter((p) => {
+    const body = BODIES[p.title];
+    return body !== undefined && p.title !== title && JSON.stringify(body.blocks).includes(`{{page:${title}}}`);
+  }).map((p) => ({ entity_id: p.id, title: p.title, space_key: p.space }));
 }
 
 function page(args: Record<string, unknown>): DocPage {
@@ -350,6 +450,124 @@ function page(args: Record<string, unknown>): DocPage {
       blocks: [para(text)],
     })),
     me: [ME],
+    sections: sections(body.blocks.map(block)),
+    history: [
+      {
+        number: body.version,
+        by: PEOPLE[by]?.[0] ?? null,
+        by_name: PEOPLE[by]?.[1] ?? null,
+        at: at(when),
+        message: null,
+      },
+    ],
+    backlinks: backlinks(found.title),
+    work: work(body.blocks.map(block)),
+    writes: ["comment", "update_page", "create_page"],
+  };
+}
+
+/** The query as the grammar reads it, for the stand-in search. */
+function parse(q: string): { need: string[]; not: string[]; by?: string; updated?: string; space?: string } {
+  const out: { need: string[]; not: string[]; by?: string; updated?: string; space?: string } = { need: [], not: [] };
+  for (const m of q.matchAll(/(-?)"([^"]+)"|(\S+)/g)) {
+    if (m[2] !== undefined) {
+      (m[1] ? out.not : out.need).push(m[2].toLowerCase());
+      continue;
+    }
+    const w = m[3]!;
+    const key = w.match(/^(space|project|by|author|updated):(.+)$/i);
+    if (key) {
+      const k = key[1]!.toLowerCase();
+      const v = key[2]!.toLowerCase();
+      if (k === "space" || k === "project") out.space = v;
+      else if (k === "updated") out.updated = v;
+      else out.by = v;
+    } else if (w.length > 1 && w.startsWith("-")) out.not.push(w.slice(1).toLowerCase());
+    else if (w.toLowerCase() !== "or") out.need.push(w.toLowerCase());
+  }
+  return out;
+}
+
+function search(args: Record<string, unknown>): DocsHits | null {
+  const started = performance.now();
+  const q = parse(String(args["query"] ?? ""));
+  const scope = args["space"] as { key: string } | null | undefined;
+  if (q.need.length === 0 && q.not.length === 0 && !q.by && !q.updated && !q.space) return null;
+  const space = q.space ?? scope?.key.toLowerCase();
+  const days = q.updated ? ({ today: 1, "7d": 7, "30d": 30, "1y": 365 } as Record<string, number>)[q.updated] : undefined;
+  const stems = q.need.map(stem);
+  const count = (text: string, s: string) => text.toLowerCase().split(s).length - 1;
+  const hits: (DocHit & { score: number })[] = [];
+  for (const p of PAGES) {
+    if (space && p.space.toLowerCase() !== space) continue;
+    const doc = page({ entityId: p.id });
+    if (q.by && doc.editor !== q.by && !(doc.editor_name ?? "").toLowerCase().startsWith(q.by)) continue;
+    if (days !== undefined && Date.now() - new Date(doc.updated_at ?? 0).getTime() > days * 864e5) continue;
+    const parts: { section: string | null; comment_by: string | null; text: string }[] = sectionsOf(doc.blocks).map(
+      (s) => ({
+        section: s.heading ? inlineWords(s.heading.text) : null,
+        comment_by: null,
+        text: [s.heading ? inlineWords(s.heading.text) : "", ...s.blocks.map(blockWords)].join(" "),
+      }),
+    );
+    for (const c of doc.comments) parts.push({ section: null, comment_by: c.author_name, text: c.blocks.map(blockWords).join(" ") });
+    const all = [doc.title, ...parts.map((x) => x.text)].join(" ");
+    if (q.not.some((n) => count(all, stem(n)) > 0)) continue;
+    if (stems.some((s) => count(all, s) === 0)) continue;
+    let best: { k: number; sentence: string; section: string | null; comment_by: string | null } | null = null;
+    for (const part of parts) {
+      for (const sentence of part.text.split(/(?<=[.!?])\s+/)) {
+        const k = stems.filter((s) => count(sentence, s) > 0).length;
+        if (k > 0 && (best === null || k > best.k)) best = { k, sentence, section: part.section, comment_by: part.comment_by };
+      }
+    }
+    const sentence = best?.sentence ?? parts.find((x) => x.text.trim() !== "")?.text ?? "";
+    const segments: { text: string; hit: boolean }[] = [];
+    for (const piece of sentence.slice(0, 150).split(new RegExp(`(${stems.map((s) => `${s}[\\p{L}\\p{N}]*`).join("|") || "$^"})`, "iu"))) {
+      if (piece === "") continue;
+      segments.push({ text: piece, hit: stems.some((s) => piece.toLowerCase().startsWith(s)) });
+    }
+    const matches = stems.reduce((n, s) => n + count(all, s), 0);
+    hits.push({
+      entity_id: doc.entity_id,
+      title: doc.title,
+      space: doc.space,
+      path: p.parentTitle,
+      snippet: { section: best?.section ?? null, comment_by: best?.comment_by ?? null, segments },
+      matches,
+      editor: doc.editor,
+      editor_name: doc.editor_name,
+      updated_at: doc.updated_at,
+      score: stems.reduce((n, s) => n + count(doc.title, s) * 8, 0) + matches,
+    });
+  }
+  hits.sort((a, b) => b.score - a.score);
+  return {
+    total: hits.length,
+    took_ms: Math.max(1, Math.round(performance.now() - started)),
+    needles: q.need,
+    unknown_tokens: [],
+    hits: hits.slice(0, 50).map(({ score: _score, ...hit }) => hit),
+  };
+}
+
+function queued(op: string, entity: string, payload: Record<string, unknown>) {
+  return {
+    id: Math.floor(Math.random() * 1e6),
+    source_id: "confluence",
+    entity_id: entity,
+    op,
+    payload,
+    target_snapshot: null,
+    state: "pending",
+    wait_reason: null,
+    detail: null,
+    queued_at: new Date().toISOString(),
+    attempted_at: null,
+    attempts: 0,
+    held_snapshot: null,
+    settled_at: null,
+    source_enabled: true,
   };
 }
 
@@ -358,5 +576,17 @@ export function handlers(): Record<string, Handler> {
   return {
     docs_tree: () => tree(),
     docs_page: (args) => page(args),
+    docs_search: (args) => search(args),
+    docs_export_markdown: (args) => {
+      const found = PAGES.find((p) => p.id === String(args["entityId"] ?? ""));
+      const file = `${(found?.title ?? "untitled").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").replace(/^-|-$/g, "")}.md`;
+      return { file, folder: "/Users/you/Downloads" };
+    },
+    docs_edit_section: (args) =>
+      queued("update_page", String(args["entityId"] ?? ""), { UpdatePage: { entity: args["entityId"], base_version: args["version"], body: "" } }),
+    docs_create_page: (args) => {
+      const next = args["page"] as { parent: string; title: string };
+      return queued("create_page", next.parent, { CreatePage: { parent: next.parent, space: "", title: next.title, body: "" } });
+    },
   };
 }

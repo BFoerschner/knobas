@@ -6,7 +6,19 @@
  * the page read last, `#/docs/space/<key>` that space's first page, and
  * `#/page/<id>[/<section>]` the page itself.
  */
-import type { DocBlock, DocInline, DocNode, DocPage, DocSpace, DocsTree, PanelKind } from "../../ipc/entity";
+import type {
+  DocBlock,
+  DocForYou,
+  DocHit,
+  DocInline,
+  DocNode,
+  DocPage,
+  DocSnippet,
+  DocSpace,
+  DocsTree,
+  PanelKind,
+  SectionRefusal,
+} from "../../ipc/entity";
 import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
@@ -103,7 +115,7 @@ export function inlineWords(text: DocInline[]): string {
     .join("");
 }
 
-function blockWords(block: DocBlock): string {
+export function blockWords(block: DocBlock): string {
   switch (block.type) {
     case "heading":
     case "paragraph":
@@ -192,4 +204,146 @@ export function panelLabel(block: Extract<DocBlock, { type: "panel" }>): string 
 export function headed(rows: { header: boolean }[][]): boolean {
   const first = rows[0];
   return first !== undefined && first.length > 0 && first.every((c) => c.header);
+}
+
+// -- the search (#860) and the find bar --------------------------------------
+
+/**
+ * A needle as the reader matches it, the backend's rule (`knobas_app::docs`,
+ * prototype-6's): lowercased, and a word longer than four letters without one
+ * `ing`, `es`, `ed` or `s` at its end, so "reviews" finds "review".
+ */
+export function stem(needle: string): string {
+  const lower = needle.toLowerCase();
+  if (lower.length <= 4) return lower;
+  for (const suffix of ["ing", "es", "ed", "s"]) {
+    if (lower.endsWith(suffix)) return lower.slice(0, -suffix.length);
+  }
+  return lower;
+}
+
+/** The stems of the find bar's text: each word, empty ones dropped. */
+export function stemsOf(find: string): string[] {
+  return [...new Set(find.split(/\s+/).filter((w) => w.length > 1).map(stem))];
+}
+
+const WORD = /[\p{L}\p{N}]/u;
+
+/**
+ * `text` as runs, each stem's occurrence and the rest of its word marked:
+ * what the reader draws as `<mark>`.
+ */
+export function markText(text: string, stems: string[]): { text: string; hit: boolean }[] {
+  if (stems.length === 0 || text === "") return [{ text, hit: false }];
+  const lower = text.toLowerCase();
+  const hit = new Array<boolean>(text.length).fill(false);
+  for (const s of stems) {
+    if (s === "") continue;
+    let at = lower.indexOf(s);
+    while (at >= 0) {
+      let end = at + s.length;
+      while (end < text.length && WORD.test(text[end]!)) end += 1;
+      hit.fill(true, at, end);
+      at = lower.indexOf(s, at + s.length);
+    }
+  }
+  const out: { text: string; hit: boolean }[] = [];
+  for (let i = 0; i < text.length; i += 1) {
+    const last = out.at(-1);
+    if (last && last.hit === hit[i]) last.text += text[i];
+    else out.push({ text: text[i]!, hit: hit[i]! });
+  }
+  return out;
+}
+
+/** How often the stems occur in `text`. */
+export function countIn(text: string, stems: string[]): number {
+  const lower = text.toLowerCase();
+  let n = 0;
+  for (const s of stems) {
+    if (s === "") continue;
+    let at = lower.indexOf(s);
+    while (at >= 0) {
+      n += 1;
+      at = lower.indexOf(s, at + s.length);
+    }
+  }
+  return n;
+}
+
+/** One section of a page body: section 0 is what comes before the first heading. */
+export interface Section {
+  number: number;
+  heading: Extract<DocBlock, { type: "heading" }> | null;
+  blocks: DocBlock[];
+}
+
+/** A body's sections, prototype-6's numbering (`sectionNumbers`). */
+export function sectionsOf(blocks: DocBlock[]): Section[] {
+  const out: Section[] = [{ number: 0, heading: null, blocks: [] }];
+  for (const block of blocks) {
+    if (block.type === "heading") out.push({ number: out.length, heading: block, blocks: [] });
+    else out.at(-1)!.blocks.push(block);
+  }
+  return out;
+}
+
+/** The outline's count per section: matches in its heading and its blocks. */
+export function sectionMatches(blocks: DocBlock[], stems: string[]): Map<number, number> {
+  const out = new Map<number, number>();
+  if (stems.length === 0) return out;
+  for (const section of sectionsOf(blocks)) {
+    if (section.heading === null) continue;
+    const words = [inlineWords(section.heading.text), ...section.blocks.map(blockWords)].join(" ");
+    const n = countIn(words, stems);
+    if (n > 0) out.set(section.number, n);
+  }
+  return out;
+}
+
+/** The search field's scope, in the placeholder and the header line: *all spaces* or the space's name. */
+export function scopeName(space: DocSpace | undefined): string {
+  return space === undefined ? "all spaces" : (space.name ?? space.key);
+}
+
+/** The hits' header line: *5 pages in all spaces, 1 ms*. */
+export function hitsLine(total: number, scope: string, ms: number): string {
+  return `${total} page${total === 1 ? "" : "s"} in ${scope}, ${Math.max(1, ms)} ms`;
+}
+
+/** What a snippet opens with: its section, or *Comment by Priya*. */
+export function snippetLabel(snippet: DocSnippet): string | null {
+  if (snippet.comment_by !== null) {
+    const first = snippet.comment_by.split(/\s+/)[0];
+    return first ? `Comment by ${first}:` : "Comment:";
+  }
+  return snippet.section === null ? null : `${snippet.section}:`;
+}
+
+/** A hit's last line: *3 matches, Priya, today 10:40* (*you* for the reader). */
+export function hitLine(hit: DocHit, me: string[], when: (iso: string | null) => string): string {
+  const who =
+    hit.editor !== null && me.includes(hit.editor)
+      ? "you"
+      : (hit.editor_name?.split(/\s+/)[0] ?? hit.editor ?? "someone");
+  return `${hit.matches} match${hit.matches === 1 ? "" : "es"}, ${who}, ${when(hit.updated_at)}`;
+}
+
+/** Why a page is *For you*: *Priya mentioned you*. */
+export function forYouWhy(item: DocForYou): string {
+  const first = item.by_name?.split(/\s+/)[0];
+  return first ? `${first} mentioned you` : "You are mentioned here";
+}
+
+/** The disabled *Edit section*'s reason, prototype-6's sentence with the source's name. */
+export function refusalReason(refusal: SectionRefusal, source: string): string {
+  if (refusal === "formatting") {
+    return `This section has formatting or links that a text edit would lose. knobas edits text-only sections; edit this one in ${source}.`;
+  }
+  return `This section has a table, code or a macro. knobas edits text-only sections; edit this one in ${source}.`;
+}
+
+/** What *Copy link* copies: the knobas address, then the page in the source. */
+export function copyLinkText(page: Pick<DocPage, "entity_id" | "web_url">): string {
+  return [pageHash(page.entity_id), page.web_url].filter((x): x is string => x !== null).join("\n");
 }
