@@ -64,10 +64,7 @@ async fn listing(server: &MockServer, dir: &str, at: &str, listing: Value) {
 /// `raw/{file}?ref={at}` answers `body`, and the file's own
 /// `contents/{file}?ref={at}` entry its size and [`blob`]`(file, at)`.
 async fn raw(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
-    let name = file.rsplit('/').next().unwrap_or(file);
-    let mut own = entry(name, file, "file", body.len() as u64);
-    own["sha"] = json!(blob(file, at));
-    listing(server, file, at, own).await;
+    own_entry(server, file, at, body.len() as u64).await;
     Mock::given(method("GET"))
         .and(path(format!("{REPO}/raw/{file}")))
         .and(query_param("ref", at))
@@ -77,12 +74,24 @@ async fn raw(server: &MockServer, file: &str, at: &str, body: Vec<u8>) {
         .await;
 }
 
-/// The blob sha [`raw`]'s entry gives `file` at `at`: a different one per
-/// ref, so a sha read at the wrong ref shows.
+/// `contents/{file}?ref={at}` answers the file's own entry: `size`, and
+/// [`blob`]`(file, at)` as its sha.
+async fn own_entry(server: &MockServer, file: &str, at: &str, size: u64) {
+    let name = file.rsplit('/').next().unwrap_or(file);
+    let mut own = entry(name, file, "file", size);
+    own["sha"] = json!(blob(file, at));
+    listing(server, file, at, own).await;
+}
+
+/// The blob sha [`own_entry`] gives `file` at `at`: 40 hex digits folded
+/// from both names, so a sha read at the wrong ref shows.
 fn blob(file: &str, at: &str) -> String {
-    let mut sha = format!("{:040x}", file.len() * 1_000 + at.len());
-    sha.truncate(40);
-    sha
+    let fold = |seed: u64| {
+        format!("{file}@{at}").bytes().fold(seed, |h, b| {
+            (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+        })
+    };
+    format!("{:016x}{:016x}{:08x}", fold(1), fold(2), fold(3) as u32)
 }
 
 fn source(server: &MockServer) -> Box<dyn Source> {
@@ -483,9 +492,7 @@ async fn a_cut_file_without_a_length_asks_gitea_its_size() {
         )
         .mount(&server)
         .await;
-    let mut own = entry("big.txt", "big.txt", "file", text.len() as u64);
-    own["sha"] = json!(blob("big.txt", "main"));
-    listing(&server, "big.txt", "main", own).await;
+    own_entry(&server, "big.txt", "main", text.len() as u64).await;
     let drawn = file(read(&server, ENTITY, "file:big.txt").await);
     assert!(drawn.truncated);
     assert_eq!(drawn.text, line.repeat(1_003));

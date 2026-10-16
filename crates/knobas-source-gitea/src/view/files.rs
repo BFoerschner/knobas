@@ -118,7 +118,7 @@ pub(super) async fn read(
     })
 }
 
-/// One entry of a listing, as `contents` answers it.
+/// One entry of a listing, or a file's own entry, as `contents` answers it.
 #[derive(Debug, serde::Deserialize)]
 struct Listed {
     name: String,

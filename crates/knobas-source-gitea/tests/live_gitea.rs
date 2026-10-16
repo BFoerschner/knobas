@@ -4748,7 +4748,7 @@ async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
     let source = env.one_repo();
     let http = reqwest::Client::new();
     let repo_id = format!("gitea:{}", env.full_name());
-    let drawn_sha = |entity: String, section: &'static str| {
+    let drawn_file = |entity: String, section: &'static str| {
         let source = &source;
         async move {
             let view = source
@@ -4765,7 +4765,7 @@ async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
 
     // 1. The seeded file at `main`.
     let (on_main, _) = file_on(&http, &env, "main", "README.md").await;
-    let (sha, text) = drawn_sha(repo_id.clone(), "file:README.md").await;
+    let (sha, text) = drawn_file(repo_id.clone(), "file:README.md").await;
     println!("LIVE README.md at main: drawn {sha:?}, contents API {on_main}");
     assert_eq!(
         sha.as_deref(),
@@ -4782,7 +4782,7 @@ async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
     let branch = format!("knobas-blob-{stamp}");
     litter.branch_off_main(&branch).await;
     let entity = format!("{repo_id}@refs/heads/{branch}");
-    let (base, _) = drawn_sha(entity.clone(), "file:README.md").await;
+    let (base, _) = drawn_file(entity.clone(), "file:README.md").await;
     let base = base.expect("the branch's file carries its blob");
     assert_eq!(base, on_main, "a branch off main holds main's blob");
     let content = format!("edited against the drawn blob {stamp}\n");
@@ -4801,7 +4801,7 @@ async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
     println!("LIVE commit_file against the drawn blob: {receipt:?}");
     let (now, text) = file_on(&http, &env, &branch, "README.md").await;
     assert_eq!(text, content, "the branch holds the edit");
-    let (redrawn, drawn_text) = drawn_sha(entity, "file:README.md").await;
+    let (redrawn, drawn_text) = drawn_file(entity, "file:README.md").await;
     assert_eq!(drawn_text, content);
     assert_eq!(
         redrawn.as_deref(),
