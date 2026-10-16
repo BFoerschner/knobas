@@ -2778,11 +2778,17 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
 
     busy.queue(&seeded, &config, BRANCH).await;
     let waiting_id = id_of(&waiting.queue(&seeded, &config, BRANCH).await);
+    // An override, so TeamCity's queue optimisation cannot fold the run into
+    // the waiting build as its duplicate (a run equal to a queued one replaces
+    // it: measured, 2026-10-16, with the clean checkout mutated away).
     let receipt = source
         .write(WriteOp::RunBuild {
             entity,
             branch: Some(BRANCH.to_owned()),
-            parameters: Vec::new(),
+            parameters: vec![knobas_source::BuildParameter {
+                name: "env.SEPA_RETRIES".to_owned(),
+                value: "852".to_owned(),
+            }],
             clean_checkout: true,
             first_in_queue: true,
         })
