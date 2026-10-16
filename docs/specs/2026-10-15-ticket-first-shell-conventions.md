@@ -37,8 +37,6 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
 - Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
-- A screen's session switches (layout, lanes, sort) are module state keyed by the view they are on, over what that view saved; nothing writes them. (#813; #812)
-
 ## Copy and display
 
 - Copy follows prototype-6 word for word unless the PR says why. A source's words are not in the design: nothing is invented for a field no source declares (the card's comment count waited for #894). (Design system, "Words"; #810, PR #895)
@@ -49,7 +47,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Tickets
 
-- The *Board / List*, *Lanes* and list sort hold for the session as the page's module `$state`, and are never written to storage or a command; a restart forgets them. (#813)
+- The *Board / List*, *Lanes* and list sort hold for the session as the page's module `$state`, and are never written to storage or a command; a restart forgets them. They are kept per ticket view, over what that view saved. (#813; #812)
 - A list header that sorts is a `th` carrying `aria-sort` with a button inside; CSS draws ▴ or ▾ on the sorted one. A column that does not sort is a plain `th`. (#813)
 - A signal is drawn through `tickets/Signals.svelte`: a `tf-dot` in its tone, then its words. Cards and list rows draw the read's signals and nothing else. (#815)
 

@@ -225,7 +225,9 @@
   const listAll = $derived(own?.listAll ?? false);
 
   // ---- the filter bar ----
-  const filter = $derived(sessionFilter(viewId === null ? "tickets-all" : `tickets-${viewId}`));
+  /** The filter bar's id: its state is kept per view. */
+  const filterId = $derived(viewId === null ? "tickets-all" : `tickets-${viewId}`);
+  const filter = $derived(sessionFilter(filterId));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
 
   /** At most this many chips a group; past it a field has too many values for chips. */
@@ -237,7 +239,7 @@
         .filter((field) => field.key === key)
         .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : field.value }));
     return {
-      id: viewId === null ? "tickets-all" : `tickets-${viewId}`,
+      id: filterId,
       placeholder: "Filter by key, summary, epic or person",
       noun: "tickets",
       base: base ?? "",
@@ -425,7 +427,8 @@
   const listColumns = $derived(
     LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
   );
-  const sortableColumns: readonly string[] = ["key", "summary", "status", "priority", "assignee", "updated"];
+  const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
+  const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
   const listCut = $derived((board?.columns ?? []).some((column) => column.cards.length < column.total));
   const listRest = $derived(
     (board?.columns ?? []).reduce((all, column) => all + column.total - column.cards.length, 0),
@@ -711,9 +714,9 @@
           <thead>
             <tr>
               {#each listColumns as [column, label] (column)}
-                {#if sortableColumns.includes(column)}
+                {#if sortable(column)}
                   <th aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
-                    ><button type="button" onclick={() => sortBy(column as SortColumn)}>{label}</button></th
+                    ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
                   >
                 {:else}
                   <th>{label}</th>

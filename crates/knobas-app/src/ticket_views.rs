@@ -125,13 +125,13 @@ macro_rules! fields {
     };
 }
 
-/// A value bound as `jsonb`.
-fn json<T: serde::Serialize>(value: &T) -> serde_json::Value {
-    serde_json::to_value(value).unwrap_or(serde_json::Value::Null)
+/// A value bound as `jsonb`; a value that cannot be one is `internal`.
+fn json<T: serde::Serialize>(value: &T) -> Result<serde_json::Value, IpcError> {
+    serde_json::to_value(value).map_err(IpcError::internal)
 }
 
 fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
-    let json = |column: &str| -> serde_json::Value { row.get(column) };
+    let stored = |column: &str| -> serde_json::Value { row.get(column) };
     Ok(TicketView {
         id: row.get("id"),
         name: row.get("name"),
@@ -139,10 +139,10 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
         position: row.get("position"),
         query: row.get("query"),
         layout: row.get("layout"),
-        columns: serde_json::from_value(json("columns")).map_err(IpcError::internal)?,
+        columns: serde_json::from_value(stored("columns")).map_err(IpcError::internal)?,
         lanes: row.get("lanes"),
-        card_fields: serde_json::from_value(json("card_fields")).map_err(IpcError::internal)?,
-        list_columns: serde_json::from_value(json("list_columns")).map_err(IpcError::internal)?,
+        card_fields: serde_json::from_value(stored("card_fields")).map_err(IpcError::internal)?,
+        list_columns: serde_json::from_value(stored("list_columns")).map_err(IpcError::internal)?,
         list_sort: row
             .get::<Option<serde_json::Value>, _>("list_sort")
             .map(serde_json::from_value)
@@ -349,11 +349,11 @@ pub async fn save(pool: &PgPool, draft: TicketViewDraft) -> Result<TicketView, I
     .bind(last)
     .bind(&draft.query)
     .bind(&draft.layout)
-    .bind(json(&draft.columns))
+    .bind(json(&draft.columns)?)
     .bind(&draft.lanes)
-    .bind(json(&draft.card_fields))
-    .bind(json(&draft.list_columns))
-    .bind(draft.list_sort.as_ref().map(json))
+    .bind(json(&draft.card_fields)?)
+    .bind(json(&draft.list_columns)?)
+    .bind(draft.list_sort.as_ref().map(json).transpose()?)
     .bind(&draft.jira_ref)
     .fetch_one(&mut *tx)
     .await?;
