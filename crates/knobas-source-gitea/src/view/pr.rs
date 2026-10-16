@@ -366,7 +366,11 @@ fn overview(
     landing: &land::Landing,
     checks: Option<Block>,
 ) -> ViewSection {
-    let mut facts = overview_facts(pull, land::mergeable_fact(pull, reviews, landing));
+    let landing_facts = land::mergeable_fact(pull, reviews, landing)
+        .into_iter()
+        .chain(land::ready_facts(pull, reviews, landing))
+        .collect();
+    let mut facts = overview_facts(pull, landing_facts);
     facts.extend(verdicts(reviews));
     let mut blocks = vec![Block::Facts { facts }];
     blocks.extend(checks);
@@ -398,9 +402,9 @@ fn files_stub(pull: &Pull) -> ViewSection {
     }
 }
 
-/// State, author, `head → base`, whether it can be merged (`mergeable`,
-/// [`land`]'s to say), its times.
-fn overview_facts(pull: &Pull, mergeable: Option<Fact>) -> Vec<Fact> {
+/// State, author, `head → base`, whether it can be merged (`landing`:
+/// *Mergeable*, *Approvals* and *Conflicts*, [`land`]'s to say), its times.
+fn overview_facts(pull: &Pull, landing: Vec<Fact>) -> Vec<Fact> {
     let (state, tone) = if pull.merged {
         ("merged".to_owned(), Some(Tone::Ok))
     } else {
@@ -434,7 +438,7 @@ fn overview_facts(pull: &Pull, mergeable: Option<Fact>) -> Vec<Fact> {
         };
         facts.push(fact("Branches", format!("{head_name} → {base_ref}")));
     }
-    facts.extend(mergeable);
+    facts.extend(landing);
     if let Some(at) = pull.created_at.as_deref() {
         facts.push(fact("Created", when_of(at)));
     }

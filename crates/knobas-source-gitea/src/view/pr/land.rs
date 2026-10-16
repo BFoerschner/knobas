@@ -475,6 +475,52 @@ pub(super) fn mergeable_fact(pull: &Pull, reviews: &[Review], landing: &Landing)
     })
 }
 
+/// *Ready to merge?*'s two facts for an open pull request (#994), so the
+/// shell reads them without taking *Mergeable*'s sentence apart:
+///
+/// - *Approvals*: the official approvals [`blockers`] counts against what the
+///   base's protection requires, `1 of 2`, ok when met and warn when short;
+///   `none required` (ok) where the protection asks for none or cannot be
+///   read.
+/// - *Conflicts*: `none with <base>` (ok) where Gitea says it can merge,
+///   `conflicts with <base>` (warn) where it says it cannot for a title it
+///   does not read as work in progress ([`Blocker::Conflict`]'s reading);
+///   nothing while Gitea has not said, and nothing for a work-in-progress
+///   title, whose `false` says nothing about a conflict.
+pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) -> Vec<Fact> {
+    if !pull.is_open() {
+        return Vec::new();
+    }
+    let base = pull.base_ref().unwrap_or("its base");
+    let required = landing.required_approvals;
+    let approvals = if required == 0 {
+        Fact {
+            label: "Approvals".to_owned(),
+            value: "none required".to_owned(),
+            tone: Some(Tone::Ok),
+        }
+    } else {
+        let given = official_approvals(reviews, landing.ignore_stale);
+        Fact {
+            label: "Approvals".to_owned(),
+            value: format!("{given} of {required}"),
+            tone: Some(if given >= required { Tone::Ok } else { Tone::Warn }),
+        }
+    };
+    let mut facts = vec![approvals];
+    let conflicts = match pull.mergeable {
+        Some(true) => Some((format!("none with {base}"), Tone::Ok)),
+        Some(false) if !is_wip(pull) => Some((format!("conflicts with {base}"), Tone::Warn)),
+        _ => None,
+    };
+    facts.extend(conflicts.map(|(value, tone)| Fact {
+        label: "Conflicts".to_owned(),
+        value,
+        tone: Some(tone),
+    }));
+    facts
+}
+
 /// The toolbar's landing actions, in the #701 ruling's order: *Update
 /// branch…* (maintenance) where the head is behind, then *Merge…* last. On a
 /// merged or closed pull request neither is offered: nothing the reader waits
