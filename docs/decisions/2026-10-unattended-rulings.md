@@ -3174,3 +3174,40 @@ Ruled by the implementer (PR for #863).
 - **`#/build/<run id>` alone (a job's or the inbox's row) moves to `#/build/<pipeline>/<run>`.**
   The pipeline is the one whose recent runs hold the run, else the one a row of the run's view
   names. With neither, the page says *No run at this address.* **Reversing:** low.
+
+## #872, #873 and #875 — Dependencies interactions, layers and views, asset editor (2026-10-16)
+
+Implementer's rulings, PR for issues #872, #873 and #875 (spec #808, TF5).
+
+- **A view is one row of `knobas.dep_view` (`0038`) holding its settings as one JSON object**,
+  read into a typed struct with `deny_unknown_fields` before every write, and the two defaults
+  are two flags with a partial unique index each, not a second table. Spec #808's "two
+  knobas-local tables" are then the layers (`0036`, already two tables) and the views.
+  **Reversing:** medium (a migration and the read).
+- **Nine commands in the existing `commands/assets.rs`**: five layer writes, each answering with
+  every layer, and the views' read and three writes. **Reversing:** medium (§10.8).
+- **The last view cannot be deleted** (`conflict`): Dependencies always opens in a view. View
+  names are not unique; prototype-6 keeps none. **Reversing:** low.
+- ***Group by Project* is the owner, else *no project***, prototype-6's formula with no project
+  declared on any item. **Reversing:** low once a project path is declared.
+- ***Find* also unfolds a folded layer that holds a match**, not only its groups: the ticket says
+  *Find* "opens folds that hold a match", and a folded layer is one. **Reversing:** low.
+- **A tile is a box holding a link and the ⌖ button**, the link stretched over the box, rather
+  than prototype-6's `role="link"` box with a button inside it, which nests a control in a link.
+  An asset's link keeps `#/asset/<id>` and a click opens the editor; a route keeps `#/route/<id>`
+  until #876's route dialog. *Add ▾* is drawn `aria-disabled` with *Not built in the new shell
+  yet*, and a layer's *+ Add* is left for #876. **Reversing:** low.
+- **The reader's gestures (Find, the trace, groups opened or shut, layers folded by hand) hold for
+  the page; the view's draft holds for the session** as module `$state`, never stored.
+  **Reversing:** low.
+- **The asset editor's title is the type's monogram and the saved name; the name is the first
+  field**, because `TfDialog` takes its title as text and prototype-6's title is an input.
+  **Reversing:** low (a `head` snippet on `TfDialog`).
+- **A part that did not save is named in one line**: *Saved the fields, but not the move:
+  <reason>*, or *Did not save the fields: <reason>*; prototype-6 has no words for it. After a
+  failure the asset is read again and the form keeps what saved, so a retry sends only the
+  rest. **Reversing:** low.
+- ***Create monitor* in the editor closes it and opens the Monitors page's dialog**
+  (`TfCreateMonitor.svelte`) for the asset. **Reversing:** low.
+- **Migration `0038` collides with #866's `0038`** in its open branch; whichever merges second
+  renumbers to the next free number. **Reversing:** none needed.

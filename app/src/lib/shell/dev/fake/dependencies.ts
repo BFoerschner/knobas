@@ -10,12 +10,16 @@
  *   delivery is the pipelines PAY-231's builds ran in (their newest run's
  *   chip), and the linked tickets are those a link joins to one of them.
  *
+ * - The layers and the views (#873) are session state: migration `0038`'s
+ *   four views, and the layer and view writes with the refusals the backend
+ *   makes (a taken or blank name, the last view).
+ *
  * A restatement, which certifies nothing: the read is witnessed in
  * `crates/knobas-app/tests/it/dependencies_ipc.rs`. The estate here is the
  * testenv one, not prototype-6's Tidewater; the screenshot comparison names
  * that.
  */
-import type { Dependencies, DepItem, DepRelation } from "../../../ipc/assets";
+import type { DepLayer, Dependencies, DepItem, DepRelation, DepView, DepViews, DepViewSettings, LayerInView } from "../../../ipc/assets";
 import type { Tone } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
@@ -23,7 +27,7 @@ import { FIXTURE_ESTATE, FIXTURE_ROUTES } from "./estate";
 import { JOB_ROWS } from "./job-reach";
 import { fakeMonitorRoster } from "./monitors";
 
-const LAYERS: Dependencies["layers"] = [
+const SEED: Dependencies["layers"] = [
   { id: "work", name: "Work", kinds: ["ticket", "pr", "page"] },
   { id: "code", name: "Code", kinds: ["repo"] },
   { id: "delivery", name: "Delivery", kinds: ["pipeline"] },
@@ -170,12 +174,125 @@ function fakeDependencies(): Dependencies {
     if (known.has(link.from) && known.has(link.to)) relations.push(link);
   }
 
-  return { layers: LAYERS, kinds: KINDS, items, relations };
+  return { layers: layers.map((layer) => ({ ...layer, kinds: [...layer.kinds] })), kinds: KINDS, items, relations };
+}
+
+// -- #873: the layers and the views, for the session --------------------------
+
+let layers: DepLayer[] = SEED.map((layer) => ({ ...layer, kinds: [...layer.kinds] }));
+let seq = 0;
+
+const refuse = (code: string, message: string) => ({ code, message, source_id: null });
+const answer = () => layers.map((layer) => ({ ...layer, kinds: [...layer.kinds] }));
+
+function layerName(raw: unknown, except: string | null): string {
+  const name = String(raw ?? "").trim();
+  if (name === "") throw refuse("invalid", "A layer needs a name.");
+  if (layers.some((layer) => layer.id !== except && layer.name.trim().toLowerCase() === name.toLowerCase()))
+    throw refuse("conflict", `There is already a layer called ${name}. Names are unique, so a name always means the same things.`);
+  return name;
+}
+
+function layerAt(id: unknown): DepLayer {
+  const layer = layers.find((l) => l.id === id);
+  if (!layer) throw refuse("not_found", `No layer ${String(id)}.`);
+  return layer;
+}
+
+const lay = (hidden: boolean, group: LayerInView["group"]): LayerInView => ({ hidden, folded: false, group });
+const GROUPS: Record<string, LayerInView["group"]> = {
+  work: "status", code: "owner", delivery: "project", entry: "environment", services: "environment",
+  containers: "parent", data: "environment", machines: "environment", hardware: "none",
+};
+function seedView(id: string, name: string, hide: (layer: string) => boolean, group: (layer: string) => LayerInView["group"]): DepView {
+  const settings: DepViewSettings = { layers: {}, environments: [], problems: false, tiles: "auto", fold_at: 24 };
+  for (const layer of SEED) settings.layers[layer.id] = lay(hide(layer.id), group(layer.id));
+  return { id, name, settings };
+}
+const CODE = ["work", "code", "delivery"];
+let views: DepViews = {
+  views: [
+    seedView("everything", "Everything", (l) => l === "work", (l) => GROUPS[l]!),
+    { id: "ticket", name: "This ticket", settings: { layers: {}, environments: [], problems: false, tiles: "auto", fold_at: 24 } },
+    seedView("runtime", "Runtime by environment", (l) => CODE.includes(l), (l) => (CODE.includes(l) ? GROUPS[l]! : l === "hardware" ? "none" : "environment")),
+    seedView("code", "Code and delivery", (l) => !CODE.includes(l), (l) => GROUPS[l]!),
+  ],
+  opens_from_ticket: "ticket",
+  opens_from_top: "everything",
+};
+
+function viewsAnswer(): DepViews {
+  const first = views.views[0]?.id ?? "";
+  const has = (id: string) => views.views.some((view) => view.id === id);
+  return {
+    views: structuredClone(views.views),
+    opens_from_ticket: has(views.opens_from_ticket) ? views.opens_from_ticket : first,
+    opens_from_top: has(views.opens_from_top) ? views.opens_from_top : first,
+  };
 }
 
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
     dependencies: () => fakeDependencies(),
+    create_dep_layer: (args) => {
+      layers.push({ id: `layer-${++seq}`, name: layerName(args["name"], null), kinds: [] });
+      return answer();
+    },
+    rename_dep_layer: (args) => {
+      const layer = layerAt(args["layerId"]);
+      layer.name = layerName(args["name"], layer.id);
+      return answer();
+    },
+    delete_dep_layer: (args) => {
+      const layer = layerAt(args["layerId"]);
+      layers = layers.filter((l) => l !== layer);
+      return answer();
+    },
+    order_dep_layers: (args) => {
+      const ids = (args["layerIds"] as string[]) ?? [];
+      if (ids.length !== layers.length || !layers.every((layer) => ids.includes(layer.id)))
+        throw refuse("invalid", "The order must name every layer exactly once.");
+      layers = ids.map((id) => layerAt(id));
+      return answer();
+    },
+    place_dep_kind: (args) => {
+      const kind = String(args["kind"]);
+      if (!KINDS.some((known) => known.id === kind)) throw refuse("invalid", `${kind} is not a kind Dependencies knows.`);
+      const to = args["layerId"] == null ? null : layerAt(args["layerId"]);
+      for (const layer of layers) layer.kinds = layer.kinds.filter((k) => k !== kind);
+      to?.kinds.push(kind);
+      return answer();
+    },
+    dep_views: () => viewsAnswer(),
+    save_dep_view: (args) => {
+      const name = String(args["name"] ?? "").trim();
+      if (name === "") throw refuse("invalid", "A view needs a name.");
+      const settings = structuredClone(args["settings"] as DepViewSettings);
+      const id = args["viewId"] as string | null | undefined;
+      if (id == null) {
+        const view = { id: `view-${++seq}`, name, settings };
+        views.views.push(view);
+        return structuredClone(view);
+      }
+      const view = views.views.find((v) => v.id === id);
+      if (!view) throw refuse("not_found", `No view ${id}.`);
+      view.name = name;
+      view.settings = settings;
+      return structuredClone(view);
+    },
+    delete_dep_view: (args) => {
+      const id = String(args["viewId"]);
+      if (!views.views.some((v) => v.id === id)) throw refuse("not_found", `No view ${id}.`);
+      if (views.views.length <= 1) throw refuse("conflict", "The last view cannot be deleted.");
+      views = { ...views, views: views.views.filter((v) => v.id !== id) };
+      return viewsAnswer();
+    },
+    set_dep_view_defaults: (args) => {
+      for (const key of ["fromTicket", "fromTop"])
+        if (!views.views.some((v) => v.id === args[key])) throw refuse("not_found", `No view ${String(args[key])}.`);
+      views = { ...views, opens_from_ticket: String(args["fromTicket"]), opens_from_top: String(args["fromTop"]) };
+      return viewsAnswer();
+    },
   };
 }

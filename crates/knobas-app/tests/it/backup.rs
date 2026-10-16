@@ -781,6 +781,14 @@ async fn layers(pool: &PgPool) -> Vec<(String, String, Option<String>)> {
     .unwrap()
 }
 
+/// Every saved view of Dependencies in `pool`, by id.
+async fn views(pool: &PgPool) -> Vec<(String, String)> {
+    sqlx::query_as("select id, name from knobas.dep_view order by id")
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
 /// The layers of Dependencies (`0036`, #871) are seeded on every machine and
 /// replaced, not merged, by a backup's: a restore must leave exactly the
 /// archive's scheme, with none of the target's seed mixed in. An archive that
@@ -798,10 +806,14 @@ async fn a_restore_replaces_the_seeded_layers_with_the_archives_and_keeps_them_o
         "insert into knobas.dep_layer (id, name, position) values ('edge', 'Edge', 9)",
         "update knobas.dep_layer_kind set layer_id = 'edge' where kind = 'route'",
         "delete from knobas.dep_layer_kind where kind = 'site'",
+        // And the views of Dependencies (`0038`, #873): one renamed, one gone.
+        "update knobas.dep_view set name = 'All of it' where id = 'everything'",
+        "delete from knobas.dep_view where id = 'code'",
     ] {
         sqlx::query(statement).execute(&from).await.unwrap();
     }
     let changed = layers(&from).await;
+    let changed_views = views(&from).await;
 
     let dir = tempfile::tempdir().unwrap();
     let archive = dir.path().join("layers.knobas");
@@ -820,6 +832,11 @@ async fn a_restore_replaces_the_seeded_layers_with_the_archives_and_keeps_them_o
         layers(&into).await,
         changed,
         "the restored layers are exactly the archive's, with no seed row left over"
+    );
+    assert_eq!(
+        views(&into).await,
+        changed_views,
+        "the restored views are exactly the archive's, with no seed row left over"
     );
 
     // An archive without the layer tables leaves the target's seed in place.

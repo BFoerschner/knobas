@@ -1,7 +1,19 @@
 import { describe, expect, test } from "vitest";
 
 import type { Dependencies, DepItem } from "../../ipc/assets";
-import { bandsOf, railOf, stateOf, unplacedOf } from "./deps";
+import { stateOf } from "./deps";
+import { drawOf, NO_GESTURES } from "./draw";
+import { settingsOf, viewBadge } from "./views";
+
+/** The bands with every layer shown, or with `hidden` hidden. */
+function bandsOf(read: Dependencies, hidden: ReadonlySet<string>) {
+  return drawOf(read, settingsOf({}, hidden), NO_GESTURES).bands.map((band) => ({
+    ...band,
+    items: band.open.flatMap((group) => group.tiles),
+  }));
+}
+const railOf = (read: Dependencies, hidden: ReadonlySet<string>) => drawOf(read, settingsOf({}, hidden), NO_GESTURES).rail;
+const unplacedOf = (read: Dependencies) => drawOf(read, settingsOf({}, new Set()), NO_GESTURES).unplaced;
 
 function item(over: Partial<DepItem> & Pick<DepItem, "id" | "kind">): DepItem {
   return {
@@ -134,5 +146,13 @@ describe("items in no layer (R-11.13, story 147)", () => {
       ]),
     );
     expect(unplaced).toEqual({ count: 3, kinds: ["Network", "something_new"] });
+  });
+});
+
+describe("the view menu's layer count (R-11.16)", () => {
+  test("counts the layers there are, not a hidden layer since removed", () => {
+    const settings = settingsOf({}, new Set(["work", "gone"]));
+    const views = { views: [{ id: "v", name: "V", settings }], opens_from_ticket: "t", opens_from_top: "t" };
+    expect(viewBadge(views, "v", ["work", "code", "data"])).toBe("2 of 3 layers");
   });
 });

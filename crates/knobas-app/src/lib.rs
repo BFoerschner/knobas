@@ -543,6 +543,17 @@ pub fn run() {
             // foot: the list is append-only (§10.8).
             commands::entity::pr_viewed_files,
             commands::entity::set_pr_file_viewed,
+            // #873's layer writes and saved views, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::assets::create_dep_layer,
+            commands::assets::rename_dep_layer,
+            commands::assets::delete_dep_layer,
+            commands::assets::order_dep_layers,
+            commands::assets::place_dep_kind,
+            commands::assets::dep_views,
+            commands::assets::save_dep_view,
+            commands::assets::delete_dep_view,
+            commands::assets::set_dep_view_defaults,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

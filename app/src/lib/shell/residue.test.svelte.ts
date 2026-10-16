@@ -157,6 +157,8 @@ vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  // The asset editor's *Depends on* links (#875). Nothing here saves one.
+  createLink: () => Promise.reject(new Error("no link in this test")),
   // The pipeline page's two live reads (#851), answering late.
   pipelineSettings: () => deferred(null),
   olderPipelineRuns: () => deferred([]),
@@ -397,7 +399,8 @@ const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
-const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
+const { createDepViewState } = await import("../tf/deps/views.svelte");
+const TfDepsViewMenu = (await import("../tf/deps/TfDepsViewMenu.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -737,6 +740,30 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(ViewMenu, { target, props: { name: "My work", onedit: () => {}, onduplicate: () => {}, ondelete: () => {} } }),
     }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** Dependencies' view menu (#873): its outside-click listener lives while it is open. */
+    name: "TfDepsViewMenu",
+    source: "lib/tf/deps/TfDepsViewMenu.svelte",
+    open: (target) => {
+      const views = createDepViewState();
+      views.take({ views: [{ id: "v", name: "Everything", settings: { layers: {}, environments: [], problems: false, tiles: "auto", fold_at: 24 } }], opens_from_ticket: "v", opens_from_top: "v" });
+      return {
+        app: mount(TfDepsViewMenu, {
+          target,
+          props: {
+            views,
+            layerIds: ["work", "code"],
+            ports: {
+              saveDepView: () => deferred(null as never),
+              deleteDepView: () => deferred(null as never),
+              setDepViewDefaults: () => deferred(null as never),
+            },
+          },
+        }),
+      };
+    },
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
   },
   {
@@ -1391,7 +1418,7 @@ const CASES: Case[] = [
     }),
   },
   {
-    /** Dependencies (#871): its one read behind a ready database, answering late. */
+    /** Dependencies (#871, #873): its read and its views behind a ready database, answering late. */
     name: "TfDeps",
     source: "lib/tf/deps/TfDeps.svelte",
     open: (target) => ({
@@ -1399,8 +1426,11 @@ const CASES: Case[] = [
         target,
         props: {
           ready: true,
-          hidden: createHiddenLayers(),
-          ports: { dependencies: () => deferred({ layers: [], kinds: [], items: [], relations: [] }) },
+          views: createDepViewState(),
+          ports: {
+            dependencies: () => deferred({ layers: [], kinds: [], items: [], relations: [] }),
+            depViews: () => deferred({ views: [], opens_from_ticket: "", opens_from_top: "" }),
+          },
         },
       }),
     }),

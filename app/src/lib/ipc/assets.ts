@@ -1323,3 +1323,89 @@ export interface Dependencies {
 export function dependencies(): Promise<Dependencies> {
   return invoke<Dependencies>("dependencies");
 }
+
+// -- The layer writes and the saved views of Dependencies (#873) -------------
+
+/** Add a shared layer at the bottom; answers with every layer. `conflict` for a taken name. */
+export function createDepLayer(name: string): Promise<DepLayer[]> {
+  return invoke<DepLayer[]>("create_dep_layer", { name });
+}
+
+/** Rename a shared layer; `conflict` for a name another layer has, `invalid` for a blank one. */
+export function renameDepLayer(layerId: string, name: string): Promise<DepLayer[]> {
+  return invoke<DepLayer[]>("rename_dep_layer", { layerId, name });
+}
+
+/** Remove a shared layer from every view; its kinds go to no layer. */
+export function deleteDepLayer(layerId: string): Promise<DepLayer[]> {
+  return invoke<DepLayer[]>("delete_dep_layer", { layerId });
+}
+
+/** Put the shared layers in this order, top to bottom: every layer once. */
+export function orderDepLayers(layerIds: string[]): Promise<DepLayer[]> {
+  return invoke<DepLayer[]>("order_dep_layers", { layerIds });
+}
+
+/** Put a kind at the end of a layer, or in no layer when `layerId` is `null`. */
+export function placeDepKind(kind: string, layerId: string | null): Promise<DepLayer[]> {
+  return invoke<DepLayer[]>("place_dep_kind", { kind, layerId });
+}
+
+/** How a layer's tiles group in a view — `dependencies::Group`. */
+export type DepGroup = "none" | "environment" | "owner" | "parent" | "project" | "status";
+
+/** The tile size — `dependencies::Tiles`. */
+export type DepTiles = "auto" | "roomy" | "compact";
+
+/** What a view keeps for one layer — `LayerInView`. */
+export interface LayerInView {
+  hidden: boolean;
+  folded: boolean;
+  group: DepGroup;
+}
+
+/** Everything a view keeps — `DepViewSettings`. A layer it does not name shows, unfolded, ungrouped. */
+export interface DepViewSettings {
+  layers: Record<string, LayerInView>;
+  /** The environment filter: empty is every environment. */
+  environments: string[];
+  /** *Problems and what they touch*. */
+  problems: boolean;
+  tiles: DepTiles;
+  /** Healthy groups fold above this many items in a layer. */
+  fold_at: number;
+}
+
+/** One saved view — `DepView`. */
+export interface DepView {
+  id: string;
+  name: string;
+  settings: DepViewSettings;
+}
+
+/** Every view, in order, and the two that open first — `DepViews`. */
+export interface DepViews {
+  views: DepView[];
+  opens_from_ticket: string;
+  opens_from_top: string;
+}
+
+/** Every saved view of Dependencies and which opens from a ticket and from the top bar. */
+export function depViews(): Promise<DepViews> {
+  return invoke<DepViews>("dep_views");
+}
+
+/** Save a view: new when `viewId` is `null` (*Save as a new view…*), else its name and settings. */
+export function saveDepView(viewId: string | null, name: string, settings: DepViewSettings): Promise<DepView> {
+  return invoke<DepView>("save_dep_view", { viewId, name, settings });
+}
+
+/** Delete a view; `conflict` for the last one. */
+export function deleteDepView(viewId: string): Promise<DepViews> {
+  return invoke<DepViews>("delete_dep_view", { viewId });
+}
+
+/** Choose which view opens from a ticket's Map tab and which from the top bar. */
+export function setDepViewDefaults(fromTicket: string, fromTop: string): Promise<DepViews> {
+  return invoke<DepViews>("set_dep_view_defaults", { fromTicket, fromTop });
+}
