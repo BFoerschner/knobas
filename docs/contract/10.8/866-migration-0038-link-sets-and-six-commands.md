@@ -69,7 +69,9 @@
   and answers it as stored; it refuses `invalid` for a blank name, a non-slug id, an unknown member
   or rule kind, an entity in the set twice, a rule twice, a rule value that is not `<x>:<y>`, an
   entity knobas has no row for, and an entity of another kind (a `pipeline` member may be any
-  kind but the other four, `ticket`, `pr`, `branch`, `commit`, `build`, `ctx`, `note` and `route`).
+  kind but the other four, `ticket`, `pr`, `branch`, `commit`, `build`, `ctx`, `note` and `route`),
+  and `not_found` for a draft whose id no set holds, so a save from an editor still open on a
+  deleted set never brings it back (checked under the save's table lock, which a delete waits on).
   `delete_link_set` removes the set with its members and rules (`not_found` when none). A rule's
   tickets are live `ticket` items; *yours* is a ticket whose declared `assignee` is a configured
   source's `username`, the identity `@me` reads. `preview_link_set_rule` answers one rule's

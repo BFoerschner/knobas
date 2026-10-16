@@ -430,8 +430,9 @@ pub async fn preview(pool: &PgPool, rule: &LinkSetRule) -> Result<Vec<RuleTicket
 /// # Errors
 ///
 /// `invalid` for a draft [`refusal`] names, or a member knobas has no entity
-/// for or whose entity is not of the member's kind; `internal` if the write
-/// fails.
+/// for or whose entity is not of the member's kind; `not_found` for a draft
+/// naming a set that is not there (one deleted while its editor was open);
+/// `internal` if the write fails.
 pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, IpcError> {
     if let Some(why) = refusal(&draft) {
         return Err(IpcError::invalid(why));
@@ -465,7 +466,20 @@ pub async fn save(pool: &PgPool, draft: LinkSetDraft) -> Result<LinkSetDetail, I
         .execute(&mut *tx)
         .await?;
     let id = match &draft.id {
-        Some(id) => id.clone(),
+        Some(id) => {
+            // Under the lock, so a delete either lands first and this save is
+            // refused, or waits for it: an editor still open on a deleted set
+            // never brings it back.
+            let exists: bool =
+                sqlx::query_scalar("select exists (select 1 from knobas.link_set where id = $1)")
+                    .bind(id)
+                    .fetch_one(&mut *tx)
+                    .await?;
+            if !exists {
+                return Err(IpcError::not_found(format!("no link set is called {id}")));
+            }
+            id.clone()
+        }
         None => {
             let base = slug(&draft.name);
             let taken: Vec<String> =

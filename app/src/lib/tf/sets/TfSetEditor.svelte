@@ -51,7 +51,8 @@
   /** A rule being added or re-kinded, until its value is chosen. */
   let pending = $state<{ at: number; kind: LinkSetRuleKind } | null>(null);
   let picking = $state<LinkSetMemberKind | null>(null);
-  let saving = $state(false);
+  /** The saves asked for so far, in order (see `save`). */
+  let saves: Promise<void> = Promise.resolve();
 
   $effect(() => {
     if (!ready) return;
@@ -105,20 +106,25 @@
     };
   }
 
-  /** Save the set as `change` leaves it, and draw what the save answered. */
-  async function save(change: (draft: LinkSetDraft) => void, toast?: string) {
-    if (!set || saving) return;
-    const draft = draftOf(set);
-    change(draft);
-    saving = true;
-    try {
-      set = await ports.saveLinkSet(draft);
-      if (toast) push({ text: toast });
-    } catch (error) {
-      push({ text: ipcErrorMessage(error), tone: "err" });
-    } finally {
-      saving = false;
-    }
+  /**
+   * Save the set as `change` leaves it, and draw what the save answered.
+   * Saves run one after another, each over what the one before answered, so
+   * a change made while a save is in flight is kept, not dropped.
+   */
+  function save(change: (draft: LinkSetDraft) => void, toast?: string): Promise<void> {
+    const target = set?.id;
+    saves = saves.then(async () => {
+      if (!set || set.id !== target) return;
+      const draft = draftOf(set);
+      change(draft);
+      try {
+        set = await ports.saveLinkSet(draft);
+        if (toast) push({ text: toast });
+      } catch (error) {
+        push({ text: ipcErrorMessage(error), tone: "err" });
+      }
+    });
+    return saves;
   }
 
   function rename(event: FocusEvent, field: "name" | "description") {
@@ -140,8 +146,10 @@
 
   async function remove() {
     if (!set) return;
+    const gone = set.id;
+    await saves;
     try {
-      await ports.deleteLinkSet(set.id);
+      await ports.deleteLinkSet(gone);
       push({ text: "Deleted the link set. Links drawn on tickets by hand stay." });
       location.hash = "#/sets";
     } catch (error) {

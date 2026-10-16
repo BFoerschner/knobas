@@ -626,6 +626,20 @@ async fn a_set_knobas_cannot_store_is_refused() {
     }
     let missing = link_sets::get(&pool, "no-such-set").await.unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
+
+    // An editor still open on a set somebody deleted cannot bring it back.
+    let saved = link_sets::save(&pool, draft("Gone soon", vec![], vec![rule("manual", &ticket)]))
+        .await
+        .unwrap();
+    link_sets::delete(&pool, &saved.set.id).await.unwrap();
+    let mut stale = draft("Gone soon", vec![], vec![rule("manual", &ticket)]);
+    stale.id = Some(saved.set.id.clone());
+    let error = link_sets::save(&pool, stale).await.unwrap_err();
+    assert_eq!(error.code, IpcErrorCode::NotFound);
+    assert!(
+        link_sets::get(&pool, &saved.set.id).await.is_err(),
+        "a save over a deleted set brought it back"
+    );
 }
 
 /// Every *This job* view reads `list_entities` with `reach:`, and a set's

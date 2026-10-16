@@ -204,6 +204,7 @@ export function handlers(): Record<string, Handler> {
     save_link_set: (args) => {
       const draft = args["draft"] as LinkSetDraft;
       if (!draft.name.trim()) throw { code: "invalid", message: "a link set needs a name", source_id: null };
+      if (draft.id !== null) found(draft.id);
       const set: FakeSet = {
         id: draft.id ?? slug(draft.name),
         name: draft.name.trim(),

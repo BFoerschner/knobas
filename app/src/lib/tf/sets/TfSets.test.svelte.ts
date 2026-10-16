@@ -253,6 +253,16 @@ test("a rule is added once its value is chosen, and Remove drops a member as one
   expect(saved.at(-1)?.members.map((member) => member.entity_id)).not.toContain("gitea:tidewater/psp-client");
 });
 
+test("a change made while a save is in flight is saved after it, not dropped", async () => {
+  await draw(["payout-stack"]);
+  target.querySelector<HTMLButtonElement>("button[aria-label='Remove tidewater/psp-client']")!.click();
+  target.querySelector<HTMLButtonElement>("button[aria-label='Remove PSP error codes']")!.click();
+  await settle();
+  await settle();
+  expect(saved).toHaveLength(2);
+  expect(saved.at(-1)?.members.map((member) => member.entity_id)).toEqual(["gitea:tidewater/payout-service"]);
+});
+
 test("Delete removes the set and goes back to the list", async () => {
   await draw(["payout-stack"]);
   button("Delete").click();
