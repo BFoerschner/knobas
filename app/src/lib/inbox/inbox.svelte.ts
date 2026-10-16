@@ -361,6 +361,16 @@ export function snoozePresets(now: Date, deadline?: Date | null): SnoozePreset[]
   return presets;
 }
 
+/**
+ * The day a date input produced (`2026-08-24`), at 09:00 local -- the
+ * presets' own convention -- or `null` for an empty or partial value.
+ */
+export function pickedMorning(value: string): Date | null {
+  const [y, m, d] = value.split("-").map(Number);
+  if (!y || !m || !d) return null;
+  return new Date(y, m - 1, d, 9, 0, 0, 0);
+}
+
 /** 09:00 local, `days` after the day `from` falls on. */
 function morningAfter(from: Date, days: number): Date {
   const at = new Date(from.getFullYear(), from.getMonth(), from.getDate() + days, 9, 0, 0, 0);

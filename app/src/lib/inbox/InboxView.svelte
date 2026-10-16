@@ -30,7 +30,7 @@
   import { push } from "../shell/toasts.svelte";
   import { drawable } from "./actions";
   import { addressOf } from "./address";
-  import { inbox as sharedInbox, snoozePresets, type Inbox } from "./inbox.svelte";
+  import { inbox as sharedInbox, pickedMorning, snoozePresets, type Inbox } from "./inbox.svelte";
 
   let {
     router,
@@ -164,9 +164,8 @@
 
   /** A date the picker produced, at 09:00 local — the presets' own convention. */
   function fromPicker(key: string, value: string) {
-    const [y, m, d] = value.split("-").map(Number);
-    if (!y || !m || !d) return;
-    void snooze(key, new Date(y, m - 1, d, 9, 0, 0, 0));
+    const at = pickedMorning(value);
+    if (at !== null) void snooze(key, at);
   }
 
   /**

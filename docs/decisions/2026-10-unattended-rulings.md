@@ -2412,6 +2412,7 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   (prototype-6's `vwSave`), so it opens as saved. **Reversing:** low.
 - **Jira views (`jira_ref`, #877) open in the same editor**; prototype-6's *Settings for …* variant
   is #877's to draw. **Reversing:** a branch in `ViewEditor`.
+
 ## #834 Inbox (2026-10-16)
 
 - **A row's job is its own ticket, else the first open job whose `job_reach` holds it.** The open

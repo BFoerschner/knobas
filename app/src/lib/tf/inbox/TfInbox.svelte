@@ -27,7 +27,7 @@
   } from "../../ipc/entity";
   import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
   import { ACTION_FORMS } from "../../inbox/actions";
-  import { inbox as sharedInbox, snoozePresets, type Inbox } from "../../inbox/inbox.svelte";
+  import { inbox as sharedInbox, pickedMorning, snoozePresets, type Inbox } from "../../inbox/inbox.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
@@ -47,7 +47,7 @@
     untilLabel,
     visible,
     when,
-    type JobReach,
+    type OpenJob,
   } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
@@ -106,7 +106,7 @@
     chips: [{ key: "kind", label: "Kind", options: KIND_CHIPS.map((value) => ({ value, label: value })) }],
   });
 
-  let jobs = $state<JobReach[]>([]);
+  let jobs = $state<OpenJob[]>([]);
   const index = $derived(jobIndex(jobs));
   const scope = $derived<"job" | "all">(job !== null && filter.scope === "job" ? "job" : "all");
 
@@ -116,7 +116,7 @@
   const shelf = $derived(snoozedLine(inbox.snoozed));
 
   /** The open jobs, the current one first, each with what it reaches. */
-  async function readJobs(current: string | null): Promise<JobReach[]> {
+  async function readJobs(current: string | null): Promise<OpenJob[]> {
     const contexts = await ports.listContexts().catch(() => [] as ContextRow[]);
     let ids = contexts
       .filter((row) => row.kind === "ticket" && row.anchor_id !== null && row.archived_at === null)
@@ -200,12 +200,13 @@
 
   /** A date the picker produced, at 09:00 local, as the presets are. */
   function fromPicker(entry: InboxEntry, value: string) {
-    const [y, m, d] = value.split("-").map(Number);
-    if (!y || !m || !d) return;
-    snooze(entry, new Date(y, m - 1, d, 9, 0, 0, 0));
+    const at = pickedMorning(value);
+    if (at !== null) snooze(entry, at);
   }
 
-  const LABEL: Record<string, string> = { rerun_build: "Re-run", ack: "Ack", snooze: "Snooze", done: "Done" };
+  /** Each button's word: a source op's is its form's (`ACTION_FORMS`), knobas' own are here. */
+  const LABEL: Record<string, string> = { ack: "Ack", snooze: "Snooze", done: "Done" };
+  const labelOf = (action: string) => ACTION_FORMS[action]?.label ?? LABEL[action] ?? action;
 
   function press(entry: InboxEntry, action: string) {
     if (action === "rerun_build") void rerun(entry);
@@ -246,7 +247,7 @@
               class="tf-btn tf-sm"
               class:tf-ghost={action === "done"}
               aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
-              onclick={() => press(entry, action)}>{LABEL[action]}</button
+              onclick={() => press(entry, action)}>{labelOf(action)}</button
             >
           {/each}
         </div>

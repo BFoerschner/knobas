@@ -129,7 +129,7 @@ export function rowActions(entry: InboxEntry): string[] {
 }
 
 /** One job and what it reaches: a ticket entity id and its `job_reach` read. */
-export interface JobReach {
+export interface OpenJob {
   id: string;
   reached: readonly Pick<Reached, "entity_id">[];
 }
@@ -146,7 +146,7 @@ export interface JobIndex {
  * The jobs' reaches, inverted. An item about a ticket belongs to that ticket;
  * anything else to the first job (in the order given) whose reach holds it.
  */
-export function jobIndex(jobs: readonly JobReach[]): JobIndex {
+export function jobIndex(jobs: readonly OpenJob[]): JobIndex {
   const owner = new Map<string, string>();
   const held = new Map<string, Set<string>>();
   for (const job of jobs) {
