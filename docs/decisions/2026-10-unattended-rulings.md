@@ -1979,3 +1979,18 @@ Ruled 2026-10-16 by the implementer (PR for #828).
 - **The fixture gains PR #150**, open, asking the fixture user for a review and linked to
   PAY-236, so the card says *review asked of you* as prototype-6's does; it also says *PR #150
   open*, which the prototype does not. **Reversing:** low.
+- **Merge-manager (PR #933): `has:` has no injection path.** Its fragment swaps `fd.v` and `fd.u`
+  for the `$N` placeholders `Builder::param` allocates, never for a value; the values are still
+  binds, already narrowed by `apply_field` to the four `SignalKind` spellings, lowercased. The
+  plan shows one hashed subplan a statement (`loops=1`) for the search and the ids path.
+  **Reversing:** none needed.
+- **Merge-manager (PR #933): the reach's builds are kept by the entity's kind before they join
+  `sync.item`.** Joined on the id alone, the planner compared every reach row with every build:
+  1.8 million comparisons on 1,800 tickets, 500 builds and 1,677 confirmed links. After the change
+  `has:failing-build` reads 60 ms where it read 230 ms, and the laned board 133 ms where it read
+  300 ms. **Reversing:** low, one macro.
+- **Merge-manager (PR #933): the uncapped laned board merges as it is, with a backlog follow-up
+  (#939).** On a mirror of 15,000 tickets and 12,000 confirmed links, a much denser link graph
+  than testenv has, the laned board reads 1.1 s and 4.2 MB, against 68 ms capped. Lanes are a
+  switch the user turns on, and testenv is far smaller; the milestone review's by-eye check
+  decides whether it gets promoted. **Reversing:** #939's lane argument on `mini_board`.
