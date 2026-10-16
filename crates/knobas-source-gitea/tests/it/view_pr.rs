@@ -384,6 +384,10 @@ async fn a_pull_request_view_is_overview_files_commits_and_conversation() {
                 "no: Gitea is still checking whether this can merge, or it conflicts with main",
                 Some(Tone::Warn)
             ),
+            // #994: what *Ready to merge?* reads without taking the sentence
+            // apart. No protection here, so no approval is required.
+            ("Approvals", "none required", Some(Tone::Ok)),
+            ("Conflicts", "conflicts with main", Some(Tone::Warn)),
             ("Created", "2026-08-21 17:41 +00:00", None),
             ("Updated", "2026-08-22 10:20 +00:00", None),
             ("Review", "approved by priya.nair", Some(Tone::Ok)),
@@ -1083,6 +1087,18 @@ fn merge_deleting(disabled: Option<&str>, delete: bool) -> ViewAction {
                     FieldKind::Flag,
                 )
             },
+            // #843: a squash's commit message, prefilled as Gitea's own
+            // default title for one: the title and the number.
+            ActionField {
+                value: Some("SEPA retry with exponential backoff (#142)".into()),
+                ..ActionField::new(
+                    "message",
+                    "Squash commit message",
+                    FieldKind::Text {
+                        suggestions: Vec::new(),
+                    },
+                )
+            },
         ],
         confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
         primary: true,
@@ -1261,6 +1277,60 @@ async fn a_merge_says_specifically_what_stands_in_its_way() {
             case.what
         );
     }
+}
+
+/// *Ready to merge?*'s facts (#994): *Approvals* as given of required, ok
+/// when met and warn when short, and *Conflicts* from Gitea's `mergeable`,
+/// none while it has not said and none for a work-in-progress title (Gitea's
+/// `false` there is not about a conflict). A closed pull request has neither.
+#[tokio::test]
+async fn the_overview_declares_its_approvals_and_its_conflicts() {
+    let approvals_and_conflicts = |view: &SourceView| {
+        let facts = facts_of(section(view, "overview"));
+        let read = |label| fact(facts, label).map(|f| (f.value.clone(), f.tone));
+        (read("Approvals"), read("Conflicts"))
+    };
+    let ok = |v: &str| Some((v.to_owned(), Some(Tone::Ok)));
+    let warn = |v: &str| Some((v.to_owned(), Some(Tone::Warn)));
+
+    // Two required, one official approval: short; Gitea can merge.
+    let server = gitea(mergeable_pull(), official_reviews()).await;
+    protect_main(&server, 2, false).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        approvals_and_conflicts(&view),
+        (warn("1 of 2"), ok("none with main"))
+    );
+
+    // One required, one given: met; Gitea says it cannot merge.
+    let server = gitea(open_pull(), official_reviews()).await;
+    protect_main(&server, 1, false).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        approvals_and_conflicts(&view),
+        (ok("1 of 1"), warn("conflicts with main"))
+    );
+
+    // Gitea has not said yet: no conflict line.
+    let mut checking = open_pull();
+    checking["mergeable"] = Value::Null;
+    let server = gitea(checking, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(approvals_and_conflicts(&view), (ok("none required"), None));
+
+    // A work-in-progress title: Gitea's `false` is not a conflict.
+    let mut wip = open_pull();
+    wip["title"] = json!("WIP: SEPA retry");
+    let server = gitea(wip, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(approvals_and_conflicts(&view).1, None);
+
+    // Closed: neither.
+    let mut closed = mergeable_pull();
+    closed["state"] = json!("closed");
+    let server = gitea(closed, json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(approvals_and_conflicts(&view), (None, None));
 }
 
 /// Reviews where one official approval stands: Priya's. Olu's approval is not
@@ -2287,9 +2357,11 @@ async fn a_pull_requests_head_commit_statuses_are_its_checks() {
             "state": "failure", "sha": HEAD_SHA, "total_count": 2,
             "statuses": [
                 { "status": "success", "context": "ci/build", "description": "passed",
-                  "target_url": "https://ci.example/1" },
+                  "target_url": "https://ci.example/1", "updated_at": "2026-08-22T11:44:00Z" },
                 { "status": "failure", "context": "ci/tests", "description": "1 failed",
-                  "target_url": "https://ci.example/2" }
+                  "target_url": "https://ci.example/2", "updated_at": "2026-08-22T10:10:00Z" },
+                { "status": "pending", "context": "ci/deploy",
+                  "updated_at": "2026-08-21T09:00:00+02:00" }
             ]
         })))
         .with_priority(2)
@@ -2304,13 +2376,38 @@ async fn a_pull_requests_head_commit_statuses_are_its_checks() {
         assert_eq!(title.as_deref(), Some("Checks"));
         let drawn: Vec<_> = rows
             .iter()
-            .map(|r| (r.title.as_str(), r.chip.as_deref(), r.tone))
+            .map(|r| {
+                (
+                    r.title.as_str(),
+                    r.chip.as_deref(),
+                    r.tone,
+                    r.meta.as_deref(),
+                )
+            })
             .collect();
+        // Each row's time (#994) after its description, as long ago as the
+        // shell's `ago()` says it: these are days old, so their UTC date.
         assert_eq!(
             drawn,
             [
-                ("ci/tests", Some("failure"), Some(Tone::Err)),
-                ("ci/build", Some("success"), Some(Tone::Ok)),
+                (
+                    "ci/tests",
+                    Some("failure"),
+                    Some(Tone::Err),
+                    Some("1 failed · 2026-08-22")
+                ),
+                (
+                    "ci/deploy",
+                    Some("pending"),
+                    Some(Tone::Info),
+                    Some("2026-08-21")
+                ),
+                (
+                    "ci/build",
+                    Some("success"),
+                    Some(Tone::Ok),
+                    Some("passed · 2026-08-22")
+                ),
             ],
             "asked for {asked:?}"
         );

@@ -1254,6 +1254,7 @@ fn write_op_probes() -> Vec<WriteOp> {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: true,
+            message: None,
         },
         WriteOp::UpdatePullRequestBranch {
             entity: "gitea:tidewater/payout-service#142".to_owned(),

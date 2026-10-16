@@ -679,11 +679,20 @@ pub enum WriteOp {
     /// it was then: one that keeps the branch. A branch the source will not
     /// delete (protected, in a fork the account cannot write) is the source's
     /// to skip; the merge itself still lands.
+    ///
+    /// `message` is the commit message the reader wrote for the merge (#843,
+    /// R-8.19: *Squash into one commit* with an editable message): its first
+    /// line the title, the rest the body. `None` leaves the source's own
+    /// default, which is what every merge queued before the field existed
+    /// meant; absent on the wire when `None`, so such a merge reads and
+    /// writes the shape it had.
     MergePullRequest {
         entity: String,
         style: MergeStyle,
         #[serde(default)]
         delete_branch: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
     },
     /// Identifier `"set_parameter"`. Set one parameter of a build
     /// configuration to `value` (spec #660 story 19, issue #668). `entity` is
@@ -1577,6 +1586,7 @@ mod tests {
                 entity: "gitea:tidewater/payout-service#142".into(),
                 style: MergeStyle::Squash,
                 delete_branch: true,
+                message: Some("Idempotent retry window (#142)\n\nRetries on 503.".into()),
             },
             WriteOp::SetParameter {
                 entity: "teamcity:buildType:Payout_Build".into(),
@@ -1699,6 +1709,7 @@ mod tests {
                 entity: "gitea:o/r#1".into(),
                 style,
                 delete_branch: false,
+                message: None,
             };
             assert_eq!(
                 serde_json::to_value(&op).unwrap(),
@@ -1725,7 +1736,7 @@ mod tests {
         assert!(
             matches!(
                 &read,
-                WriteOp::MergePullRequest { entity, style: MergeStyle::Squash, delete_branch: false }
+                WriteOp::MergePullRequest { entity, style: MergeStyle::Squash, delete_branch: false, message: None }
                     if entity == "gitea:o/r#1"
             ),
             "{read:?}"
@@ -1734,6 +1745,7 @@ mod tests {
             entity: "gitea:o/r#1".into(),
             style: MergeStyle::Merge,
             delete_branch: true,
+            message: None,
         };
         assert_eq!(
             serde_json::to_value(&new).unwrap(),

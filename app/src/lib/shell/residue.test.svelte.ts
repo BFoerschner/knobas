@@ -392,6 +392,8 @@ const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
+const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
+const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
@@ -1294,7 +1296,38 @@ const CASES: Case[] = [
             resolveUrl: () => deferred(null),
             listSources: () => deferred([]),
             submitWrite: () => deferred({} as never),
+            prViewedFiles: () => deferred([]),
+            setPrFileViewed: () => deferred([]),
           },
+        },
+      }),
+    }),
+  },
+  // *Files changed* (#842): the deferred Files read and the viewed ticks, answering late.
+  {
+    name: "TfPrFiles",
+    source: "lib/tf/pr/TfPrFiles.svelte",
+    open: (target) => ({
+      app: mount(TfPrFiles, {
+        target,
+        props: {
+          prId: "gitea:tidewater/payout-service#142",
+          entityView: () =>
+            deferred({
+              sections: [
+                {
+                  id: "files",
+                  title: "Files",
+                  count: 1,
+                  deferred: false,
+                  blocks: [{ type: "diff", files: [], truncated: false, commentable: null, gone: [] }],
+                },
+              ],
+              actions: [],
+            } as never),
+          viewedFiles: () => deferred([]),
+          setViewed: () => deferred([]),
+          pending: createPendingComments(() => null),
         },
       }),
     }),

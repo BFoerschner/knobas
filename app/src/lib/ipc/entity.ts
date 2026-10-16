@@ -500,6 +500,21 @@ export function pipelineRuns(pipelineId: string, limit?: number): Promise<RunRow
   return invoke<RunRow[]>("pipeline_runs", { pipelineId, limit: limit ?? null });
 }
 
+/**
+ * The files of pull request `prId` the reader marked *Viewed* on its current
+ * head (#842, R-8.17), in path order — `pr_viewed_files`. Knobas-local, kept
+ * by pull request and the head commit its source declares: once the mirror
+ * reads another head they read as none.
+ */
+export function prViewedFiles(prId: string): Promise<string[]> {
+  return invoke<string[]>("pr_viewed_files", { prId });
+}
+
+/** Mark one file of a pull request *Viewed* or not on its current head (#842), answering the files now viewed. */
+export function setPrFileViewed(prId: string, path: string, viewed: boolean): Promise<string[]> {
+  return invoke<string[]>("set_pr_file_viewed", { prId, path, viewed });
+}
+
 /** Pin or unpin a pipeline (#849); answers whether it is now pinned. */
 export function setPipelinePinned(pipelineId: string, pinned: boolean): Promise<boolean> {
   return invoke<boolean>("set_pipeline_pinned", { pipelineId, pinned });

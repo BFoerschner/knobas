@@ -2,7 +2,8 @@
 //! say about the commit a pull request, a branch or a commit view stands at.
 //!
 //! One read, `GET /repos/{o}/{r}/commits/{sha}/status`: Gitea's combined
-//! status, the latest status of each context. Drawn on *Overview* right after
+//! status, the latest status of each context, each row with its description
+//! and how long ago it was reported (#994). Drawn on *Overview* right after
 //! the facts as an entity list, the failing first and the passing last, so
 //! the line a reader is looking for is the top one. A commit nobody reported
 //! on draws nothing: no title over an empty list (the view stays quiet).
@@ -90,7 +91,7 @@ fn drawn(statuses: &[Status]) -> Option<Block> {
                 ViewRow {
                     entity_id: None,
                     title: context,
-                    meta: nonblank(status.description.clone()),
+                    meta: meta_of(status),
                     tone,
                     chip: (!state.is_empty()).then_some(state),
                     url: nonblank(status.target_url.clone()),
@@ -108,6 +109,22 @@ fn drawn(statuses: &[Status]) -> Option<Block> {
         title: Some("Checks".to_owned()),
         rows: rows.into_iter().map(|(_, row)| row).collect(),
     })
+}
+
+/// A row's quiet second reading: its description, then how long ago it was
+/// reported (#994, Gitea's `updated_at`, as the shell's `ago()` says it),
+/// joined by ` · ` as a commit row's are. `None` where neither is there.
+fn meta_of(status: &Status) -> Option<String> {
+    let when = status
+        .updated_at
+        .as_deref()
+        .and_then(|at| chrono::DateTime::parse_from_rfc3339(at).ok())
+        .map(|at| super::ago(at.with_timezone(&chrono::Utc), chrono::Utc::now()));
+    let parts: Vec<String> = nonblank(status.description.clone())
+        .into_iter()
+        .chain(when)
+        .collect();
+    (!parts.is_empty()).then(|| parts.join(" · "))
 }
 
 /// Where a state sorts and how loud it is: Gitea's five states, `failure`
@@ -145,6 +162,9 @@ pub(super) struct Status {
     description: Option<String>,
     #[serde(default)]
     target_url: Option<String>,
+    /// When it was last reported (#994): RFC 3339, as Gitea sends it.
+    #[serde(default)]
+    updated_at: Option<String>,
 }
 
 fn null_as_empty<'de, D>(deserializer: D) -> Result<Vec<Status>, D::Error>

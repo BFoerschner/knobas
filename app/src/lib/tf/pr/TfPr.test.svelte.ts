@@ -20,6 +20,7 @@ import type {
   ViewRow,
 } from "../../ipc/entity";
 import type { WriteOpPayload } from "../../ipc/sources";
+import { createPendingComments, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
 import { forgetPrQueued } from "./queued.svelte";
 import TfPr, { type PrPorts } from "./TfPr.svelte";
 
@@ -115,6 +116,8 @@ function prView(actions: ViewAction[] = [COMMENT, EDIT, CLOSE, UPDATE, MERGE]): 
               fact("Author", "mara"),
               fact("Branches", "feature/PAY-231-sepa-retry → main"),
               fact("Mergeable", "no: 1 of 2 required approvals", "warn"),
+              fact("Approvals", "1 of 2", "warn"),
+              fact("Conflicts", "none with main", "ok"),
               fact("Review", "approved by priya", "ok"),
             ],
           },
@@ -164,6 +167,7 @@ function detail(author: string): EntityDetail {
   return {
     row: row(PR, "pr", "SEPA retry with exponential backoff", { path: "tidewater/payout-service", state: { text: "open", tone: "info" } }),
     author,
+    links: [],
   } as unknown as EntityDetail;
 }
 
@@ -192,10 +196,12 @@ const SUGGESTIONS: SuggestionPage = {
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
+let pending: PendingCommentStore;
 
 beforeEach(() => {
   forgetPrQueued();
   writes = [];
+  pending = createPendingComments(() => null);
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -220,12 +226,14 @@ function ports(over: Partial<PrPorts> & { pr?: SourceView; author?: string; chec
       writes.push(payload);
       return {} as never;
     },
+    prViewedFiles: async () => [],
+    setPrFileViewed: async () => [],
     ...over,
   };
 }
 
 async function draw(rest: string[], with_: PrPorts = ports()) {
-  view = mount(TfPr, { target, props: { ready: true, rest, job: "PAY-231", ports: with_ } });
+  view = mount(TfPr, { target, props: { ready: true, rest, job: "PAY-231", ports: with_, pending } });
   await settle();
 }
 
@@ -269,9 +277,9 @@ test("somebody else's pull request names its author and offers Review…", async
 test("the toolbar draws what the source offers, in prototype-6's order: Review…, Update branch, Edit, Close, Merge…", async () => {
   await draw([PR], ports({ pr: prView([APPROVE, COMMENT, EDIT, CLOSE, UPDATE, MERGE]) }));
   expect(buttons()).toEqual(["Review…", "Update branch", "Edit", "Close", "Merge…"]);
-  // Merge… is #843's dialog; until it is built it says why it waits.
+  // Merge… opens its dialog (#843) even while blocked; its tooltip says why.
   const merge = button("Merge…")!;
-  expect(merge.getAttribute("aria-disabled")).toBe("true");
+  expect(merge.getAttribute("aria-disabled")).toBeNull();
   expect(merge.title).toBe("1 of 2 required approvals");
 });
 
@@ -307,15 +315,15 @@ test("Overview: each check with its state, the one the mirror holds opening its 
   expect(text(".tf-prdesc")).toBe("Retries SEPA payouts.");
 });
 
-test("Ready to merge? lists the source's verdict, the reviews and the checks, each with its dot; the clone beside it", async () => {
+test("Ready to merge? reads prototype-6's three lines, approvals, checks and conflicts, each with its dot; the clone beside it", async () => {
   await draw([PR]);
   const lines = [...target.querySelectorAll(".tf-prready > span")];
   expect(lines.map((line) => line.textContent?.trim())).toEqual([
-    "Mergeable: no: 1 of 2 required approvals",
-    "Approved by priya",
+    "Approvals: 1 of 2",
     "Checks: Payout_IntegrationTests #1187 failure",
+    "No conflicts with main",
   ]);
-  expect(lines.map((line) => line.querySelector(".tf-dot")!.className)).toEqual(["tf-dot tf-warn", "tf-dot tf-ok", "tf-dot tf-err"]);
+  expect(lines.map((line) => line.querySelector(".tf-dot")!.className)).toEqual(["tf-dot tf-warn", "tf-dot tf-err", "tf-dot tf-ok"]);
   expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… ▾ Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);
 });
@@ -399,14 +407,219 @@ test("Commits: each opens its diff on the repository page; one with a proposed l
   expect(location.hash).toBe(`#/repo/${encodeURIComponent(REPO)}/commits/${encodeURIComponent(C1)}`);
 });
 
-test("Files changed is #842's: an empty page that says so, with no side column", async () => {
-  await draw([PR, "diff"]);
-  expect(text(".tf-cbody")).toBe("Files changed is not built in the new shell yet.");
-  expect(target.querySelector(".tf-side")).toBeNull();
-});
 
 test("a pull request the mirror does not hold says why", async () => {
   await draw([PR], ports({ getEntity: async () => Promise.reject({ code: "not_found", message: "no such entity" }) }));
   expect(text(".tf-cfail")).toContain("no such entity");
   vi.restoreAllMocks();
+});
+
+// -- Submit review (#842, R-8.15, R-8.18) ------------------------------------
+
+const SUBMIT = action("submit_review", "Submit review…", { primary: true, values: { verdict: "comment" }, line_comments: "requires" });
+const APPROVE_SENDS = action("submit_review", "Approve…", {
+  values: { verdict: "approve" },
+  line_comments: "sends",
+  fields: [{ name: "body", label: "Comment", kind: { type: "long_text" }, value: null, required: false, placeholder: null }],
+});
+const CHANGES = action("submit_review", "Request changes…", {
+  values: { verdict: "request_changes" },
+  line_comments: "sends",
+  fields: [{ name: "body", label: "Comment", kind: { type: "long_text" }, value: null, required: true, placeholder: null }],
+});
+
+const dialogButton = (name: string) =>
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === name)!;
+const type = (field: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  field.value = value;
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+};
+
+test("line comments waiting turn Review… into Submit review (N pending), which sends them with the verdict", async () => {
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "new", line: 14, body: "Bound it." });
+  pending.add(PR, { path: "src/sepa/retry.rs", side: "old", line: 9, body: "Why was this 60 s?" });
+  await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
+  expect(buttons()[0]).toBe("Submit review (2 pending)");
+  expect(button("Submit review (2 pending)")!.classList.contains("tf-warnbtn")).toBe(true);
+  button("Submit review (2 pending)")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.querySelector("h2")!.textContent).toBe("Submit your review of PR #142");
+  const radios = [...dialog.querySelectorAll<HTMLLabelElement>(".tf-radio label")].map((l) => l.textContent?.replace(/\s+/g, " ").trim());
+  expect(radios).toEqual([
+    // The meaning is a `small` on its own line under the verdict.
+    "CommentFeedback without a verdict",
+    "ApproveCounts toward the approvals main needs",
+    "Request changesBlocks the merge until you approve",
+  ]);
+  expect(dialog.querySelector(".tf-pane-h")!.textContent).toBe("2 line comments go with it");
+  // Comment is picked first; Approve with a summary sends both comments.
+  dialog.querySelector<HTMLInputElement>("input[value=approve]")!.click();
+  flushSync();
+  type(dialog.querySelector("textarea")!, "Looks right.");
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([
+    {
+      SubmitReview: {
+        entity: PR,
+        verdict: "approve",
+        body: "Looks right.",
+        comments: [
+          { path: "src/sepa/retry.rs", line: 14, side: "new", body: "Bound it." },
+          { path: "src/sepa/retry.rs", line: 9, side: "old", body: "Why was this 60 s?" },
+        ],
+      },
+    },
+  ]);
+  // The review took them: none waits, the toolbar is Review… again, the header says so.
+  expect(pending.of(PR)).toEqual([]);
+  expect(buttons()[0]).toBe("Review…");
+  expect(text(".tf-fhead .tf-sub")).toContain("review queued");
+});
+
+test("Request changes waits for its words; Comment waits for a line comment", async () => {
+  await draw([PR], ports({ author: "jonas", pr: prView([SUBMIT, COMMENT, APPROVE_SENDS, CHANGES, EDIT, MERGE]) }));
+  button("Review…")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.querySelector<HTMLInputElement>("input[value=comment]")!.disabled).toBe(true);
+  expect(dialog.querySelector<HTMLInputElement>("input[value=approve]")!.checked).toBe(true);
+  dialog.querySelector<HTMLInputElement>("input[value=request_changes]")!.click();
+  flushSync();
+  expect(dialogButton("Submit review").disabled).toBe(true);
+  type(dialog.querySelector("textarea")!, "Bound the jitter.");
+  expect(dialogButton("Submit review").disabled).toBe(false);
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([{ SubmitReview: { entity: PR, verdict: "request_changes", body: "Bound the jitter.", comments: [] } }]);
+});
+
+test("one's own pull request: no Review…, but Submit review once a line comment waits, Comment its only verdict", async () => {
+  await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
+  expect(buttons()).toEqual(["Edit", "Merge…"]);
+  if (view) unmount(view);
+  pending.add(PR, { path: "docs/backoff.md", side: "new", line: 3, body: "Say ±10 %." });
+  await draw([PR], ports({ pr: prView([SUBMIT, COMMENT, EDIT, MERGE]) }));
+  button("Submit review (1 pending)")!.click();
+  flushSync();
+  const verdicts = [...document.querySelectorAll<HTMLInputElement>(".tf-dialog .tf-radio input")].map((r) => r.value);
+  expect(verdicts).toEqual(["comment"]);
+  dialogButton("Submit review").click();
+  await settle();
+  expect(writes).toEqual([
+    { SubmitReview: { entity: PR, verdict: "comment", body: "", comments: [{ path: "docs/backoff.md", line: 3, side: "new", body: "Say ±10 %." }] } },
+  ]);
+});
+
+// -- Merge… (#843, R-8.19) --------------------------------------------------
+
+const mergeAction = (disabled: string | null) =>
+  action("merge_pull_request", "Merge…", {
+    primary: true,
+    disabled,
+    confirm: "Merge feature/PAY-231-sepa-retry into main?",
+    fields: [
+      {
+        name: "style",
+        label: "Style",
+        kind: {
+          type: "choice",
+          options: [
+            { value: "merge", label: "Merge commit" },
+            { value: "rebase", label: "Rebase" },
+            { value: "squash", label: "Squash" },
+          ],
+        },
+        value: null,
+        required: true,
+        placeholder: null,
+      },
+      { name: "delete_branch", label: "Delete branch after merge", kind: { type: "flag" }, value: "true", required: false, placeholder: null },
+      {
+        name: "message",
+        label: "Squash commit message",
+        kind: { type: "text", suggestions: [] },
+        value: "SEPA retry with exponential backoff (#142)",
+        required: false,
+        placeholder: null,
+      },
+    ],
+  });
+
+/** The pull request, linked by knobas to PAY-231. */
+function linked(): EntityDetail {
+  return {
+    ...detail("mara"),
+    source: { id: "gitea", display_name: "Gitea", adapter_kind: "gitea", enabled: true },
+    links: [{ link: { id: "link:1" }, other: { entity_id: "jira:PAY-231", kind: "ticket", title: "Retry", deleted_at: null } }],
+  } as unknown as EntityDetail;
+}
+
+test("Merge… blocked: a warn box names each reason, Merge is disabled with the sentence as its tooltip", async () => {
+  const blocked = mergeAction("1 of 2 required approvals; required check Payout_IntegrationTests #1187 failed");
+  await draw([PR], ports({ getEntity: async () => linked(), pr: prView([COMMENT, EDIT, blocked]) }));
+  button("Merge…")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.querySelector("h2")!.textContent).toBe("Merge PR #142 into main");
+  const box = dialog.querySelector(".tf-prm-blocked")!;
+  expect(box.firstChild!.textContent!.trim()).toBe("Gitea blocks this merge:");
+  expect([...box.querySelectorAll("span")].map((s) => s.textContent)).toEqual([
+    "1 of 2 required approvals",
+    "required check Payout_IntegrationTests #1187 failed",
+  ]);
+  const merge = dialogButton("Merge");
+  expect(merge.getAttribute("aria-disabled")).toBe("true");
+  expect(merge.title).toBe("1 of 2 required approvals; required check Payout_IntegrationTests #1187 failed");
+  merge.click();
+  await settle();
+  expect(writes).toEqual([]);
+});
+
+test("Merge… open: the three lines, the styles, a squash's message, the delete flag and the In Review line", async () => {
+  await draw([PR], ports({ getEntity: async () => linked(), pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  button("Merge…")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect([...dialog.querySelectorAll(".tf-prm-ready > span")].map((s) => s.textContent?.trim())).toEqual([
+    "Approvals: 1 of 2",
+    "Checks: Payout_IntegrationTests #1187 failure",
+    "No conflicts with main",
+  ]);
+  expect([...dialog.querySelectorAll(".tf-radio label")].map((l) => l.textContent?.trim())).toEqual([
+    "Create a merge commit",
+    "Rebase onto main",
+    "Squash into one commit",
+  ]);
+  expect(text(".tf-dialog .tf-ck")).toBe("Delete feature/PAY-231-sepa-retry after merging");
+  expect(dialog.querySelector<HTMLInputElement>(".tf-ck input")!.checked).toBe(true);
+  expect(text(".tf-dialog .tf-prm-note")).toBe("After the merge, PAY-231 moves to In Review (the merge follower already does this).");
+  // The message shows only under Squash, prefilled as the source writes it.
+  expect(dialog.querySelector("input[aria-label='Squash commit message']")).toBeNull();
+  dialog.querySelector<HTMLInputElement>("input[value=squash]")!.click();
+  flushSync();
+  const message = dialog.querySelector<HTMLInputElement>("input[aria-label='Squash commit message']")!;
+  expect(message.value).toBe("SEPA retry with exponential backoff (#142)");
+  type(message, "SEPA retry with backoff (#142)");
+  dialog.querySelector<HTMLInputElement>(".tf-ck input")!.click();
+  flushSync();
+  dialogButton("Merge").click();
+  await settle();
+  expect(writes).toEqual([
+    { MergePullRequest: { entity: PR, style: "squash", delete_branch: false, message: "SEPA retry with backoff (#142)" } },
+  ]);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(text(".tf-fhead .tf-sub")).toContain("merge queued");
+});
+
+test("a merge commit sends no message, and a pull request linked to no ticket draws no In Review line", async () => {
+  await draw([PR], ports({ pr: prView([COMMENT, EDIT, mergeAction(null)]) }));
+  button("Merge…")!.click();
+  flushSync();
+  expect(document.querySelector(".tf-prm-note")).toBeNull();
+  dialogButton("Merge").click();
+  await settle();
+  expect(writes).toEqual([{ MergePullRequest: { entity: PR, style: "merge", delete_branch: true } }]);
 });

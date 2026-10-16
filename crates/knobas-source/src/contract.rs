@@ -153,6 +153,7 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             entity: target.clone(),
             style: crate::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         },
         // An update rewrites or extends somebody's head branch. Aimed, as the
         // merge is, at no pull request's address, so it is refused on the

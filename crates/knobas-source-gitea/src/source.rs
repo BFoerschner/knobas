@@ -291,9 +291,15 @@ impl Source for GiteaSource {
                 entity,
                 style,
                 delete_branch,
+                message,
             } => {
                 let (owner, repo, index) = self.pull_of(entity)?;
-                write::merge(&self.client, &owner, &repo, index, *style, *delete_branch).await?;
+                let how = write::Merge {
+                    style: *style,
+                    delete_branch: *delete_branch,
+                    message: message.as_deref(),
+                };
+                write::merge(&self.client, &owner, &repo, index, &how).await?;
                 Ok(WriteReceipt::none())
             }
             WriteOp::UpdatePullRequestBranch { entity, style } => {

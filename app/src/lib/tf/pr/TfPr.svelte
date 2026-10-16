@@ -4,22 +4,26 @@
   `/commits`, which share the header and the one read.
 
   - **The header**: `PR #<n> <title>`, its state, head into base and author
-    (*you* for the reader's own); the toolbar's *Review…* (#842), *Update
-    branch*, *Edit*, *Close* (or *Reopen*) and *Merge…* (#843). A write is
-    drawn only where the source's view offers it (ADR-0020 rule 4); *Review…*
-    and *Merge…* are drawn and say they are not built yet.
+    (*you* for the reader's own); the toolbar's *Review…*, or *Submit review
+    (N pending)* in warn while line comments wait (#842, `TfPrReview`),
+    *Update branch*, *Edit*, *Close* (or *Reopen*) and *Merge…* (#843,
+    `TfPrMerge`). A write is drawn only where the source's view offers it
+    (ADR-0020 rule 4).
   - **Overview**: the head commit's checks (a check whose link the mirror
     holds opens its run) and the description; beside it *Ready to merge?*
-    (the source's *Mergeable*, each standing review, the checks) and, when
+    (the source's *Approvals*, the checks and *Conflicts*, #994) and, when
     the repository is cloned, the local checkout.
   - **Conversation**: each comment and review in time order, and a comment
     box that queues `Comment`.
+  - **Files changed**: `TfPrFiles` (#842), which reads the deferred *Files*
+    section when the tab opens.
   - **Commits**: the pull request's commits; one the mirror holds opens its
     diff on the repository page, and one with a proposed link says *proposed
     link, judge it*, which opens the proposal.
 
   Everything is the source's view of the pull request (`entity_view`), read
-  once per pull request; the tabs only choose what to draw of it.
+  once per pull request (its *Files* once more, when that tab opens); the
+  tabs only choose what to draw of it.
 -->
 <script lang="ts" module>
   import type {
@@ -45,6 +49,9 @@
     resolveUrl: (url: string) => Promise<UrlMatch | null>;
     listSources: () => Promise<SourceFacts[]>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    /** *Viewed* on the pull request's files (#842). */
+    prViewedFiles: (prId: string) => Promise<string[]>;
+    setPrFileViewed: (prId: string, path: string, viewed: boolean) => Promise<string[]>;
   }
 </script>
 
@@ -55,17 +62,20 @@
     entityView,
     getEntity,
     listEntities,
+    prViewedFiles,
     resolveUrl,
     roomSuggestions,
+    setPrFileViewed,
     submitWrite,
     type EntityRow,
     type ViewAction,
     type ViewRow,
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
+  import { pendingComments as sharedPending, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import { push } from "../../shell/toasts.svelte";
   import { prNumber } from "../code/code";
-  import { isMine, itemHash, username } from "../job/job";
+  import { isMine, itemHash, keyOf, username } from "../job/job";
   import { toastQueued } from "../repo/queued.svelte";
   import { commitHash, repoHash } from "../repo/repo";
   import { jobHash } from "../route";
@@ -84,6 +94,9 @@
   import { markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
   import TfPrAction from "./TfPrAction.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import TfPrFiles from "./TfPrFiles.svelte";
+  import TfPrMerge from "./TfPrMerge.svelte";
+  import TfPrReview from "./TfPrReview.svelte";
 
   let {
     ready,
@@ -98,7 +111,10 @@
       resolveUrl: (url) => resolveUrl(url),
       listSources: () => listSources(),
       submitWrite: (payload) => submitWrite(payload),
+      prViewedFiles: (id) => prViewedFiles(id),
+      setPrFileViewed: (id, path, viewed) => setPrFileViewed(id, path, viewed),
     },
+    pending = sharedPending,
   }: {
     /** Whether the database answers yet: the reads wait for it. */
     ready: boolean;
@@ -107,6 +123,8 @@
     /** The job the reader was last in, as a ticket key. */
     job: string | null;
     ports?: PrPorts;
+    /** The reader's pending line comments (#842): this viewer's, kept across restarts. */
+    pending?: PendingCommentStore;
   } = $props();
 
   /** How many repositories and proposals one read asks for. */
@@ -272,6 +290,17 @@
   const reviewable = $derived(
     actions.some((a) => a.write_op === "submit_review" && (a.values["verdict"] === "approve" || a.values["verdict"] === "request_changes")),
   );
+  /** The reader's line comments waiting for a review (#842). */
+  const waiting = $derived(prId === null ? 0 : pending.of(prId).length);
+  /** Whether the source takes a review now: any of its `submit_review` actions. */
+  const takesReview = $derived(actions.some((a) => a.write_op === "submit_review"));
+  /** The ticket knobas links this pull request to, by its key, for *Merge…*'s In Review line. */
+  const ticket = $derived.by(() => {
+    const linked = detail?.links.find((entry) => entry.other.kind === "ticket");
+    return linked ? keyOf(linked.other.entity_id) : null;
+  });
+  let reviewing = $state(false);
+  let merging = $state(false);
 
   /** The comments this session queued that the conversation does not hold yet. */
   const pendingComments = $derived(
@@ -325,8 +354,6 @@
     if (row.entity_id === null || repo === null || (event.target as Element | null)?.closest("a")) return;
     location.hash = commitHash(repo.entity_id, row.entity_id);
   }
-
-  const NOT_BUILT = "Not built in the new shell yet";
 </script>
 
 <div class="tf-full">
@@ -362,8 +389,10 @@
         </div>
       </div>
       <div class="tf-acts">
-        {#if reviewable}
-          <button type="button" class="tf-btn" aria-disabled="true" title={NOT_BUILT}>Review…</button>
+        {#if waiting > 0 && takesReview}
+          <button type="button" class="tf-btn tf-warnbtn" onclick={() => (reviewing = true)}>Submit review ({waiting} pending)</button>
+        {:else if reviewable}
+          <button type="button" class="tf-btn" onclick={() => (reviewing = true)}>Review…</button>
         {/if}
         {#each writes as write (write.verb)}
           <button
@@ -375,7 +404,7 @@
           >
         {/each}
         {#if merge !== null}
-          <button type="button" class="tf-btn tf-primary" aria-disabled="true" title={merge.disabled ?? NOT_BUILT}>Merge…</button>
+          <button type="button" class="tf-btn tf-primary" title={merge.disabled ?? undefined} onclick={() => (merging = true)}>Merge…</button>
         {/if}
       </div>
     </header>
@@ -389,7 +418,13 @@
     </nav>
     <div class="tf-cbody" class:tf-pr={tab !== "diff"}>
       {#if tab === "diff"}
-        <div class="tf-empty"><p>Files changed is not built in the new shell yet.</p></div>
+        <TfPrFiles
+          {prId}
+          entityView={ports.entityView}
+          viewedFiles={ports.prViewedFiles}
+          setViewed={ports.setPrFileViewed}
+          {pending}
+        />
       {:else}
         <div>
           {#if viewFailed !== null}
@@ -483,7 +518,7 @@
           {/if}
         </div>
         <aside class="tf-side" aria-label="Ready to merge">
-          <div class="tf-panel">
+          <div class="tf-panel" hidden={readyRows.length === 0}>
             <header><h3>Ready to merge?</h3></header>
             <div class="tf-prready">
               {#each readyRows as line, n (n)}
@@ -509,6 +544,35 @@
     </div>
   {/if}
 </div>
+
+{#if reviewing && prId !== null}
+  <TfPrReview
+    {actions}
+    {prId}
+    {name}
+    base={header.base}
+    {pending}
+    submitWrite={ports.submitWrite}
+    onqueued={() => markQueued(prId, "review queued")}
+    onclose={() => (reviewing = false)}
+  />
+{/if}
+
+{#if merging && merge !== null && prId !== null}
+  <TfPrMerge
+    action={merge}
+    {prId}
+    {name}
+    head={header.head}
+    base={header.base}
+    source={detail?.source.display_name ?? "The source"}
+    ready={readyRows}
+    {ticket}
+    submitWrite={ports.submitWrite}
+    onqueued={() => markQueued(prId, "merge queued")}
+    onclose={() => (merging = false)}
+  />
+{/if}
 
 {#if shown !== null && prId !== null}
   {@const write = shown}

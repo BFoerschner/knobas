@@ -10,6 +10,11 @@
  * commits and Jonas's question with Mara's answer. Every other pull request
  * in the corpus draws a plain open (or settled) one with one passing check.
  *
+ * #842 and #843: *Files* answers PR #142's three files when it is asked for,
+ * Jonas's thread on the jitter line and an outdated one of Priya's; *Merge…*
+ * declares Gitea's three fields (style, delete flag, squash message); and the
+ * overview declares *Approvals* and *Conflicts* (#994), each check its time.
+ *
  * Divergences, named: the corpus titles PR #142 *Idempotent retry window*
  * where prototype-6 writes *SEPA retry with exponential backoff*; a check's
  * state is Gitea's word (`failure`, `pending`), not prototype-6's (`failed`,
@@ -18,10 +23,10 @@
  * Answers no command of its own: `entity_view` is `entity.ts`'s, which asks
  * {@link pullView} after the repository page's views.
  */
-import type { Fact, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
+import type { DiffFile, Fact, SourceView, ViewAction, ViewBlock, ViewRow, ViewSection } from "../../../../ipc/entity";
 import { CORPUS } from "../corpus";
 import { JOB_ROWS } from "../job-reach";
-import { PAYOUT_COMMITS, payoutCommitId } from "./repos";
+import { PAYOUT_COMMITS, payoutCommitId, payoutPrFiles } from "./repos";
 
 const fact = (label: string, value: string, tone: Fact["tone"] = null): Fact => ({ label, value, tone });
 const section = (id: string, title: string, blocks: ViewBlock[], count: number | null = null, deferred = false): ViewSection => ({
@@ -71,8 +76,31 @@ const check = (title: string, state: string, tone: ViewRow["tone"], meta: string
   url: run === null ? null : runUrl(run),
 });
 
+/** *Merge…*'s fields as Gitea declares them (#708, #843): the style, the delete flag, a squash's message. */
+function mergeFields(squashTitle: string): ViewAction["fields"] {
+  return [
+    {
+      name: "style",
+      label: "Style",
+      kind: {
+        type: "choice",
+        options: [
+          { value: "merge", label: "Merge commit" },
+          { value: "rebase", label: "Rebase" },
+          { value: "squash", label: "Squash" },
+        ],
+      },
+      value: null,
+      required: true,
+      placeholder: null,
+    },
+    { name: "delete_branch", label: "Delete branch after merge", kind: { type: "flag" }, value: "true", required: false, placeholder: null },
+    text("message", "Squash commit message", squashTitle),
+  ];
+}
+
 /** The toolbar, in the #701 order: what a reviewer says, the maintenance, then *Merge…*. */
-function actions(title: string, body: string, own: boolean, open: boolean, behind: boolean, blocked: string | null): ViewAction[] {
+function actions(title: string, body: string, own: boolean, open: boolean, behind: boolean, blocked: string | null, n = 0): ViewAction[] {
   const list: ViewAction[] = [];
   if (open) list.push(action("submit_review", "Submit review…", { primary: true, line_comments: "requires", values: { verdict: "comment" } }));
   list.push(action("comment", "Comment…", { fields: [{ ...text("body", "Comment", null, true), kind: { type: "long_text" } }] }));
@@ -110,7 +138,14 @@ function actions(title: string, body: string, own: boolean, open: boolean, behin
         }),
       );
     }
-    list.push(action("merge_pull_request", "Merge…", { primary: true, disabled: blocked }));
+    list.push(
+      action("merge_pull_request", "Merge…", {
+        primary: true,
+        disabled: blocked,
+        confirm: "Merge this pull request?",
+        fields: mergeFields(`${title} (#${n})`),
+      }),
+    );
   }
   return list;
 }
@@ -142,6 +177,8 @@ function view142(): SourceView {
             fact("Author", "mara"),
             fact("Branches", "feat/PAY-231-idempotent-retry → main"),
             fact("Mergeable", `no: ${blocked}`, "warn"),
+            fact("Approvals", "1 of 2", "warn"),
+            fact("Conflicts", "none with main", "ok"),
             fact("Created", "2026-08-21 15:30"),
             fact("Updated", "2026-08-22 10:20"),
             fact("Review", "approved by priya", "ok"),
@@ -152,9 +189,9 @@ function view142(): SourceView {
           type: "entities",
           title: "Checks",
           rows: [
-            check("Payout_IntegrationTests #1187", "failure", "err", "41 passed, 1 failed", "mock:Payout_IntegrationTests#1187"),
-            check("Payout_Build #1188", "pending", "info", "step 3 of 5", "mock:Payout_Build#1188"),
-            check("Payout_Lint #904", "success", "ok", null, "mock:Payout_Lint#904"),
+            check("Payout_IntegrationTests #1187", "failure", "err", "41 passed, 1 failed · 2 h ago", "mock:Payout_IntegrationTests#1187"),
+            check("Payout_Build #1188", "pending", "info", "step 3 of 5 · 6 min ago", "mock:Payout_Build#1188"),
+            check("Payout_Lint #904", "success", "ok", "7 min ago", "mock:Payout_Lint#904"),
           ],
         },
         { type: "text", text: DESCRIPTION_142, markdown: true },
@@ -173,7 +210,7 @@ function view142(): SourceView {
         2,
       ),
     ],
-    actions: actions(title, DESCRIPTION_142, true, true, true, `Gitea refuses this merge: ${blocked}`),
+    actions: actions(title, DESCRIPTION_142, true, true, true, "1 of 2 required approvals; required check Payout_IntegrationTests #1187 failed", 142),
   };
 }
 
@@ -192,9 +229,14 @@ function plainView(entityId: string): SourceView | undefined {
       section("overview", "Overview", [
         {
           type: "facts",
-          facts: [state, fact("Author", author), fact("Branches", "feature/work → main"), ...(open ? [fact("Mergeable", "yes")] : [])],
+          facts: [
+            state,
+            fact("Author", author),
+            fact("Branches", "feature/work → main"),
+            ...(open ? [fact("Mergeable", "yes"), fact("Approvals", "none required", "ok"), fact("Conflicts", "none with main", "ok")] : []),
+          ],
         },
-        { type: "entities", title: "Checks", rows: [check("Build", "success", "ok", null, null)] },
+        { type: "entities", title: "Checks", rows: [check("Build", "success", "ok", "1 h ago", null)] },
         { type: "text", text: description, markdown: true },
       ]),
       section("files", "Files", [], 1, true),
@@ -206,13 +248,73 @@ function plainView(entityId: string): SourceView | undefined {
       ),
       section("conversation", "Conversation", [], 0),
     ],
-    actions: actions(row.title, description, author === "mara", open, false, null),
+    actions: actions(row.title, description, author === "mara", open, false, null, Number(entityId.split("#")[1] ?? 0)),
   };
+}
+
+/** The jitter line of PR #142's retry, on the new side, where Jonas asked about it. */
+const JITTER_LINE = 14;
+
+/** PR #142's *Files* once asked for (#842): its three files, Jonas's thread and an outdated one of Priya's. */
+function files142(): DiffFile[] {
+  const [retry, ...rest] = payoutPrFiles();
+  const threads: DiffFile["threads"] = [
+    {
+      side: "new",
+      line: JITTER_LINE,
+      outdated: false,
+      comments: [
+        { author: "jonas", body: "Should the jitter be bounded? ±20 % feels wide.", at: "2026-08-22T09:30:00Z" },
+        { author: "mara", body: "Bounded to ±10 % in c90d11.", at: "2026-08-22T10:20:00Z" },
+      ],
+    },
+    {
+      side: "new",
+      line: 8,
+      outdated: true,
+      comments: [{ author: "priya", body: "Ten attempts is a lot for a payout.", at: "2026-08-21T18:02:00Z" }],
+    },
+  ];
+  return [{ ...retry!, threads }, ...rest];
+}
+
+/** A pull request's *Files*, read on its own: PR #142's change, or one small file for any other. */
+function filesSection(entityId: string, title: string): ViewSection {
+  const files: DiffFile[] =
+    entityId === PR_142
+      ? files142()
+      : [
+          {
+            path: "README.md",
+            old_path: null,
+            change: "modified",
+            additions: 1,
+            deletions: 0,
+            hunks: [
+              {
+                header: "@@ -1,2 +1,3 @@",
+                lines: [
+                  { kind: "context", old: 1, new: 1, text: "# Notes" },
+                  { kind: "context", old: 2, new: 2, text: "" },
+                  { kind: "add", old: null, new: 3, text: `${title}.` },
+                ],
+              },
+            ],
+            truncated: false,
+            threads: [],
+          },
+        ];
+  const commentable = { write_op: "submit_review" };
+  return section("files", "Files", [{ type: "diff", files, truncated: false, commentable, gone: [] }], files.length);
 }
 
 /** A pull request's whole view, or one of its sections; `undefined` for anything else. */
 export function pullView(entityId: string, sectionId: string | null): SourceView | undefined {
   const whole = entityId === PR_142 ? view142() : plainView(entityId);
   if (whole === undefined || sectionId === null) return whole;
+  if (sectionId === "files") {
+    const title = CORPUS.find((row) => row.entity_id === entityId)?.title ?? "";
+    return { sections: [filesSection(entityId, title)], actions: [] };
+  }
   return { sections: whole.sections.filter((candidate) => candidate.id === sectionId), actions: [] };
 }

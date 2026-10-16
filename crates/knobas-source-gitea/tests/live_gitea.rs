@@ -2734,6 +2734,7 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             .cloned()
     };
     let mut offered = None;
+    let mut seen = None;
     for _ in 0..40 {
         let view = source
             .view(&id, None)
@@ -2741,21 +2742,52 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             .expect("the view reads")
             .expect("Gitea draws a pull request");
         offered = merge_of(&view);
+        seen = Some(view);
         if offered.as_ref().is_some_and(|a| a.disabled.is_none()) {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(250)).await;
     }
     let offered = offered.expect("the pull request's toolbar has no Merge…");
+    // *Ready to merge?*'s facts (#994): the fresh base is unprotected, so no
+    // approval is required, and Gitea says it can merge.
+    let Some(Block::Facts { facts }) = seen.as_ref().and_then(|v| v.sections[0].blocks.first())
+    else {
+        panic!("the overview opens on facts: {seen:#?}");
+    };
+    let read = |label: &str| {
+        facts
+            .iter()
+            .find(|f| f.label == label)
+            .map(|f| (f.value.clone(), f.tone))
+    };
+    let ok = Some(knobas_source::view::Tone::Ok);
+    assert_eq!(
+        read("Approvals"),
+        Some(("none required".to_owned(), ok)),
+        "{facts:?}"
+    );
+    assert_eq!(
+        read("Conflicts"),
+        Some((format!("none with {base}"), ok)),
+        "{facts:?}"
+    );
     println!("LIVE Merge… action: {offered:?}");
     assert_eq!(
         offered.disabled, None,
         "Gitea never said the fresh pull request was mergeable"
     );
     assert!(offered.primary, "{offered:?}");
-    let [field, delete] = offered.fields.as_slice() else {
-        panic!("two fields, the style and the delete flag: {offered:?}")
+    let [field, delete, message] = offered.fields.as_slice() else {
+        panic!("three fields, the style, the delete flag and the message: {offered:?}")
     };
+    // A squash's message (#843), prefilled as Gitea's own squash title.
+    assert_eq!(message.name, "message");
+    assert_eq!(
+        message.value.as_deref(),
+        Some(format!("knobas merge check {stamp} (#{number})").as_str()),
+        "{message:?}"
+    );
     // The head is this repository's and unprotected, so Gitea could delete
     // it: the flag is drawn ticked (#708). This test merges with it unticked.
     assert_eq!(delete.name, "delete_branch");
@@ -2773,15 +2805,33 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
         Some(format!("Merge {head} into {base}?").as_str())
     );
 
-    // 2. The merge, through the op the queue flushes.
+    // 2. The merge, through the op the queue flushes: a squash with the
+    //    reader's own message (#843), which is the base's new head commit's.
+    let title = format!("knobas squash {stamp} (#{number})");
     source
         .write(knobas_source::WriteOp::MergePullRequest {
             entity: id.clone(),
-            style: knobas_source::MergeStyle::Merge,
+            style: knobas_source::MergeStyle::Squash,
             delete_branch: false,
+            message: Some(format!("{title}\n\nSquashed by the live suite.")),
         })
         .await
         .expect("Gitea merges a pull request it said it could");
+    let landed: serde_json::Value = http
+        .get(format!("{api}/branches/{base}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the base back")
+        .json()
+        .await
+        .expect("a branch record");
+    let said = landed["commit"]["message"].as_str().unwrap_or_default();
+    println!("LIVE squash commit message: {said:?}");
+    assert!(
+        said.starts_with(&format!("{title}\n\nSquashed by the live suite.")),
+        "the squash commit does not carry the reader's message: {said:?}"
+    );
     let record: serde_json::Value = http
         .get(format!("{api}/pulls/{number}"))
         .header("Authorization", &auth)
@@ -2919,6 +2969,7 @@ async fn a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten() {
                 entity: format!("gitea:{}#{number}", env.full_name()),
                 style: knobas_source::MergeStyle::Merge,
                 delete_branch: false,
+                message: None,
             })
             .await
             .unwrap_or_else(|e| panic!("round {round}: the merge did not land: {e:?}"));
@@ -3057,6 +3108,7 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect_err("Gitea merged past a required check that never reported");
@@ -3094,12 +3146,32 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
         None,
         "a passed check leaves Merge… enabled"
     );
+    // The check's row carries its time (#994): reported a moment ago, with
+    // no description, so its meta is the age alone.
+    let view = source.view(&id, None).await.unwrap().unwrap();
+    let row = view.sections[0]
+        .blocks
+        .iter()
+        .find_map(|b| match b {
+            knobas_source::view::Block::Entities { rows, .. } => {
+                rows.iter().find(|r| r.title == CHECK).cloned()
+            }
+            _ => None,
+        })
+        .expect("the overview's checks list the required check");
+    println!("LIVE check row: {row:?}");
+    let meta = row.meta.unwrap_or_default();
+    assert!(
+        meta == "just now" || meta.ends_with("min ago"),
+        "the check's row says when it was reported: {meta:?}"
+    );
 
     source
         .write(knobas_source::WriteOp::MergePullRequest {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect("Gitea merges once the required check passed");
@@ -3273,6 +3345,7 @@ async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_bran
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: true,
+            message: None,
         })
         .await
         .expect("Gitea merges the updated pull request");

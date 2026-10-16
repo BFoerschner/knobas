@@ -954,6 +954,7 @@ mod tests {
                     entity: "gitea:tidewater/ledger#142".to_owned(),
                     style: knobas_source::MergeStyle::Merge,
                     delete_branch: true,
+                    message: None,
                 },
                 "gitea:tidewater/ledger#142",
             ),

@@ -6,7 +6,17 @@
 import { expect, test } from "vitest";
 
 import type { SourceView, Tone, ViewAction, ViewRow } from "../../ipc/entity";
-import { checksLine, conversationOf, headerOf, prHash, readPrRoute, readyLines, tabCounts } from "./pr";
+import {
+  checksLine,
+  conversationOf,
+  headerOf,
+  mergeReasons,
+  prHash,
+  readPrRoute,
+  readyLines,
+  reviewChoices,
+  tabCounts,
+} from "./pr";
 
 const PR = "gitea:tidewater/payout-service#142";
 
@@ -71,6 +81,8 @@ const VIEW: SourceView = {
             fact("Author", "mara"),
             fact("Branches", "feature/PAY-231-sepa-retry → main"),
             fact("Mergeable", "no: 1 of 2 required approvals; required check Payout_IntegrationTests", "warn"),
+            fact("Approvals", "1 of 2", "warn"),
+            fact("Conflicts", "none with main", "ok"),
             fact("Created", "2026-08-21 15:30"),
             fact("Review", "approved by priya", "ok"),
             fact("Review", "changes requested by jonas", "warn"),
@@ -133,32 +145,65 @@ test("the tab counts are the sections' own: conversation, files changed, commits
   expect(tabCounts(null)).toEqual({ overview: null, conversation: null, diff: null, commits: null });
 });
 
-test("Ready to merge? draws the source's Mergeable, each standing review and the checks, each with its tone", () => {
+test("Ready to merge? reads prototype-6's three lines from the declared Approvals, the checks and Conflicts (#994)", () => {
   expect(readyLines(VIEW)).toEqual([
-    { text: "Mergeable: no: 1 of 2 required approvals; required check Payout_IntegrationTests", tone: "warn" },
-    { text: "Approved by priya", tone: "ok" },
-    { text: "Changes requested by jonas", tone: "warn" },
+    { text: "Approvals: 1 of 2", tone: "warn" },
     { text: "Checks: Payout_IntegrationTests #1187 failure, Payout_Build #1188 pending", tone: "err" },
+    { text: "No conflicts with main", tone: "ok" },
   ]);
 });
 
-test("a mergeable pull request reads ok; no reviews yet says so; no checks draws no checks line", () => {
-  const view: SourceView = {
-    sections: [
-      {
-        id: "overview",
-        title: "Overview",
-        count: null,
-        deferred: false,
-        blocks: [{ type: "facts", facts: [fact("State", "open", "info"), fact("Mergeable", "yes")] }],
-      },
-    ],
-    actions: [],
-  };
-  expect(readyLines(view)).toEqual([
-    { text: "Mergeable: yes", tone: "ok" },
-    { text: "No reviews yet", tone: "muted" },
+const overviewOf = (...facts: ReturnType<typeof fact>[]): SourceView => ({
+  sections: [{ id: "overview", title: "Overview", count: null, deferred: false, blocks: [{ type: "facts", facts }] }],
+  actions: [],
+});
+
+test("a conflict reads warn; no approval required says so; no checks draws no checks line", () => {
+  expect(readyLines(overviewOf(fact("Approvals", "none required", "ok"), fact("Conflicts", "conflicts with main", "warn")))).toEqual([
+    { text: "Approvals: none required", tone: "ok" },
+    { text: "Conflicts with main", tone: "warn" },
   ]);
+});
+
+test("a source that declares neither falls back to its Mergeable sentence, drawn as written", () => {
+  expect(readyLines(overviewOf(fact("State", "open", "info"), fact("Mergeable", "yes")))).toEqual([
+    { text: "Mergeable: yes", tone: "ok" },
+  ]);
+  // A merged pull request declares nothing to merge on.
+  expect(readyLines(overviewOf(fact("State", "merged", "ok")))).toEqual([]);
+});
+
+test("Merge…'s reasons are its source's sentence, one line per reason", () => {
+  const merge = (disabled: string | null) => action("merge_pull_request", "Merge…", { disabled });
+  expect(mergeReasons(merge(null))).toEqual([]);
+  expect(mergeReasons(merge("1 of 2 required approvals; required check Payout_IntegrationTests #1187 failed"))).toEqual([
+    "1 of 2 required approvals",
+    "required check Payout_IntegrationTests #1187 failed",
+  ]);
+  expect(mergeReasons(null)).toEqual([]);
+});
+
+test("the review's choices are the verdicts the source offers; Comment only with line comments waiting", () => {
+  const submit = action("submit_review", "Submit review…", { values: { verdict: "comment" }, line_comments: "requires" });
+  const approve = action("submit_review", "Approve…", { values: { verdict: "approve" }, line_comments: "sends" });
+  const changes = action("submit_review", "Request changes…", { values: { verdict: "request_changes" }, line_comments: "sends" });
+  const all = [action("comment", "Comment…"), submit, approve, changes];
+  expect(reviewChoices(all, 0).map((c) => [c.verdict, c.label, c.action === null])).toEqual([
+    ["comment", "Comment", true],
+    ["approve", "Approve", false],
+    ["request_changes", "Request changes", false],
+  ]);
+  expect(reviewChoices(all, 2).map((c) => [c.verdict, c.action?.label ?? null])).toEqual([
+    ["comment", "Submit review…"],
+    ["approve", "Approve…"],
+    ["request_changes", "Request changes…"],
+  ]);
+  // One's own pull request: only the comment, and only with comments waiting.
+  expect(reviewChoices([submit], 1).map((c) => c.verdict)).toEqual(["comment"]);
+  expect(reviewChoices([submit], 0).map((c) => c.action)).toEqual([null]);
+  expect(reviewChoices([], 3)).toEqual([]);
+  // The approval's meaning names the base its protection is on.
+  expect(reviewChoices(all, 0, "main").find((c) => c.verdict === "approve")?.meaning).toBe("Counts toward the approvals main needs");
 });
 
 test("the checks line: every check passing, else each one that is not, the loudest tone", () => {

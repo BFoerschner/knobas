@@ -775,6 +775,9 @@ knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
 knobas-app	test/it	notes_export_ipc::every_note_is_one_markdown_file_with_its_refs_kept_as_text
 knobas-app	test/it	notes_export_ipc::no_notes_writes_an_empty_folder
+knobas-app	test/it	pr_viewed_ipc::a_file_is_viewed_until_it_is_unticked_or_the_head_moves
+knobas-app	test/it	pr_viewed_ipc::each_pull_request_keeps_its_own_ticks
+knobas-app	test/it	pr_viewed_ipc::what_is_not_an_entity_id_is_refused
 knobas-app	test/it	probe_snapshot::tests::a_change_to_the_pass_code_or_the_migrations_names_another_after_pass_snapshot
 knobas-app	test/it	probe_snapshot::tests::a_changed_added_or_removed_migration_changes_the_hash
 knobas-app	test/it	probe_snapshot::tests::a_saved_snapshot_is_a_finished_copy_without_the_servers_locks
@@ -2488,6 +2491,7 @@ knobas-source-gitea	test/it	view_pr::required_status_checks_block_until_they_pas
 knobas-source-gitea	test/it	view_pr::status_checks_off_or_unreadable_decide_nothing
 knobas-source-gitea	test/it	view_pr::the_edit_is_prefilled_with_the_description_as_gitea_holds_it
 knobas-source-gitea	test/it	view_pr::the_files_tab_is_read_on_its_own_from_the_pull_requests_diff
+knobas-source-gitea	test/it	view_pr::the_overview_declares_its_approvals_and_its_conflicts
 knobas-source-gitea	test/it	view_pr::the_overview_read_alone_says_the_same_mergeability
 knobas-source-gitea	test/it	view_pr::the_reviews_line_comments_are_read_at_the_same_time
 knobas-source-gitea	test/it	view_pr::update_branch_is_offered_where_the_head_is_behind
@@ -2523,6 +2527,7 @@ knobas-source-gitea	test/it	write::a_delete_aimed_at_anything_but_a_branch_is_re
 knobas-source-gitea	test/it	write::a_delete_where_gitea_names_no_default_branch_is_refused
 knobas-source-gitea	test/it	write::a_file_is_committed_through_the_contents_api_against_the_blob_it_was_read_at
 knobas-source-gitea	test/it	write::a_merge_aimed_at_a_repository_is_refused_before_a_request
+knobas-source-gitea	test/it	write::a_merge_carries_the_message_the_reader_wrote
 knobas-source-gitea	test/it	write::a_merge_carries_the_style_the_reader_picked_as_gitea_do
 knobas-source-gitea	test/it	write::a_merge_gitea_is_still_checking_is_tried_again_until_it_lands
 knobas-source-gitea	test/it	write::a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence

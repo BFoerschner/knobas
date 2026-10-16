@@ -356,6 +356,7 @@ async fn a_merge_carries_the_style_the_reader_picked_as_gitea_do() {
                 entity: "gitea:tidewater/payout-service#142".to_owned(),
                 style,
                 delete_branch: false,
+                message: None,
             })
             .await
             .expect("a declared op is performed");
@@ -391,6 +392,7 @@ async fn a_merge_says_whether_gitea_deletes_the_branch_after_it() {
                 entity: "gitea:tidewater/payout-service#142".to_owned(),
                 style: knobas_source::MergeStyle::Squash,
                 delete_branch,
+                message: None,
             })
             .await
             .expect("a declared op is performed");
@@ -400,6 +402,53 @@ async fn a_merge_says_whether_gitea_deletes_the_branch_after_it() {
             json!({ "Do": "squash", "delete_branch_after_merge": delete_branch }),
             "delete_branch = {delete_branch}"
         );
+    }
+}
+
+/// *Squash into one commit* with the reader's message (#843, R-8.19): its
+/// first line is Gitea's `MergeTitleField`, the rest its `MergeMessageField`
+/// (Gitea joins the two with a blank line); a message of one line sends an
+/// empty body, so the commit is that line alone. No message sends neither,
+/// and the commit is Gitea's default, as before.
+#[tokio::test]
+async fn a_merge_carries_the_message_the_reader_wrote() {
+    for (message, expected) in [
+        (
+            Some("Idempotent retry window (#142)\n\nRetries on 503.\n"),
+            json!({ "Do": "squash", "delete_branch_after_merge": false,
+                    "MergeTitleField": "Idempotent retry window (#142)",
+                    "MergeMessageField": "Retries on 503." }),
+        ),
+        (
+            Some("Idempotent retry window (#142)"),
+            json!({ "Do": "squash", "delete_branch_after_merge": false,
+                    "MergeTitleField": "Idempotent retry window (#142)",
+                    "MergeMessageField": "" }),
+        ),
+        (
+            None,
+            json!({ "Do": "squash", "delete_branch_after_merge": false }),
+        ),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path(
+                "/api/v1/repos/tidewater/payout-service/pulls/142/merge",
+            ))
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&server)
+            .await;
+        source(&server)
+            .write(WriteOp::MergePullRequest {
+                entity: "gitea:tidewater/payout-service#142".to_owned(),
+                style: knobas_source::MergeStyle::Squash,
+                delete_branch: false,
+                message: message.map(str::to_owned),
+            })
+            .await
+            .expect("a declared op is performed");
+        let (_, _, body) = only_request(&server).await;
+        assert_eq!(body, expected, "{message:?}");
     }
 }
 
@@ -483,6 +532,7 @@ async fn merge_142(server: &MockServer) -> Result<(), SourceError> {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .map(|_| ())
@@ -566,6 +616,7 @@ async fn a_merge_aimed_at_a_repository_is_refused_before_a_request() {
             entity: "gitea:tidewater/payout-service".to_owned(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect_err("a repository is not a pull request");

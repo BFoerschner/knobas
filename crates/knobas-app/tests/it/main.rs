@@ -38,6 +38,7 @@ mod ipc;
 mod job_ipc;
 mod job_pipelines_ipc;
 mod notes_export_ipc;
+mod pr_viewed_ipc;
 mod probe_snapshot;
 mod project_census;
 mod protocol_ipc;
