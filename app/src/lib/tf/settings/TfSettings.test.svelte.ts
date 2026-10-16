@@ -199,6 +199,93 @@ test("Save sends what changed in the connection through update_source", async ()
   });
 });
 
+function field(key: string): HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement {
+  const found = target.querySelector<HTMLInputElement>(`#tf-src-cfg-${key}`);
+  if (!found) throw new Error(`no config field ${key}`);
+  return found;
+}
+
+function section(heading: string): HTMLElement {
+  const found = [...target.querySelectorAll<HTMLElement>(".tf-stg-sec")].find(
+    (sec) => sec.querySelector("h2")?.textContent === heading,
+  );
+  if (!found) throw new Error(`no section "${heading}"`);
+  return found;
+}
+
+function sectionButton(heading: string, text: string): HTMLButtonElement {
+  const found = [...section(heading).querySelectorAll("button")].find((el) => el.textContent?.trim() === text);
+  if (!found) throw new Error(`no button "${text}" in ${heading}`);
+  return found;
+}
+
+test("a source's page edits its adapter's config, drawn from the schema, and sends the whole config (#904)", async () => {
+  const { p } = await open(["source", "jira"]);
+  const syncs = section("What it syncs");
+  // Generated from Jira's schema: its own fields, the user excepted (Connection draws it).
+  expect(syncs.querySelector("#tf-src-cfg-projects")).not.toBeNull();
+  expect(syncs.querySelector("#tf-src-cfg-jql_filter")).not.toBeNull();
+  expect(syncs.querySelector("#tf-src-cfg-username")).toBeNull();
+  expect(field("projects").value).toBe("TW\nOPS");
+  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+
+  type("#tf-src-cfg-jql_filter", "project = TW AND updated >= -30d");
+  sectionButton("What it syncs", "Save").click();
+  await settle();
+
+  expect(p.updateSource).toHaveBeenCalledWith("jira", {
+    config: { username: "mara", projects: ["TW", "OPS"], jql_filter: "project = TW AND updated >= -30d" },
+  });
+});
+
+test("a Jira source's page shows the two field ids, or says none is set (#1021)", async () => {
+  const jira = summary("jira", "Jira", "ok", { config: { username: "mara", epic_link_field: "customfield_10108" } });
+  await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }));
+  expect(field("epic_link_field").value).toBe("customfield_10108");
+  expect(field("sprint_field").value).toBe("");
+  expect((field("sprint_field") as HTMLInputElement).placeholder).toBe("None set");
+  expect(target.querySelector('label[for="tf-src-cfg-sprint_field"]')?.textContent).toContain("Sprint field id");
+});
+
+test("saving keeps a field id the sync recorded after the page was read, beside one the reader typed (#1021)", async () => {
+  const recorded = summary("jira", "Jira", "ok", {
+    config: { username: "mara", projects: ["TW", "OPS"], sprint_field: "customfield_10107" },
+  });
+  const listSources = vi.fn().mockResolvedValueOnce(SOURCES).mockResolvedValue([recorded, SOURCES[1]!]);
+  const { p } = await open(["source", "jira"], ports({ listSources }));
+  // The page was read before the sync recorded the sprint id.
+  expect(field("sprint_field").value).toBe("");
+
+  type("#tf-src-cfg-epic_link_field", "customfield_10108");
+  sectionButton("What it syncs", "Save").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
+    config: {
+      username: "mara",
+      projects: ["TW", "OPS"],
+      sprint_field: "customfield_10107",
+      epic_link_field: "customfield_10108",
+    },
+  });
+
+  // The Connection's Save reads the stored config again too.
+  type("#tf-src-user", "mlindqvist");
+  sectionButton("Connection", "Save").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
+    config: { username: "mlindqvist", projects: ["TW", "OPS"], sprint_field: "customfield_10107" },
+  });
+});
+
+test("clearing an id the reader typed removes it, so the next sync can record one", async () => {
+  const jira = summary("jira", "Jira", "ok", { config: { username: "mara", sprint_field: "customfield_1" } });
+  const { p } = await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }));
+  type("#tf-src-cfg-sprint_field", "");
+  sectionButton("What it syncs", "Save").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", { config: { username: "mara" } });
+});
+
 test("the schedule and the pause switch are saved as they change", async () => {
   const { p } = await open(["source", "jira"]);
   const every = target.querySelector<HTMLSelectElement>("#tf-src-every")!;

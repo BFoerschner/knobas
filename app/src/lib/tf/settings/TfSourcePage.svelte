@@ -9,7 +9,12 @@
     second credential (Uptime Kuma) has an *Account* row. *Test connection*
     tests what is stored and says what it found.
   - **What it syncs**: the schedule and the pause switch, each saved as it
-    changes, through `update_source`.
+    changes, through `update_source`; then the adapter's own config,
+    generated from its `config_schema` (#904): for Jira, projects or a JQL
+    query, and the Sprint and Epic Link field ids the sync records (#1021).
+    Every config save reads the stored config again and lays only the
+    reader's changes over it (`source-config.ts`), so an id the sync recorded
+    after the page opened is kept.
   - **Sync runs**: the source's last runs.
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
@@ -19,6 +24,8 @@
   adapter whose schema declares it. Nothing here names an adapter.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import type {
     ConnectionReport,
@@ -31,8 +38,11 @@
   } from "../../ipc/sources";
   import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
+  import { validate } from "../../sources/schema-form";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
+  import { configChanges, formValues, pageFields, withChanges } from "./source-config";
+  import TfSchemaForm from "./TfSchemaForm.svelte";
   import type { SettingsPorts } from "./ports";
   import {
     IDENTITY_FIELD,
@@ -95,28 +105,31 @@
   let address = $state(source.base_url);
   // svelte-ignore state_referenced_locally
   let user = $state(userOf(source.config));
-  const patch = $derived.by(() => {
-    const next: SourcePatch = {};
-    if (address.trim() !== source.base_url) next.base_url = address.trim();
-    if (showsUser && user.trim() !== userOf(source.config)) {
-      const config = typeof source.config === "object" && source.config !== null ? source.config : {};
-      next.config = { ...config, [IDENTITY_FIELD]: user.trim() === "" ? null : user.trim() };
-    }
-    return next;
-  });
-  const dirty = $derived(Object.keys(patch).length > 0);
+  const addressChanged = $derived(address.trim() !== source.base_url);
+  const userChanged = $derived(showsUser && user.trim() !== userOf(source.config));
+  const dirty = $derived(addressChanged || userChanged);
   let saving = $state(false);
 
-  async function update(change: SourcePatch, done: string): Promise<boolean> {
+  /**
+   * The config as stored now, read again at the moment of saving: the sync
+   * records field ids into it (#889), and a copy read when the page opened
+   * would blank them (#1021). `update_source` replaces it whole.
+   */
+  async function storedConfig(): Promise<unknown> {
+    const rows = await ports.listSources();
+    return rows.find((row) => row.id === source.id)?.config ?? source.config;
+  }
+
+  async function update(change: SourcePatch | (() => Promise<SourcePatch>), done: string): Promise<SourceSummary | null> {
     saving = true;
     try {
-      const next = await ports.updateSource(source.id, change);
+      const next = await ports.updateSource(source.id, typeof change === "function" ? await change() : change);
       onchanged(next);
       push({ text: done });
-      return true;
+      return next;
     } catch (cause) {
       push({ text: `Could not save ${name}: ${ipcErrorMessage(cause)}`, tone: "err" });
-      return false;
+      return null;
     } finally {
       saving = false;
     }
@@ -124,7 +137,54 @@
 
   async function save() {
     if (!dirty || saving) return;
-    if (await update(patch, "Saved")) report = null;
+    const saved = await update(async () => {
+      const next: SourcePatch = {};
+      if (addressChanged) next.base_url = address.trim();
+      if (userChanged) {
+        next.config = withChanges(await storedConfig(), {
+          [IDENTITY_FIELD]: user.trim() === "" ? null : user.trim(),
+        });
+      }
+      return next;
+    }, "Saved");
+    if (saved !== null) report = null;
+  }
+
+  // ---- What it syncs: the adapter's own config, generated (#904) ----
+  const config = $derived(adapter === null ? { fields: [], error: null } : pageFields(adapter.config_schema));
+  let configValues = $state<Record<string, unknown>>({});
+  /** The config the form was read from, validated as the form validates it. */
+  let configLoaded = $state<Record<string, unknown>>({});
+  const configEdited = $derived(validate(config.fields, configValues));
+  const configChanged = $derived(
+    configChanges(
+      configLoaded,
+      configEdited.config,
+      config.fields.map((field) => field.key),
+    ),
+  );
+  const configDirty = $derived(Object.keys(configChanged).length > 0);
+  const configValid = $derived(Object.keys(configEdited.errors).length === 0);
+
+  // The form follows what is stored (an id the sync recorded shows once the
+  // list is read again) until the reader changes something; then it is theirs.
+  $effect(() => {
+    const fields = config.fields;
+    const stored = source.config;
+    untrack(() => {
+      if (configDirty) return;
+      configValues = formValues(fields, stored);
+      configLoaded = validate(fields, configValues).config;
+    });
+  });
+
+  async function saveConfig() {
+    if (!configDirty || !configValid || saving) return;
+    const changes = { ...configChanged };
+    const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), "Saved");
+    if (saved === null) return;
+    configValues = formValues(config.fields, saved.config);
+    configLoaded = validate(config.fields, configValues).config;
   }
 
   // ---- Test connection: what is stored, never what is typed ----
@@ -350,6 +410,23 @@
           )}><i></i></button>
     </div>
   </div>
+  {#if config.error !== null}
+    <p class="tf-stg-note tf-stg-errt">{config.error}</p>
+  {:else if config.fields.length > 0}
+    <TfSchemaForm
+      fields={config.fields}
+      values={configValues}
+      errors={configEdited.errors}
+      disabled={saving}
+      idPrefix="tf-src-cfg"
+      layout="rows"
+    />
+    <div class="tf-stg-acts">
+      <button class="tf-btn tf-sm tf-primary" disabled={!configDirty || !configValid || saving} onclick={() => void saveConfig()}
+        >Save</button
+      >
+    </div>
+  {/if}
 </section>
 
 <section class="tf-stg-sec">
