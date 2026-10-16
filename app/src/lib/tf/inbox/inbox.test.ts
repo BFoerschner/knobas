@@ -51,6 +51,12 @@ describe("a row's sentence", () => {
     );
   });
 
+  test("capitalises the backend's stand-in for a review with no author", () => {
+    expect(sentence(item({ reason: "somebody asked for your review" }))).toBe(
+      "Somebody asked for your review: Idempotent retry window",
+    );
+  });
+
   test("is the reason alone when the reason already names the item", () => {
     const credential = item({
       category: "credential_expiry",

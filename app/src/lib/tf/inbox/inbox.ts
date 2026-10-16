@@ -48,10 +48,13 @@ export function phrase(item: Pick<InboxItem, "reason" | "title">): string {
  */
 const SOURCE_FIRST: readonly InboxCategory[] = ["review_request", "alert"];
 
+/** The backend's stand-in for a review request with no author (`knobas_core::inbox`): knobas' own word. */
+const NO_AUTHOR = "somebody ";
+
 /** The row's sentence: {@link phrase}, capitalised where the first word is knobas' own. */
 export function sentence(item: Pick<InboxItem, "category" | "reason" | "title">): string {
   const text = phrase(item);
-  if (SOURCE_FIRST.includes(item.category)) return text;
+  if (SOURCE_FIRST.includes(item.category) && !text.startsWith(NO_AUTHOR)) return text;
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
