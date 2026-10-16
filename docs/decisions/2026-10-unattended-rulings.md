@@ -3638,3 +3638,19 @@ Ruled by the merge-manager (PR #1026).
   stretch is not on the running clock's ticket touches nothing. **Reversing:** low (the branch in
   `stopClock` and the restart in `settle`); the alternative, a draft read that leaves the stretch
   out, would need a `worklog_draft` argument and a §10.8 entry.
+
+## #1030 — Tickets preview: *Around this ticket* from the job-reach read (2026-10-17)
+
+- **The preview makes the job's own section reads, not one tally read.** Four `list_entities`
+  reads scoped by `reach` (Code, Builds, Pages, Monitors, with the job's kinds, orders and limit)
+  and one `job_reach` for the Assets line, all from `tf/job/sections.ts`, which the job page now
+  reads its sections from too. One `latest_per_parent` read over every kind would have been
+  cheaper, but it keeps one row per parent for every kind that declares a state, pull requests
+  included, while the Code section reads them all: the counts would differ. **Reversing:** low.
+- **The Assets line counts the reached assets (the first 50, as the job reads) and says nothing
+  about failing.** The job reads each asset's health one by one; the preview does not make those
+  reads. **Reversing:** low (`reachTally`).
+- **The lines' words are unchanged** (*Docs*, "7 builds", no *Talk* line): this ticket changes
+  what is counted, not the copy. **Reversing:** low.
+- **No IPC or fake change.** `?fake-ipc` already answered `job_reach` and the `reach` scope, so
+  PAY-231's lines draw under the fixture with no fixture edit, and no §10.8 entry is needed.
