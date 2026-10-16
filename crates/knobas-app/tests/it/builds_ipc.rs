@@ -538,7 +538,7 @@ impl knobas_source::Source for Answers {
             "{entity}"
         );
         assert!(before.ends_with(":build:1100"), "{before}");
-        assert!(count >= 1 && count <= knobas_source::pipeline::OLDER_RUNS_MAX);
+        assert!((1..=knobas_source::pipeline::OLDER_RUNS_MAX).contains(&count));
         let item = |key: &str, kind: &str, payload: serde_json::Value| knobas_source::SyncItem {
             entity: knobas_core::entity::EntityRef::parse(&format!("{}:{key}", self.id)).unwrap(),
             kind: kind.to_owned(),
