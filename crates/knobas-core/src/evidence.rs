@@ -87,6 +87,9 @@ const CONTEXT_CHARS: usize = 60;
 /// How many items a sentence names before it counts the rest.
 const NAMED: usize = 3;
 
+/// How many shared words *Also found* lists.
+const SHARED_WORDS: usize = 8;
+
 /// How much of an end's text the shared-wording excerpt is cut from.
 const HEADLINE_CHARS: i32 = 20_000;
 
@@ -96,7 +99,7 @@ const START: char = '\u{E000}';
 const STOP: char = '\u{E001}';
 
 #[derive(sqlx::FromRow)]
-struct Row {
+struct ProposalRow {
     from_id: String,
     to_id: String,
     rule: Option<String>,
@@ -126,14 +129,15 @@ const PROPOSAL: &str = "select l.from_id, l.to_id, l.rule, l.reason,
   where l.id = $1";
 
 /// Links the same rule found to the same ticket that the reader accepted,
-/// newest first: `$1` the ticket, `$2` the rule, `$3` this proposal.
-const SAME_WAY_LINKED: &str = "select e.id, e.kind, e.title
+/// newest first, the first [`NAMED`] of them and how many there are in all:
+/// `$1` the ticket, `$2` the rule, `$3` this proposal. Its `3` is [`NAMED`].
+const SAME_WAY_LINKED: &str = "select e.id, e.kind, e.title, count(*) over () as total
    from knobas.link l
    join knobas.entity e on e.id = l.from_id
   where l.to_id = $1 and l.rule = $2 and l.id <> $3
     and l.confirmed_at is not null and l.deleted_at is null
   order by l.confirmed_at desc, l.id
-  limit 4";
+  limit 3";
 
 /// Proposals the same rule made at either end that the reader dismissed:
 /// unconfirmed rows with a tombstone.
@@ -161,15 +165,14 @@ const SHARED_LEXEMES: &str = "with common as (
        from sync.item a, sync.item b, common
       where a.entity_id = $1 and b.entity_id = $2";
 
-/// One end's text around the shared words, the words marked. `$2` is the
-/// shared lexemes as a `tsquery`, `$3` the options.
-const HEADLINE: &str = "select ts_headline('english',
-              left(case when i.body_text = '' then i.title
-                        else i.title || E'\\n' || i.body_text end, $4),
-              $2::tsquery, $3),
-          left(case when i.body_text = '' then i.title
-                    else i.title || E'\\n' || i.body_text end, $4)
+/// One end's text around the shared words, the words marked, and the text it
+/// was cut from. `$2` is the shared lexemes as a `tsquery`, `$3` the
+/// options, `$4` how much of the text is read.
+const HEADLINE: &str = "select ts_headline('english', t.text, $2::tsquery, $3), t.text
      from sync.item i
+     cross join lateral (
+            select left(case when i.body_text = '' then i.title
+                             else i.title || E'\\n' || i.body_text end, $4) as text) t
     where i.entity_id = $1";
 
 /// What was said for and against the proposal `id`.
@@ -182,7 +185,7 @@ const HEADLINE: &str = "select ts_headline('english',
 /// [`CoreError::LinkNotFound`] if no link carries `id`; [`CoreError::Db`] if
 /// a query fails.
 pub async fn proposal_evidence(pool: &PgPool, id: Uuid) -> Result<ProposalEvidence, CoreError> {
-    let row = sqlx::query_as::<_, Row>(PROPOSAL)
+    let row = sqlx::query_as::<_, ProposalRow>(PROPOSAL)
         .bind(id)
         .fetch_optional(pool)
         .await?
@@ -212,13 +215,11 @@ pub async fn proposal_evidence(pool: &PgPool, id: Uuid) -> Result<ProposalEviden
             .fetch_one(pool)
             .await?;
         if dismissed > 0 {
-            found.against.push(if dismissed == 1 {
-                "1 other proposal found the same way at these ends was dismissed.".to_owned()
-            } else {
-                format!(
-                    "{dismissed} other proposals found the same way at these ends were dismissed."
-                )
-            });
+            found.against.push(format!(
+                "{} found the same way at these ends {} dismissed.",
+                counted(dismissed, "other proposal", "other proposals"),
+                if dismissed == 1 { "was" } else { "were" }
+            ));
         }
     }
     for (gone, kind, end_id, title) in [
@@ -243,7 +244,7 @@ pub async fn proposal_evidence(pool: &PgPool, id: Uuid) -> Result<ProposalEviden
 async fn by_key(
     pool: &PgPool,
     id: Uuid,
-    row: &Row,
+    row: &ProposalRow,
     rule: &str,
     found: &mut ProposalEvidence,
 ) -> Result<(), CoreError> {
@@ -251,31 +252,23 @@ async fn by_key(
     let fields = row.from_text.clone().unwrap_or_default();
     let mut times = 0;
     for field in &fields {
-        times += occurrences(field, key).len();
-        for parts in excerpts(field, &occurrences(field, key)) {
-            if found.excerpts.len() < EXCERPTS_PER_END {
-                found.excerpts.push(Excerpt {
-                    entity_id: row.from_id.clone(),
-                    parts,
-                });
-            }
-        }
+        times += quote(found, &row.from_id, field, key);
     }
 
-    let linked: Vec<(String, String, String)> = sqlx::query_as(SAME_WAY_LINKED)
+    let linked: Vec<(String, String, String, i64)> = sqlx::query_as(SAME_WAY_LINKED)
         .bind(&row.to_id)
         .bind(rule)
         .bind(id)
         .fetch_all(pool)
         .await?;
-    if !linked.is_empty() {
+    if let Some((.., total)) = linked.first() {
         let names: Vec<String> = linked
             .iter()
-            .map(|(id, kind, title)| end_name(id, kind, title))
+            .map(|(id, kind, title, _)| end_name(id, kind, title))
             .collect();
         found.support.push(format!(
             "Found the same way and already linked to {key}: {}.",
-            series(&names, ", ")
+            series(&names, usize::try_from(*total).unwrap_or(usize::MAX), ", ")
         ));
     }
     if times > 1 {
@@ -292,9 +285,10 @@ async fn by_key(
     }
     if !others.is_empty() {
         let others: Vec<String> = others.iter().map(|k| (*k).to_owned()).collect();
-        found
-            .against
-            .push(format!("It also names {}.", series(&others, " and ")));
+        found.against.push(format!(
+            "It also names {}.",
+            series(&others, others.len(), " and ")
+        ));
     }
     Ok(())
 }
@@ -303,7 +297,7 @@ async fn by_key(
 /// marked, and the words themselves.
 async fn by_wording(
     pool: &PgPool,
-    row: &Row,
+    row: &ProposalRow,
     found: &mut ProposalEvidence,
 ) -> Result<(), CoreError> {
     found.against.push(WORDING_ALONE.to_owned());
@@ -353,7 +347,7 @@ async fn by_wording(
     if words.is_empty() {
         words = lexemes;
     }
-    words.truncate(8);
+    words.truncate(SHARED_WORDS);
     found
         .support
         .push(format!("Shared words: {}.", words.join(", ")));
@@ -365,20 +359,13 @@ async fn by_wording(
 async fn by_host(
     pool: &PgPool,
     id: Uuid,
-    row: &Row,
+    row: &ProposalRow,
     rule: &str,
     found: &mut ProposalEvidence,
 ) -> Result<(), CoreError> {
     if let Some(host) = row.reason.as_deref().and_then(watched_host) {
-        for field in row.to_text.clone().unwrap_or_default() {
-            for parts in excerpts(&field, &occurrences(&field, host)) {
-                if found.excerpts.len() < EXCERPTS_PER_END {
-                    found.excerpts.push(Excerpt {
-                        entity_id: row.to_id.clone(),
-                        parts,
-                    });
-                }
-            }
+        for field in row.to_text.as_deref().unwrap_or_default() {
+            quote(found, &row.to_id, field, host);
         }
     }
     let (elsewhere,): (i64,) = sqlx::query_as(SAME_WAY_ELSEWHERE)
@@ -388,13 +375,32 @@ async fn by_host(
         .fetch_one(pool)
         .await?;
     if elsewhere > 0 {
-        found.against.push(if elsewhere == 1 {
-            "The same host is proposed for 1 other asset.".to_owned()
-        } else {
-            format!("The same host is proposed for {elsewhere} other assets.")
-        });
+        found.against.push(format!(
+            "The same host is proposed for {}.",
+            counted(elsewhere, "other asset", "other assets")
+        ));
     }
     Ok(())
+}
+
+/// Quote `field` of the end `entity_id` around each whole-word `needle`, up
+/// to [`EXCERPTS_PER_END`] excerpts in all, returning how often it appears.
+fn quote(found: &mut ProposalEvidence, entity_id: &str, field: &str, needle: &str) -> usize {
+    let at = occurrences(field, needle);
+    for parts in excerpts(field, &at) {
+        if found.excerpts.len() < EXCERPTS_PER_END {
+            found.excerpts.push(Excerpt {
+                entity_id: entity_id.to_owned(),
+                parts,
+            });
+        }
+    }
+    at.len()
+}
+
+/// `n` and the noun it counts: "1 other asset", "2 other assets".
+fn counted(n: i64, one: &str, many: &str) -> String {
+    format!("{n} {}", if n == 1 { one } else { many })
 }
 
 /// The key of an entity id: what follows the namespace (`jira:PAY-231` is
@@ -414,7 +420,9 @@ fn end_name(entity_id: &str, kind: &str, title: &str) -> String {
     }
 }
 
-/// The host the monitor rule's reason names: "this monitor watches <host>, …".
+/// The host the monitor rule's reason names: "this monitor watches <host>, …",
+/// as `suggest`'s `MONITOR_URL_HOST` formats it. A reason worded otherwise
+/// names no host, and the evidence quotes nothing rather than guessing.
 fn watched_host(reason: &str) -> Option<&str> {
     let rest = reason.strip_prefix("this monitor watches ")?;
     rest.split_once(',').map(|(host, _)| host)
@@ -576,10 +584,11 @@ fn headline_parts(headline: &str, whole: &str) -> Vec<Part> {
 }
 
 /// Names in a sentence: "a", "a and b", "a, b and c", "a, b, c and 2 more".
-/// `last` joins the final pair (", " or " and ").
-fn series(names: &[String], last: &str) -> String {
+/// `total` is how many there are, of which `names` holds the first; `last`
+/// joins the final pair (", " or " and ").
+fn series(names: &[String], total: usize, last: &str) -> String {
     let shown = names.len().min(NAMED);
-    let rest = names.len() - shown;
+    let rest = total.saturating_sub(shown);
     let names = &names[..shown];
     match (names, rest) {
         ([], _) => String::new(),
@@ -686,12 +695,13 @@ mod tests {
     #[test]
     fn names_read_as_a_sentence() {
         let n = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
-        assert_eq!(series(&n(&["a"]), " and "), "a");
-        assert_eq!(series(&n(&["a", "b"]), " and "), "a and b");
-        assert_eq!(series(&n(&["a", "b", "c"]), " and "), "a, b and c");
-        assert_eq!(series(&n(&["a", "b"]), ", "), "a, b");
+        assert_eq!(series(&n(&["a"]), 1, " and "), "a");
+        assert_eq!(series(&n(&["a", "b"]), 2, " and "), "a and b");
+        assert_eq!(series(&n(&["a", "b", "c"]), 3, " and "), "a, b and c");
+        assert_eq!(series(&n(&["a", "b"]), 2, ", "), "a, b");
+        assert_eq!(series(&n(&["a", "b", "c"]), 7, ", "), "a, b, c and 4 more");
         assert_eq!(
-            series(&n(&["a", "b", "c", "d", "e"]), " and "),
+            series(&n(&["a", "b", "c", "d", "e"]), 5, " and "),
             "a, b, c and 2 more"
         );
     }
@@ -703,5 +713,21 @@ mod tests {
             Some("gitea")
         );
         assert_eq!(watched_host("the branch name contains PAY-1"), None);
+    }
+}
+
+#[cfg(test)]
+mod names {
+    /// The rule names this module branches on are rules the detector has: a
+    /// rename in `suggest` would otherwise leave its proposals with no
+    /// evidence and no failing test.
+    #[test]
+    fn every_rule_named_here_is_a_rule_the_detector_runs() {
+        for name in super::KEY_RULES
+            .iter()
+            .chain(&["similar_text", "monitor_url_host"])
+        {
+            assert!(crate::suggest::rule(name).is_some(), "{name} is no rule");
+        }
     }
 }

@@ -2445,8 +2445,8 @@ pub async fn delete_note(
 // Four commands, and #836's evidence read, in this module and not a new one:
 // a suggestion **is** a link row (#41), these are the writes that move it
 // between the two states the link store already has, and the reads are the
-// same graph the panel above reads from the other side. A `commands/suggest.rs` would be a second module over one
-// table.
+// same graph the panel above reads from the other side. A
+// `commands/suggest.rs` would be a second module over one table.
 
 /// One page of a room's tray: the proposals, and how many there are in all.
 ///

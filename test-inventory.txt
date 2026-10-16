@@ -1137,6 +1137,7 @@ knobas-core	lib/knobas_core	entity::tests::rejects_malformed
 knobas-core	lib/knobas_core	entity::tests::reserved_namespaces_are_matched_case_insensitively
 knobas-core	lib/knobas_core	entity::tests::serde_roundtrips_as_string
 knobas-core	lib/knobas_core	entity::tests::the_reserved_namespaces_are_exactly_what_the_migration_refuses
+knobas-core	lib/knobas_core	evidence::names::every_rule_named_here_is_a_rule_the_detector_runs
 knobas-core	lib/knobas_core	evidence::tests::a_headline_is_split_at_its_markers
 knobas-core	lib/knobas_core	evidence::tests::a_key_is_found_only_as_a_whole_word
 knobas-core	lib/knobas_core	evidence::tests::a_short_text_is_quoted_whole_without_ellipses
@@ -1369,6 +1370,7 @@ knobas-core	test/it	projects::teamcitys_own_two_words_read_as_well_as_jiras
 knobas-core	test/it	proposal_evidence::a_key_in_a_commit_message_is_quoted_with_the_key_marked
 knobas-core	test/it	proposal_evidence::evidence_for_an_id_no_link_carries_is_not_found
 knobas-core	test/it	proposal_evidence::items_found_the_same_way_and_already_linked_support_a_proposal
+knobas-core	test/it	proposal_evidence::past_three_items_found_the_same_way_the_rest_are_counted_not_named
 knobas-core	test/it	proposal_evidence::proposals_dismissed_at_either_end_speak_against_one_found_the_same_way
 knobas-core	test/it	proposal_evidence::shared_wording_is_quoted_from_both_ends_with_the_shared_words_marked
 knobas-core	test/it	reach::a_parent_whose_type_cannot_be_read_brings_nothing

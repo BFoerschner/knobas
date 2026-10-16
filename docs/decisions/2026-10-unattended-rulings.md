@@ -2466,8 +2466,9 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
 - ***Also found* is left out when nothing supports the proposal**; prototype-6 never draws it
   empty and has no words for none. *Speaks against it* always draws: the backend says "Nothing
   found against it." **Reversing:** low.
-- **An excerpt from a branch or commit is set in mono**, as prototype-6 sets the commit's; prose is
-  not. **Reversing:** low.
+- **Only a branch's excerpt is set in mono.** Prototype-6 sets a commit message's quote in mono, but
+  the design system keeps mono for real code values and decides where the two differ; a commit
+  message is prose. **Reversing:** low.
 - **Evidence that cannot be read shows the error's words under the reason**, and the buttons stay.
   **Reversing:** low.
 - **`knobas_core::evidence` is its own module, not `suggest::evidence`**, so the responsiveness

@@ -292,7 +292,7 @@ test("the evidence quotes the item with the key marked, then what supports it an
   await open();
   expect(quotes().map((quote) => quote.textContent?.trim())).toEqual(["…is now a no-op. Refs PAY-231."]);
   expect([...quotes()[0]!.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["PAY-231"]);
-  expect(quotes()[0]!.classList.contains("tf-mono"), "a commit message is code").toBe(true);
+  expect(quotes()[0]!.classList.contains("tf-mono"), "a commit message is prose").toBe(false);
   expect(target.querySelector(".tf-quotes")?.classList.contains("tf-sbs")).toBe(false);
   expect([...said("Also found")!].map((line) => line.textContent)).toEqual([
     "Found the same way and already linked to PAY-231: c90d11 “PAY-231 retry once”.",

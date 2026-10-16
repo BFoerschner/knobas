@@ -200,8 +200,12 @@ export function sideBySide(evidence: Pick<ProposalEvidence, "excerpts">): boolea
   return new Set(evidence.excerpts.map((excerpt) => excerpt.entity_id)).size > 1;
 }
 
-/** Whether an excerpt quotes code (a branch name, a commit message), set in mono as prototype-6 sets a commit's. */
+/**
+ * Whether an excerpt quotes a code value (a branch name), set in mono. A
+ * commit message is prose: the design system keeps mono for real code values,
+ * and it decides where prototype-6 sets a commit's quote in mono.
+ */
 export function quotesCode(entry: SuggestionEntry, entityId: string): boolean {
   const end = [entry.from, entry.to].find((candidate) => candidate.entity_id === entityId);
-  return end !== undefined && (end.kind === "branch" || end.kind === "commit");
+  return end?.kind === "branch";
 }

@@ -241,3 +241,38 @@ async fn evidence_for_an_id_no_link_carries_is_not_found() {
         Err(CoreError::LinkNotFound(missing)) if missing == id
     ));
 }
+
+#[tokio::test]
+async fn past_three_items_found_the_same_way_the_rest_are_counted_not_named() {
+    let pool = scratch().await;
+    let ticket = item(&pool, "ticket", "PAY-231", "Retry failed SEPA payouts", "").await;
+    let mut done = Vec::new();
+    for n in 0..6 {
+        done.push(
+            item(
+                &pool,
+                "branch",
+                &format!("b{n}"),
+                &format!("feature/PAY-231-{n}"),
+                "",
+            )
+            .await,
+        );
+    }
+    let open = item(&pool, "branch", "open", "feature/PAY-231-open", "").await;
+    run_rule(&pool, "branch_name_key").await;
+    for branch in &done {
+        suggest::accept(&pool, proposal(&pool, branch, &ticket).await)
+            .await
+            .unwrap();
+    }
+
+    let found = read(&pool, proposal(&pool, &open, &ticket).await).await;
+
+    assert_eq!(
+        found.support,
+        [
+            "Found the same way and already linked to PAY-231: feature/PAY-231-5, feature/PAY-231-4, feature/PAY-231-3 and 3 more."
+        ]
+    );
+}
