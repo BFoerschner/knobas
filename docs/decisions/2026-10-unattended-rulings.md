@@ -2196,3 +2196,44 @@ Implementer, PR for #812.
 - **The fake IPC seeds prototype-6's own views** as search text (`fake/ticket-views.ts`); its counts
   restate the matcher, which passes over `assigned:`, so *Assigned to me today* reads wider than the
   real one. **Reversing:** low.
+
+## #848 — Builds tracer: declared pipeline and run
+
+Implementer, PR for #848.
+
+- **The tracer declares the fields its records already carry, not all of R-9.12.** Declared:
+  `frame`, a pipeline's `name`, `group` and `pipeline` identity, and a run's `pipeline`, `number`,
+  `branch`, `started` and `finished` (the run's state and commit were already declared, #666 and
+  #710). Not declared: a pipeline's repository, default branch, parameter specs and triggers, and a
+  run's started-by, agent, steps and test summary. The first four live in the configuration's
+  settings, which carry credentials (a VCS root's `secure:password`, a `password` parameter) that
+  the source view reads live and scrubs and that nothing mirrors today; mirroring them is its own
+  decision. Started-by is `triggered.user.username`, which 100 of 100 builds on JetBrains' public
+  instance lack (#106), so the battery's clause 3 would fail there. Agent and the test summary need
+  `BUILD_FIELDS` widened and mockd taught to serve them, and mockd's dataset has neither, so it
+  would have to invent them. Steps are on no TeamCity build record; they come with the whole log's
+  step boundaries (#854). None of them is drawn by this ticket, so a declaration now would be a
+  frozen field with no reader and no witness on screen. Each one arrives with the ticket that first
+  draws it (#851 repository, triggers and started-by; #852 parameter specs; #853 agent and steps;
+  #855 the test summary), each with its own §10.8 entry. **Reversing:** low; each field is additive.
+- **A run joins its pipeline on a declared `pipeline` identity on both kinds**, not on the
+  existing `parent` names. TeamCity configuration names are not unique; matching a run's parent
+  names against a configuration's own would mis-join two configurations of one name in two
+  projects. **Reversing:** medium (a frozen field).
+- **`frame` is a role on `KindPaths`, not a new descriptor field.** The reads already bind the
+  declarations per `(source, kind)`, so the frame kinds are found from the same parameter, and a
+  Docs frame (TF4) can add its roles to the same enum. **Reversing:** medium.
+- **Times are ISO 8601 in either spelling**, read in Rust (`parse_instant`), not normalised in the
+  adapter. TeamCity writes the basic form; the payload stays verbatim (spec §3a) and needs no
+  cursor bump. **Reversing:** low.
+- ***Running* is "a run started and not finished"; a strip block is the run's declared tone once
+  finished, else running or queued.** Both from the declared instants, so no state word is read.
+  **Reversing:** low.
+- **`#/builds/<entity id>` addresses a pipeline**, as every full-view address carries an entity id
+  (conventions, "Routes and addresses"). A bare `#/builds` selects the first failing pipeline, else
+  the first; *This job*'s choice is #850's. `#/build/...` draws "The run page is not built in the
+  new shell yet." until #853. The full route gains `head`, its first segment, so the page tells
+  the two apart. **Reversing:** low.
+- **The run list draws the source's state word** (`SUCCESS`, `FAILURE`) where prototype-6 says
+  *passed* and *failed*: the chip is the declared one (#666), and renaming it in the shell would be
+  a mapping no source declared. **Reversing:** low, a `shown_as` on TeamCity's state values.

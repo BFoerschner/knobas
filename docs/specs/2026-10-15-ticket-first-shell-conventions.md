@@ -59,3 +59,11 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A *This job* scope names the job's key after its label, in mono (`FilterScope.tag`), as prototype-6's `jobk`. (#835)
 - Filter keys on the new shell's search use the launcher's grammar, evaluated on the server; a negation is `-key:value` on the keys only, and a row whose field is absent fails the key and passes its negation. (#811, PR #890; #810, PR #895)
+
+## Builds
+
+- A full route carries its first segment as `head`, so a section with two address heads (`builds`
+  and `build`) draws each; a page matches on `section` and branches on `head`. (#848)
+- A pipeline's address is `#/builds/<entity id>`; the Builds view reads declared frame fields only
+  (`pipelines`, `pipeline_runs`), and the source's word is its configured name, once, as the
+  header line over its pipelines. (#848)
