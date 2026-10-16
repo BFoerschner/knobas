@@ -8,9 +8,13 @@
  * mode). Nothing here reads a payload: the sentence is the backend's own
  * `reason` and `title`.
  */
-import type { InboxCategory, InboxEntry, InboxItem, Reached } from "../../ipc/entity";
+import type { InboxCategory, InboxEntry, InboxItem } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
-import { itemHash, keyOf } from "../job/job";
+import { itemHash } from "../job/job";
+import type { JobIndex } from "../job/open-jobs";
+
+// Which job a row belongs to is shared with Code (#837): `job/open-jobs.ts`.
+export { jobIndex, type JobIndex, type OpenJob } from "../job/open-jobs";
 
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
@@ -129,45 +133,6 @@ const INLINE_OPS = ["rerun_build"];
 export function rowActions(entry: InboxEntry): string[] {
   const ops = entry.actions.filter((op) => INLINE_OPS.includes(op));
   return [...ops, ...(entry.item.category === "alert" ? ["ack"] : []), "snooze", "done"];
-}
-
-/** One job and what it reaches: a ticket entity id and its `job_reach` read. */
-export interface OpenJob {
-  id: string;
-  reached: readonly Pick<Reached, "entity_id">[];
-}
-
-/** Which job an item belongs to, and whether a job holds it. */
-export interface JobIndex {
-  /** The job key the row's second line names, or `null` for *no job*. */
-  jobOf(item: Pick<InboxItem, "entity_id" | "kind">): string | null;
-  /** Whether the job with this key holds the item: its own ticket, or what it reaches. */
-  holds(job: string, item: Pick<InboxItem, "entity_id">): boolean;
-}
-
-/**
- * The jobs' reaches, inverted. An item about a ticket belongs to that ticket;
- * anything else to the first job (in the order given) whose reach holds it.
- */
-export function jobIndex(jobs: readonly OpenJob[]): JobIndex {
-  const owner = new Map<string, string>();
-  const held = new Map<string, Set<string>>();
-  for (const job of jobs) {
-    const key = keyOf(job.id);
-    const ids = new Set([job.id, ...job.reached.map((row) => row.entity_id)]);
-    if (!held.has(key)) held.set(key, ids);
-    for (const id of ids) if (!owner.has(id)) owner.set(id, key);
-  }
-  return {
-    jobOf(item) {
-      if (item.entity_id === null) return null;
-      if (item.kind === "ticket") return keyOf(item.entity_id);
-      return owner.get(item.entity_id) ?? null;
-    },
-    holds(job, item) {
-      return item.entity_id !== null && (held.get(job)?.has(item.entity_id) ?? false);
-    },
-  };
 }
 
 /** What the filter bar has set. */
