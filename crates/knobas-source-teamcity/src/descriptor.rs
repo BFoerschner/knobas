@@ -101,10 +101,19 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// record carries that string, and a build's title keeps it anyway. A
 /// configuration has no parent; its project is a project, not a parent.
 ///
+/// **The Builds frame** (ADR-0022, #848): a configuration is a pipeline and
+/// a build is a run. Both name the configuration's id -- the configuration
+/// as its own `id`, the build as `buildTypeId` -- which is what joins a run to
+/// its pipeline. A pipeline is called its `name` and grouped by its
+/// `projectName`; a run carries its `number`, `branchName`, `startDate` and
+/// `finishDate`, all of them in the record `BUILD_FIELDS` already fetches.
+/// TeamCity writes its dates in ISO 8601's basic form (`20260822T102000+0000`).
+///
 /// **A build ran on its revisions** (#710): `revisions.revision[].version`,
 /// one full sha per VCS root, which is what the detail of a pull request, a
 /// branch or a commit finds the builds of its commit by.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
+    use knobas_core::payload::Frame;
     use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
     vec![
         KindPaths {
@@ -121,12 +130,22 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 at: PayloadPath::of(["revisions", "revision"]),
                 entry: PayloadPath::of(["version"]),
             }],
+            frame: Some(Frame::Run),
+            pipeline: vec![PayloadPath::of(["buildTypeId"])],
+            number: vec![PayloadPath::of(["number"])],
+            branch: vec![PayloadPath::of(["branchName"])],
+            started: vec![PayloadPath::of(["startDate"])],
+            finished: vec![PayloadPath::of(["finishDate"])],
             ..KindPaths::default()
         },
         KindPaths {
             kind: KIND_BUILD_CONFIG.to_owned(),
             project_key: vec![PayloadPath::of(["projectId"])],
             project_name: vec![PayloadPath::of(["projectName"])],
+            frame: Some(Frame::Pipeline),
+            name: vec![PayloadPath::of(["name"])],
+            group: vec![PayloadPath::of(["projectName"])],
+            pipeline: vec![PayloadPath::of(["id"])],
             ..KindPaths::default()
         },
     ]
@@ -294,6 +313,50 @@ mod tests {
             json["write_ops"],
             serde_json::json!(["trigger_build", "rerun_build", "set_parameter", "run_build"])
         );
+    }
+
+    /// The Builds frame (#848): a configuration is a pipeline named by its
+    /// `name` in its project, a build is a run of the configuration whose id
+    /// it names, with its number, branch and both dates. Read off the records
+    /// the shapes `BUILD_TYPE_FIELDS` and `BUILD_FIELDS` ask for.
+    #[test]
+    fn a_configuration_is_a_pipeline_and_a_build_is_a_run_of_it() {
+        use knobas_core::payload::{Frame, parse_instant, resolve_string};
+        let declared = descriptor_template().payload_paths;
+        let of = |kind: &str| declared.iter().find(|p| p.kind == kind).cloned().unwrap();
+        let (run, pipeline) = (of(KIND_BUILD), of(KIND_BUILD_CONFIG));
+        assert_eq!(run.frame, Some(Frame::Run));
+        assert_eq!(pipeline.frame, Some(Frame::Pipeline));
+        let config = serde_json::json!({
+            "id": "Payout_IntegrationTests", "name": "IntegrationTests",
+            "projectId": "Payout", "projectName": "Payout"
+        });
+        let build = serde_json::json!({
+            "id": 7, "number": "1187", "buildTypeId": "Payout_IntegrationTests",
+            "state": "finished", "status": "FAILURE",
+            "branchName": "feature/PAY-231-sepa-retry",
+            "startDate": "20260822T100500+0000", "finishDate": "20260822T100917+0000"
+        });
+        assert_eq!(resolve_string(&config, &pipeline.name).as_deref(), Some("IntegrationTests"));
+        assert_eq!(resolve_string(&config, &pipeline.group).as_deref(), Some("Payout"));
+        assert_eq!(
+            resolve_string(&config, &pipeline.pipeline),
+            resolve_string(&build, &run.pipeline),
+            "a run names its pipeline as the pipeline names itself"
+        );
+        assert!(resolve_string(&build, &run.pipeline).is_some());
+        assert_eq!(resolve_string(&build, &run.number).as_deref(), Some("1187"));
+        assert_eq!(
+            resolve_string(&build, &run.branch).as_deref(),
+            Some("feature/PAY-231-sepa-retry")
+        );
+        let started = parse_instant(&resolve_string(&build, &run.started).unwrap()).unwrap();
+        let finished = parse_instant(&resolve_string(&build, &run.finished).unwrap()).unwrap();
+        assert_eq!((finished - started).num_seconds(), 257);
+        // A queued build has no number and neither date yet.
+        let queued = serde_json::json!({ "id": 8, "buildTypeId": "Payout_IntegrationTests", "state": "queued" });
+        assert_eq!(resolve_string(&queued, &run.number), None);
+        assert_eq!(resolve_string(&queued, &run.started), None);
     }
 
     /// A build ran on every revision it lists (#710): one sha per VCS root,

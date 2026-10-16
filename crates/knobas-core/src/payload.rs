@@ -284,6 +284,65 @@ pub struct KindPaths {
     /// misread. Empty for every kind with no estimate, and a miss draws none.
     #[serde(default)]
     pub estimate: Vec<PayloadPath>,
+    /// Which kind of the Builds frame this kind is (ADR-0022, #848): a
+    /// [`Frame::Pipeline`] the Builds view lists, or a [`Frame::Run`] of one.
+    /// A role, not a path, like [`blocked_statuses`](Self::blocked_statuses).
+    /// `None` for every kind the frame does not draw.
+    #[serde(default)]
+    pub frame: Option<Frame>,
+    /// What a pipeline is called (#848): TeamCity's configuration `name`.
+    /// Empty for every kind that is not a pipeline.
+    #[serde(default)]
+    pub name: Vec<PayloadPath>,
+    /// The group a pipeline sits in, in the source's own word (#848): a
+    /// TeamCity project, a Jenkins folder. TeamCity's `projectName`.
+    #[serde(default)]
+    pub group: Vec<PayloadPath>,
+    /// The pipeline's identity as **both** of its kinds spell it (#848): on a
+    /// pipeline its own id, on a run the id of the pipeline it ran. A run
+    /// belongs to the pipeline of its own source whose `pipeline` is equal.
+    /// TeamCity: a configuration's `id`, a build's `buildTypeId`.
+    #[serde(default)]
+    pub pipeline: Vec<PayloadPath>,
+    /// A run's number as the source writes it (#848), a string: TeamCity's
+    /// `number`, which a queued build does not have yet.
+    #[serde(default)]
+    pub number: Vec<PayloadPath>,
+    /// The branch a run built, by name (#848): TeamCity's `branchName`.
+    #[serde(default)]
+    pub branch: Vec<PayloadPath>,
+    /// When a run started (#848): an ISO 8601 instant, extended
+    /// (`2026-08-22T10:20:00Z`) or basic (`20260822T102000+0000`, TeamCity's
+    /// `startDate`). A queued run has none.
+    #[serde(default)]
+    pub started: Vec<PayloadPath>,
+    /// When a run finished (#848), as [`started`](Self::started) is written:
+    /// TeamCity's `finishDate`. A run in flight has none; with `started` it
+    /// is the run's duration.
+    #[serde(default)]
+    pub finished: Vec<PayloadPath>,
+}
+
+/// Which part of the Builds frame a kind is (ADR-0022, #848).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Frame {
+    /// What a CI source runs: a TeamCity build configuration.
+    Pipeline,
+    /// One execution of a pipeline: a TeamCity build.
+    Run,
+}
+
+/// An ISO 8601 instant in either spelling a declared time may use (#848):
+/// extended, as RFC 3339 writes it, or basic, as TeamCity does
+/// (`20260822T102000+0000`). Anything else is a miss.
+#[must_use]
+pub fn parse_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    let raw = raw.trim();
+    chrono::DateTime::parse_from_rfc3339(raw)
+        .or_else(|_| chrono::DateTime::parse_from_str(raw, "%Y%m%dT%H%M%S%z"))
+        .ok()
+        .map(|t| t.with_timezone(&chrono::Utc))
 }
 
 /// Where a row's **state** sits, and the values it is drawn for (#666).
@@ -373,6 +432,13 @@ pub mod field {
     pub const LABELS: &str = "labels";
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
+    pub const NAME: &str = "name";
+    pub const GROUP: &str = "group";
+    pub const PIPELINE: &str = "pipeline";
+    pub const NUMBER: &str = "number";
+    pub const BRANCH: &str = "branch";
+    pub const STARTED: &str = "started";
+    pub const FINISHED: &str = "finished";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -398,6 +464,13 @@ pub mod field {
         LABELS,
         SPRINT_STATE,
         ESTIMATE,
+        NAME,
+        GROUP,
+        PIPELINE,
+        NUMBER,
+        BRANCH,
+        STARTED,
+        FINISHED,
     ];
 }
 
@@ -1208,8 +1281,44 @@ mod tests {
         let mut expected: Vec<&str> = field::ALL.to_vec();
         expected.push("kind");
         expected.push("blocked_statuses");
+        expected.push("frame");
         expected.sort_unstable();
         assert_eq!(keys, expected);
+    }
+
+    /// A kind's place in the Builds frame (#848) travels as a lowercase word,
+    /// and a descriptor from before it decodes as no part of the frame.
+    #[test]
+    fn a_frame_travels_as_a_lowercase_word_and_defaults_to_none() {
+        let run = KindPaths {
+            kind: "build".to_owned(),
+            frame: Some(Frame::Run),
+            ..KindPaths::default()
+        };
+        let wire = serde_json::to_value(&run).unwrap();
+        assert_eq!(wire["frame"], "run");
+        assert_eq!(
+            serde_json::to_value(Frame::Pipeline).unwrap(),
+            serde_json::json!("pipeline")
+        );
+        let older: KindPaths = serde_json::from_value(serde_json::json!({ "kind": "build" })).unwrap();
+        assert_eq!(older.frame, None);
+    }
+
+    /// A declared time is ISO 8601 in either spelling (#848): TeamCity's
+    /// basic form and RFC 3339 read as the same instant; a date alone, a
+    /// word or a blank is a miss.
+    #[test]
+    fn an_instant_reads_in_the_basic_and_the_extended_spelling() {
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-08-22T10:20:00Z")
+            .unwrap()
+            .with_timezone(&chrono::Utc);
+        assert_eq!(parse_instant("20260822T122000+0200"), Some(expected));
+        assert_eq!(parse_instant("2026-08-22T10:20:00Z"), Some(expected));
+        assert_eq!(parse_instant(" 20260822T102000+0000 "), Some(expected));
+        assert_eq!(parse_instant("2026-08-22"), None);
+        assert_eq!(parse_instant("yesterday"), None);
+        assert_eq!(parse_instant(""), None);
     }
 
     /// A descriptor serialized by a peer built before ADR-0018 has no
