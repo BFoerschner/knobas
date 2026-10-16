@@ -3452,3 +3452,21 @@ Ruled by the implementer (PR for #866).
   asked-for step while the Log tab is open, and the Log tab opens that fold and scrolls it into
   view once its log is read, as prototype-6 does. The address stays `…/log`, as #1003's criterion
   names it. **Reversing:** low.
+## #889 — Saved Jira sources get the discovered field ids (2026-10-16)
+
+- **The sync discovers once and records it; *Test* stays read-only.** The ticket offered
+  "*Test* on a saved row offers to apply" or "the sync discovers it once and records it". *Test
+  connection* is ruled to write nothing (`crud::test`, interfaces §3), and an offer needs a screen
+  and a click the reader has no reason to make; the sync already runs for every source. So
+  `attempt` calls `fill_discovered` before it builds the adapter: only for keys the adapter's own
+  `config_schema` declares (`epic_link_field`, `sprint_field`) and the stored config leaves empty,
+  it asks `test_connection` for `discovered` and writes the answers into the config. No adapter
+  crate is named in `knobas-sync`. The change is visible as the two fields filled in the source's
+  settings. **Reversing:** low (one function and one SQL statement, no migration, no command).
+- **A typed id is never replaced, enforced in the statement.** `config::fill_missing` is one
+  `update` that merges a key only where the row's own value is blank at that moment, so a reader
+  saving an id between the scheduler's read and its write wins. **Reversing:** n/a.
+- **A source whose instance has no such field re-asks at every sync** (three cheap reads), since
+  an empty answer is not recorded. A Jira Core has no Sprint field and costs those reads each
+  run; recording "looked, none" would need a new stored fact. **Reversing:** medium; filed if it
+  bites.

@@ -529,6 +529,71 @@ async fn ending_of_record(
     )))
 }
 
+/// The config properties an adapter discovers from its far end and that a
+/// reader should never have to type (#297 Epic Link, #811 Sprint).
+const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
+
+/// A source saved before its adapter could discover a field id gets that id
+/// once, at its next sync (#889).
+///
+/// Only for keys the adapter's own `config_schema` declares **and** the stored
+/// config leaves empty, so a source with nothing to find costs nothing, and an
+/// id the reader typed is never asked about, let alone replaced
+/// ([`config::fill_missing`] repeats that rule inside the one statement). The
+/// discovery is best-effort: a source that cannot be built or tested here
+/// syncs as it did before, and the run reports the real failure itself.
+/// Recording the id is what makes the change visible: it is in the source's
+/// settings from then on.
+async fn fill_discovered(deps: &SchedulerDeps, cfg: config::SourceConfigRow) -> config::SourceConfigRow {
+    let declared = deps
+        .registry
+        .descriptors()
+        .into_iter()
+        .find(|d| d.id == cfg.adapter_kind)
+        .map(|d| d.config_schema);
+    let wanted: Vec<&str> = DISCOVERABLE
+        .into_iter()
+        .filter(|key| {
+            declared
+                .as_ref()
+                .is_some_and(|schema| schema["properties"].get(*key).is_some())
+                && !config::config_names(&cfg.config, key)
+        })
+        .collect();
+    if wanted.is_empty() {
+        return cfg;
+    }
+    let Ok(source) = build_source(deps, &cfg).await else {
+        return cfg;
+    };
+    let found: std::collections::BTreeMap<String, String> = match source.test_connection().await {
+        Ok(info) => info
+            .discovered
+            .into_iter()
+            .filter(|(key, _)| wanted.contains(&key.as_str()))
+            .collect(),
+        Err(error) => {
+            tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
+            return cfg;
+        }
+    };
+    if found.is_empty() {
+        return cfg;
+    }
+    match config::fill_missing(&deps.pool, &cfg.id, &found).await {
+        Ok(Some(row)) => {
+            tracing::info!(source_id = %cfg.id, keys = ?found.keys().collect::<Vec<_>>(),
+                "recorded the field ids the source discovered");
+            row
+        }
+        Ok(None) => cfg,
+        Err(error) => {
+            tracing::warn!(source_id = %cfg.id, %error, "recording discovered field ids failed");
+            cfg
+        }
+    }
+}
+
 async fn attempt(
     deps: &SchedulerDeps,
     source_id: &str,
@@ -541,6 +606,7 @@ async fn attempt(
         .await
         .map_err(RunFailure::Db)?
         .ok_or(RunFailure::NotConfigured)?;
+    let cfg = fill_discovered(deps, cfg).await;
     let source = build_source(deps, &cfg).await?;
 
     // §10.6(c): the run's transaction and advisory lock go on this, and it

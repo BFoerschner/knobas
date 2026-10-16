@@ -191,11 +191,11 @@ fn config_schema() -> serde_json::Value {
             },
             "epic_link_field": {
                 "type": ["string", "null"], "default": null, "title": "Epic Link field id",
-                "description": "Where a classic project keeps epic membership. Filled in by Test connection: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent."
+                "description": "Where a classic project keeps epic membership. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent."
             },
             "sprint_field": {
                 "type": ["string", "null"], "default": null, "title": "Sprint field id",
-                "description": "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection: the id is different on every Jira. Leave it empty and no ticket is in a sprint as far as knobas knows."
+                "description": "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira. An id you type is kept. Leave it empty and no ticket is in a sprint as far as knobas knows."
             },
             "page_size": {
                 "type": "integer", "minimum": 1, "maximum": 1000, "default": 100,

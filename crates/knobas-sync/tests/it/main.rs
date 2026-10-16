@@ -15,6 +15,7 @@ mod backfill;
 mod config;
 mod cursor;
 mod dedicated;
+mod discovered_config;
 mod delete_during_run;
 mod flush_all_isolation;
 mod progress;
