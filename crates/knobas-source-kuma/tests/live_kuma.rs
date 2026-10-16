@@ -984,8 +984,16 @@ async fn a_tcp_check_and_a_ping_are_published_as_their_own_kinds() {
     kuma_monitor(&["delete", PING]);
 
     for (name, target, kind) in [
-        (TCP, "host.docker.internal:8299", knobas_source::MonitorKind::Tcp),
-        (PING, "host.docker.internal", knobas_source::MonitorKind::Ping),
+        (
+            TCP,
+            "host.docker.internal:8299",
+            knobas_source::MonitorKind::Tcp,
+        ),
+        (
+            PING,
+            "host.docker.internal",
+            knobas_source::MonitorKind::Ping,
+        ),
     ] {
         source
             .write(WriteOp::CreateMonitor {
@@ -1012,9 +1020,17 @@ async fn a_tcp_check_and_a_ping_are_published_as_their_own_kinds() {
             .expect("published")
     };
     let tcp = payload(TCP);
-    assert_eq!(tcp.get("type").and_then(|v| v.as_str()), Some("port"), "{tcp:?}");
+    assert_eq!(
+        tcp.get("type").and_then(|v| v.as_str()),
+        Some("port"),
+        "{tcp:?}"
+    );
     let ping = payload(PING);
-    assert_eq!(ping.get("type").and_then(|v| v.as_str()), Some("ping"), "{ping:?}");
+    assert_eq!(
+        ping.get("type").and_then(|v| v.as_str()),
+        Some("ping"),
+        "{ping:?}"
+    );
 
     let refused = source
         .write(WriteOp::CreateMonitor {

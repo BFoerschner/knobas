@@ -5593,7 +5593,11 @@ async fn the_roster_carries_the_environment_and_owner_in_force() {
     assert_eq!(
         roster
             .iter()
-            .map(|row| (row.name.as_str(), row.environment.as_deref(), row.owner.as_deref()))
+            .map(|row| (
+                row.name.as_str(),
+                row.environment.as_deref(),
+                row.owner.as_deref()
+            ))
             .collect::<Vec<_>>(),
         [
             ("hel1", Some("prod"), Some("ops")),
