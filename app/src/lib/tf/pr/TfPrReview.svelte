@@ -48,7 +48,7 @@
   const choices = $derived(reviewChoices(actions, drafts.length, base));
   // The first sendable verdict, once, when the dialog opens: prototype-6 checks *Comment*.
   let verdict = $state<Verdict | null>(
-    (() => reviewChoices(actions, pending.of(prId).length).find((choice) => choice.action !== null)?.verdict ?? null)(),
+    (() => reviewChoices(actions, pending.of(prId).length, base).find((choice) => choice.action !== null)?.verdict ?? null)(),
   );
   let summary = $state("");
   let busy = $state(false);

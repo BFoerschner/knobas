@@ -25,7 +25,7 @@
   import { lineName, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
-  import { diffOf, matchesPath, placeThreads, targetOf } from "./files";
+  import { diffOf, matchesPath, placeThreads, sameTarget, targetOf } from "./files";
 
   let {
     prId,
@@ -112,14 +112,15 @@
 
   const SIGN = { context: " ", add: "+", del: "−" } as const;
   const baseName = (path: string) => path.slice(path.lastIndexOf("/") + 1);
-  const isOpen = (path: string, line: DiffLine) => {
+  const isOpen = (path: string, line: DiffLine) => open !== null && sameTarget(open, { path, ...targetOf(line) });
+  const draftsAt = (path: string, line: DiffLine) => drafts.filter((d) => sameTarget(d, { path, ...targetOf(line) }));
+  /** A line's name as a comment on it says it: `line 12`, `old line 9`. */
+  const nameOf = (line: DiffLine) => {
     const at = targetOf(line);
-    return open !== null && open.path === path && open.side === at.side && open.line === at.line;
+    return lineName(at.side, at.line);
   };
-  const draftsAt = (path: string, line: DiffLine) => {
-    const at = targetOf(line);
-    return drafts.filter((d) => d.path === path && d.side === at.side && d.line === at.line);
-  };
+  /** Pending comments on files the diff no longer holds. */
+  const homeless = $derived(drafts.filter((d) => !files.some((file) => file.path === d.path)));
   const flat = (file: DiffFile) => file.hunks.flatMap((hunk, h) => hunk.lines.map((line, n) => ({ line, gap: h > 0 && n === 0 })));
 </script>
 
@@ -183,7 +184,7 @@
               <div class="tf-ln" class:tf-add={line.kind === "add"} class:tf-del={line.kind === "del"}>
                 <span>{number}</span><span>{SIGN[line.kind]} {line.text}</span>
                 {#if diff?.commentable}
-                  {@const name = lineName(targetOf(line).side, targetOf(line).line)}
+                  {@const name = nameOf(line)}
                   <button type="button" class="tf-addc" title="Comment on {name}" aria-label="Comment on {name} of {file.path}" onclick={() => startComment(file.path, line)}
                     >+</button
                   >
@@ -194,7 +195,7 @@
               {/each}
               {#each draftsAt(file.path, line) as d (d.id)}{@render mine(d.body)}{/each}
               {#if isOpen(file.path, line)}
-                {@const name = lineName(targetOf(line).side, targetOf(line).line)}
+                {@const name = nameOf(line)}
                 <div class="tf-newc">
                   <textarea bind:value={draft} placeholder="Comment on {name}" aria-label="Comment on {name} of {file.path}"></textarea>
                   <div class="tf-acts">
@@ -219,13 +220,13 @@
           {/if}
         </div>
       {/each}
-      {#if (diff?.gone.length ?? 0) > 0 || drafts.some((d) => !files.some((file) => file.path === d.path))}
+      {#if (diff?.gone.length ?? 0) > 0 || homeless.length > 0}
         <details class="tf-outdated tf-gone">
           <summary>On files this change no longer holds</summary>
           {#each diff?.gone ?? [] as gone, g (g)}
             <div class="tf-thread"><span class="tf-mono tf-dim">{gone.path}, {lineName(gone.thread.side, gone.thread.line)}</span>{@render said(gone.thread.comments)}</div>
           {/each}
-          {#each drafts.filter((d) => !files.some((file) => file.path === d.path)) as d (d.id)}
+          {#each homeless as d (d.id)}
             {@render mine(`${d.path}, ${lineName(d.side, d.line)}: ${d.body}`)}
           {/each}
         </details>

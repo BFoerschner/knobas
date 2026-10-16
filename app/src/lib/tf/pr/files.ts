@@ -53,6 +53,7 @@ export interface PlacedThreads {
   apart: LineThread[];
 }
 
+/** Where each of `file`'s threads is drawn: under the first line it answers to, or apart. */
 export function placeThreads(file: DiffFile): PlacedThreads {
   const lines = file.hunks.flatMap((hunk) => hunk.lines);
   const under: LineThread[][] = lines.map(() => []);
@@ -64,6 +65,11 @@ export function placeThreads(file: DiffFile): PlacedThreads {
     else under[at]!.push(thread);
   }
   return { under, apart };
+}
+
+/** Whether a new comment's target and a pending comment's place are one line. */
+export function sameTarget(a: { path: string; side: ReviewSide; line: number }, b: { path: string; side: ReviewSide; line: number }): boolean {
+  return a.path === b.path && a.side === b.side && a.line === b.line;
 }
 
 /** Whether `path` matches the file filter: any part of it, in any case. */

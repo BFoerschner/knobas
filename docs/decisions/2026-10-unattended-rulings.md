@@ -3078,7 +3078,9 @@ Ruled by the implementer (PR for #863).
   repository. **Reversing:** low (`land.rs`'s `ready_facts`).
 - ***Conflicts* follows #994's wording:** `conflicts with <base>` for Gitea's `mergeable: false`,
   though `false` also covers a check still running (`Blocker::Conflict`'s doubt). A
-  work-in-progress title, whose `false` says nothing about a conflict, gets no line. **Reversing:**
+  work-in-progress title, whose `false` says nothing about a conflict, gets no line. The shell
+  draws `none with <base>` as *No conflicts with <base>* and raises the other's opening letter:
+  two values of one declared fact, not a sentence taken apart. **Reversing:**
   low.
 - ***Ready to merge?* drops the per-reviewer lines** for prototype-6's three. A source that
   declares neither *Approvals* nor *Conflicts* still gets its *Mergeable* sentence as written. A
