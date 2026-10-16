@@ -2157,3 +2157,42 @@ Merge-manager, PR #938 for #831.
   leave the export folder. A long title would have made a name over 255 bytes and failed the whole
   export, and `con.md` cannot be written on Windows. The rule lives in `page_file_name`, so a page
   link and the file it points at still agree. **Reversing:** low.
+
+## #812 Ticket views: table, list and save
+
+Implementer, PR for #812.
+
+- ***Save as a view* and *Duplicate* open a small *New view* dialog** (name, group, the text it will
+  keep, "Kept in knobas. Jira never sees it.", *Create view* off until there is a name). Prototype-6
+  opens its editor there, and the editor is #814's. How the tickets show comes from where the view
+  started: *Save as a view* takes the layout, lanes and sort on screen; *Duplicate* the view's own.
+  **Reversing:** #814 swaps the dialog for the editor; nothing stored changes.
+- ***+ New view* and *Edit view* are not drawn**, and the ⋯ menus hold *Duplicate* and *Delete*
+  only: both open the editor (#814). **Reversing:** #814 adds them.
+- ***All tickets* stays at the top of the views pane, at `#/tickets`.** Prototype-6 has no such row
+  and opens its first view; #810 built *All tickets*, a fresh knobas has no view, and no migration
+  seeds any (nothing invented). **Reversing:** low, drop the row once views are seeded somewhere.
+- **A view's count is drawn only above zero** (the shell's count-badge convention); prototype-6 draws
+  every count. A view the grammar cannot read has no count. **Reversing:** low.
+- **A view the grammar cannot read draws its name, its text, and one line naming the part**
+  ("The search cannot read `sprint:next` in this view, so it shows no tickets."), and reads no
+  tickets: no filter bar, no board, no preview. Running the readable rest would show more tickets
+  than the view means. **Reversing:** low.
+- **The id is a slug of the name made at save** (`-2`, `-3` past a taken one); renaming keeps it, so
+  an address stays put. Two views may share a name. **Reversing:** opaque ids, one column.
+- **The display words are checked in Rust, not in the migration** (only `layout` is a SQL check), so
+  a lane or card field a later ticket adds is a constant, not a migration. **Reversing:** low.
+- **The session's switches are kept per view** (`#813`'s module state, now keyed by view id), over
+  what the view saved; nothing is written. **Reversing:** low.
+- **A view's own columns gather `mini_board`'s status columns** in the browser: a named column holds
+  its statuses' cards newest first, its count is their totals, "N of M" in err tone over its limit,
+  and a status on no column does not show (R-3.15). **Reversing:** a columns argument on
+  `mini_board`.
+- **Cards and the list follow a view's card fields and list columns; *All tickets* keeps the card
+  #810 drew** (epic included). *Comment count* draws nothing until #894 declares one; labels are
+  drawn only when a view asks for them. **Reversing:** low.
+- **The ticket views share part is on by default, and its tick is drawn only once a view exists**
+  (both share dialogs), the smart lists' rule. **Reversing:** low.
+- **The fake IPC seeds prototype-6's own views** as search text (`fake/ticket-views.ts`); its counts
+  restate the matcher, which passes over `assigned:`, so *Assigned to me today* reads wider than the
+  real one. **Reversing:** low.

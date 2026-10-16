@@ -7,6 +7,8 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { ContextRow, MiniBoard, MiniBoardCard } from "../../ipc/entity";
+import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
+import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
 
@@ -80,17 +82,47 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
 interface Harness {
   ports: TicketsPorts;
   reads: { perColumn: number | null; query: string | null }[];
+  /** The ticket views the views read answers with (#812); the writes change it. */
+  views: TicketViewRow[];
+  saved: TicketViewDraft[];
+  deleted: string[];
 }
 
 /** Board reads answered over {@link CORPUS}, the query read as words that must all appear. */
-function harness(contexts: ContextRow[] = []): Harness {
+function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harness {
   const reads: Harness["reads"] = [];
-  return {
+  const h: Harness = {
     reads,
+    views,
+    saved: [],
+    deleted: [],
     ports: {
+      views: () => Promise.resolve(h.views.map((row) => ({ ...row }))),
+      saveView: (draft) => {
+        h.saved.push(draft);
+        const id = draft.id ?? draft.name.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+        const made: TicketView = {
+          ...draft,
+          id,
+          position: draft.position ?? h.views.length,
+        };
+        h.views = [...h.views.filter((row) => row.id !== id), { ...made, count: 1, unreadable: null }].sort(
+          (a, b) => a.position - b.position,
+        );
+        return Promise.resolve(made);
+      },
+      deleteView: (id) => {
+        h.deleted.push(id);
+        h.views = h.views.filter((row) => row.id !== id);
+        return Promise.resolve();
+      },
       board: (perColumn, query) => {
         reads.push({ perColumn, query });
-        const words = (query ?? "").toLowerCase().split(/\s+/).filter(Boolean);
+        // Grammar keys narrow nothing here; the reads record them.
+        const words = (query ?? "")
+          .toLowerCase()
+          .split(/\s+/)
+          .filter((word) => word !== "" && !word.includes(":"));
         const kept = CORPUS.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
@@ -125,10 +157,11 @@ function harness(contexts: ContextRow[] = []): Harness {
         }),
     },
   };
+  return h;
 }
 
-async function open(h: Harness, timedTicket: string | null = null) {
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports } });
+async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null) {
+  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId } });
   await settle();
 }
 
@@ -545,4 +578,226 @@ test("signals are drawn on the card and in the list's Signals column, each a ton
     ["tf-dot tf-err", "build failed"],
     ["tf-dot tf-info", "PR #142 open"],
   ]);
+});
+
+// ---- ticket views (#812) ----
+
+function view(id: string, name: string, group: string, position: number, extra: Partial<TicketViewRow> = {}): TicketViewRow {
+  return {
+    id,
+    name,
+    group,
+    position,
+    query: "",
+    layout: "board",
+    columns: [],
+    lanes: "none",
+    card_fields: ["type", "signals", "comments", "assignee"],
+    list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"],
+    list_sort: null,
+    jira_ref: null,
+    count: 3,
+    unreadable: null,
+    ...extra,
+  };
+}
+
+const VIEWS: TicketViewRow[] = [
+  view("ops-board", "OPS board", "Ops", 0, { query: "project:OPS", count: 0 }),
+  view("backlog", "Payments backlog", "Team", 1, { query: "project:PAY status:\"To Do\"", count: 12 }),
+  view("my-work", "My work", "Mine", 2, { query: "assignee:@me", count: 2 }),
+  view("payouts", "Payouts", "Epics", 3, { query: "under:PAY-200 payout", count: 1 }),
+  view("pay", "Payments (PAY)", "Projects", 4, { query: "project:PAY", count: 18 }),
+];
+
+const pane = () =>
+  [...target.querySelectorAll(".tf-vlist > h2, .tf-vlist .tf-vw-row a")].map((el) =>
+    el.tagName === "H2" ? `# ${el.textContent}` : el.textContent!.replace(/\s+/g, " ").trim(),
+  );
+
+function menuOf(name: string): HTMLButtonElement {
+  return target.querySelector<HTMLButtonElement>(`button[aria-label="More for ${name}"]`)!;
+}
+
+function menuItem(label: string): HTMLButtonElement {
+  return [...target.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((b) => b.textContent === label)!;
+}
+
+const dialog = () => document.querySelector<HTMLElement>("[role=dialog]");
+
+test("the views pane: Mine, Team, Epics and Projects first, then typed groups, each view with its count above zero", async () => {
+  await open(harness([], VIEWS));
+  expect(pane()).toEqual([
+    "# Mine",
+    "My work 2",
+    "# Team",
+    "Payments backlog 12",
+    "# Epics",
+    "Payouts 1",
+    "# Projects",
+    "Payments (PAY) 18",
+    "# Ops",
+    "OPS board",
+  ]);
+});
+
+test("Find a view narrows the pane by name and by query, and marks the name", async () => {
+  await open(harness([], VIEWS));
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Find a view"]')!;
+  find.value = "pay";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  // "Payments backlog" and "Payments (PAY)" by name, "Payouts" by name, "OPS board" not at all.
+  expect(pane()).toEqual(["# Team", "Payments backlog 12", "# Epics", "Payouts 1", "# Projects", "Payments (PAY) 18"]);
+  expect(target.querySelector(".tf-vw-row mark")!.textContent).toBe("Pay");
+  find.value = "assignee:@me";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(pane()).toEqual(["# Mine", "My work 2"]);
+  expect(target.querySelector(".tf-vlist")!.textContent).not.toContain("All tickets");
+});
+
+test("a view opens with its text as the filter bar's base, its name and text in the header, and its own layout", async () => {
+  const h = harness([], [view("mine", "My open bugs", "Mine", 0, { query: "assignee:@me issuetype:Bug", layout: "list" })]);
+  await open(h, null, "mine");
+  expect(h.reads[0]).toEqual({ perColumn: 8, query: "assignee:@me issuetype:Bug" });
+  expect(target.querySelector(".tf-board-head h1")!.textContent).toBe("My open bugs");
+  expect(target.querySelector(".tf-q")!.textContent).toBe("assignee:@me issuetype:Bug");
+  expect(target.querySelector('.tf-views a[aria-current="true"]')!.textContent).toContain("My open bugs");
+  expect(target.querySelector(".tf-tbl")).not.toBeNull();
+  // The filter's words go after the view's text.
+  type(field(), "r");
+  await settle();
+  expect(h.reads.at(-1)!.query).toBe("assignee:@me issuetype:Bug r");
+});
+
+test("a view's switches hold for the session over what it was saved with, and each view keeps its own", async () => {
+  const h = harness([], [view("a", "A", "Mine", 0, { layout: "list" }), view("b", "B", "Mine", 1, { lanes: "assignee" })]);
+  await open(h, null, "a");
+  target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button')!.click();
+  await settle();
+  expect(target.querySelector(".tf-tbl")).toBeNull();
+  unmount(page!);
+  await open(h, null, "b");
+  expect(target.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!.value).toBe("assignee");
+  unmount(page!);
+  await open(h, null, "a");
+  expect(target.querySelector(".tf-tbl")).toBeNull();
+  expect(h.saved).toEqual([]);
+});
+
+test("a view whose text the grammar cannot read opens as text with a line naming the part, and reads no tickets", async () => {
+  const h = harness([], [
+    view("next", "Next sprint", "Mine", 0, { query: "sprint:next retry", count: null, unreadable: "sprint:next" }),
+  ]);
+  await open(h, null, "next");
+  expect(h.reads).toEqual([]);
+  expect(target.querySelector(".tf-q")!.textContent).toBe("sprint:next retry");
+  expect(target.querySelector(".tf-vw-warn")!.textContent!.replace(/\s+/g, " ").trim()).toBe(
+    "The search cannot read sprint:next in this view, so it shows no tickets.",
+  );
+  expect(target.querySelector("input[data-filter]")).toBeNull();
+  expect(target.querySelector(".tf-views .tf-vw-row .tf-count")).toBeNull();
+});
+
+test("Save as a view saves the view's text plus the chips, dropdowns and words, with how the tickets show", async () => {
+  const h = harness([], [view("pay", "Payments (PAY)", "Projects", 0, { query: "project:PAY" })]);
+  await open(h, null, "pay");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Story")!.click();
+  type(field(), "r");
+  target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button:last-child')!.click();
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
+  expect(dialog()!.querySelector("code")!.textContent).toBe("project:PAY issuetype:Story r");
+  expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
+  const create = [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Create view")!;
+  expect(create.disabled).toBe(true);
+  const name = dialog()!.querySelector<HTMLInputElement>("input")!;
+  name.value = "PAY stories";
+  name.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  expect(create.disabled).toBe(false);
+  create.click();
+  await settle();
+  expect(h.saved).toEqual([
+    expect.objectContaining({
+      id: null,
+      name: "PAY stories",
+      group: "Projects",
+      query: "project:PAY issuetype:Story r",
+      layout: "list",
+      jira_ref: null,
+    }),
+  ]);
+  expect(dialog()).toBeNull();
+  expect(location.hash).toBe("#/tickets/pay-stories");
+  expect(toasts.items.at(-1)!.text).toBe("Created PAY stories");
+});
+
+test("Delete from a row's menu goes, and the toast's Undo puts it back where it was", async () => {
+  const h = harness([], VIEWS);
+  await open(h, null, "backlog");
+  menuOf("Payments backlog").click();
+  await settle();
+  menuItem("Delete").click();
+  await settle();
+  expect(h.deleted).toEqual(["backlog"]);
+  expect(location.hash).toBe("#/tickets");
+  expect(pane()).not.toContain("Payments backlog 12");
+  const toast = toasts.items.at(-1)!;
+  expect(toast.text).toBe("Deleted Payments backlog");
+  toast.action!.run();
+  await settle();
+  expect(h.saved.at(-1)).toEqual(expect.objectContaining({ id: "backlog", position: 1, query: 'project:PAY status:"To Do"' }));
+  expect(pane()).toContain("Payments backlog 1");
+});
+
+test("Duplicate opens New view on a copy called Copy of …, with the view's text", async () => {
+  await open(harness([], VIEWS));
+  menuOf("My work").click();
+  await settle();
+  menuItem("Duplicate").click();
+  await settle();
+  expect(dialog()!.querySelector<HTMLInputElement>("input")!.value).toBe("Copy of My work");
+  expect(dialog()!.querySelector("code")!.textContent).toBe("assignee:@me");
+});
+
+test("a view's own columns gather statuses, count them, and show an over-limit count as N of M in err tone", async () => {
+  const h = harness([], [
+    view("flow", "Flow", "Team", 0, {
+      columns: [
+        { name: "Open", statuses: ["To Do", "In Progress"], limit: 10 },
+        { name: "Done", statuses: ["Done"], limit: null },
+      ],
+    }),
+  ]);
+  await open(h, null, "flow");
+  expect(columns()).toEqual([
+    { head: "Open 13 of 10", cards: 8, more: "Show 5 more" },
+    { head: "Done 5", cards: 3, more: "Show 2 more done" },
+  ]);
+  expect(target.querySelector(".tf-col .tf-count")!.classList.contains("tf-err")).toBe(true);
+});
+
+test("a view's list columns and card fields are what it was saved with", async () => {
+  const h = harness([], [
+    view("lean", "Lean", "Mine", 0, { list_columns: ["key", "summary", "epic"], card_fields: ["signals"] }),
+  ]);
+  await open(h, null, "lean");
+  const first = target.querySelector(".tf-tcard")!;
+  expect(first.querySelector(".tf-tkind")).toBeNull();
+  expect(first.querySelector(".tf-av")).toBeNull();
+  expect(first.querySelector(".tf-cep")).toBeNull();
+  target.querySelector<HTMLButtonElement>('[aria-label="Layout"] button:last-child')!.click();
+  await settle();
+  expect([...target.querySelectorAll(".tf-tbl th")].map((th) => th.textContent)).toEqual(["Key", "Summary", "Epic"]);
+});
+
+test("an address naming no view says so and offers All tickets", async () => {
+  const h = harness([], VIEWS);
+  await open(h, null, "gone");
+  expect(target.querySelector(".tf-empty")!.textContent).toContain("No view is called gone.");
+  expect(h.reads).toEqual([]);
 });

@@ -197,6 +197,51 @@ pub async fn delete_smart_list(
     delete_smart_list_inner(&lifecycle.pool()?, &id).await
 }
 
+/// Every ticket view (#812, R-3.2, R-3.3), in list order, each with its count
+/// or the part of its text today's grammar could not read. See
+/// [`crate::ticket_views`].
+///
+/// # Errors
+///
+/// `not_ready` before the database is up, `internal` if a read fails.
+#[tauri::command]
+pub async fn ticket_views(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::ticket_views::TicketViewRow>, IpcError> {
+    crate::ticket_views::list(&lifecycle.pool()?).await
+}
+
+/// Save a ticket view (#812): a new one, or over the view the draft names,
+/// which also puts a deleted one back (*Undo*). The text is stored exactly as
+/// sent. Answers the view as stored.
+///
+/// # Errors
+///
+/// `invalid` for a blank name or group, or a display word the Tickets screen
+/// does not know; `not_ready` before the database is up; `internal` if the
+/// write fails.
+#[tauri::command]
+pub async fn save_ticket_view(
+    lifecycle: State<'_, Lifecycle>,
+    view: crate::ticket_views::TicketViewDraft,
+) -> Result<crate::ticket_views::TicketView, IpcError> {
+    crate::ticket_views::save(&lifecycle.pool()?, view).await
+}
+
+/// Delete a ticket view (#812). *Undo* saves the view back.
+///
+/// # Errors
+///
+/// `not_found` if no view has that id, `not_ready` before the database is up,
+/// `internal` if the delete fails.
+#[tauri::command]
+pub async fn delete_ticket_view(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+) -> Result<(), IpcError> {
+    crate::ticket_views::delete(&lifecycle.pool()?, &id).await
+}
+
 /// The values the query box suggests after `kind:`, `source:` and `under:`
 /// (#601): the kinds with rows, the enabled sources, and the names the
 /// mirror's and the estate's parents answer to, each with its kind. Only

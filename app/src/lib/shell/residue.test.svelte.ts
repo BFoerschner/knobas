@@ -344,6 +344,7 @@ const { builtinContexts } = await import("./contexts");
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
+const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
@@ -547,6 +548,7 @@ function sectionPorts() {
     shareExport: () => new Promise<never>(() => {}),
     restoreBackup: () => new Promise<never>(() => {}),
     smartLists: () => deferred([]),
+    ticketViews: () => deferred([]),
     appStatus: () => deferred({ app_version: "1.6.0" }),
     dbStats: () =>
       deferred({ db_bytes: 1, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
@@ -679,6 +681,15 @@ const CASES: Case[] = [
     exercise: (target) => target.querySelector<HTMLButtonElement>(".ctx-name")?.click(),
   },
   {
+    /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */
+    name: "ViewMenu",
+    source: "lib/tf/tickets/ViewMenu.svelte",
+    open: (target) => ({
+      app: mount(ViewMenu, { target, props: { name: "My work", onduplicate: () => {}, ondelete: () => {} } }),
+    }),
+    exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
     name: "StatusBar",
     source: "lib/shell/StatusBar.svelte",
     open: (target) => ({
@@ -753,6 +764,9 @@ const CASES: Case[] = [
             contexts: () => deferred([]),
             tally: () => deferred(null),
             suggestions: () => deferred({ fields: [], parents: [] }),
+            views: () => deferred([]),
+            saveView: () => new Promise(() => {}),
+            deleteView: () => new Promise(() => {}),
           },
         },
       }),

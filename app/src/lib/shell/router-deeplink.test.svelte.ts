@@ -186,6 +186,8 @@ vi.mock("../ipc/search", () => ({
   launcherHome: () => Promise.resolve({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),
   smartLists: () => Promise.resolve([]),
   smartListItems: () => Promise.resolve([]),
+  // The share dialog draws the ticket views tick once a view exists (#812).
+  ticketViews: () => Promise.resolve([]),
 }));
 
 vi.mock("../ipc/backup", () => ({

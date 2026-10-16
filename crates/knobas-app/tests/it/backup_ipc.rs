@@ -572,6 +572,8 @@ struct Seeded {
     source: String,
     /// The id `create_smart_list` generated for [`SAVED_LABEL`].
     saved_list: String,
+    /// The ticket view the sharer saved (#812), as `save_ticket_view` stored it.
+    view: knobas_app::ticket_views::TicketView,
 }
 
 /// The launcher search the sharer saved, and the name they gave it (#507).
@@ -583,6 +585,11 @@ struct Seeded {
 /// else in knobas would.
 const SAVED_LABEL: &str = "Payout tickets this week";
 const SAVED_QUERY: &str = "#payouts updated:7d";
+
+/// A ticket view's text (#812), with a token today's grammar cannot read
+/// (`sprint:next`), so the round trip shows the text crosses as saved and is
+/// not read into anything on the way.
+const VIEW_QUERY: &str = "project:PAY  sprint:next retry";
 
 async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     let t = format!("{tag}{}", uuid::Uuid::new_v4().simple());
@@ -723,6 +730,35 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
             .expect("seed a saved smart list")
             .id;
 
+    // ...and a ticket view (#812), which is what the `ticket_views` part
+    // carries, saved through the command the Tickets screen calls.
+    let view = knobas_app::ticket_views::save(
+        pool,
+        knobas_app::ticket_views::TicketViewDraft {
+            id: None,
+            name: format!("Payout retries {t}"),
+            group: "Team".to_owned(),
+            position: None,
+            query: VIEW_QUERY.to_owned(),
+            layout: "list".to_owned(),
+            columns: vec![knobas_app::ticket_views::ViewColumn {
+                name: "Doing".to_owned(),
+                statuses: vec!["In Progress".to_owned(), "In Review".to_owned()],
+                limit: Some(4),
+            }],
+            lanes: "epic".to_owned(),
+            card_fields: vec!["signals".to_owned(), "assignee".to_owned()],
+            list_columns: vec!["key".to_owned(), "summary".to_owned(), "updated".to_owned()],
+            list_sort: Some(knobas_app::ticket_views::ListSort {
+                column: "priority".to_owned(),
+                direction: "descending".to_owned(),
+            }),
+            jira_ref: None,
+        },
+    )
+    .await
+    .expect("seed a ticket view");
+
     Seeded {
         ticket,
         pr,
@@ -732,6 +768,7 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
         note,
         source,
         saved_list,
+        view,
     }
 }
 
@@ -842,6 +879,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("context", 1),
         ("source_config", 1),
         ("smart_list", 1),
+        ("ticket_view", 1),
     ] {
         assert_eq!(
             rows(there, table).await,
@@ -914,6 +952,21 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         )],
         "the saved smart list did not cross with its id, its name and its query"
     );
+
+    // **The ticket view arrived whole, its text exactly as saved** (#812): the
+    // row as the far machine lists it is the row the sharer saved, and the
+    // text the grammar cannot read is still that text, read as unreadable.
+    let views = knobas_app::ticket_views::list(there)
+        .await
+        .expect("the colleague's ticket views");
+    assert_eq!(views.len(), 1, "{views:?}");
+    assert_eq!(
+        views[0].view, estate.view,
+        "the ticket view did not cross whole"
+    );
+    assert_eq!(views[0].view.query, VIEW_QUERY);
+    assert_eq!(views[0].unreadable.as_deref(), Some("sprint:next"));
+    assert_eq!(views[0].count, None);
 }
 
 /// **Each toggle alone brings exactly its tables and nothing else**, read off
@@ -983,6 +1036,15 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 ..none
             },
             vec!["smart_list"],
+        ),
+        // Nor is a ticket view (#812).
+        (
+            "ticket views",
+            backup::ShareParts {
+                ticket_views: true,
+                ..none
+            },
+            vec!["ticket_view"],
         ),
     ] {
         let record = backup::share_export(&sharer, parts)

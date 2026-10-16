@@ -17,14 +17,16 @@ export interface ShareTick {
 
 /**
  * The ticks, in prototype-6's order. Each is a part of the share export
- * (`ShareParts`); prototype-6 also draws *Link sets* and *Ticket views*,
- * which no export carries yet, so they are not drawn (#831's criterion).
- * *Smart lists* is drawn only once a saved list exists: the part is a box
- * about nothing before that (CONTEXT.md, *Share export*).
+ * (`ShareParts`); prototype-6 also draws *Link sets*, which no export carries
+ * yet, so it is not drawn (#831's criterion). *Smart lists* is drawn only
+ * once a saved list exists, and *Ticket views* (#812) only once a view
+ * exists: each part is a box about nothing before that (CONTEXT.md, *Share
+ * export*).
  */
-export function shareTicks(savedLists: boolean): ShareTick[] {
+export function shareTicks(savedLists: boolean, savedViews = false): ShareTick[] {
   const all: ShareTick[] = [
     { part: "links", label: "Links" },
+    { part: "ticket_views", label: "Ticket views" },
     { part: "contexts", label: "Contexts" },
     { part: "assets", label: "Assets and routes" },
     { part: "sources", label: "Sources, without passwords" },
@@ -32,7 +34,9 @@ export function shareTicks(savedLists: boolean): ShareTick[] {
     { part: "notes", label: "Notes" },
     { part: "time", label: "Time" },
   ];
-  return savedLists ? all : all.filter((tick) => tick.part !== "smart_lists");
+  return all.filter(
+    (tick) => (savedLists || tick.part !== "smart_lists") && (savedViews || tick.part !== "ticket_views"),
+  );
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];

@@ -42,6 +42,7 @@ pub mod sources;
 pub mod standup;
 pub mod start_work;
 pub mod suggestion_pass;
+pub mod ticket_views;
 pub mod time;
 
 pub use commands::app::{DbState, Lifecycle};
@@ -499,6 +500,11 @@ pub fn run() {
             // appended at the foot: the list is append-only (§10.8).
             commands::entity::set_notes_shown,
             commands::entity::export_notes_markdown,
+            // #812's ticket views, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::search::ticket_views,
+            commands::search::save_ticket_view,
+            commands::search::delete_ticket_view,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -43,7 +43,7 @@
     type BackupStatus,
     type ShareParts,
   } from "../ipc/backup";
-  import { smartLists, type SmartListSummary } from "../ipc/search";
+  import { smartLists, ticketViews, type SmartListSummary, type TicketViewRow } from "../ipc/search";
   import { latestRead } from "../shell/latest-read";
   import Modal from "../shell/Modal.svelte";
   import { ago } from "../shell/time";
@@ -116,6 +116,8 @@
    * because a decision taken here rests on how a tool over there behaves.
    */
   let savedLists = $state(false);
+  /** Whether this knobas holds a ticket view (#812): the same rule as `savedLists`. */
+  let savedViews = $state(false);
 
   /** Whether the share dialog has anything to export. */
   const shareEmpty = $derived(!Object.values(shareDraft).some(Boolean));
@@ -152,6 +154,7 @@
    * sharing one counter would make each of them make the other stale.
    */
   const readLists = latestRead<SmartListSummary[]>();
+  const readViews = latestRead<TicketViewRow[]>();
 
   /**
    * The two reads this section is drawn from, together.
@@ -193,6 +196,16 @@
           // not knowing — the archive is smaller than it could have been,
           // rather than naming a part this knobas could not confirm it has.
           savedLists = false;
+        },
+      }),
+      // The ticket views part's toggle, on `savedLists`' terms (#812): no
+      // view, no toggle and no part; a read that fails costs the toggle.
+      readViews(ticketViews, {
+        ok: (views) => {
+          savedViews = views.length > 0;
+        },
+        fail: () => {
+          savedViews = false;
         },
       }),
     ]);
@@ -348,7 +361,7 @@
    * archive of every knobas that has never saved a search.
    */
   function openShare() {
-    shareDraft = { ...shareDefaults, smart_lists: savedLists };
+    shareDraft = { ...shareDefaults, smart_lists: savedLists, ticket_views: savedViews };
     sharing = true;
   }
 
@@ -567,6 +580,12 @@
         <label class="chk">
           <input type="checkbox" bind:checked={shareDraft.smart_lists} />
           Saved smart lists — kept exactly as you typed them
+        </label>
+      {/if}
+      {#if savedViews}
+        <label class="chk">
+          <input type="checkbox" bind:checked={shareDraft.ticket_views} />
+          Ticket views — kept exactly as you saved them
         </label>
       {/if}
       <!--

@@ -27,7 +27,7 @@ import {
   type EntityDetail,
   type PublishTarget,
 } from "../../ipc/entity";
-import { search, smartLists, type SmartListSummary } from "../../ipc/search";
+import { search, smartLists, ticketViews, type SmartListSummary, type TicketViewRow } from "../../ipc/search";
 import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
 import {
   backfillSource,
@@ -115,6 +115,8 @@ export interface SectionPorts {
   shareExport: (parts: ShareParts) => Promise<BackupRecord>;
   restoreBackup: (file: string) => Promise<void>;
   smartLists: () => Promise<Pick<SmartListSummary, "saved">[]>;
+  /** Whether any ticket view exists, for the share export's tick (#812). */
+  ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
   appStatus: () => Promise<Pick<AppStatus, "app_version">>;
   dbStats: () => Promise<DbStats>;
   reindexFts: () => Promise<void>;
@@ -140,6 +142,7 @@ export const realSectionPorts: SectionPorts = {
   shareExport: (parts) => shareExport(parts),
   restoreBackup: (file) => restoreBackup(file),
   smartLists: () => smartLists(),
+  ticketViews: () => ticketViews(),
   appStatus: () => appStatus(),
   dbStats: () => dbStats(),
   reindexFts: () => reindexFts(),

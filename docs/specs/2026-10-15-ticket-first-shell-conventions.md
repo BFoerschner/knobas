@@ -22,6 +22,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A route not built yet draws an empty page that says so (the Job page before #816; the Map and Conversation tabs "not built yet"). (#810, PR #895; #816, PR #898)
 - The job's address is `#/job/<key>`; an ad-hoc context is `#/job/<ctx id>`. An address holding an entity id (`#/job/jira:PAY-231`) is read as one. (#810, PR #895; #816, PR #898)
+- A ticket view's address is `#/tickets/<id>`, the id a slug of its name made when it is first saved and kept through a rename; `#/tickets` is *All tickets*. (#812)
 - The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
 - A Code row opens `#/pr/<entity id>`, `#/repo/<entity id>`, `#/branch/<entity id>` or `#/commit/<entity id>`. The address carries the entity id, because a pull request's number is unique only inside its repository. `branch` and `commit` light the Code nav. (#816, PR #898)
 - A Builds row opens `#/build/<entity id>`, a Pages row `#/page/<entity id>`, an Assets row `#/asset/<asset id>`, a Monitors row `#/monitors`. (#817)
@@ -46,7 +47,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Tickets
 
-- The *Board / List*, *Lanes* and list sort hold for the session as the page's module `$state`, and are never written to storage or a command; a restart forgets them. (#813)
+- The *Board / List*, *Lanes* and list sort hold for the session as the page's module `$state`, and are never written to storage or a command; a restart forgets them. They are kept per ticket view, over what that view saved. (#813; #812)
 - A list header that sorts is a `th` carrying `aria-sort` with a button inside; CSS draws ▴ or ▾ on the sorted one. A column that does not sort is a plain `th`. (#813)
 - A signal is drawn through `tickets/Signals.svelte`: a `tf-dot` in its tone, then its words. Cards and list rows draw the read's signals and nothing else. (#815)
 

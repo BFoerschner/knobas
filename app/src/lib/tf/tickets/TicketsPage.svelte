@@ -1,9 +1,10 @@
 <!--
   Tickets, the ticket-first shell's home (#810, requirements §3), in three
-  panes over today's reads, before ticket views exist (#812):
+  panes:
 
-  - **left**, the views: *All tickets* with its count, and *Not a ticket*,
-    the ad-hoc contexts (R-3.11);
+  - **left**, the views: *Find a view*, *All tickets* with its count, the
+    ticket views in their groups with their counts (#812, R-3.2), and *Not a
+    ticket*, the ad-hoc contexts (R-3.11);
   - **middle**, every synced ticket as a ticket board, one column per status
     in the source's words, eight cards then *Show N more*, *Done* three, and
     every match while the filter has words (R-3.4), split into lanes by a
@@ -26,7 +27,15 @@
   double click open the job.
 
   **The *Board / List* and *Lanes* switches hold for the session** (R-3.3):
-  module state, never written anywhere, so a restart forgets them.
+  module state, never written anywhere, so a restart forgets them. Each view
+  keeps its own, over what it was saved with.
+
+  **Ticket views** (#812): `#/tickets/<id>` opens one. Its stored text is the
+  filter bar's base query, sent to `mini_board` as it is; a text the grammar
+  cannot read opens as text with a line naming the part, and no tickets.
+  *Save as a view* at the end of the filter bar saves the text the bar sends
+  now, with how the tickets show; the ⋯ menus offer *Duplicate* and
+  *Delete*, which a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
   import type {
@@ -35,8 +44,8 @@
     EntityPage,
     MiniBoard,
   } from "../../ipc/entity";
-  import type { FilterSuggestions } from "../../ipc/search";
-  import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
+  import type { FilterSuggestions, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
+  import type { LaneField, ListSort } from "./tickets";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface TicketsPorts {
@@ -48,30 +57,37 @@
     /** A context's room, counted by kind and tone under `latest_per_parent`. */
     tally: (ctxId: string) => Promise<EntityPage["tally"]>;
     suggestions: () => Promise<Pick<FilterSuggestions, "fields" | "parents">>;
+    /** Every ticket view, each with its count (#812). */
+    views: () => Promise<TicketViewRow[]>;
+    saveView: (draft: TicketViewDraft) => Promise<TicketView>;
+    deleteView: (id: string) => Promise<void>;
   }
 
-  /** What the page keeps for the session: the layout, the lanes, the sort, the selection, the expanded columns. */
-  const session = $state({
-    layout: "board" as "board" | "list",
-    /** The *Lanes* switch (#813): nothing, or the field the board is split by. */
-    lanes: "none" as LaneField,
-    /** The list's sort (#813), newest first until a header is pressed. */
-    sort: DEFAULT_SORT as ListSort,
-    selected: null as string | null,
-    /** Expanded board columns by status (`""` for *No status*); in a lane, `<lane>|<status>`. */
-    expanded: [] as string[],
+  /** One view's session: the switches over what it was saved with, and the expanded columns. */
+  interface ViewSession {
+    /** The *Board / List* switch, or `undefined` for the view's own. */
+    layout?: "board" | "list";
+    /** The *Lanes* switch (#813), or `undefined` for the view's own. */
+    lanes?: LaneField;
+    /** The list's sort (#813), or `undefined` for the view's own. */
+    sort?: ListSort;
+    /** Expanded board columns by name (`""` for *No status*); in a lane, `<lane>|<name>`. */
+    expanded: string[];
     /** Whether the list's *Show N more* was pressed: the list reads every ticket, the board keeps its caps. */
-    listAll: false,
+    listAll: boolean;
+  }
+
+  /** What the page keeps for the session: each view's switches, and the selection. */
+  const session = $state({
+    /** By view id, `""` for *All tickets*. */
+    views: {} as Record<string, ViewSession>,
+    selected: null as string | null,
   });
 
   /** A new session: what each test is. */
   export function forgetTicketsSession(): void {
-    session.layout = "board";
-    session.lanes = "none";
-    session.sort = DEFAULT_SORT;
+    session.views = {};
     session.selected = null;
-    session.expanded = [];
-    session.listAll = false;
   }
 </script>
 
@@ -86,13 +102,15 @@
     type MiniBoardCard,
     type MiniBoardColumn,
   } from "../../ipc/entity";
-  import { filterSuggestions } from "../../ipc/search";
+  import { deleteTicketView, filterSuggestions, saveTicketView, ticketViews } from "../../ipc/search";
+  import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
+  import SaveViewDialog from "./SaveViewDialog.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
@@ -111,6 +129,19 @@
     type Lane,
     type SortColumn,
   } from "./tickets";
+  import ViewMenu from "./ViewMenu.svelte";
+  import {
+    columnLimit,
+    DEFAULT_LIST_COLUMNS,
+    draftCopy,
+    draftFromFilter,
+    draftRestore,
+    groupViews,
+    LIST_COLUMN_ORDER,
+    OWN_GROUPS,
+    savedShowing,
+    viewColumns,
+  } from "./views";
 
   let {
     ready,
@@ -134,17 +165,69 @@
           0,
         ).then((page) => page.tally),
       suggestions: () => filterSuggestions(),
+      views: ticketViews,
+      saveView: saveTicketView,
+      deleteView: deleteTicketView,
     },
+    viewId = null,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
     /** The ticket key the timer runs on, or `null`. */
     timedTicket: string | null;
     ports?: TicketsPorts;
+    /** The ticket view `#/tickets/<id>` names, or `null` for *All tickets*. */
+    viewId?: string | null;
   } = $props();
 
+  // ---- the views ----
+  let views = $state<TicketViewRow[] | null>(null);
+  /** *Find a view*'s words. */
+  let find = $state("");
+  /** The *New view* dialog's starting point, or `null` while it is closed. */
+  let drafting = $state<TicketViewDraft | null>(null);
+
+  /**
+   * The view on screen: `null` for *All tickets*, `undefined` while the views
+   * are read or for an id no view has.
+   */
+  const view = $derived(viewId === null ? null : (views?.find((row) => row.id === viewId) ?? undefined));
+  const groups = $derived(groupViews(views ?? [], find));
+  const groupNames = $derived([
+    ...new Set([...OWN_GROUPS, ...(views ?? []).map((row) => row.group)]),
+  ]);
+  /** The base query the board is read with: the view's text, `null` when there is nothing to read. */
+  const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
+  const sessionKey = $derived(viewId ?? "");
+
+  function loadViews() {
+    ports
+      .views()
+      .then((rows) => (views = rows))
+      .catch(() => (views ??= []));
+  }
+
+  /** This view's session, made when first switched. */
+  function here(): ViewSession {
+    // Read back through the store: `??=` answers the plain object, not its proxy.
+    session.views[sessionKey] ??= { expanded: [], listAll: false };
+    return session.views[sessionKey]!;
+  }
+  const own = $derived(session.views[sessionKey]);
+  const saved = $derived(savedShowing(view ?? null));
+  /** How the tickets show now: the session's switches over the view's own (R-3.3). */
+  const showing = $derived({
+    layout: own?.layout ?? saved.layout,
+    lanes: own?.lanes ?? saved.lanes,
+    sort: own?.sort ?? saved.sort,
+  });
+  const expanded = $derived(own?.expanded ?? []);
+  const listAll = $derived(own?.listAll ?? false);
+
   // ---- the filter bar ----
-  const filter = sessionFilter("tickets-all");
+  /** The filter bar's id: its state is kept per view. */
+  const filterId = $derived(viewId === null ? "tickets-all" : `tickets-${viewId}`);
+  const filter = $derived(sessionFilter(filterId));
   let suggested = $state<Pick<FilterSuggestions, "fields" | "parents"> | null>(null);
 
   /** At most this many chips a group; past it a field has too many values for chips. */
@@ -156,10 +239,10 @@
         .filter((field) => field.key === key)
         .map((field) => ({ value: field.value, label: field.value === "@me" ? "Me" : field.value }));
     return {
-      id: "tickets-all",
+      id: filterId,
       placeholder: "Filter by key, summary, epic or person",
       noun: "tickets",
-      base: "",
+      base: base ?? "",
       chips: [
         { key: "issuetype", label: "Type", options: values("issuetype").slice(0, CHIPS_AT_MOST) },
         { key: "priority", label: "Priority", options: values("priority").slice(0, CHIPS_AT_MOST) },
@@ -183,13 +266,17 @@
   let total = $state<number | null>(null);
   let failed = $state<string | null>(null);
   let reading = 0;
+  /** Bumped when another view opens, so a count read for the last one is dropped. */
+  let epoch = 0;
 
   const typing = $derived(filter.text.trim() !== "");
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
   const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
-  const isExpanded = (column: MiniBoardColumn) => session.expanded.includes(columnKey(column));
+  const isExpanded = (column: MiniBoardColumn) => expanded.includes(columnKey(column));
   /** Whether the board is split into lanes, which reads it whole. */
-  const laned = $derived(session.layout === "board" && session.lanes !== "none");
+  const laned = $derived(showing.layout === "board" && showing.lanes !== "none");
+  /** The board's columns as the view's own columns gather them (R-3.15). */
+  const cols = $derived(viewColumns(board?.columns ?? [], view?.columns ?? []));
   const expandKey = (lane: Lane, column: MiniBoardColumn) =>
     lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
@@ -200,14 +287,15 @@
    */
   function capFor(): number | null {
     if (typing || laned) return null;
-    if ((session.expanded.length === 0 && !session.listAll) || board === null) return COLUMN_CAP;
-    const wanted = board.columns
-      .filter((column) => session.listAll || isExpanded(column))
-      .map((column) => column.total);
+    if ((expanded.length === 0 && !listAll) || board === null) return COLUMN_CAP;
+    const wanted = (listAll ? board.columns : cols.filter((column) => isExpanded(column))).map(
+      (column) => column.total,
+    );
     return Math.max(COLUMN_CAP, ...wanted);
   }
 
   function read() {
+    if (base === null) return;
     const query = toQuery(config, filter);
     const mine = ++reading;
     ports
@@ -216,16 +304,19 @@
         if (mine !== reading) return;
         board = answer;
         failed = null;
-        if (query === "") total = sum(answer);
+        if (query === base) total = sum(answer);
       })
       .catch((error: unknown) => {
         if (mine === reading) failed = messageOf(error);
       });
     // A session that comes back to a filter has not counted the whole yet.
-    if (query !== "" && total === null) {
+    if (query !== base && total === null) {
+      const at = epoch;
       ports
-        .board(1, null)
-        .then((answer) => (total ??= sum(answer)))
+        .board(1, base === "" ? null : base)
+        .then((answer) => {
+          if (at === epoch) total ??= sum(answer);
+        })
         .catch(() => {});
     }
   }
@@ -236,30 +327,30 @@
   }
 
   function expand(lane: Lane, column: MiniBoardColumn) {
-    session.expanded = [...session.expanded, expandKey(lane, column)];
+    here().expanded = [...expanded, expandKey(lane, column)];
     // A lane's column is already read whole; the board's own is capped.
     if (lane.key === null) read();
   }
 
   function chooseLayout(layout: "board" | "list") {
-    if (session.layout === layout) return;
+    if (showing.layout === layout) return;
     const wasLaned = laned;
-    session.layout = layout;
+    here().layout = layout;
     if (wasLaned !== laned) read();
   }
 
   function chooseLanes(lanes: LaneField) {
     const wasLaned = laned;
-    session.lanes = lanes;
+    here().lanes = lanes;
     if (wasLaned !== laned) read();
   }
 
   function sortBy(column: SortColumn) {
-    session.sort = nextSort(session.sort, column);
+    here().sort = nextSort(showing.sort, column);
   }
 
   function expandAll() {
-    session.listAll = true;
+    here().listAll = true;
     read();
   }
 
@@ -270,34 +361,83 @@
     read();
   }
 
+  // ---- the views' writes ----
+  /** *Save as a view* (R-3.12): the text the bar sends now, and how the tickets show. */
+  function saveAsView() {
+    drafting = draftFromFilter(view ?? null, toQuery(config, filter), showing);
+  }
+
+  async function create(draft: TicketViewDraft) {
+    const made = await ports.saveView(draft);
+    drafting = null;
+    push({ text: `Created ${made.name}` });
+    loadViews();
+    location.hash = `#/tickets/${made.id}`;
+  }
+
+  async function remove(gone: TicketViewRow) {
+    try {
+      await ports.deleteView(gone.id);
+    } catch (error) {
+      push({ text: `${gone.name} was not deleted: ${messageOf(error)}`, tone: "err" });
+      return;
+    }
+    if (viewId === gone.id) location.hash = "#/tickets";
+    loadViews();
+    push({
+      text: `Deleted ${gone.name}`,
+      action: {
+        label: "Undo",
+        run: () => {
+          ports
+            .saveView(draftRestore(gone))
+            .then(loadViews)
+            .catch((error: unknown) =>
+              push({ text: `${gone.name} was not put back: ${messageOf(error)}`, tone: "err" }),
+            );
+        },
+      },
+    });
+  }
+
   // ---- what is drawn, and the selection ----
   /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
   const bands = $derived(
-    splitLanes(board?.columns ?? [], laned ? session.lanes : "none").map((lane) => ({
+    splitLanes(cols, laned ? showing.lanes : "none").map((lane) => ({
       lane,
       drawn: lane.columns.map((column) => ({
         column,
-        cards: drawnCards(column, session.expanded.includes(expandKey(lane, column)), typing),
+        cards: drawnCards(column, expanded.includes(expandKey(lane, column)), typing),
       })),
     })),
+  );
+  /** Each card's status, whatever column of the view it sits in. */
+  const statusOf = $derived(
+    new Map((board?.columns ?? []).flatMap((column) => column.cards.map((card) => [card.entity_id, column.status]))),
   );
   /** The list's rows: every card read, in the header's order. */
   const rows = $derived(
     sortRows(
       (board?.columns ?? []).flatMap((column) => column.cards.map((card) => ({ card, status: column.status }))),
-      session.sort,
+      showing.sort,
       (board?.columns ?? []).map((column) => column.status),
     ),
   );
+  /** The list's columns: the view's, in the list's order (R-3.16). */
+  const listColumns = $derived(
+    LIST_COLUMN_ORDER.filter(([column]) => (view?.list_columns ?? DEFAULT_LIST_COLUMNS).includes(column)),
+  );
+  const SORTABLE: readonly SortColumn[] = ["key", "summary", "status", "priority", "assignee", "updated"];
+  const sortable = (column: string): column is SortColumn => (SORTABLE as readonly string[]).includes(column);
   const listCut = $derived((board?.columns ?? []).some((column) => column.cards.length < column.total));
   const listRest = $derived(
     (board?.columns ?? []).reduce((all, column) => all + column.total - column.cards.length, 0),
   );
   /** What is on screen, in reading order: the first is selected when the selection is not. */
   const visible = $derived(
-    session.layout === "board"
+    showing.layout === "board"
       ? bands.flatMap(({ drawn }) =>
-          drawn.flatMap(({ column, cards }) => cards.map((card) => ({ card, status: column.status }))),
+          drawn.flatMap(({ cards }) => cards.map((card) => ({ card, status: statusOf.get(card.entity_id) ?? null }))),
         )
       : rows,
   );
@@ -341,12 +481,27 @@
     return () => (dead = true);
   });
 
-  // Once the database answers: the board, the contexts and the suggestions.
-  // Untracked, so a read's own answer does not ask for the read again.
+  // The board, again for each view and once its text is known. Untracked,
+  // so a read's own answer does not ask for the read again.
+  $effect(() => {
+    if (!ready) return;
+    void sessionKey;
+    const text = base;
+    untrack(() => {
+      board = null;
+      total = null;
+      failed = null;
+      reading += 1;
+      epoch += 1;
+      if (text !== null) read();
+    });
+  });
+
+  // Once the database answers: the views, the contexts and the suggestions.
   $effect(() => {
     if (!ready) return;
     untrack(() => {
-      read();
+      loadViews();
       ports
         .contexts()
         .then((rows) => (contexts = rows))
@@ -411,10 +566,28 @@
 
 <div class="tf-tickets">
   <nav class="tf-views" aria-label="Ticket views">
+    <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
     <div class="tf-vlist">
-      <a href="#/tickets" aria-current="true"
-        >All tickets {#if total !== null}<span class="tf-count">{total}</span>{/if}</a
-      >
+      {#if find.trim() === ""}
+        <a href="#/tickets" aria-current={viewId === null ? "true" : undefined}
+          >All tickets {#if viewId === null && total !== null}<span class="tf-count">{total}</span>{/if}</a
+        >
+      {/if}
+      {#each groups as group (group.name)}
+        <h2>{group.name}</h2>
+        {#each group.views as row (row.id)}
+          <div class="tf-vw-row">
+            <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
+              ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
+              >{#if row.count !== null && row.count > 0}{" "}<span class="tf-count">{row.count}</span>{/if}</a
+            >
+            <ViewMenu name={row.name} onduplicate={() => (drafting = draftCopy(row))} ondelete={() => remove(row)} />
+          </div>
+        {/each}
+      {/each}
+      {#if find.trim() !== "" && groups.length === 0}
+        <p class="tf-dim tf-vw-none">No view matches.</p>
+      {/if}
       {#if adhoc.length > 0}
         <h2>Not a ticket</h2>
         {#each adhoc as context (context.id)}
@@ -426,25 +599,38 @@
 
   <section class="tf-board-wrap">
     <div class="tf-board-head">
-      <h1>All tickets</h1>
-      <div class="tf-seg" role="group" aria-label="Layout">
-        <button type="button" aria-pressed={session.layout === "board"} onclick={() => chooseLayout("board")}
-          >Board</button
-        >
-        <button type="button" aria-pressed={session.layout === "list"} onclick={() => chooseLayout("list")}
-          >List</button
-        >
-      </div>
+      <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
+      {#if view}<span class="tf-q">{view.query.trim() === "" ? "every synced ticket" : view.query}</span>{/if}
+      {#if view !== undefined && (view === null || view.unreadable === null)}
+        <div class="tf-seg" role="group" aria-label="Layout">
+          <button type="button" aria-pressed={showing.layout === "board"} onclick={() => chooseLayout("board")}
+            >Board</button
+          >
+          <button type="button" aria-pressed={showing.layout === "list"} onclick={() => chooseLayout("list")}
+            >List</button
+          >
+        </div>
+      {/if}
+      {#if view}
+        <ViewMenu
+          name="this view"
+          className="tf-btn tf-sm tf-ghost"
+          onduplicate={() => (drafting = draftCopy(view))}
+          ondelete={() => remove(view)}
+        />
+      {/if}
     </div>
-    <FilterBar {config} {filter} {shown} {total} onchange={read} extra={lanesSwitch} />
+    {#if base !== null}
+      <FilterBar {config} {filter} {shown} {total} onchange={read} extra={lanesSwitch} after={saveButton} />
+    {/if}
     {#snippet lanesSwitch()}
       <!-- prototype-6 offers lanes on the ticket board only. -->
-      {#if session.layout === "board"}
+      {#if showing.layout === "board"}
         <label class="tf-fsel">
           Lanes
           <select
             aria-label="Lanes"
-            value={session.lanes}
+            value={showing.lanes}
             onchange={(event) => chooseLanes(event.currentTarget.value as LaneField)}
           >
             {#each LANE_FIELDS as [value, label] (value)}
@@ -454,8 +640,22 @@
         </label>
       {/if}
     {/snippet}
+    {#snippet saveButton()}
+      <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={saveAsView}>Save as a view</button>
+    {/snippet}
 
-    {#if failed !== null}
+    {#if viewId !== null && views !== null && view === undefined}
+      <div class="tf-empty">
+        <p>No view is called {viewId}. It may have been deleted.</p>
+        <a class="tf-btn tf-sm" href="#/tickets">All tickets</a>
+      </div>
+    {:else if view && view.unreadable !== null}
+      <div class="tf-empty">
+        <p class="tf-vw-warn">
+          The search cannot read <code class="tf-mono">{view.unreadable}</code> in this view, so it shows no tickets.
+        </p>
+      </div>
+    {:else if failed !== null}
       <div class="tf-empty"><p>The tickets could not be read: {failed}</p></div>
     {:else if board === null}
       <div class="tf-empty" aria-busy="true"></div>
@@ -466,7 +666,7 @@
       </div>
     {:else if shown === 0}
       <div class="tf-empty"><p>No tickets synced yet. Add a Jira source in Settings and they appear here.</p></div>
-    {:else if session.layout === "board"}
+    {:else if showing.layout === "board"}
       {#each bands as { lane, drawn } (lane.key ?? "")}
         <div class="tf-lane">
           {#if lane.key !== null}
@@ -475,12 +675,22 @@
           <div class="tf-cols">
             {#each drawn as { column, cards } (columnKey(column))}
               {@const more = moreLine(column, cards.length)}
+              {@const limit = columnLimit(view?.columns ?? [], column.status)}
               <div class="tf-col">
-                <h3>{columnName(column.status)} <span class="tf-count">{column.total}</span></h3>
+                <h3>
+                  {columnName(column.status)}
+                  <span
+                    class="tf-count"
+                    class:tf-err={limit !== null && column.total > limit}
+                    title={limit !== null ? `At most ${limit} on this column` : undefined}
+                    >{column.total}{#if limit !== null}{" "}of {limit}{/if}</span
+                  >
+                </h3>
                 <div class="tf-stack">
                   {#each cards as card (card.entity_id)}
                     <TicketCard
                       {card}
+                      fields={view?.card_fields ?? null}
                       typed={filter.text}
                       selected={current?.card.entity_id === card.entity_id}
                       onselect={() => select(card)}
@@ -500,21 +710,18 @@
       {/each}
     {:else}
       <div class="tf-list">
-        {#snippet sortable(column: SortColumn, label: string)}
-          <th aria-sort={session.sort.column === column ? session.sort.direction : undefined}
-            ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
-          >
-        {/snippet}
         <table class="tf-tbl">
           <thead>
             <tr>
-              {@render sortable("key", "Key")}
-              {@render sortable("summary", "Summary")}
-              {@render sortable("status", "Status")}
-              {@render sortable("priority", "Priority")}
-              <th>Signals</th>
-              {@render sortable("assignee", "Assignee")}
-              {@render sortable("updated", "Updated")}
+              {#each listColumns as [column, label] (column)}
+                {#if sortable(column)}
+                  <th aria-sort={showing.sort.column === column ? showing.sort.direction : undefined}
+                    ><button type="button" onclick={() => sortBy(column)}>{label}</button></th
+                  >
+                {:else}
+                  <th>{label}</th>
+                {/if}
+              {/each}
             </tr>
           </thead>
           <tbody>
@@ -528,16 +735,31 @@
                 onclick={() => select(card)}
                 ondblclick={() => openJob(card)}
               >
-                <td class="tf-mono tf-nowrap"><Marked text={card.key} typed={filter.text} /></td>
-                <td
-                  ><Marked text={card.title} typed={filter.text} />{#if card.path}<span class="tf-sub">{card.path}</span
-                    >{/if}</td
-                >
-                <td class="tf-nowrap">{columnName(status)}</td>
-                <td>{card.priority ?? ""}</td>
-                <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
-                <td>{card.assignee ?? "Unassigned"}</td>
-                <td class="tf-dim">{when(card.updated_at)}</td>
+                {#each listColumns as [column] (column)}
+                  {#if column === "key"}
+                    <td class="tf-mono tf-nowrap"><Marked text={card.key} typed={filter.text} /></td>
+                  {:else if column === "summary"}
+                    <td
+                      ><Marked text={card.title} typed={filter.text} />{#if card.path}<span class="tf-sub"
+                          >{card.path}</span
+                        >{/if}</td
+                    >
+                  {:else if column === "status"}
+                    <td class="tf-nowrap">{columnName(status)}</td>
+                  {:else if column === "priority"}
+                    <td>{card.priority ?? ""}</td>
+                  {:else if column === "signals"}
+                    <td><span class="tf-sigs"><Signals signals={card.signals} /></span></td>
+                  {:else if column === "assignee"}
+                    <td>{card.assignee ?? "Unassigned"}</td>
+                  {:else if column === "updated"}
+                    <td class="tf-dim">{when(card.updated_at)}</td>
+                  {:else if column === "epic"}
+                    <td class="tf-mono tf-nowrap">{card.path ?? ""}</td>
+                  {:else}
+                    <td>{card.labels.join(", ")}</td>
+                  {/if}
+                {/each}
               </tr>
             {/each}
           </tbody>
@@ -549,7 +771,11 @@
     {/if}
   </section>
 
-  {#if current !== null}
+  {#if drafting !== null}
+    <SaveViewDialog draft={drafting} groups={groupNames} onsave={create} onclose={() => (drafting = null)} />
+  {/if}
+
+  {#if current !== null && base !== null}
     <TicketPreview
       card={current.card}
       status={current.status}

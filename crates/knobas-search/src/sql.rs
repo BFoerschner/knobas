@@ -376,6 +376,17 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
     }
 }
 
+/// How many rows [`ids_sql`] would answer with, as one `bigint` (#812): a
+/// ticket view's count in the views pane, the same rows its board draws.
+#[must_use]
+pub fn ids_count_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
+    let ids = ids_sql(words, filters);
+    SearchSql {
+        sql: format!("select count(*)::bigint from (\n{}\n) matched", ids.sql),
+        binds: ids.binds,
+    }
+}
+
 /// The filter placeholders one statement has allocated, ready to splice.
 ///
 /// A struct rather than four locals so that [`corpus_predicates`] can be one

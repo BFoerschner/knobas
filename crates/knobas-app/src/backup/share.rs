@@ -124,6 +124,12 @@ pub struct ShareParts {
     /// table here -- which is why the dialog offers no toggle for it until a
     /// saved one exists, and sends the part off while there is none.
     pub smart_lists: bool,
+    /// `knobas.ticket_view` -- the ticket views somebody made (#812, story
+    /// 41). **On by default**, beside smart lists and for their reason: a view
+    /// is a query and a layout, not a private note. Like a saved list it is no
+    /// entity, so it brings no address book, and its text crosses exactly as
+    /// it was saved.
+    pub ticket_views: bool,
 }
 
 impl Default for ShareParts {
@@ -136,6 +142,7 @@ impl Default for ShareParts {
             time: false,
             sources: true,
             smart_lists: true,
+            ticket_views: true,
         }
     }
 }
@@ -210,6 +217,9 @@ impl ShareParts {
         if self.smart_lists {
             push("smart_list");
         }
+        if self.ticket_views {
+            push("ticket_view");
+        }
         tables
     }
 
@@ -225,6 +235,7 @@ impl ShareParts {
             time: false,
             sources: false,
             smart_lists: false,
+            ticket_views: false,
         }
     }
 }
@@ -257,7 +268,8 @@ mod tests {
                 "route",
                 "context",
                 "source_config",
-                "smart_list"
+                "smart_list",
+                "ticket_view"
             ],
         );
     }
@@ -318,6 +330,14 @@ mod tests {
                 },
                 vec!["smart_list"],
             ),
+            // A ticket view is no entity either (#812).
+            (
+                ShareParts {
+                    ticket_views: true,
+                    ..ShareParts::none()
+                },
+                vec!["ticket_view"],
+            ),
         ] {
             assert_eq!(parts.tables(), expected, "{parts:?}");
         }
@@ -346,6 +366,7 @@ mod tests {
                 time: true,
                 sources: true,
                 smart_lists: true,
+                ticket_views: true,
             },
         ] {
             assert!(
@@ -371,6 +392,7 @@ mod tests {
             time: true,
             sources: true,
             smart_lists: true,
+            ticket_views: true,
         };
         for forbidden in [
             "activity",
@@ -442,12 +464,16 @@ mod tests {
             older.smart_lists,
             "a payload without `smart_lists` must decode to the ratified answer for it, which is on"
         );
+        assert!(
+            older.ticket_views,
+            "a payload without `ticket_views` must decode to the ratified answer for it, which is on"
+        );
         assert_eq!(older, ShareParts::default());
 
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
             "notes": false, "time": false, "sources": false,
-            "smart_lists": false
+            "smart_lists": false, "ticket_views": false
         }))
         .expect("a payload naming every part");
         assert_eq!(all, ShareParts::none());

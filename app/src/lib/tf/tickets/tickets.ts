@@ -4,6 +4,7 @@
  * what *Around this ticket* counts.
  */
 import type { EntityPage, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 
 /** How many cards a column draws before *Show N more* (R-3.4). */
@@ -144,7 +145,7 @@ export function aroundLines(tally: EntityPage["tally"]): AroundLine[] {
 }
 
 /** What a ticket board's lanes split by (R-3.5): nothing, or one field. */
-export type LaneField = "none" | "epic" | "assignee" | "priority" | "issuetype" | "label";
+export type LaneField = ViewLanes;
 
 /** The *Lanes* switch's choices, in prototype-6's order and words. */
 export const LANE_FIELDS: readonly (readonly [LaneField, string])[] = [
@@ -238,12 +239,10 @@ export function splitLanes(columns: MiniBoardColumn[], field: LaneField): Lane[]
 }
 
 /** What a list header sorts by (R-3.6). Signals do not sort. */
-export type SortColumn = "key" | "summary" | "status" | "priority" | "assignee" | "updated";
+export type SortColumn = ViewSortColumn;
 
-export interface ListSort {
-  column: SortColumn;
-  direction: "ascending" | "descending";
-}
+/** The list's sort: the one a view stores (`ticket_views::ListSort`). */
+export type ListSort = StoredSort;
 
 /** How the list opens: newest first. */
 export const DEFAULT_SORT: ListSort = { column: "updated", direction: "descending" };
