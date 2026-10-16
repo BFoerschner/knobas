@@ -72,8 +72,9 @@ const LIST: PipelineRow[] = [
   pipeline("Payout_Lint", "Payout_Lint", [run("teamcity:build:904", "ok")]),
 ];
 
-function draw(rest: string[], head = "builds", asked: string[] = []) {
+function draw(rest: string[], head = "builds", asked: string[] = [], extra: Partial<BuildsPorts> = {}) {
   const ports: BuildsPorts = {
+    ...extra,
     pipelines: () => Promise.resolve(LIST),
     runs: (id) => {
       asked.push(id);
@@ -156,14 +157,27 @@ test("the source's word appears once in the list, as the header line over its pi
   expect(target.querySelector(".tf-pl")?.textContent?.split("TeamCity")).toHaveLength(2);
 });
 
-test("a run's address says the run page is not built yet, and leads back to its pipeline", async () => {
+test("a run's address draws the run page, with its pipeline selected in the list", async () => {
   draw(["teamcity:buildType:Payout_Lint", "teamcity:build:904"], "build");
   await settle();
-  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("not built in the new shell yet");
-  expect(target.querySelector<HTMLAnchorElement>(".tf-bmain .tf-empty a")?.getAttribute("href")).toBe(
-    "#/builds/teamcity%3AbuildType%3APayout_Lint",
-  );
-  expect(target.querySelector('.tf-pi[aria-current="true"]')).toBeNull();
+  expect(target.querySelector(".tf-bmain h1")?.textContent).toContain("Payout_Lint #904");
+  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Lint");
+});
+
+test("a run's address without its pipeline moves to the full address of the pipeline that ran it", async () => {
+  try {
+    draw(["teamcity:build:904"], "build");
+    await settle();
+    expect(location.hash).toBe("#/build/teamcity%3AbuildType%3APayout_Lint/teamcity%3Abuild%3A904");
+  } finally {
+    location.hash = "";
+  }
+});
+
+test("a run's address no pipeline ran says so", async () => {
+  draw(["teamcity:build:1"], "build", [], { view: () => Promise.resolve(null) });
+  await settle();
+  expect(target.querySelector(".tf-bmain .tf-empty")?.textContent).toContain("No run at this address.");
 });
 
 test("no pipelines says what would fill the list", async () => {

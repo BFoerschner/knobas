@@ -1,8 +1,8 @@
 /**
- * `?fake-ipc`: Builds (#848 to #852): `pipelines`, `pipeline_runs`,
+ * `?fake-ipc`: Builds (#848 to #853): `pipelines`, `pipeline_runs`,
  * `set_pipeline_pinned`, `job_pipelines`, `older_pipeline_runs`,
  * `pipeline_settings`, `run_presets` and `save_run_preset`, and a run's
- * *Parameters* view for `entity_view` (`runView`), over
+ * view for `entity_view` (`runView`), over
  * prototype-6's 59 build configurations, so the list can be compared with
  * the prototype at `#/builds`.
  *
@@ -137,6 +137,19 @@ const LATEST: Record<string, Latest> = {
   Terraform_Plan: { no: 1402, st: "queued", branch: "main", at: "today 14:20", dur: null },
 };
 
+/**
+ * prototype-6's "real history": the runs after the story of the two
+ * configurations the job is about, so the run page's context line reads as
+ * the prototype's (*Also failed in #1185 on this branch. #1186 on main passed.*).
+ */
+const AFTER_STORY: Record<string, Latest[]> = {
+  Payout_IntegrationTests: [
+    { no: 1186, st: "success", branch: "main", at: "yesterday 18:10", dur: 241 },
+    { no: 1185, st: "failed", branch: "feature/PAY-231-sepa-retry", at: "yesterday 17:35", dur: 268 },
+  ],
+  Payout_Build: [{ no: 1184, st: "success", branch: "feature/PAY-231-sepa-retry", at: "today 10:03", dur: 402 }],
+};
+
 /** A small fixed-seed generator: the same fixture on every load. */
 function seeded(seed: number): () => number {
   let state = seed;
@@ -172,7 +185,7 @@ function runRow(config: string, no: number, st: Latest["st"], branch: string, st
     finished: finished?.toISOString() ?? null,
     duration_seconds: dur,
     updated_at: (finished ?? started).toISOString(),
-    web_url: null,
+    web_url: queued ? null : `https://ci.tidewater.example/buildConfiguration/${config}/${no}`,
   };
 }
 
@@ -196,7 +209,12 @@ function history(now: Date): Map<string, RunRow[]> {
       let no = story.no;
       let at = instant(story.at, now).getTime();
       const features = path.startsWith("Payments/Payouts") ? ["feature/PAY-231-sepa-retry", "feature/csv-export"] : ["feature/cleanup-87"];
-      for (let i = 1; i < 34; i += 1) {
+      for (const after of AFTER_STORY[config] ?? []) {
+        runs.push(runRow(config, after.no, after.st, after.branch, instant(after.at, now), after.dur));
+        no = after.no;
+        at = instant(after.at, now).getTime();
+      }
+      for (let i = runs.length; i < 34; i += 1) {
         no -= 1 + Math.floor(random() * 2);
         at -= (60 + Math.floor(random() * 700)) * 60_000;
         const st = random() < 0.05 ? "failed" : "success";
@@ -329,16 +347,80 @@ const presets = new Map<string, RunPreset[]>([
   ],
 ]);
 
+/** prototype-6's `prTitles`, for a run's one change. */
+const PR_TITLES = [
+  "Bump dependencies", "Add tracing spans", "Fix flaky test", "Retry on 429", "Split handler module",
+  "Add OpenAPI examples", "Remove dead feature flag", "Cache lookup results", "Validate input dates", "Batch inserts",
+  "Upgrade to Kotlin 2.1", "Make timeouts configurable", "Add health endpoint", "Paginate list endpoint", "Log request ids",
+  "Speed up CI cache", "Add contract test", "Handle empty payloads", "Move config to env", "Add metrics for queue depth",
+];
+
+/** prototype-6's run facts: who started it (`trigLabel`), the commit, the agent. */
+function storyOf(config: string, no: number) {
+  const commits: Record<string, string> = {
+    "Payout_IntegrationTests-1187": "a41f2c",
+    "Payout_IntegrationTests-1186": "91fe0c",
+    "Payout_IntegrationTests-1185": "7be0e4",
+    "Payout_Build-1188": "c90d11",
+    "Payout_Build-1184": "a41f2c",
+  };
+  const commit = commits[`${config}-${no}`] ?? (0x5e3a1 + no * 977).toString(16).padStart(6, "0").slice(0, 6);
+  const by = config === "Payout_Build" && no === 1188 ? "you" : `VCS change ${commit}`;
+  const agent = config === "Payout_IntegrationTests" && no === 1187 ? "linux-agent-03" : `linux-agent-0${1 + (no % 4)}`;
+  return { commit, by, agent };
+}
+
+/** prototype-6's `artifactsOf`, as TeamCity's top-level listing draws it: a folder with its count. */
+function artifactRows(config: string, no: number) {
+  const row = (title: string, meta: string, file: boolean) => ({
+    entity_id: null,
+    title,
+    meta,
+    tone: null,
+    chip: null,
+    url: file ? `https://ci.tidewater.example/repository/download/${config}/${no}:id/${title}` : null,
+  });
+  if (config === "Payout_IntegrationTests") return [row("test-report/", "2 files", false), row("logs/", "2 files", false), row("coverage/", "1 files", false)];
+  if (/Build|Docker|Release/.test(config))
+    return [
+      row("payout-service-1.9.0-rc1-x86_64.tar.gz", "6.2 MB", true),
+      row("payout-service", "18.4 MB", true),
+      row("sbom.cdx.json", "240 KB", true),
+      row("SHA256SUMS", "1 KB", true),
+    ];
+  return [row("report.txt", "4 KB", true)];
+}
+
+/** prototype-6's failing test of #1187 and #1185, as the adapter's *Tests* draws one. */
+const FAILED_TEST = [
+  {
+    type: "entities",
+    title: null,
+    rows: [{ entity_id: null, title: "sepa::retry::gives_up_after_max_attempts", meta: null, tone: "err", chip: "new", url: null }],
+  },
+  { type: "text", markdown: false, text: "assertion `left == right` failed\n  left: 6\n right: 5\n  at tests/sepa_retry.rs:14:5" },
+];
+
 /**
- * A run's source view, *Parameters* only (#852's *#N settings*): what it ran
- * with, as prototype-6's run *Parameters* tab says (`env` staging, the rest
- * their defaults). `undefined` for an id that is not a fixture run.
+ * A run's source view (#852's *#N settings*, #853's run page): the whole of
+ * it, as TeamCity's adapter answers a build, or the one section asked for.
+ * The facts are prototype-6's (`trigLabel`, the commit, the agent), the
+ * parameters what its run *Parameters* tab says (`env` staging, the rest their
+ * defaults), the artifacts its `artifactsOf` at the top level, and the
+ * changes its *Changes* tab. `undefined` for an id that is not a fixture run.
  */
 export function runView(id: string, section: string | null) {
-  const match = /^teamcity:build:(.+)-\d+$/.exec(id);
+  const match = /^teamcity:build:(.+)-(\d+)$/.exec(id);
   if (match === null) return undefined;
   const config = match[1]!;
+  const no = Number(match[2]);
   if (!Object.values(CONFIGURATIONS).some((list) => list.includes(config))) return undefined;
+  const latest = LATEST[config];
+  const st = latest?.no === no ? latest.st : (AFTER_STORY[config]?.find((r) => r.no === no)?.st ?? "success");
+  const done = st === "success" || st === "failed";
+  const story = storyOf(config, no);
+  const repo = repositoryOf(config);
+  const commitId = repo === null ? null : `mock:tidewater/${repo}@${story.commit}`;
   const values = paramDefs(config).map((p) => ({
     name: p.k,
     value: p.k === "env" && p.opts?.includes("staging") ? "staging" : p.def,
@@ -347,15 +429,41 @@ export function runView(id: string, section: string | null) {
     editable: false,
     description: null,
   }));
-  const parametersTab = {
-    id: "parameters",
-    title: "Parameters",
-    count: values.length,
-    deferred: false,
-    blocks: [{ type: "settings", title: null, entity: id, write_op: "", values }],
-  };
-  if (section !== null && section !== "parameters") return { sections: [], actions: [] };
-  return { sections: [parametersTab], actions: [] };
+  const failing = config === "Payout_IntegrationTests" && st === "failed";
+  const facts = [
+    { label: "Outcome", value: st === "success" ? "passed" : st, tone: st === "success" ? "ok" : st === "failed" ? "err" : "info" },
+    { label: "Number", value: `#${no}`, tone: null },
+    { label: "Triggered by", value: story.by, tone: null },
+    ...(st === "running" ? [{ label: "Now", value: "Step 3 of 5 is running.", tone: null }] : []),
+    { label: "Agent", value: story.agent, tone: null },
+  ];
+  const changes =
+    config === "Payout_IntegrationTests" && no === 1187
+      ? [
+          ["a41f2c", "PAY-231 backoff jitter"],
+          ["7be0e4", "PAY-231: retry SEPA payouts on transient PSP errors"],
+        ]
+      : [[story.commit, PR_TITLES[no % PR_TITLES.length]!]];
+  const entities = (rows: unknown[], title: string | null = null) => ({ type: "entities", title, rows });
+  const tab = (tabId: string, title: string, count: number | null, blocks: unknown[], deferred = false) => ({ id: tabId, title, count, deferred, blocks });
+  const sections = [
+    tab("overview", "Overview", null, [
+      { type: "facts", facts },
+      entities([{ entity_id: `${SOURCE}:buildType:${config}`, title: `Payouts / ${config}`, meta: null, tone: null, chip: null, url: null }], "Configuration"),
+      entities([{ entity_id: commitId, title: repo ?? config, meta: null, tone: null, chip: story.commit, url: null }], "Revision"),
+    ]),
+    tab(
+      "changes",
+      "Changes",
+      changes.length,
+      [entities(changes.map(([sha, title]) => ({ entity_id: repo === null ? null : `mock:tidewater/${repo}@${sha}`, title, meta: "mara", tone: null, chip: sha, url: null })))],
+    ),
+    tab("tests", "Tests", failing ? 1 : 0, section === "tests" && failing ? FAILED_TEST : [], section !== "tests"),
+    tab("log", "Log", null, [], section !== "log"),
+    tab("artifacts", "Artifacts", done ? artifactRows(config, no).length : 0, [entities(done ? artifactRows(config, no) : [])]),
+    tab("parameters", "Parameters", values.length, [{ type: "settings", title: null, entity: id, write_op: "", values }]),
+  ];
+  return { sections: section === null ? sections : sections.filter((s) => s.id === section), actions: [] };
 }
 
 /** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */

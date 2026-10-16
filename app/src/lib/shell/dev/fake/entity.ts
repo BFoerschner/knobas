@@ -162,7 +162,7 @@ function entityView(args: Record<string, unknown>) {
   // A pull request: the pull request page (#841).
   const pull = pullView(id, (args["section"] as string | null | undefined) ?? null);
   if (pull !== undefined) return pull;
-  // A run's parameters: the Run… dialog's *#N settings* (#852).
+  // A run: the Run… dialog's *#N settings* (#852) and the run page (#853).
   const ran = runView(id, (args["section"] as string | null | undefined) ?? null);
   if (ran !== undefined) return ran;
   if (id !== "mock:9f2c1ab") return null;

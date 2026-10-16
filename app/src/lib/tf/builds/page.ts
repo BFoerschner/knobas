@@ -1,6 +1,6 @@
 /**
- * Builds (#848): `#/builds` and `#/builds/<pipeline>`, and the run address
- * `#/build/...` that says it is not built yet. The page draws its own
+ * Builds (#848): `#/builds` and `#/builds/<pipeline>`, and the run page
+ * `#/build/<pipeline>/<run>` (#853). The page draws its own
  * breadcrumb inside the right-hand side, as prototype-6 does.
  */
 import { definePage } from "../page-entry";
