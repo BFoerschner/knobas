@@ -1,8 +1,8 @@
 <!--
   One commit under the repository's *Commits* tab (#838, R-8.7), as
   prototype-6's `renderCommitView`: its short sha, message, author and time,
-  *New branch from here…* (the dialog is #839's, not built yet) and *All
-  commits*, then its diff file by file.
+  *New branch from here…* (#839: the page's *New branch…* dialog, starting at
+  this commit's whole sha) and *All commits*, then its diff file by file.
 
   The header is the mirror's row (`get_entity`: title, author, `updated_at`);
   the diff is the source's (`entity_view`, section `diff`), read live.
@@ -13,18 +13,21 @@
   import TfDiff from "../code/TfDiff.svelte";
   import { when } from "../tickets/tickets";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { repoHash, shaOf } from "./repo";
+  import { fullShaOf, repoHash, shaOf } from "./repo";
 
   let {
     ports,
     repoId,
     commitId,
     now,
+    onNewBranch,
   }: {
     ports: Pick<RepoPorts, "entityView" | "getEntity">;
     repoId: string;
     commitId: string;
     now: Date;
+    /** Open *New branch…* starting at this commit: its whole sha the value, its short one the label. */
+    onNewBranch: (from: { value: string; label: string }) => void;
   } = $props();
 
   let detail = $state<EntityDetail | null>(null);
@@ -54,6 +57,7 @@
   });
 
   const sha = $derived(shaOf(commitId));
+  const full = $derived(fullShaOf(commitId));
 </script>
 
 <h2 class="tf-cgroup-h">
@@ -65,9 +69,11 @@
     >
   {/if}
   <span class="tf-acts">
-    <button type="button" class="tf-btn tf-sm" aria-disabled="true" title="Not built in the new shell yet"
-      >New branch from here…</button
-    >
+    {#if full !== null}
+      <button type="button" class="tf-btn tf-sm" onclick={() => onNewBranch({ value: full, label: sha ?? full })}
+        >New branch from here…</button
+      >
+    {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
   </span>
 </h2>
