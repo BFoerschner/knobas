@@ -272,11 +272,11 @@ fn parse(storage: &str) -> Vec<Node> {
         if tag.starts_with('/') {
             // Close up to the matching opener; a close with no opener is
             // dropped.
-            if let Some(depth) = stack.iter().rposition(|(open, _, _)| *open == name) {
-                if depth > 0 {
-                    while stack.len() > depth {
-                        close(&mut stack);
-                    }
+            if let Some(depth) = stack.iter().rposition(|(open, _, _)| *open == name)
+                && depth > 0
+            {
+                while stack.len() > depth {
+                    close(&mut stack);
                 }
             }
             continue;
@@ -783,11 +783,12 @@ fn tidy_inlines(inlines: Vec<Inline>) -> Vec<Inline> {
                     emphasis: e,
                     code: c,
                 }) = out.last_mut()
+                    && *s == strong
+                    && *e == emphasis
+                    && *c == code
                 {
-                    if *s == strong && *e == emphasis && *c == code {
-                        prev.push_str(&squeezed);
-                        continue;
-                    }
+                    prev.push_str(&squeezed);
+                    continue;
                 }
                 out.push(Inline::Text {
                     text: squeezed,

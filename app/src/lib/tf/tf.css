@@ -1046,6 +1046,7 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-bv { grid-template-columns: 1fr; height: auto; }
   .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-runs { padding-left: 16px; padding-right: 16px; }
+}
 /* ---------- Docs: the reader (#859, requirements §10, prototype-6's .rd) ---------- */
 .tf-rd { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
