@@ -974,7 +974,10 @@ const CASES: Case[] = [
           job: "PAY-231",
           sid: null,
           layers: createLayers(),
-          ports: { roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }) },
+          ports: {
+            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
+            proposalEvidence: () => deferred({ link_id: "", reason: null, excerpts: [], support: [], against: [] }),
+          },
           ongo: () => {},
         },
       }),

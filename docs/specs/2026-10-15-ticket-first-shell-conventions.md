@@ -39,6 +39,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A `?fake-ipc` row's state chip, path and source ride in its payload as `chip`, `path` and `source`, which `mirrorRow` reads; the mock adapter declares none of them. (#817)
 - A source's markup reaches the shell only as a declared block list (`knobas_source::docs`, ADR-0022): the adapter projects its mirrored payload with a plain function, and the shell draws the blocks as text, never as markup. (#859)
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
+- A read whose answer is sentences (a proposal's reason and evidence) is drawn as the backend wrote it; the view adds prototype-6's headings and no words of its own, and leaves out a heading with nothing under it. (#836)
 - Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
 ## Copy and display

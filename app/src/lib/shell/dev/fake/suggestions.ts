@@ -1,7 +1,15 @@
 /**
  * `?fake-ipc`: Suggested links (#237): the tray's proposals and the two answers to one.
  */
-import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../../ipc/entity";
+import type {
+  EvidenceExcerpt,
+  EvidencePart,
+  LinkEnd,
+  LinkRow,
+  ProposalEvidence,
+  SuggestionEntry,
+  SuggestionPage,
+} from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { CORPUS, FAKE_CONTEXTS } from "./corpus";
 
@@ -120,6 +128,66 @@ function answerSuggestion(args: Record<string, unknown>): null {
   return null;
 }
 
+/** The rules that find a ticket's key in the other end's text. */
+const KEY_RULES = ["branch_name_key", "commit_message_key", "build_parameter_key", "page_text_key"];
+
+/** A corpus row's text as the detector reads it: title, then body. */
+function textOf(entity_id: string): string {
+  const entry = CORPUS.find((candidate) => candidate.entity_id === entity_id);
+  if (!entry) return "";
+  return entry.body_text && entry.body_text !== entry.title ? `${entry.title}\n${entry.body_text}` : entry.title;
+}
+
+/**
+ * `text` with every `needle` marked where a word starts with it,
+ * case-insensitively: the whole word when `stems` (a shared word is a stem,
+ * as the rule emits it), else the needle as a whole word (a key).
+ */
+function markIn(text: string, needles: string[], stems: boolean): EvidencePart[] {
+  const parts: EvidencePart[] = [];
+  const escaped = needles.map((needle) => needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const pattern = new RegExp(`(?<!\\w)(?:${escaped.join("|")})${stems ? "\\w*" : "(?!\\w)"}`, "gi");
+  let at = 0;
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > at) parts.push({ text: text.slice(at, match.index), marked: false });
+    parts.push({ text: match[0], marked: true });
+    at = match.index + match[0].length;
+  }
+  if (at < text.length) parts.push({ text: text.slice(at), marked: false });
+  return parts;
+}
+
+/**
+ * `proposal_evidence` (#836), worked out over the corpus the way
+ * `knobas_core::evidence` works it out over the mirror: a key is marked where
+ * the item names it, shared words where both ends use them. The support and
+ * counter-evidence are the engine's sentences for this corpus, which has no
+ * accepted or dismissed siblings and no other keys beside the one found.
+ */
+function proposalEvidence(args: Record<string, unknown>): ProposalEvidence {
+  const id = String(args["linkId"] ?? "");
+  const link = FAKE_SUGGESTIONS.find((candidate) => candidate.id === id);
+  if (!link) throw { code: "not_found", message: `${id} is not a link`, source_id: null };
+  const rule = link.rule ?? "";
+  const excerpts: EvidenceExcerpt[] = [];
+  const support: string[] = [];
+  const against: string[] = [];
+  if (KEY_RULES.includes(rule)) {
+    const key = link.to_id.slice(link.to_id.indexOf(":") + 1);
+    excerpts.push({ entity_id: link.from_id, parts: markIn(textOf(link.from_id), [key], false) });
+  } else if (rule === "similar_text") {
+    const words = (link.reason ?? "").replace(/^both mention /, "").split(", ");
+    for (const end of [link.from_id, link.to_id]) {
+      const parts = markIn(textOf(end), words, true);
+      if (parts.some((part) => part.marked)) excerpts.push({ entity_id: end, parts });
+    }
+    support.push(`Shared words: ${words.join(", ")}.`);
+    against.push("Wording alone often matches unrelated items.");
+  }
+  if (against.length === 0) against.push("Nothing found against it.");
+  return { link_id: id, reason: link.reason, excerpts, support, against };
+}
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
@@ -142,5 +210,7 @@ export function handlers(): Record<string, Handler> {
     // row stops being listed -- because that is all a QA pass can witness.
     accept_suggestion: (args) => answerSuggestion(args),
     dismiss_suggestion: (args) => answerSuggestion(args),
+    // #836: why a proposal was made, read for the one open.
+    proposal_evidence: (args) => proposalEvidence(args),
   };
 }

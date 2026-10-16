@@ -925,6 +925,8 @@ knobas-app	test/it	suggestions_ipc::a_pass_over_the_demo_corpus_proposes_suggest
 knobas-app	test/it	suggestions_ipc::accepting_moves_a_proposal_into_the_panel_and_records_it
 knobas-app	test/it	suggestions_ipc::dismissing_is_remembered_across_a_later_pass
 knobas-app	test/it	suggestions_ipc::drawing_the_reverse_of_a_proposal_empties_the_tray_row_and_keeps_the_users_direction
+knobas-app	test/it	suggestions_ipc::every_proposal_over_the_demo_corpus_has_evidence_with_the_match_marked
+knobas-app	test/it	suggestions_ipc::evidence_for_a_bad_id_is_invalid_and_for_an_unknown_one_not_found
 knobas-app	test/it	suggestions_ipc::linking_a_proposed_pair_by_hand_accepts_it_instead_of_refusing
 knobas-app	test/it	suggestions_ipc::the_tray_is_scoped_to_the_room_it_is_drawn_in
 knobas-app	test/it	ticket_keys_ipc::the_filter_suggestions_command_offers_the_keys_values
@@ -1135,6 +1137,15 @@ knobas-core	lib/knobas_core	entity::tests::rejects_malformed
 knobas-core	lib/knobas_core	entity::tests::reserved_namespaces_are_matched_case_insensitively
 knobas-core	lib/knobas_core	entity::tests::serde_roundtrips_as_string
 knobas-core	lib/knobas_core	entity::tests::the_reserved_namespaces_are_exactly_what_the_migration_refuses
+knobas-core	lib/knobas_core	evidence::tests::a_headline_is_split_at_its_markers
+knobas-core	lib/knobas_core	evidence::tests::a_key_is_found_only_as_a_whole_word
+knobas-core	lib/knobas_core	evidence::tests::a_short_text_is_quoted_whole_without_ellipses
+knobas-core	lib/knobas_core	evidence::tests::an_excerpt_keeps_context_on_both_sides_and_says_where_the_text_goes_on
+knobas-core	lib/knobas_core	evidence::tests::issue_keys_are_read_in_order_between_word_boundaries
+knobas-core	lib/knobas_core	evidence::tests::matches_close_together_share_one_excerpt
+knobas-core	lib/knobas_core	evidence::tests::multibyte_text_is_cut_on_character_boundaries
+knobas-core	lib/knobas_core	evidence::tests::names_read_as_a_sentence
+knobas-core	lib/knobas_core	evidence::tests::the_monitor_reason_names_its_host
 knobas-core	lib/knobas_core	inbox::tests::every_category_has_a_rule
 knobas-core	lib/knobas_core	inbox::tests::every_category_parses_back_from_its_spelling
 knobas-core	lib/knobas_core	inbox::tests::the_alert_rule_reads_the_relation_the_estate_draws
@@ -1355,6 +1366,11 @@ knobas-core	test/it	projects::a_whitespace_only_project_key_contributes_nothing
 knobas-core	test/it	projects::every_project_the_corpus_shows_is_reported_once
 knobas-core	test/it	projects::one_key_in_two_sources_is_two_projects
 knobas-core	test/it	projects::teamcitys_own_two_words_read_as_well_as_jiras
+knobas-core	test/it	proposal_evidence::a_key_in_a_commit_message_is_quoted_with_the_key_marked
+knobas-core	test/it	proposal_evidence::evidence_for_an_id_no_link_carries_is_not_found
+knobas-core	test/it	proposal_evidence::items_found_the_same_way_and_already_linked_support_a_proposal
+knobas-core	test/it	proposal_evidence::proposals_dismissed_at_either_end_speak_against_one_found_the_same_way
+knobas-core	test/it	proposal_evidence::shared_wording_is_quoted_from_both_ends_with_the_shared_words_marked
 knobas-core	test/it	reach::a_parent_whose_type_cannot_be_read_brings_nothing
 knobas-core	test/it	reach::a_vm_brings_what_it_holds_and_nothing_brings_its_ancestors
 knobas-core	test/it	reach::an_epic_parent_brings_nothing

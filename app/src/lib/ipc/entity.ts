@@ -828,6 +828,48 @@ export function dismissSuggestion(linkId: string): Promise<void> {
   return invoke<void>("dismiss_suggestion", { linkId });
 }
 
+/** One run of an excerpt's text — `knobas_core::evidence::Part`. */
+export interface EvidencePart {
+  text: string;
+  /** The match: the key, the host or a shared word. */
+  marked: boolean;
+}
+
+/** A stretch of one end's text — `knobas_core::evidence::Excerpt`. */
+export interface EvidenceExcerpt {
+  /** The end the text is from. */
+  entity_id: string;
+  /** The text in order; the marked parts are the match. */
+  parts: EvidencePart[];
+}
+
+/**
+ * What was said for and against one proposal —
+ * `knobas_core::evidence::ProposalEvidence` (#836).
+ */
+export interface ProposalEvidence {
+  link_id: string;
+  /** The reason the rule stored, unchanged. */
+  reason: string | null;
+  /** The text the evidence was found in; empty for a relation the source records. */
+  excerpts: EvidenceExcerpt[];
+  /** *Also found*: what supports it. May be empty. */
+  support: string[];
+  /** *Speaks against it*: never empty ("Nothing found against it."). */
+  against: string[];
+}
+
+/**
+ * Why one proposal was made, beyond its one-line reason —
+ * `proposal_evidence` (#836): the text it was found in with the match marked,
+ * what supports it and what speaks against it. A read beside
+ * `roomSuggestions`; it changes no ranking. Rejects with `invalid` for
+ * something that is not a link id and `not_found` for one nothing carries.
+ */
+export function proposalEvidence(linkId: string): Promise<ProposalEvidence> {
+  return invoke<ProposalEvidence>("proposal_evidence", { linkId });
+}
+
 /**
  * Ask a source to change something — `knobas_app::commands::entity::submit_write`.
  *

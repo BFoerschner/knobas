@@ -515,6 +515,9 @@ pub fn run() {
             // #871's Dependencies read, appended at the foot: the list is
             // append-only (§10.8).
             commands::assets::dependencies,
+            // #836's proposal evidence, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::proposal_evidence,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

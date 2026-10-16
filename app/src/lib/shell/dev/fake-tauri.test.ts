@@ -21,7 +21,7 @@ import { expect, test } from "vitest";
 import type { AssetDetail, AssetRow } from "../../ipc/assets";
 import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
-import type { SuggestionPage } from "../../ipc/entity";
+import type { ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
 
 test("the four commands the tray calls are answered", () => {
@@ -112,6 +112,29 @@ test("accepting or dismissing removes the row from the next read and drops the c
 
   // And an id no proposal carries is refused the way the real one refuses it.
   expect(() => handlers["dismiss_suggestion"]!({ linkId: "link:fake-none" })).toThrow(
+    expect.objectContaining({ code: "not_found" }),
+  );
+});
+
+/**
+ * `proposal_evidence` (#836) answers every waiting proposal, and a key or a
+ * shared word the corpus bears out is marked: a reason the fixture's text
+ * could not show would be a fixture lying about the evidence.
+ */
+test("every proposal's evidence marks what the corpus bears out", () => {
+  const handlers = demoHandlers();
+  for (const entry of page(handlers).rows) {
+    const evidence = handlers["proposal_evidence"]!({ linkId: entry.link.id }) as ProposalEvidence;
+    expect(evidence.reason).toBe(entry.link.reason);
+    expect(evidence.against.length, entry.link.id).toBeGreaterThan(0);
+    const marked = evidence.excerpts.flatMap((excerpt) => excerpt.parts.filter((part) => part.marked));
+    if (entry.link.rule_class === "exact_key") {
+      const key = entry.link.to_id.slice(entry.link.to_id.indexOf(":") + 1);
+      expect(marked.map((part) => part.text), entry.link.id).toContain(key);
+    }
+    if (entry.link.rule_class === "similarity") expect(marked.length, entry.link.id).toBeGreaterThan(0);
+  }
+  expect(() => handlers["proposal_evidence"]!({ linkId: "link:fake-none" })).toThrow(
     expect.objectContaining({ code: "not_found" }),
   );
 });
