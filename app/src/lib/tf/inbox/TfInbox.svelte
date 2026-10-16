@@ -1,0 +1,282 @@
+<!--
+  The Inbox (#834, R-12.1 to R-12.3): `#/inbox`.
+
+  The filter bar (text, *This job / All*, the kind chips), then a row per item
+  newest first: the time, the item as one sentence (an err dot for a failure),
+  its actions, and a second line with its kind and the job it belongs to as a
+  link. The snoozed shelf is one line under the list, with return dates.
+
+  Over the inbox store the rooms UI already uses (`inbox/inbox.svelte.ts`:
+  `inbox_items`, `inbox_count`, `snooze_inbox_item`, `complete_inbox_item`,
+  `ack_alert`), `submit_write` for *Re-run*, and `job_reach` for which job a
+  row belongs to. No new command.
+-->
+<script lang="ts">
+  import { onDestroy } from "svelte";
+
+  import { ipcErrorMessage } from "../../ipc";
+  import {
+    getEntity,
+    jobReach,
+    listContexts,
+    submitWrite,
+    type ContextRow,
+    type EntityDetail,
+    type InboxEntry,
+    type Reached,
+  } from "../../ipc/entity";
+  import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
+  import { ACTION_FORMS } from "../../inbox/actions";
+  import { inbox as sharedInbox, pickedMorning, snoozePresets, type Inbox } from "../../inbox/inbox.svelte";
+  import { followWrite } from "../../shell/follow-write";
+  import { push } from "../../shell/toasts.svelte";
+  import FilterBar from "../filter/FilterBar.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
+  import type { FilterConfig } from "../filter/filter";
+  import Marked from "../filter/Marked.svelte";
+  import { keyOf, resolveTicket, type SourceFacts } from "../job/job";
+  import {
+    failed,
+    jobIndex,
+    KIND_CHIPS,
+    kindOf,
+    opener,
+    rowActions,
+    sentence,
+    snoozedLine,
+    untilLabel,
+    visible,
+    when,
+    type OpenJob,
+  } from "./inbox";
+
+  /** The reads and the write this view makes beside the inbox store. */
+  export interface InboxPorts {
+    listContexts: () => Promise<ContextRow[]>;
+    listSources: () => Promise<SourceFacts[]>;
+    getEntity: (entityId: string) => Promise<EntityDetail>;
+    jobReach: (entityId: string) => Promise<Reached[]>;
+    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+  }
+
+  let {
+    ready,
+    job,
+    inbox = sharedInbox,
+    ports = {
+      listContexts: () => listContexts(),
+      listSources: () => listSources(),
+      getEntity: (entityId) => getEntity(entityId),
+      jobReach: (entityId) => jobReach(entityId),
+      submitWrite: (payload) => submitWrite(payload),
+    },
+    now: fixedNow,
+  }: {
+    /** Whether the database answers yet. */
+    ready: boolean;
+    /** The job the reader was last in, as a ticket key: what *This job* keeps. */
+    job: string | null;
+    /** The live store. A prop so a test needs no Tauri bridge. */
+    inbox?: Inbox;
+    ports?: InboxPorts;
+    /** Injectable clock, so the time column and the presets are testable. */
+    now?: Date;
+  } = $props();
+
+  const now = $derived(fixedNow ?? new Date());
+
+  /**
+   * How many jobs' reaches are read to name a row's job: the open jobs (the
+   * ticket contexts opening a job promotes), newest first.
+   */
+  const JOB_LIMIT = 30;
+
+  const filter = sessionFilter("inbox");
+  // Prototype-6 opens the Inbox on *All*.
+  if (filter.scope === null) filter.scope = "all";
+
+  const config = $derived<FilterConfig>({
+    id: "inbox",
+    placeholder: "Filter by text or ticket key",
+    noun: "items",
+    scopes: [
+      ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
+      { id: "all", label: "All", query: "" },
+    ],
+    chips: [{ key: "kind", label: "Kind", options: KIND_CHIPS.map((value) => ({ value, label: value })) }],
+  });
+
+  let jobs = $state<OpenJob[]>([]);
+  const index = $derived(jobIndex(jobs));
+  const scope = $derived<"job" | "all">(job !== null && filter.scope === "job" ? "job" : "all");
+
+  const rows = $derived(
+    visible(inbox.stream, { scope, job, kinds: filter.chips["kind"] ?? [], text: filter.text }, index),
+  );
+  const shelf = $derived(snoozedLine(inbox.snoozed));
+
+  /** The open jobs, the current one first, each with what it reaches. */
+  async function readJobs(current: string | null): Promise<OpenJob[]> {
+    const contexts = await ports.listContexts().catch(() => [] as ContextRow[]);
+    let ids = contexts
+      .filter((row) => row.kind === "ticket" && row.anchor_id !== null && row.archived_at === null)
+      .map((row) => row.anchor_id as string);
+    if (current !== null) {
+      let id = ids.find((candidate) => keyOf(candidate) === current) ?? null;
+      if (id === null) {
+        const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
+        const found = await resolveTicket(current, sources, ports.getEntity).catch(() => null);
+        id = found?.row.entity_id ?? null;
+      }
+      if (id !== null) ids = [id, ...ids.filter((candidate) => candidate !== id)];
+    }
+    ids = ids.slice(0, JOB_LIMIT);
+    const answers = await Promise.allSettled(ids.map((id) => ports.jobReach(id)));
+    return ids.map((id, at) => {
+      const answer = answers[at]!;
+      return { id, reached: answer.status === "fulfilled" ? answer.value : [] };
+    });
+  }
+
+  $effect(() => {
+    if (!ready) return;
+    const current = job;
+    // An answer that lands after the view is gone, or after the job changed, draws into nothing.
+    let live = true;
+    void readJobs(current).then((read) => {
+      if (live) jobs = read;
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  $effect(() => {
+    if (ready) void inbox.refresh();
+  });
+
+  $effect(() => {
+    if (job === null && filter.scope === "job") filter.scope = "all";
+  });
+
+  /** The row whose snooze choices are open, if any. */
+  let snoozing = $state<string | null>(null);
+
+  /** The writes this view follows, stopped when it goes. */
+  const following: (() => void)[] = [];
+  onDestroy(() => {
+    for (const stop of following.splice(0)) stop();
+  });
+  /** Re-runs whose `submit_write` has not answered: a double click is one press. */
+  const queueing = new Set<string>();
+
+  async function rerun(entry: InboxEntry) {
+    const entity = entry.item.entity_id;
+    const form = ACTION_FORMS["rerun_build"];
+    if (entity === null || !form || form.kind !== "immediate" || queueing.has(entry.item.key)) return;
+    queueing.add(entry.item.key);
+    try {
+      const write = await ports.submitWrite(form.build(entity));
+      push({ text: `${form.label} queued for ${entry.item.title}` });
+      following.push(followWrite(write, { name: form.label }));
+      void inbox.refresh();
+    } catch (error) {
+      push({ text: ipcErrorMessage(error), tone: "err" });
+    } finally {
+      queueing.delete(entry.item.key);
+    }
+  }
+
+  function ack(entry: InboxEntry) {
+    push({ text: "Acked. The alert stays open until the monitor recovers." });
+    void inbox.ack(entry.item.key);
+  }
+
+  function snooze(entry: InboxEntry, at: Date) {
+    snoozing = null;
+    push({ text: `Snoozed until ${untilLabel(at, now)}` });
+    void inbox.snooze(entry.item.key, at);
+  }
+
+  /** A date the picker produced, at 09:00 local, as the presets are. */
+  function fromPicker(entry: InboxEntry, value: string) {
+    const at = pickedMorning(value);
+    if (at !== null) snooze(entry, at);
+  }
+
+  /** Each button's word: a source op's is its form's (`ACTION_FORMS`), knobas' own are here. */
+  const LABEL: Record<string, string> = { ack: "Ack", snooze: "Snooze", done: "Done" };
+  const labelOf = (action: string) => ACTION_FORMS[action]?.label ?? LABEL[action] ?? action;
+
+  function press(entry: InboxEntry, action: string) {
+    if (action === "rerun_build") void rerun(entry);
+    else if (action === "ack") ack(entry);
+    else if (action === "snooze") snoozing = snoozing === entry.item.key ? null : entry.item.key;
+    else if (action === "done") void inbox.complete(entry.item.key);
+  }
+</script>
+
+<header class="tf-fhead">
+  <div>
+    <h1>Inbox</h1>
+    <div class="tf-sub">What asks for you, newest first. Each row says which job it belongs to.</div>
+  </div>
+</header>
+<FilterBar {config} {filter} shown={inbox.answered ? rows.length : null} total={inbox.answered ? inbox.stream.length : null} />
+<div class="tf-ibody">
+  {#if inbox.error !== null}
+    <p class="tf-ifail">{inbox.error}</p>
+  {/if}
+  <div class="tf-inbox">
+    {#each rows as entry (entry.item.key)}
+      {@const item = entry.item}
+      {@const open = opener(item)}
+      {@const belongs = index.jobOf(item)}
+      <div class="tf-ib">
+        <time datetime={item.occurred_at}>{when(item.occurred_at, now)}</time>
+        <div class="tf-what">
+          {#if failed(item)}<span class="tf-dot tf-err"></span>{" "}{/if}<Marked text={sentence(item)} typed={filter.text} />
+        </div>
+        <div class="tf-acts">
+          {#if open !== null}
+            <a class="tf-btn tf-sm" href={open.href}>{open.label}</a>
+          {/if}
+          {#each rowActions(entry) as action (action)}
+            <button
+              type="button"
+              class="tf-btn tf-sm"
+              class:tf-ghost={action === "done"}
+              aria-expanded={action === "snooze" ? snoozing === item.key : undefined}
+              onclick={() => press(entry, action)}>{labelOf(action)}</button
+            >
+          {/each}
+        </div>
+        <div class="tf-ctx">
+          {kindOf(item.category)}{#if belongs !== null}, job <a href="#/job/{encodeURIComponent(belongs)}" class="tf-mono"
+              >{belongs}</a
+            >{:else}, no job{/if}
+        </div>
+        {#if snoozing === item.key}
+          <div class="tf-isnooze" role="group" aria-label="Snooze until">
+            {#each snoozePresets(now) as preset (preset.label)}
+              <button type="button" class="tf-btn tf-sm" onclick={() => snooze(entry, preset.at)}>{preset.label}</button>
+            {/each}
+            <input
+              type="date"
+              aria-label="Snooze until a date"
+              onchange={(event) => fromPicker(entry, event.currentTarget.value)}
+            />
+            <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (snoozing = null)}>Cancel</button>
+          </div>
+        {/if}
+      </div>
+    {:else}
+      {#if inbox.answered}
+        <div class="tf-empty">Nothing here. New items appear as sources sync.</div>
+      {/if}
+    {/each}
+  </div>
+  {#if shelf !== null}
+    <p class="tf-dim tf-ishelf">{shelf}</p>
+  {/if}
+</div>

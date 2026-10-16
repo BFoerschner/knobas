@@ -32,6 +32,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Data, fixtures and screenshots
 
+- A list of items from everywhere names each item's job as its own ticket, else the first open job (a live ticket context, the current one first) whose `job_reach` holds it; nothing reaches it, *no job*. (#834, PR #958)
 - The shell reads declared paths only, never a payload (ADR-0007). A field a card needs becomes a declared path, not a payload read. (#810, PR #895; #816, PR #898)
 - `?fake-ipc` fixtures grow with the ticket that needs them: enough rows to compare with prototype-6 (eleven more PAY tickets in #810; a small link graph and the workflow in #816). Where the fixture diverges from the mock adapter, the PR says so. (PR #895; PR #898)
 - The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
@@ -47,6 +48,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - An unreachable source is plain text in the status bar; only a credential failure gets the err tone and *Re-enter password*. (#809, PR #885)
 - An estimate reads in hours and minutes (`est. 6h`), never days. (#816, PR #898)
 - Initials come from the account's spelling (`mara.lindqvist` is ML). (#810, PR #895)
+- A sentence built from a backend reason capitalises only knobas' own opening word; a source's word (an account, an asset path) keeps the source's spelling. (#834, PR #958)
 
 ## Tickets
 
