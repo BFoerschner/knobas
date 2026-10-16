@@ -916,6 +916,7 @@ function tree(section: string | null): Promise<View | null> {
         truncated: false,
         binary: false,
         url: null,
+        sha: null,
       },
     ],
     "file:src/main.rs": [
@@ -929,6 +930,7 @@ function tree(section: string | null): Promise<View | null> {
         truncated: false,
         binary: false,
         url: null,
+        sha: null,
       },
     ],
   };

@@ -174,6 +174,11 @@ pub enum Block {
         truncated: bool,
         binary: bool,
         url: Option<String>,
+        /// The file's blob sha at the ref drawn (#883): the version an edit
+        /// of it is made against, `WriteOp::CommitFile`'s `base_sha`. `None`
+        /// where the source has none; absent on the wire reads as `None`.
+        #[serde(default)]
+        sha: Option<String>,
     },
 }
 
@@ -702,6 +707,7 @@ mod tests {
                 truncated: true,
                 binary: false,
                 url: Some("https://gitea.example/o/r/src/branch/main/README.md".into()),
+                sha: Some("8c2ac7f1e6c4a3b2d1e0f9a8b7c6d5e4f3a2b1c0".into()),
             },
         ];
         for block in &probes {
@@ -798,15 +804,25 @@ mod tests {
             truncated: false,
             binary: true,
             url: None,
+            sha: None,
         };
         assert_eq!(
             serde_json::to_value(&file).unwrap(),
             serde_json::json!({
                 "type": "file", "trail": [], "path": "logo.png", "text": "",
                 "language": null, "size": 2048, "truncated": false, "binary": true,
-                "url": null
+                "url": null, "sha": null
             })
         );
+        // A file block from before the blob was drawn reads as one without
+        // it (#883).
+        let old: Block = serde_json::from_value(serde_json::json!({
+            "type": "file", "trail": [], "path": "a.txt", "text": "a\n",
+            "language": null, "size": 2, "truncated": false, "binary": false,
+            "url": null
+        }))
+        .expect("a file block without a sha reads");
+        assert!(matches!(old, Block::File { sha: None, .. }), "{old:?}");
     }
 
     /// The wire shape the TypeScript mirror is written against: blocks are a

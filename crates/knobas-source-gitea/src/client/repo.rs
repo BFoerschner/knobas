@@ -260,8 +260,9 @@ impl GiteaClient {
     }
 
     /// `GET /repos/{o}/{r}/contents/{file}?ref={at}` -- one file's own entry
-    /// at a ref (its size, among others): what a cut [`Self::raw_capped`]
-    /// read asks when Gitea's answer did not say how long the file is.
+    /// at a ref (its size and blob sha, among others): read beside every
+    /// file's [`Self::raw_capped`] for the blob an edit is made against
+    /// (#883), and its size where a cut answer did not say how long it is.
     pub(crate) async fn contents_entry_as<T: serde::de::DeserializeOwned>(
         &self,
         owner: &str,

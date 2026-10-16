@@ -2335,6 +2335,7 @@ knobas-source-gitea	test/it	view_branch::the_default_branch_offers_no_delete_and
 knobas-source-gitea	test/it	view_branch::the_default_branch_shows_no_compare
 knobas-source-gitea	test/it	view_branch::the_diff_tab_reads_the_compares_diff
 knobas-source-gitea	test/it	view_files::a_binary_file_says_so_with_its_size
+knobas-source-gitea	test/it	view_files::a_branch_file_carries_the_blob_at_the_branch
 knobas-source-gitea	test/it	view_files::a_branch_reads_its_tree_at_the_branch
 knobas-source-gitea	test/it	view_files::a_cut_file_without_a_length_asks_gitea_its_size
 knobas-source-gitea	test/it	view_files::a_directory_over_the_entry_cap_is_cut_at_it
@@ -2466,6 +2467,7 @@ knobas-source-gitea	test/live_gitea	pull_requests_come_back_newest_updated_first
 knobas-source-gitea	test/live_gitea	repositories_gitea_refuses_pull_requests_for_do_not_end_a_full_sync
 knobas-source-gitea	test/live_gitea	the_adapter_creates_a_branch_a_pull_request_a_comment_and_an_approval
 knobas-source-gitea	test/live_gitea	the_discussion_endpoint_does_not_page
+knobas-source-gitea	test/live_gitea	the_file_view_draws_the_blob_a_commit_is_made_against
 knobas-source-gitea	test/live_gitea	the_seeded_content_lands_under_the_documented_key_forms
 knobas-source-gitea	test/live_gitea	the_seeded_repos_view_lists_its_pull_requests_and_branches
 knobas-source-gitea	test/live_gitea	the_seeded_trees_are_walked_and_a_seeded_file_is_drawn
