@@ -70,9 +70,7 @@ impl ProjectTree {
         if roots.iter().any(|r| r == id) {
             return true;
         }
-        self.path(id)
-            .iter()
-            .any(|p| roots.iter().any(|r| *r == p.id))
+        self.path(id).iter().any(|p| roots.contains(&p.id))
     }
 
     /// `raw` with its project's chain written beside it under
