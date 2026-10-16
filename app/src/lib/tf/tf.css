@@ -1536,8 +1536,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-mon-acts .tf-btn + .tf-btn { margin-left: 4px; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }
-||||||| parent of 6fd9703f (Repository page: Branches, compare and create a PR, edit a file and commit it)
-
 
 /* ---------- Branches, compare and edit (#839, #840, #845, R-8.6, R-8.8, R-8.11) ---------- */
 .tf-rbranches td:first-child { width: 34%; }
