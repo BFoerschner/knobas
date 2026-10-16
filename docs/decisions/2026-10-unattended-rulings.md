@@ -3065,3 +3065,62 @@ Ruled by the implementer (PR for #863).
   (`confluence:sepa`, `confluence:manual-review`), and PAY-231's reach lists them.** These are
   prototype-6's two PAY-231 pages. The reach's `mock:` page rows stay for the job's Pages section,
   which reads `list_entities`. **Reversing:** low.
+
+## #842, #843 and #994 — Files changed and reviews, Merge…, Ready to merge?'s lines (2026-10-16)
+
+- ***Viewed* is one `knobas.setting` row, `code.viewed`**, by pull request, holding the head sha
+  the ticks were made on. Its two commands (`pr_viewed_files`, `set_pr_file_viewed`) read the head
+  from the mirror's declared `commit`, not from the live view, which declares no sha. So a push
+  resets *Viewed* once the sync has read it, not the moment the diff shows it. **Reversing:** low
+  (a view fact or a parameter would carry the live sha).
+- ***Approvals* reads `none required` (ok)** where the base's protection asks for none or cannot be
+  read, rather than being left out, so the panel keeps prototype-6's three lines on an unprotected
+  repository. **Reversing:** low (`land.rs`'s `ready_facts`).
+- ***Conflicts* follows #994's wording:** `conflicts with <base>` for Gitea's `mergeable: false`,
+  though `false` also covers a check still running (`Blocker::Conflict`'s doubt). A
+  work-in-progress title, whose `false` says nothing about a conflict, gets no line. **Reversing:**
+  low.
+- ***Ready to merge?* drops the per-reviewer lines** for prototype-6's three. A source that
+  declares neither *Approvals* nor *Conflicts* still gets its *Mergeable* sentence as written. A
+  closed or merged pull request, which declares none of them, draws no panel. **Reversing:** low
+  (`readyLines`).
+- **A check row's time rides in its `meta`**, after the description, joined by ` · ` (as a commit
+  row's author and date are). No new `ViewRow` field. The Overview draws state and meta in one
+  cell, so prototype-6's separate time column is not drawn. **Reversing:** medium (a `ViewRow`
+  field is a §10.8 entry and 46 literals).
+- **A squash's message is a new optional `MergePullRequest.message`**, its first line Gitea's
+  title and the rest its body. Gitea's *Merge…* declares it as a third field, prefilled with
+  Gitea's own squash default (`<title> (#n)`). The shell sends it only with *Squash*. The old
+  shell's dialog shows the field too, labelled *Squash commit message*. **Reversing:** low (the
+  field is optional both ways).
+- ***Merge…* opens its dialog even when blocked**, its tooltip still the source's sentence. The
+  dialog's *Merge* is `aria-disabled` with that sentence as its title. The warn box lists each
+  reason, one per line: the sentence split at `; `, which is how `land.rs` joins them. It opens
+  *<source> blocks this merge:*, not prototype-6's *Gitea's branch protection blocks this merge:*,
+  because some reasons (a conflict, a work-in-progress title) are not protection. **Reversing:**
+  low.
+- **The open dialog reuses *Ready to merge?*'s lines** (*Approvals: 2 of 2*) rather than
+  prototype-6's second spelling (*2 of 2 approvals*, *All checks passing*). One reading, two
+  places. **Reversing:** low.
+- **The three styles get prototype-6's words** (*Create a merge commit*, *Rebase onto main*,
+  *Squash into one commit*), keyed on the SPI's `MergeStyle` values. A value outside the three
+  would show the source's label. **Reversing:** low.
+- **The In Review line shows when knobas holds a confirmed link to a ticket** (`EntityDetail.links`,
+  the links `follow_merges` joins on), naming the ticket by its key. **Reversing:** low.
+- ***Submit review* offers the verdicts the source's actions offer.** *Comment* is the
+  comment-only review Gitea declares as `line_comments: requires`, so it is drawn disabled until a
+  line comment waits. The first verdict that can be sent starts checked. *Approve*'s meaning is
+  *Counts toward the approvals <base> needs*, without prototype-6's count, which would mean
+  reading it out of the *Approvals* fact. A verdict whose words are required (*Request changes*)
+  says *Summary*, not *Summary (optional)*, and waits for them. **Reversing:** low.
+- **Pending line comments are the old shell's store** (`detail/view/pending-comments`, this
+  viewer's `localStorage`), so a comment written in one shell is pending in the other. Once a
+  review is queued, the comments it took are settled; one edited meanwhile stays. **Reversing:**
+  low.
+- **A thread is drawn as each comment's login, its age and its words.** Prototype-6's *Reply*
+  (a toast there) is left out: no write takes a reply to a line thread. Outdated threads, and
+  pending comments whose line is no longer drawn, sit in a closed *N outdated* list at the end of
+  the file. Threads and comments on files the diff no longer holds go in one list at the end.
+  **Reversing:** low.
+- **The *Files* section is read each time the tab opens**, not cached with the whole view, so a
+  return to the tab shows the diff as it is now. **Reversing:** low.
