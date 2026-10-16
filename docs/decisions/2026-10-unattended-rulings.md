@@ -2152,3 +2152,8 @@ Merge-manager, PR #938 for #831.
   "Not registered: <reason>" under the row, as the rooms section does. **Reversing:** low.
 - **The rooms UI's capture section says a stored shortcut is not registered while notes are
   hidden.** Without that it would read "Registered." for a key nobody holds. **Reversing:** low.
+- **Merge review of #944: `page_file_name` caps its stem at 60 characters and suffixes a Windows
+  device name with `-page`.** Its slug already kept only letters, digits and `-`, so no title could
+  leave the export folder. A long title would have made a name over 255 bytes and failed the whole
+  export, and `con.md` cannot be written on Windows. The rule lives in `page_file_name`, so a page
+  link and the file it points at still agree. **Reversing:** low.

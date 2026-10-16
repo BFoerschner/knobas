@@ -107,8 +107,14 @@ pub fn to_markdown(blocks: &[DocBlock]) -> String {
 }
 
 /// The file a page with this title is exported as: lower case, letters and
-/// digits kept, everything else one `-`, and `.md`. A title with nothing to
-/// keep is `untitled.md`.
+/// digits kept, everything else one `-`, at most [`FILE_STEM_CHARS`]
+/// characters, and `.md`. A title with nothing to keep is `untitled.md`.
+///
+/// Only letters, digits and `-` survive, so no title can name a path outside
+/// the export folder (`/`, `..` and `\` all become `-`). The cap keeps a long
+/// title under the 255-byte name limit, which would otherwise fail the whole
+/// export. A stem Windows reserves for a device (`con`, `nul`, `com1`, ...)
+/// gets `-page`, since `con.md` cannot be written there.
 ///
 /// One function for both ends of a link: [`Inline::PageLink`] points at the
 /// name the exporter writes.
@@ -116,6 +122,9 @@ pub fn to_markdown(blocks: &[DocBlock]) -> String {
 pub fn page_file_name(title: &str) -> String {
     let mut slug = String::new();
     for ch in title.chars().flat_map(char::to_lowercase) {
+        if slug.chars().count() >= FILE_STEM_CHARS {
+            break;
+        }
         if ch.is_alphanumeric() {
             slug.push(ch);
         } else if !slug.is_empty() && !slug.ends_with('-') {
@@ -125,9 +134,24 @@ pub fn page_file_name(title: &str) -> String {
     let slug = slug.trim_end_matches('-');
     if slug.is_empty() {
         "untitled.md".to_owned()
+    } else if is_windows_device(slug) {
+        format!("{slug}-page.md")
     } else {
         format!("{slug}.md")
     }
+}
+
+/// The longest stem [`page_file_name`] writes, in characters. Four bytes a
+/// character at worst, plus `-99.md`, stays under 255 bytes.
+pub const FILE_STEM_CHARS: usize = 60;
+
+/// Whether Windows reserves `stem` for a device, whatever the extension.
+fn is_windows_device(stem: &str) -> bool {
+    matches!(stem, "con" | "prn" | "aux" | "nul")
+        || ["com", "lpt"].iter().any(|prefix| {
+            stem.strip_prefix(prefix)
+                .is_some_and(|n| n.len() == 1 && n.as_bytes()[0].is_ascii_digit())
+        })
 }
 
 fn join_blocks(blocks: &[DocBlock]) -> String {
@@ -565,5 +589,22 @@ mod tests {
         );
         assert_eq!(page_file_name("  Größe / 2026  "), "größe-2026.md");
         assert_eq!(page_file_name("???"), "untitled.md");
+    }
+
+    #[test]
+    fn a_file_name_stays_in_its_folder_and_writable() {
+        assert_eq!(page_file_name("../../etc/passwd"), "etc-passwd.md");
+        assert_eq!(page_file_name("a\\b/c"), "a-b-c.md");
+        assert_eq!(page_file_name(".."), "untitled.md");
+        assert_eq!(page_file_name("CON"), "con-page.md");
+        assert_eq!(page_file_name("com1"), "com1-page.md");
+        assert_eq!(page_file_name("com12"), "com12.md");
+        assert_eq!(page_file_name("console"), "console.md");
+        let long = page_file_name(&"ä ".repeat(200));
+        assert!(long.len() < 255, "{} bytes", long.len());
+        assert!(
+            !long.contains("-.md"),
+            "no dash before the extension: {long}"
+        );
     }
 }

@@ -1115,6 +1115,7 @@ knobas-core	lib/knobas_core	link::tests::origin_roundtrips_through_its_column_va
 knobas-core	lib/knobas_core	link::tests::origin_serializes_as_its_column_value
 knobas-core	lib/knobas_core	link::tests::the_origins_are_exactly_what_the_migration_allows
 knobas-core	lib/knobas_core	markdown::tests::a_file_name_keeps_letters_and_digits
+knobas-core	lib/knobas_core	markdown::tests::a_file_name_stays_in_its_folder_and_writable
 knobas-core	lib/knobas_core	markdown::tests::a_heading_is_hashes_by_level_and_clamped
 knobas-core	lib/knobas_core	markdown::tests::a_list_is_bulleted_or_numbered_and_nests_under_its_item
 knobas-core	lib/knobas_core	markdown::tests::a_macro_is_an_html_comment_naming_it
