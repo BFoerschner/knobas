@@ -1702,6 +1702,91 @@ async fn a_synced_build_carries_the_revisions_it_ran_on() {
     }
 }
 
+/// The Builds frame (ADR-0022, #848) on the seeded server's own records: every
+/// seeded configuration is a pipeline with a name and a group, and the seeded
+/// 1187 is a run of `Payout_IntegrationTests` -- its declared `pipeline` is the
+/// configuration's own -- with its number, its branch, and a start and finish
+/// in an ISO 8601 spelling `parse_instant` reads, the finish after the start.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_seeded_records_fill_the_builds_frame() {
+    use knobas_core::payload::{Frame, parse_instant, resolve_string};
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+    let declared = knobas_source_teamcity::descriptor_template().payload_paths;
+    let of = |kind: &str| {
+        declared
+            .iter()
+            .find(|paths| paths.kind == kind)
+            .cloned()
+            .expect("the kind declares its paths")
+    };
+    let (pipeline, run) = (of("build_config"), of("build"));
+    assert_eq!(pipeline.frame, Some(Frame::Pipeline));
+    assert_eq!(run.frame, Some(Frame::Run));
+
+    let configs = of_kind(&items, "build_config");
+    assert!(!configs.is_empty(), "the seed makes configurations");
+    for config in &configs {
+        let name = resolve_string(&config.payload, &pipeline.name);
+        let group = resolve_string(&config.payload, &pipeline.group);
+        println!(
+            "SEEDED pipeline {}: name {name:?}, group {group:?}",
+            config.entity
+        );
+        assert!(name.is_some(), "{} has a name", config.entity);
+        assert!(group.is_some(), "{} has a group", config.entity);
+        assert!(resolve_string(&config.payload, &pipeline.pipeline).is_some());
+    }
+
+    let failed = seeded.fixture_build(1187);
+    let build = of_kind(&items, "build")
+        .into_iter()
+        .find(|i| i.entity.key == format!("build:{}", failed.real_id))
+        .unwrap_or_else(|| panic!("the seeded 1187 is missing; got {:?}", keys(&items)));
+    let field = |paths: &[knobas_core::payload::PayloadPath]| resolve_string(&build.payload, paths);
+    println!(
+        "SEEDED 1187 as a run: pipeline {:?}, number {:?}, branch {:?}, started {:?}, finished {:?}",
+        field(&run.pipeline),
+        field(&run.number),
+        field(&run.branch),
+        field(&run.started),
+        field(&run.finished)
+    );
+    assert_eq!(
+        field(&run.pipeline).as_deref(),
+        Some(failed.build_type.as_str())
+    );
+    let own = configs
+        .iter()
+        .find(|c| {
+            resolve_string(&c.payload, &pipeline.pipeline).as_deref()
+                == Some(failed.build_type.as_str())
+        })
+        .expect("the run's pipeline is a mirrored configuration");
+    assert_eq!(
+        resolve_string(&own.payload, &pipeline.pipeline),
+        field(&run.pipeline),
+        "a run joins its pipeline on the declared identity"
+    );
+    assert_eq!(field(&run.number).as_deref(), Some("1187"));
+    assert_eq!(
+        field(&run.branch).as_deref(),
+        Some("feature/PAY-231-sepa-retry")
+    );
+    let started = field(&run.started)
+        .as_deref()
+        .and_then(parse_instant)
+        .expect("a start instant");
+    let finished = field(&run.finished)
+        .as_deref()
+        .and_then(parse_instant)
+        .expect("a finish instant");
+    assert!(finished >= started, "{started} .. {finished}");
+}
+
 /// The contract battery -- the suite every adapter must pass -- against the
 /// server that decides, over the configurations nothing in this file queues
 /// on while it runs.

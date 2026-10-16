@@ -1011,3 +1011,39 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-vw-which { display: flex; flex-direction: column; gap: 3px; }
 .tf-vw-which code { font-size: var(--t-xs); overflow-wrap: anywhere; }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
+/* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
+.tf-bv { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
+.tf-pl { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
+.tf-pl-top { padding: 12px 12px 8px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule-2); }
+.tf-pl-top .tf-fsearch { max-width: none; flex: none; }
+.tf-pl-list { overflow: auto; flex: 1; padding: 4px 0 16px; }
+.tf-pl h3 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 12px 14px 4px; }
+.tf-pl-note { font-size: var(--t-sm); color: var(--ink-2); padding: 12px 14px; }
+.tf-pi {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 8px; align-items: center;
+  padding: 5px 14px; text-decoration: none; font-size: var(--t-sm); color: var(--ink);
+}
+.tf-pi:hover { background: var(--sheet-2); }
+.tf-pi[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-pi-nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tf-pi-nm.tf-bad { color: var(--err); }
+.tf-pi-when { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tf-pi[aria-current="true"] .tf-pi-when { color: inherit; opacity: .8; }
+.tf-pi[aria-current="true"] .tf-pi-nm.tf-bad { color: inherit; }
+.tf-strip { display: flex; gap: 2px; grid-column: 1 / span 2; margin-top: 3px; }
+.tf-strip i { width: 7px; height: 5px; border-radius: 1px; background: var(--ok); }
+.tf-strip i.tf-run-err { background: var(--err); }
+.tf-strip i.tf-run-warn { background: var(--warn); }
+.tf-strip i.tf-run-run { background: var(--info); }
+.tf-strip i.tf-run-q { background: var(--rule); }
+.tf-strip i.tf-run-muted { background: var(--muted); }
+.tf-bmain { overflow: auto; min-width: 0; }
+.tf-runs { padding: 0 22px 18px; }
+.tf-runs .tf-run-no { width: 150px; }
+.tf-runs .tf-run-no a { color: inherit; text-decoration: none; margin-right: 6px; }
+.tf-runs .tf-run-br { font-size: var(--t-xs); }
+@media (max-width: 900px) {
+  .tf-bv { grid-template-columns: 1fr; height: auto; }
+  .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
+  .tf-runs { padding-left: 16px; padding-right: 16px; }
+}

@@ -665,6 +665,27 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 paths.kind
             );
         }
+        // The Builds frame (ADR-0022, #848): a run is drawn under the
+        // pipeline whose declared `pipeline` equals its own, so both kinds
+        // must say where that identity is, and a pipeline must say what it is
+        // called -- or the frame lists rows it cannot name or join.
+        if let Some(frame) = paths.frame {
+            assert!(
+                !paths.pipeline.is_empty(),
+                "descriptor.payload_paths declares kind {:?} a {frame:?} of the Builds frame but \
+                 no `pipeline` path -- a run is joined to its pipeline on that identity, so \
+                 without it this kind is a frame row nothing can place",
+                paths.kind
+            );
+            if frame == knobas_core::payload::Frame::Pipeline {
+                assert!(
+                    !paths.name.is_empty(),
+                    "descriptor.payload_paths declares kind {:?} a pipeline but no `name` path -- \
+                     the Builds list names every pipeline it draws",
+                    paths.kind
+                );
+            }
+        }
         assert!(
             declared_for.insert(paths.kind.as_str()),
             "descriptor.payload_paths declares kind {:?} twice; readers take the first entry, \
@@ -684,6 +705,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         List,
         /// A whole number: an estimate in seconds (#816).
         Integer,
+        /// An ISO 8601 instant, basic or extended: when a run started or
+        /// finished (#848), as `parse_instant` reads one.
+        Instant,
     }
 
     impl Wanted {
@@ -697,6 +721,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Integer => value
                     .as_i64()
                     .is_some_and(|n| n.unsigned_abs() < 1_000_000_000_000_000_000),
+                Wanted::Instant => value
+                    .as_str()
+                    .is_some_and(|t| knobas_core::payload::parse_instant(t).is_some()),
             }
         }
 
@@ -706,6 +733,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Flag => "boolean",
                 Wanted::List => "array",
                 Wanted::Integer => "whole number",
+                Wanted::Instant => "ISO 8601 instant",
             }
         }
     }
@@ -750,7 +778,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 12] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 19] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -763,6 +791,13 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::DEFAULT_BRANCH, &paths.default_branch, Wanted::Text),
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
             (field::ESTIMATE, &paths.estimate, Wanted::Integer),
+            (field::NAME, &paths.name, Wanted::Text),
+            (field::GROUP, &paths.group, Wanted::Text),
+            (field::PIPELINE, &paths.pipeline, Wanted::Text),
+            (field::NUMBER, &paths.number, Wanted::Text),
+            (field::BRANCH, &paths.branch, Wanted::Text),
+            (field::STARTED, &paths.started, Wanted::Instant),
+            (field::FINISHED, &paths.finished, Wanted::Instant),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811). One
@@ -1178,6 +1213,15 @@ mod tests {
         StateNoItemResolves,
         /// Declares a state `at` the status object rather than its name.
         StateOntoAnObject,
+        /// Declares its tickets runs of the Builds frame with no `pipeline`
+        /// path: rows nothing can place under a pipeline (#848).
+        FrameWithoutPipeline,
+        /// Declares its tickets pipelines with a `pipeline` path but no
+        /// `name`: rows the Builds list cannot name (#848).
+        PipelineWithoutName,
+        /// Declares a run's `started` at the ticket key, a string that is no
+        /// instant (#848).
+        StartedThatIsNoInstant,
     }
 
     struct TestSource {
@@ -1370,6 +1414,21 @@ mod tests {
                         }],
                         Behavior::StateOntoAnObject => vec![KindPaths {
                             state: state(&["fields", "status"], "In Progress"),
+                            ..good
+                        }],
+                        Behavior::FrameWithoutPipeline => vec![KindPaths {
+                            frame: Some(knobas_core::payload::Frame::Run),
+                            ..good
+                        }],
+                        Behavior::PipelineWithoutName => vec![KindPaths {
+                            frame: Some(knobas_core::payload::Frame::Pipeline),
+                            pipeline: vec![PayloadPath::of(["key"])],
+                            ..good
+                        }],
+                        Behavior::StartedThatIsNoInstant => vec![KindPaths {
+                            frame: Some(knobas_core::payload::Frame::Run),
+                            pipeline: vec![PayloadPath::of(["key"])],
+                            started: vec![PayloadPath::of(["key"])],
                             ..good
                         }],
                         _ => vec![good],
@@ -1933,6 +1992,31 @@ mod tests {
             Behavior::StateOntoAnObject,
             "declares state of kind \"ticket\" at [\"fields\", \"status\"], which leads to an \
              object",
+        )
+        .await;
+    }
+
+    // -- the Builds frame (ADR-0022, #848) -------------------------------------
+
+    #[tokio::test]
+    async fn rejects_a_frame_kind_with_no_pipeline_path() {
+        rejects(Behavior::FrameWithoutPipeline, "but no `pipeline` path").await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_pipeline_with_no_name_path() {
+        rejects(
+            Behavior::PipelineWithoutName,
+            "a pipeline but no `name` path",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_started_time_that_is_no_instant() {
+        rejects(
+            Behavior::StartedThatIsNoInstant,
+            "declares started of kind \"ticket\" at [\"key\"], which leads to a string",
         )
         .await;
     }

@@ -505,6 +505,10 @@ pub fn run() {
             commands::search::ticket_views,
             commands::search::save_ticket_view,
             commands::search::delete_ticket_view,
+            // #848's two Builds reads, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::pipelines,
+            commands::entity::pipeline_runs,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

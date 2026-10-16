@@ -1243,6 +1243,309 @@ pub async fn get_entity(
     get_entity_inner(&pool, &entity_id).await
 }
 
+// -- the Builds frame (ADR-0022, #848) -------------------------------------
+
+/// One run of a pipeline, as the Builds view draws it (#848): every field
+/// read through the run kind's declared paths (ADR-0007), and nothing else.
+///
+/// `started` and `finished` are the declared ISO 8601 instants, basic or
+/// extended (`knobas_core::payload::parse_instant`); a run in flight has no
+/// `finished`, a queued one neither. `duration_seconds` is the one from the
+/// other, only where both are read.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+pub struct RunRow {
+    pub entity_id: String,
+    /// The run's number in the source's own spelling; a queued TeamCity
+    /// build has none yet.
+    pub number: Option<String>,
+    /// The declared state chip (#666): its text in the source's word and the
+    /// tone the shell draws it in.
+    pub state: Option<knobas_core::payload::StateChip>,
+    pub branch: Option<String>,
+    pub started: Option<DateTime<Utc>>,
+    pub finished: Option<DateTime<Utc>>,
+    pub duration_seconds: Option<i64>,
+    /// The source's own timestamp for the row, what runs are ordered by.
+    pub updated_at: Option<DateTime<Utc>>,
+    pub web_url: Option<String>,
+}
+
+/// One pipeline in the Builds list (R-9.4a, #848).
+///
+/// `source_name` is the configured source's display name: the one place the
+/// source's word appears, in the list's header line (ADR-0022). `recent` is
+/// its last runs newest first, at most [`PIPELINE_RECENT`]: the strip, the
+/// latest time, and whether the latest run failed.
+#[derive(Debug, Clone, serde::Serialize)]
+#[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+pub struct PipelineRow {
+    pub entity_id: String,
+    pub source_id: String,
+    pub source_name: String,
+    pub name: String,
+    pub group: Option<String>,
+    pub web_url: Option<String>,
+    pub recent: Vec<RunRow>,
+}
+
+/// How many runs a pipeline row carries: the strip of the last twelve.
+pub const PIPELINE_RECENT: i64 = 12;
+
+/// How many runs `pipeline_runs` answers when the caller names no cap.
+const PIPELINE_RUNS: i64 = 100;
+
+/// The (source, kind) pairs the declarations put in the Builds frame, with
+/// their part: `pipeline` or `run`. `$1` is the declarations. Read once a
+/// statement, so the live corpus is joined on its `(source_id, kind)` rather
+/// than every row's declaration being looked up.
+macro_rules! frame_kinds_cte {
+    () => {
+        "frames as (
+  select s.key as source_id, k.key as kind, k.value->>'frame' as frame
+    from jsonb_each($1::jsonb) s
+    cross join lateral jsonb_each(case when jsonb_typeof(s.value) = 'object' then s.value else '{}'::jsonb end) k
+   where jsonb_typeof(k.value) = 'object' and k.value->>'frame' in ('pipeline', 'run')
+)"
+    };
+}
+
+/// A run's columns, read through its kind's declarations; the row alias is
+/// `i` and the declarations `$1`.
+macro_rules! run_columns {
+    () => {
+        concat!(
+            "i.entity_id, i.source_id, i.web_url, i.item_updated_at, ",
+            knobas_core::declared_string!("$1", "pipeline"),
+            " as pkey, ",
+            knobas_core::declared_string!("$1", "number"),
+            " as number, ",
+            knobas_core::declared_state!("$1"),
+            " as state, ",
+            knobas_core::declared_string!("$1", "branch"),
+            " as branch, ",
+            knobas_core::declared_string!("$1", "started"),
+            " as started, ",
+            knobas_core::declared_string!("$1", "finished"),
+            " as finished"
+        )
+    };
+}
+
+/// Every live pipeline, by name, each with its last [`PIPELINE_RECENT`] runs
+/// as a jsonb array newest first. A run sits under the pipeline of its own
+/// source whose declared `pipeline` equals its own; a pipeline whose name or
+/// identity misses is not drawn. Runs are ordered by the source's own
+/// timestamp, newest first.
+const PIPELINES: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ",
+p as (
+  select i.entity_id, i.source_id, i.web_url, coalesce(c.display_name, i.source_id) as source_name, ",
+    knobas_core::declared_string!("$1", "name"),
+    " as name, ",
+    knobas_core::declared_string!("$1", "group"),
+    " as grp, ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+    left join knobas.source_config c on c.id = i.source_id
+   where f.frame = 'pipeline'
+),
+r as (
+  select x.*, row_number() over (partition by x.source_id, x.pkey
+                                 order by x.item_updated_at desc nulls last, x.entity_id desc) as rn
+    from (select ",
+    run_columns!(),
+    "
+            from frames f
+            join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+           where f.frame = 'run') x
+   where x.pkey is not null
+)
+select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url,
+       coalesce((select jsonb_agg(jsonb_build_object(
+                   'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
+                   'branch', r.branch, 'started', r.started, 'finished', r.finished,
+                   'updated_at', r.item_updated_at, 'web_url', r.web_url) order by r.rn)
+                   from r
+                  where r.source_id = p.source_id and r.pkey = p.pkey and r.rn <= $2),
+                '[]'::jsonb) as recent
+  from p
+ where p.pkey is not null and p.name is not null
+ order by lower(p.name), p.entity_id
+"
+);
+
+/// The runs of the pipeline `$2`, newest first, at most `$3`.
+const PIPELINE_RUNS_OF: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ",
+target as (
+  select i.source_id, ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'pipeline' and i.entity_id = $2
+)
+select t.pkey is not null as found, x.* from target t
+  left join lateral (
+    select ",
+    run_columns!(),
+    "
+      from frames f
+      join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+     where f.frame = 'run' and f.source_id = t.source_id
+       and ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " = t.pkey
+     order by i.item_updated_at desc nulls last, i.entity_id desc
+     limit $3) x on true
+"
+);
+
+/// A run as it leaves a statement or a `recent` array: the declared times
+/// still in the source's spelling.
+#[derive(serde::Deserialize)]
+struct RawRun {
+    entity_id: String,
+    number: Option<String>,
+    state: Option<knobas_core::payload::StateChip>,
+    branch: Option<String>,
+    started: Option<String>,
+    finished: Option<String>,
+    updated_at: Option<DateTime<Utc>>,
+    web_url: Option<String>,
+}
+
+impl From<RawRun> for RunRow {
+    fn from(raw: RawRun) -> Self {
+        let instant =
+            |t: Option<String>| t.as_deref().and_then(knobas_core::payload::parse_instant);
+        let started = instant(raw.started);
+        let finished = instant(raw.finished);
+        RunRow {
+            entity_id: raw.entity_id,
+            number: raw.number,
+            state: raw.state,
+            branch: raw.branch,
+            duration_seconds: started
+                .zip(finished)
+                .map(|(from, to)| (to - from).num_seconds().max(0)),
+            started,
+            finished,
+            updated_at: raw.updated_at,
+            web_url: raw.web_url,
+        }
+    }
+}
+
+/// Every pipeline the configured sources declare, for the Builds list.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError> {
+    let declarations = declared_paths(pool).await?;
+    let rows = sqlx::query(PIPELINES)
+        .bind(declarations.as_param())
+        .bind(PIPELINE_RECENT)
+        .fetch_all(pool)
+        .await?;
+    rows.iter()
+        .map(|row| {
+            let recent: sqlx::types::Json<Vec<RawRun>> = row.get("recent");
+            Ok(PipelineRow {
+                entity_id: row.get("entity_id"),
+                source_id: row.get("source_id"),
+                source_name: row.get("source_name"),
+                name: row.get("name"),
+                group: row.get("grp"),
+                web_url: row.get("web_url"),
+                recent: recent.0.into_iter().map(RunRow::from).collect(),
+            })
+        })
+        .collect()
+}
+
+/// One pipeline's runs, newest first, at most `limit` (100 when `None`).
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not an
+/// entity id; [`NotFound`](crate::IpcErrorCode::NotFound) when no live
+/// pipeline carries it; [`Internal`](crate::IpcErrorCode::Internal) for a
+/// query failure.
+pub async fn pipeline_runs_inner(
+    pool: &PgPool,
+    pipeline_id: &str,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    let declarations = declared_paths(pool).await?;
+    let rows = sqlx::query(PIPELINE_RUNS_OF)
+        .bind(declarations.as_param())
+        .bind(entity.to_string())
+        .bind(limit.map_or(PIPELINE_RUNS, i64::from))
+        .fetch_all(pool)
+        .await?;
+    if !rows.first().is_some_and(|row| row.get::<bool, _>("found")) {
+        return Err(IpcError::not_found(format!(
+            "{entity} is not a pipeline in the mirror"
+        )));
+    }
+    Ok(rows
+        .iter()
+        .filter_map(|row| {
+            let entity_id: Option<String> = row.get("entity_id");
+            Some(RunRow::from(RawRun {
+                entity_id: entity_id?,
+                number: row.get("number"),
+                state: row
+                    .get::<Option<sqlx::types::Json<knobas_core::payload::StateChip>>, _>("state")
+                    .map(|chip| chip.0),
+                branch: row.get("branch"),
+                started: row.get("started"),
+                finished: row.get("finished"),
+                updated_at: row.get("item_updated_at"),
+                web_url: row.get("web_url"),
+            }))
+        })
+        .collect())
+}
+
+/// The Builds list (#848).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`pipelines_inner`] refuses with.
+#[tauri::command]
+pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRow>, IpcError> {
+    let pool = lifecycle.pool()?;
+    pipelines_inner(&pool).await
+}
+
+/// One pipeline's runs (#848).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`pipeline_runs_inner`] refuses with.
+#[tauri::command]
+pub async fn pipeline_runs(
+    lifecycle: State<'_, Lifecycle>,
+    pipeline_id: String,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    let pool = lifecycle.pool()?;
+    pipeline_runs_inner(&pool, &pipeline_id, limit).await
+}
+
 // -- the URL a paste names --------------------------------------------------
 
 /// What a pasted URL resolved to: the entity, and the kind that says where it

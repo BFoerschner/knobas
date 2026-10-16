@@ -347,6 +347,7 @@ const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
 const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
+const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
@@ -767,6 +768,40 @@ const CASES: Case[] = [
             views: () => deferred([]),
             saveView: () => new Promise(() => {}),
             deleteView: () => new Promise(() => {}),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Builds (#848): the filter's `/` on the window, and the pipelines and
+     * runs reads answering late.
+     */
+    name: "TfBuilds",
+    source: "lib/tf/builds/TfBuilds.svelte",
+    open: (target) => ({
+      app: mount(TfBuilds, {
+        target,
+        props: {
+          ready: true,
+          head: "builds",
+          rest: [],
+          job: null,
+          ports: {
+            pipelines: () =>
+              deferred([
+                {
+                  entity_id: "teamcity:buildType:A",
+                  source_id: "teamcity",
+                  source_name: "TeamCity",
+                  name: "A",
+                  group: null,
+                  web_url: null,
+                  recent: [],
+                },
+              ]),
+            runs: () => deferred([]),
           },
         },
       }),

@@ -193,3 +193,20 @@ test("the start-work flow proposes in the named repository, then runs to queued 
   const ran = h["start_work_run"]!({ entityId: "mock:PAY-236" }) as { outcome: string }[];
   expect(ran.map((step) => step.outcome)).toEqual(["queued", "queued", "succeeded", "queued"]);
 });
+
+// -- Builds (#848) ----------------------------------------------------------
+
+test("builds: 59 pipelines by name, each with at most twelve runs, and pipeline_runs answers each one", () => {
+  const h = demoHandlers() as Calls;
+  const list = h["pipelines"]!({}) as { entity_id: string; name: string; recent: { state: { tone: string } }[] }[];
+  expect(list).toHaveLength(59);
+  const names = list.map((p) => p.name);
+  expect([...names].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()))).toEqual(names);
+  expect(list.every((p) => p.recent.length > 0 && p.recent.length <= 12)).toBe(true);
+  const tests = list.find((p) => p.name === "Payout_IntegrationTests")!;
+  expect(tests.recent[0]!.state.tone).toBe("err");
+  const runs = h["pipeline_runs"]!({ pipelineId: tests.entity_id, limit: null }) as { number: string }[];
+  expect(runs[0]!.number).toBe("1187");
+  expect(runs.length).toBeGreaterThan(12);
+  expect(() => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
+});

@@ -114,7 +114,26 @@ export interface KindPaths {
   sprint_state: ListPath[];
   /** A ticket's original estimate in seconds, a whole number (#816). */
   estimate: PayloadPath[];
+  /** Which part of the Builds frame this kind is, or `null` (ADR-0022, #848). */
+  frame: Frame | null;
+  /** What a pipeline is called (#848). */
+  name: PayloadPath[];
+  /** The group a pipeline sits in, in the source's word (#848). */
+  group: PayloadPath[];
+  /** The pipeline's identity, as a pipeline and its runs both spell it (#848). */
+  pipeline: PayloadPath[];
+  /** A run's number, a string (#848). */
+  number: PayloadPath[];
+  /** The branch a run built (#848). */
+  branch: PayloadPath[];
+  /** When a run started, ISO 8601 basic or extended (#848). */
+  started: PayloadPath[];
+  /** When a run finished, as `started` (#848). */
+  finished: PayloadPath[];
 }
+
+/** `knobas_core::payload::Frame` — a pipeline or a run of the Builds frame (#848). */
+export type Frame = "pipeline" | "run";
 
 /**
  * `knobas_core::payload::StatePath` — where a row's state sits, and the values

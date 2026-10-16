@@ -4,6 +4,7 @@
  */
 import { expect, test } from "vitest";
 
+import { page as buildsPage } from "./builds/page";
 import { page as jobPage } from "./job/page";
 import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
@@ -18,6 +19,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(timePage);
   expect(PAGES).toContain(settingsPage);
   expect(PAGES).toContain(reviewPage);
+  expect(PAGES).toContain(buildsPage);
 });
 
 const ADDRESSES = [
@@ -33,7 +35,10 @@ const ADDRESSES = [
   ["#/settings/source/teamcity", "settings"],
   ["#/review", "review"],
   ["#/review/link-1", "review"],
-  ["#/builds", "shell"],
+  ["#/builds", "builds"],
+  ["#/builds/teamcity%3AbuildType%3APayout_Build", "builds"],
+  ["#/build/x/y", "builds"],
+  ["#/code", "shell"],
   ["#/nowhere", "shell"],
 ] as const;
 
@@ -45,6 +50,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [timePage, "time"],
     [settingsPage, "settings"],
     [reviewPage, "review"],
+    [buildsPage, "builds"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);
@@ -67,4 +73,15 @@ test("the review page hands TfReview the addressed proposal, or none", () => {
   const props = (hash: string) => reviewPage.props({ route: parseTfHash(hash) } as Parameters<typeof reviewPage.props>[0]);
   expect(props("#/review/link%3Afake-2")).toMatchObject({ sid: "link:fake-2" });
   expect(props("#/review")).toMatchObject({ sid: null });
+});
+
+test("the builds page hands TfBuilds the address's head and the pipeline's entity id", () => {
+  const route = parseTfHash("#/builds/teamcity%3AbuildType%3APayout_Build");
+  const props = buildsPage.props({ route, ready: true, job: null } as Parameters<typeof buildsPage.props>[0]);
+  expect(props).toMatchObject({ head: "builds", rest: ["teamcity:buildType:Payout_Build"] });
+  const run = parseTfHash("#/build/p/r");
+  expect(buildsPage.props({ route: run, ready: true, job: null } as Parameters<typeof buildsPage.props>[0])).toMatchObject({
+    head: "build",
+    rest: ["p", "r"],
+  });
 });
