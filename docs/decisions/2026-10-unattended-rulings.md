@@ -3593,3 +3593,5 @@ Ruled by the merge-manager (PR #1018).
   assignee through the `fp` CTE was tried and was 8 times slower. Without the one-row `pd`
   join, the planner chose a nested loop over `sync.item` × `knobas.entity` on tables that
   were never analyzed. So the declared read per row stays. **Reversing:** low.
+
+- **Merge-manager (PR #1025): the key branch is redundant only where `sync.item_parent` already names the ticket.** A Jira ticket's own key is among the names it answers to as a parent, so the surviving mutant was right for a payload that carries its key. The fixture also titled each ticket with its key. The test now has a ticket with a summary title and one whose payload names no key; the mutant fails it. **Reversing:** n/a.
