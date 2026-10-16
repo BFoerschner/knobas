@@ -41,7 +41,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { flushSync, mount, unmount } from "svelte";
+import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
 import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
@@ -354,6 +354,7 @@ const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
+const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -901,6 +902,36 @@ const CASES: Case[] = [
           rest: ["teamcity:buildType:A"],
           job: "PAY-231",
           runs: () => deferred([]),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The run page (#853): the runs, the run's view, the settings, the job's
+     * branches and the sources' facts all answering late, through the real ports.
+     */
+    name: "TfRun",
+    source: "lib/tf/builds/TfRun.svelte",
+    open: (target) => ({
+      app: mount(TfRun, {
+        target,
+        props: {
+          pipeline: {
+            entity_id: "teamcity:buildType:A",
+            source_id: "teamcity",
+            source_name: "TeamCity",
+            name: "A",
+            group: null,
+            path: [],
+            pinned: false,
+            web_url: null,
+            recent: [],
+          },
+          rest: ["teamcity:buildType:A", "teamcity:build:1"],
+          job: "PAY-231",
+          runs: () => deferred([]),
+          crumbs: createRawSnippet(() => ({ render: () => "<nav></nav>" })),
         },
       }),
     }),
