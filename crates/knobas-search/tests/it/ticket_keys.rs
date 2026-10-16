@@ -755,6 +755,14 @@ async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
     )
     .await;
     let nobodys = store(&pool, &p, 2, BASE).await;
+    // A real ticket's title is its summary, not its key, so the key is a
+    // word of the row only through the key branch of the predicate (a
+    // Jira ticket answers as its own epic only when it is one).
+    sqlx::query("update sync.item set title = 'Rename the ledger' where entity_id = $1")
+        .bind(&nobodys)
+        .execute(&pool)
+        .await
+        .unwrap();
     let searcher = searcher(&pool).await;
     for (typed, expected) in [
         (person.to_uppercase(), vec![theirs.clone()]),
