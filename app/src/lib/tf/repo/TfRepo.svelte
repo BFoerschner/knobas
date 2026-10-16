@@ -12,7 +12,7 @@
   - **The tabs**, `REPO_TABS` in `repo.ts`: Files, Commits and Pull requests
     are drawn here; Branches (#839) and Local changes (#847), and the edit
     (#845) and compare (#840) places, say they are not built yet. A ticket that
-    builds one replaces its `notBuilt` arm below with its component.
+    builds one replaces its `NOT_BUILT` entry below with its component.
 
   The repository is read through its source's own view (`entity_view`), so a
   repository nobody cloned reads the same as one on this disk; the checkout
@@ -75,6 +75,7 @@
     repoPrs,
     REPO_TABS,
     type BranchOption,
+    type RepoTab,
     type RepoTabId,
   } from "./repo";
   import TfRepoCommit from "./TfRepoCommit.svelte";
@@ -230,7 +231,7 @@
     chosen[repoId] = (event.currentTarget as HTMLSelectElement).value;
   }
 
-  const NOT_BUILT: Record<string, string> = {
+  const NOT_BUILT: Partial<Record<RepoTab, string>> = {
     branches: "Branches",
     local: "Local changes",
     edit: "Editing a file",
@@ -256,7 +257,7 @@
   {:else}
     <header class="tf-fhead">
       <div>
-        <h1 class="tf-mono tf-repo-h">{repo?.title ?? ""}</h1>
+        <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
           {#if repo !== null}Last push {when(repo.updated_at, now)}.{/if}
           {#if sentence !== null && sentence.path !== null}
@@ -291,7 +292,7 @@
       {/each}
     </nav>
     <div class="tf-cbody">
-      {#if route.tab in NOT_BUILT}
+      {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
       {:else if branches === null || at === null}
         <!-- The branch every tab reads at is not known yet. -->

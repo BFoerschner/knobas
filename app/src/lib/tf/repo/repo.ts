@@ -14,7 +14,8 @@ import { matchesAll } from "../filter/filter";
 
 /**
  * The page's tabs, in prototype-6's order. A later ticket that builds one
- * adds its body to `TfRepo.svelte`'s `BUILT` map; the tab row is this list.
+ * replaces its `NOT_BUILT` entry in `TfRepo.svelte` with an arm drawing its
+ * component; the tab row is this list.
  */
 export const REPO_TABS = [
   { id: "files", label: "Files" },

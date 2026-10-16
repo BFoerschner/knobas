@@ -7,14 +7,13 @@
 -->
 <script lang="ts">
   import type { EntityRow } from "../../ipc/entity";
-  import { prNumber } from "../code/code";
+  import { prNumber, PR_STATES } from "../code/code";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { itemHash } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob, type OpenJobPorts } from "../job/open-jobs";
-  import { PR_STATES } from "../code/code";
   import { visibleRepoPrs } from "./repo";
 
   let {

@@ -1398,7 +1398,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 
 /* ---------- Repository page (#838, R-8.3 to R-8.5, R-8.7) ---------- */
-.tf .tf-repo-h { font-size: var(--t-2xl); }
 .tf-count.tf-warn { background: var(--warn-bg); color: var(--warn); }
 /* A tab's filter bar sits in the page's body, not sticky under the tabs. */
 .tf-rbar { margin-bottom: 12px; }

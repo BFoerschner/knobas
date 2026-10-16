@@ -2688,5 +2688,5 @@ Implementer, PR for #851.
   feature glob because they answer no command of their own; `entity.ts`'s `entity_view` asks it
   first. The checkout's fixture change moved to `src/sepa/retry.rs`, the file prototype-6 marks,
   and three of the job branch's commits joined the corpus so their rows open. **Reversing:** low.
-- **The repository name is `--t-2xl`** (prototype-6's 22 px sits between 20 and 24).
-  **Reversing:** low.
+- **A diff file cut by the source's cap ends on "Cut here: the rest of this file's change is at
+  the source."** Prototype-6 has no cut diff; the words are knobas' own. **Reversing:** low.

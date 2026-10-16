@@ -22,8 +22,6 @@
       <span class="tf-add-n">+{file.additions}</span>
       <span class="tf-del-n">−{file.deletions}</span>
       {#if file.change === "added"}<span class="tf-chip">new file</span>{/if}
-      {#if file.change === "deleted"}<span class="tf-chip">deleted</span>{/if}
-      {#if file.change === "binary"}<span class="tf-chip">binary</span>{/if}
     </div>
     {#each file.hunks as hunk, at (at)}
       {#if at > 0}
