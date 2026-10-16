@@ -23,6 +23,7 @@ function seedCaptureShortcut(params: URLSearchParams): void {
   const stored = params.get("fake-shortcut");
   if (stored !== null) fakeShortcutStored = stored.trim() === "" ? null : stored.trim();
   fakeShortcutRefused = params.has("fake-shortcut-refused");
+  fakeNotesShown = params.has("fake-notes-shown");
 }
 
 /**
@@ -32,14 +33,20 @@ function seedCaptureShortcut(params: URLSearchParams): void {
  */
 let fakeShortcutStored: string | null = null;
 let fakeShortcutRefused = false;
+/** *Show notes and quick capture* (#832): off, unless `?fake-notes-shown`. */
+let fakeNotesShown = false;
 
 function fakeShortcut() {
   return {
     accelerator: fakeShortcutStored,
     refusal:
-      fakeShortcutStored !== null && fakeShortcutRefused
+      fakeShortcutStored !== null && fakeNotesShown && fakeShortcutRefused
         ? `${fakeShortcutStored} is registered by another application`
         : null,
+    shown: fakeNotesShown,
+    // Prototype-6's count (#832): 37 notes, the last from 12 August.
+    note_count: 37,
+    last_note_at: "2026-08-12T09:00:00Z",
   };
 }
 
@@ -61,6 +68,13 @@ export function handlers(): Record<string, Handler> {
     record_capture_context: () => null,
     capture_context: () => FAKE_CAPTURE_CONTEXT,
     reveal_note: () => null,
+    // Settings › Notes and capture (#832): the setting, and the export, which
+    // answers the 37 notes `capture_shortcut` counts and writes nothing.
+    set_notes_shown: (args) => {
+      fakeNotesShown = args["shown"] === true;
+      return fakeShortcut();
+    },
+    export_notes_markdown: () => ({ count: 37, folder: "/Users/mara/Downloads/knobas-notes" }),
   };
 }
 

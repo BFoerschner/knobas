@@ -141,6 +141,8 @@
       </div>
       {#if stored.accelerator === null}
         <p class="sub">Not set — no shortcut is registered.</p>
+      {:else if !stored.shown}
+        <p class="sub">Not registered while notes are hidden. The new shell turns them on, in Settings › Notes and capture.</p>
       {:else if stored.refusal !== null}
         <p class="fail">Not registered: {stored.refusal}</p>
       {:else}

@@ -32,8 +32,8 @@
 use std::sync::Mutex;
 
 use knobas_app::capture::{
-    CaptureState, Recorded, Registrar, ShortcutView, context, record, register_stored,
-    set_shortcut, shortcut,
+    CaptureState, Recorded, Registrar, SHOWN_KEY, ShortcutView, context, record, register_stored,
+    set_shortcut, set_shown, shortcut,
 };
 use sqlx::PgPool;
 
@@ -43,6 +43,27 @@ async fn pool() -> PgPool {
         .pool(4)
         .await
         .expect("a pool onto the scratch db")
+}
+
+/// A database with *Show notes and quick capture* on (#832), which is what
+/// every shortcut test before #832 assumed: the shortcut registers only then.
+async fn shown_pool() -> PgPool {
+    let pool = pool().await;
+    knobas_app::settings::write(&pool, SHOWN_KEY, Some("true"))
+        .await
+        .expect("notes shown");
+    pool
+}
+
+/// The view with notes shown and no notes written.
+fn view(accelerator: Option<String>, refusal: Option<String>) -> ShortcutView {
+    ShortcutView {
+        accelerator,
+        refusal,
+        shown: true,
+        note_count: 0,
+        last_note_at: None,
+    }
 }
 
 /// A registrar that records what it was asked to do and refuses one named
@@ -115,8 +136,8 @@ async fn nothing_is_registered_until_a_shortcut_is_chosen() {
     assert_eq!(
         shortcut(&pool, &capture).await.expect("the view"),
         ShortcutView {
-            accelerator: None,
-            refusal: None,
+            shown: false,
+            ..view(None, None)
         },
         "a knobas nobody has configured has no shortcut and nothing to explain"
     );
@@ -130,20 +151,14 @@ async fn nothing_is_registered_until_a_shortcut_is_chosen() {
 /// What is stored is what comes back, and a restart registers it again.
 #[tokio::test]
 async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
-    let pool = pool().await;
+    let pool = shown_pool().await;
     let capture = CaptureState::new();
     let stub = Stub::default();
 
     let answered = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
         .await
         .expect("the write");
-    assert_eq!(
-        answered,
-        ShortcutView {
-            accelerator: Some(SHORTCUT.to_owned()),
-            refusal: None,
-        }
-    );
+    assert_eq!(answered, view(Some(SHORTCUT.to_owned()), None));
     assert_eq!(stub.calls(), [format!("register {SHORTCUT}")]);
 
     // A second process, over the same database: the setting is the only thing
@@ -156,10 +171,7 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
     assert_eq!(after.calls(), [format!("register {SHORTCUT}")]);
     assert_eq!(
         shortcut(&pool, &restarted).await.expect("the view"),
-        ShortcutView {
-            accelerator: Some(SHORTCUT.to_owned()),
-            refusal: None,
-        }
+        view(Some(SHORTCUT.to_owned()), None)
     );
 }
 
@@ -173,7 +185,7 @@ async fn a_stored_shortcut_is_registered_now_and_again_at_the_next_start() {
 /// looked, which is the whole reason this is state.
 #[tokio::test]
 async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
-    let pool = pool().await;
+    let pool = shown_pool().await;
     let capture = CaptureState::new();
     let stub = Stub::refusing(SHORTCUT);
 
@@ -182,10 +194,10 @@ async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
         .expect("a refused registration is not a refused write");
     assert_eq!(
         answered,
-        ShortcutView {
-            accelerator: Some(SHORTCUT.to_owned()),
-            refusal: Some(format!("{SHORTCUT} is registered by another application")),
-        }
+        view(
+            Some(SHORTCUT.to_owned()),
+            Some(format!("{SHORTCUT} is registered by another application"))
+        )
     );
 
     assert_eq!(
@@ -202,7 +214,7 @@ async fn a_refused_shortcut_is_stored_and_the_answer_says_why() {
 /// report under an empty box.
 #[tokio::test]
 async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
-    let pool = pool().await;
+    let pool = shown_pool().await;
     let capture = CaptureState::new();
     let stub = Stub::refusing(SHORTCUT);
 
@@ -215,10 +227,7 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
         .expect("the second write");
     assert_eq!(
         replaced,
-        ShortcutView {
-            accelerator: Some(OTHER.to_owned()),
-            refusal: None,
-        },
+        view(Some(OTHER.to_owned()), None),
         "the new shortcut registered, so there is nothing left to explain"
     );
 
@@ -227,10 +236,7 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
         .expect("a blank field clears");
     assert_eq!(
         cleared,
-        ShortcutView {
-            accelerator: None,
-            refusal: None,
-        },
+        view(None, None),
         "a blank field is *forget this*, and knobas then holds no key"
     );
     assert_eq!(
@@ -242,6 +248,110 @@ async fn a_refusal_does_not_outlive_the_shortcut_that_earned_it() {
         ],
         "clearing the setting cleared the registration, rather than leaving a key that fires"
     );
+}
+
+/// Hidden by default (#832, D10): a stored shortcut is **kept and not
+/// registered**, at bring-up and on a write, and turning notes on registers it.
+///
+/// The ticket's criterion *"with the setting off, the capture shortcut is not
+/// registered; turning it on restores today's behaviour"*, asserted on the
+/// registrar's log, which is what the operating system is asked for.
+#[tokio::test]
+async fn a_stored_shortcut_is_held_only_while_notes_are_shown() {
+    let pool = pool().await;
+    let capture = CaptureState::new();
+    let stub = Stub::default();
+
+    let stored = set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+        .await
+        .expect("the write");
+    assert_eq!(
+        stored,
+        ShortcutView {
+            shown: false,
+            ..view(Some(SHORTCUT.to_owned()), None)
+        },
+        "the shortcut is stored while notes are hidden"
+    );
+    let restarted = Stub::default();
+    register_stored(&pool, &CaptureState::new(), &restarted)
+        .await
+        .expect("bring-up");
+    assert_eq!(
+        stub.calls(),
+        ["clear"],
+        "hidden, the write asked for no key"
+    );
+    assert_eq!(
+        restarted.calls(),
+        ["clear"],
+        "hidden, bring-up asks for no key"
+    );
+
+    let on = set_shown(&pool, &capture, &stub, true)
+        .await
+        .expect("turn notes on");
+    assert_eq!(on, view(Some(SHORTCUT.to_owned()), None));
+    assert_eq!(
+        stub.calls(),
+        ["clear".to_owned(), format!("register {SHORTCUT}")]
+    );
+    let after = Stub::default();
+    register_stored(&pool, &CaptureState::new(), &after)
+        .await
+        .expect("bring-up");
+    assert_eq!(
+        after.calls(),
+        [format!("register {SHORTCUT}")],
+        "shown survives a restart"
+    );
+
+    let off = set_shown(&pool, &capture, &stub, false)
+        .await
+        .expect("turn notes off");
+    assert!(!off.shown);
+    assert_eq!(
+        off.accelerator.as_deref(),
+        Some(SHORTCUT),
+        "hiding keeps the shortcut"
+    );
+    assert_eq!(
+        stub.calls().last().map(String::as_str),
+        Some("clear"),
+        "hiding releases the key"
+    );
+}
+
+/// A refusal is not reported while notes are hidden: nothing was asked for.
+#[tokio::test]
+async fn a_refusal_is_not_reported_while_notes_are_hidden() {
+    let pool = shown_pool().await;
+    let capture = CaptureState::new();
+    let stub = Stub::refusing(SHORTCUT);
+    set_shortcut(&pool, &capture, &stub, Some(SHORTCUT))
+        .await
+        .expect("the refused write");
+    let hidden = set_shown(&pool, &capture, &stub, false)
+        .await
+        .expect("hide");
+    assert_eq!(hidden.refusal, None);
+}
+
+/// The view counts the notes and dates the newest, for the settings section.
+#[tokio::test]
+async fn the_view_counts_the_notes() {
+    let pool = pool().await;
+    let capture = CaptureState::new();
+    assert_eq!(shortcut(&pool, &capture).await.expect("view").note_count, 0);
+    knobas_app::commands::entity::create_note_inner(&pool, Some("One"), Some("a"), &[])
+        .await
+        .expect("a note");
+    knobas_app::commands::entity::create_note_inner(&pool, Some("Two"), Some("b"), &[])
+        .await
+        .expect("a note");
+    let counted = shortcut(&pool, &capture).await.expect("view");
+    assert_eq!(counted.note_count, 2);
+    assert!(counted.last_note_at.is_some());
 }
 
 /// The pair the main window records is the pair the capture window reads.
@@ -382,6 +492,8 @@ fn invoke(cmd: &str, body: serde_json::Value) -> Result<serde_json::Value, Strin
             knobas_app::commands::entity::record_capture_context,
             knobas_app::commands::entity::capture_context,
             knobas_app::commands::entity::reveal_note,
+            knobas_app::commands::entity::set_notes_shown,
+            knobas_app::commands::entity::export_notes_markdown,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -457,6 +569,8 @@ fn every_capture_command_is_registered_and_its_arguments_decode() {
             "reveal_note",
             serde_json::json!({ "noteId": "note:0f2c1a" }),
         ),
+        ("set_notes_shown", serde_json::json!({ "shown": true })),
+        ("export_notes_markdown", serde_json::json!({})),
     ] {
         let outcome = invoke(cmd, args.clone());
         let rejection = match &outcome {

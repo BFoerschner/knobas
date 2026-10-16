@@ -469,6 +469,35 @@ pub async fn get(pool: &PgPool, id: &EntityRef) -> Result<Option<NoteRow>, CoreE
     Ok(row)
 }
 
+/// How many notes there are, and when the newest was last changed (#832):
+/// what Settings › Notes and capture draws beside its switch.
+///
+/// # Errors
+///
+/// [`CoreError`] if the query fails.
+pub async fn summary(pool: &PgPool) -> Result<(u64, Option<DateTime<Utc>>), CoreError> {
+    let (count, last): (i64, Option<DateTime<Utc>>) =
+        sqlx::query_as("select count(*), max(updated_at) from knobas.note")
+            .fetch_one(pool)
+            .await?;
+    Ok((u64::try_from(count).unwrap_or_default(), last))
+}
+
+/// Every note, oldest first: what *Export notes as Markdown* writes (#832).
+///
+/// # Errors
+///
+/// [`CoreError`] if the query fails.
+pub async fn all(pool: &PgPool) -> Result<Vec<NoteRow>, CoreError> {
+    let rows = sqlx::query_as::<_, NoteRow>(
+        "select id, title, body_md, created_at, updated_at from knobas.note
+         order by created_at, id",
+    )
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
 /// Delete a note: the body goes, the address stays, tombstoned.
 ///
 /// The asymmetry is deliberate and is the same one a withdrawn mirrored item

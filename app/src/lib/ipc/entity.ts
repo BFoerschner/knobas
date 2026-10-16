@@ -2275,6 +2275,15 @@ export function entityCheckoutDiff(entityId: string): Promise<DiffRead> {
 export interface CaptureShortcut {
   accelerator: string | null;
   refusal: string | null;
+  /**
+   * *Show notes and quick capture* (#832, D10). Off, the accelerator is kept
+   * and not registered, and `refusal` is `null`.
+   */
+  shown: boolean;
+  /** How many notes there are (#832). */
+  note_count: number;
+  /** RFC 3339: when the newest note was last changed; `null` with no notes. */
+  last_note_at: string | null;
 }
 
 /** What the capture shortcut is set to, and whether it holds — `capture_shortcut` (#503). */
@@ -2387,4 +2396,29 @@ export function visitEntity(entityId: string): Promise<string | null> {
  */
 export function entityThread(entityId: string): Promise<Thread> {
   return invoke<Thread>("entity_thread", { entityId });
+}
+
+/**
+ * Turn *Show notes and quick capture* on or off — `set_notes_shown` (#832,
+ * D10). Registers or releases the stored capture shortcut to match, and
+ * answers the capture shortcut's view, which carries the setting.
+ */
+export function setNotesShown(shown: boolean): Promise<CaptureShortcut> {
+  return invoke<CaptureShortcut>("set_notes_shown", { shown });
+}
+
+/** What *Export notes as Markdown* wrote — `knobas_app::notes_export::NotesExport` (#832). */
+export interface NotesExport {
+  /** Notes written, one `.md` file each. */
+  count: number;
+  /** The folder they are in, absolute. */
+  folder: string;
+}
+
+/**
+ * *Export notes as Markdown* — `export_notes_markdown` (#832, D10): one `.md`
+ * per note, `[[refs]]` kept as text, in `~/Downloads/knobas-notes`.
+ */
+export function exportNotesMarkdown(): Promise<NotesExport> {
+  return invoke<NotesExport>("export_notes_markdown");
 }

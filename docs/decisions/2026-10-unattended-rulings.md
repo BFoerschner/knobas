@@ -2125,3 +2125,35 @@ Merge-manager, PR #938 for #831.
   blocks, depends on*), stored as `create_link` stores ids (`depends-on`); a proposal's relation
   that the list lacks goes first. **Reversing:** low.
 - **No breadcrumb,** as prototype-6 draws this view. **Reversing:** low (`crumbs: true`).
+
+## #832 Hide notes and capture; the Markdown converter
+
+- **The setting lives in the backend, with one command beyond the export.** The capture shortcut is
+  registered in Rust at bring-up, before any window, and the criterion is that it is not
+  registered while the setting is off. So *Show notes and quick capture* is a `knobas.setting` row
+  (`capture.notes_shown`) and `set_notes_shown` is a second new command, though the milestone
+  digest names only the converter's. A frontend-only setting could not keep bring-up from
+  registering the key. **Reversing:** medium, the command and its §10.8 entry.
+- **The note count rides on `capture_shortcut`'s answer.** `list_entities` reads `sync.live_item`,
+  which holds no notes, so it answers 0 for the note kind. `ShortcutView` gains `note_count` and
+  `last_note_at`, so the section has one read and no third command. **Reversing:** low.
+- **A note exports as two blocks: its title as a heading, and its body as Markdown passed through.**
+  The body is already Markdown, so re-parsing it into blocks would only risk changing it. Passing it
+  through keeps every `[[ref]]` exactly as typed. **Reversing:** low.
+- **The converter is `knobas_core::markdown`** (`DocBlock`, `Inline`), a core module and not a
+  frozen surface, so TF4's Confluence mapping (#861) can target it and add blocks. **Reversing:** low.
+- **Export goes to `~/Downloads/knobas-notes`**, as prototype-6's toast says. A same-named file from
+  an earlier export is replaced. A second note with the same title gets `-2`, `-3`. **Reversing:** low.
+- ***Move to Confluence…* shows a toast** saying the move comes with the Docs view, until #941
+  builds the page picker in TF4. **Reversing:** n/a, #941.
+- **Prototype-6's help text keeps "notes are back in search"**, and #940 (TF2) makes that true by
+  taking notes out of search while hidden. This ticket built the shortcut half only. **Reversing:** n/a.
+- **An unset shortcut reads "Not set"**, because prototype-6 always draws one. A refused one reads
+  "Not registered: <reason>" under the row, as the rooms section does. **Reversing:** low.
+- **The rooms UI's capture section says a stored shortcut is not registered while notes are
+  hidden.** Without that it would read "Registered." for a key nobody holds. **Reversing:** low.
+- **Merge review of #944: `page_file_name` caps its stem at 60 characters and suffixes a Windows
+  device name with `-page`.** Its slug already kept only letters, digits and `-`, so no title could
+  leave the export folder. A long title would have made a name over 255 bytes and failed the whole
+  export, and `con.md` cannot be written on Windows. The rule lives in `page_file_name`, so a page
+  link and the file it points at still agree. **Reversing:** low.

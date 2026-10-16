@@ -3201,6 +3201,45 @@ pub fn reveal_note<R: tauri::Runtime>(
     crate::capture::reveal_note(&app, &note_id)
 }
 
+/// Turn *Show notes and quick capture* on or off (#832, D10), registering or
+/// releasing the stored capture shortcut to match. Answers the capture
+/// shortcut's view, which carries the setting.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_notes_shown<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    capture: State<'_, crate::capture::CaptureState>,
+    shown: bool,
+) -> Result<crate::capture::ShortcutView, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::capture::set_shown(&pool, &capture, &crate::capture::Plugin::new(app), shown).await
+}
+
+/// *Export notes as Markdown* (#832, D10): one `.md` per note in
+/// `~/Downloads/knobas-notes`, through the block-to-Markdown converter.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if there is no
+/// Downloads folder, the read fails or a file cannot be written.
+#[tauri::command]
+pub async fn export_notes_markdown<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::notes_export::NotesExport, IpcError> {
+    use tauri::Manager;
+    let pool = lifecycle.pool()?;
+    let downloads = app.path().download_dir().map_err(IpcError::internal)?;
+    crate::notes_export::export(&pool, &downloads.join(crate::notes_export::FOLDER)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

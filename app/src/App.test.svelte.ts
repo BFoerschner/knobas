@@ -185,7 +185,8 @@ vi.mock("./lib/ipc/entity", () => ({
   // read.
   // The capture shortcut the settings section draws (#503). Nothing set, which
   // is the default, and no refusal to explain.
-  captureShortcut: () => Promise.resolve({ accelerator: null, refusal: null }),
+  captureShortcut: () =>
+    Promise.resolve({ accelerator: null, refusal: null, shown: false, note_count: 0, last_note_at: null }),
   setCaptureShortcut: () => Promise.reject(new Error("no shortcut is set in this test")),
   recordCaptureContext: (context: string | null, foreground: string | null) => {
     captureRecords.push({ context, foreground });
