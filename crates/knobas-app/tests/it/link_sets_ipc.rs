@@ -778,7 +778,10 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
         ("epic", epic.as_str()),
         "the manual rule names another ticket, so the epic's is the reason"
     );
-    assert_eq!(on_stack.via.title.as_deref(), Some(format!("{p}-1").as_str()));
+    assert_eq!(
+        on_stack.via.title.as_deref(),
+        Some(format!("{p}-1").as_str())
+    );
     let members: Vec<(&str, &str, Option<&str>, bool)> = on_stack
         .members
         .iter()
@@ -800,7 +803,12 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     );
     assert_eq!(on_stack.members[0].entity_kind.as_deref(), Some("repo"));
     assert_eq!(
-        link_sets::get(&pool, &stack.set.id).await.unwrap().set.members.len(),
+        link_sets::get(&pool, &stack.set.id)
+            .await
+            .unwrap()
+            .set
+            .members
+            .len(),
         2,
         "hiding never edits the set"
     );
@@ -860,7 +868,11 @@ async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
         "the parent's own links, never the sub-task itself"
     );
     assert!(
-        link_sets::on_job(&pool, &story).await.unwrap().parent.is_none(),
+        link_sets::on_job(&pool, &story)
+            .await
+            .unwrap()
+            .parent
+            .is_none(),
         "an epic is not a parent here"
     );
 

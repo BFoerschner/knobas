@@ -2071,8 +2071,8 @@ fn the_docs_shapes_match_their_typescript_mirror() {
 #[test]
 fn the_link_set_shapes_match_their_typescript_mirror() {
     use knobas_app::link_sets::{
-        JobLink, JobLinkSets, JobMember, JobParent, JobSet, LinkSetDetail, LinkSetDraft, LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow,
-        RuleTicket,
+        JobLink, JobLinkSets, JobMember, JobParent, JobSet, LinkSetDetail, LinkSetDraft,
+        LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow, RuleTicket,
     };
     let row = LinkSetRow {
         id: "payout-stack".to_owned(),
