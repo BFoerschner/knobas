@@ -2,12 +2,20 @@
  * Code's pure half (#837, R-8.1, R-8.2): how pull requests group, what a
  * repository row says, and which rows the two filter bars keep.
  *
- * Over `list_entities` and `entity_checkout` only. Nothing here reads a
- * payload: a pull request's group is the attention read's (#712), its state
- * the declared chip, its repository the declared parent path.
+ * Over `list_entities`, `entity_checkout` and `code_facts` only. Nothing
+ * here reads a payload: a pull request's group is the attention read's
+ * (#712), its state the declared chip, its repository the declared parent
+ * path, its author and a repository's team and language `code_facts` (#966).
  */
-import type { AttentionGroup, CheckoutView, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
+import type { AttentionGroup, CheckoutView, CodeFacts, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
+
+/** `code_facts`' answer by entity id. */
+export type FactsById = ReadonlyMap<string, CodeFacts>;
+
+export function factsById(facts: readonly CodeFacts[]): FactsById {
+  return new Map(facts.map((entry) => [entry.entity_id, entry]));
+}
 
 /** A pull request's group on the *Pull requests* tab, in draw order. */
 export type PrGroup = "review" | "yours" | "others" | "settled";
@@ -43,6 +51,8 @@ export interface PrLine {
   number: string | null;
   /** Open, and nothing happened to it for more than five days. */
   idle: boolean;
+  /** Who opened it, as the source spells the account, or `null` before `code_facts` answers or on a miss. */
+  author: string | null;
 }
 
 /** Whether a group is *Mine*: asking your review, or yours. */
@@ -60,31 +70,33 @@ export function prNumber(entityId: string): string | null {
  * The tab's rows: first the attention read's (#712), which holds the open
  * pull requests group by group in its own order, then every other pull
  * request the recency read holds (merged or closed, which attention drops as
- * settled), newest first.
+ * settled), newest first. A settled one whose author is mine (`code_facts`,
+ * #966) is under *Yours*, as prototype-6 groups `p.by===ME`.
  */
-export function prLines(attention: EntityPage, all: EntityPage, now: Date): PrLine[] {
+export function prLines(attention: EntityPage, all: EntityPage, now: Date, facts: FactsById = new Map()): PrLine[] {
   const groupOf: (PrGroup | null)[] = [];
   for (const tally of attention.groups ?? []) {
     for (let n = 0; n < tally.count; n += 1) groupOf.push(FROM_ATTENTION[tally.group] ?? null);
   }
   // The rows arrive group by group, so the n-th row is in the n-th slot.
   const open = attention.rows
-    .map((row, at) => line(row, attention.groups ? (groupOf[at] ?? null) : null, now, true))
+    .map((row, at) => line(row, attention.groups ? (groupOf[at] ?? null) : null, now, true, facts))
     .filter((entry) => entry.row.kind === "pr");
   const seen = new Set(open.map((entry) => entry.row.entity_id));
   const settled = all.rows
     .filter((row) => row.kind === "pr" && !seen.has(row.entity_id))
-    .map((row) => line(row, "settled", now, false));
+    .map((row) => line(row, facts.get(row.entity_id)?.mine ? "yours" : "settled", now, false, facts));
   return [...open, ...settled];
 }
 
-function line(row: EntityRow, group: PrGroup | null, now: Date, open: boolean): PrLine {
+function line(row: EntityRow, group: PrGroup | null, now: Date, open: boolean, facts: FactsById): PrLine {
   const at = row.updated_at ? new Date(row.updated_at).getTime() : Number.NaN;
   return {
     row,
     group,
     number: prNumber(row.entity_id),
     idle: open && !Number.isNaN(at) && now.getTime() - at > IDLE_MS,
+    author: facts.get(row.entity_id)?.author ?? null,
   };
 }
 
@@ -102,24 +114,39 @@ export interface PrFilter {
   flags: readonly string[];
   /** The *Repo* dropdown's value, a repository's full name, or `""` for *Any*. */
   repo: string;
+  /** The *Team* dropdown's value, or `""` for *Any*: the pull request's repository is in that team. */
+  team: string;
   text: string;
+}
+
+/** Each repository's declared teams, by {@link repoKey}: what a pull request's *Team* is (#966). */
+export function repoTeams(repos: readonly EntityRow[], facts: FactsById): Map<string, readonly string[]> {
+  return new Map(repos.map((row) => [repoKey(row.source_id, row.title), facts.get(row.entity_id)?.teams ?? []]));
 }
 
 /**
  * The pull requests the filter keeps, in the order given. *Mine* is what
- * asks for your review and what is yours, which is what the attention read
- * can tell (prototype-6: `p.by===ME||p.wait`).
+ * asks for your review and what is yours (prototype-6: `p.by===ME||p.wait`).
+ * The words reach the number, title, repository and author.
  */
-export function visiblePrs(lines: readonly PrLine[], filter: PrFilter): PrLine[] {
+export function visiblePrs(
+  lines: readonly PrLine[],
+  filter: PrFilter,
+  teams: ReadonlyMap<string, readonly string[]>,
+): PrLine[] {
   const states = filter.states.map((state) => state.toLowerCase());
-  return lines.filter(({ row, group, number, idle }) => {
+  return lines.filter(({ row, group, number, idle, author }) => {
     if (filter.scope === "job" && !filter.held(row.entity_id)) return false;
     if (filter.scope === "mine" && !isMineGroup(group)) return false;
     if (states.length > 0 && !states.includes(row.state?.text.toLowerCase() ?? "")) return false;
     if (filter.flags.includes("Waiting on me") && group !== "review") return false;
     if (filter.flags.includes("Idle > 5 days") && !idle) return false;
     if (filter.repo !== "" && row.path !== filter.repo) return false;
-    return matchesAll(`${number ?? ""} ${row.title} ${row.path ?? ""}`, filter.text);
+    if (filter.team !== "") {
+      const of = row.path === null ? [] : (teams.get(repoKey(row.source_id, row.path)) ?? []);
+      if (!of.includes(filter.team)) return false;
+    }
+    return matchesAll(`${number ?? ""} ${row.title} ${row.path ?? ""} ${author ?? ""}`, filter.text);
   });
 }
 
@@ -177,17 +204,33 @@ export interface RepoFilter {
   scope: "job" | "mine" | "all";
   held: (entityId: string) => boolean;
   flags: readonly string[];
+  /** The *Team* dropdown's value, or `""` for *Any*. */
+  team: string;
+  /** The *Language* dropdown's value, or `""` for *Any*. */
+  language: string;
   text: string;
+}
+
+/** The *Team* and *Language* dropdowns' choices: every value the repositories declare, sorted. */
+export function repoChoices(repos: readonly EntityRow[], facts: FactsById): { teams: string[]; languages: string[] } {
+  const known = repos.map((row) => facts.get(row.entity_id)).filter((entry) => entry !== undefined);
+  const sorted = (values: string[]) => [...new Set(values)].sort((a, b) => a.localeCompare(b));
+  return {
+    teams: sorted(known.flatMap((entry) => entry.teams)),
+    languages: sorted(known.flatMap((entry) => (entry.language === null ? [] : [entry.language]))),
+  };
 }
 
 /**
  * The repositories the filter keeps: yours first (a pull request of yours, or
- * one asking your review, is in it), then by last push, newest first.
+ * one asking your review, is in it), then by last push, newest first. The
+ * words reach the name, the teams and the language.
  */
 export function visibleRepos(
   rows: readonly EntityRow[],
   lines: readonly PrLine[],
   checkouts: Readonly<Record<string, CheckoutView>>,
+  facts: FactsById,
   filter: RepoFilter,
 ): EntityRow[] {
   const open = openPrsOf(lines);
@@ -203,7 +246,10 @@ export function visibleRepos(
       if (filter.scope === "mine" && !isMine(row)) return false;
       if (filter.flags.includes("Cloned here") && !checkouts[row.entity_id]?.path) return false;
       if (filter.flags.includes("Has open PRs") && openCount(open, row) === 0) return false;
-      return matchesAll(row.title, filter.text);
+      const known = facts.get(row.entity_id);
+      if (filter.team !== "" && !known?.teams.includes(filter.team)) return false;
+      if (filter.language !== "" && known?.language !== filter.language) return false;
+      return matchesAll(`${row.title} ${known?.teams.join(" ") ?? ""} ${known?.language ?? ""}`, filter.text);
     })
     .sort(
       (a, b) => Number(isMine(b)) - Number(isMine(a)) || (b.updated_at ?? "").localeCompare(a.updated_at ?? ""),
