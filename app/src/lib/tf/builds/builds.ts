@@ -117,6 +117,9 @@ export function groupsOf(pipeline: Pick<PipelineRow, "path" | "group">): string[
   return pipeline.group !== null ? [pipeline.group] : [];
 }
 
+/** The pipeline list's scope (#850): the job's pipelines, or every one. */
+export type Scope = "job" | "all";
+
 /** One fold of the tree: a group, its own pipelines and the groups inside it. */
 export interface Fold {
   /** What the summary says: one group, or a chain of single children joined by ` › `. */
@@ -141,13 +144,19 @@ export interface SourceTree {
   folds: Fold[];
 }
 
-interface Building {
+/** A tree node while {@link treeOf} is still filling it. */
+interface Draft {
   name: string;
   pipelines: PipelineRow[];
-  kids: Map<string, Building>;
+  kids: Map<string, Draft>;
 }
 
-function fold(node: Building, parentKey: string): Fold {
+/** Groups by name, ignoring case. */
+function byName(a: { name: string }, b: { name: string }): number {
+  return a.name.toLowerCase().localeCompare(b.name.toLowerCase());
+}
+
+function fold(node: Draft, parentKey: string): Fold {
   // A group holding nothing but one subgroup is drawn as one row with it
   // ("Payments › Payouts"), as deep as the chain of single children goes.
   let name = node.name;
@@ -158,7 +167,7 @@ function fold(node: Building, parentKey: string): Fold {
   }
   const key = `${parentKey}/${name}`;
   const folds = [...at.kids.values()]
-    .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+    .sort(byName)
     .map((kid) => fold(kid, key));
   return {
     name,
@@ -177,7 +186,7 @@ function fold(node: Building, parentKey: string): Fold {
  * its subgroups.
  */
 export function treeOf(list: readonly PipelineRow[]): SourceTree[] {
-  const roots = new Map<string, { name: string; root: Building }>();
+  const roots = new Map<string, { name: string; root: Draft }>();
   for (const pipeline of list) {
     let tree = roots.get(pipeline.source_id);
     if (tree === undefined) {
@@ -200,7 +209,7 @@ export function treeOf(list: readonly PipelineRow[]): SourceTree[] {
     sourceId,
     pipelines: root.pipelines,
     folds: [...root.kids.values()]
-      .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()))
+      .sort(byName)
       .map((kid) => fold(kid, sourceId)),
   }));
 }

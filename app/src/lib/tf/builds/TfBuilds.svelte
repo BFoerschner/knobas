@@ -85,6 +85,7 @@
     stripOf,
     treeOf,
     type Fold,
+    type Scope,
   } from "./builds";
 
   let {
@@ -120,7 +121,7 @@
   });
 
   // *This job* (#850): on by default while a job is current.
-  const scope = $derived<"job" | "all">(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
+  const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
   let reasons = $state<Map<string, PipelineReason[]> | null>(null);
   $effect(() => {
     const key = job;
@@ -158,7 +159,7 @@
     return ticket === null ? [] : readJobPipelines(ticket.row.entity_id);
   }
 
-  function setScope(next: "job" | "all") {
+  function setScope(next: Scope) {
     filter.scope = next;
   }
 
