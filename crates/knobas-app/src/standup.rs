@@ -1,11 +1,13 @@
-//! The standup digest: yesterday, today and blockers, every line traceable
-//! (issue #288, spec #272 story 58-63).
+//! The standup digest: yesterday, today, blockers and infrastructure, every
+//! line traceable (issue #288, spec #272 story 58-63; infrastructure #932).
 //!
 //! `CONTEXT.md`'s **digest**: *"the standup's generated three lists --
 //! yesterday, today, blockers -- drawn from the mirror and the activity stream
 //! for the configured usernames, every line linking to the item it came from.
 //! Yesterday is the newest day before today that has any of your activity, at
-//! most seven days back. Mine only."*
+//! most seven days back. Mine only."* The fourth list, *infrastructure*, is
+//! the glossary's amendment of 2026-10-17 (#932): monitor alerts, not mine
+//! only.
 //!
 //! # Derived, never stored
 //!
@@ -231,7 +233,7 @@ pub struct DigestLine {
     pub at: DateTime<Utc>,
 }
 
-/// The three lists, and which day the first of them is about.
+/// The four lists, and which day the first of them is about.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StandupDigest {
     /// The day [`yesterday`](Self::yesterday) is really about, in the reader's
@@ -249,6 +251,16 @@ pub struct StandupDigest {
     pub today: Vec<DigestLine>,
     /// The user's items a source calls stuck or a link calls blocked.
     pub blockers: Vec<DigestLine>,
+    /// The monitor alerts since the last working day (#932, R-13.4): every
+    /// [alert](knobas_sync::alerts) that was open at any point from the start
+    /// of [`yesterday_day`](Self::yesterday_day) -- or of today, when no such
+    /// day was found -- to the end of today, newest first.
+    ///
+    /// **Not mine only**, unlike the three lists above: a monitor has no owner
+    /// in the mirror, and the standup asks what happened to the estate, not
+    /// what happened to you. A monitor's restart is not here: the mirror
+    /// records a state change, not why it changed.
+    pub infrastructure: Vec<DigestLine>,
 }
 
 /// The digest for one day.
@@ -288,11 +300,17 @@ pub async fn digest(
         }
     }
 
+    let since = earlier
+        .iter()
+        .find(|window| Some(window.day) == yesterday_day)
+        .map_or(today.from, |window| window.from);
+
     Ok(StandupDigest {
         yesterday_day,
         yesterday,
         today: today_lines,
         blockers: blockers(pool, identity, declarations).await?,
+        infrastructure: infrastructure(pool, since, today.to).await?,
     })
 }
 
@@ -783,9 +801,93 @@ async fn blockers(
     Ok(lines)
 }
 
+/// One alert, as its table keeps it, with its monitor's kind and name.
+#[derive(sqlx::FromRow)]
+struct AlertRow {
+    entity_id: String,
+    kind: String,
+    title: String,
+    state: String,
+    opened_at: DateTime<Utc>,
+    closed_at: Option<DateTime<Utc>>,
+}
+
+/// The alerts open at any instant of `[$1, $2)`: opened before the window
+/// ends, and either still open or closed at or after it begins. The join is
+/// for the monitor's name, which a tombstoned entity still carries.
+const ALERTS_IN_WINDOW: &str =
+    "select a.entity_id, e.kind, e.title, a.state, a.opened_at, a.closed_at
+       from knobas.monitor_alert a
+       join knobas.entity e on e.id = a.entity_id
+      where a.opened_at < $2
+        and (a.closed_at is null or a.closed_at >= $1)
+      order by a.opened_at desc, a.id desc
+      limit $3";
+
+/// How long an alert stayed open, as the reason words it: `12 min`, `1 h 5 min`.
+/// Never under a minute, so a blip still reads as something that happened.
+fn lasted(span: Duration) -> String {
+    let minutes = span.num_minutes().max(1);
+    if minutes < 60 {
+        format!("{minutes} min")
+    } else if minutes % 60 == 0 {
+        format!("{} h", minutes / 60)
+    } else {
+        format!("{} h {} min", minutes / 60, minutes % 60)
+    }
+}
+
+/// The Infrastructure list: one line per alert that touched `[since, until)`.
+///
+/// The reason carries a duration and no clock reading, because the clock is
+/// the reader's timezone and this side does not hold it; [`DigestLine::at`] is
+/// when the alert opened and the view draws that.
+async fn infrastructure(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+    until: DateTime<Utc>,
+) -> Result<Vec<DigestLine>, IpcError> {
+    let rows = sqlx::query_as::<_, AlertRow>(ALERTS_IN_WINDOW)
+        .bind(since)
+        .bind(until)
+        .bind(MOST_LINES)
+        .fetch_all(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            // `down` and `warn` are the only states `monitor_alert_state_chk`
+            // allows; the word for the second is the reader's, not the table's.
+            let word = if row.state == "warn" { "slow" } else { "down" };
+            let reason = match row.closed_at {
+                Some(closed) => format!("was {word} {}", lasted(closed - row.opened_at)),
+                None => format!("is still {word}"),
+            };
+            DigestLine {
+                source: namespace_of(&row.entity_id),
+                entity_id: Some(row.entity_id),
+                kind: Some(row.kind),
+                title: row.title,
+                verb: row.state,
+                reason,
+                at: row.opened_at,
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_alert_reads_in_minutes_then_hours_and_is_never_under_a_minute() {
+        assert_eq!(lasted(Duration::seconds(5)), "1 min");
+        assert_eq!(lasted(Duration::minutes(12)), "12 min");
+        assert_eq!(lasted(Duration::minutes(60)), "1 h");
+        assert_eq!(lasted(Duration::minutes(65)), "1 h 5 min");
+    }
 
     fn day(iso: &str) -> NaiveDate {
         iso.parse().expect("a date")

@@ -35,7 +35,7 @@ function line(over: Partial<DigestLine> = {}): DigestLine {
 }
 
 function digest(over: Partial<StandupDigest> = {}): StandupDigest {
-  return { yesterday_day: null, yesterday: [], today: [], blockers: [], ...over };
+  return { yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [], ...over };
 }
 
 let target: HTMLDivElement;

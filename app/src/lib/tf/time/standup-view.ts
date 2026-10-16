@@ -24,7 +24,7 @@
  */
 import type { DigestLine, StandupDigest } from "../../ipc/entity";
 import { actionItems, bullet, type ActionItem } from "../../standup/protocol";
-import { dayLabel } from "../../time/day";
+import { clockReading, dayLabel } from "../../time/day";
 import { itemHash, keyOf } from "../job/job";
 
 /** The protocol as the tab draws it. */
@@ -225,6 +225,20 @@ function textOf(line: DigestLine, yesterday: boolean): string {
 }
 
 /**
+ * When a monitor alert opened, as the reader's clock reads it: `from 03:10`.
+ * The duration is the line's reason; the clock is here because only this side
+ * knows the reader's timezone.
+ */
+export function alertSince(line: Pick<DigestLine, "at">): string {
+  return `from ${clockReading(line.at)}`;
+}
+
+/** An Infrastructure line as plain text: `payout-api was down 12 min, from 03:10`. */
+function alertText(line: DigestLine): string {
+  return `${line.title} ${line.reason}, ${alertSince(line)}`;
+}
+
+/**
  * An action item's words and its trailing `(Owner)`, which prototype-6 dims.
  * Only a last parenthesis counts; the words are the reader's.
  */
@@ -240,16 +254,20 @@ export function yesterdayHeading(day: string | null): string {
 
 /** The digest as plain text, for pasting into a chat before the meeting. */
 export function digestText(digest: StandupDigest): string {
-  const list = (lines: DigestLine[], yesterday: boolean) =>
-    lines.length === 0 ? ["- None"] : lines.map((line) => `- ${textOf(line, yesterday)}`);
+  const list = (lines: DigestLine[], text: (line: DigestLine) => string) =>
+    lines.length === 0 ? ["- None"] : lines.map((line) => `- ${text(line)}`);
+  const after = (line: DigestLine) => textOf(line, false);
   return [
     yesterdayHeading(digest.yesterday_day),
-    ...list(digest.yesterday, true),
+    ...list(digest.yesterday, (line) => textOf(line, true)),
     "",
     "Today",
-    ...list(digest.today, false),
+    ...list(digest.today, after),
     "",
     "Blockers",
-    ...list(digest.blockers, false),
+    ...list(digest.blockers, after),
+    "",
+    "Infrastructure",
+    ...list(digest.infrastructure, alertText),
   ].join("\n");
 }

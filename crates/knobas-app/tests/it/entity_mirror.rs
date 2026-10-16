@@ -1540,12 +1540,19 @@ fn the_standup_digest_shape_matches_its_typescript_mirror() {
         yesterday: vec![digest_line()],
         today: vec![digest_label_line()],
         blockers: vec![digest_line()],
+        infrastructure: vec![digest_line()],
     };
     let wire = serde_json::to_value(&filled).unwrap();
     assert_shape(
         "StandupDigest",
         &wire,
-        &["yesterday_day", "yesterday", "today", "blockers"],
+        &[
+            "yesterday_day",
+            "yesterday",
+            "today",
+            "blockers",
+            "infrastructure",
+        ],
     );
     assert_eq!(
         wire["yesterday_day"],
@@ -1559,10 +1566,11 @@ fn the_standup_digest_shape_matches_its_typescript_mirror() {
         yesterday: Vec::new(),
         today: Vec::new(),
         blockers: Vec::new(),
+        infrastructure: Vec::new(),
     };
     let wire = serde_json::to_value(&silent).unwrap();
     assert!(wire["yesterday_day"].is_null());
-    for empty in ["yesterday", "today", "blockers"] {
+    for empty in ["yesterday", "today", "blockers", "infrastructure"] {
         assert_eq!(
             wire[empty],
             serde_json::json!([]),

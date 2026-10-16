@@ -5,9 +5,10 @@
   `publish_standup_protocol`, `standup_publish_target`,
   `create_action_item_ticket`, `action_item_ticket`).
 
-  **The digest** is three lists, every line a link into the new shell, and
-  *Copy as text*. Prototype-6's fourth list, *Infrastructure*, waits for a
-  field `StandupDigest` does not carry (named in the PR, a follow-up).
+  **The digest** is four lists, every line a link into the new shell, and
+  *Copy as text*. The fourth, *Infrastructure* (#932), is the monitor alerts
+  since the last working day, each drawn as its duration and the clock it
+  opened at.
 
   **The protocol** is the day's note, drawn as prototype-6's form: who was
   there, a note per person, the action items. Every edit rewrites one section
@@ -50,6 +51,7 @@
   import TfDialog from "../settings/TfDialog.svelte";
   import {
     digestText,
+    alertSince,
     lineHash,
     lineKey,
     ownerOf,
@@ -466,7 +468,7 @@
       {#if digestFailure}
         <p class="tf-tm-fail" role="alert">{digestFailure}</p>
       {/if}
-      {#snippet list(heading: string, lines: StandupDigest["today"], silence: string, yesterday: boolean)}
+      {#snippet list(heading: string, lines: StandupDigest["today"], silence: string, yesterday: boolean, alert = false)}
         <h4>{heading}</h4>
         {#if lines.length === 0}
           <p class="tf-su-none">{digest === null ? "Reading…" : silence}</p>
@@ -476,7 +478,9 @@
               {@const href = lineHash(line)}
               {@const key = lineKey(line)}
               {#snippet words()}
-                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if yesterday}{`: ${line.reason}`}{:else}{" "}<span
+                {#if key}<span class="tf-mono">{key}</span>{" "}{/if}{line.title}{#if alert}{" "}{line.reason}<span
+                    class="tf-dim">{`, ${alertSince(line)}`}</span
+                  >{:else if yesterday}{`: ${line.reason}`}{:else}{" "}<span
                     class="tf-dim">({line.reason})</span
                   >{/if}
               {/snippet}
@@ -495,6 +499,7 @@
       )}
       {@render list("Today", digest?.today ?? [], "Nothing touched yet today.", false)}
       {@render list("Blockers", digest?.blockers ?? [], "Nothing of yours is blocked.", false)}
+      {@render list("Infrastructure", digest?.infrastructure ?? [], "No monitor alerts.", false, true)}
     </div>
   </section>
 

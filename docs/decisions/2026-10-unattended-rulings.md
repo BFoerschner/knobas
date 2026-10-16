@@ -3738,3 +3738,41 @@ Ruled by the implementer (one PR for the three).
 - **Jira's schema fixture transcribes `sprint_field` verbatim** (it was an unnamed absence since
   #889), and the `?fake-ipc` Jira source carries prototype-6's four projects and a recorded
   Sprint field id. **Reversing:** low.
+## #932 — Standup digest: the Infrastructure list (2026-10-17)
+
+- **The ticket's "incidents" are `knobas.monitor_alert` rows, not samples or a new table.** An
+  alert is a monitor's open-until-recovered down or warn spell (CONTEXT.md, Alert), which is what
+  "was down 12 min" is. **Reversing:** one statement (`ALERTS_IN_WINDOW`).
+- **"Since the last working day" is the start of `yesterday_day`'s window, else today's start.**
+  The digest's own yesterday rule already names the last working day; an alert open at any instant
+  from then to the end of today is listed, including one still open that began earlier.
+  **Reversing:** the `since` line in `digest`.
+- **Not mine-only.** A monitor has no owner in the mirror; the ticket says "monitor incidents".
+  **Reversing:** needs an ownership rule that does not exist.
+- **No restart lines.** Prototype-6's "vm-pay-01 restarted at 03:12" has no source: the mirror
+  records state changes only. The ticket's "incidents and restarts" is met by incidents.
+  **Reversing:** a producer for restarts, a separate ticket.
+- **The reason is a duration; the clock is drawn by the view from `at`** (`from 03:10`), because
+  the reader's timezone lives in the webview. Prototype-6's "03:10 to 03:22" loses its end
+  reading. **Reversing:** an `ended_at` on the line, a second schema change.
+- **`infrastructure` is required on the TypeScript `StandupDigest`**, so every fixture names it.
+  **Reversing:** low.
+
+Ruled by the merge-manager (PR #1034).
+
+- **Alert, not incident, in code, copy and docs.** CONTEXT.md's **Alert** lists `_Avoid_:
+  incident`; the ticket's "monitor incidents" was its own wording. Renamed `IncidentRow`,
+  `INCIDENTS`, `incidentSince`, `incidentText` and the empty-list copy ("No monitor alerts.").
+  **Reversing:** a rename.
+- **CONTEXT.md's Digest is amended in place for the fourth list**, since the entry said "three
+  lists … Mine only" and the new list is neither. **Reversing:** drop the amendment note.
+- **The query scans `knobas.monitor_alert` with no index for the window.** The two indexes are
+  partial on open alerts; a closed-alert window index needs a migration, and the table holds one
+  row per down or warn spell, read once per Standup open. **Reversing:** a migration adding
+  `(opened_at)` or `(closed_at)`.
+- **A flapping monitor lists every spell, up to 200 lines.** The ticket asks for one line per
+  incident; folding a monitor's spells is a design change for prototype-6, not this review.
+  **Reversing:** group by `entity_id` in `infrastructure`.
+- **The clock carries no day marker** (`from 22:00` for an alert open since Thursday). The prototype
+  draws a bare clock; `clockReading`'s `(−n)` suffix would need today's key in `alertSince`.
+  **Reversing:** pass the digest's day to `alertSince`.

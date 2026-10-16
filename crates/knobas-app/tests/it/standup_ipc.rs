@@ -1224,3 +1224,141 @@ async fn a_colleagues_day_is_in_no_list() {
         }
     }
 }
+
+/// One alert on a monitor, opened and (maybe) closed at the given instants.
+async fn alert(
+    h: &Harness,
+    monitor: &str,
+    state: &str,
+    opened: DateTime<Utc>,
+    closed: Option<DateTime<Utc>>,
+) {
+    h.entity(&format!("{FORGE}:{monitor}"), "monitor", monitor)
+        .await;
+    sqlx::query(
+        "insert into knobas.monitor_alert (entity_id, opened_at, state, closed_at)
+         values ($1,$2,$3,$4)",
+    )
+    .bind(format!("{FORGE}:{monitor}"))
+    .bind(opened)
+    .bind(state)
+    .bind(closed)
+    .execute(&h.pool)
+    .await
+    .expect("the alert row is written");
+}
+
+/// **The Infrastructure list** (#932, R-13.4): the monitor alerts since the last
+/// working day, each line on its monitor, with how long it lasted.
+///
+/// Friday is the last working day (one commit of mine there), so Friday 03:10
+/// to 03:22 is in; Thursday's alert closed before Friday began and is out; a
+/// still-open alert and one that opened today are in, and so are two that
+/// began before Friday and were open into it. The Infrastructure list is not
+/// mine-only: nobody's name is on a monitor.
+#[tokio::test]
+async fn infrastructure_lists_the_alerts_since_the_last_working_day() {
+    let h = harness("standup-infrastructure").await;
+    let friday = 3;
+    h.item(
+        FORGE,
+        "commit",
+        "friday",
+        ME,
+        days_before(friday, 10, 0),
+        serde_json::json!({}),
+    )
+    .await;
+    alert(
+        &h,
+        "payout-api",
+        "down",
+        days_before(friday, 3, 10),
+        Some(days_before(friday, 3, 22)),
+    )
+    .await;
+    alert(
+        &h,
+        "ledger",
+        "down",
+        days_before(friday + 1, 22, 0),
+        Some(days_before(friday + 1, 23, 0)),
+    )
+    .await;
+    alert(&h, "edge-proxy", "warn", days_before(2, 8, 0), None).await;
+    alert(&h, "queue", "down", noon() - Duration::hours(2), None).await;
+    // Two that began before Friday and reach into it: one recovered at 00:30
+    // Friday, one still open since Wednesday. Both touched the window.
+    alert(
+        &h,
+        "vault",
+        "down",
+        days_before(friday + 1, 23, 30),
+        Some(days_before(friday, 0, 30)),
+    )
+    .await;
+    alert(&h, "cache", "warn", days_before(friday + 2, 9, 0), None).await;
+
+    let digest = h.digest().await;
+
+    let seen: Vec<(&str, &str, &str, &str)> = digest
+        .infrastructure
+        .iter()
+        .map(|l| {
+            (
+                l.title.as_str(),
+                l.source.as_str(),
+                l.verb.as_str(),
+                l.reason.as_str(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        vec![
+            ("queue", FORGE, "down", "is still down"),
+            ("edge-proxy", FORGE, "warn", "is still slow"),
+            ("payout-api", FORGE, "down", "was down 12 min"),
+            ("vault", FORGE, "down", "was down 1 h"),
+            ("cache", FORGE, "warn", "is still slow"),
+        ]
+    );
+    assert_eq!(digest.infrastructure[2].kind.as_deref(), Some("monitor"));
+    assert_eq!(
+        digest.infrastructure[2].entity_id.as_deref(),
+        Some("forge:payout-api")
+    );
+    assert_eq!(digest.infrastructure[2].at, days_before(friday, 3, 10));
+}
+
+/// With no working day found, the list reaches back only to today's midnight.
+#[tokio::test]
+async fn infrastructure_without_a_last_working_day_starts_at_todays_midnight() {
+    let h = harness("standup-infrastructure-quiet").await;
+    alert(
+        &h,
+        "payout-api",
+        "down",
+        days_before(1, 3, 0),
+        Some(days_before(1, 3, 30)),
+    )
+    .await;
+    alert(
+        &h,
+        "queue",
+        "down",
+        noon() - Duration::hours(2),
+        Some(noon() - Duration::hours(1)),
+    )
+    .await;
+
+    let digest = h.digest().await;
+
+    assert_eq!(digest.yesterday_day, None);
+    let titles: Vec<&str> = digest
+        .infrastructure
+        .iter()
+        .map(|l| l.title.as_str())
+        .collect();
+    assert_eq!(titles, vec!["queue"]);
+}
