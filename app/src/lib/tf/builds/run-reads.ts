@@ -71,6 +71,24 @@ export interface StepSegment {
 const SEGMENT_MIN = 2;
 
 /**
+ * Percent shares summing to 100, none under `SEGMENT_MIN`: the slivers get the
+ * minimum, and the rest share what is left by their time, until none of those
+ * falls under it.
+ */
+function withFloor(raw: readonly number[]): number[] {
+  const floor = Math.min(SEGMENT_MIN, 100 / raw.length);
+  const pinned = new Set<number>();
+  for (;;) {
+    const free = 100 - floor * pinned.size;
+    const freeRaw = raw.reduce((sum, share, i) => (pinned.has(i) ? sum : sum + share), 0);
+    const shares = raw.map((share, i) => (pinned.has(i) ? floor : freeRaw === 0 ? free / (raw.length - pinned.size) : (share / freeRaw) * free));
+    const under = shares.findIndex((share, i) => !pinned.has(i) && share < floor);
+    if (under === -1) return shares;
+    pinned.add(under);
+  }
+}
+
+/**
  * The steps bar over the log's steps: one segment per step, as wide as its
  * share of the time. A step with no duration (running, or unstamped) takes
  * the mean of the others'. No read or no steps is no bar.
@@ -81,20 +99,7 @@ export function stepSegments(log: RunLog | null, inFlight: boolean): StepSegment
   const mean = known.length === 0 ? 1 : known.reduce((a, b) => a + b, 0) / known.length || 1;
   const weights = log.steps.map((s) => s.seconds ?? mean);
   const total = weights.reduce((a, b) => a + b, 0);
-  const raw = weights.map((w) => (total === 0 ? 100 / weights.length : (w / total) * 100));
-  // The slivers get the minimum; the rest share what is left by their time,
-  // until none of those falls under it.
-  const floor = Math.min(SEGMENT_MIN, 100 / raw.length);
-  const pinned = new Set<number>();
-  let shares = raw;
-  for (;;) {
-    const free = 100 - floor * pinned.size;
-    const freeRaw = raw.reduce((sum, share, i) => (pinned.has(i) ? sum : sum + share), 0);
-    shares = raw.map((share, i) => (pinned.has(i) ? floor : freeRaw === 0 ? free / (raw.length - pinned.size) : (share / freeRaw) * free));
-    const under = shares.findIndex((share, i) => !pinned.has(i) && share < floor);
-    if (under === -1) break;
-    pinned.add(under);
-  }
+  const shares = withFloor(weights.map((w) => (total === 0 ? 100 / weights.length : (w / total) * 100)));
   let x = 0;
   return log.steps.map((step, index) => {
     const state = stepState(log, index, inFlight);

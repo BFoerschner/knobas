@@ -108,8 +108,8 @@
   let logRead: Promise<RunLog | null> | null = null;
   let logSettled = false;
   /** The step a click on the bar opens the Log tab at; `seq` tells two clicks on one step apart. */
-  let focus = $state<{ step: number; seq: number } | null>(null);
-  let focusSeq = 0;
+  let openStep = $state<{ step: number; seq: number } | null>(null);
+  let openSeq = 0;
   let token = 0;
 
   $effect(() => {
@@ -193,7 +193,7 @@
 
   // A step asked for is the Log tab's only while the reader stays on it.
   $effect(() => {
-    if (tab !== "log") focus = null;
+    if (tab !== "log") openStep = null;
   });
 
   function readFailure(id: string, mine: number) {
@@ -351,12 +351,12 @@
           <a
             href={runTabHash(pipelineId, runId, "log")}
             aria-label={segment.tip}
-            onclick={() => (focus = { step: segment.index, seq: ++focusSeq })}
+            onclick={() => (openStep = { step: segment.index, seq: ++openSeq })}
           >
             <title>{segment.tip}</title>
-            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="30" aria-hidden="true">
-              <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="30" />
-              {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="30" />{/if}
+            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
+              <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
+              {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
               <text x="10" y="19">{segment.name}</text>
             </svg>
           </a>
@@ -492,7 +492,7 @@
         {/if}
       {/if}
     {:else if tab === "log"}
-      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {focus} />
+      <TfRunLog {runId} {inFlight} {failed} ports={logPorts} {openStep} />
     {:else if tab === "tests"}
       <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} />
     {:else if tab === "artifacts"}
