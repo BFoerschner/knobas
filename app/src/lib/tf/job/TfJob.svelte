@@ -15,6 +15,10 @@
 
   **The Connections button (#820)** sits at the right of the tab bar, with the
   ticket's link count and its proposals, and opens the drawer (also `L`).
+  **Link sets (#867)**: `job_link_sets` is read once per job opened, for the
+  *Also on this job* chips above the tab's body (not on Conversation, R-4.4)
+  and the drawer's set and parent groups; *Hide here* and *Show again* re-read
+  it with the reach and the sections, and never edit the set (R-7.5).
   the five sections (#817): Code, Builds, Assets, Monitors and Pages, each read
   through the job-reach read (`job_reach`, and `list_entities` scoped by it),
   so a row from the parent carries its label. Above them, a blocked ticket's
@@ -631,7 +635,7 @@
                   >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
           >
         {/each}
-        <button type="button" class="tf-conn" title="Connections (L)" onclick={() => (drawer = true)}>
+        <button type="button" class="tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
             ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
           ><b>{connectedCount(connected, origins)}</b> connected{#if proposals !== null && proposals.length > 0},
