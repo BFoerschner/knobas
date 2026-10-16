@@ -976,3 +976,38 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-bridge { padding: 12px 0; }
   .tf-bridge::before { display: none; }
 }
+/* ---------- ticket views (#812): the views pane, its menus, and *New view* ---------- */
+.tf-vfind { padding: 12px 10px 6px; }
+.tf-vfind input {
+  width: 100%; border: 1px solid var(--rule); background: var(--paper); border-radius: 4px; padding: 5px 8px; color: var(--ink);
+}
+.tf-vfind + .tf-vlist { padding-top: 4px; }
+.tf-vw-row { position: relative; }
+.tf-views .tf-vw-row a { padding-right: 30px; }
+.tf-vw-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tf-vw-row .tf-vw-menu { position: absolute; right: 3px; top: 50%; transform: translateY(-50%); }
+.tf-vw-more {
+  border: 0; background: none; color: inherit; cursor: pointer; padding: 1px 6px; border-radius: 3px; opacity: 0; font-size: var(--t-sm);
+}
+.tf-vw-row:hover .tf-vw-more, .tf-vw-more:focus-visible, .tf-vw-row:focus-within .tf-vw-more, .tf-vw-more[aria-expanded="true"] { opacity: 1; }
+.tf-vw-more:hover { background: var(--sheet-2); }
+.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more { color: var(--sheet); }
+.tf-vw-row a[aria-current="true"] + .tf-vw-menu .tf-vw-more:hover { background: rgba(255,255,255,.15); }
+.tf-vw-menu { position: relative; display: inline-flex; }
+.tf-vw-menu .tf-menu { width: 200px; }
+.tf-vw-menu .tf-menu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-vw-menu .tf-menu b { font-weight: 500; }
+.tf-vw-none { font-size: var(--t-sm); margin: 8px; }
+.tf-q { font: var(--t-xs) var(--mono); color: var(--ink-2); }
+.tf-vw-savef { margin-left: 4px; }
+.tf-vw-warn { color: var(--warn); }
+.tf-lab { font-size: var(--t-2xs); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
+.tf-vw-form { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tf-vw-form label { display: flex; flex-direction: column; gap: 3px; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-vw-form input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); font-size: var(--t-md);
+}
+.tf-vw-form small { font-size: var(--t-2xs); }
+.tf-vw-which { display: flex; flex-direction: column; gap: 3px; }
+.tf-vw-which code { font-size: var(--t-xs); overflow-wrap: anywhere; }
+.tf-vw-store { font-size: var(--t-xs); align-self: center; }

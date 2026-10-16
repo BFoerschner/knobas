@@ -531,6 +531,16 @@ function fakeQueryMatches(entry: (typeof CORPUS)[number], query: string): boolea
   return true;
 }
 
+/**
+ * How many live tickets `query` admits, by {@link fakeQueryMatches}: a ticket
+ * view's count in the views pane (#812), the number its board draws.
+ */
+export function fakeTicketCount(query: string): number {
+  return CORPUS.filter(
+    (entry) => entry.kind === "ticket" && entry.deleted_at === null && (query.trim() === "" || fakeQueryMatches(entry, query)),
+  ).length;
+}
+
 /** `list_entities`, filtered, ordered and paged the way the real one is. */
 function listEntities(args: Record<string, unknown>) {
   const filter = (args["filter"] ?? {}) as {

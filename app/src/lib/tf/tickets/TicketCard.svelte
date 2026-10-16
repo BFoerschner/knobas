@@ -4,9 +4,13 @@
   initials. The selected card is the yellow card, lifted off the board. A
   double click opens the job (#813). The comment count waits for a declared
   count (see the #810 rulings).
+
+  A ticket view says what its cards show (#812, R-3.16, *Cards show*):
+  `fields` names them; without it the card shows what it always has.
 -->
 <script lang="ts">
   import type { MiniBoardCard } from "../../ipc/entity";
+  import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
   import Signals from "./Signals.svelte";
   import { initials } from "./tickets";
@@ -17,6 +21,7 @@
     selected,
     onselect,
     onopen,
+    fields = null,
   }: {
     card: MiniBoardCard;
     typed: string;
@@ -24,7 +29,13 @@
     onselect: () => void;
     /** A double click: open the job. */
     onopen: () => void;
+    /** What the card shows, from its view; `null` is everything it has. */
+    fields?: CardField[] | null;
   } = $props();
+
+  const shows = (field: CardField) => fields === null || fields.includes(field);
+  /** Labels are shown only when a view asks for them, as in prototype-6. */
+  const labels = $derived(fields?.includes("labels") ? card.labels : []);
 
   const kind = $derived([card.issue_type, card.priority].filter(Boolean).join(", "));
 </script>
@@ -39,11 +50,14 @@
   ondblclick={onopen}
 >
   <span class="tf-k"><Marked text={card.key} {typed} /></span>
-  {#if kind}<span class="tf-dim tf-tkind">{kind}</span>{/if}
+  {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {typed} /></span>
-  {#if card.path}<span class="tf-cep">{card.path}</span>{/if}
+  {#if card.path && shows("epic")}<span class="tf-cep">{card.path}</span>{/if}
   <span class="tf-meta">
-    <Signals signals={card.signals} />
-    <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
+    {#if shows("signals")}<Signals signals={card.signals} />{/if}
+    {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}
+    {#if shows("assignee")}
+      <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
+    {/if}
   </span>
 </button>

@@ -61,12 +61,16 @@ let stores: (posted: BackupSchedule) => BackupSchedule = (posted) => posted;
  */
 let rail: { id: string; saved: boolean }[] = [{ id: "mine", saved: false }];
 let railFails: unknown = null;
+/** What `ticket_views` answers with (#812): none, unless a test says so. */
+let ticketViewIds: string[] = [];
+let viewsFail: unknown = null;
 
 vi.mock("../ipc/search", () => ({
   smartLists: () => {
     calls.lists += 1;
     return railFails ? Promise.reject(railFails) : Promise.resolve(rail);
   },
+  ticketViews: () => (viewsFail ? Promise.reject(viewsFail) : Promise.resolve(ticketViewIds.map((id) => ({ id })))),
 }));
 
 vi.mock("../ipc/backup", () => ({
@@ -106,6 +110,7 @@ vi.mock("../ipc/backup", () => ({
     time: false,
     sources: true,
     smart_lists: true,
+    ticket_views: true,
   },
   shareExport: (parts: ShareParts) => {
     calls.share.push(parts);
@@ -181,6 +186,8 @@ beforeEach(() => {
   calls.lists = 0;
   rail = [{ id: "mine", saved: false }];
   railFails = null;
+  ticketViewIds = [];
+  viewsFail = null;
   status = statusOf();
   statusFails = null;
   answerStatus = null;
@@ -896,6 +903,8 @@ test("Share… opens on the defaults and exports the parts that are ticked", asy
       // so the part has no toggle and is not asked for. #507's own tests below
       // are where the other state is read.
       smart_lists: false,
+      // Off for the same reason: this knobas holds no ticket view (#812).
+      ticket_views: false,
     },
   ]);
   expect(dialog()).toBeNull();
@@ -1088,4 +1097,49 @@ test("a smart_lists read that fails draws no toggle and no error", async () => {
   button("Export", dialog()!)!.click();
   await settle();
   expect(calls.share[0]!.smart_lists).toBe(false);
+});
+
+/**
+ * Ticket views (#812) follow the saved lists' rule: no view, no toggle and the
+ * part off; one view, the toggle up and ticked; a read that fails, no toggle.
+ */
+test("the ticket views part has a toggle only once a view exists, and goes out off without one", async () => {
+  render();
+  await settle();
+  button("Share…")!.click();
+  await settle();
+  expect(tick("Ticket views")).toBeUndefined();
+  button("Export", dialog()!)!.click();
+  await settle();
+  expect(calls.share[0]!.ticket_views).toBe(false);
+});
+
+test("one ticket view puts its toggle up, ticked, and unticking leaves the part out", async () => {
+  ticketViewIds = ["my-work"];
+  render();
+  await settle();
+  button("Share…")!.click();
+  await settle();
+  expect(tick("Ticket views")!.checked).toBe(true);
+  button("Export", dialog()!)!.click();
+  await settle();
+  expect(calls.share[0]!.ticket_views).toBe(true);
+
+  button("Share…")!.click();
+  await settle();
+  tick("Ticket views")!.click();
+  await settle();
+  button("Export", dialog()!)!.click();
+  await settle();
+  expect(calls.share[1]!.ticket_views).toBe(false);
+});
+
+test("a ticket views read that fails draws no toggle and no error", async () => {
+  viewsFail = { code: "internal", message: "the views are unreadable" };
+  render();
+  await settle();
+  expect(text()).not.toContain("the views are unreadable");
+  button("Share…")!.click();
+  await settle();
+  expect(tick("Ticket views")).toBeUndefined();
 });

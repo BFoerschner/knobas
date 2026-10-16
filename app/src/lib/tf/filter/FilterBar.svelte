@@ -41,6 +41,7 @@
     total,
     onchange = () => {},
     extra,
+    after,
   }: {
     config: FilterConfig;
     /** The view's filter state, usually `sessionFilter(config.id)`. */
@@ -50,8 +51,10 @@
     /** How many rows the view holds unfiltered, or `null` before it is known. */
     total: number | null;
     onchange?: () => void;
-    /** What the view adds after the dropdowns: its *Lanes*, its *Save as a view*. */
+    /** What the view adds after the dropdowns: Tickets' *Lanes*. */
     extra?: Snippet;
+    /** What follows the count at the end of the bar (Tickets' *Save as a view*, #812). */
+    after?: Snippet;
   } = $props();
 
   let field: HTMLInputElement | undefined = $state();
@@ -162,4 +165,5 @@
   <span class="tf-fcount" aria-live="polite"
     >{shown !== null && total !== null ? countLine(shown, total, config.noun) : ""}</span
   >
+  {@render after?.()}
 </div>
