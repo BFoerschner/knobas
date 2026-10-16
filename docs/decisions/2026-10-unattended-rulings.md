@@ -2973,5 +2973,5 @@ Ruled by the implementer (PR for #844, #846, #847).
   annotation and is left out; *Where is <name> cloned?* drops "knobas checks that the folder's
   origin is this repository.", since `set_checkout_override` does not check it. **Reversing:**
   low.
-- **Not in this PR: the PR page's checkout panel** (R-8.22's last place) is #841's screen, built
-  beside this one; it can mount `TfOpenIn` as it is. **Reversing:** none needed.
+- **The PR page's checkout panel** (R-8.22's last place, #841's screen, which landed while this
+  was built) mounts `TfOpenIn` in place of its disabled *Open in…*. **Reversing:** low.

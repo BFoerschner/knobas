@@ -316,7 +316,7 @@ test("Ready to merge? lists the source's verdict, the reviews and the checks, ea
     "Checks: Payout_IntegrationTests #1187 failure",
   ]);
   expect(lines.map((line) => line.querySelector(".tf-dot")!.className)).toEqual(["tf-dot tf-warn", "tf-dot tf-ok", "tf-dot tf-err"]);
-  expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… Local changes");
+  expect(text(".tf-prlocal")).toBe("/Users/mara/code/payout-service On this branch, 1 changed file Open in… ▾ Local changes");
   expect(target.querySelector(".tf-prlocal a")!.getAttribute("href")).toBe(`#/repo/${encodeURIComponent(REPO)}/local`);
 });
 

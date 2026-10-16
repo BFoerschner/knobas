@@ -83,6 +83,7 @@
   } from "./pr";
   import { markComment, markQueued, pendingComments as pendingOf, queuedChips } from "./queued.svelte";
   import TfPrAction from "./TfPrAction.svelte";
+  import TfOpenIn from "../openin/TfOpenIn.svelte";
 
   let {
     ready,
@@ -497,7 +498,7 @@
                 <span class="tf-mono">{local.path}</span>
                 <span>{local.line}</span>
                 <div class="tf-prlocal-acts">
-                  <button type="button" class="tf-btn tf-sm" aria-disabled="true" title={NOT_BUILT}>Open in…</button>
+                  <TfOpenIn entityId={repo.entity_id} title={repo.title} checkout={checkout ?? undefined} />
                   <a class="tf-btn tf-sm tf-ghost" href={repoHash(repo.entity_id, "local")}>Local changes</a>
                 </div>
               </div>
