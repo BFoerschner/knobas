@@ -122,7 +122,9 @@
   {#if scopes.length > 0}
     <div class="tf-seg" role="group" aria-label="Scope">
       {#each scopes as choice (choice.id)}
-        <button type="button" aria-pressed={scope === choice.id} onclick={() => pick(choice.id)}>{choice.label}</button>
+        <button type="button" aria-pressed={scope === choice.id} onclick={() => pick(choice.id)}
+          >{choice.label}{#if choice.tag}{" "}<span class="tf-jobk">{choice.tag}</span>{/if}</button
+        >
       {/each}
     </div>
   {/if}

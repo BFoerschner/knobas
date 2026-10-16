@@ -349,6 +349,7 @@ const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
+const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
@@ -879,6 +880,27 @@ const CASES: Case[] = [
           onclose: () => {},
           onunlink: () => {},
           onlinkto: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Proposed links (#835): `Y`, `N`, `S` and the filter bar's `/` on the
+     * window, and the tray read behind a ready database, answering late.
+     */
+    name: "TfReview",
+    source: "lib/tf/review/TfReview.svelte",
+    open: (target) => ({
+      app: mount(TfReview, {
+        target,
+        props: {
+          ready: true,
+          job: "PAY-231",
+          sid: null,
+          layers: createLayers(),
+          ports: { roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }) },
+          ongo: () => {},
         },
       }),
     }),

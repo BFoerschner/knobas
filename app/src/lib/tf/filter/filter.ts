@@ -57,6 +57,8 @@ export interface FilterScope {
   id: string;
   label: string;
   query: string;
+  /** A code value drawn after the label in mono: *This job* names its key (prototype-6's `jobk`). */
+  tag?: string;
 }
 
 /**

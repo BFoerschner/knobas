@@ -2080,3 +2080,48 @@ Merge-manager, PR #938 for #831.
   with**, the rule `mini_board`'s `mine` reads. **Reversing:** `isMine` in `job.ts`.
 - **Sections stay in R-4.6's order on every job** (Code, Builds, Assets, Monitors, Pages);
   prototype-6 draws PAY-228's in another order. **Reversing:** the grid in `TfJob.svelte`.
+
+## #835 Proposed links view
+
+- **A decision is written when its toast closes, not when it is taken.** *Undo* has to put a
+  proposal back in the queue, and no command can: `unlink` on an accepted proposal tombstones it,
+  and `dismiss_suggestion` is remembered on purpose. So *Link them* and *Not related* are held for
+  the toast's 6.5 s and only then sent; *Undo* cancels a write that never happened
+  (`tf/review/decisions.svelte.ts`). A window closed inside those seconds loses the decision, and
+  the proposal is simply there next time. **Reversing:** low in the UI; a real undo needs a
+  `restore_suggestion` command and its §10.8 entry.
+- **A relation the reader changed is drawn with `create_link`, then the proposal is dismissed.**
+  `accept_suggestion` confirms the row as it stands and no command relabels a link, so the
+  activity log shows *linked* and *dismissed* for that pair. Unchanged, it is `accept_suggestion`.
+  **Reversing:** low; an optional relation on `accept_suggestion` would need a §10.8 entry.
+- **Merge-manager, PR #943: the held write stays, with no flush on close.** Neither the spec nor
+  an ADR says a decision must survive a close. Closing the last window exits the app and shuts the
+  database down (`RunEvent::ExitRequested`), and Cmd-Q goes straight to `Exit`, so a write fired
+  from `beforeunload` races that shutdown, and could land half a relation change. A route change
+  loses nothing (the timers are module-level). The toast is the visible held state. The
+  shell-conventions line now says what a close loses. **Reversing:** low; a reliable flush needs a
+  close-requested hook that awaits the writes.
+- **Merge-manager, PR #943: a changed relation's `create_link` treats `conflict` as drawn.** The
+  pair already linked under that relation is the state the write wants, so a retry after a failed
+  dismissal (link landed, proposal still waiting) dismisses instead of sticking on "already
+  linked". No duplicate is possible: the active-edge index is one per pair per relation.
+  **Reversing:** low.
+- **Strength comes from the rule class.** `exact_key` and `source_relation` read *Strong*,
+  `similarity` reads *Weak*. No rule writes evidence through another link, so nothing reads
+  *Indirect* yet; its chip is drawn as prototype-6 draws it and keeps nothing. **Reversing:** low.
+- **The cards show the kind and the name only.** Prototype-6's context line (author, time, branch,
+  status) has no field on `SuggestionEntry`'s ends, and two `get_entity` reads per proposal for it
+  were not worth it here. A ticket is named *KEY title*, a commit *sha “message”*, anything else by
+  its title. The kind line is the kind's name (*Commit*), not prototype-6's *Commit in
+  payout-service*. **Reversing:** low.
+- **The reason reads as a sentence.** The detector writes a clause (*the commit message mentions
+  PAY-231*); the card capitalises it and ends it with a full stop. **Reversing:** low.
+- **A queue row names the item and points at the ticket**, whichever end the ticket is; with no
+  ticket, or two, the link's own direction decides. The cards keep the link's direction
+  (from, relation, to). **Reversing:** low.
+- **Decisions last the session** and survive leaving the view; *Decide later* writes nothing, so
+  the proposal is back after a restart. **Reversing:** low.
+- **The relation list is prototype-6's** (*implements, deploys, documents, mentions, related,
+  blocks, depends on*), stored as `create_link` stores ids (`depends-on`); a proposal's relation
+  that the list lacks goes first. **Reversing:** low.
+- **No breadcrumb,** as prototype-6 draws this view. **Reversing:** low (`crumbs: true`).

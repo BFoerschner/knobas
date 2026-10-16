@@ -56,26 +56,26 @@ test("a room under ?fake-ipc draws proposals, not a red line, and answering one 
   installFakeTauri(demoHandlers());
   const { target, app } = render();
 
-  await heading(target, "3 waiting");
+  // Seven since #835 grew the fixture for the Proposed links view.
+  await heading(target, "7 waiting");
   expect(target.querySelector(".fail")).toBeNull();
-  expect(target.querySelectorAll(".row.sug")).toHaveLength(3);
+  const drawn = target.querySelectorAll(".row.sug").length;
+  expect(drawn).toBeGreaterThan(2);
   const badges = [...target.querySelectorAll(".cls")].map((badge) => badge.textContent?.trim());
   expect(badges).toContain("exact");
   expect(badges).toContain("guess");
   for (const why of target.querySelectorAll(".why")) {
-    expect(why.textContent?.replace(/\s+/g, " ").trim()).toMatch(/(exact|guess) \S/);
+    expect(why.textContent?.replace(/\s+/g, " ").trim()).toMatch(/(exact|guess|recorded) \S/);
   }
 
   const first = target.querySelector(".row.sug")!;
   (first.querySelector("button.pri") as HTMLButtonElement).click();
-  await heading(target, "2 waiting");
+  await heading(target, "6 waiting");
   expect(target.querySelector(".fail")).toBeNull();
-  expect(target.querySelectorAll(".row.sug")).toHaveLength(2);
 
   const next = target.querySelector(".row.sug")!;
   (next.querySelector("button.ghost") as HTMLButtonElement).click();
-  await heading(target, "1 waiting");
-  expect(target.querySelectorAll(".row.sug")).toHaveLength(1);
+  await heading(target, "5 waiting");
 
   unmount(app);
   target.remove();

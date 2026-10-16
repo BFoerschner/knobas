@@ -54,7 +54,8 @@ test("every proposal is unconfirmed, gives a reason, shows both classes and open
   expect(answer.total).toBe(answer.rows.length);
   for (const { link, from, to } of answer.rows) {
     expect(link.confirmed_at, `${link.id} is confirmed`).toBeNull();
-    expect(link.origin).toBe("suggested");
+    // The detector writes a relation the source records under the source's origin.
+    expect(link.origin).toBe(link.rule_class === "source_relation" ? "source" : "suggested");
     expect(link.reason, `${link.id} has no reason`).toEqual(expect.any(String));
     expect(link.rule_class, `${link.id} has no class`).not.toBeNull();
     expect(from.entity_id).toBe(link.from_id);
