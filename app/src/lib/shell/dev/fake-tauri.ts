@@ -161,6 +161,8 @@ interface FakeFeature {
   handlers: (params: URLSearchParams) => Record<string, Handler>;
   /** Read the page's query before the bridge is installed, where it needs to. */
   seed?: (params: URLSearchParams) => void;
+  /** Hold the installed bridge, for a feature that emits events (a clone's progress, #846). */
+  attach?: (bridge: FakeBridge) => void;
 }
 
 /** Every feature module, in path order. */
@@ -180,7 +182,8 @@ export function installIfRequested(): void {
   const params = new URLSearchParams(location.search);
   if (!params.has("fake-ipc")) return;
   for (const [, feature] of FEATURES) feature.seed?.(params);
-  installFakeTauri(demoHandlers(params));
+  const bridge = installFakeTauri(demoHandlers(params));
+  for (const [, feature] of FEATURES) feature.attach?.(bridge);
 }
 
 /**

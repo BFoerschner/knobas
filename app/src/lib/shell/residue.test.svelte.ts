@@ -355,6 +355,36 @@ const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
+const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
+const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
+const TfCheckoutsSection = (await import("../tf/settings/TfCheckoutsSection.svelte")).default;
+const { createApps } = await import("../tf/openin/apps.svelte");
+const { createClones } = await import("../tf/openin/clones.svelte");
+
+/** An *Open in…* list whose reads land when the test says (#844). */
+function residueApps() {
+  return createApps({
+    checkoutSettings: () =>
+      deferred({
+        clones_root: "/src",
+        git: { status: "found" as const, path: "/usr/bin/git" },
+        default_application: "vscode",
+        applications: [{ id: "vscode", name: "VS Code", command: "code {path}", file_command: null }],
+      }),
+    setCheckoutApplications: () => deferred({} as never),
+    openCheckout: () => deferred([]),
+  });
+}
+
+const CLONED = {
+  repo_entity_id: "mock:tidewater/payout-service",
+  repo_url: null,
+  path: "/src/payout-service",
+  found_by: "scan" as const,
+  clones_root: "/src",
+  clone_command: null,
+  tree: null,
+};
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
@@ -971,8 +1001,32 @@ const CASES: Case[] = [
             tree: null,
           },
           checkoutOf: "mock:tidewater/payout-service",
-          commands: [{ action: "vscode", label: "Open in VS Code", template: "code {path}", is_default: true }],
-          onopen: () => Promise.resolve(),
+          layers: createLayers(),
+          apps: residueApps(),
+        },
+      }),
+    }),
+    exercise: (target) => {
+      target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
+    },
+  },
+  {
+    /**
+     * *Open in…* (#844): open, its menu registers a layer and a window click
+     * listener; *Clone* (#846) subscribes to `clone:progress`.
+     */
+    name: "TfOpenIn",
+    source: "lib/tf/openin/TfOpenIn.svelte",
+    open: (target) => ({
+      app: mount(TfOpenIn, {
+        target,
+        props: {
+          entityId: "mock:tidewater/payout-service",
+          title: "tidewater/payout-service",
+          checkout: CLONED,
+          apps: residueApps(),
+          // The real ports: `listen` is this file's mock, a window listener.
+          clones: createClones(undefined, residueApps()),
           layers: createLayers(),
         },
       }),
@@ -980,6 +1034,34 @@ const CASES: Case[] = [
     exercise: (target) => {
       target.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")?.click();
     },
+  },
+  {
+    /** *Local changes* (#847) reads the diff again when the window gets focus. */
+    name: "TfRepoLocal",
+    source: "lib/tf/repo/TfRepoLocal.svelte",
+    open: (target) => ({
+      app: mount(TfRepoLocal, {
+        target,
+        props: {
+          repoId: "mock:tidewater/payout-service",
+          title: "tidewater/payout-service",
+          checkout: CLONED,
+          readDiff: () => deferred({ status: "no_git" as const }),
+          setPath: () => deferred(undefined),
+        },
+      }),
+    }),
+  },
+  {
+    /** Settings › Checkouts (#844) reads the list when it opens. */
+    name: "TfCheckoutsSection",
+    source: "lib/tf/settings/TfCheckoutsSection.svelte",
+    open: (target) => ({
+      app: mount(TfCheckoutsSection, {
+        target,
+        props: { apps: residueApps(), saveRoot: () => deferred(undefined), layers: createLayers() },
+      }),
+    }),
   },
   {
     /** The Connections drawer (#820) registers a drawer layer while it is open. */

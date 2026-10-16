@@ -1226,3 +1226,16 @@ async fn a_stored_command_wins_and_clearing_gives_the_shipped_one_back() {
     set_command(&pool, "vscode", None).await.unwrap();
     assert_eq!(commands(&pool).await.unwrap(), before);
 }
+
+/// *Where should clones go?* offers `~/code`; nothing knobas runs expands a
+/// tilde, so the root is stored with the home directory spelled out (#846).
+#[tokio::test]
+async fn a_clones_root_typed_with_a_tilde_is_stored_under_home() {
+    let pool = pool().await;
+    let home = std::env::var("HOME").expect("the gate runs with a HOME");
+    set_clones_root(&pool, Some("~/code")).await.unwrap();
+    assert_eq!(
+        clones_root(&pool).await.unwrap(),
+        Some(format!("{}/code", home.trim_end_matches('/')))
+    );
+}

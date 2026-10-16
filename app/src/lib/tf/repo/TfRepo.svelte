@@ -321,8 +321,7 @@
           type="button"
           class="tf-btn"
           disabled={branches === null || branches.length === 0}
-          onclick={() => (newBranch = { from: null })}>New branch…</button
-        >
+          onclick={() => (newBranch = { from: null })}>New branch…</button>
         {#if proposed !== null}
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}

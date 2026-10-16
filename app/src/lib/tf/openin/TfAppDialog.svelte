@@ -178,8 +178,6 @@
       <button type="button" class="tf-btn" disabled={command.trim() === ""} onclick={tryIt}>Try it on {sample.name}</button>
     {/if}
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="submit" class="tf-btn tf-primary" form="tf-app-form" disabled={!ready}
-      >{editing ? "Save" : "Add application"}</button
-    >
+    <button type="submit" class="tf-btn tf-primary" form="tf-app-form" disabled={!ready}>{editing ? "Save" : "Add application"}</button>
   {/snippet}
 </TfDialog>

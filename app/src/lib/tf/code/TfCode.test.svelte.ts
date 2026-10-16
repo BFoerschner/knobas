@@ -141,9 +141,10 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
 
   const rows = [...target.querySelectorAll("tbody tr")];
   expect(rows.map(cells)).toEqual([
-    ["tidewater/payout-service PAY-231", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20"],
-    ["tidewater/fx-rates", "0", "not on this machine", "today 11:00"],
-    ["tidewater/ledger-api", "1", "not on this machine", "yesterday 12:00"],
+    ["tidewater/payout-service PAY-231", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
+    // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
+    ["tidewater/fx-rates", "0", "not on this machine", "today 11:00", "Clone"],
+    ["tidewater/ledger-api", "1", "not on this machine", "yesterday 12:00", "Clone"],
   ]);
   expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
 });

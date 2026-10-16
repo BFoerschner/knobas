@@ -421,3 +421,143 @@ fn spawn(argv: &[String]) -> std::io::Result<()> {
     });
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
+
+    /// The body of one `export interface <name> {` in the mirror.
+    fn interface(name: &str) -> &'static str {
+        MIRROR
+            .split_once(&format!("export interface {name} {{"))
+            .unwrap_or_else(|| panic!("entity.ts declares {name}"))
+            .1
+            .split_once("\n}")
+            .expect("the interface is closed")
+            .0
+    }
+
+    fn keys(value: &serde_json::Value) -> Vec<String> {
+        let mut keys: Vec<String> = value.as_object().unwrap().keys().cloned().collect();
+        keys.sort();
+        keys
+    }
+
+    /// Exactly the keys the mirror declares, for each shape on the wire: a
+    /// field added on one side only is invisible to a walk over a hardcoded
+    /// list.
+    #[test]
+    fn the_settings_serialise_the_keys_the_mirror_declares() {
+        let settings = CheckoutSettings {
+            clones_root: None,
+            git: GitFound::NoGit,
+            default_application: Some("vscode".to_owned()),
+            applications: vec![Application {
+                id: "vscode".to_owned(),
+                name: "VS Code".to_owned(),
+                command: "code {path}".to_owned(),
+                file_command: None,
+            }],
+        };
+        let json = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            keys(&json),
+            ["applications", "clones_root", "default_application", "git"]
+        );
+        let body = interface("CheckoutSettings");
+        for key in keys(&json) {
+            assert!(body.contains(&format!("{key}:")), "CheckoutSettings.{key}");
+        }
+        let app = &json["applications"][0];
+        assert_eq!(keys(app), ["command", "file_command", "id", "name"]);
+        let body = interface("CheckoutApplication");
+        for key in keys(app) {
+            assert!(body.contains(&format!("{key}:")), "CheckoutApplication.{key}");
+        }
+        // A draft is what the mirror sends back: the same four, the id optional.
+        let draft: knobas_core::checkout::open::Draft = serde_json::from_value(serde_json::json!({
+            "id": null, "name": "X", "command": "x {path}", "file_command": null
+        }))
+        .unwrap();
+        assert_eq!(draft.id, None);
+        let body = interface("CheckoutApplicationDraft");
+        for key in ["id", "name", "command", "file_command"] {
+            assert!(body.contains(&format!("{key}:")), "CheckoutApplicationDraft.{key}");
+        }
+    }
+
+    /// The git found is tagged on `status`, with the words the mirror narrows on.
+    #[test]
+    fn the_git_found_serialises_as_the_mirror_declares() {
+        for (git, word) in [
+            (
+                GitFound::Found {
+                    path: "/usr/bin/git".to_owned(),
+                },
+                "found",
+            ),
+            (GitFound::NoGit, "no_git"),
+            (
+                GitFound::Failed {
+                    reason: "x".to_owned(),
+                },
+                "failed",
+            ),
+        ] {
+            assert_eq!(serde_json::to_value(&git).unwrap()["status"], word);
+            assert!(MIRROR.contains(&format!("status: \"{word}\"")), "{word}");
+        }
+    }
+
+    /// #501's button view keeps its four keys, which the rooms panel reads.
+    #[test]
+    fn the_open_command_serialises_the_keys_the_mirror_declares() {
+        let shipped = knobas_core::checkout::open::shipped_on("macos");
+        let view = command_view(&shipped[0], &shipped);
+        assert_eq!(view.label, "Open in VS Code");
+        assert!(view.is_default);
+        let json = serde_json::to_value(view).unwrap();
+        assert_eq!(keys(&json), ["action", "is_default", "label", "template"]);
+        let body = interface("CheckoutCommand");
+        for key in keys(&json) {
+            assert!(body.contains(&format!("{key}:")), "CheckoutCommand.{key}");
+        }
+    }
+
+    /// A default that names no entry is the first one, and an empty list has
+    /// none.
+    #[test]
+    fn a_default_whose_entry_is_gone_is_the_first() {
+        let shipped = knobas_core::checkout::open::shipped_on("macos");
+        let stored = Stored {
+            default: Some("gone".to_owned()),
+            applications: shipped.clone(),
+        }
+        .settle_default();
+        assert_eq!(stored.default.as_deref(), Some(shipped[0].id.as_str()));
+        let empty = Stored {
+            default: Some("gone".to_owned()),
+            applications: vec![],
+        }
+        .settle_default();
+        assert_eq!(empty.default, None);
+    }
+
+    /// The legacy keys are #501's spellings, and the list's key is its own.
+    #[test]
+    fn the_keys_are_501s_and_the_lists_own() {
+        let legacy: Vec<String> = LEGACY.iter().map(|(id, _)| legacy_key(id)).collect();
+        assert_eq!(
+            legacy,
+            [
+                "checkout.command.vscode",
+                "checkout.command.jetbrains",
+                "checkout.command.terminal"
+            ]
+        );
+        assert!(!legacy.contains(&APPLICATIONS_KEY.to_owned()));
+        assert_ne!(APPLICATIONS_KEY, super::super::CLONES_ROOT_KEY);
+    }
+}

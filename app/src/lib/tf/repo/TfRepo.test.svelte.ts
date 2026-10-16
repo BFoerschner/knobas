@@ -372,14 +372,72 @@ test("Pull requests lists this repository's, with a state filter", async () => {
   expect(rows()).toEqual(["#139"]);
 });
 
-test("Local changes says it is not built yet, under its tab", async () => {
-  for (const [rest, lit, name] of [[[REPO, "local"], "Local changes", "Local changes"]] as const) {
-    await draw([...rest]);
-    expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain(lit);
-    expect(text(target.querySelector(".tf-cbody .tf-empty"))).toBe(`${name} is not built in the new shell yet.`);
-    unmount(view!);
-    view = null;
-  }
+test("Local changes draws the checkout line, the uncommitted diff with the PR's diff block, and the untracked files", async () => {
+  const read: DiffRead = {
+    ...LOCAL,
+    staged: {
+      files: [{ path: "src/sepa/mod.rs", old_path: null, change: "modified", additions: 2, deletions: 0, hunks: [], truncated: false, threads: [] }],
+      truncated: false,
+    },
+    untracked: ["notes.txt", "scratch/"],
+  };
+  let reads = 0;
+  await draw([REPO, "local"], ports({ entityCheckoutDiff: async () => ((reads += 1), read) }));
+  expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain("Local changes");
+  const line = target.querySelector(".tf-cbody .tf-checkout")!;
+  expect(text(line)).toContain("/Users/mara/src/payout-service on main 1 ahead, 1 changed");
+  expect(line.querySelector("button[aria-haspopup='menu']")).not.toBeNull();
+  expect(text(target.querySelector(".tf-cbody"))).toContain("knobas never commits, stashes or pushes here");
+  // The pull request's diff block (#842's `TfDiff`), each file marked.
+  expect([...target.querySelectorAll(".tf-cbody .tf-diff .tf-fh .tf-mono")].map(text)).toEqual([
+    "src/retry.rs (modified, not staged)",
+    "src/sepa/mod.rs (modified, staged)",
+  ]);
+  expect([...target.querySelectorAll(".tf-untracked li")].map(text)).toEqual(["notes.txt", "scratch/"]);
+
+  // And again when the window gets focus.
+  const before = reads;
+  window.dispatchEvent(new Event("focus"));
+  await settle();
+  expect(reads).toBeGreaterThan(before);
+});
+
+test("Local changes on a clean checkout says so", async () => {
+  await draw([REPO, "local"], ports({ entityCheckoutDiff: async () => ({ ...LOCAL, unstaged: { files: [], truncated: false } }) }));
+  expect(text(target.querySelector(".tf-cbody .tf-empty"))).toBe("Working tree clean.");
+});
+
+test("Local changes for a repository not on this machine offers Clone and setting a path by hand", async () => {
+  const overrides: [string, string | null][] = [];
+  await draw(
+    [REPO, "local"],
+    ports(
+      {
+        setCheckoutOverride: async (id, path) => {
+          overrides.push([id, path]);
+          return checkout(path);
+        },
+      },
+      false,
+    ),
+  );
+  const empty = target.querySelector(".tf-cbody .tf-empty")!;
+  expect(text(empty)).toContain("Not on this machine yet.");
+  const clone = [...empty.querySelectorAll("button")].find((b) => text(b) === "Clone")!;
+  expect(clone.getAttribute("title")).toBe("Clones into /Users/mara/src/payout-service");
+  [...empty.querySelectorAll("button")].find((b) => text(b) === "It is already cloned somewhere else…")!.click();
+  flushSync();
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(text(dialog.querySelector("h2"))).toBe("Where is payout-service cloned?");
+  const input = dialog.querySelector<HTMLInputElement>("#tf-spp")!;
+  input.value = "/Users/mara/work/payout-service";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  dialog.querySelector<HTMLButtonElement>("button[type='submit']")!.click();
+  await settle();
+  expect(overrides).toEqual([[REPO, "/Users/mara/work/payout-service"]]);
+  // The fresh view has the path: the tab is the cloned one now.
+  expect(text(target.querySelector(".tf-cbody .tf-checkout"))).toContain("/Users/mara/work/payout-service");
 });
 
 test("a repository the mirror does not hold says so", async () => {
