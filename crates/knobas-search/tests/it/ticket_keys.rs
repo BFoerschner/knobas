@@ -785,7 +785,10 @@ async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
         (person.to_uppercase(), vec![theirs.clone()]),
         (format!("{person} {p}"), vec![theirs.clone()]),
         (format!("{p}-2"), vec![nobodys.clone()]),
-        (p.clone(), vec![theirs.clone(), nobodys.clone(), bare.clone()]),
+        (
+            p.clone(),
+            vec![theirs.clone(), nobodys.clone(), bare.clone()],
+        ),
         (format!("{p}-2 {person}"), Vec::new()),
     ] {
         assert_eq!(
