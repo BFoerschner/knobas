@@ -38,6 +38,7 @@ const DRAFT: Draft = {
 
 const DAY: DayRecord = {
   past_horizon: false,
+  open: [],
   blocks: [
     {
       title: "Retry SEPA payouts",

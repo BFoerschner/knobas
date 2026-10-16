@@ -118,6 +118,11 @@ function todaysBlocks(): FakeBlock[] {
   ];
 }
 
+/** Today's focused time with no target (#901): prototype-6's 12:35 to 13:10. */
+function todaysOpen(): { started_at: string; ended_at: string }[] {
+  return [{ started_at: todayAt(12, 35), ended_at: todayAt(13, 10) }];
+}
+
 /**
  * Prototype-6's Thu 21 PAY-231 row in *Log all*, which no block backs: one
  * place for its start hour, length and comment (#828).
@@ -230,12 +235,22 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     day_blocks: (args) => {
       const from = String(args["from"]);
       const to = String(args["to"]);
+      const claimed = [...blocks, ...(running ? [{ started_at: running.started_at, ended_at: new Date().toISOString() }] : [])];
       return {
         past_horizon: from < fakeHorizon(),
         blocks: blocks
           .filter((block) => block.started_at < to && block.ended_at > from)
           .sort((a, b) => a.started_at.localeCompare(b.started_at))
           .map((block) => ({ block, title: titleOf(block.target) })),
+        // Prototype-6's open stretch (#901), 12:35 to 13:10, the 35 minutes the
+        // week's Friday "No target, app open" cell holds. Gone, whole, once a
+        // block or the running timer claims any of it.
+        open: todaysOpen().filter(
+          (stretch) =>
+            stretch.started_at < to &&
+            stretch.ended_at > from &&
+            !claimed.some((claim) => claim.started_at < stretch.ended_at && claim.ended_at > stretch.started_at),
+        ),
       };
     },
     // The Day tab's edits (#827): in memory, so a click visibly does something.
@@ -265,6 +280,15 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
     },
     delete_block: (args) => {
       const block = editable(args["id"]);
+      blocks = blocks.filter((candidate) => candidate !== block);
+      return null;
+    },
+    // *Dismiss* (#900): only an offer, and it stays gone.
+    dismiss_block: (args) => {
+      const block = editable(args["id"]);
+      if (block.kind !== "passive") {
+        throw { code: "invalid", message: "only a block knobas offered can be dismissed", source_id: null };
+      }
       blocks = blocks.filter((candidate) => candidate !== block);
       return null;
     },

@@ -293,6 +293,7 @@ knobas-app	lib/knobas_app	time::passive::tests::focused_time_is_the_beats_shape_
 knobas-app	lib/knobas_app	time::passive::tests::focused_time_with_nothing_open_attributes_nothing_and_pays_for_itself
 knobas-app	lib/knobas_app	time::passive::tests::no_observations_are_no_blocks
 knobas-app	lib/knobas_app	time::passive::tests::observations_out_of_order_derive_the_same_blocks
+knobas-app	lib/knobas_app	time::passive::tests::open_stretches_are_focused_time_minus_the_union_of_what_claims_it
 knobas-app	lib/knobas_app	time::passive::tests::silence_longer_than_a_beat_window_breaks_a_visit
 knobas-app	lib/knobas_app	time::passive::tests::the_beat_window_is_the_interval_the_shell_beats_at
 knobas-app	lib/knobas_app	time::passive::tests::the_cap_binds_when_heartbeats_overlap
@@ -310,7 +311,6 @@ knobas-app	lib/knobas_app	time::tests::every_block_kind_is_one_the_schema_accept
 knobas-app	lib/knobas_app	time::tests::the_context_namespace_is_the_one_knobas_core_reserves
 knobas-app	lib/knobas_app	time::week::tests::a_day_list_that_would_double_count_is_refused
 knobas-app	lib/knobas_app	time::week::tests::a_pending_worklog_is_logged_and_everything_else_is_held
-knobas-app	lib/knobas_app	time::week::tests::uncovered_time_is_the_span_minus_the_union_of_what_covers_it
 knobas-app	lib/knobas_app	time::worklog::tests::a_concatenated_interval_logs_the_time_worked_not_the_window_it_sat_in
 knobas-app	lib/knobas_app	time::worklog::tests::a_day_is_the_readers_day_and_not_the_servers
 knobas-app	lib/knobas_app	time::worklog::tests::an_offset_that_is_not_an_offset_is_refused
@@ -590,6 +590,11 @@ knobas-app	test/it	conversation_ipc::a_visit_answers_the_one_before_it
 knobas-app	test/it	conversation_ipc::a_visit_is_not_in_the_recent_activity
 knobas-app	test/it	conversation_ipc::a_visit_to_another_ticket_is_not_this_ones
 knobas-app	test/it	conversation_ipc::a_visit_to_nothing_is_refused_and_writes_nothing
+knobas-app	test/it	day_offers_ipc::a_dismissed_offer_is_gone_and_the_next_reads_do_not_offer_it_again
+knobas-app	test/it	day_offers_ipc::only_an_offered_block_can_be_dismissed
+knobas-app	test/it	day_offers_ipc::the_days_open_stretches_are_focused_time_no_block_covers
+knobas-app	test/it	day_offers_ipc::the_running_timer_claims_its_time_from_the_open_stretches
+knobas-app	test/it	day_offers_ipc::with_nothing_observed_nothing_is_open
 knobas-app	test/it	demo::a_demo_ticket_carries_its_project_into_the_mirrored_payload
 knobas-app	test/it	demo::a_demo_ticket_with_no_project_syncs_and_its_payload_names_none
 knobas-app	test/it	demo::a_profile_stored_at_an_older_fixture_version_re_syncs_and_gains_the_project

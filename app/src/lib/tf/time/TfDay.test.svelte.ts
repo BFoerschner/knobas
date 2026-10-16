@@ -8,7 +8,8 @@
 import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AdHocBlock, Block, DayBlock, RunningTimer, TimerTarget, Week } from "../../ipc/time";
+import type { AdHocBlock, Block, DayBlock, OpenStretch, RunningTimer, TimerTarget } from "../../ipc/time";
+import { toasts } from "../../shell/toasts.svelte";
 import { createLayers } from "../layers.svelte";
 import TfDay from "./TfDay.svelte";
 
@@ -75,14 +76,16 @@ function render(
     blocks?: DayBlock[];
     running?: RunningTimer | null;
     pastHorizon?: boolean;
-    openSeconds?: number;
+    open?: OpenStretch[];
     day?: string | null;
   } = {},
 ) {
   let listed = over.blocks ?? friday();
+  const open = over.open ?? [{ started_at: at(12, 35), ended_at: at(13, 10) }];
   const updates: [number, string, string, TimerTarget][] = [];
   const creates: [string, string, TimerTarget][] = [];
   const deletes: number[] = [];
+  const dismissals: number[] = [];
   const logs: [string, string][] = [];
   let stops = 0;
   const layers = createLayers();
@@ -96,14 +99,8 @@ function render(
       now: () => NOW,
       layers,
       ports: {
-        dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false }),
+        dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
         adHocBlock: (id: number) => Promise.resolve(OFFERS[id] ?? null),
-        weekTimesheet: () =>
-          Promise.resolve({
-            days: [DAY],
-            rows: [{ target: null, title: null, cells: [{ tracked_seconds: over.openSeconds ?? 35 * 60 }] }],
-            past_horizon: [false],
-          } as unknown as Week),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
           updates.push([id, from, to, on]);
           const entry = listed.find((candidate) => candidate.block.id === id)!;
@@ -122,11 +119,16 @@ function render(
           listed = listed.filter((candidate) => candidate.block.id !== id);
           return Promise.resolve();
         },
+        dismissBlock: (id: number) => {
+          dismissals.push(id);
+          listed = listed.filter((candidate) => candidate.block.id !== id);
+          return Promise.resolve();
+        },
       },
     },
   });
   flushSync();
-  return { updates, creates, deletes, logs, layers, stops: () => stops };
+  return { updates, creates, deletes, dismissals, logs, layers, stops: () => stops };
 }
 
 async function settle() {
@@ -171,7 +173,7 @@ test("the day draws its five figures and a row per block, in time order, with it
     "15m offered by knobas",
     "35m open, app in front",
   ]);
-  expect(rows()).toEqual(["logged", "offered", "unlogged", "untracked", "label", "running"]);
+  expect(rows()).toEqual(["logged", "offered", "unlogged", "open", "label", "running"]);
   const when = (state: string) =>
     [...row(state).querySelector(".tf-tm-when")!.childNodes].map((part) => squash(part.textContent)).join(" ");
   expect(when("unlogged")).toBe("09:40 to 11:50 2h 10m");
@@ -251,28 +253,63 @@ test("Edit moves a block and Delete block removes it, and Esc closes the dialog 
   expect(sent.deletes).toEqual([3]);
 });
 
-test("Assign… on untracked time writes a block over exactly that stretch", async () => {
+test("an open stretch is a dashed open row, and the open figure is the sum of the open rows", async () => {
+  render({
+    open: [
+      { started_at: at(12, 10), ended_at: at(12, 20) },
+      { started_at: at(12, 35), ended_at: at(13, 10) },
+    ],
+  });
+  await settle();
+  expect(rows()).toEqual(["logged", "offered", "unlogged", "open", "open", "label"]);
+  expect(figures()[4]).toBe("45m open, app in front");
+  const what = squash(row("open").textContent);
+  expect(what).toContain("No target, app open");
+  expect(what).toContain("knobas was open and in front, with no timer and nothing it could name.");
+  expect(squash(row("open").querySelector(".tf-chip")?.textContent)).toBe("open");
+  // Dashed on the strip, and the legend says what dashed means.
+  expect(target.querySelectorAll(".tf-tm-strip .tf-tm-gap")).toHaveLength(2);
+  expect(squash(target.querySelector(".tf-tm-legend")?.textContent)).toContain("Open: app in front, no target");
+  // 11:50 to 12:10 is neither a block nor focused time, and is no row.
+  expect(squash(target.textContent)).not.toContain("Nothing tracked");
+});
+
+test("Assign… on an open stretch writes a block over exactly that stretch", async () => {
   const sent = render();
   await settle();
-  button(row("untracked"), "Assign…").click();
+  button(row("open"), "Assign…").click();
   flushSync();
   const on = target.querySelector<HTMLInputElement>("#tf-tm-on")!;
   on.value = "jira:OPS-77";
   on.dispatchEvent(new Event("input", { bubbles: true }));
   button(target, "Assign").click();
   await settle();
-  expect(sent.creates).toEqual([[at(11, 50), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
+  expect(sent.creates).toEqual([[at(12, 35), at(13, 10), { kind: "entity", entity_id: "jira:OPS-77" }]]);
+});
+
+test("Dismiss on an offered block dismisses it, says knobas will not offer it again, and the day re-reads", async () => {
+  const sent = render();
+  await settle();
+  expect(button(row("offered"), "Dismiss").className).toContain("tf-ghost");
+  button(row("offered"), "Dismiss").click();
+  await settle();
+  expect(sent.dismissals).toEqual([2]);
+  expect(sent.deletes).toEqual([]);
+  expect(toasts.items.at(-1)?.text).toBe("Dismissed. knobas will not offer it again.");
+  expect(rows()).not.toContain("offered");
+  // Only an offer has it.
+  expect(() => button(row("unlogged"), "Dismiss")).toThrow();
 });
 
 test("a day past the observation horizon with nothing tracked says No record", async () => {
-  render({ blocks: [], pastHorizon: true, day: "2026-07-01" });
+  render({ blocks: [], pastHorizon: true, open: [], day: "2026-07-01" });
   await settle();
   expect(squash(target.textContent)).toContain("No record for this day.");
   expect(target.querySelector(".tf-tm-sum")).toBeNull();
 });
 
 test("a day with nothing on it says so, and a day before today offers the day after and Today", async () => {
-  render({ blocks: [], day: "2026-08-20" });
+  render({ blocks: [], open: [], day: "2026-08-20" });
   await settle();
   expect(squash(target.textContent)).toContain("Nothing tracked on this day.");
   expect(target.querySelector('a[aria-label="Day after"]')!.getAttribute("href")).toBe("#/time/2026-08-21");
@@ -280,7 +317,7 @@ test("a day with nothing on it says so, and a day before today offers the day af
 });
 
 test("past the horizon, what knobas saw is absent rather than zero, and the blocks you tracked stay", async () => {
-  render({ blocks: [block(3, at(9, 40, 1), at(11, 50, 1))], pastHorizon: true, day: "2026-08-01" });
+  render({ blocks: [block(3, at(9, 40, 1), at(11, 50, 1))], pastHorizon: true, open: [], day: "2026-08-01" });
   await settle();
   expect(figures()).toEqual(["2h 10m tracked", "0m logged", "2h 10m to log", "– offered by knobas", "– open, app in front"]);
   expect(squash(target.textContent)).toContain("No record of what was in front of you.");
