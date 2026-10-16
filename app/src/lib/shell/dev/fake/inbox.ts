@@ -6,32 +6,37 @@
  * `notify`, which the census used to list as out of the walk's reach.
  *
  * **Shape from prototype-6's `inbox` array**, in its order: a review asked of
- * you, a monitor down, a mention, a failed build, an assignment, and (on the
- * snoozed shelf) the two credential expiries its footer names. Times are
- * minutes before the browser's clock, so "today 13:50" stays today whenever
- * the page is opened.
+ * you, a monitor down, a mention, a failed build, a mention on a pull
+ * request, two assignments and a mention on a ticket, and (on the snoozed
+ * shelf) the two credential expiries its footer names. Times are minutes
+ * before the browser's clock, so "today 13:50" stays today whenever the page
+ * is opened.
  *
  * **Where this diverges from prototype-6 and the mock adapter:**
  *
- * - The mirror holds five entities (`corpus.ts`), not prototype-6's forty, so
- *   PR #144 and PAY-240 cannot be the subject of an item; the rows use the
- *   entities that exist (PR #142, PAY-231, PAY-228, OPS-77, INC-1). Their
- *   `reason` text is prototype-6's `what` column, reworded to the backend's
- *   "why this is here" voice.
- * - Prototype-6 draws each row's action buttons by hand (*Re-run*, *Ack*);
- *   the backend sends `actions` as `WriteOp` names the source declares, and
- *   so does this, with only `comment`, `transition` and `re_run` (the three
- *   the screen needs to prove "render exactly these").
+ * - Each `reason` is in the backend's own words (`knobas_core::inbox`: "jonas
+ *   asked for your review", "you are mentioned here", "this build failed: …",
+ *   "assigned to you", "<asset path> is down", "the <source> credential
+ *   expires on …"), not prototype-6's richer sentences, which no rule writes
+ *   (#834): the screenshot shows what the app will say.
+ * - The rows use entities the fixture holds (`corpus.ts`, `job-reach.ts`), so
+ *   the build and the pull request are ones PAY-231 reaches.
+ * - The alert is on `kuma:3`, the fixture's one unacked open alert
+ *   (`monitors.ts`), and its entity is the asset the monitor watches, as the
+ *   backend's is. Once `ack_alert` acks it, the stream leaves it out.
+ * - `actions` are each category's candidate ops (`Category::candidate_ops`):
+ *   `approve` and `comment` on a review request, `comment` on a mention,
+ *   `rerun_build` on a failed build, none on an assignment or an alert.
  * - A credential expiry has `entity_id: null`, as in the backend.
  * - `notification_kinds` starts with all six on, as prototype-6's Notifications
  *   page draws it; the backend's default is none ("every kind is off by
  *   default"), so a screenshot of the empty state needs the toggles clicked off.
- * - Prototype-6's "Done" removes a row for the session; so does this, and a
- *   snooze moves it to the snoozed shelf until `until`. Neither survives a
- *   reload.
+ * - *Done* removes a row for the session, and a snooze moves it to the
+ *   snoozed shelf until `until`. Neither survives a reload.
  */
 import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
+import { fakeOpenAlerts } from "./monitors";
 import type { InboxCategory, InboxEntry, InboxShelf } from "../../../ipc/entity";
 
 const KINDS: InboxCategory[] = [
@@ -81,37 +86,42 @@ function entry(
 /** The stream, newest first (prototype-6's order). */
 function stream(): InboxEntry[] {
   return [
-    entry("review_request:mock:payout-service#142", "review_request", "mock", "mock:payout-service#142", "pr",
-      "Add retry classification for TEMP_UNAVAILABLE", "Jonas asked you to review this pull request", 40, ["comment"]),
-    entry("alert:mock:INC-1", "alert", "mock", "mock:INC-1", "incident",
-      "Payout queue backed up for 40 minutes", "flows-stage is down (HTTP, 1 h 52 m)", 70, []),
+    entry("review_request:mock:payout-service#150", "review_request", "mock", "mock:payout-service#150", "pr",
+      "Payout CSV export", "jonas asked for your review", 10, ["approve", "comment"]),
+    entry("alert:kuma:3", "alert", "kuma", "asset:knobas-jira", "asset",
+      "jira", "knobas test estate / devs-MacBook-Pro / OrbStack Linux VM / Docker engine (OrbStack) / knobas-jira is down", 80, []),
     entry("mention:mock:ENG-SEPA", "mention", "mock", "mock:ENG-SEPA", "page",
-      "SEPA payout retry design", "Priya mentioned you: “can you add the manual-review queue SLA here?”", 105, ["comment"]),
-    entry("failed_build:mock:payout-service#318", "failed_build", "mock", "mock:payout-service#318", "build",
-      "payout-service #318", "Build #318 failed on feature/PAY-231-sepa-retry", 235, ["re_run"]),
+      "SEPA retry design", "you are mentioned here", 115, ["comment"]),
+    entry("failed_build:mock:Payout_IntegrationTests#1187", "failed_build", "teamcity", "mock:Payout_IntegrationTests#1187", "build",
+      "Payout_IntegrationTests #1187", "this build failed: Tests failed: 3 (3 new), passed: 212", 226, ["rerun_build"]),
     entry("mention:mock:payout-service#142", "mention", "mock", "mock:payout-service#142", "pr",
-      "Add retry classification for TEMP_UNAVAILABLE", "Jonas commented on your pull request: “Should the jitter be bounded? ±20 % feels wide.”", 270, ["comment"]),
-    entry("new_assignment:mock:PAY-198", "new_assignment", "mock", "mock:PAY-198", "ticket",
-      "Reconcile ledger drift on partial refunds", "Priya assigned this ticket to you", 330, ["comment", "transition"]),
+      "Idempotent retry window", "you are mentioned here", 260, ["comment"]),
+    entry("new_assignment:mock:PAY-240", "new_assignment", "mock", "mock:PAY-240", "ticket",
+      "Payout dashboard latency", "assigned to you", 338, []),
     entry("new_assignment:mock:PAY-228", "new_assignment", "mock", "mock:PAY-228", "ticket",
-      "Fix ledger drift on partial refunds", "PAY-228 is blocked by OPS-77 On-call runbook outdated", 1_290, ["comment", "transition"]),
+      "Idempotency key on the payout endpoint", "assigned to you", 1_290, []),
     entry("mention:mock:PAY-231", "mention", "mock", "mock:PAY-231", "ticket",
-      "Retry failed SEPA payouts", "Lena mentioned you: “will the manual review queue get an SLA?”", 1_380, ["comment"]),
+      "Retry failed SEPA payouts", "you are mentioned here", 1_380, ["comment"]),
   ];
 }
 
 /** The snoozed shelf: prototype-6's footer, back on 2026-08-29. */
 function snoozed(): InboxEntry[] {
   const back = "2026-08-29T07:00:00Z";
-  const row = (key: string, title: string, reason: string, source: string): InboxEntry => {
-    const made = entry(key, "credential_expiry", source, null, null, title, reason, 3_000, []);
+  const row = (source: string, name: string, expires: string): InboxEntry => {
+    const made = entry(`credential_expiry:${source}`, "credential_expiry", source, null, null, name,
+      `the ${name} credential expires on ${expires}`, 3_000, []);
     made.item.snoozed_until = back;
     return made;
   };
-  return [
-    row("credential_expiry:jira", "Jira PAT", "The Jira token expires in 12 days", "jira"),
-    row("credential_expiry:gitea", "Payouts certificate", "The payouts certificate expires in 9 days", "gitea"),
-  ];
+  return [row("jira", "Tidewater Jira", "Thursday 3 Sep 2026"), row("gitea", "Tidewater Gitea", "Monday 31 Aug 2026")];
+}
+
+/** Whether an alert row's monitor has been acked (`monitors.ts` keeps the ack). */
+function acked(entry: InboxEntry): boolean {
+  if (entry.item.category !== "alert") return false;
+  const monitor = entry.item.key.slice("alert:".length);
+  return fakeOpenAlerts().some((alert) => alert.monitor_id === monitor && alert.acked_at !== null);
 }
 
 /** This feature's commands. */
@@ -127,8 +137,11 @@ export function handlers(): Record<string, Handler> {
   };
 
   return {
-    inbox_items: (args) => ((args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.slice()),
-    inbox_count: () => live.length,
+    inbox_items: (args) => {
+      live = live.filter((candidate) => !acked(candidate));
+      return (args["shelf"] as InboxShelf) === "snoozed" ? later.slice() : live.slice();
+    },
+    inbox_count: () => live.filter((candidate) => !acked(candidate)).length,
     snooze_inbox_item: (args) => {
       const moved = take(args["itemKey"]);
       moved.item.snoozed_until = String(args["until"]);
