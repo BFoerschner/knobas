@@ -576,6 +576,7 @@ knobas-app	test/it	demo_delete_during_load::a_demo_load_purges_nothing_when_a_so
 knobas-app	test/it	demo_delete_during_load::a_source_deleted_during_a_demo_load_has_no_mirror_once_the_load_returns
 knobas-app	test/it	demo_delete_during_load::a_source_deleted_during_a_demo_load_that_fails_has_no_mirror_once_it_returns
 knobas-app	test/it	docs_ipc::a_page_reads_as_blocks_with_the_mirror_filled_in
+knobas-app	test/it	docs_ipc::a_page_under_a_parent_loop_keeps_its_parent
 knobas-app	test/it	docs_ipc::a_parent_loop_is_cut_and_both_pages_sit_at_the_top
 knobas-app	test/it	docs_ipc::only_a_mirrored_page_reads
 knobas-app	test/it	docs_ipc::the_page_read_last_is_the_newest_visit

@@ -192,7 +192,8 @@ pub async fn tree(pool: &PgPool, declarations: &Declarations) -> Result<DocsTree
 /// Cut every parent loop: two pages that name each other (titles are matched,
 /// and a title can be reused after a move) would otherwise have no top and
 /// would recurse in every walk of the tree. Each page on a loop is put at the
-/// top, so it is still drawn.
+/// top, so it is still drawn. A page that only hangs under a loop keeps its
+/// parent: once the loop is cut, that parent sits at the top.
 fn break_loops(pages: &mut [DocNode]) {
     let parent_of: HashMap<String, Option<String>> = pages
         .iter()
@@ -202,8 +203,11 @@ fn break_loops(pages: &mut [DocNode]) {
         let mut seen = std::collections::HashSet::new();
         let mut at = page.parent.clone();
         while let Some(id) = at {
-            if id == page.entity_id || !seen.insert(id.clone()) {
+            if id == page.entity_id {
                 page.parent = None;
+                break;
+            }
+            if !seen.insert(id.clone()) {
                 break;
             }
             at = parent_of.get(&id).cloned().flatten();

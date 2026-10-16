@@ -403,3 +403,28 @@ async fn a_parent_loop_is_cut_and_both_pages_sit_at_the_top() {
         assert_eq!(node.parent, None, "{id} is cut loose from the loop");
     }
 }
+
+/// A page under a loop is not on it: once the loop is cut, it still hangs
+/// under the page it names, which now sits at the top.
+#[tokio::test]
+async fn a_page_under_a_parent_loop_keeps_its_parent() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let a = page(&pool, &src, "1", "Alpha", "OPS", &["Beta"], "").await;
+    let b = page(&pool, &src, "2", "Beta", "OPS", &["Alpha"], "").await;
+    let c = page(&pool, &src, "3", "Gamma", "OPS", &["Alpha"], "").await;
+    let tree = docs_tree_inner(&pool).await.unwrap();
+    let space = tree.spaces.iter().find(|s| s.source_id == src).unwrap();
+    let parent_of = |id: &str| {
+        space
+            .pages
+            .iter()
+            .find(|p| p.entity_id == id)
+            .unwrap()
+            .parent
+            .clone()
+    };
+    assert_eq!(parent_of(&a), None);
+    assert_eq!(parent_of(&b), None);
+    assert_eq!(parent_of(&c), Some(a.clone()), "Gamma hangs under Alpha");
+}
