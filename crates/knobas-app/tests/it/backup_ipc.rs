@@ -960,7 +960,10 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         .await
         .expect("the colleague's ticket views");
     assert_eq!(views.len(), 1, "{views:?}");
-    assert_eq!(views[0].view, estate.view, "the ticket view did not cross whole");
+    assert_eq!(
+        views[0].view, estate.view,
+        "the ticket view did not cross whole"
+    );
     assert_eq!(views[0].view.query, VIEW_QUERY);
     assert_eq!(views[0].unreadable.as_deref(), Some("sprint:next"));
     assert_eq!(views[0].count, None);

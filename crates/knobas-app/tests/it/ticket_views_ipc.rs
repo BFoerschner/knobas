@@ -129,9 +129,12 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
     let p = project();
     let mut ids = Vec::new();
     for n in 0..knobas_search::saved::MAX_SAVED_LISTS + 4 {
-        let saved = ticket_views::save(&pool, draft(&format!("{p} view {n}"), &format!("project:{p}")))
-            .await
-            .unwrap_or_else(|error| panic!("view {n}: {error:?}"));
+        let saved = ticket_views::save(
+            &pool,
+            draft(&format!("{p} view {n}"), &format!("project:{p}")),
+        )
+        .await
+        .unwrap_or_else(|error| panic!("view {n}: {error:?}"));
         ids.push(saved.id);
     }
     let twin = ticket_views::save(&pool, draft(&format!("{p} view 0"), ""))
@@ -153,7 +156,9 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
         direction: "ascending".to_owned(),
     });
     whole.jira_ref = Some("board:21".to_owned());
-    let saved = ticket_views::save(&pool, whole.clone()).await.expect("save");
+    let saved = ticket_views::save(&pool, whole.clone())
+        .await
+        .expect("save");
     assert_eq!(
         saved,
         TicketView {
@@ -177,9 +182,16 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
     all.push(&saved.id);
     let rows = listed(&pool, &all).await;
     assert_eq!(rows.len(), all.len(), "every view is listed");
-    assert_eq!(rows.last().unwrap().view, saved, "the newest is last, and read back as stored");
+    assert_eq!(
+        rows.last().unwrap().view,
+        saved,
+        "the newest is last, and read back as stored"
+    );
     let positions: Vec<i32> = rows.iter().map(|row| row.view.position).collect();
-    assert!(positions.windows(2).all(|pair| pair[0] < pair[1]), "{positions:?}");
+    assert!(
+        positions.windows(2).all(|pair| pair[0] < pair[1]),
+        "{positions:?}"
+    );
 }
 
 /// A text the grammar cannot read is listed as that text, with the part it
@@ -214,9 +226,15 @@ async fn an_unreadable_text_is_listed_as_text_and_reading_rewrites_nothing() {
 async fn a_deleted_view_comes_back_where_it_was() {
     let pool = pool().await;
     let p = project();
-    let first = ticket_views::save(&pool, draft(&format!("{p} first"), "")).await.unwrap();
-    let second = ticket_views::save(&pool, draft(&format!("{p} second"), "")).await.unwrap();
-    let third = ticket_views::save(&pool, draft(&format!("{p} third"), "")).await.unwrap();
+    let first = ticket_views::save(&pool, draft(&format!("{p} first"), ""))
+        .await
+        .unwrap();
+    let second = ticket_views::save(&pool, draft(&format!("{p} second"), ""))
+        .await
+        .unwrap();
+    let third = ticket_views::save(&pool, draft(&format!("{p} third"), ""))
+        .await
+        .unwrap();
 
     let renamed = ticket_views::save(
         &pool,
@@ -228,12 +246,21 @@ async fn a_deleted_view_comes_back_where_it_was() {
     .await
     .unwrap();
     assert_eq!(renamed.id, second.id);
-    assert_eq!(renamed.position, second.position, "saving over a view keeps its place");
+    assert_eq!(
+        renamed.position, second.position,
+        "saving over a view keeps its place"
+    );
 
-    ticket_views::delete(&pool, &second.id).await.expect("delete");
+    ticket_views::delete(&pool, &second.id)
+        .await
+        .expect("delete");
     let ids = [first.id.as_str(), second.id.as_str(), third.id.as_str()];
     assert_eq!(
-        listed(&pool, &ids).await.iter().map(|row| row.view.id.clone()).collect::<Vec<_>>(),
+        listed(&pool, &ids)
+            .await
+            .iter()
+            .map(|row| row.view.id.clone())
+            .collect::<Vec<_>>(),
         [first.id.clone(), third.id.clone()]
     );
     let gone = ticket_views::delete(&pool, &second.id).await.unwrap_err();
@@ -251,7 +278,11 @@ async fn a_deleted_view_comes_back_where_it_was() {
     .unwrap();
     assert_eq!(back, renamed);
     assert_eq!(
-        listed(&pool, &ids).await.iter().map(|row| row.view.id.clone()).collect::<Vec<_>>(),
+        listed(&pool, &ids)
+            .await
+            .iter()
+            .map(|row| row.view.id.clone())
+            .collect::<Vec<_>>(),
         [first.id, second.id, third.id]
     );
 }
@@ -272,10 +303,11 @@ async fn a_word_the_screen_does_not_know_is_refused() {
     .await
     .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::Invalid);
-    let written: i64 = sqlx::query_scalar("select count(*) from knobas.ticket_view where name = $1")
-        .bind(format!("{p} lanes"))
-        .fetch_one(&pool)
-        .await
-        .unwrap();
+    let written: i64 =
+        sqlx::query_scalar("select count(*) from knobas.ticket_view where name = $1")
+            .bind(format!("{p} lanes"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
     assert_eq!(written, 0);
 }

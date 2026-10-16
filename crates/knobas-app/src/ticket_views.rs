@@ -32,7 +32,9 @@ pub const LIST_COLUMNS: &[&str] = &[
     "key", "summary", "status", "priority", "signals", "assignee", "updated", "epic", "labels",
 ];
 /// What a list header sorts by (R-3.6). Signals do not sort.
-pub const SORT_COLUMNS: &[&str] = &["key", "summary", "status", "priority", "assignee", "updated"];
+pub const SORT_COLUMNS: &[&str] = &[
+    "key", "summary", "status", "priority", "assignee", "updated",
+];
 /// A sort's two directions.
 pub const SORT_DIRECTIONS: &[&str] = &["ascending", "descending"];
 
@@ -157,9 +159,13 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 ///
 /// `internal` if a read fails.
 pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
-    let rows = sqlx::query(concat!("select ", fields!(), " from knobas.ticket_view order by position, id"))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(concat!(
+        "select ",
+        fields!(),
+        " from knobas.ticket_view order by position, id"
+    ))
+    .fetch_all(pool)
+    .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
     let readings = crate::commands::search::searcher(pool)
@@ -189,7 +195,8 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
 /// be in.
 fn refusal(draft: &TicketViewDraft) -> Option<String> {
     let one_of = |what: &str, value: &str, allowed: &[&str]| {
-        (!allowed.contains(&value)).then(|| format!("{what} `{value}` is not one of {}", allowed.join(", ")))
+        (!allowed.contains(&value))
+            .then(|| format!("{what} `{value}` is not one of {}", allowed.join(", ")))
     };
     if draft.name.trim().is_empty() {
         return Some("a view needs a name".to_owned());
@@ -255,7 +262,9 @@ fn is_slug(id: &str) -> bool {
         && !id.starts_with('-')
         && !id.ends_with('-')
         && !id.contains("--")
-        && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && id
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
 }
 
 /// A name as an address: lowercase letters and digits joined by single
@@ -273,7 +282,11 @@ fn slug(name: &str) -> String {
         }
     }
     let slug = out.trim_matches('-').to_owned();
-    if slug.is_empty() { "view".to_owned() } else { slug }
+    if slug.is_empty() {
+        "view".to_owned()
+    } else {
+        slug
+    }
 }
 
 /// Save a view: a new one under an id from its name, or over the view the
@@ -312,9 +325,10 @@ pub async fn save(pool: &PgPool, draft: TicketViewDraft) -> Result<TicketView, I
             candidate
         }
     };
-    let last: i32 = sqlx::query_scalar("select coalesce(max(position) + 1, 0) from knobas.ticket_view")
-        .fetch_one(&mut *tx)
-        .await?;
+    let last: i32 =
+        sqlx::query_scalar("select coalesce(max(position) + 1, 0) from knobas.ticket_view")
+            .fetch_one(&mut *tx)
+            .await?;
     let row = sqlx::query(concat!(
         "insert into knobas.ticket_view as v (id, name, view_group, position, query, layout, columns, \
                                               lanes, card_fields, list_columns, list_sort, jira_ref)
@@ -360,7 +374,9 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
         .await?
         .rows_affected();
     if gone == 0 {
-        return Err(IpcError::not_found(format!("no ticket view is called {id}")));
+        return Err(IpcError::not_found(format!(
+            "no ticket view is called {id}"
+        )));
     }
     Ok(())
 }
@@ -414,16 +430,46 @@ mod tests {
             None
         );
         for (bad, says) in [
-            (TicketViewDraft { name: " ".to_owned(), ..draft() }, "name"),
-            (TicketViewDraft { group: String::new(), ..draft() }, "group"),
-            (TicketViewDraft { layout: "columns".to_owned(), ..draft() }, "layout"),
-            (TicketViewDraft { lanes: "who".to_owned(), ..draft() }, "lanes"),
             (
-                TicketViewDraft { card_fields: vec!["who".to_owned()], ..draft() },
+                TicketViewDraft {
+                    name: " ".to_owned(),
+                    ..draft()
+                },
+                "name",
+            ),
+            (
+                TicketViewDraft {
+                    group: String::new(),
+                    ..draft()
+                },
+                "group",
+            ),
+            (
+                TicketViewDraft {
+                    layout: "columns".to_owned(),
+                    ..draft()
+                },
+                "layout",
+            ),
+            (
+                TicketViewDraft {
+                    lanes: "who".to_owned(),
+                    ..draft()
+                },
+                "lanes",
+            ),
+            (
+                TicketViewDraft {
+                    card_fields: vec!["who".to_owned()],
+                    ..draft()
+                },
                 "card field",
             ),
             (
-                TicketViewDraft { list_columns: vec!["summary".to_owned()], ..draft() },
+                TicketViewDraft {
+                    list_columns: vec!["summary".to_owned()],
+                    ..draft()
+                },
                 "Key",
             ),
             (
@@ -436,8 +482,16 @@ mod tests {
             (
                 TicketViewDraft {
                     columns: vec![
-                        ViewColumn { name: "Doing".to_owned(), statuses: vec!["In Progress".to_owned()], limit: None },
-                        ViewColumn { name: "Also".to_owned(), statuses: vec!["In Progress".to_owned()], limit: Some(3) },
+                        ViewColumn {
+                            name: "Doing".to_owned(),
+                            statuses: vec!["In Progress".to_owned()],
+                            limit: None,
+                        },
+                        ViewColumn {
+                            name: "Also".to_owned(),
+                            statuses: vec!["In Progress".to_owned()],
+                            limit: Some(3),
+                        },
                     ],
                     ..draft()
                 },
@@ -445,12 +499,21 @@ mod tests {
             ),
             (
                 TicketViewDraft {
-                    list_sort: Some(ListSort { column: "signals".to_owned(), direction: "ascending".to_owned() }),
+                    list_sort: Some(ListSort {
+                        column: "signals".to_owned(),
+                        direction: "ascending".to_owned(),
+                    }),
                     ..draft()
                 },
                 "sort column",
             ),
-            (TicketViewDraft { id: Some("Not A Slug".to_owned()), ..draft() }, "view id"),
+            (
+                TicketViewDraft {
+                    id: Some("Not A Slug".to_owned()),
+                    ..draft()
+                },
+                "view id",
+            ),
         ] {
             let why = refusal(&bad).unwrap_or_else(|| panic!("{bad:?} was not refused"));
             assert!(why.contains(says), "{why:?} does not say {says:?}");
@@ -469,11 +532,18 @@ mod tests {
             position: 0,
             query: String::new(),
             layout: String::new(),
-            columns: vec![ViewColumn { name: String::new(), statuses: vec![], limit: None }],
+            columns: vec![ViewColumn {
+                name: String::new(),
+                statuses: vec![],
+                limit: None,
+            }],
             lanes: String::new(),
             card_fields: vec![],
             list_columns: vec![],
-            list_sort: Some(ListSort { column: String::new(), direction: String::new() }),
+            list_sort: Some(ListSort {
+                column: String::new(),
+                direction: String::new(),
+            }),
             jira_ref: None,
         };
         let row = serde_json::to_value(TicketViewRow {
@@ -492,7 +562,10 @@ mod tests {
             .chain(&keys(&row["list_sort"]))
             .chain(&keys(&draft))
         {
-            assert!(mirror.contains(&format!("  {key}:")) || mirror.contains(&format!("  {key}?:")), "{key} is not mirrored");
+            assert!(
+                mirror.contains(&format!("  {key}:")) || mirror.contains(&format!("  {key}?:")),
+                "{key} is not mirrored"
+            );
         }
         for name in [
             "export interface TicketView {",
@@ -512,10 +585,15 @@ mod tests {
             (LIST_COLUMNS, "export type ListColumn"),
             (SORT_COLUMNS, "export type ViewSortColumn"),
         ] {
-            let at = mirror.find(mirrored).unwrap_or_else(|| panic!("{mirrored} is not in the mirror"));
+            let at = mirror
+                .find(mirrored)
+                .unwrap_or_else(|| panic!("{mirrored} is not in the mirror"));
             let line = &mirror[at..at + mirror[at..].find(';').unwrap()];
             for word in words {
-                assert!(line.contains(&format!("\"{word}\"")), "{mirrored} lacks {word}: {line}");
+                assert!(
+                    line.contains(&format!("\"{word}\"")),
+                    "{mirrored} lacks {word}: {line}"
+                );
             }
         }
     }
