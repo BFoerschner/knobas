@@ -3685,3 +3685,15 @@ Ruled by the merge-manager (PR #1026).
 - **The share's time part does not carry dismissals yet**, and dismissals are not pruned with the
   observations (a day past the horizon is never reconciled, and the rows are tiny). Follow-up
   #1028 (backlog). **Reversing:** with #1028.
+
+Ruled by the merge-manager (PR #1029).
+
+- **`materialize` locks `knobas.passive_dismissal` in `share row exclusive` mode and reads the
+  dismissals inside its transaction.** It read them before the transaction, so a *Dismiss*
+  committing between that read and the `OFFER` upsert was undone: the upsert wrote the row back
+  and the read beside the click offered it again (witnessed: with the lock removed,
+  `a_dismissal_committing_beside_a_read_is_not_offered_back` fails with the stretch offered).
+  `DISMISS`'s `row exclusive` lock conflicts with it, so one waits for the other; the mode also
+  conflicts with itself, so two reconciliations queue rather than deadlock on
+  `DISMISSAL_GROWS`. The cost is that two day reads reconcile one after the other, for the length
+  of a short transaction. **Reversing:** low (one statement), but the race comes back with it.
