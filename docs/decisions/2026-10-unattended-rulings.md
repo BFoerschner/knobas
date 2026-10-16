@@ -2439,3 +2439,49 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   the item's own view has it. **Reversing:** low (`opener`).
 - **The Inbox opens on *All*** (prototype-6's `scope:'all'`); *This job* is offered only once a job
   was opened, as on Proposed links. **Reversing:** low.
+## #836 Proposal evidence (2026-10-16)
+
+- **A read beside the tray, `proposal_evidence(linkId)`, not a field on `SuggestionEntry`.** The
+  view reads it for the open proposal only. `room_suggestions` answers up to 500 rows and is read
+  on every room's tray; an excerpt costs a text scan (and for shared wording a `ts_headline`) that
+  only the open proposal needs, and the ranking and its read stay untouched. **Reversing:** medium
+  (a field filled for every row, and the tray's perf measured again).
+- **Evidence is worked out when read, not stored when proposed.** No migration; every proposal
+  already in a mirror gets evidence; the stored `reason` stays the one-line provenance it was.
+  **Reversing:** high (a column, and every rule writing it).
+- **Match spans travel as parts (`{ text, marked }`), not offsets**, so the shell never agrees with
+  Rust on what a character is. **Reversing:** low.
+- **What each rule can say, and nothing past it.** The four key rules: the key marked where the
+  item names it, items the same rule found and the reader accepted for the same ticket, how often
+  the key appears, the other keys the text names (against). `similar_text`: both ends quoted
+  around their shared lexemes, the shared words (as marked in the text, not the stems), and
+  "Wording alone often matches unrelated items." `monitor_url_host`: the host where the monitor's
+  text names it, other assets proposed for the same monitor (against). Every rule: dismissed
+  siblings at either end and a withdrawn end (against). `source_recorded_relation` adds nothing to
+  its reason. Prototype-6's other sentences ("which you linked yesterday", "TeamCity data is 38 min
+  old", the chain of an *indirect* proposal) need reads no rule has, so they are not drawn.
+  **Reversing:** low per sentence, in `knobas_core::evidence`.
+- **The sentences are the backend's**, as the stored reason is; the view adds only prototype-6's
+  headings. **Reversing:** low.
+- ***Also found* is left out when nothing supports the proposal**; prototype-6 never draws it
+  empty and has no words for none. *Speaks against it* always draws: the backend says "Nothing
+  found against it." **Reversing:** low.
+- **Only a branch's excerpt is set in mono.** Prototype-6 sets a commit message's quote in mono, but
+  the design system keeps mono for real code values and decides where the two differ; a commit
+  message is prose. **Reversing:** low.
+- **Evidence that cannot be read shows the error's words under the reason**, and the buttons stay.
+  **Reversing:** low.
+- **`knobas_core::evidence` is its own module, not `suggest::evidence`**, so the responsiveness
+  probe's after-pass snapshot, keyed on `suggest.rs`'s bytes, is not rebuilt (as `tray.rs` was
+  split out for). **Reversing:** low.
+- **`knobas-core/src/evidence.rs` joins `link_reads.rs`'s base-table exemptions.** A dismissed
+  proposal is an unconfirmed tombstone that neither `knobas.confirmed_link` nor
+  `knobas.proposed_link` holds, and the evidence counts dismissals against a proposal; each of its
+  statements names the population it wants in its own `where`. **Reversing:** low (drop the
+  dismissed count and read the views).
+- **Merge-manager: *It also names* lists only keys of a project the mirror holds.** The text's
+  key-shaped words were all named against the proposal, so a commit saying `UTF-8` or `SHA-256`
+  drew "It also names UTF-8." Now a key counts when some live ticket shares its project prefix:
+  `PAY-2311` still counts beside a mirrored `PAY-231`, a key of a project not synced does not.
+  One statement over `knobas.entity`, made only when the text names another key. **Reversing:**
+  low (drop `HELD_PROJECTS`).

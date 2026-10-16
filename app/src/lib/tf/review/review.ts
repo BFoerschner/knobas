@@ -7,13 +7,14 @@
  * tray answers every waiting proposal under its limit), so the queue filters
  * in the browser (R-2.3's first mode).
  */
-import type { LinkEnd, LinkRow, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
+import type { LinkEnd, LinkRow, ProposalEvidence, SuggestionEntry, SuggestionPage } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 import { keyOf } from "../job/job";
 
-/** The tray's read, injectable so a test needs no bridge. */
+/** The tray's read and the open proposal's evidence, injectable so a test needs no bridge. */
 export interface ReviewPorts {
   roomSuggestions: (sources: string[], ctx: string | null, limit: number) => Promise<SuggestionPage>;
+  proposalEvidence: (linkId: string) => Promise<ProposalEvidence>;
 }
 
 /** Prototype-6's three strengths, which its chips and dots draw. */
@@ -189,4 +190,22 @@ export function relationOptions(current: string): RelationOption[] {
 /** How a relation id reads. */
 export function relationLabel(id: string): string {
   return OFFERED.find((option) => option.id === id)?.label ?? id;
+}
+
+/**
+ * How the excerpts sit (#836): side by side when they quote both ends, as
+ * prototype-6 draws shared wording; stacked when they quote one.
+ */
+export function sideBySide(evidence: Pick<ProposalEvidence, "excerpts">): boolean {
+  return new Set(evidence.excerpts.map((excerpt) => excerpt.entity_id)).size > 1;
+}
+
+/**
+ * Whether an excerpt quotes a code value (a branch name), set in mono. A
+ * commit message is prose: the design system keeps mono for real code values,
+ * and it decides where prototype-6 sets a commit's quote in mono.
+ */
+export function quotesCode(entry: SuggestionEntry, entityId: string): boolean {
+  const end = [entry.from, entry.to].find((candidate) => candidate.entity_id === entityId);
+  return end?.kind === "branch";
 }

@@ -2442,11 +2442,11 @@ pub async fn delete_note(
 
 // -- suggestions and the room tray -----------------------------------------
 //
-// Four commands, in this module and not a new one: a suggestion **is** a link
-// row (#41), these are the writes that move it between the two states the link
-// store already has, and the read is the same graph the panel above reads from
-// the other side. A `commands/suggest.rs` would be a second module over one
-// table.
+// Four commands, and #836's evidence read, in this module and not a new one:
+// a suggestion **is** a link row (#41), these are the writes that move it
+// between the two states the link store already has, and the reads are the
+// same graph the panel above reads from the other side. A
+// `commands/suggest.rs` would be a second module over one table.
 
 /// One page of a room's tray: the proposals, and how many there are in all.
 ///
@@ -2589,6 +2589,25 @@ pub async fn dismiss_suggestion_inner(
     }))
 }
 
+/// What was said for and against one proposal (#836): the stored reason, the
+/// text it was found in with the match marked, what supports it and what
+/// speaks against it. The Proposed links view reads it for the proposal open.
+///
+/// A read beside `room_suggestions`, not a field on its rows: the tray's
+/// ranking and read are unchanged, and only the open proposal pays for the
+/// text scan (`knobas_core::evidence`).
+///
+/// # Errors
+///
+/// As [`accept_suggestion_inner`].
+pub async fn proposal_evidence_inner(
+    pool: &PgPool,
+    link_id: &str,
+) -> Result<knobas_core::evidence::ProposalEvidence, IpcError> {
+    let id = suggestion_id(link_id)?;
+    Ok(knobas_core::evidence::proposal_evidence(pool, id).await?)
+}
+
 /// A suggestion is addressed by its link id, because it is a link row.
 fn suggestion_id(link_id: &str) -> Result<Uuid, IpcError> {
     link_id
@@ -2665,6 +2684,21 @@ pub async fn dismiss_suggestion<R: tauri::Runtime>(
         announce(&app, written.activity);
     }
     Ok(())
+}
+
+/// What was said for and against one proposal (#836).
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the database
+/// is still coming up, and whatever [`proposal_evidence_inner`] refuses with.
+#[tauri::command]
+pub async fn proposal_evidence(
+    lifecycle: State<'_, Lifecycle>,
+    link_id: String,
+) -> Result<knobas_core::evidence::ProposalEvidence, IpcError> {
+    let pool = lifecycle.pool()?;
+    proposal_evidence_inner(&pool, &link_id).await
 }
 
 // -- the start-work flow ----------------------------------------------------

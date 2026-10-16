@@ -4,6 +4,7 @@ pub mod checkout;
 pub mod context;
 pub mod entity;
 mod error;
+pub mod evidence;
 pub mod inbox;
 pub mod link;
 mod live;

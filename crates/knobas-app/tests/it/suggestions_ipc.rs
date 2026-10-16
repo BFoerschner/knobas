@@ -15,7 +15,7 @@
 use knobas_app::IpcErrorCode;
 use knobas_app::commands::entity::{
     accept_suggestion_inner, create_link_inner, detect_suggestions_inner, dismiss_suggestion_inner,
-    get_entity_inner, room_suggestions_inner,
+    get_entity_inner, proposal_evidence_inner, room_suggestions_inner,
 };
 use knobas_app::suggestion_pass::SuggestionPass;
 use sqlx::PgPool;
@@ -395,4 +395,103 @@ async fn the_tray_is_scoped_to_the_room_it_is_drawn_in() {
     let capped = room_suggestions_inner(&pool, &[], None, 1).await.unwrap();
     assert_eq!(capped.rows.len(), 1);
     assert_eq!(capped.total, everywhere.total);
+}
+
+/// Every proposal a pass makes over the shipped corpus has evidence a reader
+/// can judge (#836): an exact key is quoted where the item names it, with the
+/// key marked; shared wording is quoted from both ends, the shared words
+/// marked; and *Speaks against it* always says something. The tray's page is
+/// the same before and after the reads: evidence changes no ranking.
+#[tokio::test]
+async fn every_proposal_over_the_demo_corpus_has_evidence_with_the_match_marked() {
+    let pool = demo().await;
+    detect_suggestions_inner(&SuggestionPass::beside(&pool))
+        .await
+        .unwrap();
+    let before = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
+
+    let mut keyed = 0;
+    let mut worded = 0;
+    for entry in &before.rows {
+        let id = entry.link.id.to_string();
+        let evidence = proposal_evidence_inner(&pool, &id).await.unwrap();
+        assert_eq!(evidence.link_id, entry.link.id);
+        assert_eq!(
+            evidence.reason, entry.link.reason,
+            "the stored reason, unchanged"
+        );
+        assert!(
+            !evidence.against.is_empty(),
+            "{id}: *Speaks against it* is never blank"
+        );
+        let marked: Vec<&str> = evidence
+            .excerpts
+            .iter()
+            .flat_map(|e| e.parts.iter().filter(|p| p.marked).map(|p| p.text.as_str()))
+            .collect();
+        match entry.link.rule.as_deref() {
+            Some(
+                "branch_name_key" | "commit_message_key" | "build_parameter_key" | "page_text_key",
+            ) => {
+                let key = entry.to.entity_id.split_once(':').unwrap().1;
+                assert!(
+                    !marked.is_empty() && marked.iter().all(|m| *m == key),
+                    "{id}: the key {key} is what is marked, and only it: {marked:?}"
+                );
+                assert!(
+                    evidence
+                        .excerpts
+                        .iter()
+                        .all(|e| e.entity_id == entry.from.entity_id),
+                    "{id}: the key is quoted from the item that names it"
+                );
+                keyed += 1;
+            }
+            Some("similar_text") => {
+                assert!(!marked.is_empty(), "{id}: the shared words are marked");
+                assert!(
+                    evidence
+                        .support
+                        .iter()
+                        .any(|s| s.starts_with("Shared words: ")),
+                    "{id}: {:?}",
+                    evidence.support
+                );
+                worded += 1;
+            }
+            _ => {}
+        }
+    }
+    assert!(keyed > 0, "the demo corpus has exact-key proposals to read");
+    assert!(worded > 0, "and shared-wording ones");
+
+    let after = room_suggestions_inner(&pool, &[], None, 500).await.unwrap();
+    let ids = |page: &knobas_app::commands::entity::SuggestionPage| {
+        page.rows.iter().map(|e| e.link.id).collect::<Vec<_>>()
+    };
+    assert_eq!(
+        ids(&before),
+        ids(&after),
+        "reading evidence changes no ranking"
+    );
+}
+
+/// The evidence read addresses a proposal as the answers do.
+#[tokio::test]
+async fn evidence_for_a_bad_id_is_invalid_and_for_an_unknown_one_not_found() {
+    let pool = demo().await;
+    assert_eq!(
+        proposal_evidence_inner(&pool, "not-a-uuid")
+            .await
+            .unwrap_err()
+            .code,
+        IpcErrorCode::Invalid
+    );
+    assert_eq!(
+        proposal_evidence_inner(&pool, &uuid::Uuid::new_v4().to_string())
+            .await
+            .unwrap_err()
+            .code,
+        IpcErrorCode::NotFound
+    );
 }

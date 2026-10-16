@@ -7,7 +7,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { LinkEnd, LinkRow, SuggestionEntry } from "../../ipc/entity";
+import type { LinkEnd, LinkRow, ProposalEvidence, SuggestionEntry } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -57,15 +57,47 @@ const ROWS = [
     "exact_key", "this page mentions tidewater/ledger", "2026-08-22T10:00:00Z"),
 ];
 
+/** What `proposal_evidence` answers for l1 and l2; l3 has none, so its read fails. */
+const EVIDENCE: Record<string, ProposalEvidence> = {
+  l1: {
+    link_id: "l1",
+    reason: "the commit message mentions PAY-231",
+    excerpts: [
+      {
+        entity_id: "gitea:9f2c1ab",
+        parts: [
+          { text: "…is now a no-op. Refs ", marked: false },
+          { text: "PAY-231", marked: true },
+          { text: ".", marked: false },
+        ],
+      },
+    ],
+    support: ["Found the same way and already linked to PAY-231: c90d11 “PAY-231 retry once”."],
+    against: ["Nothing found against it."],
+  },
+  l2: {
+    link_id: "l2",
+    reason: "both mention 409, fail, idempotent, payout",
+    excerpts: [
+      { entity_id: "confluence:ENG-SEPA", parts: [{ text: "the ", marked: false }, { text: "payout", marked: true }] },
+      { entity_id: "jira:PAY-231", parts: [{ text: "Retry failed SEPA ", marked: false }, { text: "payouts", marked: true }] },
+    ],
+    support: [],
+    against: ["Wording alone often matches unrelated items."],
+  },
+};
+
+let evidenceReads: string[];
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
-let props: { ready: boolean; job: string | null; sid: string | null; layers: Layers; decisions: Decisions; ports: { roomSuggestions: () => Promise<{ rows: SuggestionEntry[]; total: number; more: [] }> }; ongo: (hash: string) => void };
+let props: { ready: boolean; job: string | null; sid: string | null; layers: Layers; decisions: Decisions; ports: { roomSuggestions: () => Promise<{ rows: SuggestionEntry[]; total: number; more: [] }>; proposalEvidence: (id: string) => Promise<ProposalEvidence> }; ongo: (hash: string) => void };
 let writes: string[];
 
 beforeEach(() => {
   toasts.items.length = 0;
   forgetFilters();
   writes = [];
+  evidenceReads = [];
   target = document.createElement("div");
   document.body.appendChild(target);
 });
@@ -101,7 +133,15 @@ async function open(over: { job?: string | null; sid?: string | null } = {}) {
     sid: over.sid ?? null,
     layers: createLayers(),
     decisions: heldDecisions(),
-    ports: { roomSuggestions: async () => ({ rows: ROWS, total: ROWS.length, more: [] as [] }) },
+    ports: {
+      roomSuggestions: async () => ({ rows: ROWS, total: ROWS.length, more: [] as [] }),
+      proposalEvidence: async (id: string) => {
+        evidenceReads.push(id);
+        const found = EVIDENCE[id];
+        if (!found) throw { code: "not_found", message: `${id} is not a link`, source_id: null };
+        return found;
+      },
+    },
     ongo: (hash: string) => {
       const id = hash.replace(/^#\/review\/?/, "");
       props.sid = id === "" ? null : decodeURIComponent(id);
@@ -240,4 +280,53 @@ test("with nothing proposed, the view says what would fill it", async () => {
   expect(props.sid).toBeNull();
   expect(heading()).toBe("Nothing left to judge");
   expect(target.textContent).toContain("Dismissed ones stay dismissed.");
+});
+
+const quotes = () => [...target.querySelectorAll(".tf-evidence blockquote")];
+const said = (heading: string) =>
+  [...target.querySelectorAll(".tf-against")]
+    .find((block) => block.querySelector("strong")?.textContent === heading)
+    ?.querySelectorAll("span");
+
+test("the evidence quotes the item with the key marked, then what supports it and what speaks against it", async () => {
+  await open();
+  expect(quotes().map((quote) => quote.textContent?.trim())).toEqual(["…is now a no-op. Refs PAY-231."]);
+  expect([...quotes()[0]!.querySelectorAll("mark")].map((mark) => mark.textContent)).toEqual(["PAY-231"]);
+  expect(quotes()[0]!.classList.contains("tf-mono"), "a commit message is prose").toBe(false);
+  expect(target.querySelector(".tf-quotes")?.classList.contains("tf-sbs")).toBe(false);
+  expect([...said("Also found")!].map((line) => line.textContent)).toEqual([
+    "Found the same way and already linked to PAY-231: c90d11 “PAY-231 retry once”.",
+  ]);
+  expect([...said("Speaks against it")!].map((line) => line.textContent)).toEqual(["Nothing found against it."]);
+});
+
+test("shared wording is quoted from both ends side by side, and with no support there is no Also found", async () => {
+  await open({ sid: "l2" });
+  expect(target.querySelector(".tf-quotes")?.classList.contains("tf-sbs")).toBe(true);
+  expect(quotes().flatMap((quote) => [...quote.querySelectorAll("mark")].map((mark) => mark.textContent))).toEqual([
+    "payout",
+    "payouts",
+  ]);
+  expect(quotes()[0]!.classList.contains("tf-mono"), "a page is prose").toBe(false);
+  expect(said("Also found")).toBeUndefined();
+  expect([...said("Speaks against it")!].map((line) => line.textContent)).toEqual([
+    "Wording alone often matches unrelated items.",
+  ]);
+});
+
+test("each proposal's evidence is read once, when it opens", async () => {
+  await open();
+  expect(evidenceReads).toEqual(["l1"]);
+  props.sid = "l2";
+  await settle();
+  props.sid = "l1";
+  await settle();
+  expect(evidenceReads).toEqual(["l1", "l2"]);
+});
+
+test("evidence that cannot be read says why, and the reason still stands", async () => {
+  await open({ sid: "l3" });
+  expect(target.querySelector(".tf-claim")?.textContent).toBe("This page mentions tidewater/ledger.");
+  expect(target.querySelector(".tf-evidence .tf-dim")?.textContent).toBe("l3 is not a link");
+  expect(said("Speaks against it")).toBeUndefined();
 });

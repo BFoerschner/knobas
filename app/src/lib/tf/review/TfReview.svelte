@@ -6,19 +6,21 @@
   *Decided*) and a row per proposal with its strength dot, the item and its
   target. Right, the open proposal: both ends as cards, the relation as an
   editable dropdown under the strength, *Why it was proposed* with the
-  detector's reason (the evidence under it is #836), and *Link them* (`Y`),
+  detector's reason and, under it, the evidence (#836): the text it was found
+  in with the match marked, *Also found* and *Speaks against it*, read for
+  the open proposal from `proposal_evidence`. Then *Link them* (`Y`),
   *Not related* (`N`, remembered), *Decide later* (`S`). A decision opens the
   next proposal and the toast offers *Undo*; the write waits for the toast
   (`decisions.svelte.ts`).
 
-  Over `room_suggestions`, `accept_suggestion`, `dismiss_suggestion` and, for
-  a relation the reader changed, `create_link`. No new command.
+  Over `room_suggestions`, `proposal_evidence`, `accept_suggestion`,
+  `dismiss_suggestion` and, for a relation the reader changed, `create_link`.
 -->
 <script lang="ts">
-  import { onMount } from "svelte";
+  import { onMount, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { roomSuggestions, type SuggestionEntry } from "../../ipc/entity";
+  import { proposalEvidence, roomSuggestions, type ProposalEvidence, type SuggestionEntry } from "../../ipc/entity";
   import { inTextField } from "../../shell/keys";
   import { kindSingular } from "../../shell/kinds";
   import { push } from "../../shell/toasts.svelte";
@@ -36,10 +38,12 @@
     linkedToast,
     nextAfter,
     queue,
+    quotesCode,
     relationLabel,
     relationOptions,
     REVIEW_LIMIT,
     rowNote,
+    sideBySide,
     STRENGTHS,
     strengthOf,
     targetOf,
@@ -53,7 +57,10 @@
     job,
     sid,
     layers,
-    ports = { roomSuggestions: (sources, ctx, limit) => roomSuggestions(sources, ctx, limit) },
+    ports = {
+      roomSuggestions: (sources, ctx, limit) => roomSuggestions(sources, ctx, limit),
+      proposalEvidence: (linkId) => proposalEvidence(linkId),
+    },
     decisions = sessionDecisions,
     ongo = (hash: string) => location.replace(hash),
   }: {
@@ -73,6 +80,8 @@
   let rows = $state<SuggestionEntry[] | null>(null);
   let failure = $state<string | null>(null);
   let relation = $state("related");
+  /** Each proposal's evidence once read, by link id: the evidence, or why it could not be read. */
+  let evidence = $state<Record<string, ProposalEvidence | { failure: string }>>({});
 
   const filter = sessionFilter("review");
 
@@ -148,6 +157,21 @@
     return () => {
       live = false;
     };
+  });
+
+  $effect(() => {
+    const id = current?.link.id;
+    if (!ready || id === undefined || untrack(() => evidence[id]) !== undefined) return;
+    // Started on a microtask, so a port that throws as it is called is a
+    // failure to read and not an effect that throws.
+    Promise.resolve()
+      .then(() => ports.proposalEvidence(id))
+      .then((found) => {
+        evidence[id] = found;
+      })
+      .catch((cause: unknown) => {
+        evidence[id] = { failure: ipcErrorMessage(cause) };
+      });
   });
 
   function decide(verdict: Verdict) {
@@ -234,6 +258,7 @@
       </div>
     {:else}
       {@const strength = strengthOf(current.link)}
+      {@const found = evidence[current.link.id]}
       <div class="tf-review">
         <div class="tf-review-top">
           <h1>Is this a real connection?</h1>
@@ -259,6 +284,29 @@
         <div class="tf-evidence">
           <h2>Why it was proposed</h2>
           <div class="tf-claim">{claim(current.link.reason ?? "")}</div>
+          {#if found !== undefined && "failure" in found}
+            <p class="tf-dim">{found.failure}</p>
+          {:else if found !== undefined}
+            {#if found.excerpts.length > 0}
+              <div class="tf-quotes" class:tf-sbs={sideBySide(found)}>
+                {#each found.excerpts as excerpt, i (i)}
+                  <blockquote class:tf-mono={quotesCode(current, excerpt.entity_id)}>
+                    {#each excerpt.parts as part, j (j)}{#if part.marked}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+                  </blockquote>
+                {/each}
+              </div>
+            {/if}
+            {#if found.support.length > 0}
+              <div class="tf-against">
+                <strong>Also found</strong>
+                {#each found.support as line, i (i)}<span>{line}</span>{/each}
+              </div>
+            {/if}
+            <div class="tf-against">
+              <strong>Speaks against it</strong>
+              {#each found.against as line, i (i)}<span>{line}</span>{/each}
+            </div>
+          {/if}
         </div>
         <div class="tf-decide">
           <button type="button" class="tf-btn tf-yes" onclick={() => decide("yes")}>Link them <kbd>Y</kbd></button>

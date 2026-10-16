@@ -963,6 +963,14 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-evidence h2 { font-size: var(--t-lg); font-weight: 600; font-variation-settings: "wdth" 88; }
 .tf-evidence .tf-claim { font-size: var(--t-lg); }
+.tf-quotes { display: flex; flex-direction: column; gap: 10px; }
+.tf-quotes.tf-sbs { display: grid; grid-template-columns: 1fr 1fr; }
+.tf-evidence blockquote {
+  margin: 0; padding: 8px 12px; border-left: 3px solid var(--rule); background: var(--sheet-2);
+  border-radius: 0 4px 4px 0; font-size: var(--t-sm); overflow-wrap: anywhere;
+}
+.tf-against { font-size: var(--t-sm); color: var(--ink-2); display: flex; flex-direction: column; gap: 4px; }
+.tf-against strong { color: var(--ink); }
 .tf-decide { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
 .tf-decide .tf-btn { padding: 9px 16px; font-size: var(--t-md); }
 .tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
@@ -973,6 +981,7 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-rv { grid-template-columns: minmax(0, 1fr); }
   .tf-rvq { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; }
   .tf-pair { grid-template-columns: minmax(0, 1fr); }
+  .tf-quotes.tf-sbs { grid-template-columns: minmax(0, 1fr); }
   .tf-bridge { padding: 12px 0; }
   .tf-bridge::before { display: none; }
 }
