@@ -2412,3 +2412,29 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   (prototype-6's `vwSave`), so it opens as saved. **Reversing:** low.
 - **Jira views (`jira_ref`, #877) open in the same editor**; prototype-6's *Settings for …* variant
   is #877's to draw. **Reversing:** a branch in `ViewEditor`.
+## #834 Inbox (2026-10-16)
+
+- **A row's job is its own ticket, else the first open job whose `job_reach` holds it.** The open
+  jobs are the live ticket contexts (opening a job promotes one), the current job first, at most 30
+  reach reads. Nothing any open job reaches says *no job*. No reverse-reach command (the ticket
+  allows no backend change beyond the reach read). **Reversing:** low; a reverse read replaces
+  `readJobs` in `TfInbox.svelte` and `jobIndex` keeps its shape.
+- **The sentence is the backend's `reason`, then `: <title>`, or the reason alone when it already
+  names the item.** No rule writes prototype-6's richer sentences ("Priya mentioned you on …:
+  "…""), so none is invented. Only knobas' own opening words are capitalised; a review request
+  (the reviewer's account) and an alert (the asset's path) start with a source's word and keep its
+  spelling. **Reversing:** low (`sentence` in `tf/inbox/inbox.ts`).
+- **Inline source ops are *Re-run* only.** *Approve* and *Comment* are offered by the backend but
+  the row draws *Review* (open the PR) instead, as prototype-6 does; approving unread is one press
+  too easy. **Reversing:** low (`INLINE_OPS`).
+- **Every row offers *Snooze* and *Done*; an alert adds *Ack*.** Prototype-6 hand-picks them per
+  row with no rule; today's inbox offers both everywhere. *Snooze* opens Tomorrow, Next Monday and
+  a date (the presets of `snoozePresets`), not prototype-6's fixed Monday. *After it expires* is
+  left to the rooms view: its window constant is pinned by a Rust test to `InboxView.svelte`.
+  **Reversing:** low.
+- **The opener's word is by category, then by kind:** *Review* (PR), *Open log* (build), *Open
+  monitor* (`#/monitors`), *Open job* (assignment), *Open conversation* / *Open PR* / *Open page*
+  (a mention), *Open source* (a credential expiry, to its settings page). *In browser* is not drawn;
+  the item's own view has it. **Reversing:** low (`opener`).
+- **The Inbox opens on *All*** (prototype-6's `scope:'all'`); *This job* is offered only once a job
+  was opened, as on Proposed links. **Reversing:** low.
