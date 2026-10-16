@@ -487,6 +487,7 @@ knobas-app	test/it	backup_ipc::the_archive_list_is_ordered_by_date_and_not_by_th
 knobas-app	test/it	backup_ipc::the_archive_list_says_which_archives_are_share_exports
 knobas-app	test/it	backup_ipc::the_nightly_job_exports_once_and_then_leaves_it_alone
 knobas-app	test/it	builds_ipc::a_pipelines_runs_come_newest_first_with_their_fields
+knobas-app	test/it	builds_ipc::a_run_joins_its_pipeline_by_id_within_its_source_only
 knobas-app	test/it	builds_ipc::pipelines_carry_their_name_group_and_last_twelve_runs
 knobas-app	test/it	builds_ipc::runs_of_something_that_is_no_pipeline_are_refused
 knobas-app	test/it	builds_of_a_commit::a_commits_builds_are_the_walk_after_every_change
