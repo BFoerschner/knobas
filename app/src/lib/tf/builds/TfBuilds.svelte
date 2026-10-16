@@ -36,7 +36,6 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
-  import { when } from "../tickets/tickets";
   import {
     CHIPS,
     duration,
@@ -45,7 +44,9 @@
     latestTime,
     pipelineHash,
     pipelineOf,
+    runHash,
     runTone,
+    shortTime,
     stripOf,
   } from "./builds";
 
@@ -151,11 +152,9 @@
 
   function took(run: RunRow): string {
     if (run.duration_seconds !== null) return duration(run.duration_seconds);
-    return runTone(run) === "run" ? "running" : runTone(run) === "q" ? "waiting" : "";
+    const tone = runTone(run);
+    return tone === "run" ? "running" : tone === "q" ? "waiting" : "";
   }
-
-  const runHash = (run: RunRow) =>
-    `#/build/${encodeURIComponent(selected?.entity_id ?? "")}/${encodeURIComponent(run.entity_id)}`;
 </script>
 
 {#snippet crumbs(parts: { name: string; href?: string }[])}
@@ -262,12 +261,12 @@
               {#each runs as run (run.entity_id)}
                 <tr>
                   <td class="tf-nowrap tf-run-no">
-                    <a href={runHash(run)}><b>{run.number !== null ? `#${run.number}` : "queued"}</b></a>
+                    <a href={runHash(selected.entity_id, run.entity_id)}><b>{run.number !== null ? `#${run.number}` : "queued"}</b></a>
                     {#if stateText(run) !== ""}<span class={`tf-chip ${chipTone(run)}`}>{stateText(run)}</span>{/if}
                   </td>
                   <td class="tf-mono tf-run-br">{run.branch ?? ""}</td>
                   <td class="tf-nowrap tf-num">{took(run)}</td>
-                  <td class="tf-nowrap tf-dim tf-num">{run.started !== null ? when(run.started).replace(/^(today|yesterday) /, "") : ""}</td>
+                  <td class="tf-nowrap tf-dim tf-num">{run.started !== null ? shortTime(run.started) : ""}</td>
                 </tr>
               {/each}
             </tbody>

@@ -13,6 +13,7 @@ import {
   latestTime,
   pipelineHash,
   pipelineOf,
+  runHash,
   runTone,
   stripOf,
 } from "./builds";
@@ -118,4 +119,8 @@ test("a duration reads as prototype-6's: seconds under a minute, else minutes an
   expect(duration(38)).toBe("38 s");
   expect(duration(252)).toBe("4 m 12 s");
   expect(duration(65)).toBe("1 m 05 s");
+});
+
+test("a run's address carries its pipeline's entity id and its own", () => {
+  expect(runHash("teamcity:buildType:A", "teamcity:build:7")).toBe("#/build/teamcity%3AbuildType%3AA/teamcity%3Abuild%3A7");
 });

@@ -51,8 +51,17 @@ export function stripOf(pipeline: PipelineRow): RunRow[] {
 export function latestTime(pipeline: PipelineRow, now: Date = new Date()): string {
   const latest = pipeline.recent[0];
   const at = latest?.started ?? latest?.updated_at ?? null;
-  if (at === null) return "";
-  return when(at, now).replace("today ", "").replace("yesterday", "yest.");
+  return at === null ? "" : shortTime(at, now);
+}
+
+/** An instant as a row writes it: *11:45* today, *yest. 16:20*, else the date. */
+export function shortTime(iso: string, now: Date = new Date()): string {
+  return when(iso, now).replace("today ", "").replace("yesterday", "yest.");
+}
+
+/** A run's address: its pipeline's entity id, then its own (#853 draws it). */
+export function runHash(pipelineId: string, runId: string): string {
+  return `#/build/${encodeURIComponent(pipelineId)}/${encodeURIComponent(runId)}`;
 }
 
 /** The pipelines the filter's words and the chips keep, in the list's order. */
