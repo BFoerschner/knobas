@@ -802,6 +802,35 @@ async fn what_the_reader_waits_on() {
     .await;
     room(pool, "room: stored context", &[], Some(&ctx), None, runs).await;
 
+    // -- the Tickets view's filter (#810, #897) ------------------------------
+    // What a keystroke in the filter reads: the board with no cap while the
+    // filter has words (R-3.4). `a` is one broad letter (every key here holds
+    // one), `jira0-123` a narrow one, and `zzqx` a word nothing holds, which
+    // makes every row's assignee read run.
+    let tickets_view = "tickets view: filter";
+    time(tickets_view, "mini_board (no words, 8 a column)", runs, || {
+        knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, Some(8), None)
+    })
+    .await;
+    for word in ["a", "jira0-123", "zzqx"] {
+        time(
+            tickets_view,
+            &format!("mini_board (typed `{word}`, every match)"),
+            runs,
+            || {
+                knobas_app::commands::entity::mini_board_inner(
+                    pool,
+                    None,
+                    &[],
+                    None,
+                    None,
+                    Some(word),
+                )
+            },
+        )
+        .await;
+    }
+
     // -- opening a detail ----------------------------------------------------
     let declarations = knobas_app::sources::paths::declared_paths(pool, &registry)
         .await
