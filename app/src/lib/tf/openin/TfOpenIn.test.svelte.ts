@@ -37,7 +37,7 @@ function settings(): CheckoutSettings {
 function view(path: string | null, root: string | null = "/Users/mara/code"): CheckoutView {
   return {
     repo_entity_id: REPO,
-    repo_url: "https://git.tidewater.internal/tidewater/payout-service",
+    repo_url: "https://git.tidewater.example/tidewater/payout-service",
     path,
     found_by: path === null ? "nothing" : "scan",
     clones_root: root,
@@ -248,7 +248,7 @@ test("a failed clone is said in place with what to do, and Try again starts it a
   emit({ entity_id: REPO, path: "/Users/mara/code/payout-service", state: "failed", reason: "fatal: Authentication failed", cause: "auth", removed: true });
   flushSync();
   expect(text(target.querySelector("[role='alert']"))).toBe(
-    "git could not sign in to git.tidewater.internal. knobas uses your own git credentials (ssh agent or credential helper); check them in a terminal",
+    "git could not sign in to git.tidewater.example. knobas uses your own git credentials (ssh agent or credential helper); check them in a terminal",
   );
   button("Try again", target).click();
   await settle();

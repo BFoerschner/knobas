@@ -391,14 +391,16 @@ pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save {com
 # The **visible label text**, not the `for=`/`id=` pair: the driver focuses
 # this field by its accessible name, which the label element supplies, so a
 # pin on the id would stay green through a rename and let the run fail minutes
-# in. Same for the three command fields, whose names come from
-# `knobas_core::checkout`'s `label()` and are pinned there.
+# in. Same for the command fields, whose names come from
+# `knobas_app::checkout::open`'s `command_view` and are pinned there.
 pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Directory<' \
     "the clones-root field is still labelled Directory"
 # The button the driver presses and the settings field it fills are both named
-# from one Rust string, so this is where the driver's `Open in VS Code` comes
-# from -- not from either component.
-pin_label ../crates/knobas-core/src/checkout.rs '"Open in VS Code"' \
+# from one Rust label, so this is where the driver's `Open in VS Code` comes
+# from -- not from either component. Since #844 the label is composed
+# ("Open in " and the shipped entry's name) in `command_view`, and the unit test
+# beside it asserts the composed words, so the literal is pinned there.
+pin_label ../crates/knobas-app/src/checkout/open.rs '"Open in VS Code"' \
     "the VS Code action is still labelled the way the driver asks for it"
 # The Save that stored a template puts a *Reset* beside it, and the driver
 # waits for that appearing as its proof the write landed -- so the reset

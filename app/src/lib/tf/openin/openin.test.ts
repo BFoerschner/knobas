@@ -63,8 +63,8 @@ test("a placeholder goes in at the cursor, after a space", () => {
 test("Clone's tooltip names the folder, and a failure says what to do", () => {
   expect(cloneTip("~/code", "booking-web")).toBe("Clones into ~/code/booking-web");
   expect(cloneTip(null, "booking-web")).toBe("Clones into your clones root/booking-web");
-  expect(cloneFailure("auth", "fatal: Authentication failed", "https://git.tidewater.internal/t/booking-web")).toBe(
-    "git could not sign in to git.tidewater.internal. knobas uses your own git credentials (ssh agent or credential helper); check them in a terminal",
+  expect(cloneFailure("auth", "fatal: Authentication failed", "https://git.tidewater.example/t/booking-web")).toBe(
+    "git could not sign in to git.tidewater.example. knobas uses your own git credentials (ssh agent or credential helper); check them in a terminal",
   );
   expect(cloneFailure("other", "fatal: unable to access: Could not resolve host", null)).toBe(
     "fatal: unable to access: Could not resolve host",
