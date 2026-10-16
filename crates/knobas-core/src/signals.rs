@@ -130,7 +130,11 @@ pub struct Signal {
 /// not a walk per ticket. The board names the cards it keeps; `has:` names
 /// every end of a confirmed link, the only tickets that can carry a signal,
 /// and asks which of them carry the kind it wants. The per-row parts are
-/// index probes and the declaration's own reads.
+/// index probes and the declaration's own reads. `builds` keeps the reach's
+/// builds by the entity's kind before it joins `sync.item`: joined on the
+/// id alone, the planner underestimated the reach and compared every reach
+/// row with every build (1.8 million comparisons for 1,800 tickets and 500
+/// builds, 230 ms, where this reads 70 ms; PR #933's review).
 #[macro_export]
 macro_rules! ticket_signals {
     ($decl:literal, $me:literal, $tickets:expr) => {
@@ -145,7 +149,7 @@ macro_rules! ticket_signals {
                         select t.tid, l.from_id
                           from t join knobas.confirmed_link l on l.to_id = t.tid) x
                       join knobas.entity e on e.id = x.id where e.kind <> 'ctx'),
-              reach as (select x.tid, x.id from (
+              reach as (select x.tid, x.id, e.kind from (
                         select n1.tid, n1.id from n1
                         union
                         select n1.tid, l.to_id
@@ -163,7 +167,7 @@ macro_rules! ticket_signals {
                                ",
             $crate::declared_state!($decl),
             "->>'tone' as tone
-                          from reach r join sync.item i on i.entity_id = r.id
+                          from reach r join sync.item i on i.entity_id = r.id and r.kind = 'build'
                          where i.kind = 'build' and ",
             $crate::live_by_key!("i"),
             ") b order by b.tid, b.cfg, b.at desc, b.tone),
