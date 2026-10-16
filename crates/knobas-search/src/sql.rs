@@ -358,11 +358,17 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
     let mut predicates = corpus_predicates(corpus, None, &bound);
     if let Some((words, declarations)) = &typed {
         let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
+        // The key and the title first, each on its own, so a word either
+        // holds reads no payload (#897); the declared assignee only for a
+        // word they both miss. No word holds a space, so this matches what
+        // the three joined by spaces matched.
         predicates.push(format!(
             "not exists (select 1 from unnest({words}::text[]) w(word) where \
-             strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1) || ' ' || i.title || ' ' || coalesce({}, '')), w.word) = 0 \
-             and not exists (select 1 from sync.item_parent ip \
-                             where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0))",
+             case when strpos(lower(substr(i.entity_id, strpos(i.entity_id, ':') + 1)), w.word) > 0 then false \
+                  when strpos(lower(i.title), w.word) > 0 then false \
+                  when strpos(lower(coalesce({}, '')), w.word) > 0 then false \
+                  else not exists (select 1 from sync.item_parent ip \
+                                   where ip.entity_id = i.entity_id and strpos(lower(ip.name), w.word) > 0) end)",
             knobas_core::declared_string!("pd.d", "assignee")
         ));
     }

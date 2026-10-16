@@ -735,3 +735,42 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
         "a query for another kind matches no ticket"
     );
 }
+
+/// The Tickets view's words with no key beside them (#897), which is what a
+/// keystroke on *All tickets* sends: the key, the title and the declared
+/// assignee are each a word of the row, and every word is still required.
+#[tokio::test]
+async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
+    let pool = pool().await;
+    let p = project();
+    let person: &'static str = Box::leak(format!("{}.nair", p.to_lowercase()).into_boxed_str());
+    let theirs = store(
+        &pool,
+        &p,
+        1,
+        Ticket {
+            assignee: Some(person),
+            ..BASE
+        },
+    )
+    .await;
+    let nobodys = store(&pool, &p, 2, BASE).await;
+    let searcher = searcher(&pool).await;
+    for (typed, expected) in [
+        (person.to_uppercase(), vec![theirs.clone()]),
+        (format!("{person} {p}"), vec![theirs.clone()]),
+        (format!("{p}-2"), vec![nobodys.clone()]),
+        (p.clone(), vec![theirs.clone(), nobodys.clone()]),
+        (format!("{p}-2 {person}"), Vec::new()),
+    ] {
+        assert_eq!(
+            searcher
+                .matching_ids(&typed, "ticket")
+                .await
+                .unwrap()
+                .map(sorted),
+            Some(sorted(expected)),
+            "{typed}"
+        );
+    }
+}
