@@ -2335,3 +2335,55 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   fills this tree.", "Nothing to read yet. Pages appear here once a docs source has synced.",
   "knobas cannot read this page's body. Open it in <source>." and "No comments yet." (the last is
   prototype-6's).
+## #871 Dependencies tracer
+
+- **The kinds a layer holds are a table of their own,** `knobas.dep_layer_kind`, keyed by the
+  kind, so "every kind sits in at most one layer" is the primary key. The issue asks for "the
+  layers tables"; spec #808 counts "two knobas-local tables" (layers and views), so with #873's
+  views there will be three. **Reversing:** medium; a migration folding the kinds into an array
+  column, and the rule into the write path.
+- **A pipeline is what the Builds view lists:** the read takes #848's `pipelines_inner` (the
+  declared frame), so Dependencies and Builds cannot disagree about what a pipeline is, and its
+  health is the newest run's chip. (#848 merged while this was open; the first draft read
+  `build_config` by name.) **Reversing:** low.
+- **A tile's health is the thing's own:** an asset's status and its attached monitors' newest
+  samples, not the effective health the Tree rolls up from what it holds. A hypervisor drawn red
+  because a container three levels down is down would turn every band above a problem red, and
+  R-11.18's "problems never fold" would then unfold the whole estate. **Reversing:** low (one
+  `least` in the read).
+- **"Linked ticket" means a ticket at one end of a confirmed link whose other end is an item of
+  the read.** No pages: the issue's list names none, and the Work layer's pages arrive with a
+  ticket's reach (#874). **Reversing:** low.
+- **The relations are what the stored data holds:** confirmed links by their relation, `inside`,
+  `exposes`, `lands-on`, `in-repository`. Chains, deploy targets and a run's repository are not
+  declared by any source yet; they come with the Builds tickets. **Reversing:** low (additive).
+- **Nothing here reads the reach walk** (#942): the top-bar opening is unscoped. The ticket
+  opening that filters by the job-reach read is #874's and depends on #942's answer.
+- **Which layers show is held for the session and starts with every layer shown.** Prototype-6's
+  *Everything* view hides Work; views are #873's, which takes this state over. **Reversing:** low.
+- **A tile is a link to the thing's own address** (`#/job/<key>`, `#/pr/<id>`, `#/repo/<id>`,
+  `#/build/<id>`, `#/asset/<id>`, `#/route/<id>`) until #872 and #875 give it R-11.15's click and
+  the asset editor. An asset's address opens the Asset tree at it. **Reversing:** low.
+- **The Asset tree is today's `AssetsView`, mounted unchanged** at `#/assets`, `#/asset/<id>` and
+  `#/route/<id>` in the new shell, with a router that hands it the address and sends its other
+  members back to `#/deps`. It keeps the rooms look until a ticket ports it. **Reversing:** low.
+- **`#/deps` and `#/map` draw Dependencies; `#/assets`, `#/asset/<id>` and `#/route/<id>` the Asset
+  tree,** each page matching on the route's `head` (#848's convention). **Reversing:** low.
+- **A count keeps an all-capitals label as written:** "1 VM", "2 VMs", where prototype-6 lower-cases
+  the singular ("1 vm"). **Reversing:** trivial.
+- **A restore treats the seeded layers as bookkeeping, as it does `knobas.setting`.** Seeding them
+  in the migration made every fresh machine "occupied", and fourteen backup tests refused the
+  restore (`TargetNotEmpty { table: "dep_layer" }`). `knobas_db::backup` now excludes
+  `dep_layer` and `dep_layer_kind` from the occupancy probe and clears them before loading an
+  archive that carries them; an older archive leaves this machine's defaults. **Reversing:** low;
+  seeding lazily on first read instead would bring the refusal back for anyone who opened
+  Dependencies before restoring.
+- **Merge-manager, PR #949: an archive carrying only one of the two layer tables is not guarded.**
+  Each table is cleared only when the archive carries it, so a hand-made archive holding
+  `dep_layer_kind` without `dep_layer` would load kinds onto this machine's layers. knobas cannot
+  write one: the backup is schema-scoped and carries both, and no share part names either table
+  (`backup::share::Parts::tables`). A guard would refuse an archive nothing produces.
+  `a_restore_replaces_the_seeded_layers_with_the_archives_and_keeps_them_otherwise` pins the two
+  shapes knobas does write: a backup's layers replace the seed with no seed row left over, and an
+  archive without them leaves the seed alone. **Reversing:** low; clear the pair together, or
+  refuse a half pair, if a share part ever carries the layers.

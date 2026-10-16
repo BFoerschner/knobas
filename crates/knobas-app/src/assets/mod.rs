@@ -224,6 +224,7 @@
 //! `commands::assets::get_asset` because the answer is in the keychain and this
 //! module reads the database.
 
+pub mod dependencies;
 pub mod docker;
 pub mod hcloud;
 

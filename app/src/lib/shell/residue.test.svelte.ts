@@ -352,6 +352,8 @@ const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
+const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
+const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -952,6 +954,21 @@ const CASES: Case[] = [
           layers: createLayers(),
           ports: { roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }) },
           ongo: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** Dependencies (#871): its one read behind a ready database, answering late. */
+    name: "TfDeps",
+    source: "lib/tf/deps/TfDeps.svelte",
+    open: (target) => ({
+      app: mount(TfDeps, {
+        target,
+        props: {
+          ready: true,
+          hidden: createHiddenLayers(),
+          ports: { dependencies: () => deferred({ layers: [], kinds: [], items: [], relations: [] }) },
         },
       }),
     }),
