@@ -422,6 +422,70 @@ impl Source for TeamCitySource {
                 .collect(),
         ))
     }
+
+    /// A range of a build's whole log, streamed, and its steps (#854).
+    async fn run_log(
+        &self,
+        entity: &str,
+        from: Option<u64>,
+        count: u32,
+    ) -> Result<Option<knobas_source::run::RunLog>, SourceError> {
+        let id = self.build_id(entity)?;
+        let count = count.clamp(1, knobas_source::run::LOG_LINES_MAX);
+        Ok(Some(self.rest.run_log(id, from, count).await?))
+    }
+
+    /// A build's tests, failed first (#855).
+    async fn run_tests(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::run::RunTests>, SourceError> {
+        let id = self.build_id(entity)?;
+        Ok(Some(self.rest.run_tests(id).await?))
+    }
+
+    /// One test's last ten outcomes in the build's configuration (#855).
+    async fn test_history(
+        &self,
+        entity: &str,
+        test: &str,
+    ) -> Result<Option<Vec<knobas_source::run::TestOutcome>>, SourceError> {
+        let id = self.build_id(entity)?;
+        Ok(Some(self.rest.test_history(&self.id, id, test).await?))
+    }
+
+    /// One folder of a build's artifacts (#856).
+    async fn run_artifacts(
+        &self,
+        entity: &str,
+        path: &str,
+    ) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, SourceError> {
+        let id = self.build_id(entity)?;
+        Ok(Some(self.rest.run_artifacts(id, path).await?))
+    }
+
+    /// The head of one text artifact (#856).
+    async fn artifact_preview(
+        &self,
+        entity: &str,
+        path: &str,
+    ) -> Result<Option<knobas_source::run::ArtifactPreview>, SourceError> {
+        let id = self.build_id(entity)?;
+        Ok(Some(self.rest.artifact_preview(id, path).await?))
+    }
+
+    /// A log, a file, a folder or every artifact, streamed with the stored
+    /// credential (D8, #856).
+    async fn download(
+        &self,
+        entity: &str,
+        target: &knobas_source::run::DownloadTarget,
+        sink: &mut dyn knobas_source::run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        let id = self.build_id(entity)?;
+        self.rest.download(id, target, sink).await?;
+        Ok(true)
+    }
 }
 
 #[cfg(test)]

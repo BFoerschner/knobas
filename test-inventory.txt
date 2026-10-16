@@ -184,6 +184,8 @@ knobas-app	lib/knobas_app	docs::search_tests::a_hit_by_title_alone_shows_the_fir
 knobas-app	lib/knobas_app	docs::search_tests::matches_count_title_sections_and_comments_but_not_link_lines
 knobas-app	lib/knobas_app	docs::search_tests::stemming_is_prototype_sixes
 knobas-app	lib/knobas_app	docs::search_tests::the_snippet_is_the_sentence_with_the_most_needles_and_says_its_section
+knobas-app	lib/knobas_app	downloads::tests::a_suggested_name_is_only_ever_a_name
+knobas-app	lib/knobas_app	downloads::tests::a_taken_name_is_numbered_before_its_extension
 knobas-app	lib/knobas_app	error::tests::a_failed_run_keeps_the_source_it_belongs_to
 knobas-app	lib/knobas_app	error::tests::a_link_endpoint_that_is_not_in_the_mirror_is_not_found
 knobas-app	lib/knobas_app	error::tests::every_code_has_its_snake_case_spelling
@@ -725,6 +727,7 @@ knobas-app	test/it	entity_mirror::the_pipeline_settings_shape_matches_its_typesc
 knobas-app	test/it	entity_mirror::the_project_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_reached_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_run_preset_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_mirror::the_run_read_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_source_ref_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_standup_digest_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_standup_protocol_shape_matches_its_typescript_mirror
@@ -838,6 +841,9 @@ knobas-app	test/it	responsiveness_probe::what_the_reader_waits_on
 knobas-app	test/it	run_presets_ipc::a_preset_that_could_never_run_is_refused
 knobas-app	test/it	run_presets_ipc::a_saved_preset_reads_back_on_its_pipeline_alone
 knobas-app	test/it	run_presets_ipc::saving_a_name_again_replaces_that_preset
+knobas-app	test/it	run_reads_ipc::a_bad_address_or_path_is_refused_and_a_foreign_run_is_the_sources_refusal
+knobas-app	test/it	run_reads_ipc::a_download_is_a_new_file_in_the_folder_named_by_its_last_segment
+knobas-app	test/it	run_reads_ipc::each_run_read_reaches_the_runs_own_source_with_the_cap_applied
 knobas-app	test/it	search_ipc::a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure
 knobas-app	test/it	search_ipc::a_property_value_and_a_url_are_what_a_reader_types
 knobas-app	test/it	search_ipc::a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither
@@ -2107,6 +2113,9 @@ knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
 knobas-source	lib/knobas_source	pipeline::tests::settings_without_the_later_fields_read_as_empty
+knobas-source	lib/knobas_source	run::tests::a_download_target_is_tagged_on_kind
+knobas-source	lib/knobas_source	run::tests::a_tests_module_is_its_name_up_to_the_last_separator
+knobas-source	lib/knobas_source	run::tests::an_artifact_path_never_climbs_out_of_the_artifacts
 knobas-source	lib/knobas_source	tests::a_commit_file_crosses_in_its_own_shape
 knobas-source	lib/knobas_source	tests::a_create_queued_before_kinds_reads_as_an_http_check
 knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_status_it_came_from
@@ -2940,6 +2949,11 @@ knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::each_auth_method_
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::teamcitys_json_error_envelope_becomes_the_message
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::the_base_url_may_carry_a_path_prefix_with_or_without_a_trailing_slash
 knobas-source-teamcity	lib/knobas_source_teamcity	http::tests::the_plaintext_error_form_is_still_read_where_one_arrives
+knobas-source-teamcity	lib/knobas_source_teamcity	log::tests::a_heading_loses_only_a_duration_in_parentheses
+knobas-source-teamcity	lib/knobas_source_teamcity	log::tests::a_line_longer_than_the_cap_is_cut_and_says_so
+knobas-source-teamcity	lib/knobas_source_teamcity	log::tests::a_log_splits_into_its_steps_with_their_lines_durations_and_tones
+knobas-source-teamcity	lib/knobas_source_teamcity	log::tests::a_range_from_past_the_end_is_empty_and_does_not_overflow
+knobas-source-teamcity	lib/knobas_source_teamcity	log::tests::a_range_keeps_only_its_lines_and_still_knows_every_step
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_bare_build_configuration_still_maps
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_and_a_configuration_cannot_share_a_key
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::a_build_configuration_maps_to_a_build_config_item
@@ -2968,6 +2982,11 @@ knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::teamcity_timestam
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::the_field_selectors_cover_everything_the_mapping_reads
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::the_selectors_ask_for_nothing_no_reader_looks_at
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::unknown_fields_are_ignored
+knobas-source-teamcity	lib/knobas_source_teamcity	run_reads::tests::a_preview_is_text_unless_it_holds_a_nul_and_says_when_it_was_cut
+knobas-source-teamcity	lib/knobas_source_teamcity	run_reads::tests::an_artifact_path_is_escaped_segment_by_segment
+knobas-source-teamcity	lib/knobas_source_teamcity	run_reads::tests::failed_tests_come_first_and_a_muted_failure_after_them
+knobas-source-teamcity	lib/knobas_source_teamcity	run_reads::tests::only_a_number_is_a_test_id
+knobas-source-teamcity	lib/knobas_source_teamcity	run_reads::tests::the_selectors_have_no_whitespace_and_balance
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::a_bad_config_fails_construction_rather_than_the_first_sync
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::a_base_url_that_is_not_a_url_is_refused
 knobas-source-teamcity	lib/knobas_source_teamcity	source::tests::a_blank_display_name_falls_back_to_the_adapter_name
@@ -3067,6 +3086,15 @@ knobas-source-teamcity	test/it	run::a_run_that_names_nothing_runnable_is_refused
 knobas-source-teamcity	test/it	run::a_run_without_a_branch_or_overrides_sends_neither
 knobas-source-teamcity	test/it	run::a_runs_options_cross_as_triggering_options_and_only_when_ticked
 knobas-source-teamcity	test/it	run::an_answer_without_an_id_is_still_a_queued_run
+knobas-source-teamcity	test/it	run_reads::a_failed_download_never_starts_the_file
+knobas-source-teamcity	test/it	run_reads::a_folder_is_read_by_its_path_and_its_entries_carry_their_whole_path
+knobas-source-teamcity	test/it	run_reads::a_log_of_something_that_is_not_a_build_is_refused_before_any_request
+knobas-source-teamcity	test/it	run_reads::a_preview_is_the_files_text
+knobas-source-teamcity	test/it	run_reads::a_tests_history_is_its_configurations_last_ten_runs_newest_first
+knobas-source-teamcity	test/it	run_reads::each_download_streams_its_url_under_the_name_it_suggests
+knobas-source-teamcity	test/it	run_reads::past_the_cap_the_failed_tests_are_read_on_their_own_so_none_is_left_out
+knobas-source-teamcity	test/it	run_reads::tests_come_back_failed_first_with_their_module_details_and_id
+knobas-source-teamcity	test/it	run_reads::the_whole_log_is_streamed_and_only_the_range_asked_for_is_answered
 knobas-source-teamcity	test/it	view::a_build_configuration_opens_on_its_overview_with_one_tab_per_part
 knobas-source-teamcity	test/it	view::a_configuration_id_that_is_not_one_is_refused_unsent
 knobas-source-teamcity	test/it	view::a_configuration_the_server_does_not_know_is_its_404
@@ -3122,6 +3150,7 @@ knobas-source-teamcity	test/live_teamcity_seeded	a_configured_project_takes_in_i
 knobas-source-teamcity	test/live_teamcity_seeded	a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_options
 knobas-source-teamcity	test/live_teamcity_seeded	a_run_with_an_override_is_built_on_its_branch_and_synced_next
 knobas-source-teamcity	test/live_teamcity_seeded	a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view
+knobas-source-teamcity	test/live_teamcity_seeded	a_seeded_runs_log_tests_and_artifacts_read_whole
 knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_its_configuration_and_is_found_by_under_its_name_and_id
 knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_its_state_chip
 knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_the_revisions_it_ran_on

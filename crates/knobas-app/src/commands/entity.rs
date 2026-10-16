@@ -1797,6 +1797,328 @@ pub async fn pipeline_settings<R: tauri::Runtime>(
     .await
 }
 
+// -- the run page's live reads (ADR-0022; #854, #855, #856) ------------------
+
+/// The parsed run id and its live adapter, or the refusal: `invalid` for an
+/// address that is not an entity id, `not_found` for a source that is not
+/// configured.
+async fn run_adapter(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+) -> Result<(EntityRef, Box<dyn knobas_source::Source>), IpcError> {
+    let entity = EntityRef::parse(run_id).map_err(IpcError::invalid)?;
+    let source = crate::sources::crud::run_source(pool, secrets, registry, &entity.to_string())
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
+    Ok((entity, source))
+}
+
+/// A source's failure on a run read, as [`crate::sources::to_ipc`] maps it.
+fn run_read_failed(entity: &EntityRef, error: knobas_source::SourceError) -> IpcError {
+    crate::sources::to_ipc(&error.into(), Some(&entity.namespace))
+}
+
+/// A range of run `run_id`'s whole log and its steps (#854): `count` lines
+/// (all [`knobas_source::run::LOG_LINES_MAX`] of the cap when `None`) from
+/// line `from`, or the last `count` when `from` is `None`. `None` for a
+/// source that keeps no runs.
+///
+/// # Errors
+///
+/// `invalid` for an address that is not an entity id, `not_found` for a
+/// source that is not configured, and the source's own failure as
+/// [`crate::sources::to_ipc`] maps it (a run it does not have included).
+pub async fn run_log_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+    from: Option<u64>,
+    count: Option<u32>,
+) -> Result<Option<knobas_source::run::RunLog>, IpcError> {
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let count = count
+        .unwrap_or(knobas_source::run::LOG_LINES_MAX)
+        .clamp(1, knobas_source::run::LOG_LINES_MAX);
+    source
+        .run_log(&entity.to_string(), from, count)
+        .await
+        .map_err(|error| run_read_failed(&entity, error))
+}
+
+/// Run `run_id`'s tests, failed first (#855). Errors as [`run_log_inner`].
+///
+/// # Errors
+///
+/// As [`run_log_inner`].
+pub async fn run_tests_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    source
+        .run_tests(&entity.to_string())
+        .await
+        .map_err(|error| run_read_failed(&entity, error))
+}
+
+/// How test `test_id` came out in the last ten runs of `run_id`'s pipeline,
+/// newest first (#855).
+///
+/// # Errors
+///
+/// As [`run_log_inner`].
+pub async fn test_history_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+    test_id: &str,
+) -> Result<Option<Vec<knobas_source::run::TestOutcome>>, IpcError> {
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    source
+        .test_history(&entity.to_string(), test_id)
+        .await
+        .map_err(|error| run_read_failed(&entity, error))
+}
+
+/// `invalid` unless `path` stays inside a run's artifacts.
+fn artifact_path(path: &str) -> Result<(), IpcError> {
+    if knobas_source::run::is_artifact_path(path) {
+        Ok(())
+    } else {
+        Err(IpcError::invalid(format!(
+            "{path:?} is not a path inside a run's artifacts"
+        )))
+    }
+}
+
+/// One folder of run `run_id`'s artifacts, the root when `path` is `None`
+/// (#856).
+///
+/// # Errors
+///
+/// As [`run_log_inner`], and `invalid` for a path that leaves the artifacts.
+pub async fn run_artifacts_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+    path: Option<&str>,
+) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, IpcError> {
+    let path = path.unwrap_or_default();
+    artifact_path(path)?;
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    source
+        .run_artifacts(&entity.to_string(), path)
+        .await
+        .map_err(|error| run_read_failed(&entity, error))
+}
+
+/// The head of one text artifact of run `run_id`, for *Preview* (#856).
+///
+/// # Errors
+///
+/// As [`run_artifacts_inner`].
+pub async fn artifact_preview_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+    path: &str,
+) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
+    artifact_path(path)?;
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    source
+        .artifact_preview(&entity.to_string(), path)
+        .await
+        .map_err(|error| run_read_failed(&entity, error))
+}
+
+/// Stream `target` of run `run_id` into a new file in `dir` with the stored
+/// credential (D8, #856), and answer the file's path; `None` for a source
+/// that keeps no runs. The file is named as the source suggests
+/// ([`crate::downloads::safe_name`]), numbered where the name is taken, and a
+/// download that fails leaves no file.
+///
+/// # Errors
+///
+/// As [`run_artifacts_inner`]; a file that cannot be written is `internal`.
+pub async fn download_run_file_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    run_id: &str,
+    target: &knobas_source::run::DownloadTarget,
+    dir: &std::path::Path,
+) -> Result<Option<String>, IpcError> {
+    use knobas_source::run::DownloadTarget;
+    if let DownloadTarget::File { path } | DownloadTarget::Folder { path } = target {
+        artifact_path(path)?;
+    }
+    let (entity, source) = run_adapter(pool, secrets, registry, run_id).await?;
+    let mut sink = crate::downloads::FileSink::new(dir);
+    let streamed = source
+        .download(&entity.to_string(), target, &mut sink)
+        .await;
+    let finished = match streamed {
+        Ok(true) => sink.finish().await.map(Some),
+        Ok(false) => Ok(None),
+        Err(error) => Err(error),
+    };
+    match finished {
+        Ok(path) => Ok(path.map(|p| p.display().to_string())),
+        Err(error) => {
+            sink.discard().await;
+            Err(run_read_failed(&entity, error))
+        }
+    }
+}
+
+/// A range of one run's log (#854).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and whatever
+/// [`run_log_inner`] refuses with.
+#[tauri::command]
+pub async fn run_log<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    from: Option<u64>,
+    count: Option<u32>,
+) -> Result<Option<knobas_source::run::RunLog>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    run_log_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+        from,
+        count,
+    )
+    .await
+}
+
+/// One run's tests (#855).
+///
+/// # Errors
+///
+/// As [`run_log`].
+#[tauri::command]
+pub async fn run_tests<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+) -> Result<Option<knobas_source::run::RunTests>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    run_tests_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+    )
+    .await
+}
+
+/// One test's last ten outcomes (#855).
+///
+/// # Errors
+///
+/// As [`run_log`].
+#[tauri::command]
+pub async fn test_history<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    test_id: String,
+) -> Result<Option<Vec<knobas_source::run::TestOutcome>>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    test_history_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+        &test_id,
+    )
+    .await
+}
+
+/// One folder of a run's artifacts (#856).
+///
+/// # Errors
+///
+/// As [`run_log`].
+#[tauri::command]
+pub async fn run_artifacts<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    path: Option<String>,
+) -> Result<Option<Vec<knobas_source::run::ArtifactEntry>>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    run_artifacts_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+        path.as_deref(),
+    )
+    .await
+}
+
+/// The head of one text artifact (#856).
+///
+/// # Errors
+///
+/// As [`run_log`].
+#[tauri::command]
+pub async fn artifact_preview<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    path: String,
+) -> Result<Option<knobas_source::run::ArtifactPreview>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    artifact_preview_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+        &path,
+    )
+    .await
+}
+
+/// A run's log, an artifact, a folder or every artifact, into the downloads
+/// folder (D8, #856).
+///
+/// # Errors
+///
+/// As [`run_log`], and `internal` when the system names no downloads folder.
+#[tauri::command]
+pub async fn download_run_file<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    run_id: String,
+    target: knobas_source::run::DownloadTarget,
+) -> Result<Option<String>, IpcError> {
+    use tauri::Manager;
+    let dir = app
+        .path()
+        .download_dir()
+        .map_err(|error| IpcError::internal(format!("no downloads folder: {error}")))?;
+    let state = crate::sources::state(&app)?;
+    download_run_file_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &run_id,
+        &target,
+        &dir,
+    )
+    .await
+}
+
 /// The Builds list (#848).
 ///
 /// # Errors

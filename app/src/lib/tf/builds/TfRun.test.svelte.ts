@@ -6,7 +6,7 @@
 import { createRawSnippet, flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { PipelineRow, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
+import type { DownloadTarget, PipelineRow, PipelineSettings, RunRow, SourceView } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import type { RunPorts } from "./pipeline-ports";
@@ -165,13 +165,14 @@ const TESTS: SourceView = {
 };
 
 interface Drawn {
+  downloads: DownloadTarget[];
   writes: WriteOpPayload[];
   opened: string[];
   views: string[];
 }
 
 function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<RunPorts> = {}, runs: RunRow[] = RUNS): Drawn {
-  const drawn: Drawn = { writes: [], opened: [], views: [] };
+  const drawn: Drawn = { downloads: [], writes: [], opened: [], views: [] };
   const ports: RunPorts = {
     older: () => Promise.resolve([]),
     settings: () => Promise.resolve(SETTINGS),
@@ -191,6 +192,15 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
     savePreset: (preset) => Promise.resolve(preset),
     repoBranches: () => Promise.resolve(["main", FEATURE]),
     runParameters: () => Promise.resolve([{ name: "env", value: "prod-dryrun" }]),
+    log: () => Promise.resolve(null),
+    tests: () => Promise.resolve(null),
+    history: () => Promise.resolve(null),
+    artifacts: () => Promise.resolve([]),
+    preview: () => Promise.resolve(null),
+    download: (_runId, target) => {
+      drawn.downloads.push(target);
+      return Promise.resolve(`/Users/mara/Downloads/${target.kind === "file" ? target.path : target.kind}`);
+    },
     view: (id, section) => {
       drawn.views.push(section ?? "");
       if (section === "tests") return Promise.resolve(TESTS);
@@ -314,14 +324,18 @@ test("the Run panel lists branch, commit, who started it, agent, start and took 
   expect(panel.querySelector("dd a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Apayout-service/commits/gitea%3Acommit%3Aa41f2c");
 });
 
-test("the Artifacts panel lists the first four with Download, and links to all of them", async () => {
+test("the Artifacts panel lists the first four with Download through knobas, and links to all of them", async () => {
   const drawn = draw();
   await settle();
   const panel = target.querySelector('[aria-label="Artifacts"].tf-panel')!;
   expect([...panel.querySelectorAll(".tf-r .tf-t")].map((t) => t.textContent)).toEqual(["a.xml", "b.html", "c.log", "d.log"]);
   expect(panel.querySelector(".tf-open")?.textContent).toBe("All 5");
   panel.querySelector<HTMLButtonElement>(".tf-r button")!.click();
-  expect(drawn.opened).toEqual(["http://ci.example/a/a.xml"]);
+  await settle();
+  // D8 (#856): through knobas into the downloads folder, not the source's page.
+  expect(drawn.opened).toEqual([]);
+  expect(drawn.downloads).toEqual([{ kind: "file", path: "a.xml" }]);
+  expect(toasts.items.at(-1)?.text).toBe("Saved a.xml to ~/Downloads");
   expect(target.querySelector('.tf-tabs [href$="/tests"]')?.textContent).toBe("Tests 1 failed");
 });
 
@@ -373,9 +387,18 @@ test("Parameters pairs each value in this run with its default, then the branch,
   expect(target.querySelector(".tf-run-dialog")).not.toBeNull();
 });
 
-test("the Log tab is a later ticket's and says so", async () => {
-  draw("teamcity:build:1187", "log");
-  await settle();
-  expect(target.querySelector(".tf-runbody .tf-empty")?.textContent).toContain("Log is not built in the new shell yet.");
-  expect(target.querySelector('.tf-tabs [aria-current="page"]')?.textContent).toBe("Log");
+test("the Log, Tests and Artifacts tabs read the run live, each by its own read", async () => {
+  const asked: string[] = [];
+  for (const tab of ["log", "tests", "artifacts"]) {
+    draw("teamcity:build:1187", tab, {
+      log: (id) => (asked.push(`log ${id}`), Promise.resolve(null)),
+      tests: (id) => (asked.push(`tests ${id}`), Promise.resolve(null)),
+      artifacts: (id, path) => (asked.push(`artifacts ${id} ${JSON.stringify(path)}`), Promise.resolve([])),
+    });
+    await settle();
+    expect(target.querySelector('.tf-tabs [aria-current="page"]')?.textContent?.startsWith(tab === "log" ? "Log" : tab === "tests" ? "Tests" : "Artifacts")).toBe(true);
+    unmount(page!);
+    page = null;
+  }
+  expect(asked).toEqual(["log teamcity:build:1187", "tests teamcity:build:1187", 'artifacts teamcity:build:1187 ""']);
 });

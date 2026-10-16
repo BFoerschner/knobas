@@ -46,6 +46,7 @@ mod protocol_ipc;
 mod read_plans;
 mod responsiveness_probe;
 mod run_presets_ipc;
+mod run_reads_ipc;
 mod search_ipc;
 mod signals_ipc;
 mod sources_crud;

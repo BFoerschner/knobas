@@ -31,6 +31,7 @@ pub mod checkout;
 pub mod commands;
 pub mod conversation;
 pub mod docs;
+pub mod downloads;
 mod error;
 pub mod inbox;
 pub mod link_sets;
@@ -566,6 +567,14 @@ pub fn run() {
             // #857's build chain read, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::run_chain,
+            // #854 to #856's run page reads and its download, appended at
+            // the foot: the list is append-only (§10.8).
+            commands::entity::run_log,
+            commands::entity::run_tests,
+            commands::entity::test_history,
+            commands::entity::run_artifacts,
+            commands::entity::artifact_preview,
+            commands::entity::download_run_file,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

@@ -124,3 +124,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A run page panel that needs a read beyond the run's row and view is its own component with its
   own read, injectable for its test (`TfRunChain` reads `run_chain`); a pipeline's chain rides on
   its settings (`PipelineSettings.chain`). (#857)
+- A run's live reads (`run_log`, `run_tests`, `test_history`, `run_artifacts`, `artifact_preview`)
+  route by the run's namespace with no mirror check, as `entity_view` does, and answer frame shapes
+  (`knobas_source::run`). A download from a source is one command (`download_run_file`) into a new
+  file in the downloads folder, named by the adapter's suggestion cut to its last segment, never
+  the source's URL opened in a browser (D8). (#854, #855, #856)

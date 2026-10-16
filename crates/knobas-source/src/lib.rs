@@ -30,6 +30,7 @@ pub mod diff;
 pub mod docs;
 pub mod instance;
 pub mod pipeline;
+pub mod run;
 pub mod view;
 
 /// Everything knobas needs to know about a configured adapter instance.
@@ -1349,6 +1350,71 @@ pub trait Source: Send + Sync {
     ) -> Result<Option<Vec<pipeline::RunChainStep>>, SourceError> {
         let _ = run;
         Ok(None)
+    }
+    /// A range of run `entity`'s whole log, and its steps (ADR-0022, #854):
+    /// `count` lines (capped at [`run::LOG_LINES_MAX`]) from line `from`
+    /// (from 1), or the last `count` lines when `from` is `None`. The log is
+    /// streamed and never held whole.
+    ///
+    /// `Ok(None)` is **this adapter keeps no runs**, and is the default, as
+    /// for [`pipeline_settings`](Source::pipeline_settings).
+    async fn run_log(
+        &self,
+        entity: &str,
+        from: Option<u64>,
+        count: u32,
+    ) -> Result<Option<run::RunLog>, SourceError> {
+        let _ = (entity, from, count);
+        Ok(None)
+    }
+    /// Run `entity`'s tests, failed ones first (ADR-0022, #855).
+    /// `Ok(None)` as for [`run_log`](Source::run_log).
+    async fn run_tests(&self, entity: &str) -> Result<Option<run::RunTests>, SourceError> {
+        let _ = entity;
+        Ok(None)
+    }
+    /// How the test `test` (a [`run::RunTest::id`]) came out in the last
+    /// [`run::TEST_HISTORY_RUNS`] runs of run `entity`'s pipeline, newest
+    /// first (#855). `Ok(None)` as for [`run_log`](Source::run_log).
+    async fn test_history(
+        &self,
+        entity: &str,
+        test: &str,
+    ) -> Result<Option<Vec<run::TestOutcome>>, SourceError> {
+        let _ = (entity, test);
+        Ok(None)
+    }
+    /// The entries of one folder of run `entity`'s artifacts, `""` for the
+    /// root (ADR-0022, #856). `Ok(None)` as for [`run_log`](Source::run_log).
+    async fn run_artifacts(
+        &self,
+        entity: &str,
+        path: &str,
+    ) -> Result<Option<Vec<run::ArtifactEntry>>, SourceError> {
+        let _ = (entity, path);
+        Ok(None)
+    }
+    /// The head of one artifact file of run `entity`, for *Preview* (#856).
+    /// `Ok(None)` as for [`run_log`](Source::run_log).
+    async fn artifact_preview(
+        &self,
+        entity: &str,
+        path: &str,
+    ) -> Result<Option<run::ArtifactPreview>, SourceError> {
+        let _ = (entity, path);
+        Ok(None)
+    }
+    /// Stream `target` of run `entity` into `sink` with the stored credential
+    /// (D8, #856): read from the source, nothing written to it. `Ok(false)`
+    /// is **this adapter keeps no runs**, and is the default.
+    async fn download(
+        &self,
+        entity: &str,
+        target: &run::DownloadTarget,
+        sink: &mut dyn run::DownloadSink,
+    ) -> Result<bool, SourceError> {
+        let _ = (entity, target, sink);
+        Ok(false)
     }
 }
 

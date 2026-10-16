@@ -3324,3 +3324,74 @@ Ruled by the implementer (PR for #866).
   one failure, `the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail` (tab counts
   stale since #852's seed change), does not involve this PR and is #1015 (`backlog`).
   **Reversing:** low.
+## #854, #855 and #856 — Whole log, Tests tab, Artifacts and downloads (2026-10-16)
+
+- **Six commands, one SPI module (`knobas_source::run`), six `Source` methods with a default
+  answer.** ADR-0022's reads are "a range of log lines, tests, the artifact tree with a download
+  stream". The tree is one folder per read, the preview of a text file is its own read, and a
+  test's history (#855's criterion) is its own read; the download is one command over a
+  `DownloadTarget` (log, file, folder, all). **Reversing:** medium (a §10.8 surface).
+- **The Log tab reads the last 20,000 lines (`LOG_LINES_MAX`) and the steps over the whole log.**
+  A failing build's end is where the failure is. Past the cap the line under the log says *The
+  last N of M lines. Download log has all of them.* A line is cut at 4,000 characters. The range
+  read (`from`, `count`) exists for a later "earlier lines" control; nothing draws it yet.
+  **Reversing:** low (`LOG_LINES_MAX`, `TfRunLog`).
+- **Steps are TeamCity's top-level `Step N/M: <name>` blocks**, found in the plain-text log the
+  build log page's *Download* saves (`downloadBuildLog.html`), as the seeded server writes it
+  (witnessed in `a_seeded_runs_log_tests_and_artifacts_read_whole`). A step's lines are the
+  deeper ones after its heading. A step's duration is its first stamp to its last; a heading's
+  `(1m:02s)` suffix is dropped from the name, not parsed. Lines before, between and after the
+  steps (preparation, *Build finished*) are drawn outside every fold, not in an invented
+  *Preparation* step. A line's tone is TeamCity's status mark (`E` err, `W` warn), not a guess
+  from its words. **Reversing:** low (`log.rs`).
+- **A fold holds its lines only while open**, so a 20,000-line log in closed steps costs their
+  summaries. A new find resets the reader's own fold choices so every step with a match opens.
+  **Reversing:** low.
+- **The find counts marked runs (`marks`, the filter bar's matcher), "N of M"**, and `0 found`
+  with none. With *Errors and warnings only* on, a find keeps only the toned lines that match
+  (prototype-6's `drawLog`). **Reversing:** low.
+- **Tests: one read of up to 5,000 (`TESTS_MAX`); past it the failed ones are read on their own**
+  so none is left out. Failed first, a muted failure after the others. A test's module is its
+  name up to the last `::` or `.` (TeamCity's `parsedTestName` is not asked for). **Reversing:**
+  low.
+- **A failed test's row opens from its name; the first five start open, and a history is read
+  when its row opens.** prototype-6 opens every failed test, which is one request each.
+  **Reversing:** low (`OPEN_FAILED`).
+- **The history line**: *Failed in N of the last M runs*, then *, on this branch*, *, both on
+  this branch* or *, all on this branch* when every failure was on the run's branch; *Passed in
+  all of the last M runs.* when none failed. The history is TeamCity's last ten occurrences of
+  the test in the run's configuration (`test:(id:T),buildType:(id:B),count:10`). **Reversing:**
+  low (`historyLine`).
+- **Artifacts: the top-level folders start open (up to ten), deeper ones are read when
+  opened.** *Preview* is offered for a file whose extension is a text one, or that has none
+  (`SHA256SUMS`); the read takes the first 256 KB and a file with a NUL byte is *not text*.
+  **Reversing:** low (`previewable`).
+- **Every download is a new file in the downloads folder; a taken name gets ` (1)`, ` (2)`.** The
+  name is the adapter's suggestion cut to its last segment (`downloads::safe_name`), so a source
+  cannot write outside the folder. A download that breaks off removes its file. The toast is
+  *Saved <name> to ~/Downloads*, the prototype's words, whatever the system's downloads folder
+  is called. **Reversing:** low.
+- **The Overview's *Download* goes through knobas too (D8)**, reversing #853's "opens the
+  source's URL until #856". It downloads the view row's title as a top-level path, offered on a
+  row with a URL: TeamCity's top-level file rows are titled by their name, and a folder row has no
+  URL. Reading the panel from `run_artifacts` instead would be a second read on the Overview.
+  **Reversing:** low.
+- **A download is bounded by the HTTP client's per-request timeout**, as every source read is
+  (`knobas-http`'s `send`). A large artifact over a slow link can fail; a streaming send with a
+  stall timeout instead of a total one is follow-up #1012. **Reversing:** n/a.
+- **The run reads route by the run's namespace with no mirror check**, as `entity_view` does, so
+  a run older than the mirror's window (#853's older pages) reads too. The adapter refuses an id
+  that is not one of its runs, which arrives as `internal`. **Reversing:** low.
+- **The seeded failed build publishes its report a second time into `reports/`**, so the live
+  suite has a folder to list, open and zip. The seed re-runs a failed build that lacks it, and
+  the view's live test now counts two artifacts (and four parameters, which #852's
+  `env.LOG_LEVEL` had already made true). **Reversing:** low (`seed-teamcity-builds.sh`).
+- **A download's name is capped in bytes, not characters, and loses leading dots and spaces
+  together** (merge-manager, PR #1013). 200 characters of `é` is 400 bytes, past APFS's and
+  ext4's 255, so the file could not be created; and `. .` trimmed to `.`, the downloads folder
+  itself, before the number made it a hidden `. (1)`. Now 200 bytes cut on a character, and
+  `. .` is `download`. Windows' reserved names (`CON`, `NUL`) and trailing dots are not handled:
+  the app runs on macOS. **Reversing:** low (`downloads::safe_name`).
+- **A log range starting past the end answers no lines instead of overflowing** (merge-manager,
+  PR #1013): `from` arrives from the IPC as any `u64`, and `from + count` panicked in a debug
+  build at `u64::MAX`. **Reversing:** n/a.

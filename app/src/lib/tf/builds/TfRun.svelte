@@ -16,11 +16,12 @@
   - **Changes**: the commits in the run, each opening its commit.
   - **Parameters**: each value in this run beside the default, the branch,
     and *Run again with these…*.
-  - *Log*, *Tests* and *Artifacts* are later tickets' (#854 to #856) and
-    say so.
+  - **Log** (#854, `TfRunLog`), **Tests** (#855, `TfRunTests`) and
+    **Artifacts** (#856, `TfRunArtifacts`) read the run live (`run_log`,
+    `run_tests`, `run_artifacts`). A download, here and on the Overview, goes
+    through knobas into the downloads folder (`download_run_file`, D8).
 
-  The steps bar (R-9.10) waits for a read of a run's steps, which nothing
-  answers yet (#854's step boundaries).
+  The steps bar (R-9.10) is #1003's, over #854's step boundaries.
 -->
 <script lang="ts">
   import { onDestroy, onMount, untrack, type Snippet } from "svelte";
@@ -37,7 +38,11 @@
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunChain from "./TfRunChain.svelte";
+  import TfRunArtifacts from "./TfRunArtifacts.svelte";
   import TfRunDialog from "./TfRunDialog.svelte";
+  import TfRunLog from "./TfRunLog.svelte";
+  import TfRunTests from "./TfRunTests.svelte";
+  import { downloadAndSay } from "./run-reads";
   import {
     RUN_TABS,
     artifactsOf,
@@ -233,6 +238,9 @@
     void queue(request);
   }
 
+  /** A top-level artifact file into the downloads folder (D8, #856). */
+  const downloadFile = (name: string) => downloadAndSay(ports.download, runId, { kind: "file", path: name }, name);
+
   function openExternal(url: string | null) {
     if (url === null) return;
     void ports.openExternal(url).catch((cause: unknown) => {
@@ -363,7 +371,7 @@
                   <span class="tf-rend">
                     {#if artifact.meta !== null}<span class="tf-dim">{artifact.meta}</span>{/if}
                     {#if artifact.url !== null}
-                      <button type="button" class="tf-btn tf-sm" onclick={() => openExternal(artifact.url)}>Download</button>
+                      <button type="button" class="tf-btn tf-sm" onclick={() => downloadFile(artifact.title)}>Download</button>
                     {/if}
                   </span>
                 </div>
@@ -416,8 +424,12 @@
           <button type="button" class="tf-btn tf-runagain" onclick={() => (dialog = true)}>Run again with these…</button>
         {/if}
       {/if}
-    {:else}
-      <div class="tf-empty"><p>{RUN_TABS.find((t) => t.id === tab)?.name} is not built in the new shell yet.</p></div>
+    {:else if tab === "log"}
+      <TfRunLog {runId} {inFlight} {failed} {ports} />
+    {:else if tab === "tests"}
+      <TfRunTests {runId} branch={run.branch} logHref={runTabHash(pipelineId, runId, "log")} {ports} />
+    {:else if tab === "artifacts"}
+      <TfRunArtifacts {runId} sourceName={pipeline.source_name} {ports} />
     {/if}
   </div>
 

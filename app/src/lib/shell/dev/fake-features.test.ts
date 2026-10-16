@@ -314,3 +314,24 @@ test("link sets: the job's reach carries a set's members under its name, a save 
   expect(reach().some((row) => row.entity_id === "kuma:3")).toBe(false);
   expect(reach().some((row) => row.entity_id === "asset:knobas-jira-db")).toBe(true);
 });
+
+test("builds: a fixture run answers its log, tests, a test's history, artifacts, a preview and downloads (#854, #855, #856)", () => {
+  const h = demoHandlers() as Calls;
+  const runId = "teamcity:build:Payout_IntegrationTests-1187";
+  const log = h["run_log"]!({ runId, from: null, count: null }) as { lines: { step: number | null; tone: string | null }[]; steps: { name: string; tone: string | null }[]; total: number };
+  expect(log.steps.map((s) => s.name)).toEqual(["Checkout", "Start PSP sandbox stub", "cargo build --tests", "cargo test --test sepa_retry", "Publish test report"]);
+  expect(log.steps[3]!.tone).toBe("err");
+  expect(log.lines).toHaveLength(log.total);
+  expect((h["run_log"]!({ runId, from: null, count: 5 }) as { lines: unknown[] }).lines).toHaveLength(5);
+  const tests = h["run_tests"]!({ runId }) as { tests: { id: string; name: string; status: string }[] };
+  expect(tests.tests).toHaveLength(42);
+  expect(tests.tests[0]).toMatchObject({ name: "sepa::retry::gives_up_after_max_attempts", status: "failed" });
+  const history = h["test_history"]!({ runId, testId: tests.tests[0]!.id }) as { status: string }[];
+  expect(history.filter((o) => o.status === "failed")).toHaveLength(2);
+  const root = h["run_artifacts"]!({ runId, path: null }) as { path: string; folder: boolean }[];
+  expect(root.map((e) => e.path)).toEqual(["test-report", "logs", "coverage"]);
+  expect((h["run_artifacts"]!({ runId, path: "logs" }) as { path: string }[]).map((e) => e.path)).toEqual(["logs/psp-sandbox.log", "logs/integration.log"]);
+  expect((h["artifact_preview"]!({ runId, path: "test-report/junit.xml" }) as { text: string }).text).toContain("<testsuites");
+  expect(h["download_run_file"]!({ runId, target: { kind: "folder", path: "logs" } })).toBe("/Users/mara/Downloads/logs.zip");
+  expect(() => h["run_tests"]!({ runId: "teamcity:build:Nope-1" })).toThrow();
+});

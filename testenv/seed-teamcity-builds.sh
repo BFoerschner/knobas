@@ -238,6 +238,9 @@ branch_spec() {  # branch_spec <repo>
 # after it. The artifact is the log again, as a file, under a name this script
 # decides.
 SEEDED_ARTIFACT=sepa-report.txt
+# The same file again inside a folder, so the run page's artifact tree has a
+# folder to open and to download as a zip (#856).
+SEEDED_FOLDER=reports
 fixture_log() {  # fixture_log <build type id> -> the fixture's log, blank lines dropped
   jqf ".builds[] | select(.cfg==\"$1\") | .log" | sed '/^$/d'
 }
@@ -280,6 +283,7 @@ EOF
       _test=$(tc_escape "$(failed_test_name Payout_IntegrationTests)")
       _why=$(tc_escape "$(failed_test_details Payout_IntegrationTests)")
       printf '%s\n' "##teamcity[publishArtifacts '$SEEDED_ARTIFACT']" \
+                    "##teamcity[publishArtifacts '$SEEDED_ARTIFACT => $SEEDED_FOLDER']" \
                     "##teamcity[testStarted name='$_test']" \
                     "##teamcity[testFailed name='$_test' message='$_why']" \
                     "##teamcity[testFinished name='$_test']" \
@@ -437,6 +441,14 @@ ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
   esac
   if [ "$2" = "FAILURE" ] && [ "$(printf '%s' "$REST_BODY" | jq '.testOccurrences.failed // 0')" -lt 1 ]; then
     _why="it reports no failed test"
+  fi
+  if [ -z "$_why" ] && [ "$2" = "FAILURE" ]; then
+    # #856: the failed build publishes the artifact folder too.
+    rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
+    expect "list the artifacts of build id $1" 200
+    if ! printf '%s' "$REST_BODY" | jq -e --arg f "$SEEDED_FOLDER" '[.file[]?.name] | index($f)' >/dev/null; then
+      _why="it publishes no $SEEDED_FOLDER/ folder"
+    fi
   fi
   [ -z "$_why" ] && return 0
   rest DELETE "/app/rest/builds/id:$1"
@@ -609,8 +621,9 @@ assert_reports() {  # assert_reports <build id> <build type id>
     || die "build id $1 reports failed tests $(printf '%s' "$REST_BODY" | jq -c '[.testOccurrence[]?.name]'), wanted [\"$_want\"]"
   rest GET "/app/rest/builds/id:$1/artifacts?fields=file(name)"
   expect "list the artifacts of build id $1" 200
-  [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | join(",")')" = "$SEEDED_ARTIFACT" ] \
-    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted [\"$SEEDED_ARTIFACT\"]"
+  _want=$(printf '%s\n' "$SEEDED_ARTIFACT" "$SEEDED_FOLDER" | sort | paste -sd, -)
+  [ "$(printf '%s' "$REST_BODY" | jq -r '[.file[]?.name] | sort | join(",")')" = "$_want" ] \
+    || die "build id $1 publishes $(printf '%s' "$REST_BODY" | jq -c '[.file[]?.name]'), wanted the file and the folder: $_want"
 }
 
 # --------------------------------------------------------------------------
