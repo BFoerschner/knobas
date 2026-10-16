@@ -114,7 +114,7 @@
       </p>
     {/if}
     {#if failure !== null}
-      <p class="tf-mfail" role="alert">{failure}</p>
+      <p class="tf-ifail" role="alert">{failure}</p>
     {/if}
   {/snippet}
   {#snippet footer()}

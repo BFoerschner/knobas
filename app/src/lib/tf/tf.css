@@ -1468,5 +1468,4 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-mon-acts { white-space: nowrap; text-align: right; }
 .tf-mon-acts .tf-btn + .tf-btn { margin-left: 4px; }
 .tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
-.tf-mfail { color: var(--err); font-size: var(--t-sm); }
 .tf-mon .tf-num { font-variant-numeric: tabular-nums; white-space: nowrap; }

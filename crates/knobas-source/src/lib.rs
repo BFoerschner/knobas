@@ -977,14 +977,6 @@ pub enum MonitorKind {
 }
 
 impl MonitorKind {
-    /// Every kind, in the order a form offers them.
-    pub const ALL: [MonitorKind; 4] = [
-        MonitorKind::Http,
-        MonitorKind::Tcp,
-        MonitorKind::Ping,
-        MonitorKind::Docker,
-    ];
-
     /// The word on the wire.
     #[must_use]
     pub fn as_str(self) -> &'static str {
@@ -1748,7 +1740,13 @@ mod tests {
         });
         let read = serde_json::from_value::<WriteOp>(old).unwrap();
         assert!(
-            matches!(&read, WriteOp::CreateMonitor { kind: MonitorKind::Http, .. }),
+            matches!(
+                &read,
+                WriteOp::CreateMonitor {
+                    kind: MonitorKind::Http,
+                    ..
+                }
+            ),
             "{read:?}"
         );
         let new = WriteOp::CreateMonitor {

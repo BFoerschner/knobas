@@ -79,15 +79,45 @@ pub(crate) fn document(name: &str, url: &str) -> Result<serde_json::Value, Sourc
 ///
 /// # Errors
 ///
-/// [`SourceError::Protocol`] for a check knobas will not send, [`document`]'s
-/// reason: a blank name or target, a target the kind cannot read, or a Docker
-/// check on an account with no Docker host.
+/// [`SourceError::Protocol`] for a check knobas will not send, for the
+/// reason the HTTP-only `document` gives: a blank name or target, a target the
+/// kind cannot read, or a Docker check on an account with no Docker host.
 pub(crate) fn document_of(
     name: &str,
     kind: MonitorKind,
     target: &str,
     docker_hosts: Option<&[i64]>,
 ) -> Result<serde_json::Value, SourceError> {
+    let (name, mut fields) = checked(name, kind, target)?;
+    if kind == MonitorKind::Docker {
+        let host = docker_hosts
+            .and_then(|hosts| hosts.first().copied())
+            .ok_or_else(|| {
+                SourceError::protocol(
+                    "this Uptime Kuma has no Docker host, so it cannot watch a container -- add \
+                 one in Kuma's settings, or pick another kind of check"
+                        .to_owned(),
+                )
+            })?;
+        if let Some(map) = fields.as_object_mut() {
+            map.insert("docker_host".into(), host.into());
+        }
+    }
+    Ok(with_common(name, fields))
+}
+
+/// The name, trimmed, and the kind's own fields: everything [`document_of`]
+/// can refuse before a session opens. A Docker check's host is the one thing
+/// left out, since which hosts exist is known only inside the session.
+///
+/// # Errors
+///
+/// [`document_of`]'s, but the missing Docker host.
+pub(crate) fn checked<'a>(
+    name: &'a str,
+    kind: MonitorKind,
+    target: &str,
+) -> Result<(&'a str, serde_json::Value), SourceError> {
     let name = name.trim();
     let url = target.trim();
     if name.is_empty() {
@@ -97,27 +127,18 @@ pub(crate) fn document_of(
         ));
     }
     let fields = match kind {
-        MonitorKind::Http => return http_document(name, url),
+        MonitorKind::Http => http_fields(url)?,
         MonitorKind::Tcp => {
             let (host, port) = host_and_port(url)?;
             serde_json::json!({ "type": "port", "hostname": host, "port": port })
         }
         MonitorKind::Ping => serde_json::json!({ "type": "ping", "hostname": host_of(url)? }),
-        MonitorKind::Docker => {
-            let container = plain(url, "a Docker check needs a container's name")?;
-            let host = docker_hosts.and_then(|hosts| hosts.first().copied()).ok_or_else(|| {
-                SourceError::protocol(
-                    "this Uptime Kuma has no Docker host, so it cannot watch a container -- add \
-                     one in Kuma's settings, or pick another kind of check"
-                        .to_owned(),
-                )
-            })?;
-            serde_json::json!({
-                "type": "docker", "docker_container": container, "docker_host": host
-            })
-        }
+        MonitorKind::Docker => serde_json::json!({
+            "type": "docker",
+            "docker_container": plain(url, "a Docker check needs a container's name")?,
+        }),
     };
-    Ok(with_common(name, fields))
+    Ok((name, fields))
 }
 
 /// `fields` with the name and every field fixed for every kind (the module
@@ -151,7 +172,9 @@ fn with_common(name: &str, mut fields: serde_json::Value) -> serde_json::Value {
 /// `missing` names.
 fn plain<'a>(target: &'a str, missing: &str) -> Result<&'a str, SourceError> {
     if target.is_empty() || target.chars().any(char::is_whitespace) {
-        return Err(SourceError::protocol(format!("{missing}, and {target:?} is not one")));
+        return Err(SourceError::protocol(format!(
+            "{missing}, and {target:?} is not one"
+        )));
     }
     Ok(target)
 }
@@ -181,12 +204,16 @@ fn host_and_port(target: &str) -> Result<(&str, u16), SourceError> {
     if host.is_empty() || host.contains('/') {
         return Err(refused());
     }
-    let port = port.parse::<u16>().ok().filter(|port| *port > 0).ok_or_else(refused)?;
+    let port = port
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(refused)?;
     Ok((host, port))
 }
 
-/// The HTTP check's document: the seed's own.
-fn http_document(name: &str, url: &str) -> Result<serde_json::Value, SourceError> {
+/// The HTTP check's own fields; with [`with_common`]'s, the seed's document.
+fn http_fields(url: &str) -> Result<serde_json::Value, SourceError> {
     // The same two schemes `KumaHttp` accepts for the base URL, and the same
     // reason: what Kuma does with anything else is fetch nothing and report a
     // check that never runs.
@@ -198,9 +225,7 @@ fn http_document(name: &str, url: &str) -> Result<serde_json::Value, SourceError
                 "{url:?} is not an http(s) URL, so an Uptime Kuma HTTP monitor cannot watch it"
             ))
         })?;
-    Ok(with_common(
-        name,
-        serde_json::json!({
+    Ok(serde_json::json!({
             "type": TYPE,
             // The parsed URL and not the caller's string: a paste carrying a
             // trailing space or a missing path is normalised once, here, so the
@@ -210,8 +235,7 @@ fn http_document(name: &str, url: &str) -> Result<serde_json::Value, SourceError
             "url": parsed.as_str(),
             "method": "GET",
             "maxredirects": MAX_REDIRECTS,
-        }),
-    ))
+    }))
 }
 
 /// The monitor id Kuma minted, out of its acknowledgement.
@@ -366,8 +390,13 @@ mod tests {
         assert_eq!(ping["hostname"], "10.0.0.4");
         assert_eq!(ping["name"], "vm");
 
-        let docker =
-            document_of("worker", MonitorKind::Docker, "payout-worker", Some(&[3, 7])).unwrap();
+        let docker = document_of(
+            "worker",
+            MonitorKind::Docker,
+            "payout-worker",
+            Some(&[3, 7]),
+        )
+        .unwrap();
         assert_eq!(docker["type"], "docker");
         assert_eq!(docker["docker_container"], "payout-worker");
         assert_eq!(docker["docker_host"], 3);
@@ -393,7 +422,10 @@ mod tests {
             (MonitorKind::Docker, ""),
         ] {
             assert!(
-                matches!(document_of("n", kind, target, Some(&[1])), Err(SourceError::Protocol { .. })),
+                matches!(
+                    document_of("n", kind, target, Some(&[1])),
+                    Err(SourceError::Protocol { .. })
+                ),
                 "{kind:?} {target:?} must be refused"
             );
         }

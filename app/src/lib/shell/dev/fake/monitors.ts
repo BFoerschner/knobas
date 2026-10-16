@@ -115,7 +115,7 @@ function fakeQueuedWrite(args: Record<string, unknown>) {
     id: (FIXTURE_WRITE_ID += 1),
     source_id: entity.split(":")[0] ?? "kuma",
     entity_id: entity,
-    op: tag === "ResumeMonitor" ? "resume_monitor" : tag === "CreateMonitor" ? "create_monitor" : "pause_monitor",
+    op: FIXTURE_OPS[tag] ?? "pause_monitor",
     payload,
     target_snapshot: null,
     state: "sent",
@@ -131,6 +131,13 @@ function fakeQueuedWrite(args: Record<string, unknown>) {
 }
 
 let FIXTURE_WRITE_ID = 0;
+
+/** Each payload tag this fixture queues, by the op identifier the queue records. */
+const FIXTURE_OPS: Record<string, string> = {
+  PauseMonitor: "pause_monitor",
+  ResumeMonitor: "resume_monitor",
+  CreateMonitor: "create_monitor",
+};
 
 /**
  * The monitors a reader has acked in this session, by monitor entity id.

@@ -59,7 +59,7 @@ function downSince(row: MonitorRow): Date | null {
 }
 
 /** The state chip: its words, as prototype-6 words them, and its tone. */
-export function chipOf(row: MonitorRow): { label: string; tone: ChipTone } {
+export function stateChip(row: MonitorRow): { label: string; tone: ChipTone } {
   switch (chipStateOf(row)) {
     case "paused":
       return { label: "paused", tone: null };

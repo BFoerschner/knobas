@@ -300,12 +300,12 @@ impl KumaSocket {
             .send(emit(LOGIN_ACK, "login", &self.login_argument()))
             .await?;
         let mut pushed = Pushed::default();
-        let login = session.wait_for(LOGIN_ACK, &mut pushed).await?;
+        let login = session.wait_for(LOGIN_ACK, Some(&mut pushed)).await?;
         login_verdict(&login, &self.account.username)?;
 
         let argument = build(&pushed)?;
         session.send(emit(CALL_ACK, event, &argument)).await?;
-        let answered = session.wait_for(CALL_ACK, &mut Pushed::default()).await?;
+        let answered = session.wait_for(CALL_ACK, None).await?;
         Ok((session, answered))
     }
 
@@ -374,7 +374,11 @@ impl Session<'_> {
     /// Everything else in the stream is discarded on purpose: what a login
     /// pushes is the dashboard's whole state, and this module has no use for
     /// any of it -- reading a monitor is `/metrics`' job and stays so.
-    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
+    async fn wait_for(
+        &self,
+        ack: u32,
+        mut pushed: Option<&mut Pushed>,
+    ) -> Result<String, SourceError> {
         loop {
             let request = self
                 .socket
@@ -390,7 +394,9 @@ impl Session<'_> {
                     self.send("3".to_owned()).await?;
                 } else if let Some(payload) = ack_of(packet, ack) {
                     return Ok(payload.to_owned());
-                } else if let Some(hosts) = docker_hosts_of(packet) {
+                } else if let Some(pushed) = pushed.as_deref_mut()
+                    && let Some(hosts) = docker_hosts_of(packet)
+                {
                     pushed.docker_hosts = Some(hosts);
                 }
             }

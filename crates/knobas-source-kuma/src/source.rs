@@ -288,10 +288,9 @@ impl Source for KumaSource {
             } => {
                 create_target(&self.id, entity)?;
                 // Checked before a session opens, so a refused target costs no
-                // login. Which Docker hosts the account has is known only inside
-                // the session, so this check stands one in, and the document is
-                // built again there with the real list (#864).
-                create::document_of(name, *kind, url, Some(&[0]))?;
+                // login; the document is built inside it, where a Docker check
+                // learns which Docker hosts the account has (#864).
+                create::checked(name, *kind, url)?;
                 let answered = socket
                     .call_with(socket::ADD_EVENT, |pushed| {
                         create::document_of(name, *kind, url, pushed.docker_hosts.as_deref())

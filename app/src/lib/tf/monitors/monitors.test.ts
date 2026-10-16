@@ -8,7 +8,7 @@ import { describe, expect, test } from "vitest";
 import type { AssetDetail, AssetProperty, MonitorRow, RouteRow, UnmonitoredAsset } from "../../ipc/assets";
 import { jobIndex } from "../job/open-jobs";
 import {
-  chipOf,
+  stateChip,
   gaps,
   kindWord,
   prefill,
@@ -69,7 +69,7 @@ describe("the state chip", () => {
       state: "down",
       samples: [sample(90, "up"), sample(60, "down"), sample(30, "down"), sample(1, "down")],
     });
-    const chip = chipOf(down);
+    const chip = stateChip(down);
     expect(chip.tone).toBe("err");
     expect(chip.label).toMatch(/^down since \d\d:\d\d$/);
     const at = new Date(NOW - 60 * 60_000);
@@ -78,24 +78,24 @@ describe("the state chip", () => {
   });
 
   test("says down alone when no sample says since when", () => {
-    expect(chipOf(row({ state: "down" }))).toEqual({ label: "down", tone: "err" });
+    expect(stateChip(row({ state: "down" }))).toEqual({ label: "down", tone: "err" });
   });
 
   test("says slow with the response on a warning", () => {
-    expect(chipOf(row({ state: "warn", response_time_ms: 8400 }))).toEqual({
+    expect(stateChip(row({ state: "warn", response_time_ms: 8400 }))).toEqual({
       label: "slow, 8\u00a0400 ms",
       tone: "warn",
     });
   });
 
   test("says paused for a tombstone whatever its last reading", () => {
-    expect(chipOf(row({ state: "up", tombstoned: true }))).toEqual({ label: "paused", tone: null });
+    expect(stateChip(row({ state: "up", tombstoned: true }))).toEqual({ label: "paused", tone: null });
   });
 
   test("says up, and names a state it has no chip for", () => {
-    expect(chipOf(row({}))).toEqual({ label: "up", tone: "ok" });
-    expect(chipOf(row({ state: "pending" }))).toEqual({ label: "pending", tone: "info" });
-    expect(chipOf(row({ state: null }))).toEqual({ label: "no reading", tone: null });
+    expect(stateChip(row({}))).toEqual({ label: "up", tone: "ok" });
+    expect(stateChip(row({ state: "pending" }))).toEqual({ label: "pending", tone: "info" });
+    expect(stateChip(row({ state: null }))).toEqual({ label: "no reading", tone: null });
   });
 });
 
