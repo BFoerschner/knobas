@@ -135,6 +135,11 @@ pub struct Searcher {
     /// [`Self::declaring`] stores), so a bare searcher answers it from
     /// whatever was stored last.
     payload_paths: Vec<(String, Vec<knobas_core::payload::KindPaths>)>,
+    /// Whether notes are searched. False while *Show notes and quick capture*
+    /// is off (#940, R-13a.6): the notes corpus leaves every statement, so
+    /// `note:` finds nothing, and `kind:` stops offering `note`. The notes
+    /// themselves stay (D10).
+    notes_shown: bool,
 }
 
 impl Searcher {
@@ -149,6 +154,25 @@ impl Searcher {
             pool,
             kinds: KindCatalog::default(),
             payload_paths: Vec::new(),
+            notes_shown: true,
+        }
+    }
+
+    /// The same searcher, searching notes or leaving them out (#940). A new
+    /// searcher searches them.
+    #[must_use]
+    pub fn with_notes_shown(mut self, shown: bool) -> Self {
+        self.notes_shown = shown;
+        self
+    }
+
+    /// The corpora a statement is built over: [`corpus::ALL`], less notes
+    /// while they are hidden.
+    fn corpora(&self) -> &'static [&'static corpus::Corpus] {
+        if self.notes_shown {
+            corpus::ALL
+        } else {
+            corpus::WITHOUT_NOTES
         }
     }
 
@@ -159,6 +183,7 @@ impl Searcher {
             pool,
             kinds,
             payload_paths: Vec::new(),
+            notes_shown: true,
         }
     }
 
@@ -342,7 +367,7 @@ impl Searcher {
         }
 
         let built = sql::search_sql(
-            corpus::ALL,
+            self.corpora(),
             text,
             parsed.prefix_last_term,
             &filters,
@@ -590,7 +615,7 @@ impl Searcher {
     /// [`SearchError::Db`] if any read fails.
     pub async fn filter_suggestions(&self, under: &str) -> Result<FilterSuggestions, SearchError> {
         let vocab = self.vocabulary().await?;
-        suggest::read(&self.pool, &vocab, under).await
+        suggest::read(&self.pool, &vocab, under, self.notes_shown).await
     }
 
     /// The parents half of [`Searcher::filter_suggestions`] and nothing else
@@ -653,7 +678,7 @@ impl Searcher {
         vocab: &Vocabulary,
     ) -> Result<Vec<SmartListSummary>, SearchError> {
         let mut out = lists::summaries(&self.pool, &vocab.identity).await?;
-        out.extend(saved::summaries(&self.pool, vocab).await?);
+        out.extend(saved::summaries(&self.pool, vocab, self.corpora()).await?);
         Ok(out)
     }
 
@@ -675,7 +700,7 @@ impl Searcher {
         // assembling a summary here: a second way to build this row is a
         // second answer to "what does a saved list look like", and the one the
         // caller gets on save is the one it would get on the next opening.
-        saved::summaries(&self.pool, &vocab)
+        saved::summaries(&self.pool, &vocab, self.corpora())
             .await?
             .into_iter()
             .find(|list| list.id == created.id)
@@ -785,7 +810,7 @@ impl Searcher {
             .map_err(|refusal| SearchError::Invalid(refusal.description()))?;
 
         let built = sql::search_sql(
-            corpus::ALL,
+            self.corpora(),
             runnable.text.as_deref(),
             // A saved query is not being typed, so its last word is finished.
             // `sep` saved as a list means `sep`, not "anything starting sep".

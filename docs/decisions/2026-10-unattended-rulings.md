@@ -3776,3 +3776,21 @@ Ruled by the merge-manager (PR #1034).
 - **The clock carries no day marker** (`from 22:00` for an alert open since Thursday). The prototype
   draws a bare clock; `clockReading`'s `(−n)` suffix would need today's key in `alertSince`.
   **Reversing:** pass the digest's day to `alertSince`.
+## #940 — Notes leave search while notes and capture are hidden (2026-10-17)
+
+- **The filter is in `commands::search::searcher`, not in each command.** It reads `capture.notes_shown`
+  (one primary-key read of `knobas.setting`, the same key #832's shortcut reads) and builds the
+  `Searcher` with `corpus::WITHOUT_NOTES` when it is off. Every launcher read then agrees: the
+  search, `list:`, saved-list counts and the `kind:` suggestions. **Reversing:** low (one call and
+  one const).
+- **`note:` finds nothing rather than parsing as plain text.** With the notes corpus out, the
+  prefix's `kinds = ["note"]` matches no corpus. **Reversing:** low.
+- **The `note:` row in the launcher's static syntax list and Help card stays** while notes are
+  hidden. Hiding it needs the frontend to know the setting (a field on `launcher_home`, a §10.8
+  entry); filed as a follow-up. **Reversing:** n/a.
+- **An absent `capture.notes_shown` row hides notes from search, for fresh and existing databases
+  alike (merge-manager, PR #1037).** #832 and R-13a.6 say the setting is off by default and
+  `capture::shown` already reads an absent row as off; #940 says notes leave search while it is
+  off. Upgrading therefore hides notes from search until the user turns the setting on; the notes
+  and commands stay (D10). No change made. **Reversing:** low (read the absent row as on in
+  `capture::shown`, which would also arm the capture shortcut, contradicting #832).

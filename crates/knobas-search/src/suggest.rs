@@ -370,8 +370,12 @@ pub(crate) async fn read(
     pool: &PgPool,
     vocab: &Vocabulary,
     under: &str,
+    notes_shown: bool,
 ) -> Result<FilterSuggestions, SearchError> {
-    let kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
+    let mut kinds: Vec<String> = sqlx::query_scalar(KINDS_SQL).fetch_all(pool).await?;
+    if !notes_shown {
+        kinds.retain(|kind| kind != "note");
+    }
     let parents = parents(pool, under).await?;
     let enabled: Vec<&str> = vocab
         .sources

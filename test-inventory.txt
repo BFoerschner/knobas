@@ -816,6 +816,7 @@ knobas-app	test/it	link_sets_ipc::sets_never_feed_membership_the_tray_the_inbox_
 knobas-app	test/it	link_sets_ipc::the_job_reads_each_set_that_applies_with_its_reason
 knobas-app	test/it	notes_export_ipc::every_note_is_one_markdown_file_with_its_refs_kept_as_text
 knobas-app	test/it	notes_export_ipc::no_notes_writes_an_empty_folder
+knobas-app	test/it	notes_search_ipc::a_hidden_note_is_not_found_and_a_shown_one_is
 knobas-app	test/it	pr_viewed_ipc::a_file_is_viewed_until_it_is_unticked_or_the_head_moves
 knobas-app	test/it	pr_viewed_ipc::each_pull_request_keeps_its_own_ticks
 knobas-app	test/it	pr_viewed_ipc::what_is_not_an_entity_id_is_refused
