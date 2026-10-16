@@ -16,6 +16,14 @@ So a new milestone with new rules needs a milestone description, not an edit her
 
 Before the first iteration of a session, read `CLAUDE.md`, `docs/agents/working-model.md` and `docs/agents/issue-tracker.md`.
 
+**The loop runs unattended: no permission prompts** (Björn, 2026-10-16: "I didn't turn on dangerous mode for fun. I'm not at the computer 24/7"). Bypass mode still prompts for a few things, and one prompt stalls the loop until he is back. Neither you nor any agent you dispatch may:
+
+- chain `cd` into a compound command (`cd X && …`, `cd X; …`). Use absolute paths, `git -C <dir>`, `npm --prefix <dir>`;
+- write, delete or move anything under `~/.claude/` or a `.git/` directory from Bash (`rm`, `mv`, `sed -i`, redirects). Git commands are fine. Change memory files only with the Write and Edit tools;
+- edit shell config files.
+
+A step that seems to need one is skipped and named in the report. The brief masters carry this rule; quote it in every dispatch that gets no brief (splitters, milestone reviewers).
+
 ## What a ticket is
 
 Every open issue labelled `ready-for-agent`, in any milestone or none, except a **spec**: an issue whose title begins `Spec:` or that has sub-issues. A spec is never claimed. The issue body is the brief, and there is no separate Agent Brief comment. Blocking comes from GitHub's native dependencies (`issue_dependencies_summary.blocked_by` counts open blockers), falling back to the body's `## Blocked by` list. Order is by issue number.
