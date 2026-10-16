@@ -40,6 +40,25 @@ export function moreLine(column: MiniBoardColumn, drawn: number): string | null 
 }
 
 /**
+ * A ticket's epic as the card and the preview draw it (#894): the path's key
+ * and the epic's name, `PAY-200 Payout reliability`; the key alone when the
+ * mirror holds no epic of that name, and `null` with no path.
+ */
+export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): string | null {
+  if (card.path === null) return null;
+  return card.parent_title ? `${card.path} ${card.parent_title}` : card.path;
+}
+
+/**
+ * The comment count a card draws (#894): "N comments" above zero only, so a
+ * count of none and a count that never answered both draw nothing.
+ */
+export function commentsLine(count: number | null): string | null {
+  if (count === null || count <= 0) return null;
+  return count === 1 ? "1 comment" : `${count} comments`;
+}
+
+/**
  * The initials in a card's corner: the first letters of an account's first
  * two parts (`mara.lindqvist` is *ML*), or its first two letters, or *–* for
  * nobody.

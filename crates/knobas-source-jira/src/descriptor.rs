@@ -90,6 +90,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// **The estimate** (#816) is `timeoriginalestimate`, which Jira sends in
 /// seconds and `BASE_FIELDS` has asked for since M1: the job card's *est.*.
 ///
+/// **The comment count** (#894) is `fields.comment.total`: `BASE_FIELDS` asks
+/// for `comment` too, and the sync's completion rewrites `total` with the
+/// comments it fetched beyond what `/search` returned, so it is the count the
+/// mirror holds. The ticket card's *N comments*.
+///
 /// **No reviewers and no merged flag**: a Jira issue has neither. A kind that
 /// declares no path for a field is a miss, which is what those readers did
 /// against Jira before this existed.
@@ -131,6 +136,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
         project_name: vec![PayloadPath::of(["fields", "project", "name"])],
         issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
         estimate: vec![PayloadPath::of(["fields", "timeoriginalestimate"])],
+        comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
         labels: vec![ListPath {
             at: PayloadPath::of(["fields", "labels"]),
             entry: PayloadPath::default(),

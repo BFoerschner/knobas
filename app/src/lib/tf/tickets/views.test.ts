@@ -36,6 +36,8 @@ function card(key: string, updated: string): MiniBoardCard {
     assignee: null,
     updated_at: updated,
     path: null,
+    parent_title: null,
+    comment_count: null,
     mine: false,
     labels: [],
     signals: [],

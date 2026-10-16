@@ -284,6 +284,12 @@ pub struct KindPaths {
     /// misread. Empty for every kind with no estimate, and a miss draws none.
     #[serde(default)]
     pub estimate: Vec<PayloadPath>,
+    /// How many comments a ticket has (#894): Jira's `fields.comment.total`.
+    /// A whole JSON number, read as `estimate` is; the ticket card draws
+    /// "N comments" above zero. Empty for every kind with no count, and a
+    /// miss draws nothing.
+    #[serde(default)]
+    pub comment_count: Vec<PayloadPath>,
     /// Which kind of the Builds frame this kind is (ADR-0022, #848): a
     /// [`Frame::Pipeline`] the Builds view lists, or a [`Frame::Run`] of one.
     /// A role, not a path, like [`blocked_statuses`](Self::blocked_statuses).
@@ -441,6 +447,7 @@ pub mod field {
     pub const LABELS: &str = "labels";
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
+    pub const COMMENT_COUNT: &str = "comment_count";
     pub const NAME: &str = "name";
     pub const GROUP: &str = "group";
     pub const GROUP_PATH: &str = "group_path";
@@ -474,6 +481,7 @@ pub mod field {
         LABELS,
         SPRINT_STATE,
         ESTIMATE,
+        COMMENT_COUNT,
         NAME,
         GROUP,
         GROUP_PATH,

@@ -947,6 +947,7 @@ fn ticket_declarations() -> Declarations {
             priority: vec![PayloadPath::of(["fields", "priority", "name"])],
             assignee: vec![PayloadPath::of(["fields", "assignee", "name"])],
             issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+            comment_count: vec![PayloadPath::of(["fields", "comment", "total"])],
             parent: vec![knobas_core::payload::ParentPath {
                 kind: "ticket".to_owned(),
                 at: PayloadPath::of(["epic"]),
@@ -1017,6 +1018,149 @@ async fn a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine() 
     assert_eq!(bare.assignee, None);
     assert_eq!(bare.path, None);
     assert!(!bare.mine, "an unassigned ticket is nobody's");
+}
+
+/// A card carries its comment count and its epic's name (#894): the count at
+/// the declared `comment_count` path, the name the title of the mirrored item
+/// the declared parent names. A record with no count, a count Jira did not
+/// write as a whole number, an epic the mirror does not hold and an item that
+/// does not answer to the name the child gives all carry nothing (ADR-0007).
+#[tokio::test]
+async fn a_tickets_card_carries_its_comment_count_and_its_epics_name() {
+    let pool = scratch().await;
+    let epic = item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-200",
+        serde_json::json!({ "key": "PAY-200", "fields": { "status": { "name": "In Progress" } } }),
+    )
+    .await;
+    sqlx::query("update sync.item set title = 'Payout reliability' where entity_id = $1")
+        .bind(&epic)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // An item at the address the name would give, which does not answer to
+    // that name: its record carries no `key`, so it is not PAY-300 as far as
+    // the declaration says.
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-300",
+        serde_json::json!({ "fields": { "status": { "name": "To Do" } } }),
+    )
+    .await;
+    let child = |epic: &str, comments: serde_json::Value| {
+        serde_json::json!({
+            "fields": { "status": { "name": "To Do" }, "comment": { "total": comments } },
+            "epic": { "key": epic }
+        })
+    };
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-231",
+        child("PAY-200", 3.into()),
+    )
+    .await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-232",
+        child("PAY-999", 0.into()),
+    )
+    .await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-233",
+        child("PAY-300", "2".into()),
+    )
+    .await;
+    item(&pool, SOURCE, "ticket", "PAY-1", jira(Some("To Do"), None)).await;
+    // An epic the source withdrew: tombstoned, so no name.
+    let gone = item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-400",
+        serde_json::json!({ "key": "PAY-400" }),
+    )
+    .await;
+    tombstone(&pool, &gone).await;
+    item(
+        &pool,
+        SOURCE,
+        "ticket",
+        "PAY-234",
+        child("PAY-400", 1.into()),
+    )
+    .await;
+
+    let board = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope::default(),
+        &ticket_declarations(),
+        None,
+    )
+    .await
+    .unwrap();
+    let card = |key: &str| {
+        board
+            .columns
+            .iter()
+            .flat_map(|column| &column.cards)
+            .find(|card| card.key == key)
+            .unwrap()
+            .clone()
+    };
+
+    let named = card("PAY-231");
+    assert_eq!(named.comment_count, Some(3));
+    assert_eq!(named.path.as_deref(), Some("PAY-200"));
+    assert_eq!(named.parent_title.as_deref(), Some("Payout reliability"));
+
+    let unmirrored = card("PAY-232");
+    assert_eq!(
+        unmirrored.comment_count,
+        Some(0),
+        "zero is an answer, not a miss"
+    );
+    assert_eq!(unmirrored.path.as_deref(), Some("PAY-999"));
+    assert_eq!(
+        unmirrored.parent_title, None,
+        "an epic the mirror lacks has no name"
+    );
+
+    let unanswered = card("PAY-233");
+    assert_eq!(
+        unanswered.comment_count, None,
+        "a count written as text is a miss"
+    );
+    assert_eq!(
+        unanswered.parent_title, None,
+        "an item that does not answer to the name is not the epic"
+    );
+
+    assert_eq!(
+        card("PAY-234").parent_title,
+        None,
+        "a withdrawn epic has no name"
+    );
+
+    let bare = card("PAY-1");
+    assert_eq!(bare.comment_count, None);
+    assert_eq!(bare.parent_title, None);
+    assert_eq!(
+        card("PAY-200").parent_title,
+        None,
+        "the epic itself names no parent"
+    );
 }
 
 /// `only` narrows the board to the tickets a search matched (#810), inside
