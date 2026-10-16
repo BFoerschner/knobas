@@ -100,9 +100,15 @@
   let save = $state(false);
   let presetName = $state("My run");
 
-  /** *Start from*: fill the form from the defaults, the run, or a preset. */
+  /**
+   * *Start from*: fill the form from the defaults, the run, or a preset. The
+   * added rows go: a preset brings back its own, its overrides of no
+   * declared parameter, and a preset saved on the default branch (`branch`
+   * none) moves the branch back to it.
+   */
   function pick(choice: string) {
     start = choice;
+    extra = [];
     if (choice === "") {
       values = valuesFrom(fields, []);
       return;
@@ -115,7 +121,10 @@
     const preset = presets.find((p) => `preset:${p.name}` === choice);
     if (preset === undefined) return;
     values = valuesFrom(fields, preset.parameters);
-    if (preset.branch !== null) branch = preset.branch;
+    extra = preset.parameters
+      .filter((p) => !fields.some((field) => field.name === p.name))
+      .map((p) => ({ name: p.name, value: p.value }));
+    branch = preset.branch ?? fallback ?? "";
     clean = preset.clean_checkout;
     first = preset.first_in_queue;
   }

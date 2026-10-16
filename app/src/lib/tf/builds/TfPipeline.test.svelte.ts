@@ -414,6 +414,14 @@ test("Run again… starts from that run's settings; a preset fills the form; Sav
           clean_checkout: false,
           first_in_queue: true,
         },
+        {
+          pipeline_id: PIPELINE.entity_id,
+          name: "Traced",
+          branch: null,
+          parameters: [{ name: "env.TRACE", value: "1" }],
+          clean_checkout: false,
+          first_in_queue: false,
+        },
       ]),
     savePreset: (preset) => {
       saved.push(preset);
@@ -426,7 +434,12 @@ test("Run again… starts from that run's settings; a preset fills the form; Sav
   await settle();
   expect(dialog()!.querySelector("h2")?.textContent).toBe("Run Payout_IntegrationTests again, from #1186");
   const start = field<HTMLSelectElement>("Start from");
-  expect([...start.options].map((o) => o.textContent)).toEqual(["Defaults", "#1186 settings", "Preset: Only staging"]);
+  expect([...start.options].map((o) => o.textContent)).toEqual([
+    "Defaults",
+    "#1186 settings",
+    "Preset: Only staging",
+    "Preset: Traced",
+  ]);
   expect(start.value).toBe("from");
   expect(field<HTMLInputElement>("Branch").value).toBe("main");
   expect(field<HTMLSelectElement>("env").value).toBe("prod-dryrun");
@@ -435,6 +448,15 @@ test("Run again… starts from that run's settings; a preset fills the form; Sav
   choose(start, "preset:Only staging");
   expect(field<HTMLInputElement>("Branch").value).toBe("release/1.9");
   expect(field<HTMLSelectElement>("env").value).toBe("staging");
+
+  // A preset saved on the default branch moves the branch back to it, and an
+  // override of no declared parameter comes back as an added row (#852 review).
+  choose(start, "preset:Traced");
+  expect(field<HTMLInputElement>("Branch").value).toBe("main");
+  expect(dialog()!.querySelector<HTMLInputElement>('[aria-label="Name of added parameter 1"]')?.value).toBe("env.TRACE");
+  expect(summary()).toBe("On main, with env.TRACE=1");
+
+  choose(start, "preset:Only staging");
   choose(start, "");
   expect(summary()).toBe("On release/1.9, defaults");
 
