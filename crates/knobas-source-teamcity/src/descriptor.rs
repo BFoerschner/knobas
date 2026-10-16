@@ -337,8 +337,14 @@ mod tests {
             "branchName": "feature/PAY-231-sepa-retry",
             "startDate": "20260822T100500+0000", "finishDate": "20260822T100917+0000"
         });
-        assert_eq!(resolve_string(&config, &pipeline.name).as_deref(), Some("IntegrationTests"));
-        assert_eq!(resolve_string(&config, &pipeline.group).as_deref(), Some("Payout"));
+        assert_eq!(
+            resolve_string(&config, &pipeline.name).as_deref(),
+            Some("IntegrationTests")
+        );
+        assert_eq!(
+            resolve_string(&config, &pipeline.group).as_deref(),
+            Some("Payout")
+        );
         assert_eq!(
             resolve_string(&config, &pipeline.pipeline),
             resolve_string(&build, &run.pipeline),

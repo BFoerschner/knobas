@@ -1301,7 +1301,8 @@ mod tests {
             serde_json::to_value(Frame::Pipeline).unwrap(),
             serde_json::json!("pipeline")
         );
-        let older: KindPaths = serde_json::from_value(serde_json::json!({ "kind": "build" })).unwrap();
+        let older: KindPaths =
+            serde_json::from_value(serde_json::json!({ "kind": "build" })).unwrap();
         assert_eq!(older.frame, None);
     }
 

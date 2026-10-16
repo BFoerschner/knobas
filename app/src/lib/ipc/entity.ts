@@ -449,6 +449,54 @@ export function getEntity(entityId: string): Promise<EntityDetail> {
 }
 
 /**
+ * One run of a pipeline — `knobas_app::commands::entity::RunRow` (#848). Every
+ * field is read through the run kind's declared paths; `started` and
+ * `finished` are RFC 3339, `null` while queued or in flight.
+ */
+export interface RunRow {
+  entity_id: string;
+  /** In the source's own spelling; a queued run may have none yet. */
+  number: string | null;
+  state: StateChip | null;
+  branch: string | null;
+  started: string | null;
+  finished: string | null;
+  /** Whole seconds, only where both instants were read. */
+  duration_seconds: number | null;
+  /** The source's own timestamp, what runs are ordered by. */
+  updated_at: string | null;
+  web_url: string | null;
+}
+
+/**
+ * One pipeline of the Builds list — `knobas_app::commands::entity::PipelineRow`
+ * (#848). `source_name` is the one place the source's word appears (ADR-0022);
+ * `recent` is the last twelve runs, newest first.
+ */
+export interface PipelineRow {
+  entity_id: string;
+  source_id: string;
+  source_name: string;
+  name: string;
+  group: string | null;
+  web_url: string | null;
+  recent: RunRow[];
+}
+
+/** Every pipeline the configured sources declare, by name (#848). */
+export function pipelines(): Promise<PipelineRow[]> {
+  return invoke<PipelineRow[]>("pipelines");
+}
+
+/**
+ * One pipeline's runs, newest first, at most `limit` (100 when omitted).
+ * Rejects with `invalid` for a non-id and `not_found` for no pipeline.
+ */
+export function pipelineRuns(pipelineId: string, limit?: number): Promise<RunRow[]> {
+  return invoke<RunRow[]>("pipeline_runs", { pipelineId, limit: limit ?? null });
+}
+
+/**
  * What a pasted URL named — `knobas_app::commands::entity::UrlMatch` (#496).
  *
  * `kind` rides along because an entity id names a namespace and a key, not a

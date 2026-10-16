@@ -2005,7 +2005,11 @@ mod tests {
 
     #[tokio::test]
     async fn rejects_a_pipeline_with_no_name_path() {
-        rejects(Behavior::PipelineWithoutName, "a pipeline but no `name` path").await;
+        rejects(
+            Behavior::PipelineWithoutName,
+            "a pipeline but no `name` path",
+        )
+        .await;
     }
 
     #[tokio::test]

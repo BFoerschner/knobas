@@ -30,7 +30,7 @@
 use chrono::{DateTime, TimeZone, Utc};
 use knobas_app::commands::entity::{
     AttentionGroup, EntityDetail, EntityFilter, EntityOrder, EntityPage, EntityRow, GroupTally,
-    KindTally, NoteLinkInput, SourceRef, SuggestionPage, UrlMatch,
+    KindTally, NoteLinkInput, PipelineRow, RunRow, SourceRef, SuggestionPage, UrlMatch,
 };
 use knobas_core::activity::ActivityRow;
 use knobas_core::link::{LinkEnd, LinkEntry, LinkRow, Origin};
@@ -746,6 +746,60 @@ fn the_url_match_shape_matches_its_typescript_mirror() {
     })
     .unwrap();
     assert_shape("UrlMatch", &wire, &["entity_id", "kind"]);
+}
+
+/// The Builds frame's two rows (#848): a run with every nullable field
+/// empty -- a queued run -- inside a pipeline with no group, so a
+/// `skip_serializing_if` on any of them cannot pass.
+#[test]
+fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
+    let queued = RunRow {
+        entity_id: "teamcity:build:7".to_owned(),
+        number: None,
+        state: None,
+        branch: None,
+        started: None,
+        finished: None,
+        duration_seconds: None,
+        updated_at: None,
+        web_url: None,
+    };
+    let run_keys = [
+        "branch",
+        "duration_seconds",
+        "entity_id",
+        "finished",
+        "number",
+        "started",
+        "state",
+        "updated_at",
+        "web_url",
+    ];
+    assert_shape("RunRow", &serde_json::to_value(&queued).unwrap(), &run_keys);
+    let pipeline = PipelineRow {
+        entity_id: "teamcity:buildType:Payout_Lint".to_owned(),
+        source_id: "teamcity".to_owned(),
+        source_name: "TeamCity".to_owned(),
+        name: "Lint".to_owned(),
+        group: None,
+        web_url: None,
+        recent: vec![queued],
+    };
+    let wire = serde_json::to_value(&pipeline).unwrap();
+    assert_shape(
+        "PipelineRow",
+        &wire,
+        &[
+            "entity_id",
+            "group",
+            "name",
+            "recent",
+            "source_id",
+            "source_name",
+            "web_url",
+        ],
+    );
+    assert_shape("RunRow", &wire["recent"][0], &run_keys);
 }
 
 fn note_row() -> knobas_core::note::NoteRow {
