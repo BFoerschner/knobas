@@ -21,3 +21,13 @@ superpowers planning skills. Task tracking is GitHub Issues (milestone M2 onward
 retired superpowers plan docs are in git history. Key documents: spec
 `docs/specs/2026-08-23-knobas-design.md` · frozen-contract record `docs/contract.md` ·
 roadmap `docs/roadmap.md` · agent working model `docs/agents/working-model.md`.
+
+### Unattended: no permission prompts
+
+Björn runs agents unattended in bypass mode (2026-10-16); a permission prompt stalls the work until he is back. Bypass mode still prompts for these, so never do them, and put the rule in every brief you hand an agent:
+
+- `cd` chained into a compound command (`cd X && …`). Use absolute paths, `git -C <dir>`, `npm --prefix <dir>`.
+- Writing, deleting or moving anything under `~/.claude/` or a `.git/` directory from Bash. Git commands are fine; change memory files with the Write and Edit tools.
+- Editing shell config files.
+
+If a step seems to need one, skip it and say so in your report.
