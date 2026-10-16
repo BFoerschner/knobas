@@ -1334,6 +1334,22 @@ pub trait Source: Send + Sync {
         let _ = (entity, before, count);
         Ok(None)
     }
+    /// The chain the run `run` is in (ADR-0022, issue #857, R-9.13): one
+    /// entry per step of its pipeline's [`chain`](pipeline::PipelineSettings::chain),
+    /// in order, each with its run on the run's branch (see
+    /// [`pipeline::RunChainStep::run`]). Empty for a run of a pipeline in no
+    /// chain. `run` is a run's [`EntityRef`] in string form.
+    ///
+    /// `Ok(None)` as for [`pipeline_settings`](Source::pipeline_settings).
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    async fn run_chain(
+        &self,
+        run: &str,
+    ) -> Result<Option<Vec<pipeline::RunChainStep>>, SourceError> {
+        let _ = run;
+        Ok(None)
+    }
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;

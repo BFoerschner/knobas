@@ -581,6 +581,31 @@ export interface PipelineSettings {
   parameter_write_op: string | null;
   /** How each parameter is asked for in Run…, one per parameter in order (#852). */
   parameter_specs: ParameterSpec[];
+  /** The chain the pipeline is a step of, itself included, in running order; empty for none (#857). */
+  chain: ChainStep[];
+}
+
+/** One pipeline of a chain — `knobas_source::pipeline::ChainStep` (#857). */
+export interface ChainStep {
+  /** The pipeline's entity id. */
+  pipeline: string;
+  /** What the source calls it. */
+  name: string;
+}
+
+/**
+ * One step of the chain a run is in — `knobas_app::commands::entity::ChainStepRow`
+ * (#857): its run on the run's branch, or `null` where it has not run there.
+ */
+export interface ChainStepRow {
+  pipeline_id: string;
+  name: string;
+  run: RunRow | null;
+}
+
+/** The chain a run is in, read live, in running order; empty for none (#857). */
+export function runChain(runId: string): Promise<ChainStepRow[]> {
+  return invoke<ChainStepRow[]>("run_chain", { runId });
 }
 
 /** How one parameter is asked for — `knobas_source::pipeline::ParameterSpec` (#852). */

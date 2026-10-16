@@ -3126,9 +3126,280 @@ async fn a_configurations_settings_come_back_without_a_credential() {
             ]
         }
     );
+    assert!(
+        settings.chain.is_empty(),
+        "the seeded configurations wait on nothing: {:?}",
+        settings.chain
+    );
     let wire = serde_json::to_string(&settings).unwrap();
     assert!(
         !wire.contains(&seeded.token),
         "the token is nowhere in the answer"
+    );
+}
+
+/// The chain [`a_chain_names_its_steps_and_each_runs_build_on_the_branch`]
+/// makes under the seeded `Payout`: `Build`, `Docker` waiting on it, `Deploy`
+/// waiting on `Docker`, each building payout-service with one `echo` step.
+/// Deleted again when the guard drops, [`NestedProject`]'s way; deleting the
+/// project deletes its configurations and their builds.
+struct ChainProject {
+    url: String,
+    token: String,
+}
+
+/// The chain's project id; its configurations are `<this>_<step>`.
+const CHAIN: &str = "KnobasChain857";
+
+impl ChainProject {
+    async fn delete(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+        let at = format!("{url}/app/rest/projects/id:{CHAIN}");
+        match http.delete(&at).bearer_auth(token).send().await {
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 404 => Ok(()),
+            Ok(r) => Err(format!("DELETE {at} -> {}", r.status())),
+            Err(e) => Err(format!("DELETE {at}: {e}")),
+        }
+    }
+
+    async fn new(seeded: &Seeded) -> ChainProject {
+        Self::delete(&seeded.http, &seeded.url, &seeded.token)
+            .await
+            .expect("a leftover chain is cleared");
+        let post = async |path: String, body: serde_json::Value| {
+            let r = seeded
+                .http
+                .post(format!("{}/{path}", seeded.url))
+                .bearer_auth(&seeded.token)
+                .header("Accept", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .expect("the server answers");
+            let status = r.status();
+            let text = r.text().await.unwrap_or_default();
+            assert!(status.is_success(), "POST {path} -> {status}: {text}");
+            text
+        };
+        post(
+            "app/rest/projects".into(),
+            serde_json::json!({ "id": CHAIN, "name": CHAIN, "parentProject": { "id": "Payout" } }),
+        )
+        .await;
+        let mut before: Option<String> = None;
+        for step in ["Build", "Docker", "Deploy"] {
+            let id = format!("{CHAIN}_{step}");
+            post(
+                "app/rest/buildTypes".into(),
+                serde_json::json!({ "id": id, "name": step, "project": { "id": CHAIN } }),
+            )
+            .await;
+            post(
+                format!("app/rest/buildTypes/id:{id}/vcs-root-entries"),
+                serde_json::json!({ "vcs-root": { "id": "Payout_PayoutService" } }),
+            )
+            .await;
+            post(
+                format!("app/rest/buildTypes/id:{id}/steps"),
+                serde_json::json!({ "name": "echo", "type": "simpleRunner", "properties": { "property": [
+                    { "name": "script.content", "value": format!("echo {step}") },
+                    { "name": "use.custom.script", "value": "true" } ] } }),
+            )
+            .await;
+            if let Some(dep) = &before {
+                post(
+                    format!("app/rest/buildTypes/id:{id}/snapshot-dependencies"),
+                    serde_json::json!({ "id": dep, "type": "snapshot_dependency",
+                                        "source-buildType": { "id": dep } }),
+                )
+                .await;
+            }
+            before = Some(id);
+        }
+        ChainProject {
+            url: seeded.url.clone(),
+            token: seeded.token.clone(),
+        }
+    }
+
+    /// Queue one build of the chain's `step` on `branch` and wait for it to
+    /// finish, with every build the chain queued for it. Answers its id.
+    async fn run(seeded: &Seeded, step: &str, branch: &str) -> i64 {
+        let r = seeded
+            .http
+            .post(format!("{}/app/rest/buildQueue", seeded.url))
+            .bearer_auth(&seeded.token)
+            .header("Accept", "application/json")
+            .json(&serde_json::json!({
+                "buildType": { "id": format!("{CHAIN}_{step}") }, "branchName": branch,
+                "comment": { "text": "queued by the knobas TeamCity live suite (issue #857)" }
+            }))
+            .send()
+            .await
+            .expect("queue a build");
+        let body: serde_json::Value = r.json().await.unwrap_or_default();
+        let id = id_of(&body);
+        let deadline = std::time::Instant::now() + BUILD_BUDGET;
+        loop {
+            let record = seeded.build(id).await;
+            if record["state"] == "finished" {
+                return id;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "build {id} did not finish within {BUILD_BUDGET:?}: {record}"
+            );
+            tokio::time::sleep(Duration::from_secs(2)).await;
+        }
+    }
+}
+
+impl Drop for ChainProject {
+    fn drop(&mut self) {
+        let (url, token) = (self.url.clone(), self.token.clone());
+        let outcome = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move { ChainProject::delete(&client(), &url, &token).await })
+        })
+        .join()
+        .expect("the cleanup thread");
+        if let Err(e) = outcome {
+            if std::thread::panicking() {
+                eprintln!("live suite cleanup: {e}");
+            } else {
+                panic!("live suite cleanup: {e}");
+            }
+        }
+    }
+}
+
+/// **Build chains** (#857, R-9.13) on the seeded server: each configuration of
+/// a chain of snapshot dependencies names the whole chain in running order,
+/// and a build's chain gives each step its build -- the one it built on, the
+/// one that built on it, else the step's newest on the branch, else none.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_chain_names_its_steps_and_each_runs_build_on_the_branch() {
+    const FEATURE: &str = "feature/PAY-231-sepa-retry";
+    const FIX: &str = "fix/PAY-228-partial-refund-drift";
+    let seeded = seeded();
+    let _chain = ChainProject::new(&seeded).await;
+    let source = seeded.source(serde_json::json!({}));
+    let pipeline = |step: &str| format!("teamcity:buildType:{CHAIN}_{step}");
+    let run = |id: i64| format!("teamcity:build:{id}");
+
+    for step in ["Build", "Docker", "Deploy"] {
+        let settings = source
+            .pipeline_settings(&pipeline(step))
+            .await
+            .expect("the settings read")
+            .expect("TeamCity keeps pipelines");
+        let got: Vec<(String, String)> = settings
+            .chain
+            .iter()
+            .map(|s| (s.pipeline.clone(), s.name.clone()))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                (pipeline("Build"), "Build".to_owned()),
+                (pipeline("Docker"), "Docker".to_owned()),
+                (pipeline("Deploy"), "Deploy".to_owned()),
+            ],
+            "{step} names the whole chain, first step first"
+        );
+    }
+
+    // Deploy on the feature branch runs Build and Docker first.
+    let deploy = ChainProject::run(&seeded, "Deploy", FEATURE).await;
+    let chained = seeded
+        .build_ids(&format!(
+            "snapshotDependency:(to:(id:{deploy}),includeInitial:true),branch:default:any,count:10"
+        ))
+        .await;
+    println!("SEEDED chain builds: {chained:?}");
+    assert_eq!(chained.len(), 3, "Deploy ran Build and Docker: {chained:?}");
+    // A newer Build on the same branch that nothing built on, and one on
+    // another branch.
+    let newer = ChainProject::run(&seeded, "Build", FEATURE).await;
+    let alone = ChainProject::run(&seeded, "Build", FIX).await;
+
+    let steps_of = async |id: i64| -> Vec<(String, Option<String>, Option<String>)> {
+        let steps = source
+            .run_chain(&run(id))
+            .await
+            .expect("the chain read")
+            .expect("TeamCity keeps pipelines");
+        println!("SEEDED chain of build {id}: {steps:#?}");
+        steps
+            .iter()
+            .map(|s| {
+                (
+                    s.step.name.clone(),
+                    s.run.as_ref().map(|r| r.entity.to_string()),
+                    s.run
+                        .as_ref()
+                        .and_then(|r| r.payload["branchName"].as_str().map(str::to_owned)),
+                )
+            })
+            .collect()
+    };
+    let mut of_step = std::collections::HashMap::new();
+    for id in &chained {
+        let (_, record) = seeded
+            .get(&format!("app/rest/builds/id:{id}?fields=buildTypeId"))
+            .await;
+        of_step.insert(
+            record["buildTypeId"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned(),
+            *id,
+        );
+    }
+    let (build, docker) = (
+        of_step[&format!("{CHAIN}_Build")],
+        of_step[&format!("{CHAIN}_Docker")],
+    );
+    let feature = Some(FEATURE.to_owned());
+
+    // Docker's chain: the Build it built on, itself, the Deploy built on it.
+    assert_eq!(
+        steps_of(docker).await,
+        [
+            ("Build".to_owned(), Some(run(build)), feature.clone()),
+            ("Docker".to_owned(), Some(run(docker)), feature.clone()),
+            ("Deploy".to_owned(), Some(run(deploy)), feature.clone()),
+        ]
+    );
+    // The newer Build: itself, then the newest Docker and Deploy on its branch.
+    assert_eq!(
+        steps_of(newer).await,
+        [
+            ("Build".to_owned(), Some(run(newer)), feature.clone()),
+            ("Docker".to_owned(), Some(run(docker)), feature.clone()),
+            ("Deploy".to_owned(), Some(run(deploy)), feature.clone()),
+        ]
+    );
+    // On the fix branch only Build ran.
+    assert_eq!(
+        steps_of(alone).await,
+        [
+            ("Build".to_owned(), Some(run(alone)), Some(FIX.to_owned())),
+            ("Docker".to_owned(), None, None),
+            ("Deploy".to_owned(), None, None),
+        ]
+    );
+    // A seeded build in no chain has none.
+    let lone = seeded.fixture_build(1187).real_id;
+    assert!(
+        source
+            .run_chain(&run(lone))
+            .await
+            .expect("the chain read")
+            .expect("TeamCity keeps pipelines")
+            .is_empty()
     );
 }

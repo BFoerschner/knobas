@@ -429,6 +429,67 @@ impl HttpRest {
 }
 
 impl HttpRest {
+    /// `GET /app/rest/buildTypes?locator=<locator>` with
+    /// [`CHAIN_TYPE_FIELDS`](crate::chain::CHAIN_TYPE_FIELDS): the
+    /// configurations a chain locator names, each with what it depends on
+    /// (#857). Not on [`Rest`], for [`Self::build_config`]'s reason.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn chain_types(
+        &self,
+        locator: &str,
+    ) -> Result<Vec<crate::chain::ChainType>, SourceError> {
+        #[derive(serde::Deserialize)]
+        struct Listing {
+            #[serde(rename = "buildType", default)]
+            build_type: Vec<crate::chain::ChainType>,
+        }
+        let listing: Listing = self
+            .one(
+                "app/rest/buildTypes",
+                &[
+                    ("locator", locator),
+                    ("fields", crate::chain::CHAIN_TYPE_FIELDS),
+                ],
+            )
+            .await?;
+        Ok(listing.build_type)
+    }
+
+    /// `GET /app/rest/builds?locator=<locator>` with [`BUILD_FIELDS`], each
+    /// build kept verbatim for [`crate::map::build_item`] (#857).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to.
+    pub(crate) async fn builds_at(&self, locator: &str) -> Result<Vec<Rec<Build>>, SourceError> {
+        let page = self
+            .list::<Build>(
+                "app/rest/builds",
+                &[("locator", locator), ("fields", BUILD_FIELDS)],
+            )
+            .await?;
+        Ok(page.items)
+    }
+
+    /// One build's configuration and branch, and whether that is the
+    /// default branch (#857).
+    ///
+    /// # Errors
+    ///
+    /// Whatever the request maps to, a 404 for a build that is gone included.
+    pub(crate) async fn build_branch(&self, id: i64) -> Result<Build, SourceError> {
+        self.one(
+            &format!("app/rest/builds/id:{id}"),
+            &[("fields", "id,buildTypeId,branchName,defaultBranch")],
+        )
+        .await
+    }
+}
+
+impl HttpRest {
     /// `GET /app/rest/builds/id:{id}` -- one build for its source view
     /// (#665). Not on [`Rest`], for [`Self::build_config`]'s reason.
     ///

@@ -728,6 +728,8 @@ pub(crate) fn pipeline_settings(
                 )
             })
             .collect(),
+        // The chain is a listing of its own; `TeamCitySource::pipeline_settings` fills it.
+        chain: Vec::new(),
     }
 }
 

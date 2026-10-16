@@ -99,6 +99,33 @@ impl TeamCitySource {
             })
     }
 
+    /// The configurations `config` is joined to by snapshot dependencies,
+    /// itself included, in running order; empty for one in no chain (#857).
+    async fn chain_of(&self, config: &str) -> Result<Vec<crate::chain::ChainType>, SourceError> {
+        let mut types = self
+            .rest
+            .chain_types(&crate::chain::upstream_types(config))
+            .await?;
+        types.extend(
+            self.rest
+                .chain_types(&crate::chain::downstream_types(config))
+                .await?,
+        );
+        Ok(crate::chain::order(types))
+    }
+
+    /// A chain configuration as the SPI's step: its pipeline id and name.
+    fn chain_step(&self, t: crate::chain::ChainType) -> knobas_source::pipeline::ChainStep {
+        knobas_source::pipeline::ChainStep {
+            pipeline: knobas_core::entity::EntityRef::new(
+                &self.id,
+                &crate::map::build_config_key(&t.id),
+            )
+            .to_string(),
+            name: t.name.unwrap_or(t.id),
+        }
+    }
+
     /// The build a re-run names.
     ///
     /// # Errors
@@ -294,7 +321,69 @@ impl Source for TeamCitySource {
         let config = self.build_config_id(entity)?;
         let config = crate::ids::config_id(entity, &config)?;
         let record = self.rest.build_config(config).await?;
-        Ok(Some(crate::view::pipeline_settings(&record)))
+        let mut settings = crate::view::pipeline_settings(&record);
+        settings.chain = self
+            .chain_of(config)
+            .await?
+            .into_iter()
+            .map(|t| self.chain_step(t))
+            .collect();
+        Ok(Some(settings))
+    }
+
+    /// The chain the build is in (#857): its configuration's chain, each step
+    /// with its build out of this build's own chain -- what it built on, what
+    /// built on it -- else the step's newest build on this build's branch.
+    async fn run_chain(
+        &self,
+        run: &str,
+    ) -> Result<Option<Vec<knobas_source::pipeline::RunChainStep>>, SourceError> {
+        let id = self.build_id(run)?;
+        let build = self.rest.build_branch(id).await?;
+        let Some(config) = build.build_type_id.clone() else {
+            return Ok(Some(Vec::new()));
+        };
+        let steps = self.chain_of(&config).await?;
+        if steps.is_empty() {
+            return Ok(Some(Vec::new()));
+        }
+        let mut builds = self
+            .rest
+            .builds_at(&crate::chain::upstream_builds(id))
+            .await?;
+        builds.extend(
+            self.rest
+                .builds_at(&crate::chain::downstream_builds(id))
+                .await?,
+        );
+        let picked = crate::chain::pick(
+            &steps,
+            &builds,
+            |b| b.rec.build_type_id.as_deref(),
+            |b| b.rec.id,
+        );
+        let mut out = Vec::with_capacity(steps.len());
+        for (step, found) in steps.into_iter().zip(picked) {
+            let found = match found {
+                Some(b) => Some(b.clone()),
+                None => self
+                    .rest
+                    .builds_at(&crate::chain::newest_on_branch(
+                        &step.id,
+                        build.branch_name.as_deref(),
+                        build.default_branch == Some(true),
+                    ))
+                    .await?
+                    .into_iter()
+                    .next(),
+            };
+            out.push(knobas_source::pipeline::RunChainStep {
+                step: self.chain_step(step),
+                run: found
+                    .map(|b| crate::map::build_item(&self.id, &self.base_url, &b.raw, &b.rec)),
+            });
+        }
+        Ok(Some(out))
     }
 
     /// A configuration's builds older than `before` (#851): the classes the
