@@ -1281,6 +1281,8 @@ fn write_op_probes() -> Vec<WriteOp> {
                 name: "env.SEPA_RETRIES".to_owned(),
                 value: "9".to_owned(),
             }],
+            clean_checkout: true,
+            first_in_queue: true,
         },
         WriteOp::SubmitReview {
             entity: "gitea:tidewater/payout-service#142".to_owned(),

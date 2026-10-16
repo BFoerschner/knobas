@@ -38,6 +38,7 @@ pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
+pub mod run_presets;
 pub mod settings;
 pub mod sources;
 pub mod standup;
@@ -534,6 +535,10 @@ pub fn run() {
             // is append-only (§10.8).
             commands::entity::checkout_settings,
             commands::entity::set_checkout_applications,
+            // #852's Run… presets, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::run_presets,
+            commands::entity::save_run_preset,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

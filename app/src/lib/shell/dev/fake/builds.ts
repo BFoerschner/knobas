@@ -1,7 +1,8 @@
 /**
- * `?fake-ipc`: Builds (#848, #849, #850, #851): `pipelines`, `pipeline_runs`,
- * `set_pipeline_pinned`, `job_pipelines`, `older_pipeline_runs` and
- * `pipeline_settings`, over
+ * `?fake-ipc`: Builds (#848 to #852): `pipelines`, `pipeline_runs`,
+ * `set_pipeline_pinned`, `job_pipelines`, `older_pipeline_runs`,
+ * `pipeline_settings`, `run_presets` and `save_run_preset`, and a run's
+ * *Parameters* view for `entity_view` (`runView`), over
  * prototype-6's 59 build configurations, so the list can be compared with
  * the prototype at `#/builds`.
  *
@@ -17,7 +18,16 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
-import type { JobPipeline, PipelineReason, PipelineRow, PipelineSettings, RunRow, Setting } from "../../../ipc/entity";
+import type {
+  JobPipeline,
+  ParameterSpec,
+  PipelineReason,
+  PipelineRow,
+  PipelineSettings,
+  RunPreset,
+  RunRow,
+  Setting,
+} from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 
 const SOURCE = "teamcity";
@@ -261,12 +271,91 @@ export function fakeOlderRuns(config: string, before: RunRow, limit: number, sto
   return out;
 }
 
-/** prototype-6's `paramDefs`, as the settings read answers them. */
+/** One of prototype-6's `paramDefs`: a name, its default, its options or hint. */
+type ParamDef = { k: string; def: string; opts?: string[]; hint?: string };
+
+/** prototype-6's `paramDefs`, word for word. */
+function paramDefs(config: string): ParamDef[] {
+  if (config === "Payout_IntegrationTests")
+    return [
+      { k: "env", opts: ["staging", "prod-dryrun"], def: "staging" },
+      { k: "test.filter", def: "", hint: "empty runs every test" },
+      { k: "log.level", opts: ["info", "debug", "trace"], def: "info" },
+    ];
+  if (/Deploy/.test(config))
+    return [
+      { k: "version", def: "1.9.0-rc1" },
+      { k: "env", opts: [/Prod/.test(config) ? "prod" : "staging"], def: /Prod/.test(config) ? "prod" : "staging" },
+      { k: "dry.run", opts: ["false", "true"], def: "false" },
+    ];
+  return [
+    { k: "profile", opts: ["release", "debug"], def: "release" },
+    { k: "env", opts: ["staging", "prod-dryrun"], def: "staging" },
+  ];
+}
+
+/** The settings read's parameters, from {@link paramDefs}. */
 function parameters(config: string): Setting[] {
-  const own = (name: string, value: string): Setting => ({ name, value, inherited: false, secret: false, editable: true, description: null });
-  if (config === "Payout_IntegrationTests") return [own("env", "staging"), own("test.filter", ""), own("log.level", "info")];
-  if (/Deploy/.test(config)) return [own("version", "1.9.0-rc1"), own("env", /Prod/.test(config) ? "prod" : "staging"), own("dry.run", "false")];
-  return [own("profile", "release"), own("env", "staging")];
+  return paramDefs(config).map((p) => ({ name: p.k, value: p.def, inherited: false, secret: false, editable: true, description: null }));
+}
+
+/** The settings read's parsed specs (#852), from {@link paramDefs}. */
+function parameterSpecs(config: string): ParameterSpec[] {
+  return paramDefs(config).map((p) => ({
+    name: p.k,
+    label: null,
+    hint: p.hint ?? null,
+    kind: p.opts ? { type: "select", options: p.opts.map((value) => ({ value, label: null })) } : { type: "text" },
+  }));
+}
+
+/** prototype-6's `S.presets`: one preset, kept for the session as the app keeps them (#852). */
+const presets = new Map<string, RunPreset[]>([
+  [
+    `${SOURCE}:buildType:Payout_IntegrationTests`,
+    [
+      {
+        pipeline_id: `${SOURCE}:buildType:Payout_IntegrationTests`,
+        name: "Only the retry tests",
+        branch: null,
+        parameters: [
+          { name: "test.filter", value: "sepa::retry" },
+          { name: "log.level", value: "debug" },
+        ],
+        clean_checkout: false,
+        first_in_queue: false,
+      },
+    ],
+  ],
+]);
+
+/**
+ * A run's source view, *Parameters* only (#852's *#N settings*): what it ran
+ * with, as prototype-6's run *Parameters* tab says (`env` staging, the rest
+ * their defaults). `undefined` for an id that is not a fixture run.
+ */
+export function runView(id: string, section: string | null) {
+  const match = /^teamcity:build:(.+)-\d+$/.exec(id);
+  if (match === null) return undefined;
+  const config = match[1]!;
+  if (!Object.values(CONFIGURATIONS).some((list) => list.includes(config))) return undefined;
+  const values = paramDefs(config).map((p) => ({
+    name: p.k,
+    value: p.k === "env" && p.opts?.includes("staging") ? "staging" : p.def,
+    inherited: false,
+    secret: false,
+    editable: false,
+    description: null,
+  }));
+  const parametersTab = {
+    id: "parameters",
+    title: "Parameters",
+    count: values.length,
+    deferred: false,
+    blocks: [{ type: "settings", title: null, entity: id, write_op: "", values }],
+  };
+  if (section !== null && section !== "parameters") return { sections: [], actions: [] };
+  return { sections: [parametersTab], actions: [] };
 }
 
 /** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */
@@ -312,6 +401,7 @@ export function fakeSettings(config: string): PipelineSettings {
     ],
     parameters: parameters(config),
     parameter_write_op: "set_parameter",
+    parameter_specs: parameterSpecs(config),
   };
 }
 
@@ -338,6 +428,17 @@ export function handlers(): Record<string, Handler> {
       return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
     },
     pipeline_settings: (args) => fakeSettings(configOf(String(args["pipelineId"] ?? ""))),
+    run_presets: (args) => presets.get(String(args["pipelineId"] ?? "")) ?? [],
+    save_run_preset: (args) => {
+      const preset = args["preset"] as RunPreset;
+      const name = preset.name.trim();
+      const kept = (presets.get(preset.pipeline_id) ?? []).map((p) =>
+        p.name.trim().toLowerCase() === name.toLowerCase() ? { ...preset, name } : p,
+      );
+      if (!kept.some((p) => p.name === name)) kept.push({ ...preset, name });
+      presets.set(preset.pipeline_id, kept);
+      return { ...preset, name };
+    },
     pipelines: () => fakePipelines(),
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");

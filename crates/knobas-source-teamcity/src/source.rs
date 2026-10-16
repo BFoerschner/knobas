@@ -207,10 +207,17 @@ impl Source for TeamCitySource {
                 entity,
                 branch,
                 parameters,
+                clean_checkout,
+                first_in_queue,
             } => {
                 let config = self.build_config_id(entity)?;
                 let config = crate::ids::config_id(entity, &config)?;
-                let queued = write::run(&self.rest, config, branch.as_deref(), parameters).await?;
+                let options = write::RunOptions {
+                    clean_checkout: *clean_checkout,
+                    first_in_queue: *first_in_queue,
+                };
+                let queued =
+                    write::run(&self.rest, config, branch.as_deref(), parameters, options).await?;
                 Ok(WriteReceipt {
                     remote_id: queued.map(|id| id.to_string()),
                 })

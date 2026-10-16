@@ -852,7 +852,10 @@ fn the_job_pipeline_shape_matches_its_typescript_mirror() {
 /// through the repository and the trigger it nests.
 #[test]
 fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
-    use knobas_source::pipeline::{PipelineRepository, PipelineSettings, PipelineTrigger};
+    use knobas_source::pipeline::{
+        ParameterKind, ParameterOption, ParameterSpec, PipelineRepository, PipelineSettings,
+        PipelineTrigger,
+    };
     let settings = PipelineSettings {
         repositories: vec![PipelineRepository {
             name: "payout-service".to_owned(),
@@ -867,18 +870,73 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
         }],
         parameters: vec![],
         parameter_write_op: None,
+        parameter_specs: vec![
+            ParameterSpec {
+                name: "env".to_owned(),
+                label: None,
+                hint: None,
+                kind: ParameterKind::Select {
+                    options: vec![ParameterOption {
+                        value: "staging".to_owned(),
+                        label: None,
+                    }],
+                },
+            },
+            ParameterSpec {
+                name: "clean".to_owned(),
+                label: None,
+                hint: None,
+                kind: ParameterKind::Checkbox {
+                    checked: "true".to_owned(),
+                    unchecked: "false".to_owned(),
+                },
+            },
+            ParameterSpec {
+                name: "filter".to_owned(),
+                label: None,
+                hint: None,
+                kind: ParameterKind::Text,
+            },
+        ],
     };
     let wire = serde_json::to_value(&settings).unwrap();
     assert_shape(
         "PipelineSettings",
         &wire,
         &[
+            "parameter_specs",
             "parameter_write_op",
             "parameters",
             "repositories",
             "triggers",
         ],
     );
+    // #852's parameter specs, each kind on its tag.
+    assert_shape(
+        "ParameterSpec",
+        &wire["parameter_specs"][0],
+        &["hint", "kind", "label", "name"],
+    );
+    assert_shape(
+        "ParameterOption",
+        &wire["parameter_specs"][0]["kind"]["options"][0],
+        &["label", "value"],
+    );
+    assert_eq!(wire["parameter_specs"][0]["kind"]["type"], "select");
+    assert_eq!(wire["parameter_specs"][1]["kind"]["type"], "checkbox");
+    assert_eq!(
+        wire["parameter_specs"][2]["kind"],
+        serde_json::json!({ "type": "text" })
+    );
+    assert!(MIRROR.contains(concat!(
+        r#"| { type: "text" }"#,
+        "
+  ",
+        r#"| { type: "select"; options: ParameterOption[] }"#,
+        "
+  ",
+        r#"| { type: "checkbox"; checked: string; unchecked: string };"#
+    )));
     assert_shape(
         "PipelineRepository",
         &wire["repositories"][0],
@@ -889,6 +947,35 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
         &wire["triggers"][0],
         &["disabled", "facts", "name"],
     );
+}
+
+/// #852's Run… preset, and the two commands by their registered names.
+#[test]
+fn the_run_preset_shape_matches_its_typescript_mirror() {
+    let preset = knobas_app::run_presets::RunPreset {
+        pipeline_id: "teamcity:buildType:Payout_IntegrationTests".to_owned(),
+        name: "Only the retry tests".to_owned(),
+        branch: None,
+        parameters: vec![],
+        clean_checkout: false,
+        first_in_queue: true,
+    };
+    let wire = serde_json::to_value(&preset).unwrap();
+    assert_shape(
+        "RunPreset",
+        &wire,
+        &[
+            "branch",
+            "clean_checkout",
+            "first_in_queue",
+            "name",
+            "parameters",
+            "pipeline_id",
+        ],
+    );
+    for command in ["\"run_presets\"", "\"save_run_preset\""] {
+        assert!(MIRROR.contains(command), "{command} is not invoked");
+    }
 }
 
 fn note_row() -> knobas_core::note::NoteRow {

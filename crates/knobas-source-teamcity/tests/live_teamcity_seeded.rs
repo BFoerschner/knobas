@@ -2009,7 +2009,7 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
         tabs,
         [
             ("overview", None),
-            ("parameters", Some(3)),
+            ("parameters", Some(4)),
             ("steps", Some(1)),
             ("triggers", Some(1)),
             ("vcs_roots", Some(1)),
@@ -2075,6 +2075,7 @@ async fn the_seeded_configurations_view_lists_its_builds_parameters_and_steps() 
     assert_eq!(
         drawn,
         [
+            ("env.LOG_LEVEL", "info", false, false, true),
             ("env.SEPA_RETRIES", "5", false, false, true),
             (settings.secret_parameter.as_str(), "", false, true, true),
             ("tidewater.region", "eu-central-1", true, false, true),
@@ -2683,6 +2684,8 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
                 name: OVERRIDDEN.to_owned(),
                 value: "9".to_owned(),
             }],
+            clean_checkout: false,
+            first_in_queue: false,
         })
         .await
         .unwrap_or_else(|e| panic!("the run is queued: {e:?}"));
@@ -2744,6 +2747,105 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
         seeded.seeded_ids_newest_first(),
         "the server is back in the plain-seed state"
     );
+}
+
+/// The run options (#852, R-9.7) against the real server. TeamCity takes
+/// `triggeringOptions` on the queue and answers none of it back on a read
+/// (measured on the seeded 2026.1.3 server, 2026-10-16: `fields=
+/// triggeringOptions(..)` answers the build without it), so each option is
+/// witnessed by what it does:
+///
+/// * **first in the queue**: two plain builds go on the queue first, so the
+///   one agent is busy and one waits; the adapter's run with `first_in_queue`
+///   then stands ahead of the waiting one in `/app/rest/buildQueue`;
+/// * **clean checkout**: the finished run's log says the checkout was clean.
+///
+/// Every build is deleted again by its [`Queued`] guard.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_options() {
+    use knobas_source::WriteOp;
+
+    const BRANCH: &str = "feature/PAY-231-sepa-retry";
+    let seeded = seeded();
+    // All three guards before anything is queued: each clears leftovers.
+    let mut busy = Queued::new(&seeded).await;
+    let mut waiting = Queued::new(&seeded).await;
+    let mut ours = Queued::new(&seeded).await;
+    let config = seeded.fixture_build(1187).build_type.clone();
+    let entity = format!("teamcity:buildType:{config}");
+    let source = seeded.scoped_to(&[config.as_str()]);
+
+    busy.queue(&seeded, &config, BRANCH).await;
+    let waiting_id = id_of(&waiting.queue(&seeded, &config, BRANCH).await);
+    // An override, so TeamCity's queue optimisation cannot fold the run into
+    // the waiting build as its duplicate (a run equal to a queued one replaces
+    // it: measured, 2026-10-16, with the clean checkout mutated away).
+    let receipt = source
+        .write(WriteOp::RunBuild {
+            entity,
+            branch: Some(BRANCH.to_owned()),
+            parameters: vec![knobas_source::BuildParameter {
+                name: "env.SEPA_RETRIES".to_owned(),
+                value: "852".to_owned(),
+            }],
+            clean_checkout: true,
+            first_in_queue: true,
+        })
+        .await
+        .unwrap_or_else(|e| panic!("the run is queued: {e:?}"));
+    let id: i64 = receipt
+        .remote_id
+        .as_deref()
+        .and_then(|id| id.parse().ok())
+        .unwrap_or_else(|| panic!("the receipt names the queued build: {receipt:?}"));
+    ours.adopt(id);
+
+    let (status, queue) = seeded
+        .get(&format!(
+            "app/rest/buildQueue?locator=buildType:(id:{config})&fields=build(id)"
+        ))
+        .await;
+    println!("SEEDED queue after the run: {status} {queue}");
+    assert_eq!(status, 200, "{queue}");
+    let order: Vec<i64> = queue["build"]
+        .as_array()
+        .map(|rows| rows.iter().map(id_of).collect())
+        .unwrap_or_default();
+    let at = |wanted: i64| order.iter().position(|&queued| queued == wanted);
+    assert!(
+        at(waiting_id).is_some(),
+        "the second plain build waits behind the first: {order:?}"
+    );
+    assert!(
+        at(id) < at(waiting_id),
+        "first in the queue stands ahead of the build that waited: {order:?}"
+    );
+
+    let record = ours.wait_finished(&seeded).await;
+    println!("SEEDED run with options: {record}");
+    let log = seeded
+        .http
+        .get(format!("{}/downloadBuildLog.html?buildId={id}", seeded.url))
+        .bearer_auth(&seeded.token)
+        .send()
+        .await
+        .expect("the log")
+        .text()
+        .await
+        .unwrap_or_default();
+    // The agent's own sentence for `cleanSources` (2026.1.3, 2026-10-16):
+    // "Clean build enabled: removing old files from <checkout dir>".
+    let clean: Vec<&str> = log
+        .lines()
+        .filter(|line| line.contains("Clean build enabled"))
+        .collect();
+    println!("SEEDED log lines naming a clean checkout: {clean:#?}");
+    assert!(
+        !clean.is_empty(),
+        "the agent's log names the clean checkout:\n{log}"
+    );
+    drop((busy, waiting, ours));
 }
 
 /// The nested project [`a_configured_project_takes_in_its_nested_projects_and_writes_their_path`]
@@ -2989,6 +3091,40 @@ async fn a_configurations_settings_come_back_without_a_credential() {
     assert_eq!(
         settings.parameter_write_op.as_deref(),
         Some("set_parameter")
+    );
+    // The seeded select (#852): its spec as the real server keeps it, parsed.
+    assert_eq!(
+        settings
+            .parameter_specs
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>(),
+        settings
+            .parameters
+            .iter()
+            .map(|p| p.name.clone())
+            .collect::<Vec<_>>(),
+        "one spec per parameter, in the same order"
+    );
+    let level = settings
+        .parameter_specs
+        .iter()
+        .find(|p| p.name == "env.LOG_LEVEL")
+        .unwrap_or_else(|| panic!("the seed's select: {:#?}", settings.parameter_specs));
+    assert_eq!(
+        level.kind,
+        knobas_source::pipeline::ParameterKind::Select {
+            options: vec![
+                knobas_source::pipeline::ParameterOption {
+                    value: "info".into(),
+                    label: None,
+                },
+                knobas_source::pipeline::ParameterOption {
+                    value: "debug".into(),
+                    label: Some("Debug".into()),
+                },
+            ]
+        }
     );
     let wire = serde_json::to_string(&settings).unwrap();
     assert!(

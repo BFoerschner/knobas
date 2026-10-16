@@ -455,6 +455,7 @@ ensure_current_build() {  # ensure_current_build <build id> <FAILURE|SUCCESS>
 #   project Payout              tidewater.region = eu-central-1   (inherited)
 #   Payout_IntegrationTests     env.SEPA_RETRIES = 5
 #                               env.SEPA_SANDBOX_KEY = <password, SETTINGS_SECRET>
+#                               env.LOG_LEVEL = info  (a select of info, debug; #852)
 #                               a VCS trigger on +:feature/*, DISABLED
 #
 # The trigger is disabled on purpose: the Gitea live suite pushes branches to
@@ -489,6 +490,7 @@ ensure_configuration_settings() {
   ensure_parameter projects "$(project_of "$SETTINGS_CONFIG")" tidewater.region eu-central-1
   ensure_parameter buildTypes "$SETTINGS_CONFIG" env.SEPA_RETRIES 5
   ensure_parameter buildTypes "$SETTINGS_CONFIG" env.SEPA_SANDBOX_KEY "$SETTINGS_SECRET" "password display='hidden'"
+  ensure_parameter buildTypes "$SETTINGS_CONFIG" env.LOG_LEVEL info "select data_1='info' data_2='debug' label_2='Debug' display='normal'"
   rest GET "/app/rest/buildTypes/id:$SETTINGS_CONFIG/triggers"
   expect "list triggers of $SETTINGS_CONFIG" 200
   if [ "$(printf '%s' "$REST_BODY" | jq '[.trigger[]? | select(.type=="vcsTrigger")] | length')" = "0" ]; then
@@ -499,7 +501,7 @@ ensure_configuration_settings() {
     expect "add a VCS trigger to $SETTINGS_CONFIG" 200
     say "added a disabled VCS trigger to $SETTINGS_CONFIG"
   fi
-  say "parameters of $SETTINGS_CONFIG: tidewater.region (inherited), env.SEPA_RETRIES, env.SEPA_SANDBOX_KEY (password)"
+  say "parameters of $SETTINGS_CONFIG: tidewater.region (inherited), env.SEPA_RETRIES, env.SEPA_SANDBOX_KEY (password), env.LOG_LEVEL (select)"
 }
 
 # The build by its fixture number, if the server has one in any state -- and

@@ -105,3 +105,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   payload. (#851)
 - A geometry that depends on data (a chart's bar, a duration bar) is SVG attributes, since an
   inline style is refused; a tip is the SVG `<title>`. (#851)
+- Knobas-local per-pipeline state with fields and a typed name (Run presets) is a table of its own
+  with a case- and space-blind unique name; a save of an existing name replaces it. (#852)
+- Starting a run goes through the one Run… dialog (`tf/builds/TfRunDialog.svelte`), which hands
+  the page a `RunRequest`; the page queues it and draws it *queued*. The default branch is sent as
+  no branch. (#852)

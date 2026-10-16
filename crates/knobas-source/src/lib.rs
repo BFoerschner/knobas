@@ -739,12 +739,23 @@ pub enum WriteOp {
     /// secret's value is never drawn, so it is here only when the reader
     /// typed one.
     ///
+    /// `clean_checkout` and `first_in_queue` are the source's run options
+    /// (spec #808, issue #852): check the sources out anew rather than
+    /// reuse the agent's working directory, and put the run at the top of
+    /// the source's queue. Both default to `false` and are absent on an
+    /// older payload, which reads as neither; an adapter with no such option
+    /// ignores a `false` and refuses a `true` it cannot honour.
+    ///
     /// Hold detection takes liveness alone, as for a trigger: a run adds a
     /// build beside whatever the configuration holds and overwrites nothing.
     RunBuild {
         entity: String,
         branch: Option<String>,
         parameters: Vec<BuildParameter>,
+        #[serde(default)]
+        clean_checkout: bool,
+        #[serde(default)]
+        first_in_queue: bool,
     },
     /// Identifier `"submit_review"`. Review a pull request: approve it,
     /// request changes, or only comment, with a body and line comments (spec
@@ -1580,6 +1591,8 @@ mod tests {
                     name: "env.SEPA_RETRIES".into(),
                     value: "9".into(),
                 }],
+                clean_checkout: true,
+                first_in_queue: false,
             },
             WriteOp::SubmitReview {
                 entity: "gitea:tidewater/payout-service#142".into(),
@@ -1886,6 +1899,8 @@ mod tests {
                     value: "".into(),
                 },
             ],
+            clean_checkout: true,
+            first_in_queue: false,
         };
         assert_eq!(
             serde_json::to_value(&op).unwrap(),
@@ -1895,7 +1910,9 @@ mod tests {
                 "parameters": [
                     { "name": "env.SEPA_RETRIES", "value": "9" },
                     { "name": "tidewater.region", "value": "" }
-                ]
+                ],
+                "clean_checkout": true,
+                "first_in_queue": false
             } })
         );
         let back: WriteOp = serde_json::from_value(serde_json::json!({ "RunBuild": {
@@ -1905,9 +1922,10 @@ mod tests {
         } }))
         .unwrap();
         assert!(
-            matches!(&back, WriteOp::RunBuild { branch: Some(b), parameters, .. }
-                if b == "main" && parameters.is_empty()),
-            "{back:?}"
+            matches!(&back, WriteOp::RunBuild {
+                branch: Some(b), parameters, clean_checkout: false, first_in_queue: false, ..
+            } if b == "main" && parameters.is_empty()),
+            "a payload from before the run options reads as neither (#852): {back:?}"
         );
     }
 

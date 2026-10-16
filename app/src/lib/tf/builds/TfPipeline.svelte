@@ -16,8 +16,7 @@
     runs asked of the source when the end scrolls into view), *Parameters*
     (each default with *Change…* through the write queue), *Triggers*.
 
-  *Run…* and *Run again…* open the Run… dialog, which is #852's; until it
-  lands they say so. *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
+  *Run…* and *Run again…* open the Run… dialog (#852, `TfRunDialog`). *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
   *queued* at once, never as started (R-9.8).
 -->
 <script lang="ts">
@@ -25,7 +24,7 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
-  import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+  import type { SourceDescriptor, SourceSummary, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { settingPayload } from "../../detail/view/settings";
@@ -35,6 +34,8 @@
   import type { FilterConfig } from "../filter/filter";
   import { duration, runHash, runTone, shortTime } from "./builds";
   import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
+  import type { RunRequest } from "./run-dialog";
+  import TfRunDialog from "./TfRunDialog.svelte";
   import {
     BAR_STEP,
     BAR_WIDTH,
@@ -209,16 +210,24 @@
   const fallback = $derived(defaultBranch(settings));
 
   /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
-  async function runOn(branch: string | null) {
+  function runOn(branch: string | null) {
     const words = branch ?? fallback ?? "the default branch";
+    void queue({ RunBuild: { entity: id, branch, parameters: [] } }, branch ?? fallback, `On ${words}, defaults`);
+  }
+
+  /**
+   * Queue a run and draw it *queued* at the top at once (R-9.8). The toast
+   * names it by the dialog's line, as prototype-6's `startRun` does.
+   */
+  async function queue(payload: WriteOpPayload, branch: string | null, summary: string): Promise<boolean> {
     try {
-      const queued = await ports.submitWrite({ RunBuild: { entity: id, branch, parameters: [] } });
+      const queued = await ports.submitWrite(payload);
       started = [
         {
           entity_id: startedHere(queued.id),
           number: null,
           state: { text: "queued", tone: "info" },
-          branch: branch ?? fallback,
+          branch,
           started: null,
           finished: null,
           duration_seconds: null,
@@ -228,21 +237,32 @@
         ...started,
       ];
       push({
-        text: `Queued: run ${pipeline.name}. On ${words}, defaults. ${stale?.fix ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync."}`,
+        text: `Queued: run ${pipeline.name}. ${summary}. ${stale?.fix ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync."}`,
         action: { label: "Show queue", run: openWriteQueue },
       });
+      return true;
     } catch (cause) {
       push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return false;
     }
   }
 
-  /** *Run…* and *Run again…*: the dialog is #852's. */
+  /** *Run…* and *Run again…*: the Run… dialog (#852), from a run's settings or none. */
+  let dialog = $state<{ from: RunRow | null } | null>(null);
+
   function runDialog(from: RunRow | null) {
-    push({
-      text: from
-        ? `Run ${pipeline.name} again from ${from.number !== null ? `#${from.number}` : "this run"}: the Run… dialog is not built in the new shell yet.`
-        : `Run ${pipeline.name}: the Run… dialog is not built in the new shell yet.`,
-    });
+    dialog = { from };
+  }
+
+  async function onrun(request: RunRequest) {
+    dialog = null;
+    const branch = "RunBuild" in request.payload ? (request.payload.RunBuild.branch ?? fallback) : fallback;
+    if (!(await queue(request.payload, branch, request.summary)) || request.preset === null) return;
+    try {
+      await ports.savePreset(request.preset);
+    } catch (cause) {
+      push({ text: `Could not save the preset: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
   }
 
   function openInSource() {
@@ -567,4 +587,18 @@
       <p class="tf-dim">Read only. Edit triggers in {pipeline.source_name}.</p>
     {/if}
   </div>
+{/if}
+
+{#if dialog !== null}
+  <TfRunDialog
+    {pipeline}
+    {settings}
+    runs={all ?? []}
+    from={dialog.from}
+    {jobBranch}
+    signInFailing={stale?.fix != null}
+    {ports}
+    onclose={() => (dialog = null)}
+    {onrun}
+  />
 {/if}

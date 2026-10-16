@@ -3,8 +3,17 @@
  * test needs no bridge. Each is wrapped rather than referenced, so importing
  * this module calls nothing.
  */
-import { getEntity, listEntities, olderPipelineRuns, pipelineSettings, submitWrite } from "../../ipc/entity";
-import type { PipelineSettings, RunRow } from "../../ipc/entity";
+import {
+  entityView,
+  getEntity,
+  listEntities,
+  olderPipelineRuns,
+  pipelineSettings,
+  runPresets,
+  saveRunPreset,
+  submitWrite,
+} from "../../ipc/entity";
+import type { PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
 import {
   listAdapters,
   listSources,
@@ -17,6 +26,8 @@ import {
 } from "../../ipc/sources";
 import { openExternal } from "../../shell/open-external";
 import { isEntityId, resolveTicket } from "../job/job";
+import { branchOptions } from "../repo/repo";
+import type { StartValue } from "./run-dialog";
 
 export interface PipelinePorts {
   /** Runs older than `before`, asked of the source (`older_pipeline_runs`). */
@@ -32,6 +43,14 @@ export interface PipelinePorts {
   jobBranches: (job: string) => Promise<string[]>;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   openExternal: (url: string) => Promise<void>;
+  /** The pipeline's Run… presets (`run_presets`, #852). */
+  presets: (pipelineId: string) => Promise<RunPreset[]>;
+  /** Save one, replacing the pipeline's preset of that name (`save_run_preset`). */
+  savePreset: (preset: RunPreset) => Promise<RunPreset>;
+  /** The branch names of a mirrored repository, the default first (its view's *Branches*). */
+  repoBranches: (repoId: string) => Promise<string[]>;
+  /** The parameters a run ran with (its view's *Parameters*), for *#N settings*. */
+  runParameters: (runId: string) => Promise<StartValue[]>;
 }
 
 /** How many branches the job's read takes: a job reaches a handful. */
@@ -63,6 +82,22 @@ export async function readJobBranches(job: string): Promise<string[]> {
   return page.rows.map((row) => row.title);
 }
 
+/** A repository's branches, from its source view's *Branches* section (#838's read). */
+export async function readRepoBranches(repoId: string): Promise<string[]> {
+  const view = await entityView(repoId, "branches");
+  const section = view?.sections.find((s) => s.id === "branches") ?? null;
+  return branchOptions(section).map((option) => option.name);
+}
+
+/** What a run ran with, from its source view's *Parameters* section: a hidden value says so. */
+export async function readRunParameters(runId: string): Promise<StartValue[]> {
+  const view = await entityView(runId, "parameters");
+  const section = view?.sections.find((s) => s.id === "parameters");
+  return (section?.blocks ?? []).flatMap((block) =>
+    block.type === "settings" ? block.values.map((v) => ({ name: v.name, value: v.value, secret: v.secret })) : [],
+  );
+}
+
 export const BRIDGE: PipelinePorts = {
   older: (pipelineId, before) => olderPipelineRuns(pipelineId, before),
   settings: (pipelineId) => pipelineSettings(pipelineId),
@@ -72,4 +107,8 @@ export const BRIDGE: PipelinePorts = {
   jobBranches: (job) => readJobBranches(job),
   submitWrite: (payload) => submitWrite(payload),
   openExternal: (url) => openExternal(url),
+  presets: (pipelineId) => runPresets(pipelineId),
+  savePreset: (preset) => saveRunPreset(preset),
+  repoBranches: (repoId) => readRepoBranches(repoId),
+  runParameters: (runId) => readRunParameters(runId),
 };
