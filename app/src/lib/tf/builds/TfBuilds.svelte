@@ -18,8 +18,9 @@
     that run, and a strip of the last twelve runs newest right. A hover
     gives its groups and name. The selected one is drawn inverted and kept
     in view.
-  - **Right**, the selected pipeline's runs as a plain list, newest first.
-    The pipeline page (header, chart, day groups, filter bar) is #851.
+  - **Right**, the selected pipeline's page (#851, `TfPipeline.svelte`):
+    header with *Pin*, history chart, and the Runs, Parameters and Triggers
+    tabs.
 
   `#/builds` selects the first failing pipeline, else the first;
   `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
@@ -66,9 +67,9 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
+  import TfPipeline from "./TfPipeline.svelte";
   import {
     CHIPS,
-    duration,
     foldOpen,
     groupsOf,
     isFailing,
@@ -79,9 +80,7 @@
     pinnedOf,
     reasonsById,
     reasonsLine,
-    runHash,
     runTone,
-    shortTime,
     stripOf,
     treeOf,
     type Fold,
@@ -182,23 +181,6 @@
     if (open !== foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)) remembered.set(f.key, open);
   }
 
-  let runs = $state<RunRow[] | null>(null);
-  let runsFailed = $state<string | null>(null);
-  $effect(() => {
-    const id = selected?.entity_id ?? null;
-    runs = null;
-    runsFailed = null;
-    if (id === null) return;
-    ports.runs(id).then(
-      (rows) => {
-        if (selected?.entity_id === id) runs = rows;
-      },
-      (error: unknown) => {
-        if (selected?.entity_id === id) runsFailed = message(error);
-      },
-    );
-  });
-
   function message(error: unknown): string {
     if (error && typeof error === "object" && "message" in error) return String(error.message);
     return String(error);
@@ -231,17 +213,6 @@
 
   function stateText(run: RunRow): string {
     return run.state?.text ?? "";
-  }
-
-  function chipTone(run: RunRow): string {
-    const tone = run.state?.tone;
-    return tone === "ok" || tone === "err" || tone === "warn" || tone === "info" ? `tf-${tone}` : "";
-  }
-
-  function took(run: RunRow): string {
-    if (run.duration_seconds !== null) return duration(run.duration_seconds);
-    const tone = runTone(run);
-    return tone === "run" ? "running" : tone === "q" ? "waiting" : "";
   }
 </script>
 
@@ -376,38 +347,7 @@
         ...(selected.group !== null ? [{ name: selected.group, href: "#/builds" }] : []),
         { name: selected.name },
       ])}
-      <header class="tf-fhead">
-        <div>
-          <h1>{selected.name}</h1>
-          {#if selected.group !== null}<div class="tf-sub">In {selected.group}.</div>{/if}
-        </div>
-        <div class="tf-acts">
-          <button type="button" class="tf-btn tf-ghost" onclick={() => togglePin(selected!)}>{selected.pinned ? "Unpin" : "Pin"}</button>
-        </div>
-      </header>
-      <div class="tf-runs">
-        {#if runsFailed !== null}
-          <p class="tf-dim">Runs could not be read: {runsFailed}</p>
-        {:else if runs !== null && runs.length === 0}
-          <div class="tf-empty"><p>No runs yet.</p></div>
-        {:else if runs !== null}
-          <table class="tf-tbl" aria-label="Runs">
-            <tbody>
-              {#each runs as run (run.entity_id)}
-                <tr>
-                  <td class="tf-nowrap tf-run-no">
-                    <a href={runHash(selected.entity_id, run.entity_id)}><b>{run.number !== null ? `#${run.number}` : "queued"}</b></a>
-                    {#if stateText(run) !== ""}<span class={`tf-chip ${chipTone(run)}`}>{stateText(run)}</span>{/if}
-                  </td>
-                  <td class="tf-mono tf-run-br">{run.branch ?? ""}</td>
-                  <td class="tf-nowrap tf-num">{took(run)}</td>
-                  <td class="tf-nowrap tf-dim tf-num">{run.started !== null ? shortTime(run.started) : ""}</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        {/if}
-      </div>
+      <TfPipeline pipeline={selected} {rest} {job} runs={ports.runs} onpin={() => togglePin(selected!)} />
     {:else if all !== null && all.length > 0}
       {@render crumbs([{ name: "Builds" }])}
       <div class="tf-empty"><p>No pipeline at this address. Pick one on the left.</p></div>

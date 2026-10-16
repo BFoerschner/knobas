@@ -421,3 +421,311 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
         .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }
+
+// -- the pipeline page's two live reads (#851) -------------------------------
+
+/// A registry whose TeamCity is a fake answering the two pipeline reads, so
+/// what is under test is the app's half: routing, the run kind's declared
+/// paths over the answer, and the repository resolved against the mirror.
+/// The real adapter's half is witnessed on the seeded TeamCity
+/// (`live_teamcity_seeded.rs`).
+struct Answering;
+
+impl knobas_sync::scheduler::AdapterRegistry for Answering {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        knobas_app::sources::Registry::builtin().descriptors()
+    }
+    fn build(
+        &self,
+        instance: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        Ok(Box::new(Answers { id: instance.id }))
+    }
+}
+
+struct Answers {
+    id: String,
+}
+
+#[async_trait::async_trait]
+impl knobas_source::Source for Answers {
+    fn descriptor(&self) -> knobas_source::SourceDescriptor {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        let mut d = knobas_app::sources::Registry::builtin()
+            .descriptors()
+            .into_iter()
+            .find(|d| d.adapter_kind == "teamcity")
+            .expect("TeamCity is compiled in");
+        d.id = self.id.clone();
+        d
+    }
+    async fn test_connection(
+        &self,
+    ) -> Result<knobas_source::ConnectionInfo, knobas_source::SourceError> {
+        Ok(knobas_source::ConnectionInfo::default())
+    }
+    async fn sync(
+        &self,
+        cursor: Option<knobas_source::Cursor>,
+        _sink: &mut (dyn knobas_source::Sink + Send),
+    ) -> Result<knobas_source::Cursor, knobas_source::SourceError> {
+        Ok(cursor.unwrap_or_default())
+    }
+    async fn write(
+        &self,
+        _op: knobas_source::WriteOp,
+    ) -> Result<knobas_source::WriteReceipt, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol("read-only"))
+    }
+    async fn reachable_transitions(
+        &self,
+        _entity: &str,
+    ) -> Result<Vec<String>, knobas_source::SourceError> {
+        Err(knobas_source::SourceError::protocol("no workflow"))
+    }
+    async fn view(
+        &self,
+        _entity: &str,
+        _section: Option<&str>,
+    ) -> Result<Option<knobas_source::view::SourceView>, knobas_source::SourceError> {
+        Ok(None)
+    }
+    async fn pipeline_settings(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, knobas_source::SourceError> {
+        use knobas_source::pipeline::{PipelineRepository, PipelineSettings, PipelineTrigger};
+        if entity.ends_with(":buildType:Down") {
+            return Err(knobas_source::SourceError::Unreachable(
+                "connection refused".to_owned(),
+            ));
+        }
+        let repository = |name: &str, url: Option<&str>| PipelineRepository {
+            name: name.to_owned(),
+            url: url.map(str::to_owned),
+            default_branch: Some("refs/heads/main".to_owned()),
+            entity_id: None,
+        };
+        Ok(Some(PipelineSettings {
+            repositories: vec![
+                repository(
+                    "payout-service",
+                    Some("HTTP://Gitea.Example/tidewater/payout-service.git"),
+                ),
+                repository(
+                    "elsewhere",
+                    Some("http://gitea.example/tidewater/elsewhere.git"),
+                ),
+                repository("no url", None),
+            ],
+            triggers: vec![PipelineTrigger {
+                name: "VCS".to_owned(),
+                facts: vec![],
+                disabled: false,
+            }],
+            parameters: vec![],
+            parameter_write_op: Some("set_parameter".to_owned()),
+        }))
+    }
+    async fn older_runs(
+        &self,
+        entity: &str,
+        before: &str,
+        count: u32,
+    ) -> Result<Option<Vec<knobas_source::SyncItem>>, knobas_source::SourceError> {
+        assert!(
+            entity.ends_with(":buildType:Payout_IntegrationTests"),
+            "{entity}"
+        );
+        assert!(before.ends_with(":build:1100"), "{before}");
+        assert!((1..=knobas_source::pipeline::OLDER_RUNS_MAX).contains(&count));
+        let item = |key: &str, kind: &str, payload: serde_json::Value| knobas_source::SyncItem {
+            entity: knobas_core::entity::EntityRef::parse(&format!("{}:{key}", self.id)).unwrap(),
+            kind: kind.to_owned(),
+            title: key.to_owned(),
+            body_text: String::new(),
+            author: None,
+            updated_at: None,
+            payload,
+            web_url: Some(format!("http://ci.example/{key}")),
+            deleted: false,
+        };
+        Ok(Some(vec![
+            // The run the page holds already: the source may answer it too.
+            item(
+                "build:1100",
+                "build",
+                serde_json::json!({ "id": 1100, "buildTypeId": "Payout_IntegrationTests" }),
+            ),
+            item(
+                "build:1099",
+                "build",
+                serde_json::json!({
+                    "id": 1099, "number": "1099", "buildTypeId": "Payout_IntegrationTests",
+                    "state": "finished", "status": "FAILURE", "branchName": "main",
+                    "startDate": "20260801T100000+0000", "finishDate": "20260801T100400+0000"
+                }),
+            ),
+            // A kind outside the run frame is not a run, whatever it says.
+            item(
+                "buildType:Payout_IntegrationTests",
+                "build_config",
+                serde_json::json!({ "id": "Payout_IntegrationTests", "name": "x" }),
+            ),
+            item(
+                "build:1098",
+                "build",
+                serde_json::json!({
+                    "id": 1098, "number": "1098", "buildTypeId": "Payout_IntegrationTests",
+                    "state": "finished", "status": "SUCCESS", "branchName": "feature/x",
+                    "startDate": "20260801T090000+0000", "finishDate": "20260801T090300+0000"
+                }),
+            ),
+        ]))
+    }
+}
+
+fn no_secrets() -> std::sync::Arc<dyn knobas_secrets::SecretStore> {
+    std::sync::Arc::new(knobas_secrets::MemoryStore::new())
+}
+
+/// **Older history** (R-9.5): the runs the source answers beyond the mirror,
+/// read through the run kind's declarations as a mirrored run is, newest
+/// first, without the run the page already holds and without anything that is
+/// not a run.
+#[tokio::test]
+async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
+    use knobas_app::commands::entity::older_pipeline_runs_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let oldest = build(
+        &pool,
+        &tc,
+        1100,
+        "Payout_IntegrationTests",
+        Some("SUCCESS"),
+        "2026-08-02T10:00:00Z",
+    )
+    .await;
+
+    let older =
+        older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(10))
+            .await
+            .unwrap();
+    let ids: Vec<&str> = older.iter().map(|r| r.entity_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        [format!("{tc}:build:1099"), format!("{tc}:build:1098")]
+    );
+    let failed = &older[0];
+    assert_eq!(failed.number.as_deref(), Some("1099"));
+    assert_eq!(failed.branch.as_deref(), Some("main"));
+    assert_eq!(
+        failed.state.as_ref().map(|s| s.text.as_str()),
+        Some("FAILURE")
+    );
+    assert_eq!(failed.duration_seconds, Some(240));
+    assert_eq!(
+        failed.web_url.as_deref(),
+        Some("http://ci.example/build:1099")
+    );
+
+    let capped =
+        older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(1))
+            .await
+            .unwrap();
+    assert_eq!(capped.len(), 1);
+}
+
+/// A pipeline the mirror does not hold is not found, and a run of another
+/// source is a bad address -- neither reaches a source.
+#[tokio::test]
+async fn older_runs_of_no_pipeline_or_a_foreign_run_are_refused() {
+    use knobas_app::commands::entity::older_pipeline_runs_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let run = build(
+        &pool,
+        &tc,
+        1,
+        "Payout_IntegrationTests",
+        Some("SUCCESS"),
+        "2026-08-22T10:00:00Z",
+    )
+    .await;
+    let code = |r: Result<Vec<_>, knobas_app::IpcError>| r.unwrap_err().code;
+    assert_eq!(
+        code(older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &run, &run, None).await),
+        knobas_app::IpcErrorCode::NotFound
+    );
+    assert_eq!(
+        code(
+            older_pipeline_runs_inner(
+                &pool,
+                &no_secrets(),
+                &Answering,
+                &tests,
+                "other:build:1",
+                None
+            )
+            .await
+        ),
+        knobas_app::IpcErrorCode::Invalid
+    );
+    assert_eq!(
+        code(
+            older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, "no id", &run, None).await
+        ),
+        knobas_app::IpcErrorCode::Invalid
+    );
+}
+
+/// **The settings** (R-9.4): the source's answer as it is, but for the
+/// repository the mirror holds, which gets that repository's id; one the
+/// mirror does not hold, or with no URL, stays a name. A source that cannot be
+/// reached is a rejection, not an empty page.
+#[tokio::test]
+async fn settings_name_the_mirrored_repository_by_its_id() {
+    use knobas_app::commands::entity::pipeline_settings_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let down = configuration(&pool, &tc, "Down", "Down").await;
+    let repo = format!("gitea{}:repo:tidewater/payout-service", &tc[2..]);
+    sqlx::query(
+        "insert into knobas.entity (id, kind, title) values ($1, 'repo', 'payout-service')",
+    )
+    .bind(&repo)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, payload, web_url)
+         values ($1, $2, 'repo', 'payout-service', '{}'::jsonb, $3)",
+    )
+    .bind(&repo)
+    .bind(format!("gitea{}", &tc[2..]))
+    .bind("http://gitea.example/tidewater/payout-service")
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let settings = pipeline_settings_inner(&pool, &no_secrets(), &Answering, &tests)
+        .await
+        .unwrap()
+        .expect("a TeamCity pipeline has settings");
+    let ids: Vec<Option<&str>> = settings
+        .repositories
+        .iter()
+        .map(|r| r.entity_id.as_deref())
+        .collect();
+    assert_eq!(ids, [Some(repo.as_str()), None, None]);
+    assert_eq!(settings.triggers[0].name, "VCS");
+
+    let failed = pipeline_settings_inner(&pool, &no_secrets(), &Answering, &down)
+        .await
+        .unwrap_err();
+    assert_eq!(failed.code, knobas_app::IpcErrorCode::Unreachable);
+}

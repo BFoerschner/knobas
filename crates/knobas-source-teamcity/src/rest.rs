@@ -616,6 +616,10 @@ pub(crate) struct Locator {
     pub build_type_id: Option<String>,
     pub state: Option<StateFilter>,
     pub since_build_id: Option<i64>,
+    /// Send `untilBuild:(id:N)`: builds older than build `N`, which the
+    /// Builds frame's older history asks for beyond the sync's window (#851).
+    /// TeamCity counts `N` itself in, so the reader drops it.
+    pub until_build_id: Option<i64>,
     /// Send `canceled:any`, which puts canceled builds back into a page
     /// TeamCity's default filter would have hidden them from (issue #105).
     ///
@@ -702,6 +706,9 @@ impl Locator {
         }
         if let Some(id) = self.since_build_id {
             parts.push(format!("sinceBuild:(id:{id})"));
+        }
+        if let Some(id) = self.until_build_id {
+            parts.push(format!("untilBuild:(id:{id})"));
         }
         if self.canceled_any {
             parts.push("canceled:any".to_owned());
@@ -1038,6 +1045,7 @@ mod tests {
             build_type_id: Some("Payout_Build".to_owned()),
             state: Some(StateFilter::InFlight),
             since_build_id: Some(9),
+            until_build_id: Some(7),
             canceled_any: true,
             failed_to_start_any: true,
             branch_any: true,
@@ -1045,10 +1053,12 @@ mod tests {
             count: 100,
         }
         .render();
+        assert!(rendered.contains("untilBuild:(id:7)"), "{rendered}");
         for dimension in [
             "buildType:",
             "state:",
             "sinceBuild:",
+            "untilBuild:",
             "canceled:",
             "failedToStart:",
             "branch:",

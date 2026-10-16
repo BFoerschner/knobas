@@ -1550,6 +1550,184 @@ pub async fn pipeline_runs_inner(
         .collect())
 }
 
+/// Whether `$2` is a live pipeline of the declarations `$1`.
+const IS_PIPELINE: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    "
+select exists (
+  select 1 from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'pipeline' and i.entity_id = $2)"
+);
+
+/// `not_found` unless `entity` is a live pipeline of `declarations`.
+async fn live_pipeline(
+    pool: &PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    entity: &EntityRef,
+) -> Result<(), IpcError> {
+    let live: bool = sqlx::query_scalar(IS_PIPELINE)
+        .bind(declarations.as_param())
+        .bind(entity.to_string())
+        .fetch_one(pool)
+        .await?;
+    if live {
+        Ok(())
+    } else {
+        Err(IpcError::not_found(format!(
+            "{entity} is not a pipeline in the mirror"
+        )))
+    }
+}
+
+/// How many older runs one scroll asks for when the caller names no cap.
+const OLDER_RUNS: u32 = 50;
+
+/// One run the source answered, read through its kind's declarations as a
+/// mirrored run is (`run_columns!`): `None` for an item of a kind the
+/// declarations put outside the run frame.
+fn run_of_item(
+    declarations: &knobas_core::payload::Declarations,
+    item: &knobas_source::SyncItem,
+) -> Option<RunRow> {
+    use knobas_core::payload::{Frame, resolve_state, resolve_string};
+    let paths = declarations.get(&item.entity.namespace, &item.kind)?;
+    if paths.frame != Some(Frame::Run) {
+        return None;
+    }
+    let payload = &item.payload;
+    Some(RunRow::from(RawRun {
+        entity_id: item.entity.to_string(),
+        number: resolve_string(payload, &paths.number),
+        state: resolve_state(payload, &paths.state),
+        branch: resolve_string(payload, &paths.branch),
+        started: resolve_string(payload, &paths.started),
+        finished: resolve_string(payload, &paths.finished),
+        updated_at: item.updated_at,
+        web_url: item.web_url.clone(),
+    }))
+}
+
+/// A pipeline's runs older than the run `before`, asked of its source: the
+/// history beyond the window the sync keeps (ADR-0022, #851), newest first, at
+/// most `limit` (50 when `None`, never more than
+/// [`knobas_source::pipeline::OLDER_RUNS_MAX`]). Each run is read through the
+/// run kind's declared paths, as [`pipeline_runs_inner`] reads a mirrored one,
+/// and nothing is stored. An empty answer is the start of the history.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not an
+/// entity id; [`NotFound`](crate::IpcErrorCode::NotFound) when no live
+/// pipeline carries it or its source is not configured; the source's own
+/// failure as [`crate::sources::to_ipc`] maps it.
+pub async fn older_pipeline_runs_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    pipeline_id: &str,
+    before: &str,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    let run = EntityRef::parse(before).map_err(IpcError::invalid)?;
+    if run.namespace != entity.namespace {
+        return Err(IpcError::invalid(format!(
+            "{run} is not a run of {entity}'s source"
+        )));
+    }
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    live_pipeline(pool, &declarations, &entity).await?;
+    let count = limit
+        .unwrap_or(OLDER_RUNS)
+        .clamp(1, knobas_source::pipeline::OLDER_RUNS_MAX);
+    let items = crate::sources::crud::older_runs(
+        pool,
+        secrets,
+        registry,
+        &entity.to_string(),
+        &run.to_string(),
+        count,
+    )
+    .await
+    .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
+    Ok(items
+        .iter()
+        .filter(|item| item.entity != run)
+        .filter_map(|item| run_of_item(&declarations, item))
+        .take(count as usize)
+        .collect())
+}
+
+/// A pipeline's settings, read live from its source (ADR-0022, #851): the
+/// repositories it builds (each with its mirrored repository's id where the
+/// mirror holds one), its triggers and its parameters. `None` for a source
+/// that keeps no pipelines.
+///
+/// # Errors
+///
+/// As [`older_pipeline_runs_inner`].
+pub async fn pipeline_settings_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    pipeline_id: &str,
+) -> Result<Option<knobas_source::pipeline::PipelineSettings>, IpcError> {
+    let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+    live_pipeline(pool, &declarations, &entity).await?;
+    crate::sources::crud::pipeline_settings(pool, secrets, registry, &entity.to_string())
+        .await
+        .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))
+}
+
+/// Older runs of one pipeline, beyond the mirror's window (#851).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and whatever
+/// [`older_pipeline_runs_inner`] refuses with.
+#[tauri::command]
+pub async fn older_pipeline_runs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    pipeline_id: String,
+    before: String,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    older_pipeline_runs_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &pipeline_id,
+        &before,
+        limit,
+    )
+    .await
+}
+
+/// One pipeline's settings, read live (#851).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up, and whatever
+/// [`pipeline_settings_inner`] refuses with.
+#[tauri::command]
+pub async fn pipeline_settings<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    pipeline_id: String,
+) -> Result<Option<knobas_source::pipeline::PipelineSettings>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    pipeline_settings_inner(
+        &state.pool,
+        &state.secrets,
+        state.registry.as_ref(),
+        &pipeline_id,
+    )
+    .await
+}
+
 /// The Builds list (#848).
 ///
 /// # Errors

@@ -2583,3 +2583,60 @@ Implementer, one PR for both.
   takes the roots with it, and step 1 makes everything again. Fires only when a finished build's
   revision is not a commit of the Gitea now up. **Reversing:** low (drop
   `drop_projects_built_from_another_gitea` from `testenv/seed-teamcity-builds.sh`).
+## #851 Pipeline page (2026-10-16)
+
+Implementer, PR for #851.
+
+- **A pipeline's repository, default branch, triggers and parameters come from a live read,
+  `Source::pipeline_settings`, answered as `knobas_source::pipeline::PipelineSettings`**, not as
+  declared paths over the mirror. They are in no mirrored record: they live in the configuration's
+  settings, which carry credentials, and #848's ruling and #947 both name "declare them over the
+  live configuration read". TeamCity answers off the record its source view already reads, through
+  the view's own scrubbing. ADR-0022's wording names declared paths as the mechanism, so the
+  conflict is filed as #962. **Reversing:** medium (a frozen SPI shape and a command).
+- **Older history is `Source::older_runs`, answered as the `SyncItem`s the sync would have
+  made**, read by the app through the run kind's declared paths, so an older run and a mirrored
+  one are one `RunRow`. TeamCity pages with a new locator dimension, `untilBuild:(id:N)`, over the
+  sync's own per-configuration filter. **Reversing:** medium.
+- **Both new `Source` methods have a default body answering `Ok(None)`** ("keeps no
+  pipelines"), unlike `reachable_transitions` and `view`. `None` is an honest answer for every
+  non-CI adapter, and 44 implementations (most of them test fakes) would otherwise each grow two
+  methods that say the same. **Reversing:** low; drop the defaults and add the bodies.
+- **Not drawn: the Runs table's trigger and tests columns, the *Started by me* scope, and commit
+  and person in the filter's words.** A run's started-by and trigger are undeclared (#848's
+  ruling), `RunRow` carries no commit, and the test summary is #855's. The placeholder says
+  *Filter runs by number or branch* until they are. Follow-up #961. **Reversing:** additive.
+- ***Pin* / *Unpin* is the pipeline page's, written through #849's pins**: #849 merged while this
+  was open with the button on its own header; the page takes the list's `togglePin` as `onpin`, so
+  one store keeps the pins and the list's *Pinned* group follows at once. This closes #960.
+  **Reversing:** low.
+- ***Run…* and *Run again…* are drawn and say, in a toast, that the Run… dialog is not built in
+  the new shell yet**: the dialog is #852's. ***Run on <branch>*** queues `RunBuild` with no
+  overrides and draws a *queued* row at once (R-9.8): the job's branch when this pipeline has
+  built one of the job's branches, else the default branch the settings name, else "the default
+  branch". **Reversing:** low.
+- **The source's word for a pipeline is the label its descriptor gives the kind it declares
+  `frame: pipeline` on** (*Build configuration*, lower-cased), and the header line is "<source
+  name> <word> in project <group>, builds <repository>. Triggered by …". **Reversing:** low.
+- **The history chart is SVG, each bar a link to its run with an SVG `<title>` as its tip**, not
+  prototype-6's positioned tooltip: a positioned tip needs an inline style, which the CSP and
+  `house-rules.test.ts` refuse. The duration bars are SVG too, and a running run's bar is a
+  native `<progress>`. **Reversing:** low.
+- **Older runs are asked for when the end of the list scrolls into view** (an
+  `IntersectionObserver`), and an *Older runs* button does the same for a keyboard or a page too
+  short to scroll; an empty answer says "The start of this pipeline's history." **Reversing:** low.
+- ***Change…* edits a default in place** (an input with *Save* and *Cancel*) and queues
+  `set_parameter` against the drawn value, through the existing `settingPayload`; prototype-6's
+  `prompt()` is not available in the webview. The *Kind* column says *text*, *text, inherited* or
+  *password*: the parameter specs (a select's options) are #852's. **Reversing:** low.
+- **The warn line also covers a last sync that failed (unreachable or error)**, without a fix
+  link; a credential failure gets prototype-6's line and *Re-enter password*. **Reversing:** low.
+- **The Runs scope offers *My job's branches* and *All* only when a job is open, and starts on
+  *All*** (prototype-6's default). **Reversing:** low.
+- **#848's test "the source's word appears once" now counts the list only**: the pipeline page's
+  header and *Open in <source>* name the source again, as prototype-6 does. **Reversing:** low.
+- **Merge-manager: a failed sync's warn line does not date the data** ("TeamCity data may be out of
+  date: TeamCity cannot be reached, last tried 1 h ago."). An unreachable or erroring source retries
+  on backoff, so `last_finished_at` is the last try, and "data is 1 min old" would understate the
+  age; no status field holds the last good sync. The credential line keeps prototype-6's "data is
+  N old" over the same instant #848's job page uses. **Reversing:** low (copy in `staleLine`).

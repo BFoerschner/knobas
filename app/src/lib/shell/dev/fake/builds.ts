@@ -1,6 +1,7 @@
 /**
- * `?fake-ipc`: Builds (#848, #849, #850): `pipelines`, `pipeline_runs`,
- * `set_pipeline_pinned` and `job_pipelines`, over
+ * `?fake-ipc`: Builds (#848, #849, #850, #851): `pipelines`, `pipeline_runs`,
+ * `set_pipeline_pinned`, `job_pipelines`, `older_pipeline_runs` and
+ * `pipeline_settings`, over
  * prototype-6's 59 build configurations, so the list can be compared with
  * the prototype at `#/builds`.
  *
@@ -16,7 +17,7 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
-import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../../ipc/entity";
+import type { JobPipeline, PipelineReason, PipelineRow, PipelineSettings, RunRow, Setting } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 
 const SOURCE = "teamcity";
@@ -211,7 +212,7 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
         group: path.split("/").at(-1) ?? path,
         path: path.split("/"),
         pinned: pins.has(`${SOURCE}:buildType:${config}`),
-        web_url: null,
+        web_url: `https://ci.tidewater.example/buildConfiguration/${config}`,
         recent: (runs.get(config) ?? []).slice(0, 12),
       })),
     )
@@ -235,8 +236,108 @@ export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobP
     .filter((row) => row.reasons.length > 0);
 }
 
+/** How far back a configuration's history goes, in runs before its story: the scroll ends. */
+const OLDER_DEPTH = 200;
+
+/**
+ * `older_pipeline_runs` (#851): the runs before `before`, continuing the
+ * history the way it was filled, from a seed of the run it starts from, so
+ * two scrolls agree. A history ends {@link OLDER_DEPTH} runs before the story.
+ */
+export function fakeOlderRuns(config: string, before: RunRow, limit: number, story: number): RunRow[] {
+  const random = seeded(Number(before.number ?? 1) * 31 + config.length);
+  const base = before.duration_seconds ?? 180;
+  const out: RunRow[] = [];
+  let no = Number(before.number ?? 0);
+  let at = new Date(before.started ?? before.updated_at ?? Date.now()).getTime();
+  while (out.length < limit) {
+    no -= 1 + Math.floor(random() * 2);
+    if (no <= story - OLDER_DEPTH) break;
+    at -= (60 + Math.floor(random() * 700)) * 60_000;
+    const st = random() < 0.05 ? "failed" : "success";
+    const branch = /Prod/.test(config) || random() < 0.55 ? "main" : "feature/cleanup-87";
+    out.push(runRow(config, no, st, branch, new Date(at), Math.round(base * (0.8 + random() * 0.45))));
+  }
+  return out;
+}
+
+/** prototype-6's `paramDefs`, as the settings read answers them. */
+function parameters(config: string): Setting[] {
+  const own = (name: string, value: string): Setting => ({ name, value, inherited: false, secret: false, editable: true, description: null });
+  if (config === "Payout_IntegrationTests") return [own("env", "staging"), own("test.filter", ""), own("log.level", "info")];
+  if (/Deploy/.test(config)) return [own("version", "1.9.0-rc1"), own("env", /Prod/.test(config) ? "prod" : "staging"), own("dry.run", "false")];
+  return [own("profile", "release"), own("env", "staging")];
+}
+
+/** prototype-6's `repoOfCfg`: the repository a configuration builds, by the mock's repository ids. */
+function repositoryOf(config: string): string | null {
+  if (/^(Payout_|Dashboard_)/.test(config)) return "payout-service";
+  if (/^PspClient/.test(config)) return "psp-client";
+  if (/^(Ledger|FxRates)/.test(config)) return "ledger-api";
+  return null;
+}
+
+/** `pipeline_settings` (#851): prototype-6's repository, triggers and parameters. */
+export function fakeSettings(config: string): PipelineSettings {
+  const repo = repositoryOf(config);
+  return {
+    repositories:
+      repo === null
+        ? []
+        : [
+            {
+              name: repo,
+              url: `http://gitea.example/tidewater/${repo}.git`,
+              default_branch: "refs/heads/main",
+              entity_id: `mock:tidewater/${repo}`,
+            },
+          ],
+    triggers: [
+      {
+        name: "VCS",
+        facts: [
+          { label: "Branch filter", value: "+:refs/heads/*", tone: null },
+          { label: "Quiet period", value: "60 s", tone: null },
+        ],
+        disabled: false,
+      },
+      {
+        name: "Schedule",
+        facts: [
+          { label: "When", value: "daily at 02:00", tone: null },
+          { label: "Branch filter", value: "+:main", tone: null },
+        ],
+        disabled: false,
+      },
+    ],
+    parameters: parameters(config),
+    parameter_write_op: "set_parameter",
+  };
+}
+
+/** The configuration an id names, or a `not_found` like the command's. */
+function configOf(id: string): string {
+  const config = id.replace(`${SOURCE}:buildType:`, "");
+  if (!id.startsWith(`${SOURCE}:buildType:`) || !Object.values(CONFIGURATIONS).some((list) => list.includes(config))) {
+    throw { code: "not_found", message: `${id} is not a pipeline in the mirror`, source_id: null };
+  }
+  return config;
+}
+
 export function handlers(): Record<string, Handler> {
   return {
+    older_pipeline_runs: (args) => {
+      const config = configOf(String(args["pipelineId"] ?? ""));
+      const before = String(args["before"] ?? "");
+      const limit = typeof args["limit"] === "number" ? args["limit"] : 50;
+      const mirrored = history(new Date()).get(config) ?? [];
+      // The whole history beyond the mirror, continued from its oldest run:
+      // the same chain on every call, so pages join up.
+      const all = [...mirrored, ...fakeOlderRuns(config, mirrored.at(-1)!, OLDER_DEPTH, Number(mirrored[0]?.number ?? 0))];
+      const at = all.findIndex((run) => run.entity_id === before);
+      return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
+    },
+    pipeline_settings: (args) => fakeSettings(configOf(String(args["pipelineId"] ?? ""))),
     pipelines: () => fakePipelines(),
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");

@@ -174,7 +174,17 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     write_ops: [],
-    entity_kinds: KIND_INFO,
+    // The Builds frame (#851): the pipeline page's header names a pipeline in
+    // the word the descriptor gives the kind it declares the frame on.
+    entity_kinds: [
+      ...KIND_INFO,
+      { id: "build", label: "Build", plural: "Builds", monogram: "BD", full_sync_exhaustive: false },
+      { id: "build_config", label: "Build configuration", plural: "Build configurations", monogram: "BC", full_sync_exhaustive: false },
+    ],
+    payload_paths: [
+      { kind: "build", frame: "run" },
+      { kind: "build_config", frame: "pipeline" },
+    ],
     config_schema: TEAMCITY_SCHEMA,
   },
 ];

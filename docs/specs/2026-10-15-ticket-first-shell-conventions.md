@@ -80,3 +80,10 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Knobas-local per-pipeline state the reader sets (pins) is a `knobas.setting` row of entity ids,
   read back on `pipelines`; *This job* on Builds is `job_pipelines` by the ticket's entity id. (#849,
   #850)
+- A pipeline page's tab is the address's next segment: `#/builds/<entity id>/params`,
+  `/triggers`; Runs is the pipeline's own address. (#851)
+- What a frame needs and the mirror does not hold is a live read on `Source` with a default
+  `Ok(None)`, answered in a frame shape the shell draws (`knobas_source::pipeline`), never a
+  payload. (#851)
+- A geometry that depends on data (a chart's bar, a duration bar) is SVG attributes, since an
+  inline style is refused; a tip is the SVG `<title>`. (#851)

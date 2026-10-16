@@ -2875,3 +2875,124 @@ async fn a_configured_project_takes_in_its_nested_projects_and_writes_their_path
     assert_eq!(deep, ["Payout", "KnobasNested849", "Deeper"]);
     assert_eq!(path("buildType:Payout_Build"), ["Payout"]);
 }
+
+/// The pipeline page's older history (#851, R-9.5) on the seeded server:
+/// asked for the runs of the seeded configuration with the most builds older
+/// than its newest seeded build, the adapter answers every other seeded build of that
+/// configuration, newest first, without the one it was asked from, each the
+/// build item the sync makes -- a run of that configuration by the declared
+/// `pipeline` path. Asked from the oldest, it answers nothing: the start of
+/// the history. A count of one answers one.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn older_runs_page_back_through_a_configurations_history() {
+    use knobas_core::payload::resolve_string;
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    // The seeded configuration with the most builds: the change witness's
+    // (its fixture build and the witness's two) on the current seed.
+    let config = seeded
+        .seed
+        .builds
+        .iter()
+        .map(|b| b.build_type.clone())
+        .max_by_key(|c| seeded.seeded_ids_of(c).len())
+        .expect("the seed made builds");
+    let mut ids = seeded.seeded_ids_of(&config);
+    ids.reverse();
+    assert!(
+        ids.len() >= 2,
+        "{config} has at least two seeded builds: {ids:?}"
+    );
+    let source = seeded.source(serde_json::json!({}));
+    let pipeline = format!("teamcity:buildType:{config}");
+    let run = |id: i64| format!("teamcity:build:{id}");
+
+    let older = source
+        .older_runs(&pipeline, &run(ids[0]), 50)
+        .await
+        .expect("the older runs read")
+        .expect("TeamCity keeps pipelines");
+    println!(
+        "SEEDED older than {}: {:?}",
+        ids[0],
+        older
+            .iter()
+            .map(|i| i.entity.key.clone())
+            .collect::<Vec<_>>()
+    );
+    let declared = knobas_source_teamcity::descriptor_template().payload_paths;
+    let run_paths = declared
+        .iter()
+        .find(|p| p.kind == "build")
+        .expect("a build declares its paths");
+    assert_eq!(
+        older
+            .iter()
+            .map(|i| i.entity.key.clone())
+            .collect::<Vec<_>>(),
+        ids[1..]
+            .iter()
+            .map(|id| format!("build:{id}"))
+            .collect::<Vec<_>>(),
+        "every older seeded build, newest first, not the one asked from"
+    );
+    for item in &older {
+        assert_eq!(item.kind, "build");
+        assert_eq!(
+            resolve_string(&item.payload, &run_paths.pipeline).as_deref(),
+            Some(config.as_str())
+        );
+    }
+
+    let one = source
+        .older_runs(&pipeline, &run(ids[0]), 1)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(one.len(), 1);
+    let none = source
+        .older_runs(&pipeline, &run(*ids.last().unwrap()), 50)
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(none.is_empty(), "the start of the history: {none:?}");
+}
+
+/// The pipeline page's settings (#851, R-9.4/R-9.6) on the seeded server:
+/// `Payout_IntegrationTests` answers its repositories, triggers and
+/// parameters, and nothing in the answer carries a credential -- no URL with
+/// a `user@`, no password parameter's value.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_configurations_settings_come_back_without_a_credential() {
+    let seeded = seeded();
+    let config = seeded.fixture_build(1187).build_type.clone();
+    let source = seeded.source(serde_json::json!({}));
+    let settings = source
+        .pipeline_settings(&format!("teamcity:buildType:{config}"))
+        .await
+        .expect("the settings read")
+        .expect("TeamCity keeps pipelines");
+    println!("SEEDED settings of {config}: {settings:#?}");
+    for repository in &settings.repositories {
+        if let Some(url) = &repository.url {
+            let authority = url.split("://").nth(1).unwrap_or(url);
+            let authority = authority.split('/').next().unwrap_or(authority);
+            assert!(!authority.contains('@'), "{url}");
+        }
+    }
+    for parameter in settings.parameters.iter().filter(|p| p.secret) {
+        assert!(parameter.value.is_empty(), "{}", parameter.name);
+    }
+    assert_eq!(
+        settings.parameter_write_op.as_deref(),
+        Some("set_parameter")
+    );
+    let wire = serde_json::to_string(&settings).unwrap();
+    assert!(
+        !wire.contains(&seeded.token),
+        "the token is nowhere in the answer"
+    );
+}

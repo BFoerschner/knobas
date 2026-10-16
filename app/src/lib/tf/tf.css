@@ -1012,6 +1012,43 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-vw-warn { color: var(--warn); }
 .tf-lab { font-size: var(--t-2xs); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
+/* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */
+.tf-bhead { padding-bottom: 8px; }
+.tf-bhead .tf-sub { max-width: 80ch; }
+.tf-bhead .tf-sub a { color: inherit; }
+.tf-bstale { margin: 0 22px 10px; }
+.tf-hist { display: flex; gap: 22px; align-items: flex-end; padding: 4px 22px 14px; flex-wrap: wrap; }
+.tf-chart .tf-bars { display: block; border-bottom: 1px solid var(--rule); overflow: visible; }
+.tf-bar { fill: var(--ok); opacity: .85; }
+.tf-bar.tf-run-err { fill: var(--err); }
+.tf-bar.tf-run-warn { fill: var(--warn); }
+.tf-bar.tf-run-run { fill: var(--info); }
+.tf-bar.tf-run-q, .tf-bar.tf-run-muted { fill: var(--rule); }
+.tf-bars a:hover .tf-bar, .tf-bars a:focus-visible .tf-bar { opacity: 1; stroke: var(--ink); stroke-width: 2px; }
+.tf-bars a:focus-visible { outline: none; }
+.tf-axis { display: flex; justify-content: space-between; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 3px; font-variant-numeric: tabular-nums; }
+.tf-legend { display: flex; gap: 10px; font-size: var(--t-2xs); color: var(--ink-2); margin-top: 4px; }
+.tf-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: -1px; background: var(--ok); }
+.tf-legend i.tf-run-err { background: var(--err); }
+.tf-legend i.tf-run-run { background: var(--info); }
+.tf-facts2 { display: flex; gap: 22px; font-size: var(--t-sm); flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.tf-facts2 b { display: block; font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); }
+.tf-runbar { padding: 8px 22px 0; }
+.tf-dayh { font-size: var(--t-sm); font-weight: 600; color: var(--ink-2); margin: 14px 0 6px; }
+.tf-runs .tf-run-dur { width: 150px; }
+.tf-runs .tf-run-at { width: 110px; }
+.tf-runs .tf-run-acts { width: 150px; text-align: right; }
+.tf-durbar { vertical-align: middle; margin-right: 6px; }
+.tf-durbar rect { fill: var(--ink-2); opacity: .35; }
+.tf-progress { width: 70px; height: 4px; vertical-align: middle; appearance: none; border: 0; border-radius: 2px; background: var(--rule-2); }
+.tf-progress::-webkit-progress-bar { background: var(--rule-2); border-radius: 2px; }
+.tf-chip.tf-jobchip-sm { background: var(--card); color: var(--card-ink); }
+.tf-older { padding: 12px 0; display: flex; gap: 8px; align-items: center; }
+.tf-bsettings { padding-top: 12px; }
+.tf-bsettings > p { font-size: var(--t-sm); margin: 0 0 8px; }
+.tf-bsettings .tf-sub { display: block; color: var(--ink-2); font-size: var(--t-xs); }
+.tf-bsettings input { width: 100%; padding: 3px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--sheet); }
+
 /* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
 .tf-bv { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
 .tf-pl { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }

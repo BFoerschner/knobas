@@ -790,6 +790,88 @@ pub async fn view(
     Ok(Some(view))
 }
 
+/// A pipeline's settings, read live from its own source (ADR-0022, #851),
+/// routed like [`view`].
+///
+/// **One thing is the app's to do to the answer**: a repository the
+/// pipeline builds names where it fetches from, and the adapter cannot see
+/// another source's mirror. Where the mirror holds the repository whose page
+/// that URL is -- the URL made canonical over the configured clone addresses
+/// (#683), its `.git` taken off, and looked up by the paste resolver's own
+/// statement -- the repository gets that entity's id, so the header links it.
+/// Found nothing, it stays a name.
+///
+/// # Errors
+///
+/// As [`view`]. `Ok(None)` is a source that keeps no pipelines.
+pub async fn pipeline_settings(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let Some(mut settings) = source.pipeline_settings(entity_id).await? else {
+        return Ok(None);
+    };
+    if settings.repositories.iter().any(|r| r.url.is_some()) {
+        let addresses = clone_addresses(pool, registry).await?;
+        for repository in &mut settings.repositories {
+            let Some(url) = repository.url.as_deref() else {
+                continue;
+            };
+            let Some(page) = repository_page(&knobas_source::clone_urls::canonical_repo_url(
+                url, &addresses,
+            )) else {
+                continue;
+            };
+            let found: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
+                .bind(&page)
+                .fetch_optional(pool)
+                .await?;
+            repository.entity_id = found
+                .filter(|(_, kind)| kind == "repo")
+                .map(|(entity_id, _)| entity_id);
+        }
+    }
+    Ok(Some(settings))
+}
+
+/// The runs of pipeline `entity_id` older than run `before`, asked of its own
+/// source (ADR-0022, #851), routed like [`view`]. The items are the source's
+/// answer as it is: nothing is stored, and the caller reads them through the
+/// run kind's declarations.
+///
+/// # Errors
+///
+/// As [`view`]. A source that keeps no pipelines answers no runs.
+pub async fn older_runs(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    before: &str,
+    count: u32,
+) -> Result<Vec<knobas_source::SyncItem>, SourcesError> {
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    Ok(source
+        .older_runs(entity_id, before, count)
+        .await?
+        .unwrap_or_default())
+}
+
+/// A repository's web page from a clone URL: its `.git` and trailing slash
+/// taken off, `None` for a remote that is not `http`/`https` ([`commit_page`]'s
+/// rule).
+fn repository_page(repo_url: &str) -> Option<String> {
+    let repo = repo_url.trim().trim_end_matches('/');
+    let repo = repo
+        .strip_suffix(".git")
+        .unwrap_or(repo)
+        .trim_end_matches('/');
+    crate::commands::entity::is_web_url(repo).then(|| repo.to_owned())
+}
+
 /// Every row's commit hint, resolved to the mirrored commit where the mirror
 /// holds its page, and cleared (see [`view`]). One resolver read per hinted
 /// row; a build lists a handful of changes.

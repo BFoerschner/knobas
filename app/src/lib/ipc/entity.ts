@@ -527,6 +527,51 @@ export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
 }
 
 /**
+ * Runs of a pipeline older than the run `before`, asked of the source: the
+ * history beyond the mirror's window (#851), newest first, at most `limit`
+ * (50 when omitted). Empty is the start of the history. Rejects as
+ * {@link pipelineRuns} does, and with the source's own failure.
+ */
+export function olderPipelineRuns(pipelineId: string, before: string, limit?: number): Promise<RunRow[]> {
+  return invoke<RunRow[]>("older_pipeline_runs", { pipelineId, before, limit: limit ?? null });
+}
+
+/** One repository a pipeline builds — `knobas_source::pipeline::PipelineRepository` (#851). */
+export interface PipelineRepository {
+  name: string;
+  /** Where it fetches from, never with a credential. */
+  url: string | null;
+  default_branch: string | null;
+  /** The mirrored repository, where the mirror holds it. */
+  entity_id: string | null;
+}
+
+/** One trigger of a pipeline — `knobas_source::pipeline::PipelineTrigger` (#851). */
+export interface PipelineTrigger {
+  /** Its kind in the source's word (`VCS`, `Schedule`). */
+  name: string;
+  facts: Fact[];
+  disabled: boolean;
+}
+
+/**
+ * A pipeline's settings, read live — `knobas_source::pipeline::PipelineSettings`
+ * (#851). A secret parameter's value is never sent.
+ */
+export interface PipelineSettings {
+  repositories: PipelineRepository[];
+  triggers: PipelineTrigger[];
+  parameters: Setting[];
+  /** The write op a parameter's default changes through, or `null`. */
+  parameter_write_op: string | null;
+}
+
+/** One pipeline's settings, read live; `null` for a source with no pipelines (#851). */
+export function pipelineSettings(pipelineId: string): Promise<PipelineSettings | null> {
+  return invoke<PipelineSettings | null>("pipeline_settings", { pipelineId });
+}
+
+/**
  * What a pasted URL named — `knobas_app::commands::entity::UrlMatch` (#496).
  *
  * `kind` rides along because an entity id names a namespace and a key, not a
