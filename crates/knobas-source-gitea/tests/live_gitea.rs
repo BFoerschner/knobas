@@ -2779,6 +2779,7 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect("Gitea merges a pull request it said it could");
@@ -2919,6 +2920,7 @@ async fn a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten() {
                 entity: format!("gitea:{}#{number}", env.full_name()),
                 style: knobas_source::MergeStyle::Merge,
                 delete_branch: false,
+                message: None,
             })
             .await
             .unwrap_or_else(|e| panic!("round {round}: the merge did not land: {e:?}"));
@@ -3057,6 +3059,7 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect_err("Gitea merged past a required check that never reported");
@@ -3100,6 +3103,7 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: false,
+            message: None,
         })
         .await
         .expect("Gitea merges once the required check passed");
@@ -3273,6 +3277,7 @@ async fn a_pull_request_behind_its_base_is_updated_then_merged_deleting_its_bran
             entity: id.clone(),
             style: knobas_source::MergeStyle::Merge,
             delete_branch: true,
+            message: None,
         })
         .await
         .expect("Gitea merges the updated pull request");

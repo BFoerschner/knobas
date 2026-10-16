@@ -611,11 +611,34 @@ fn merge(pull: &Pull, reviews: &[Review], landing: &Landing) -> ViewAction {
                     FieldKind::Flag,
                 )
             },
+            // A squash's commit message (#843, R-8.19), prefilled as the one
+            // Gitea writes for a squash by default: the title and `(#n)`.
+            // The shell sends it only with *Squash*; the others keep Gitea's.
+            ActionField {
+                value: Some(squash_title(pull)),
+                ..ActionField::new(
+                    "message",
+                    "Squash commit message",
+                    FieldKind::Text {
+                        suggestions: Vec::new(),
+                    },
+                )
+            },
         ],
         confirm: Some(confirm),
         primary: true,
         disabled,
         ..ViewAction::new(crate::WRITE_OP_MERGE_PULL_REQUEST, "Merge…")
+    }
+}
+
+/// The title Gitea gives a squash commit when nobody writes one: the pull
+/// request's title and `(#<number>)`.
+fn squash_title(pull: &Pull) -> String {
+    let title = pull.title.as_deref().unwrap_or_default().trim();
+    match pull.number {
+        Some(n) => format!("{title} (#{n})"),
+        None => title.to_owned(),
     }
 }
 

@@ -537,6 +537,9 @@ impl Pull {
 /// The fields of Gitea's `PullRequest` this view reads.
 #[derive(Debug, serde::Deserialize)]
 struct Pull {
+    /// Its index, which a squash's default message ends on (#843).
+    #[serde(default)]
+    number: Option<u64>,
     /// What *Edit…* prefills (#706).
     #[serde(default)]
     title: Option<String>,

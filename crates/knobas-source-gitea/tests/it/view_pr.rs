@@ -1087,6 +1087,18 @@ fn merge_deleting(disabled: Option<&str>, delete: bool) -> ViewAction {
                     FieldKind::Flag,
                 )
             },
+            // #843: a squash's commit message, prefilled as Gitea's own
+            // default title for one: the title and the number.
+            ActionField {
+                value: Some("SEPA retry with exponential backoff (#142)".into()),
+                ..ActionField::new(
+                    "message",
+                    "Squash commit message",
+                    FieldKind::Text {
+                        suggestions: Vec::new(),
+                    },
+                )
+            },
         ],
         confirm: Some("Merge feature/PAY-231-sepa-retry into main?".into()),
         primary: true,

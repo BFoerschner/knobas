@@ -539,6 +539,10 @@ pub fn run() {
             // append-only (§10.8).
             commands::entity::run_presets,
             commands::entity::save_run_preset,
+            // #842's *Viewed* on a pull request's files, appended at the
+            // foot: the list is append-only (§10.8).
+            commands::entity::pr_viewed_files,
+            commands::entity::set_pr_file_viewed,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

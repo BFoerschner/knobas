@@ -165,9 +165,12 @@ pub(crate) async fn approve(
 /// the SPI's three words as they are. `delete_branch_after_merge` is always
 /// sent, both ways (#708): Gitea 1.27 reads an absent field as the
 /// repository's own default, so leaving it out when the reader unticked the
-/// box could delete the branch anyway. Nothing else is sent: the merge
-/// commit's title and message are Gitea's defaults, which is what its own
-/// *Merge* button does without the reader typing anything.
+/// box could delete the branch anyway. The reader's message (#843), where
+/// there is one, is `MergeTitleField` (its first line) and
+/// `MergeMessageField` (the rest, trimmed; empty for a one-line message);
+/// without one the merge commit's title and message are Gitea's defaults,
+/// which is what its own *Merge* button does without the reader typing
+/// anything.
 ///
 /// Gitea answers **405** for every pull request it will not merge -- a
 /// work-in-progress title, one already merged, an account that may not --
@@ -185,19 +188,32 @@ pub(crate) async fn merge(
     owner: &str,
     repo: &str,
     index: u64,
-    style: MergeStyle,
-    delete_branch: bool,
+    how: &Merge<'_>,
 ) -> Result<(), SourceError> {
     let path = format!(
         "/repos/{}/{}/pulls/{index}/merge",
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    let body = json!({ "Do": style.as_str(), "delete_branch_after_merge": delete_branch });
+    let mut body =
+        json!({ "Do": how.style.as_str(), "delete_branch_after_merge": how.delete_branch });
+    if let Some(message) = how.message {
+        let (title, rest) = message.split_once('\n').unwrap_or((message, ""));
+        body["MergeTitleField"] = json!(title.trim());
+        body["MergeMessageField"] = json!(rest.trim());
+    }
     patiently(MERGE_PATIENCE, || async {
         client.post(&path, &body).await.map(|_| ())
     })
     .await
+}
+
+/// What [`merge`] is asked to do: the style, whether Gitea deletes the head
+/// after, and the reader's commit message (`None` for Gitea's default).
+pub(crate) struct Merge<'a> {
+    pub(crate) style: MergeStyle,
+    pub(crate) delete_branch: bool,
+    pub(crate) message: Option<&'a str>,
 }
 
 /// How long a merge keeps asking while Gitea answers [`still_checking`].

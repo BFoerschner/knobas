@@ -689,6 +689,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
             style: knobas_source::MergeStyle::Squash,
             delete_branch: true,
+            message: Some("Idempotent retry window (#142)".to_owned()),
         },
         knobas_source::WriteOp::UpdatePullRequestBranch {
             entity: "gitea:tidewater/payout-service#142".to_owned(),
