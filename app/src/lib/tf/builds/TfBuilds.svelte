@@ -24,12 +24,13 @@
 
   `#/builds` selects the first failing pipeline, else the first;
   `#/builds/<entity id>` selects that one. `#/build/<pipeline>/<run>` is the
-  run page (#853), not built yet, and says so.
+  run page (#853, `TfRun.svelte`) with its pipeline selected on the left;
+  `#/build/<run>` finds the run's pipeline and moves to that address.
 -->
 <script lang="ts" module>
   import { SvelteMap } from "svelte/reactivity";
 
-  import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
+  import type { JobPipeline, PipelineRow, RunRow, SourceView } from "../../ipc/entity";
 
   /** The reads and the write this page makes, injectable so a test needs no bridge. */
   export interface BuildsPorts {
@@ -39,6 +40,8 @@
     setPinned?: (pipelineId: string, pinned: boolean) => Promise<boolean>;
     /** The job's pipelines and their reasons, by the job's key (#850); the bridge's when omitted. */
     jobPipelines?: (job: string) => Promise<JobPipeline[]>;
+    /** A run's whole view, for the pipeline a bare run address names (#853); the bridge's when omitted. */
+    view?: (runId: string) => Promise<SourceView | null>;
   }
 
   /** The folds the reader opened or closed this session, by key (R-9.3). */
@@ -54,6 +57,7 @@
   import { onMount, tick } from "svelte";
 
   import {
+    entityView,
     getEntity,
     jobPipelines as readJobPipelines,
     pipelineRuns,
@@ -68,6 +72,8 @@
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
   import TfPipeline from "./TfPipeline.svelte";
+  import TfRun from "./TfRun.svelte";
+  import { pipelineOfRun } from "./run";
   import {
     CHIPS,
     foldOpen,
@@ -80,6 +86,7 @@
     pinnedOf,
     reasonsById,
     reasonsLine,
+    runHash,
     runTone,
     stripOf,
     treeOf,
@@ -145,7 +152,32 @@
   const kept = $derived(
     all === null ? [] : keptPipelines(scope === "job" ? onJob : all, filter.text, chips),
   );
-  const selected = $derived(all === null || head !== "builds" ? null : pipelineOf(all, rest, onJob));
+  const selected = $derived(
+    all === null ? null : head === "builds" ? pipelineOf(all, rest, onJob) : (all.find((p) => p.entity_id === rest[0]) ?? null),
+  );
+
+  // `#/build/<run id>` (a job's or the inbox's row) names the run alone: its
+  // pipeline is the one whose recent runs hold it, else the one its view names.
+  /** A bare run address no pipeline was found for. */
+  let lost = $state<string | null>(null);
+  $effect(() => {
+    if (all === null || head !== "build" || rest.length !== 1 || selected !== null) return;
+    const id = rest[0]!;
+    const owner = all.find((p) => p.recent.some((r) => r.entity_id === id));
+    if (owner !== undefined) {
+      location.replace(runHash(owner.entity_id, id));
+      return;
+    }
+    const ids = all.map((p) => p.entity_id);
+    void (ports.view ?? ((runId: string) => entityView(runId)))(id).then(
+      (view) => {
+        const found = pipelineOfRun(view, ids);
+        if (found !== null && rest[0] === id) location.replace(runHash(found, id));
+        else lost = id;
+      },
+      () => (lost = id),
+    );
+  });
   const pinned = $derived(scope === "job" ? [] : pinnedOf(kept));
   const trees = $derived(treeOf(kept));
   /** Whether anything narrows the list, which opens every fold. */
@@ -333,14 +365,13 @@
     </div>
   </nav>
   <section class="tf-bmain">
-    {#if head === "build"}
+    {#if head === "build" && selected !== null && rest.length >= 2}
+      <TfRun pipeline={selected} {rest} {job} runs={ports.runs} {crumbs} />
+    {:else if head === "build"}
       {@render crumbs([{ name: "Builds", href: "#/builds" }, { name: "Run" }])}
-      <div class="tf-empty">
-        <p>The run page is not built in the new shell yet.</p>
-        {#if rest[0] !== undefined}
-          <a class="tf-btn" href={pipelineHash(rest[0])}>Back to the pipeline</a>
-        {/if}
-      </div>
+      {#if all !== null && (rest.length !== 1 || lost === rest[0])}
+        <div class="tf-empty"><p>No run at this address. Pick a pipeline on the left.</p></div>
+      {/if}
     {:else if selected !== null}
       {@render crumbs([
         { name: "Builds", href: "#/builds" },

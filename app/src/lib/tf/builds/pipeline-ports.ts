@@ -13,7 +13,7 @@ import {
   saveRunPreset,
   submitWrite,
 } from "../../ipc/entity";
-import type { PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
+import type { PipelineSettings, RunPreset, RunRow, SourceView } from "../../ipc/entity";
 import {
   listAdapters,
   listSources,
@@ -111,4 +111,15 @@ export const BRIDGE: PipelinePorts = {
   savePreset: (preset) => saveRunPreset(preset),
   repoBranches: (repoId) => readRepoBranches(repoId),
   runParameters: (runId) => readRunParameters(runId),
+};
+
+/** The run page's reads (#853): the pipeline page's, and the run's source view. */
+export interface RunPorts extends PipelinePorts {
+  /** The run's view (`entity_view`): the whole of it, or the one section named. */
+  view: (runId: string, section?: string) => Promise<SourceView | null>;
+}
+
+export const RUN_BRIDGE: RunPorts = {
+  ...BRIDGE,
+  view: (runId, section) => entityView(runId, section ?? null),
 };

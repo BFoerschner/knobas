@@ -1072,6 +1072,26 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-run-save input[type="text"] { width: 160px; padding: 2px 6px; border: 1px solid var(--rule); border-radius: 4px; background: var(--paper); color: var(--ink); }
 .tf-runsum { font-size: var(--t-xs); color: var(--ink-2); margin-right: auto; align-self: center; }
 
+/* ---------- Builds, the run page (#853): prototype-6's .bhead chip, .problem and the Run panel ---------- */
+.tf-bhead h1 .tf-run-chip { font-size: var(--t-sm); vertical-align: 4px; }
+.tf-runbody { padding: 16px 22px 24px; }
+.tf-runbody > .tf-dim { font-size: var(--t-sm); margin: 0 0 10px; }
+.tf-runov { display: flex; flex-direction: column; gap: 14px; max-width: 980px; }
+.tf-problem {
+  border: 1px solid var(--err); background: var(--err-bg); border-radius: 6px; padding: 12px 14px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.tf-problem h3 { font-size: var(--t-md); font-weight: 700; color: var(--err); overflow-wrap: anywhere; }
+.tf-problem pre { margin: 0; font: var(--t-xs)/1.5 var(--mono); color: var(--ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.tf-problem .tf-acts { display: flex; gap: 6px; flex-wrap: wrap; }
+.tf-problem .tf-dim { font-size: var(--t-sm); }
+.tf-runfacts { padding: 0 12px 12px; }
+.tf-runfacts .tf-mono { font-size: var(--t-xs); }
+.tf-runbody .tf-r .tf-mono { font-size: var(--t-xs); }
+.tf-runbody .tf-r .tf-dim { font-size: var(--t-xs); }
+.tf-runagain { margin-top: 10px; }
+@media (max-width: 900px) { .tf-runbody { padding-left: 16px; padding-right: 16px; } }
+
 /* ---------- Builds (#848): the pipeline list beside the selected pipeline's runs ---------- */
 .tf-bv { display: grid; grid-template-columns: 300px minmax(0, 1fr); height: 100%; }
 .tf-pl { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
