@@ -891,6 +891,8 @@ mod tests {
             ended_at: at(14, 0),
             seconds: 150 * 60,
             block_ids: vec![7, 8],
+            // `Some`, so the mirror's type is exercised and not just a `null`.
+            running_since: Some(at(13, 0)),
             candidates: vec![candidate()],
             comment: "- Retry SEPA payouts".to_owned(),
         };
@@ -911,6 +913,7 @@ mod tests {
                 "ended_at",
                 "seconds",
                 "block_ids",
+                "running_since",
                 "candidates",
                 "comment",
             ],

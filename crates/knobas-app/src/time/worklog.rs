@@ -194,8 +194,15 @@ pub struct Draft {
     pub ended_at: DateTime<Utc>,
     /// The time that will be logged -- the blocks' durations added up.
     pub seconds: i64,
-    /// The blocks this draft is made of, oldest first.
+    /// The blocks this draft is made of, oldest first. Closed blocks only: the
+    /// running timer's stretch has no block yet, and is [`Self::running_since`].
     pub block_ids: Vec<i64>,
+    /// When the running timer started, if it runs on this ticket and started
+    /// on this day (#896). The draft then counts its stretch up to the moment
+    /// it was read: `ended_at` is that moment and `seconds` includes it. The
+    /// stretch becomes a block when the clock stops, and `log_work` re-derives
+    /// the blocks it covers then, so a shell logs only after stopping.
+    pub running_since: Option<DateTime<Utc>>,
     /// What knobas saw in the interval, for the reader to tick.
     pub candidates: Vec<Candidate>,
     /// The comment as generated from **every** candidate, which is what the
@@ -328,6 +335,17 @@ const UNLOGGED_BLOCKS: &str = "select id, started_at, ended_at from knobas.block
        and started_at >= $2 and started_at < $3
      order by started_at, id";
 
+/// The running timer's stretch on one entity, if it started inside the
+/// interval -- the block [`super::stop`] would write, ended now (#896).
+///
+/// The same day rule as [`UNLOGGED_BLOCKS`] (a stretch belongs to the day it
+/// started on), and `now()` from the database because that is the clock the
+/// stop's own `now()` reads. `greatest` keeps a timer whose start is ahead of
+/// that clock from counting negative time.
+const OPEN_STRETCH: &str = "select started_at, greatest(now(), started_at) as ended_at
+     from knobas.timer
+     where entity_id = $1 and started_at >= $2 and started_at < $3";
+
 /// Every column of a worklog row that leaves this module.
 macro_rules! worklog_columns {
     () => {
@@ -354,6 +372,7 @@ fn worklog_of(row: &sqlx::postgres::PgRow) -> Result<Worklog, IpcError> {
 ///
 /// `pub(super)` for #283's *Log all*, which concatenates the same spans over a
 /// whole day rather than over one draft.
+#[derive(Clone)]
 pub(super) struct Span {
     pub id: i64,
     pub started_at: DateTime<Utc>,
@@ -709,7 +728,27 @@ pub async fn draft(
         return Ok(None);
     }
     let (from, to) = day_bounds(day, offset_minutes)?;
-    let spans = unlogged(pool, entity_id, from, to).await?;
+    let closed = unlogged(pool, entity_id, from, to).await?;
+    let open = match sqlx::query(OPEN_STRETCH)
+        .bind(entity_id)
+        .bind(from)
+        .bind(to)
+        .fetch_optional(pool)
+        .await?
+    {
+        Some(row) => Some(Span {
+            id: 0,
+            started_at: row.try_get("started_at")?,
+            ended_at: row.try_get("ended_at")?,
+        }),
+        None => None,
+    };
+    let running_since = open.as_ref().map(|s| s.started_at);
+    // The open stretch is concatenated like any block, in start order: the
+    // sum then counts it and the window ends at now.
+    let mut spans = closed.clone();
+    spans.extend(open);
+    spans.sort_by_key(|s| s.started_at);
     let Some((started_at, ended_at, seconds)) = concatenate(&spans) else {
         return Ok(None);
     };
@@ -724,7 +763,8 @@ pub async fn draft(
         started_at,
         ended_at,
         seconds,
-        block_ids: spans.iter().map(|s| s.id).collect(),
+        block_ids: closed.iter().map(|s| s.id).collect(),
+        running_since,
         comment: comment_of(&candidates),
         candidates,
     }))
