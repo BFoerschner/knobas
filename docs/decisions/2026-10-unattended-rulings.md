@@ -2387,3 +2387,28 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   shapes knobas does write: a backup's layers replace the seed with no seed row left over, and an
   archive without them leaves the seed alone. **Reversing:** low; clear the pair together, or
   refuse a half pair, if a share part ever carries the layers.
+## #814 View editor (2026-10-16)
+
+- **A token that is no condition stays in the words, as typed.** Every key of #811 plus `under:`
+  (Epic) and `updated:` is a condition; `is:mine`, `/jira`, `kind:`, a quoted phrase go into *Words in
+  the key or summary* verbatim and are written back after the conditions, so the editor never drops
+  what a reader typed. **Reversing:** low (a separate "other tokens" line).
+- **A text whose conditions and words the reader left alone is saved as typed**, not rewritten in
+  the editor's order. Changed, the text is written conditions first, one token per value, then the
+  words. **Reversing:** low.
+- **One column per status, in the board's order and with no limit, is stored as no columns of its
+  own** (`[]`), so a status that turns up later gets its column, as a new view does (R-3.4).
+  Anything else is stored as edited; a blank or zero *At most* is none. **Reversing:** low.
+- **The Signal field shows when the suggestions offer `has:` values** (#815 landed, so it shows
+  today); a view already naming `has:` keeps it either way. **Reversing:** low.
+- **The values a condition offers are the suggestions' (`filter_suggestions` fields, the parents
+  for Epic)**; `sprint:`, `updated:` and `assigned:` offer prototype-6's fixed choices. A value the
+  text names that nothing offers is drawn pressed beside them. **Reversing:** low.
+- **The preview reads `mini_board` with the text the view would store, 150 ms after a change**,
+  nine cards a column (every ticket when laned, to count the lanes), and draws four stubs a column
+  and nine list rows, as prototype-6 does. The statuses a column can hold are the unfiltered
+  board's. **Reversing:** low.
+- **Saving an edit resets the session's *Board / List*, *Lanes* and sort switches for that view**
+  (prototype-6's `vwSave`), so it opens as saved. **Reversing:** low.
+- **Jira views (`jira_ref`, #877) open in the same editor**; prototype-6's *Settings for …* variant
+  is #877's to draw. **Reversing:** a branch in `ViewEditor`.

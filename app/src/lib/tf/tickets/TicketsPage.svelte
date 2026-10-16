@@ -33,9 +33,9 @@
   **Ticket views** (#812): `#/tickets/<id>` opens one. Its stored text is the
   filter bar's base query, sent to `mini_board` as it is; a text the grammar
   cannot read opens as text with a line naming the part, and no tickets.
-  *Save as a view* at the end of the filter bar saves the text the bar sends
-  now, with how the tickets show; the ⋯ menus offer *Duplicate* and
-  *Delete*, which a toast's *Undo* takes back.
+  *+ New view*, *Edit view*, *Save as a view* (the text the bar sends now,
+  with how the tickets show) and *Duplicate* open the view editor (#814);
+  *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
   import type {
@@ -110,8 +110,7 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
   import { jobHash } from "../route";
-  import SaveViewDialog from "./SaveViewDialog.svelte";
-  import TicketCard from "./TicketCard.svelte";
+    import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
   import {
@@ -129,12 +128,15 @@
     type Lane,
     type SortColumn,
   } from "./tickets";
+  import ViewEditor from "./ViewEditor.svelte";
   import ViewMenu from "./ViewMenu.svelte";
   import {
     columnLimit,
     DEFAULT_LIST_COLUMNS,
     draftCopy,
+    draftEdit,
     draftFromFilter,
+    draftNew,
     draftRestore,
     groupViews,
     LIST_COLUMN_ORDER,
@@ -184,8 +186,23 @@
   let views = $state<TicketViewRow[] | null>(null);
   /** *Find a view*'s words. */
   let find = $state("");
-  /** The *New view* dialog's starting point, or `null` while it is closed. */
-  let drafting = $state<TicketViewDraft | null>(null);
+  /** The view editor's starting point and the view it edits, or `null` while it is closed. */
+  let drafting = $state<{ draft: TicketViewDraft; editing: TicketViewRow | null } | null>(null);
+
+  function newView(draft: TicketViewDraft) {
+    drafting = { draft, editing: null };
+  }
+
+  function editView(row: TicketViewRow) {
+    drafting = { draft: draftEdit(row), editing: row };
+  }
+
+  /** *Delete view* in the editor: closes it, then deletes as the ⋯ menu does. */
+  function deleteFromEditor() {
+    const gone = drafting?.editing ?? null;
+    drafting = null;
+    if (gone !== null) void remove(gone);
+  }
 
   /**
    * The view on screen: `null` for *All tickets*, `undefined` while the views
@@ -364,15 +381,20 @@
   // ---- the views' writes ----
   /** *Save as a view* (R-3.12): the text the bar sends now, and how the tickets show. */
   function saveAsView() {
-    drafting = draftFromFilter(view ?? null, toQuery(config, filter), showing);
+    newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
   }
 
-  async function create(draft: TicketViewDraft) {
+  async function save(draft: TicketViewDraft) {
+    const editing = drafting?.editing ?? null;
     const made = await ports.saveView(draft);
     drafting = null;
-    push({ text: `Created ${made.name}` });
+    push({ text: editing === null ? `Created ${made.name}` : `Saved ${made.name}` });
     loadViews();
-    location.hash = `#/tickets/${made.id}`;
+    if (editing === null || viewId === made.id) {
+      // A saved view opens as saved: the session's switches over it go.
+      if (editing !== null) delete session.views[made.id];
+      location.hash = `#/tickets/${made.id}`;
+    }
   }
 
   async function remove(gone: TicketViewRow) {
@@ -568,6 +590,9 @@
   <nav class="tf-views" aria-label="Ticket views">
     <div class="tf-vfind"><input type="search" bind:value={find} placeholder="Find a view" aria-label="Find a view" /></div>
     <div class="tf-vlist">
+      <div class="tf-vw-acts">
+        <button type="button" class="tf-btn tf-sm" onclick={() => newView(draftNew())}>+ New view</button>
+      </div>
       {#if find.trim() === ""}
         <a href="#/tickets" aria-current={viewId === null ? "true" : undefined}
           >All tickets {#if viewId === null && total !== null}<span class="tf-count">{total}</span>{/if}</a
@@ -581,7 +606,12 @@
               ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
               >{#if row.count !== null && row.count > 0}{" "}<span class="tf-count">{row.count}</span>{/if}</a
             >
-            <ViewMenu name={row.name} onduplicate={() => (drafting = draftCopy(row))} ondelete={() => remove(row)} />
+            <ViewMenu
+              name={row.name}
+              onedit={() => editView(row)}
+              onduplicate={() => newView(draftCopy(row))}
+              ondelete={() => remove(row)}
+            />
           </div>
         {/each}
       {/each}
@@ -612,10 +642,12 @@
         </div>
       {/if}
       {#if view}
+        <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}>Edit view</button>
         <ViewMenu
           name="this view"
           className="tf-btn tf-sm tf-ghost"
-          onduplicate={() => (drafting = draftCopy(view))}
+          onedit={() => editView(view)}
+          onduplicate={() => newView(draftCopy(view))}
           ondelete={() => remove(view)}
         />
       {/if}
@@ -772,7 +804,19 @@
   </section>
 
   {#if drafting !== null}
-    <SaveViewDialog draft={drafting} groups={groupNames} onsave={create} onclose={() => (drafting = null)} />
+    {@const editing = drafting.editing}
+    <ViewEditor
+      draft={drafting.draft}
+      editing={editing !== null}
+      unreadable={editing?.unreadable ?? null}
+      groups={groupNames}
+      fields={suggested?.fields ?? []}
+      parents={suggested?.parents ?? []}
+      board={ports.board}
+      onsave={save}
+      ondelete={editing === null ? undefined : deleteFromEditor}
+      onclose={() => (drafting = null)}
+    />
   {/if}
 
   {#if current !== null && base !== null}

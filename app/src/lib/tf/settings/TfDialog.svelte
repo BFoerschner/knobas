@@ -18,12 +18,15 @@
     layers = sharedLayers,
     body,
     footer,
+    className = "",
   }: {
     title: string;
     onclose: () => void;
     layers?: Layers;
     body: Snippet;
     footer: Snippet;
+    /** A class beside `tf-dialog`, for a dialog of its own size (the view editor's). */
+    className?: string;
   } = $props();
 
   const uid = $props.id();
@@ -75,7 +78,7 @@
     if (event.target === event.currentTarget) onclose();
   }}
 >
-  <div class="tf-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
+  <div class="tf-dialog {className}" role="dialog" aria-modal="true" aria-labelledby={titleId} tabindex="-1" bind:this={dialog} {onkeydown}>
     <header><h2 id={titleId}>{title}</h2></header>
     <div class="tf-body">{@render body()}</div>
     <footer>{@render footer()}</footer>

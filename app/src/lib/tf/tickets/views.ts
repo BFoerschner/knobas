@@ -109,6 +109,16 @@ export function draftCopy(view: TicketView): TicketViewDraft {
   return { ...draftOf(view), name: `Copy of ${view.name}` };
 }
 
+/** What *+ New view* starts from (R-3.12): no conditions, one column per status, the defaults. */
+export function draftNew(): TicketViewDraft {
+  return draftOf(null);
+}
+
+/** What *Edit view* starts from: the view as saved, under its id and in its place. */
+export function draftEdit(view: TicketView): TicketViewDraft {
+  return draftRestore(view);
+}
+
 /** What *Undo* on a delete saves: the view back, under its id and in its place. */
 export function draftRestore(view: TicketView): TicketViewDraft {
   return { ...draftOf(view), id: view.id, position: view.position, jira_ref: view.jira_ref };

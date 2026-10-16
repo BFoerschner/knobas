@@ -1,7 +1,6 @@
 <!--
   A ticket view's ⋯ menu (#812, R-3.12), on its row in the views pane and in
-  its header: *Duplicate* and *Delete*. *Edit view* joins it with the editor
-  (#814).
+  its header: *Edit view* (#814), *Duplicate* and *Delete*.
 
   Opens under its button; `Esc`, a pick or a click anywhere else closes it,
   and focus goes back to the button.
@@ -12,12 +11,14 @@
   let {
     name,
     className = "tf-vw-more",
+    onedit,
     onduplicate,
     ondelete,
   }: {
     /** The view's name, for the button's accessible name. */
     name: string;
     className?: string;
+    onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
   } = $props();
@@ -74,6 +75,7 @@
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
+      <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>
       <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
       <hr />
       <button type="button" role="menuitem" onclick={() => pick(ondelete)}><b>Delete</b></button>
