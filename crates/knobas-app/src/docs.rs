@@ -1371,12 +1371,12 @@ pub async fn create_page(
     if title.is_empty() {
         return Err(IpcError::invalid("A new page needs a title."));
     }
-    let row = sqlx::query(concat!(
+    let row = sqlx::query(
         "select i.kind, i.source_id, s.kind as adapter_kind, p.key from sync.live_item i \
            join knobas.source_config s on s.id = i.source_id \
            left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind \
-          where i.entity_id = $1"
-    ))
+          where i.entity_id = $1",
+    )
     .bind(&new.parent)
     .fetch_optional(pool)
     .await?

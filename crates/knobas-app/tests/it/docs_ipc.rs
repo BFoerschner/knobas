@@ -584,7 +584,7 @@ async fn the_space_the_grammar_and_the_empty_query() {
         ids(docs_search_inner(&pool, &w, Some(&scope(&src, "ENG")))
             .await
             .unwrap()),
-        [eng.clone()]
+        [eng.as_str()]
     );
     assert_eq!(
         ids(
@@ -592,20 +592,20 @@ async fn the_space_the_grammar_and_the_empty_query() {
                 .await
                 .unwrap()
         ),
-        [ops.clone()],
+        [ops.as_str()],
         "the typed space wins over the picker"
     );
     assert_eq!(
         ids(docs_search_inner(&pool, &format!("{w} project:ops"), None)
             .await
             .unwrap()),
-        [ops.clone()]
+        [ops.as_str()]
     );
     assert_eq!(
         ids(docs_search_inner(&pool, &format!("{w} -cron"), None)
             .await
             .unwrap()),
-        [eng.clone()]
+        [eng.as_str()]
     );
     assert_eq!(
         ids(
@@ -613,19 +613,19 @@ async fn the_space_the_grammar_and_the_empty_query() {
                 .await
                 .unwrap()
         ),
-        [eng.clone()]
+        [eng.as_str()]
     );
     assert_eq!(
         ids(docs_search_inner(&pool, &format!("{w} by:priya"), None)
             .await
             .unwrap()),
-        [ops.clone()]
+        [ops.as_str()]
     );
     assert_eq!(
         ids(docs_search_inner(&pool, &format!("{w} updated:30d"), None)
             .await
             .unwrap()),
-        [eng.clone()]
+        [eng.as_str()]
     );
     assert!(
         ids(docs_search_inner(&pool, &format!("{w} type:ticket"), None)
