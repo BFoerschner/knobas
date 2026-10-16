@@ -30,6 +30,7 @@ import {
 import { search, smartLists, ticketViews, type SmartListSummary, type TicketViewRow } from "../../ipc/search";
 import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
 import {
+  addSource,
   backfillSource,
   dbStats,
   reindexFts,
@@ -46,6 +47,7 @@ import {
   type ConnectionReport,
   type DbStats,
   type CredentialHealth,
+  type NewSource,
   type SecretInput,
   type SourceDescriptor,
   type SourceDraft,
@@ -67,6 +69,8 @@ export interface SettingsPorts {
   testSource: (draft: SourceDraft) => Promise<ConnectionReport>;
   syncNow: (sourceId: string) => Promise<number>;
   syncAll: () => Promise<number[]>;
+  /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
+  addSource: (input: NewSource) => Promise<SourceSummary>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
 }
 
@@ -87,6 +91,7 @@ export const realSettingsPorts: SettingsPorts = {
   testSource: (draft) => testSource(draft),
   syncNow: (sourceId) => syncNow(sourceId),
   syncAll: () => syncAll(),
+  addSource: (input) => addSource(input),
   listen: (event, handler) => tauriListen(event, handler),
 };
 

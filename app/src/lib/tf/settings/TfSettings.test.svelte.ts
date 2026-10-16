@@ -133,6 +133,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     ),
     syncNow: vi.fn(() => Promise.resolve(42)),
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
+    addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
     listen: vi.fn(() => Promise.resolve(() => {})),
     ...over,
   };
@@ -284,6 +285,129 @@ test("clearing an id the reader typed removes it, so the next sync can record on
   sectionButton("What it syncs", "Save").click();
   await settle();
   expect(p.updateSource).toHaveBeenLastCalledWith("jira", { config: { username: "mara" } });
+});
+
+function dialog(): HTMLElement {
+  const found = target.querySelector<HTMLElement>('.tf-dialog[role="dialog"]');
+  if (!found) throw new Error("no dialog");
+  return found;
+}
+
+function dialogButton(text: string): HTMLButtonElement {
+  const found = [...dialog().querySelectorAll("button")].find((el) => el.textContent?.trim() === text);
+  if (!found) throw new Error(`no dialog button "${text}"`);
+  return found;
+}
+
+test("Add a source opens in the ticket-first look, and Esc closes it through the layer stack (#903)", async () => {
+  const layers = createLayers();
+  view = mount(TfSettings, {
+    target,
+    props: { rest: [], job: null, ready: true, onrooms: () => {}, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+  });
+  await settle();
+  button("+ Add a source").click();
+  await settle();
+  expect(dialog().querySelector("h2")?.textContent).toBe("Add a source");
+  expect(dialog().querySelector(".tf-pane-h")?.textContent).toBe("What is it?");
+  // One radio per adapter, with what it holds as its description.
+  const choice = dialog().querySelector<HTMLLabelElement>(".tf-radio label")!;
+  expect(choice.querySelector("input")?.type).toBe("radio");
+  expect(choice.textContent).toContain("Jira Data Center");
+  expect(choice.querySelector("small")?.textContent).toBe("Tickets");
+  expect(layers.open.map((layer) => layer.kind)).toEqual(["dialog"]);
+
+  layers.open[0]!.close();
+  flushSync();
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+});
+
+test("Add a source: the generated form, Test connection's fills, then one add_source (#903)", async () => {
+  const added = summary("jira-2", "Jira Data Center", "ok");
+  const p = ports({
+    addSource: vi.fn(() => Promise.resolve(added)),
+    testSource: vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        account: "mara",
+        server_version: "9.12.4",
+        secret_expires_at: null,
+        error: null,
+        code: null,
+        elapsed_ms: 214,
+        detail: null,
+        discovered: { epic_link_field: "customfield_10101", sprint_field: "customfield_10107" },
+      }),
+    ),
+  });
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+
+  // Generated from the chosen adapter's schema: no per-adapter branch.
+  expect(dialog().querySelector("#tf-add-cfg-projects")).not.toBeNull();
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("jira");
+  expect(dialogButton("Add source").disabled).toBe(true);
+
+  type("#tf-add-id", "jira-2");
+  type("#tf-add-address", "https://jira2.tidewater.example");
+  type("#tf-add-secret", "hunter2");
+  type("#tf-add-cfg-sprint_field", "customfield_99");
+  dialogButton("Test connection").click();
+  await settle();
+
+  expect(p.testSource).toHaveBeenCalledWith({
+    source_id: null,
+    adapter_kind: "jira",
+    base_url: "https://jira2.tidewater.example",
+    auth_kind: "UserPassword",
+    config: { flavor: "datacenter", sprint_field: "customfield_99" },
+    secret: { value: "hunter2", account: null },
+  });
+  expect(dialog().textContent).toContain("Connected as mara · 9.12.4 · 214 ms");
+  // The identity fill (#82) and the discovered fill (#297), only into empty fields.
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-username")!.value).toBe("mara");
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-epic_link_field")!.value).toBe("customfield_10101");
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-cfg-sprint_field")!.value).toBe("customfield_99");
+
+  dialogButton("Add source").click();
+  await settle();
+  expect(p.addSource).toHaveBeenCalledWith({
+    id: "jira-2",
+    adapter_kind: "jira",
+    display_name: "Jira Data Center",
+    base_url: "https://jira2.tidewater.example",
+    auth_kind: "UserPassword",
+    config: {
+      flavor: "datacenter",
+      username: "mara",
+      epic_link_field: "customfield_10101",
+      sprint_field: "customfield_99",
+    },
+    secret: { value: "hunter2", account: null },
+    sync_interval_secs: 900,
+    enabled: true,
+  });
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  // The list is read again, so the new source has its row.
+  expect(p.listSources).toHaveBeenCalledTimes(2);
+});
+
+test("Add a source waits for a passing test of what is typed now", async () => {
+  await open([]);
+  button("+ Add a source").click();
+  await settle();
+  dialog().querySelector<HTMLInputElement>(".tf-radio input")!.click();
+  flushSync();
+  type("#tf-add-address", "https://jira2.tidewater.example");
+  type("#tf-add-secret", "hunter2");
+  dialogButton("Test connection").click();
+  await settle();
+  expect(dialogButton("Add source").disabled).toBe(false);
+  type("#tf-add-address", "https://jira3.tidewater.example");
+  expect(dialogButton("Add source").disabled).toBe(true);
 });
 
 test("the schedule and the pause switch are saved as they change", async () => {

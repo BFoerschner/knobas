@@ -21,7 +21,8 @@
   import { latestRead } from "../../shell/latest-read";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { jobHash } from "../route";
-  import { addSourcePanel } from "./add-source.svelte";
+  import { push } from "../../shell/toasts.svelte";
+  import TfAddSource from "./TfAddSource.svelte";
   import { notifications as sharedNotifications, type Notifications } from "../../inbox/notify.svelte";
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
@@ -138,13 +139,8 @@
     };
   });
 
-  // A source the Add-source dialog just added is a new row.
-  let seenAdded = addSourcePanel.added;
-  $effect(() => {
-    if (addSourcePanel.added === seenAdded) return;
-    seenAdded = addSourcePanel.added;
-    void load();
-  });
+  /** Whether *Add a source* is open (#903); a source it adds is a new row. */
+  let adding = $state(false);
 
   /** A locally started run, before its first `sync:state` arrives. */
   function markStarted(id: string) {
@@ -252,6 +248,7 @@
           {ports}
           onstarted={(ids) => ids.forEach(markStarted)}
           onstopped={(ids) => ids.forEach(stopped)}
+          onadd={() => (adding = true)}
         />
       {:else if current === null}
         <header class="tf-stg-h"><h1>{sourceId}</h1></header>
@@ -282,3 +279,15 @@
     </div>
   </div>
 </div>
+{#if adding}
+  <TfAddSource
+    {ports}
+    {layers}
+    onclose={() => (adding = false)}
+    onsaved={() => {
+      adding = false;
+      push({ text: "Added. The first sync is running." });
+      void load();
+    }}
+  />
+{/if}

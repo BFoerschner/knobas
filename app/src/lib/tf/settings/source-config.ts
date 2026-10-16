@@ -19,10 +19,18 @@
 import { defaultValues, schemaFields, type SchemaField } from "../../sources/schema-form";
 import { IDENTITY_FIELD } from "./settings";
 
-/** The page's config fields, or why there are none. The user is Connection's row. */
-export function pageFields(schema: unknown): { fields: SchemaField[]; error: string | null } {
+/**
+ * An adapter's config fields, or why there are none (`schemaFields` throws for
+ * a schema that declares a secret). A source's page leaves the user out, since
+ * Connection draws it; *Add a source* keeps it (`keepUser`).
+ */
+export function pageFields(
+  schema: unknown,
+  { keepUser = false }: { keepUser?: boolean } = {},
+): { fields: SchemaField[]; error: string | null } {
   try {
-    return { fields: schemaFields(schema).filter((field) => field.key !== IDENTITY_FIELD), error: null };
+    const fields = schemaFields(schema);
+    return { fields: keepUser ? fields : fields.filter((field) => field.key !== IDENTITY_FIELD), error: null };
   } catch (cause) {
     return { fields: [], error: cause instanceof Error ? cause.message : String(cause) };
   }
@@ -74,6 +82,30 @@ export function configChanges(
     changes[key] = edited[key];
   }
   return changes;
+}
+
+/**
+ * Put what a passing *Test connection* found into the form (#903): the
+ * account into the identity field (#82) and each `discovered` value into the
+ * field of that key (#297), the rooms dialog's one rule. Only a text field,
+ * and only an empty one: a value the reader typed was meant.
+ */
+export function fillFound(
+  fields: SchemaField[],
+  values: Record<string, unknown>,
+  account: string | null,
+  discovered: Record<string, string> | null | undefined,
+): void {
+  const found: Record<string, string> = { ...(discovered ?? {}) };
+  if (account !== null && account !== "") found[IDENTITY_FIELD] = account;
+  for (const [key, value] of Object.entries(found)) {
+    if (typeof value !== "string" || value === "") continue;
+    const field = fields.find((candidate) => candidate.key === key);
+    if (!field || field.control.kind !== "text") continue;
+    const current = values[key];
+    if (typeof current === "string" && current.trim() !== "") continue;
+    values[key] = value;
+  }
 }
 
 /** The stored config with the reader's changes laid over it. */

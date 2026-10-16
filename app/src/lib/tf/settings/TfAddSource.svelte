@@ -1,0 +1,255 @@
+<!--
+  *Add a source* in the ticket-first look (#903): prototype-6's
+  `stgAddSource`, in the `TfDialog` frame.
+
+  *What is it?* is one radio per adapter, described by what it holds. Then the
+  address, the adapter's config form, **generated** from its `config_schema`
+  (spec §3a, `TfSchemaForm`, no per-adapter branch), and the credential. *Test
+  connection* tests the draft and fills what it found into empty fields: the
+  account into the user (#82), the ids the source reports into theirs (#297).
+  *Add source* sends one `add_source` with the secret and the row, as the
+  rooms UI's `AddSource.svelte` does (contract §3: the backend orders the two
+  writes), and only after a passing test of the draft as it stands.
+
+  The rooms dialog's five steps are one page here, as prototype-6 draws it.
+  Its *Schedule* step is not drawn: a new source syncs every 15 minutes, its
+  default, and its page changes that.
+-->
+<script lang="ts">
+  import { ipcErrorMessage } from "../../ipc";
+  import type { AuthMethod, ConnectionReport, SourceDescriptor, SourceSummary } from "../../ipc/sources";
+  import { ACCOUNT_INCOMPLETE, accountHalfDone, accountOf } from "../../sources/account";
+  import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
+  import { defaultValues, validate } from "../../sources/schema-form";
+  import type { Layers } from "../layers.svelte";
+  import type { SettingsPorts } from "./ports";
+  import { fillFound, pageFields } from "./source-config";
+  import TfDialog from "./TfDialog.svelte";
+  import TfSchemaForm from "./TfSchemaForm.svelte";
+
+  let {
+    ports,
+    layers,
+    onclose,
+    onsaved,
+  }: {
+    ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource">;
+    layers: Layers;
+    onclose: () => void;
+    onsaved: (source: SourceSummary) => void;
+  } = $props();
+
+  /** How an `AuthMethod` reads, when an adapter offers more than one. */
+  const AUTH_LABEL: Record<AuthMethod, string> = {
+    UserPassword: "Username and password",
+    Pat: "Personal access token",
+    ApiToken: "API token",
+    OAuth: "OAuth",
+  };
+
+  /** Contract §4.1. The id is the entity namespace and is immutable (P10). */
+  const ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
+
+  /** A new source's schedule: the rooms dialog's default. */
+  const INTERVAL_SECS = 900;
+
+  let adapters = $state<SourceDescriptor[] | null>(null);
+  let adaptersError = $state<string | null>(null);
+  let chosen = $state<SourceDescriptor | null>(null);
+  let id = $state("");
+  let displayName = $state("");
+  let baseUrl = $state("");
+  let authKind = $state<AuthMethod | null>(null);
+  let secret = $state("");
+  let accountUser = $state("");
+  let accountPassword = $state("");
+  let configValues = $state<Record<string, unknown>>({});
+  let report = $state<ConnectionReport | null>(null);
+  /** The draft the passing test was of; *Add source* waits for it to match. */
+  let tested = $state<string | null>(null);
+  let testing = $state(false);
+  let saving = $state(false);
+  let saveError = $state<string | null>(null);
+
+  $effect(() => {
+    let dead = false;
+    ports
+      .listAdapters()
+      .then((rows) => {
+        if (!dead) adapters = rows;
+      })
+      .catch((cause) => {
+        if (!dead) adaptersError = ipcErrorMessage(cause);
+      });
+    return () => {
+      dead = true;
+    };
+  });
+
+  const config = $derived(chosen === null ? { fields: [], error: null } : pageFields(chosen.config_schema, { keepUser: true }));
+  const validated = $derived(validate(config.fields, configValues));
+  const half = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
+  const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
+  const secretWord = $derived(authKind === "UserPassword" ? "Password" : "Token");
+
+  const idError = $derived.by(() => {
+    if (id === "") return "An id is required.";
+    if (!ID_PATTERN.test(id)) return "Lower-case letters, digits and hyphens, starting with a letter.";
+    return null;
+  });
+
+  /** The draft as a test sends it, so a passing test is tied to what was typed. */
+  const draft = $derived(
+    JSON.stringify([chosen?.adapter_kind, baseUrl.trim(), authKind, validated.config, secret, account]),
+  );
+  const ready = $derived(
+    chosen !== null &&
+      authKind !== null &&
+      baseUrl.trim() !== "" &&
+      secret !== "" &&
+      !half &&
+      config.error === null &&
+      Object.keys(validated.errors).length === 0,
+  );
+  const canAdd = $derived(ready && idError === null && report?.ok === true && tested === draft && !saving);
+
+  /** What an adapter holds, as prototype-6 describes each one. */
+  function holds(adapter: SourceDescriptor): string {
+    return adapter.entity_kinds.map((kind, index) => (index === 0 ? kind.plural : kind.plural.toLowerCase())).join(", ");
+  }
+
+  function choose(adapter: SourceDescriptor) {
+    chosen = adapter;
+    id = adapter.adapter_kind;
+    displayName = adapter.name;
+    // The config belongs to the adapter that declared it; nothing carries over.
+    configValues = defaultValues(pageFields(adapter.config_schema, { keepUser: true }).fields);
+    authKind = adapter.auth_methods[0] ?? null;
+    report = null;
+    tested = null;
+  }
+
+  async function test() {
+    if (!chosen || !authKind || !ready) return;
+    testing = true;
+    report = null;
+    try {
+      report = await ports.testSource({
+        source_id: null,
+        adapter_kind: chosen.adapter_kind,
+        base_url: baseUrl.trim(),
+        auth_kind: authKind,
+        config: validated.config,
+        secret: { value: secret, account },
+      });
+      if (report.ok) {
+        fillFound(config.fields, configValues, report.account, report.discovered);
+        // Read after the fill: the filled values are part of what was tested.
+        tested = draft;
+      }
+    } catch (cause) {
+      report = failedReport(cause);
+    } finally {
+      testing = false;
+    }
+  }
+
+  async function add() {
+    if (!chosen || !authKind || !canAdd) return;
+    saving = true;
+    saveError = null;
+    try {
+      const source = await ports.addSource({
+        id,
+        adapter_kind: chosen.adapter_kind,
+        display_name: displayName.trim() === "" ? chosen.name : displayName.trim(),
+        base_url: baseUrl.trim(),
+        auth_kind: authKind,
+        config: validated.config,
+        secret: { value: secret, account },
+        sync_interval_secs: INTERVAL_SECS,
+        enabled: true,
+      });
+      secret = "";
+      accountPassword = "";
+      onsaved(source);
+    } catch (cause) {
+      // The dialog stays open with the draft: a name collision is not a reason to retype it.
+      saveError = ipcErrorMessage(cause);
+    } finally {
+      saving = false;
+    }
+  }
+</script>
+
+<TfDialog title="Add a source" {layers} {onclose}>
+  {#snippet body()}
+    <div class="tf-pane-h">What is it?</div>
+    {#if adaptersError !== null}
+      <p class="tf-fail">Could not read the adapters: {adaptersError}</p>
+    {:else if adapters !== null}
+      <div class="tf-radio" role="radiogroup" aria-label="What is it?">
+        {#each adapters as adapter (adapter.id)}
+          <label>
+            <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => choose(adapter)} />
+            <span>{adapter.name}<small>{holds(adapter)}</small></span>
+          </label>
+        {/each}
+      </div>
+    {/if}
+    {#if chosen !== null}
+      <div class="tf-formgrid">
+        <label for="tf-add-address">Address</label>
+        <input id="tf-add-address" type="text" placeholder="https://" autocomplete="off" bind:value={baseUrl} />
+      </div>
+      {#if config.error !== null}
+        <p class="tf-fail">{config.error}</p>
+      {:else}
+        <TfSchemaForm fields={config.fields} values={configValues} errors={validated.errors} idPrefix="tf-add-cfg" layout="grid" />
+      {/if}
+      {#if chosen.auth_methods.length > 1}
+        <div class="tf-radio" role="radiogroup" aria-label="Sign in with">
+          {#each chosen.auth_methods as method (method)}
+            <label>
+              <input type="radio" name="tf-add-auth" value={method} bind:group={authKind} />
+              <span>{AUTH_LABEL[method] ?? method}</span>
+            </label>
+          {/each}
+        </div>
+      {/if}
+      <div class="tf-formgrid">
+        <label for="tf-add-secret">{secretWord}</label>
+        <input id="tf-add-secret" type="password" autocomplete="off" bind:value={secret} />
+        {#if chosen.accepts_account}
+          <label for="tf-add-account-user">Account</label>
+          <input id="tf-add-account-user" type="text" autocomplete="off" placeholder="Username (optional)" bind:value={accountUser} />
+          <label for="tf-add-account-pass">Account password</label>
+          <input id="tf-add-account-pass" type="password" autocomplete="off" placeholder="Password" bind:value={accountPassword} />
+        {/if}
+        <label for="tf-add-name">Name</label>
+        <input id="tf-add-name" type="text" autocomplete="off" bind:value={displayName} />
+        <label for="tf-add-id">Id</label>
+        <input id="tf-add-id" type="text" autocomplete="off" aria-describedby="tf-add-id-note" bind:value={id} />
+      </div>
+      <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
+        {idError ?? "Permanent: everything from this source is named with it."}
+      </p>
+      {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
+      {#if report !== null}
+        {@const note = connectionNote(report)}
+        <!-- Text: `error` is a line an upstream server wrote. -->
+        <p class="tf-dlg-note {report.ok ? '' : 'tf-stg-errt'}" role="status">
+          {connectionLine(report)}{note ? `. ${note}` : ""}
+        </p>
+      {:else}
+        <p class="tf-dlg-note">Test connection fills in what it can find, such as your user and the field ids.</p>
+      {/if}
+      {#if saveError !== null}<p class="tf-dlg-note tf-stg-errt" role="alert">{saveError}</p>{/if}
+    {/if}
+  {/snippet}
+  {#snippet footer()}
+    <button class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
+    <button class="tf-btn" disabled={!ready || testing} onclick={() => void test()}>Test connection</button>
+    <button class="tf-btn tf-primary" disabled={!canAdd} onclick={() => void add()}>Add source</button>
+  {/snippet}
+</TfDialog>

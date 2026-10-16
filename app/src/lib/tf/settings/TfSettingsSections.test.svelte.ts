@@ -56,6 +56,7 @@ const sourcePorts: SettingsPorts = {
   testSource: () => Promise.reject(new Error("unused")),
   syncNow: () => Promise.resolve(0),
   syncAll: () => Promise.resolve([]),
+  addSource: () => Promise.reject(new Error("unused")),
   listen: () => Promise.resolve(() => {}),
 };
 

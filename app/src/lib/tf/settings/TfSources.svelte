@@ -8,7 +8,6 @@
   import type { SourceSummary, SourceSyncStatus } from "../../ipc/sources";
   import type { Health } from "../../shell/health.svelte";
   import { push } from "../../shell/toasts.svelte";
-  import { addSourcePanel } from "./add-source.svelte";
   import type { SettingsPorts } from "./ports";
   import { bareAddress, holdings, sourceHash, sourceState } from "./settings";
 
@@ -20,6 +19,7 @@
     ports,
     onstarted,
     onstopped,
+    onadd,
   }: {
     sources: SourceSummary[];
     statuses: Record<string, SourceSyncStatus>;
@@ -28,6 +28,8 @@
     ports: Pick<SettingsPorts, "syncAll">;
     onstarted: (ids: string[]) => void;
     onstopped: (ids: string[]) => void;
+    /** Opens *Add a source* (#903). */
+    onadd: () => void;
   } = $props();
 
   async function syncAll() {
@@ -48,7 +50,7 @@
   <p>Where knobas reads from. Each source syncs on its own schedule; writes go back through the queue.</p>
 </header>
 <div class="tf-stg-acts">
-  <button class="tf-btn tf-primary" onclick={() => (addSourcePanel.open = true)}>+ Add a source</button>
+  <button class="tf-btn tf-primary" onclick={onadd}>+ Add a source</button>
   {#if sources.length > 0}
     <button class="tf-btn" onclick={() => void syncAll()}>Sync all</button>
   {/if}
