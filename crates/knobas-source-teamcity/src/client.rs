@@ -13,9 +13,9 @@ use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS, PROJECT_FIELDS,
-    Project, Property,
-    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
+    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
+    PROJECT_FIELDS, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences,
+    USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --

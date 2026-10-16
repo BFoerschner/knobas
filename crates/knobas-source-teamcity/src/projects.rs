@@ -77,7 +77,11 @@ impl ProjectTree {
 
     /// `raw` with its project's chain written beside it under
     /// [`PROJECT_PATH`]. A record with no `projectId` is left as it is.
-    pub(crate) fn annotate(&self, raw: &serde_json::Value, project_id: Option<&str>) -> serde_json::Value {
+    pub(crate) fn annotate(
+        &self,
+        raw: &serde_json::Value,
+        project_id: Option<&str>,
+    ) -> serde_json::Value {
         let mut out = raw.clone();
         if let (Some(id), Some(obj)) = (project_id, out.as_object_mut()) {
             let chain: Vec<serde_json::Value> = self
@@ -113,7 +117,11 @@ mod tests {
             project(ROOT, "<Root project>", None),
             project("Payments", "Payments", Some(ROOT)),
             project("Payments_Payouts", "Payouts", Some("Payments")),
-            project("Payments_Payouts_Deploy", "Deploy", Some("Payments_Payouts")),
+            project(
+                "Payments_Payouts_Deploy",
+                "Deploy",
+                Some("Payments_Payouts"),
+            ),
             project("Data", "Data", Some(ROOT)),
         ])
     }
@@ -146,10 +154,7 @@ mod tests {
 
     #[test]
     fn a_cycle_ends_the_chain_rather_than_looping() {
-        let tree = ProjectTree::new([
-            project("A", "A", Some("B")),
-            project("B", "B", Some("A")),
-        ]);
+        let tree = ProjectTree::new([project("A", "A", Some("B")), project("B", "B", Some("A"))]);
         assert_eq!(tree.path("A").len(), 2);
     }
 
@@ -167,7 +172,10 @@ mod tests {
             ])
         );
         // A configuration straight under the root has an empty chain.
-        assert_eq!(payments().annotate(&raw, Some(ROOT))[PROJECT_PATH], serde_json::json!([]));
+        assert_eq!(
+            payments().annotate(&raw, Some(ROOT))[PROJECT_PATH],
+            serde_json::json!([])
+        );
         assert!(payments().annotate(&raw, None).get(PROJECT_PATH).is_none());
     }
 }

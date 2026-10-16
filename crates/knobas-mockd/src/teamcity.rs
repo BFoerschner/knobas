@@ -535,7 +535,8 @@ async fn projects(State(s): State<Arc<MockState>>, req: Request) -> Response {
     }
     let mut seen = std::collections::BTreeMap::new();
     for t in s.build_types() {
-        seen.entry(t.project_id.clone()).or_insert(t.project_name.clone());
+        seen.entry(t.project_id.clone())
+            .or_insert(t.project_name.clone());
     }
     let project = std::iter::once(json!({
         "id": "_Root", "name": "<Root project>", "parentProjectId": Value::Null,

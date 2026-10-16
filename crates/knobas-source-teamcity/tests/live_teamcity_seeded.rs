@@ -2793,7 +2793,11 @@ impl NestedProject {
             )
             .await
             .expect("create a project");
-            assert!(r.status().is_success(), "create project {id}: {}", r.status());
+            assert!(
+                r.status().is_success(),
+                "create project {id}: {}",
+                r.status()
+            );
         }
         let r = post(
             "app/rest/buildTypes",

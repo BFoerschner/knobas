@@ -123,9 +123,16 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     let tc = configured(&pool, "teamcity").await;
     let head_sha = format!("{}{}{}{}", unique(), unique(), unique(), unique());
 
-    let ticket = item(&pool, &jira, "PAY-1", "ticket", "PAY-1", serde_json::json!({
-        "key": "PAY-1", "fields": { "issuetype": { "name": "Story" } }
-    }))
+    let ticket = item(
+        &pool,
+        &jira,
+        "PAY-1",
+        "ticket",
+        "PAY-1",
+        serde_json::json!({
+            "key": "PAY-1", "fields": { "issuetype": { "name": "Story" } }
+        }),
+    )
     .await;
     let branch = item(
         &pool,
@@ -136,9 +143,16 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
         serde_json::json!({ "name": "feature/PAY-1-x" }),
     )
     .await;
-    let pr = item(&pool, &gitea, "acme/svc#7", "pr", "Retry", serde_json::json!({
-        "number": 7, "head": { "ref": "feature/PAY-1-pr", "sha": head_sha }
-    }))
+    let pr = item(
+        &pool,
+        &gitea,
+        "acme/svc#7",
+        "pr",
+        "Retry",
+        serde_json::json!({
+            "number": 7, "head": { "ref": "feature/PAY-1-pr", "sha": head_sha }
+        }),
+    )
     .await;
     draw(&pool, &ticket, &branch).await;
     draw(&pool, &ticket, &pr).await;
@@ -148,7 +162,15 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     run(&pool, &tc, 1, "OnBranch", "feature/PAY-1-x", "aaa").await;
     // A run on the pull request's branch, spelt as a ref, at its head commit.
     let on_pr = config(&pool, &tc, "OnPr").await;
-    run(&pool, &tc, 2, "OnPr", "refs/heads/feature/PAY-1-pr", &head_sha).await;
+    run(
+        &pool,
+        &tc,
+        2,
+        "OnPr",
+        "refs/heads/feature/PAY-1-pr",
+        &head_sha,
+    )
+    .await;
     // A run the job reaches through its pull request.
     let via_pr = config(&pool, &tc, "ViaPr").await;
     let linked_run = run(&pool, &tc, 3, "ViaPr", "main", "bbb").await;
@@ -181,13 +203,23 @@ async fn a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link() {
     );
     assert_eq!(
         reasons(&all, &linked),
-        Some(serde_json::json!([{ "kind": "linked", "step": linked, "origin": { "kind": "own" } }]))
+        Some(
+            serde_json::json!([{ "kind": "linked", "step": linked, "origin": { "kind": "own" } }])
+        )
     );
     assert_eq!(reasons(&all, &elsewhere), None);
     assert_eq!(all.len(), 4, "each pipeline once: {all:?}");
 
     // A ticket that reaches nothing has no pipelines.
-    let lone = item(&pool, &jira, "PAY-9", "ticket", "PAY-9", serde_json::json!({ "key": "PAY-9" })).await;
+    let lone = item(
+        &pool,
+        &jira,
+        "PAY-9",
+        "ticket",
+        "PAY-9",
+        serde_json::json!({ "key": "PAY-9" }),
+    )
+    .await;
     assert!(job_pipelines_inner(&pool, &lone).await.unwrap().is_empty());
 }
 
@@ -198,9 +230,16 @@ async fn a_sub_task_shows_the_pipelines_its_parent_links() {
     let pool = pool().await;
     let jira = configured(&pool, "jira").await;
     let tc = configured(&pool, "teamcity").await;
-    let parent = item(&pool, &jira, "PAY-2", "ticket", "PAY-2", serde_json::json!({
-        "key": "PAY-2", "fields": { "issuetype": { "name": "Story" } }
-    }))
+    let parent = item(
+        &pool,
+        &jira,
+        "PAY-2",
+        "ticket",
+        "PAY-2",
+        serde_json::json!({
+            "key": "PAY-2", "fields": { "issuetype": { "name": "Story" } }
+        }),
+    )
     .await;
     let child = item(&pool, &jira, "PAY-3", "ticket", "PAY-3", serde_json::json!({
         "key": "PAY-3", "fields": { "parent": { "key": "PAY-2" }, "issuetype": { "name": "Sub-task" } }

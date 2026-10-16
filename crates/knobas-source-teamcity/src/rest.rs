@@ -1124,7 +1124,10 @@ mod tests {
         }
         // The tree (#849): `crate::projects` reads all three.
         for needed in ["project(", "id", "name", "parentProjectId"] {
-            assert!(PROJECT_FIELDS.contains(needed), "PROJECT_FIELDS misses {needed}");
+            assert!(
+                PROJECT_FIELDS.contains(needed),
+                "PROJECT_FIELDS misses {needed}"
+            );
         }
         assert!(SERVER_FIELDS.contains("version"));
         assert!(USER_FIELDS.contains("username"));

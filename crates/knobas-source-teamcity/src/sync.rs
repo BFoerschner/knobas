@@ -1708,7 +1708,10 @@ mod tests {
             serde_json::json!([{ "id": "Data", "name": "Data" }])
         );
         // A build's own record is left verbatim.
-        let b = items.iter().find(|i| i.entity.key == "build:12").expect("build");
+        let b = items
+            .iter()
+            .find(|i| i.entity.key == "build:12")
+            .expect("build");
         assert!(b.payload.get("projectPath").is_none());
     }
 

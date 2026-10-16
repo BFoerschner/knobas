@@ -6,7 +6,9 @@
 //! Each test configures a TeamCity source of its own, so the rows it reads
 //! back are told apart by `source_id` from anything else in this database.
 
-use knobas_app::commands::entity::{pipeline_runs_inner, pipelines_inner, set_pipeline_pinned_inner};
+use knobas_app::commands::entity::{
+    pipeline_runs_inner, pipelines_inner, set_pipeline_pinned_inner,
+};
 
 /// A TeamCity source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
@@ -375,13 +377,26 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
         all.iter().find(|p| p.entity_id == id).unwrap().pinned
     };
 
-    assert!(set_pipeline_pinned_inner(&pool, &tests, true).await.unwrap());
-    assert!(set_pipeline_pinned_inner(&pool, &tests, true).await.unwrap(), "twice is once");
+    assert!(
+        set_pipeline_pinned_inner(&pool, &tests, true)
+            .await
+            .unwrap()
+    );
+    assert!(
+        set_pipeline_pinned_inner(&pool, &tests, true)
+            .await
+            .unwrap(),
+        "twice is once"
+    );
     assert!(set_pipeline_pinned_inner(&pool, &lint, true).await.unwrap());
     let all = pipelines_inner(&pool).await.unwrap();
     assert!(pinned(&all, &tests) && pinned(&all, &lint));
 
-    assert!(!set_pipeline_pinned_inner(&pool, &tests, false).await.unwrap());
+    assert!(
+        !set_pipeline_pinned_inner(&pool, &tests, false)
+            .await
+            .unwrap()
+    );
     let all = pipelines_inner(&pool).await.unwrap();
     assert!(!pinned(&all, &tests), "unpinned");
     assert!(pinned(&all, &lint), "the other pin is kept");
@@ -392,10 +407,17 @@ async fn a_pin_is_kept_until_it_is_taken_back() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    let ids: Vec<&str> = stored.as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    let ids: Vec<&str> = stored
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|v| v.as_str())
+        .collect();
     assert_eq!(ids.iter().filter(|id| **id == lint).count(), 1);
     assert!(!ids.contains(&tests.as_str()));
 
-    let refused = set_pipeline_pinned_inner(&pool, "not an id", true).await.unwrap_err();
+    let refused = set_pipeline_pinned_inner(&pool, "not an id", true)
+        .await
+        .unwrap_err();
     assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }
