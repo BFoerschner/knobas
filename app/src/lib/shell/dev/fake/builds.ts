@@ -410,7 +410,8 @@ const FAILED_TEST = [
  * defaults), the artifacts its `artifactsOf` at the top level, and the
  * changes its *Changes* tab. `undefined` for an id that is not a fixture run.
  */
-export function runView(id: string, section: string | null) {
+/** A fixture run's configuration, number and result, or `undefined` for an id that is not one (#854 to #856's reads use it too). */
+export function fixtureRun(id: string): { config: string; no: number; st: Latest["st"] } | undefined {
   const match = /^teamcity:build:(.+)-(\d+)$/.exec(id);
   if (match === null) return undefined;
   const config = match[1]!;
@@ -418,6 +419,13 @@ export function runView(id: string, section: string | null) {
   if (!Object.values(CONFIGURATIONS).some((list) => list.includes(config))) return undefined;
   const latest = LATEST[config];
   const st = latest?.no === no ? latest.st : (AFTER_STORY[config]?.find((r) => r.no === no)?.st ?? "success");
+  return { config, no, st };
+}
+
+export function runView(id: string, section: string | null) {
+  const found = fixtureRun(id);
+  if (found === undefined) return undefined;
+  const { config, no, st } = found;
   const done = st === "success" || st === "failed";
   const story = storyOf(config, no);
   const repo = repositoryOf(config);

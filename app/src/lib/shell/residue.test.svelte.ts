@@ -359,6 +359,9 @@ const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
 const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfRun = (await import("../tf/builds/TfRun.svelte")).default;
 const TfRunChain = (await import("../tf/builds/TfRunChain.svelte")).default;
+const TfRunLog = (await import("../tf/builds/TfRunLog.svelte")).default;
+const TfRunTests = (await import("../tf/builds/TfRunTests.svelte")).default;
+const TfRunArtifacts = (await import("../tf/builds/TfRunArtifacts.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfOpenIn = (await import("../tf/openin/TfOpenIn.svelte")).default;
 const TfRepoLocal = (await import("../tf/repo/TfRepoLocal.svelte")).default;
@@ -999,6 +1002,64 @@ const CASES: Case[] = [
     source: "lib/tf/builds/TfRunChain.svelte",
     open: (target) => ({
       app: mount(TfRunChain, { target, props: { runId: "teamcity:build:1", branch: "main" } }),
+    }),
+  },
+  {
+    /** The run's Log tab (#854): the log and a download answering late. */
+    name: "TfRunLog",
+    source: "lib/tf/builds/TfRunLog.svelte",
+    open: (target) => ({
+      app: mount(TfRunLog, {
+        target,
+        props: {
+          runId: "teamcity:build:1",
+          inFlight: false,
+          failed: true,
+          ports: { log: () => deferred(null), download: () => deferred(null) },
+        },
+      }),
+    }),
+  },
+  {
+    /** The run's Tests tab (#855): the tests and each history answering late. */
+    name: "TfRunTests",
+    source: "lib/tf/builds/TfRunTests.svelte",
+    open: (target) => ({
+      app: mount(TfRunTests, {
+        target,
+        props: {
+          runId: "teamcity:build:1",
+          branch: null,
+          logHref: "#/",
+          ports: {
+            tests: () =>
+              deferred({
+                tests: [{ id: "1", name: "a::b", module: "a", status: "failed" as const, muted: false, new_failure: false, duration_ms: 1, details: null }],
+                truncated: false,
+              }),
+            history: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /** The run's Artifacts tab (#856): the folders, a preview and downloads answering late. */
+    name: "TfRunArtifacts",
+    source: "lib/tf/builds/TfRunArtifacts.svelte",
+    open: (target) => ({
+      app: mount(TfRunArtifacts, {
+        target,
+        props: {
+          runId: "teamcity:build:1",
+          sourceName: "TeamCity",
+          ports: {
+            artifacts: () => deferred([{ path: "logs", name: "logs", size: null, folder: true, children: 1 }]),
+            preview: () => deferred(null),
+            download: () => deferred(null),
+          },
+        },
+      }),
     }),
   },
   {

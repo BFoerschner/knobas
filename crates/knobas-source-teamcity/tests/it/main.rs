@@ -9,6 +9,7 @@
 
 mod mockd;
 mod run;
+mod run_reads;
 mod view;
 mod view_build;
 mod write;

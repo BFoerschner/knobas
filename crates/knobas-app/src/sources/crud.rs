@@ -876,6 +876,24 @@ pub async fn run_chain(
     Ok(source.run_chain(entity_id).await?.unwrap_or_default())
 }
 
+/// The live adapter of run `entity_id`'s source, for the run page's reads
+/// (ADR-0022; #854, #855, #856), routed like [`view`]: by the id's namespace,
+/// with no mirror check, so a run older than the mirror's window reads too.
+/// The adapter refuses an id that is not one of its runs.
+///
+/// # Errors
+///
+/// As [`view`]'s routing: an id that is not one, a source not configured, a
+/// credential the keychain cannot give.
+pub async fn run_source(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+) -> Result<Box<dyn knobas_source::Source>, SourcesError> {
+    adapter_for(pool, secrets, registry, entity_id).await
+}
+
 /// A repository's web page from a clone URL: its `.git` and trailing slash
 /// taken off, `None` for a remote that is not `http`/`https` ([`commit_page`]'s
 /// rule).

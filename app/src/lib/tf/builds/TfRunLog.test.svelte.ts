@@ -1,0 +1,165 @@
+/**
+ * The run page's Log tab (#854) over `run_log`: the steps' folds, the lines
+ * outside them, find with "N of M" and its keys, the toolbar's toggles, and
+ * *Download log* through `download_run_file`.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type { DownloadTarget, LogLine, RunLog } from "../../ipc/entity";
+import { toasts } from "../../shell/toasts.svelte";
+import TfRunLog from "./TfRunLog.svelte";
+
+let target: HTMLElement;
+let page: ReturnType<typeof mount> | null = null;
+
+beforeEach(() => {
+  target = document.createElement("div");
+  document.body.appendChild(target);
+  toasts.items = [];
+  Element.prototype.scrollIntoView = () => {};
+});
+
+afterEach(() => {
+  if (page) unmount(page);
+  page = null;
+  target.remove();
+});
+
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+const line = (number: number, step: number | null, text: string, tone: LogLine["tone"] = null): LogLine => ({
+  number,
+  time: `10:06:${String(number).padStart(2, "0")}`,
+  text,
+  tone,
+  step,
+});
+
+const LOG: RunLog = {
+  total: 8,
+  steps: [
+    { name: "Checkout", first: 2, last: 3, seconds: 12, tone: null },
+    { name: "cargo test", first: 4, last: 7, seconds: 82, tone: "err" },
+  ],
+  lines: [
+    line(1, null, "TeamCity server version is 2026.1.3"),
+    line(2, 0, "Step 1/2: Checkout"),
+    line(3, 0, "Updating sources for retry"),
+    line(4, 1, "Step 2/2: cargo test"),
+    line(5, 1, "warning: unused variable", "warn"),
+    line(6, 1, "test sepa::retry::gives_up ... FAILED", "err"),
+    line(7, 1, "test sepa::retry::backs_off ... ok"),
+    line(8, null, "Build finished"),
+  ],
+};
+
+function draw(log: RunLog = LOG, failed = true, inFlight = false): DownloadTarget[] {
+  const downloads: DownloadTarget[] = [];
+  page = mount(TfRunLog, {
+    target,
+    props: {
+      runId: "teamcity:build:1187",
+      inFlight,
+      failed,
+      ports: {
+        log: () => Promise.resolve(log),
+        download: (_id, what) => {
+          downloads.push(what);
+          return Promise.resolve("/Users/mara/Downloads/Payout_IntegrationTests-1187.log");
+        },
+      },
+    },
+  });
+  return downloads;
+}
+
+const folds = () => [...target.querySelectorAll<HTMLDetailsElement>(".tf-logv details")];
+const shown = () => [...target.querySelectorAll(".tf-ll .tf-no")].map((n) => Number(n.textContent));
+const button = (name: string) => [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.trim() === name);
+const count = () => target.querySelector(".tf-lqn")?.textContent;
+
+function find(text: string) {
+  const input = target.querySelector<HTMLInputElement>('input[aria-label="Find in log"]')!;
+  input.value = text;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+}
+
+function enter(shift = false) {
+  target.querySelector('input[aria-label="Find in log"]')!.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", shiftKey: shift, bubbles: true }));
+  flushSync();
+}
+
+test("each step is a fold with its duration and lines; a failed one is open, a passing one holds no lines until opened", async () => {
+  draw();
+  await settle();
+  expect(folds().map((d) => [d.querySelector("summary")?.textContent, d.open])).toEqual([
+    ["Checkout12 s, 2 lines", false],
+    ["cargo test1 m 22 s, 4 lines", true],
+  ]);
+  expect(folds()[1]!.querySelector(".tf-dot.tf-err")).not.toBeNull();
+  expect(shown()).toEqual([1, 4, 5, 6, 7, 8]);
+  expect(target.querySelector('.tf-ll[data-n="6"]')?.classList.contains("tf-e")).toBe(true);
+  expect(target.querySelector('.tf-ll[data-n="5"]')?.classList.contains("tf-w")).toBe(true);
+  expect(target.querySelector('.tf-ll[data-n="5"] .tf-ts')?.textContent).toBe("10:06:05");
+  expect(target.querySelector(".tf-logfoot")?.textContent).toBe("The whole log, 8 lines.");
+});
+
+test("a find opens every step with a match and counts N of M; Enter and Shift+Enter move through them", async () => {
+  draw();
+  await settle();
+  find("retry");
+  expect(folds().map((d) => d.open)).toEqual([true, true]);
+  expect(shown()).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  expect(count()).toBe("1 of 3");
+  expect(target.querySelector("mark.tf-curm")?.closest(".tf-ll")?.getAttribute("data-n")).toBe("3");
+  enter();
+  expect(count()).toBe("2 of 3");
+  expect(target.querySelector("mark.tf-curm")?.closest(".tf-ll")?.getAttribute("data-n")).toBe("6");
+  enter(true);
+  enter(true);
+  expect(count()).toBe("3 of 3");
+  find("nothing here");
+  expect(count()).toBe("0 found");
+});
+
+test("errors and warnings only, wrap and timestamps are toggles on the toolbar", async () => {
+  draw();
+  await settle();
+  button("Errors and warnings only")!.click();
+  flushSync();
+  expect(button("Errors and warnings only")!.getAttribute("aria-pressed")).toBe("true");
+  expect(shown()).toEqual([5, 6]);
+  button("Wrap lines")!.click();
+  button("Timestamps")!.click();
+  flushSync();
+  const viewer = target.querySelector(".tf-logv")!;
+  expect([viewer.classList.contains("tf-wrap"), viewer.classList.contains("tf-nots")]).toEqual([true, true]);
+});
+
+test("Jump to the first error is on a failed run only; Download log saves through knobas and says where", async () => {
+  const downloads = draw();
+  await settle();
+  expect(button("Jump to the first error")).toBeDefined();
+  button("Download log")!.click();
+  await settle();
+  expect(downloads).toEqual([{ kind: "log" }]);
+  expect(toasts.items.at(-1)?.text).toBe("Saved Payout_IntegrationTests-1187.log to ~/Downloads");
+  unmount(page!);
+  page = null;
+  draw({ ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null }], lines: LOG.lines.map((l) => ({ ...l, tone: null })) }, false, true);
+  await settle();
+  expect(button("Jump to the first error")).toBeUndefined();
+  expect(folds()[1]!.querySelector("summary")?.textContent).toBe("cargo testrunning, 4 lines");
+  expect(folds()[1]!.open).toBe(true);
+});
+
+test("past the cap the line under the log says which part it holds", async () => {
+  draw({ ...LOG, total: 31_402 });
+  await settle();
+  expect(target.querySelector(".tf-logfoot")?.textContent).toBe("The last 8 of 31,402 lines. Download log has all of them.");
+});

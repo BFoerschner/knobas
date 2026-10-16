@@ -2202,8 +2202,10 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
             ("changes", Some(0), false),
             ("tests", Some(1), true),
             ("log", None, true),
-            ("artifacts", Some(1), false),
-            ("parameters", Some(3), false),
+            // The file, and the folder holding it again (#856).
+            ("artifacts", Some(2), false),
+            // #852 seeded a fourth, `env.LOG_LEVEL`.
+            ("parameters", Some(4), false),
         ]
     );
     let Block::Facts { facts } = &view.sections[0].blocks[0] else {
@@ -2262,15 +2264,15 @@ async fn the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail() {
     assert!(text.lines().count() <= 400);
 
     let artifacts = &view.sections[4].blocks;
-    assert!(
-        matches!(&artifacts[0], Block::Entities { rows, .. }
-            if rows.len() == 1 && rows[0].title == "sepa-report.txt"),
-        "{artifacts:#?}"
-    );
     let Block::Entities { rows, .. } = &artifacts[0] else {
-        unreachable!()
+        panic!("{artifacts:#?}");
     };
-    let download = rows[0].url.clone().expect("a download URL");
+    assert_eq!(rows.len(), 2, "{artifacts:#?}");
+    let file = rows
+        .iter()
+        .find(|r| r.title == "sepa-report.txt")
+        .unwrap_or_else(|| panic!("{artifacts:#?}"));
+    let download = file.url.clone().expect("a download URL");
     assert_eq!(seeded.status_of(&download).await, 200, "{download}");
 
     let parameters = &view.sections[5].blocks;
@@ -3406,4 +3408,216 @@ async fn a_chain_names_its_steps_and_each_runs_build_on_the_branch() {
             .expect("TeamCity keeps pipelines")
             .is_empty()
     );
+}
+
+/// The run page's reads on the seeded failed build (#854, #855, #856): the
+/// whole log split into its step, the failed test with its id and its
+/// history, the artifact folder the seed publishes and the file inside it,
+/// a preview, and a download of the folder, a file and the log -- each the
+/// bytes the server streamed, under the name the adapter suggests.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_seeded_runs_log_tests_and_artifacts_read_whole() {
+    use knobas_source::run::{DownloadSink, DownloadTarget, TestStatus};
+
+    #[derive(Default)]
+    struct Kept {
+        name: Option<String>,
+        bytes: Vec<u8>,
+    }
+    #[async_trait::async_trait]
+    impl DownloadSink for Kept {
+        async fn start(&mut self, file_name: &str) -> Result<(), knobas_source::SourceError> {
+            self.name = Some(file_name.to_owned());
+            Ok(())
+        }
+        async fn write(&mut self, bytes: &[u8]) -> Result<(), knobas_source::SourceError> {
+            self.bytes.extend_from_slice(bytes);
+            Ok(())
+        }
+    }
+
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let failed = seeded.fixture_build(1187).real_id;
+    let run = format!("teamcity:build:{failed}");
+    let source = seeded.source(serde_json::json!({}));
+
+    // -- the whole log (#854) --
+    let log = source
+        .run_log(&run, None, knobas_source::run::LOG_LINES_MAX)
+        .await
+        .expect("the log reads")
+        .expect("TeamCity keeps runs");
+    println!(
+        "SEEDED RUN LOG {run}: {} lines, steps {:?}",
+        log.total, log.steps
+    );
+    for line in &log.lines {
+        println!(
+            "{:>4} {:?} {:<8} {:?} {}",
+            line.number,
+            line.step,
+            line.time.as_deref().unwrap_or(""),
+            line.tone,
+            line.text
+        );
+    }
+    assert_eq!(
+        log.lines.len() as u64,
+        log.total,
+        "the whole seeded log is under the cap"
+    );
+    assert_eq!(
+        log.steps.len(),
+        1,
+        "the configuration has one step: {:?}",
+        log.steps
+    );
+    let step = &log.steps[0];
+    let failing = log
+        .lines
+        .iter()
+        .find(|l| {
+            l.text
+                .ends_with("test sepa::retry::gives_up_after_max_attempts ... FAILED")
+        })
+        .expect("the step's own output is in the log");
+    assert_eq!(failing.step, Some(0), "its line is inside the step");
+    assert!(step.first < failing.number && failing.number <= step.last);
+    assert!(
+        log.lines
+            .iter()
+            .any(|l| l.tone == Some(knobas_source::Tone::Err)),
+        "the failure is an error line"
+    );
+    let head = source.run_log(&run, Some(1), 3).await.unwrap().unwrap();
+    assert_eq!(
+        head.lines.iter().map(|l| l.number).collect::<Vec<_>>(),
+        [1, 2, 3]
+    );
+    assert_eq!(head.total, log.total);
+
+    // -- the tests and one test's history (#855) --
+    let tests = source
+        .run_tests(&run)
+        .await
+        .expect("the tests read")
+        .expect("runs");
+    println!("SEEDED RUN TESTS: {tests:?}");
+    let test = &tests.tests[0];
+    assert_eq!(test.name, "sepa::retry::gives_up_after_max_attempts");
+    assert_eq!(
+        (test.status, test.module.as_deref()),
+        (TestStatus::Failed, Some("sepa::retry"))
+    );
+    let id = test
+        .id
+        .clone()
+        .expect("TeamCity names the test across runs");
+    let history = source
+        .test_history(&run, &id)
+        .await
+        .expect("the history reads")
+        .expect("runs");
+    println!("SEEDED TEST HISTORY {id}: {history:?}");
+    let this = history
+        .iter()
+        .find(|o| o.run == run)
+        .unwrap_or_else(|| panic!("the run itself is in its test's history: {history:?}"));
+    assert_eq!(this.status, TestStatus::Failed);
+    assert!(history.len() <= 10);
+
+    // -- the artifacts, a folder of them, a preview and the downloads (#856) --
+    let root = source
+        .run_artifacts(&run, "")
+        .await
+        .expect("the root reads")
+        .expect("runs");
+    println!("SEEDED ARTIFACTS: {root:?}");
+    let folder = root
+        .iter()
+        .find(|e| e.folder)
+        .expect("the seed publishes a folder");
+    assert_eq!(folder.path, "reports");
+    let inside = source
+        .run_artifacts(&run, &folder.path)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        inside.iter().map(|e| e.path.as_str()).collect::<Vec<_>>(),
+        ["reports/sepa-report.txt"]
+    );
+    let preview = source
+        .artifact_preview(&run, "reports/sepa-report.txt")
+        .await
+        .expect("the preview reads")
+        .expect("runs");
+    let text = preview.text.expect("the report is text");
+    assert!(
+        text.contains("test sepa::retry::gives_up_after_max_attempts ... FAILED"),
+        "{text}"
+    );
+
+    let mut file = Kept::default();
+    assert!(
+        source
+            .download(
+                &run,
+                &DownloadTarget::File {
+                    path: "sepa-report.txt".into()
+                },
+                &mut file
+            )
+            .await
+            .expect("the file downloads")
+    );
+    assert_eq!(
+        (file.name.as_deref(), file.bytes.as_slice()),
+        (Some("sepa-report.txt"), text.as_bytes())
+    );
+    let mut zip = Kept::default();
+    assert!(
+        source
+            .download(
+                &run,
+                &DownloadTarget::Folder {
+                    path: "reports".into()
+                },
+                &mut zip
+            )
+            .await
+            .expect("the folder downloads")
+    );
+    assert_eq!(zip.name.as_deref(), Some("reports.zip"));
+    assert!(
+        zip.bytes.starts_with(b"PK"),
+        "a zip: {:?}",
+        &zip.bytes[..zip.bytes.len().min(16)]
+    );
+    let mut whole = Kept::default();
+    assert!(
+        source
+            .download(&run, &DownloadTarget::Log, &mut whole)
+            .await
+            .expect("the log downloads")
+    );
+    assert_eq!(
+        whole.name.as_deref(),
+        Some("Payout_IntegrationTests-1187.log")
+    );
+    assert_eq!(
+        String::from_utf8_lossy(&whole.bytes).lines().count() as u64,
+        log.total,
+        "the download is the log the read counted"
+    );
+    let mut all = Kept::default();
+    assert!(
+        source
+            .download(&run, &DownloadTarget::All, &mut all)
+            .await
+            .expect("every artifact downloads")
+    );
+    assert!(all.bytes.starts_with(b"PK"), "a zip");
 }

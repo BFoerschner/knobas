@@ -4,16 +4,33 @@
  * this module calls nothing.
  */
 import {
+  artifactPreview,
+  downloadRunFile,
   entityView,
   getEntity,
   listEntities,
   olderPipelineRuns,
   pipelineSettings,
+  runArtifacts,
+  runLog,
   runPresets,
+  runTests,
   saveRunPreset,
   submitWrite,
+  testHistory,
 } from "../../ipc/entity";
-import type { PipelineSettings, RunPreset, RunRow, SourceView } from "../../ipc/entity";
+import type {
+  ArtifactEntry,
+  ArtifactPreview,
+  DownloadTarget,
+  PipelineSettings,
+  RunLog,
+  RunPreset,
+  RunRow,
+  RunTests,
+  SourceView,
+  TestOutcome,
+} from "../../ipc/entity";
 import {
   listAdapters,
   listSources,
@@ -117,9 +134,27 @@ export const BRIDGE: PipelinePorts = {
 export interface RunPorts extends PipelinePorts {
   /** The run's view (`entity_view`): the whole of it, or the one section named. */
   view: (runId: string, section?: string) => Promise<SourceView | null>;
+  /** The last lines of the run's whole log, up to the cap, and its steps (`run_log`, #854). */
+  log: (runId: string) => Promise<RunLog | null>;
+  /** The run's tests, failed first (`run_tests`, #855). */
+  tests: (runId: string) => Promise<RunTests | null>;
+  /** One test's last ten outcomes (`test_history`, #855). */
+  history: (runId: string, testId: string) => Promise<TestOutcome[] | null>;
+  /** One artifact folder, `""` the root (`run_artifacts`, #856). */
+  artifacts: (runId: string, path: string) => Promise<ArtifactEntry[] | null>;
+  /** The head of one text artifact (`artifact_preview`, #856). */
+  preview: (runId: string, path: string) => Promise<ArtifactPreview | null>;
+  /** Stream one into the downloads folder; the saved path (`download_run_file`, D8). */
+  download: (runId: string, target: DownloadTarget) => Promise<string | null>;
 }
 
 export const RUN_BRIDGE: RunPorts = {
   ...BRIDGE,
   view: (runId, section) => entityView(runId, section ?? null),
+  log: (runId) => runLog(runId),
+  tests: (runId) => runTests(runId),
+  history: (runId, testId) => testHistory(runId, testId),
+  artifacts: (runId, path) => runArtifacts(runId, path === "" ? null : path),
+  preview: (runId, path) => artifactPreview(runId, path),
+  download: (runId, target) => downloadRunFile(runId, target),
 };

@@ -660,6 +660,135 @@ export function pipelineSettings(pipelineId: string): Promise<PipelineSettings |
   return invoke<PipelineSettings | null>("pipeline_settings", { pipelineId });
 }
 
+/** A range of a run's log — `knobas_source::run::RunLog` (#854). */
+export interface RunLog {
+  lines: LogLine[];
+  /** The run's steps over the whole log, whether or not their lines are here. */
+  steps: LogStep[];
+  /** How many lines the whole log has. */
+  total: number;
+}
+
+/** One log line — `knobas_source::run::LogLine`. */
+export interface LogLine {
+  /** Its place in the whole log, from 1. */
+  number: number;
+  /** The source's stamp, as written (`10:06:12`). */
+  time: string | null;
+  text: string;
+  /** `err` or `warn` where the source marked it; `null` otherwise. */
+  tone: Tone | null;
+  /** Index into `RunLog.steps`; `null` outside every step. */
+  step: number | null;
+}
+
+/** One step, as a range of the log's lines — `knobas_source::run::LogStep`. */
+export interface LogStep {
+  name: string;
+  first: number;
+  last: number;
+  seconds: number | null;
+  tone: Tone | null;
+}
+
+/** A run's tests — `knobas_source::run::RunTests` (#855). */
+export interface RunTests {
+  /** Failed first. */
+  tests: RunTest[];
+  /** The run has more tests than these. */
+  truncated: boolean;
+}
+
+/** How a test came out — `knobas_source::run::TestStatus`. */
+export type TestStatus = "failed" | "passed" | "ignored";
+
+/** One test of a run — `knobas_source::run::RunTest`. */
+export interface RunTest {
+  /** The source's id for the test across runs, for its history. */
+  id: string | null;
+  name: string;
+  module: string | null;
+  status: TestStatus;
+  muted: boolean;
+  new_failure: boolean;
+  duration_ms: number | null;
+  /** The assertion and stack, as the source wrote them. */
+  details: string | null;
+}
+
+/** One test's outcome in one run — `knobas_source::run::TestOutcome` (#855). */
+export interface TestOutcome {
+  /** The run's entity id. */
+  run: string;
+  number: string | null;
+  branch: string | null;
+  status: TestStatus;
+}
+
+/** One entry of an artifact folder — `knobas_source::run::ArtifactEntry` (#856). */
+export interface ArtifactEntry {
+  /** From the artifacts' root, `/`-separated. */
+  path: string;
+  name: string;
+  /** Bytes; `null` for a folder. */
+  size: number | null;
+  folder: boolean;
+  /** How many entries a folder holds, where the source says. */
+  children: number | null;
+}
+
+/** The head of a text artifact — `knobas_source::run::ArtifactPreview` (#856). */
+export interface ArtifactPreview {
+  /** `null` for a file that is not text. */
+  text: string | null;
+  truncated: boolean;
+}
+
+/** What one download streams — `knobas_source::run::DownloadTarget`, tagged on `kind`. */
+export type DownloadTarget =
+  | { kind: "log" }
+  | { kind: "file"; path: string }
+  | { kind: "folder"; path: string }
+  | { kind: "all" };
+
+/**
+ * A range of a run's whole log and its steps (#854): `count` lines (the cap
+ * when omitted) from line `from`, or the last `count` when `from` is `null`.
+ * `null` for a source that keeps no runs.
+ */
+export function runLog(runId: string, from: number | null = null, count: number | null = null): Promise<RunLog | null> {
+  return invoke<RunLog | null>("run_log", { runId, from, count });
+}
+
+/** A run's tests, failed first (#855). */
+export function runTests(runId: string): Promise<RunTests | null> {
+  return invoke<RunTests | null>("run_tests", { runId });
+}
+
+/** How one test came out in the last ten runs of the run's pipeline, newest first (#855). */
+export function testHistory(runId: string, testId: string): Promise<TestOutcome[] | null> {
+  return invoke<TestOutcome[] | null>("test_history", { runId, testId });
+}
+
+/** One folder of a run's artifacts; `null` path is the root (#856). */
+export function runArtifacts(runId: string, path: string | null = null): Promise<ArtifactEntry[] | null> {
+  return invoke<ArtifactEntry[] | null>("run_artifacts", { runId, path });
+}
+
+/** The head of one text artifact, for *Preview* (#856). */
+export function artifactPreview(runId: string, path: string): Promise<ArtifactPreview | null> {
+  return invoke<ArtifactPreview | null>("artifact_preview", { runId, path });
+}
+
+/**
+ * Stream a log, file, folder or every artifact into the downloads folder
+ * with the stored credential (D8, #856); the saved file's path, or `null`
+ * for a source that keeps no runs.
+ */
+export function downloadRunFile(runId: string, target: DownloadTarget): Promise<string | null> {
+  return invoke<string | null>("download_run_file", { runId, target });
+}
+
 /**
  * What a pasted URL named — `knobas_app::commands::entity::UrlMatch` (#496).
  *

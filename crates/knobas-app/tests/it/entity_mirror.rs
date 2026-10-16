@@ -2166,3 +2166,118 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         assert!(MIRROR.contains(command), "{command} is not invoked");
     }
 }
+
+/// #854 to #856's run reads: every field on the wire, through each shape the
+/// run page draws, and the test status on both sides.
+#[test]
+fn the_run_read_shapes_match_their_typescript_mirror() {
+    use knobas_source::run::{
+        ArtifactEntry, ArtifactPreview, LogLine, LogStep, RunLog, RunTest, RunTests, TestOutcome,
+        TestStatus,
+    };
+    let log = RunLog {
+        lines: vec![LogLine {
+            number: 1,
+            time: None,
+            text: String::new(),
+            tone: None,
+            step: None,
+        }],
+        steps: vec![LogStep {
+            name: String::new(),
+            first: 1,
+            last: 1,
+            seconds: None,
+            tone: None,
+        }],
+        total: 1,
+    };
+    let wire = serde_json::to_value(&log).unwrap();
+    assert_shape("RunLog", &wire, &["lines", "steps", "total"]);
+    assert_shape(
+        "LogLine",
+        &wire["lines"][0],
+        &["number", "step", "text", "time", "tone"],
+    );
+    assert_shape(
+        "LogStep",
+        &wire["steps"][0],
+        &["first", "last", "name", "seconds", "tone"],
+    );
+    let tests = RunTests {
+        tests: vec![RunTest {
+            id: None,
+            name: String::new(),
+            module: None,
+            status: TestStatus::Failed,
+            muted: false,
+            new_failure: false,
+            duration_ms: None,
+            details: None,
+        }],
+        truncated: false,
+    };
+    let wire = serde_json::to_value(&tests).unwrap();
+    assert_shape("RunTests", &wire, &["tests", "truncated"]);
+    assert_shape(
+        "RunTest",
+        &wire["tests"][0],
+        &[
+            "details",
+            "duration_ms",
+            "id",
+            "module",
+            "muted",
+            "name",
+            "new_failure",
+            "status",
+        ],
+    );
+    let outcome = TestOutcome {
+        run: String::new(),
+        number: None,
+        branch: None,
+        status: TestStatus::Passed,
+    };
+    assert_shape(
+        "TestOutcome",
+        &serde_json::to_value(&outcome).unwrap(),
+        &["branch", "number", "run", "status"],
+    );
+    let statuses: Vec<String> = [TestStatus::Failed, TestStatus::Passed, TestStatus::Ignored]
+        .iter()
+        .map(|s| {
+            serde_json::to_value(s)
+                .unwrap()
+                .as_str()
+                .unwrap()
+                .to_owned()
+        })
+        .collect();
+    assert_same_members(
+        &statuses.iter().map(String::as_str).collect::<Vec<_>>(),
+        declared_union(MIRROR, "TestStatus"),
+        "a status declared on one side only is a test the page cannot sort",
+    );
+    let entry = ArtifactEntry {
+        path: String::new(),
+        name: String::new(),
+        size: None,
+        folder: true,
+        children: None,
+    };
+    assert_shape(
+        "ArtifactEntry",
+        &serde_json::to_value(&entry).unwrap(),
+        &["children", "folder", "name", "path", "size"],
+    );
+    let preview = ArtifactPreview {
+        text: None,
+        truncated: false,
+    };
+    assert_shape(
+        "ArtifactPreview",
+        &serde_json::to_value(&preview).unwrap(),
+        &["text", "truncated"],
+    );
+}

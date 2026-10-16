@@ -86,7 +86,7 @@ pub(crate) trait Rest: Send + Sync {
 /// The real transport.
 #[derive(Debug)]
 pub(crate) struct HttpRest {
-    client: HttpClient,
+    pub(crate) client: HttpClient,
 }
 
 impl HttpRest {
