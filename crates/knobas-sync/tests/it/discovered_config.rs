@@ -27,10 +27,14 @@ type Built = Arc<Mutex<Vec<serde_json::Value>>>;
 /// Every position a sync was handed, in order.
 type Handed = Arc<Mutex<Vec<Option<Cursor>>>>;
 
+/// Whether the far end fails the sync itself.
+type Fails = Arc<std::sync::atomic::AtomicBool>;
+
 struct Fake {
     id: String,
     discovery: Discovery,
     handed: Handed,
+    fails: Fails,
 }
 
 #[async_trait::async_trait]
@@ -91,6 +95,9 @@ impl Source for Fake {
         _sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
         self.handed.lock().unwrap().push(cursor.clone());
+        if self.fails.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(SourceError::protocol("the far end failed the sync"));
+        }
         Ok(cursor.unwrap_or_else(|| "from-the-top".to_owned()))
     }
 
@@ -110,6 +117,7 @@ struct Registry {
     discovery: Discovery,
     built: Built,
     handed: Handed,
+    fails: Fails,
 }
 
 impl AdapterRegistry for Registry {
@@ -119,6 +127,7 @@ impl AdapterRegistry for Registry {
                 id: "fieldy".to_owned(),
                 discovery: self.discovery.clone(),
                 handed: Arc::clone(&self.handed),
+                fails: Arc::clone(&self.fails),
             }
             .descriptor(),
         ]
@@ -130,6 +139,7 @@ impl AdapterRegistry for Registry {
             id: instance.id,
             discovery: self.discovery.clone(),
             handed: Arc::clone(&self.handed),
+            fails: Arc::clone(&self.fails),
         }))
     }
 }
@@ -154,6 +164,7 @@ struct Harness {
     deps: SchedulerDeps,
     built: Built,
     handed: Handed,
+    fails: Fails,
     id: String,
 }
 
@@ -186,6 +197,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
         .unwrap();
     let built: Built = Arc::default();
     let handed: Handed = Arc::default();
+    let fails: Fails = Arc::default();
     Harness {
         deps: SchedulerDeps {
             pool,
@@ -194,6 +206,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
                 discovery,
                 built: Arc::clone(&built),
                 handed: Arc::clone(&handed),
+                fails: Arc::clone(&fails),
             }),
             secrets: Arc::new(store),
             events: Arc::new(Quiet),
@@ -201,6 +214,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
         },
         built,
         handed,
+        fails,
         id,
     }
 }
@@ -342,6 +356,32 @@ async fn the_run_that_records_an_id_on_a_source_with_a_position_is_a_backfill() 
         [None, Some("from-the-top".to_owned())]
     );
     assert_eq!(last_trigger(&h).await, "manual");
+}
+
+/// A recording run that fails records nothing, so the next run discovers the
+/// id again and is the backfill instead: one failure never strands the
+/// untouched tickets on the old position.
+#[tokio::test]
+async fn a_recording_run_that_fails_records_nothing_and_the_next_one_backfills() {
+    let h = harness(
+        serde_json::json!({}),
+        Discovery::Fields(vec![("sprint_field", "customfield_10104")]),
+    )
+    .await;
+    with_position(&h, "pos-1").await;
+    h.fails.store(true, std::sync::atomic::Ordering::SeqCst);
+    assert_ne!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(stored(&h).await, serde_json::json!({}), "nothing recorded");
+
+    h.fails.store(false, std::sync::atomic::Ordering::SeqCst);
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(
+        *h.handed.lock().unwrap(),
+        [None, None],
+        "both read from the top"
+    );
+    assert_eq!(last_trigger(&h).await, "backfill");
+    assert_eq!(stored(&h).await["sprint_field"], "customfield_10104");
 }
 
 #[tokio::test]

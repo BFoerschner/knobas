@@ -5006,15 +5006,42 @@ async fn a_second_page_with_one_title_in_one_space_is_refused() {
     assert_eq!(named, [id.as_str()], "one page, not two");
 }
 
+/// One *Sync now*, waited for to its ending.
+async fn sync_now(state: &SourcesState, source: &str) {
+    let (sink, wait) = Ending::for_run();
+    state
+        .scheduler
+        .trigger(source, SyncTrigger::Manual, Some(sink))
+        .await
+        .expect("the sync starts");
+    wait.await.expect("the run reports its ending");
+}
+
+/// Tickets in the mirror whose `sprints` carry an active sprint.
+async fn in_an_active_sprint(pool: &sqlx::PgPool) -> i64 {
+    sqlx::query_scalar(
+        "select count(*) from sync.live_item
+          where source_id = $1 and jsonb_array_length(payload->'sprints') > 0
+            and payload->'sprints' @> '[{\"state\": \"active\"}]'::jsonb",
+    )
+    .bind(JIRA)
+    .fetch_one(pool)
+    .await
+    .expect("the mirror is readable")
+}
+
 /// **A Jira source saved with neither field id gets both at its next sync, and
-/// that sync stores the active sprint** (#889).
+/// that sync stores the active sprint on tickets nobody touched** (#889).
 ///
-/// The saved row names only a username, as every source saved before #297 and
-/// #811 does. One backfill later the row's config names the instance's own
+/// A source saved before #297 and #811 names only a username, has a stored
+/// position, and mirrors every ticket with no sprint. This test builds exactly
+/// that: one sync, then the two ids and every mirrored `sprints` taken away
+/// again, the position kept. The next *Sync now* records the instance's own
 /// Epic Link and Sprint field ids (the same ones *Test connection* answers),
-/// and the mirror holds a ticket whose `sprints` carry the seed's active
-/// sprint -- `sprint:current` has something to match. That a typed id is kept
-/// is `knobas-sync`'s `discovered_config` suite.
+/// runs as a backfill because an incremental run from the position would not
+/// re-fetch the untouched tickets, and the mirror again holds tickets in the
+/// seed's active sprint -- `sprint:current` has something to match. That a
+/// typed id is kept is `knobas-sync`'s `discovered_config` suite.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
 async fn a_saved_source_without_field_ids_gets_them_at_its_next_sync_and_stores_the_sprint() {
@@ -5035,7 +5062,40 @@ async fn a_saved_source_without_field_ids_gets_them_at_its_next_sync_and_stores_
     assert!(before.config.get("sprint_field").is_none(), "{before:?}");
     assert!(before.config.get("epic_link_field").is_none(), "{before:?}");
 
-    backfill(&state, JIRA).await;
+    // The source as #811 found it: a position, no ids, no sprints mirrored.
+    sync_now(&state, JIRA).await;
+    sqlx::query(
+        "update knobas.source_config
+            set config = config - 'sprint_field' - 'epic_link_field'
+          where id = $1",
+    )
+    .bind(JIRA)
+    .execute(&state.pool)
+    .await
+    .unwrap();
+    sqlx::query("update sync.item set payload = payload - 'sprints' where source_id = $1")
+        .bind(JIRA)
+        .execute(&state.pool)
+        .await
+        .unwrap();
+    let saved = knobas_sync::config::get(&state.pool, JIRA)
+        .await
+        .unwrap()
+        .expect("the saved source");
+    assert!(saved.cursor.is_some(), "the source has a position");
+    assert!(saved.config.get("sprint_field").is_none(), "{saved:?}");
+    assert_eq!(in_an_active_sprint(&state.pool).await, 0);
+
+    sync_now(&state, JIRA).await;
+
+    let trigger: String = sqlx::query_scalar(
+        "select trigger from knobas.sync_run where source_id = $1 order by id desc limit 1",
+    )
+    .bind(JIRA)
+    .fetch_one(&state.pool)
+    .await
+    .unwrap();
+    assert_eq!(trigger, "backfill", "the recording run read from the top");
 
     let after = knobas_sync::config::get(&state.pool, JIRA)
         .await
@@ -5058,15 +5118,7 @@ async fn a_saved_source_without_field_ids_gets_them_at_its_next_sync_and_stores_
         "the rest of the config is kept"
     );
 
-    let in_a_sprint: i64 = sqlx::query_scalar(
-        "select count(*) from sync.live_item
-          where source_id = $1 and jsonb_array_length(payload->'sprints') > 0
-            and payload->'sprints' @> '[{\"state\": \"active\"}]'::jsonb",
-    )
-    .bind(JIRA)
-    .fetch_one(&state.pool)
-    .await
-    .expect("the mirror is readable");
+    let in_a_sprint = in_an_active_sprint(&state.pool).await;
     assert!(
         in_a_sprint > 0,
         "the sync that recorded the id stored the seed's active sprint on its tickets"

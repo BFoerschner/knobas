@@ -132,7 +132,7 @@ _Avoid_: refetch
 A source's authentication state as knobas last observed it, surfaced per source in the shell. Carries what the credential's last check *said went wrong*, not what an adapter had to say about the far end when it went right — that is a [Connection note](#connection-note).
 
 **Discovered configuration**:
-A configuration value an adapter learns from the instance itself during *Test connection*, rather than one the user types. It reaches the Add-source dialog on the connection report, keyed by the config property it belongs in, and the dialog fills that field **only when it is empty** — a value somebody typed is never replaced. Jira's Epic Link custom field id is the first: it is minted per instance, so an id copied from another server reads the wrong field rather than failing (#297). Not a secret, and never written by *Test connection* itself, which writes nothing.
+A configuration value an adapter learns from the instance itself during *Test connection*, rather than one the user types. It reaches the Add-source dialog on the connection report, keyed by the config property it belongs in, and the dialog fills that field **only when it is empty** — a value somebody typed is never replaced. Jira's Epic Link custom field id is the first: it is minted per instance, so an id copied from another server reads the wrong field rather than failing (#297). Not a secret, and never written by *Test connection* itself, which writes nothing. A saved source that leaves such a field empty gets it at its next sync instead, which records it under the same rule and re-reads the source as a backfill (#889).
 _Avoid_: auto-detected, probed
 
 **Connection note**:

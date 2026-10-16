@@ -3470,3 +3470,42 @@ Ruled by the implementer (PR for #866).
   an empty answer is not recorded. A Jira Core has no Sprint field and costs those reads each
   run; recording "looked, none" would need a new stored fact. **Reversing:** medium; filed if it
   bites.
+
+Ruled by the merge-manager (PR #1018).
+
+- **The run that records an id on a source with a stored position is a backfill.** Every source
+  the ticket is about (saved before #811) has a cursor, and an incremental run re-fetches only
+  what changed upstream, so the recorded `sprint_field` never reached a ticket nobody touched:
+  the live test passed only because its source had no position. `attempt` now runs that one run
+  as `RunMode::Backfill` (no sweep, CONTEXT.md *Backfill*) and relabels its `sync_run` row
+  `backfill` (`run_log::relabel_as_backfill`), so the trigger and the mode still agree. A source
+  with no position reads from the top anyway and keeps its sweeping first run. Cost: one full
+  re-read per source, once. Pinned by
+  `the_run_that_records_an_id_on_a_source_with_a_position_is_a_backfill`. **Reversing:** low.
+- **Discovery waits at most 10 s (`DISCOVERY_BUDGET`).** On a far end that is down, the first
+  discovery read spends the HTTP client's 45 s budget before the sync spends another, so a
+  failing run took twice as long. Past the budget the run syncs without discovery and asks again
+  next time. The adapter is now built once, and again only when an id was recorded (one keychain
+  read in the common case), so the implementer's "before it builds the adapter" above now reads
+  "after building it, rebuilding it only when an id was found". The log row is relabelled
+  before the mode changes; a failed relabel leaves the run incremental.
+- **The ids are recorded only after the run that used them succeeds.** Recorded up front, a
+  recording run that failed left the ids stored and the position unmoved, so the next run had
+  nothing to record, stayed incremental, and the untouched tickets kept `sprints: []` for good.
+  `discover` now only finds; the run builds its adapter from the stored config plus the found
+  ids, and `record_discovered` writes them (still `fill_missing`, blank keys only) once the run
+  returned `Ok`. A failed run leaves the config alone and the next one discovers and backfills
+  again. Pinned by `a_recording_run_that_fails_records_nothing_and_the_next_one_backfills`.
+  **Reversing:** low.
+- **The live test now builds a pre-#811 source** (one sync, then the ids and every mirrored
+  `sprints` removed, the position kept) and witnesses the *Sync now* that records the ids running
+  as a backfill and restoring the sprints. Before, it ran from an empty mirror with no position,
+  which would have passed without the backfill. **Reversing:** n/a.
+- **Visibility is filed, not built here.** The ticket asks that "the change to the config is
+  visible"; the TF source page shows only the address and username, so the recorded ids are not
+  on screen. Building a settings field is UI work outside this ticket's diff; filed as a
+  `ready-for-agent` follow-up. **Reversing:** n/a. Pinned by `a_discovery_that_never_answers_does_not_hold_the_sync`.
+  **Reversing:** low.
+- **A reader saving the whole config mid-sync from a form opened earlier can blank the recorded
+  ids** (`config::patch` replaces `config`). The next sync records them again, at the cost of a
+  second backfill. Accepted: rare, and self-healing. **Reversing:** n/a.
