@@ -7,13 +7,26 @@
 //! CONCURRENTLY`, which leaves an invalid index behind when cancelled) and the
 //! adapters' declarations, whose change recomputes every item's parents (7.6 s
 //! at 100,000 items in the #745 review). Witnessed on a one-connection pool
-//! whose limit is a few milliseconds: each finishes anyway, and the connection
-//! the pool holds afterwards still carries the limit.
+//! with a one-second limit: each is held up for longer than that, each
+//! finishes anyway, and the connection the pool holds afterwards still carries
+//! the limit.
+//!
+//! The hold-up is a lock the test takes on a second pool and releases after
+//! [`HOLD`], not the cost of the work itself (#968). A limit of ten
+//! milliseconds raced the statements around the lifted one (the declaration
+//! read, `begin`, `commit`, the `set` itself) against machine load and
+//! cancelled them at load 17 to 25; a lock wait lasts as long as the test says
+//! whatever the machine is doing, so the limit can be far above anything a
+//! trivial statement takes.
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 
-const LIMIT: &str = "10ms";
+const LIMIT: &str = "1s";
+/// How long the lock is held: longer than [`LIMIT`] by a margin no scheduler
+/// delay closes.
+const HOLD: std::time::Duration = std::time::Duration::from_millis(2500);
+const TICKETS: i64 = 200;
 
 /// A one-connection pool onto a fresh database whose statements are cancelled
 /// after [`LIMIT`], and a second pool without one for the setup.
@@ -29,7 +42,6 @@ async fn limited(label: &str) -> (PgPool, PgPool) {
         .connect_with(options)
         .await
         .unwrap();
-    // 20,000 tickets: enough that neither statement fits in ten milliseconds.
     sqlx::query(
         "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
          values ('jira', 'jira', 'Jira', 'http://x', 'Pat')",
@@ -40,7 +52,7 @@ async fn limited(label: &str) -> (PgPool, PgPool) {
     sqlx::query(
         "insert into knobas.entity (id, kind, title)
          select 'jira:PAY-' || g, 'ticket', 'payout retry storm ' || g
-           from generate_series(1, 20000) g",
+           from generate_series(1, 200) g",
     )
     .execute(&free)
     .await
@@ -68,11 +80,26 @@ async fn limit_of(pool: &PgPool) -> String {
 
 #[tokio::test]
 async fn reindex_runs_past_the_ui_limit_and_leaves_it_in_place() {
-    let (_free, pool) = limited("limit_reindex").await;
+    let (free, pool) = limited("limit_reindex").await;
     assert_eq!(limit_of(&pool).await, LIMIT);
 
-    knobas_sync::stats::reindex_fts(&pool)
+    // `REINDEX CONCURRENTLY` waits for every transaction that holds a write
+    // lock on the table to end.
+    let mut older = free.begin().await.unwrap();
+    sqlx::query("lock table sync.item in row exclusive mode")
+        .execute(&mut *older)
         .await
+        .unwrap();
+    let rebuild = tokio::spawn({
+        let pool = pool.clone();
+        async move { knobas_sync::stats::reindex_fts(&pool).await }
+    });
+    tokio::time::sleep(HOLD).await;
+    assert!(!rebuild.is_finished(), "the rebuild is held past the limit");
+    older.commit().await.unwrap();
+    rebuild
+        .await
+        .unwrap()
         .expect("a rebuild longer than the pool's limit still finishes");
     assert_eq!(
         limit_of(&pool).await,
@@ -89,15 +116,36 @@ async fn a_declaration_recompute_runs_past_the_ui_limit_and_leaves_it_in_place()
         .await
         .unwrap();
 
-    knobas_app::commands::search::searcher(&pool)
+    // The recompute writes `sync.item_parent`; a share lock holds it up.
+    let mut blocker = free.begin().await.unwrap();
+    sqlx::query("lock table sync.item_parent in share mode")
+        .execute(&mut *blocker)
         .await
+        .unwrap();
+    let recompute = tokio::spawn({
+        let pool = pool.clone();
+        async move {
+            knobas_app::commands::search::searcher(&pool)
+                .await
+                .map(|_| ())
+        }
+    });
+    tokio::time::sleep(HOLD).await;
+    assert!(
+        !recompute.is_finished(),
+        "the recompute is held past the limit"
+    );
+    blocker.commit().await.unwrap();
+    recompute
+        .await
+        .unwrap()
         .expect("a recompute longer than the pool's limit still finishes");
     let parents: i64 = sqlx::query_scalar("select count(*) from sync.item_parent")
         .fetch_one(&free)
         .await
         .unwrap();
     assert!(
-        parents >= 20_000,
+        parents >= TICKETS,
         "the recompute ran: {parents} parent rows"
     );
     assert_eq!(
