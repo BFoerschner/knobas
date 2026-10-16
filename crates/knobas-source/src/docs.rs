@@ -43,6 +43,9 @@ pub struct DocContent {
     /// The version number the source gives this revision, or `None` where the
     /// record names none.
     pub version: Option<u64>,
+    /// The display name of who made this revision, where the record carries
+    /// one; the account name is the normalized `author`.
+    pub editor_name: Option<String>,
     /// The page's labels, in the source's order.
     pub labels: Vec<String>,
     /// The page body.

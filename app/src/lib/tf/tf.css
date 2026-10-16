@@ -1046,4 +1046,112 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-bv { grid-template-columns: 1fr; height: auto; }
   .tf-pl { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 50vh; }
   .tf-runs { padding-left: 16px; padding-right: 16px; }
+/* ---------- Docs: the reader (#859, requirements §10, prototype-6's .rd) ---------- */
+.tf-rd { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
+.tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
+.tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
+.tf-dl-head select {
+  font: 600 var(--t-md) var(--sans); border: 1px solid var(--rule); border-radius: 5px; padding: 6px 8px;
+  background: var(--paper); color: var(--ink); width: 100%;
+}
+.tf-dl-body { overflow: auto; flex: 1; padding: 6px 0 12px; }
+.tf-dl-note { padding: 12px 14px; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-doc .tf-dl-note { padding: 0; font-family: var(--sans); font-size: var(--t-md); }
+.tf-rd-tree a {
+  display: block; padding: 4px 12px; text-decoration: none; font-size: var(--t-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tf-rd-tree a:hover { background: var(--sheet-2); }
+.tf-rd-tree a[aria-current="true"] { background: var(--ink); color: var(--sheet); }
+.tf-rd-tree details > summary {
+  list-style: none; cursor: pointer; padding: 4px 12px; font-size: var(--t-sm);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.tf-rd-tree details > summary::-webkit-details-marker { display: none; }
+.tf-rd-tree details > summary::before { content: "▸ "; color: var(--ink-2); font-size: 10px; }
+.tf-rd-tree details[open] > summary::before { content: "▾ "; }
+.tf-rd-tree details > summary:hover { background: var(--sheet-2); }
+.tf-rd-tree details > summary.tf-cur { background: var(--ink); color: var(--sheet); }
+.tf-rd-tree details > summary.tf-cur::before { color: inherit; }
+.tf-rd-tree summary a.tf-sl { display: inline; padding: 0; color: inherit; background: none; }
+.tf-rd-tree .tf-fold-in { padding-left: 16px; }
+.tf-rd-tree summary.tf-spc { font-weight: 600; color: var(--ink-2); margin-top: 4px; }
+.tf-rd-main { overflow: auto; min-height: 0; }
+.tf-rd-page { max-width: 74ch; margin: 0 auto; padding: 22px 32px 90px; }
+.tf-rd-crumb { font-size: 12.5px; color: var(--ink-2); }
+.tf-rd-crumb a { color: inherit; }
+.tf-rd-crumb a.tf-jobchip { text-decoration: none; padding: 1px 6px; }
+.tf-rd-title {
+  font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
+}
+.tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
+.tf-rd-acts {
+  display: flex; gap: 6px; flex-wrap: wrap; margin: 16px 0 4px; padding-bottom: 14px; border-bottom: 1px solid var(--rule);
+}
+.tf-rd-acts .tf-openin { margin-left: auto; }
+.tf-doc { font-family: var(--serif); font-size: 17.5px; line-height: 1.65; color: var(--ink); }
+.tf-doc h2 { font-family: var(--serif); font-size: 25px; line-height: 1.25; margin: 36px 0 10px; font-weight: 600; scroll-margin-top: 50px; }
+.tf-doc h2 .tf-tools {
+  font-family: var(--sans); font-size: var(--t-xs); font-weight: 400; opacity: 0; margin-left: 10px;
+  vertical-align: 4px; display: inline-flex; gap: 4px;
+}
+.tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:focus-within { opacity: 1; }
+.tf-doc h2 .tf-tools a {
+  border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
+  color: var(--ink-2); text-decoration: none; font: inherit;
+}
+.tf-doc p { margin: 0 0 15px; }
+.tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
+.tf-doc li { margin: 4px 0; }
+.tf-doc li > p:last-child, .tf-doc .tf-callout p:last-child { margin-bottom: 0; }
+.tf-doc code { font: .82em var(--mono); background: var(--sheet-2); padding: 1px 5px; border-radius: 3px; }
+.tf-doc pre {
+  font: 13.5px/1.55 var(--mono); background: var(--sheet-2); border: 1px solid var(--rule); border-radius: 6px;
+  padding: 12px 14px; overflow: auto; position: relative; margin: 0 0 18px; white-space: pre;
+}
+.tf-doc pre code { font: inherit; background: none; padding: 0; }
+.tf-doc pre .tf-copy { position: absolute; top: 6px; right: 6px; font: var(--t-xs) var(--sans); }
+.tf-doc pre .tf-lang { position: absolute; bottom: 4px; right: 10px; font: var(--t-2xs) var(--sans); color: var(--ink-2); }
+.tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 14.5px; line-height: 1.45; margin: 0 0 18px; }
+.tf-doc th, .tf-doc td { border: 1px solid var(--rule); padding: 7px 10px; text-align: left; vertical-align: top; }
+.tf-doc th { background: var(--sheet-2); font-weight: 600; }
+.tf-callout {
+  display: flex; gap: 10px; border-radius: 6px; padding: 11px 14px; margin: 0 0 18px; font-family: var(--sans);
+  font-size: var(--t-lg); line-height: 1.5; border-left: 4px solid;
+}
+.tf-callout.tf-info { background: var(--info-bg); border-color: var(--info); }
+.tf-callout.tf-warn { background: var(--warn-bg); border-color: var(--warn); }
+.tf-callout.tf-note { background: var(--sheet-2); border-color: var(--ink-2); }
+.tf-callout.tf-ok { background: var(--ok-bg); border-color: var(--ok); }
+.tf-callout .tf-lbl { font-weight: 700; white-space: nowrap; }
+.tf-macro {
+  border: 1px dashed var(--ink-2); border-radius: 6px; padding: 10px 14px; font-family: var(--sans); font-size: var(--t-md);
+  color: var(--ink-2); margin: 0 0 18px; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.tf-macro .tf-btn { margin-left: auto; }
+.tf-tchip {
+  display: inline-flex; gap: 5px; align-items: baseline; font-family: var(--sans); font-size: 13.5px; padding: 0 6px;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); text-decoration: none; white-space: nowrap; line-height: 1.5;
+}
+.tf-tchip .tf-k { font: 600 var(--t-xs) var(--mono); }
+.tf-tchip .tf-chip { font-size: var(--t-2xs); padding: 0 5px; }
+.tf-ment { font-family: var(--sans); font-size: .85em; font-weight: 600; color: var(--info); background: var(--info-bg); padding: 0 4px; border-radius: 3px; }
+.tf-ment.tf-me { background: var(--card); color: var(--card-ink); }
+.tf-doc a.tf-pgl, .tf-doc .tf-doc-link {
+  color: var(--info); text-decoration: underline; text-underline-offset: 2px;
+}
+.tf-doc .tf-doc-link { border: 0; background: none; padding: 0; font: inherit; cursor: pointer; }
+.tf-cmts { border-top: 1px solid var(--rule); margin-top: 44px; padding-top: 18px; font-family: var(--sans); }
+.tf-cmts h2 { font-family: var(--sans); font-size: 16px; margin: 0 0 12px; }
+.tf-cmts .tf-msg { margin-bottom: 10px; font-size: var(--t-md); line-height: 1.5; }
+.tf-cmts .tf-av { width: 28px; height: 28px; }
+.tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
+.tf-cmts .tf-who b { color: var(--ink); }
+.tf-cmts .tf-cmt-body p { margin: 2px 0 6px; }
+@media (max-width: 1240px) { .tf-rd { grid-template-columns: 220px minmax(0, 1fr); } }
+@media (max-width: 900px) {
+  .tf-rd { grid-template-columns: minmax(0, 1fr); height: auto; }
+  .tf-rd-tree { display: none; }
+  .tf-rd-page { padding: 18px 16px 60px; }
+  .tf-rd-title { font-size: 30px; }
 }

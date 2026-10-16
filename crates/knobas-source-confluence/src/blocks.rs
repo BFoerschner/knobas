@@ -83,8 +83,14 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
         .and_then(Value::as_array)
         .map(|comments| comments.iter().filter_map(|c| comment(c, &people)).collect())
         .unwrap_or_default();
+    let editor_name = payload
+        .pointer("/version/by/displayName")
+        .and_then(Value::as_str)
+        .filter(|name| !name.trim().is_empty())
+        .map(str::to_owned);
     Some(DocContent {
         version,
+        editor_name,
         labels,
         blocks: to_blocks(storage, &people),
         comments,
@@ -1128,6 +1134,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         });
         let doc = doc_content("page", &payload).expect("a page projects");
         assert_eq!(doc.version, Some(31));
+        assert_eq!(doc.editor_name.as_deref(), Some("Tomasz Wójcik"));
         assert_eq!(doc.labels, vec!["ops", "on-call"]);
         assert_eq!(
             doc.blocks,

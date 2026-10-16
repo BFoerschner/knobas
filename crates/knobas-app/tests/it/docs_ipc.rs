@@ -171,6 +171,7 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     assert_eq!(doc.ancestors[0].title, "Ops home");
     assert_eq!(doc.ancestors[0].entity_id.as_deref(), Some(home.as_str()));
     assert_eq!(doc.editor.as_deref(), Some("tomasz"));
+    assert_eq!(doc.editor_name.as_deref(), Some("Tomasz Wójcik"));
     assert_eq!(doc.web_url.as_deref(), Some("http://x/pages/1"));
     assert!(doc.readable);
     assert_eq!(doc.version, Some(7));

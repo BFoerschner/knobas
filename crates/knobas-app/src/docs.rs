@@ -75,6 +75,8 @@ pub struct DocPage {
     pub ancestors: Vec<DocAncestor>,
     /// Who made this version (contract §4.1's `author`).
     pub editor: Option<String>,
+    /// The editor's display name, where the source's record carries one.
+    pub editor_name: Option<String>,
     pub updated_at: Option<DateTime<Utc>>,
     /// The page in the source (*Open in Confluence*).
     pub web_url: Option<String>,
@@ -263,6 +265,7 @@ pub async fn page(
     let readable = content.is_some();
     let mut content = content.unwrap_or(knobas_source::docs::DocContent {
         version: None,
+        editor_name: None,
         labels: Vec::new(),
         blocks: Vec::new(),
         comments: Vec::new(),
@@ -381,6 +384,7 @@ pub async fn page(
         space,
         ancestors,
         editor: row.get("author"),
+        editor_name: content.editor_name,
         updated_at: row.get("item_updated_at"),
         web_url: row.get("web_url"),
         readable,

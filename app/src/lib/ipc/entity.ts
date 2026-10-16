@@ -2516,6 +2516,8 @@ export interface DocPage {
   ancestors: DocAncestor[];
   /** Who made this version, in the source's account spelling. */
   editor: string | null;
+  /** The editor's display name, where the source's record carries one. */
+  editor_name: string | null;
   updated_at: string | null;
   /** The page in the source. */
   web_url: string | null;
