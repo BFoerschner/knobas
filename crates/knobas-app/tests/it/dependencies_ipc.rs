@@ -565,10 +565,6 @@ fn names(layers: &[dependencies::Layer]) -> Vec<String> {
     layers.iter().map(|layer| layer.name.clone()).collect()
 }
 
-fn code_of(error: &knobas_app::IpcError) -> knobas_app::IpcErrorCode {
-    error.code
-}
-
 /// A layer's name stays unique on every write that sets one: adding and
 /// renaming both refuse a name already taken, by case and outer spaces, with
 /// R-11.13's sentence; a blank name is refused as invalid.
@@ -585,7 +581,7 @@ async fn adding_and_renaming_a_layer_keep_the_names_unique() {
     let refused = dependencies::create_layer(&pool, " services ")
         .await
         .expect_err("Services is taken");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Conflict);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Conflict);
     assert_eq!(
         refused.message,
         "There is already a layer called services. Names are unique, so a name always means the same things."
@@ -594,12 +590,12 @@ async fn adding_and_renaming_a_layer_keep_the_names_unique() {
     let refused = dependencies::rename_layer(&pool, &mesh.id, "WORK")
         .await
         .expect_err("Work is taken");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Conflict);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Conflict);
 
     let refused = dependencies::rename_layer(&pool, &mesh.id, "   ")
         .await
         .expect_err("blank");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
     assert_eq!(refused.message, "A layer needs a name.");
 
     // Renaming a layer to its own name in another case is not a clash with itself.
@@ -611,7 +607,7 @@ async fn adding_and_renaming_a_layer_keep_the_names_unique() {
     let missing = dependencies::rename_layer(&pool, "nope", "Nope")
         .await
         .expect_err("no such layer");
-    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(missing.code, knobas_app::IpcErrorCode::NotFound);
 }
 
 /// Reordering takes every layer once; removing one sends its kinds to no layer;
@@ -630,7 +626,7 @@ async fn layers_reorder_remove_and_place_kinds() {
     let refused = dependencies::order_layers(&pool, &ids[1..])
         .await
         .expect_err("one layer missing");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 
     let placed = dependencies::place_kind(&pool, "vm", Some("services"))
         .await
@@ -658,11 +654,11 @@ async fn layers_reorder_remove_and_place_kinds() {
     let refused = dependencies::place_kind(&pool, "spaceship", Some("services"))
         .await
         .expect_err("not a kind");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
     let refused = dependencies::place_kind(&pool, "vm", Some("nope"))
         .await
         .expect_err("not a layer");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
 
     let left = dependencies::delete_layer(&pool, "data")
         .await
@@ -680,7 +676,7 @@ async fn layers_reorder_remove_and_place_kinds() {
     let missing = dependencies::delete_layer(&pool, "data")
         .await
         .expect_err("gone");
-    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(missing.code, knobas_app::IpcErrorCode::NotFound);
 }
 
 /// The four built-in views are seeded, *This ticket* opens from a ticket and
@@ -748,11 +744,11 @@ async fn views_are_saved_renamed_chosen_and_deleted() {
     let blank = dependencies::save_view(&pool, Some(&mine.id), " ", &settings)
         .await
         .expect_err("blank");
-    assert_eq!(code_of(&blank), knobas_app::IpcErrorCode::Invalid);
+    assert_eq!(blank.code, knobas_app::IpcErrorCode::Invalid);
     let missing = dependencies::save_view(&pool, Some("nope"), "x", &settings)
         .await
         .expect_err("no such view");
-    assert_eq!(code_of(&missing), knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(missing.code, knobas_app::IpcErrorCode::NotFound);
 
     let read = dependencies::set_view_defaults(&pool, &mine.id, "runtime")
         .await
@@ -763,7 +759,7 @@ async fn views_are_saved_renamed_chosen_and_deleted() {
     let refused = dependencies::set_view_defaults(&pool, "nope", "runtime")
         .await
         .expect_err("no such view");
-    assert_eq!(code_of(&refused), knobas_app::IpcErrorCode::NotFound);
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::NotFound);
 
     let read = dependencies::delete_view(&pool, &mine.id)
         .await
@@ -779,7 +775,7 @@ async fn views_are_saved_renamed_chosen_and_deleted() {
     let last = dependencies::delete_view(&pool, "code")
         .await
         .expect_err("the last view");
-    assert_eq!(code_of(&last), knobas_app::IpcErrorCode::Conflict);
+    assert_eq!(last.code, knobas_app::IpcErrorCode::Conflict);
 }
 
 /// A settings object that does not read as one is refused before it is stored.

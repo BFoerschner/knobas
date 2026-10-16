@@ -19,22 +19,22 @@
  *   so a line to a folded item lands on its fold.
  */
 import type { DepGroup, DepItem, DepLayer, DepTiles, DepViewSettings, Dependencies, LayerInView } from "../../ipc/assets";
-import { isProblem, kindOf, ORDER, stateOf, summaryOf, wrongOf, type TileTone } from "./deps";
+import { isEstate, isProblem, kindOf, ORDER, stateOf, summaryOf, wrongOf, type TileTone } from "./deps";
 
-/** The relations as adjacency, both ways. */
+/** The relations as adjacency, both ways: what each item leads to, and what leads to it. */
 export interface Graph {
   out: Map<string, string[]>;
-  inn: Map<string, string[]>;
+  into: Map<string, string[]>;
 }
 
 export function graphOf(read: Dependencies): Graph {
   const out = new Map<string, string[]>();
-  const inn = new Map<string, string[]>();
+  const into = new Map<string, string[]>();
   for (const relation of read.relations) {
     (out.get(relation.from) ?? out.set(relation.from, []).get(relation.from)!).push(relation.to);
-    (inn.get(relation.to) ?? inn.set(relation.to, []).get(relation.to)!).push(relation.from);
+    (into.get(relation.to) ?? into.set(relation.to, []).get(relation.to)!).push(relation.from);
   }
-  return { out, inn };
+  return { out, into };
 }
 
 function reach(edges: Map<string, string[]>, from: string, into: Set<string>) {
@@ -57,14 +57,22 @@ function reach(edges: Map<string, string[]>, from: string, into: Set<string>) {
 export function touches(graph: Graph, id: string): Set<string> {
   const all = new Set<string>();
   reach(graph.out, id, all);
-  reach(graph.inn, id, all);
+  reach(graph.into, id, all);
   return all;
 }
 
-/** A layer as a view shows it: shown, unfolded and ungrouped unless the view says. */
+/** What a view does with a layer it does not name: shows it, unfolded and ungrouped. */
+export const UNNAMED_LAYER: Readonly<LayerInView> = { hidden: false, folded: false, group: "none" };
+
+/** A layer as a view shows it. */
 export function layerIn(settings: DepViewSettings, layer: string): LayerInView {
-  return settings.layers[layer] ?? { hidden: false, folded: false, group: "none" };
+  return settings.layers[layer] ?? { ...UNNAMED_LAYER };
 }
+
+/** The element keys `where` uses: a folded band, a chip, a "more" button. */
+export const bandEl = (layer: string) => `b:${layer}`;
+export const chipEl = (group: string) => `c:${group}`;
+export const moreEl = (group: string) => `m:${group}`;
 
 /** The reader's own gestures, held for the session (never saved with a view). */
 export interface Gestures {
@@ -136,13 +144,11 @@ function holders(read: Dependencies): Map<string, string> {
   return at;
 }
 
-const ASSETISH = (kind: string) => !["ticket", "pr", "page", "repo", "pipeline"].includes(kind);
-
 /** The group an item falls in under one *Group by*, in prototype-6's words; `""` is no heading. */
 export function groupOf(item: DepItem, mode: DepGroup, holder: string | undefined): string {
   switch (mode) {
     case "environment":
-      return item.environment ?? (ASSETISH(item.kind) ? "no environment" : "");
+      return item.environment ?? (isEstate(item.kind) ? "no environment" : "");
     case "owner":
       return item.owner ?? "no owner";
     case "parent":
@@ -276,7 +282,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
       mix: mixOf(items),
       count: items.length,
       folded,
-      el: `b:${layer.id}`,
+      el: bandEl(layer.id),
       compact,
       open: [],
       shut: [],
@@ -304,7 +310,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
       const isOpen =
         gestures.open.has(key) || matched || (!gestures.shut.has(key) && (problems || !big || ordered.length === 1));
       if (!isOpen) {
-        const el = `c:${key}`;
+        const el = chipEl(key);
         put(members, el);
         band.shut.push({ key, el, name, count: members.length, wrong: wrongOf(members), mix: mixOf(members) });
         continue;
@@ -315,15 +321,15 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
       const tiles = all ? members : [...lead, ...rest.slice(0, Math.max(0, cap - lead.length))];
       const left = members.filter((item) => !tiles.includes(item));
       for (const tile of tiles) where.set(tile.id, tileEl(tile.id));
-      const moreEl = `m:${key}`;
-      put(left, moreEl);
+      const more = moreEl(key);
+      put(left, more);
       band.open.push({
         key,
         name,
         count: members.length,
         wrong: wrongOf(members),
         tiles,
-        more: left.length > 0 ? { el: moreEl, count: left.length, wrong: wrongOf(left) } : null,
+        more: left.length > 0 ? { el: more, count: left.length, wrong: wrongOf(left) } : null,
       });
     }
     band.shutLabel = band.open.length > 0 ? "Folded, all fine" : "All fine, folded";

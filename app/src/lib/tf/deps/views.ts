@@ -8,6 +8,7 @@
  * once by their own writes.
  */
 import type { DepGroup, DepTiles, DepViews, DepViewSettings, LayerInView } from "../../ipc/assets";
+import { UNNAMED_LAYER } from "./draw";
 
 /** *Group by*'s choices, in prototype-6's words and order. */
 export const GROUPS: readonly { value: DepGroup; label: string }[] = [
@@ -29,12 +30,15 @@ export const TILES: readonly { value: DepTiles; label: string }[] = [
 /** The environment chips, in prototype-6's order. */
 export const ENVIRONMENTS = ["prod", "stage", "dev", "shared"] as const;
 
+/** Healthy groups fold above this many items unless a view says (the backend's `FOLD_AT`). */
+export const FOLD_AT = 24;
+
 /** A view's settings from a few layers' choices and a set of hidden layers. */
 export function settingsOf(layers: Record<string, Partial<LayerInView>>, hidden: ReadonlySet<string> = new Set()): DepViewSettings {
   const all: Record<string, LayerInView> = {};
-  for (const [id, over] of Object.entries(layers)) all[id] = { hidden: false, folded: false, group: "none", ...over };
-  for (const id of hidden) all[id] = { ...(all[id] ?? { folded: false, group: "none" }), hidden: true };
-  return { layers: all, environments: [], problems: false, tiles: "auto", fold_at: 24 };
+  for (const [id, over] of Object.entries(layers)) all[id] = { ...UNNAMED_LAYER, ...over };
+  for (const id of hidden) all[id] = { ...(all[id] ?? UNNAMED_LAYER), hidden: true };
+  return { layers: all, environments: [], problems: false, tiles: "auto", fold_at: FOLD_AT };
 }
 
 /** A copy a draft can change without touching what was saved. */
@@ -49,10 +53,9 @@ export function cloneSettings(settings: DepViewSettings): DepViewSettings {
 /** Whether two settings say the same thing. */
 export function sameSettings(a: DepViewSettings, b: DepViewSettings): boolean {
   const keys = new Set([...Object.keys(a.layers), ...Object.keys(b.layers)]);
-  const blank: LayerInView = { hidden: false, folded: false, group: "none" };
   for (const key of keys) {
-    const x = a.layers[key] ?? blank;
-    const y = b.layers[key] ?? blank;
+    const x: LayerInView = a.layers[key] ?? UNNAMED_LAYER;
+    const y: LayerInView = b.layers[key] ?? UNNAMED_LAYER;
     if (x.hidden !== y.hidden || x.folded !== y.folded || x.group !== y.group) return false;
   }
   return (

@@ -4,8 +4,7 @@
  * into itself or into something it holds is never offered.
  */
 import type { Dependencies } from "../../ipc/assets";
-
-const NOT_PLACES = new Set(["ticket", "pr", "page", "repo", "pipeline", "route"]);
+import { isAsset } from "./deps";
 
 export interface Place {
   id: string;
@@ -15,7 +14,7 @@ export interface Place {
 }
 
 export function assetPaths(read: Dependencies): { places: Place[]; under: (id: string) => Set<string> } {
-  const assets = read.items.filter((item) => !NOT_PLACES.has(item.kind));
+  const assets = read.items.filter((item) => isAsset(item.kind));
   const name = new Map(assets.map((item) => [item.id, item.name]));
   const parent = new Map<string, string>();
   const children = new Map<string, string[]>();

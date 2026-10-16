@@ -28,6 +28,7 @@
   } from "./asset-edit";
   import { kindOf } from "./deps";
   import { assetPaths } from "./estate-paths";
+  import { ENVIRONMENTS } from "./views";
   import type { EditorPorts } from "./ports";
 
   let {
@@ -51,7 +52,6 @@
     oncreatemonitor: (detail: AssetDetail) => void;
   } = $props();
 
-  const ENVIRONMENTS: Environment[] = ["prod", "stage", "dev", "shared"];
   const STATUSES = [
     { value: "none", label: "Not set, monitors decide" },
     { value: "up", label: "Up" },
@@ -154,6 +154,9 @@
   /** What *Inherit* would give: the nearest holder that sets it. */
   const inheritEnv = $derived((detail ? [...detail.held_by].reverse() : []).find((row) => row.environment !== null) ?? null);
   const inheritOwner = $derived((detail ? [...detail.held_by].reverse() : []).find((row) => row.owner !== null) ?? null);
+  /** A linked work item's own address (the shell conventions' *Routes and addresses*). */
+  const workHref = (kind: string, id: string) =>
+    `#/${{ ticket: "job", pr: "pr", build: "build", page: "page", commit: "commit" }[kind] ?? "job"}/${encodeURIComponent(id)}`;
   const nameOf = (id: string) => read.items.find((item) => item.id === id)?.name ?? id;
 </script>
 
@@ -249,7 +252,7 @@
           <h4>Linked work</h4>
           <div class="tf-dp-rels">
             {#each work as entry (entry.link.id)}
-              <a class="tf-chip tf-mono" href="#/job/{encodeURIComponent(entry.other.entity_id)}" onclick={onclose}>{entry.other.title}</a>
+              <a class="tf-chip tf-mono" href={workHref(entry.other.kind, entry.other.entity_id)} onclick={onclose}>{entry.other.title}</a>
             {:else}<span class="tf-dim">None</span>{/each}
           </div>
         </div>

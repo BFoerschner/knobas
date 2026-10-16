@@ -164,8 +164,10 @@ export async function runSave(ports: SavePorts, assetId: string, plan: SavePlan)
 export function failureLine(outcome: SaveOutcome): string {
   const failed = outcome.failed;
   if (failed === null) return "";
-  const what = { fields: "the fields", move: "the move", links: "what it depends on" }[failed.part];
-  const kept = outcome.saved.map((part) => ({ fields: "the fields", move: "the move", links: "some of what it depends on" })[part]);
+  const words = (part: SavePart, some: boolean) =>
+    part === "links" ? (some ? "some of what it depends on" : "what it depends on") : part === "fields" ? "the fields" : "the move";
+  const what = words(failed.part, false);
+  const kept = outcome.saved.map((part) => words(part, true));
   const head = kept.length > 0 ? `Saved ${kept.join(" and ")}, but not ${what}` : `Did not save ${what}`;
   return `${head}: ${failed.message}`;
 }

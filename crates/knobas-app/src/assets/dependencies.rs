@@ -482,6 +482,21 @@ pub async fn read(pool: &PgPool) -> Result<Dependencies, IpcError> {
 // bottom, so the panel draws what the database now holds rather than a guess.
 // Changes apply at once and to every view (R-11.13): there is no draft.
 
+const LAYER_EXISTS: &str = "select exists (select 1 from knobas.dep_layer where id = $1)";
+const VIEW_EXISTS: &str = "select exists (select 1 from knobas.dep_view where id = $1)";
+
+/// Whether `query` (one of the `*_EXISTS` reads) finds `id`.
+async fn exists(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    query: &'static str,
+    id: &str,
+) -> Result<bool, IpcError> {
+    Ok(sqlx::query_scalar(query)
+        .bind(id)
+        .fetch_one(&mut **tx)
+        .await?)
+}
+
 /// The name index `0036` refuses a second spelling of a name with.
 const LAYER_NAME_INDEX: &str = "dep_layer_name_idx";
 
@@ -618,12 +633,7 @@ pub async fn place_kind(
         .execute(&mut *tx)
         .await?;
     if let Some(layer) = layer_id {
-        let exists: bool =
-            sqlx::query_scalar("select exists (select 1 from knobas.dep_layer where id = $1)")
-                .bind(layer)
-                .fetch_one(&mut *tx)
-                .await?;
-        if !exists {
+        if !exists(&mut tx, LAYER_EXISTS, layer).await? {
             return Err(IpcError::not_found(format!("No layer {layer}.")));
         }
         sqlx::query(
@@ -844,12 +854,7 @@ pub async fn delete_view(pool: &PgPool, id: &str) -> Result<DepViews, IpcError> 
     let count: i64 = sqlx::query_scalar("select count(*) from knobas.dep_view")
         .fetch_one(&mut *tx)
         .await?;
-    let exists: bool =
-        sqlx::query_scalar("select exists (select 1 from knobas.dep_view where id = $1)")
-            .bind(id)
-            .fetch_one(&mut *tx)
-            .await?;
-    if !exists {
+    if !exists(&mut tx, VIEW_EXISTS, id).await? {
         return Err(IpcError::not_found(format!("No view {id}.")));
     }
     if count <= 1 {
@@ -875,12 +880,7 @@ pub async fn set_view_defaults(
 ) -> Result<DepViews, IpcError> {
     let mut tx = pool.begin().await?;
     for id in [from_ticket, from_top] {
-        let exists: bool =
-            sqlx::query_scalar("select exists (select 1 from knobas.dep_view where id = $1)")
-                .bind(id)
-                .fetch_one(&mut *tx)
-                .await?;
-        if !exists {
+        if !exists(&mut tx, VIEW_EXISTS, id).await? {
             return Err(IpcError::not_found(format!("No view {id}.")));
         }
     }

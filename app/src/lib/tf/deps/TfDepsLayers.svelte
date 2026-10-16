@@ -16,7 +16,7 @@
   import { layerIn } from "./draw";
   import type { LayerPorts } from "./ports";
   import type { DepViewState } from "./views.svelte";
-  import { freeLayerName, GROUPS, TILES } from "./views";
+  import { FOLD_AT, freeLayerName, GROUPS, TILES } from "./views";
 
   let {
     read,
@@ -191,11 +191,11 @@
         >Fold groups with no problem when a layer holds more than <input
           type="number"
           aria-label="Fold count"
-          min="4"
+          min="1"
           max="500"
           class="tf-dp-foldat"
           value={draft.fold_at}
-          onchange={(e) => { const at = Number(e.currentTarget.value) || 24; views.change((d) => void (d.fold_at = at)); }}
+          onchange={(e) => { const at = Number(e.currentTarget.value) || FOLD_AT; views.change((d) => void (d.fold_at = at)); }}
         /></label
       >
     </div>

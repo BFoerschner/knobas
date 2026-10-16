@@ -42,8 +42,10 @@
   } from "../../ipc/assets";
   import { createLink, submitWrite } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import TfCreateMonitor from "../monitors/TfCreateMonitor.svelte";
-  import { drawOf, graphOf, hitsLine, matcher, nextTile, touches, type Gestures } from "./draw";
+  import { isAsset, nameIsCode } from "./deps";
+  import { drawOf, graphOf, hitsLine, matcher, nextTile, touches, UNNAMED_LAYER, type Gestures } from "./draw";
   import type { EditorPorts, LayerPorts, ViewPorts } from "./ports";
   import TfAssetEditor from "./TfAssetEditor.svelte";
   import TfDepsBand from "./TfDepsBand.svelte";
@@ -154,8 +156,7 @@
   }
 
   function openItem(item: DepItem, event?: MouseEvent) {
-    const asset = !["ticket", "pr", "page", "repo", "pipeline", "route"].includes(item.kind);
-    if (!asset) return;
+    if (!isAsset(item.kind)) return;
     event?.preventDefault();
     editing = item.id;
   }
@@ -282,7 +283,7 @@
 
   function setHidden(layer: string, hidden: boolean) {
     views.change((draft) => {
-      draft.layers[layer] = { ...(draft.layers[layer] ?? { folded: false, group: "none" }), hidden };
+      draft.layers[layer] = { ...(draft.layers[layer] ?? UNNAMED_LAYER), hidden };
     });
   }
 
@@ -374,7 +375,7 @@
     </div>
     {#if traced !== null}
       <div class="tf-dp-trail">
-        <span>Only what touches <b class:tf-mono={traced.kind !== "ticket" && traced.kind !== "pr"}>{traced.name}</b>, up and down.</span>
+        <span>Only what touches <b class:tf-mono={nameIsCode(traced.kind)}>{traced.name}</b>, up and down.</span>
         <button type="button" class="tf-btn tf-sm" onclick={() => (trace = null)}>Show everything</button>
       </div>
     {/if}
@@ -468,7 +469,7 @@
     queue={ports.submitWrite}
     onclose={() => (creating = null)}
     oncreated={() => {
-      push({ text: `Create monitor queued for ${creating?.asset.name ?? ""}` });
+      push({ text: `Queued: create monitor for ${creating?.asset.name ?? ""}. Sends with the next sync.`, action: { label: "Show queue", run: openWriteQueue } });
       creating = null;
     }}
   />

@@ -11,7 +11,7 @@
 <script lang="ts">
   import type { DepItem, DepKind } from "../../ipc/assets";
   import Marked from "../filter/Marked.svelte";
-  import { hrefOf, kindOf, lineOf, stateOf } from "./deps";
+  import { hrefOf, kindOf, lineOf, nameIsCode, stateOf } from "./deps";
   import { moreLine, tileEl, type DrawnBand, type Mix } from "./draw";
 
   let {
@@ -121,7 +121,7 @@
                   onclick={(event) => onopen(tile, event)}
                 >
                   <span class="tf-dp-mono" aria-hidden="true">{kind.monogram}</span>
-                  <span class="tf-dp-nm" class:tf-dp-code={tile.kind !== "ticket" && tile.kind !== "pr"}><Marked text={tile.name} typed={query} /></span>
+                  <span class="tf-dp-nm" class:tf-dp-code={nameIsCode(tile.kind)}><Marked text={tile.name} typed={query} /></span>
                   {#if band.compact}
                     <i class="tf-dp-dot tf-dp-dot-{state.tone}" role="img" aria-label={state.word || kind.label}></i>
                   {:else}

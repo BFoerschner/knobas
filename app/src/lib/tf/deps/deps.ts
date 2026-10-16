@@ -19,6 +19,15 @@ export const ORDER: readonly TileTone[] = ["err", "warn", "info", "none", "ok", 
 /** The kinds that are not assets: their state word is not about monitors. */
 const NOT_ASSETS = new Set(["ticket", "pr", "page", "repo", "pipeline"]);
 
+/** Whether a kind is an asset or a route: something the estate holds, with an environment. */
+export const isEstate = (kind: string): boolean => !NOT_ASSETS.has(kind);
+
+/** Whether a kind is an asset proper: the estate less its routes. What the editor opens. */
+export const isAsset = (kind: string): boolean => isEstate(kind) && kind !== "route";
+
+/** Whether a tile's name is code (a repository, an asset) rather than words (a ticket, a PR). */
+export const nameIsCode = (kind: string): boolean => kind !== "ticket" && kind !== "pr";
+
 /** A tile's tone and its one state word, in prototype-6's words. */
 export function stateOf(item: DepItem): { tone: TileTone; word: string } {
   const kind = item.kind;
