@@ -91,6 +91,8 @@ macro_rules! link_set_rule_tickets {
            and ip.source_id = split_part(w.id, ':', 1)
            and ip.arm = 'child' and ip.kind = 'ticket'
           join knobas.source_config sc on sc.id = ip.source_id and sc.kind = ip.adapter_kind
+         -- `lower(name)` reaches `item_parent_name_idx`; the exact match is the
+         -- up walk's `source_id || ':' || name`, so the two directions agree.
          where w.d < 5 and ip.name = substr(w.id, strpos(w.id, ':') + 1)
     ),
     rule_ticket(n, id) as (

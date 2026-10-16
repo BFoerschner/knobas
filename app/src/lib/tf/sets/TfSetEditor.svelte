@@ -80,12 +80,12 @@
     };
   });
 
-  const ruleKey = (rule: Pick<LinkSetRule, "kind" | "value">) => `${rule.kind}|${rule.value}`;
+  const countKey = (rule: Pick<LinkSetRule, "kind" | "value">) => `${rule.kind}|${rule.value}`;
 
   // Each rule's count is its own read, asked once per rule the set holds.
   $effect(() => {
     for (const rule of set?.rules ?? []) {
-      const at = ruleKey(rule);
+      const at = countKey(rule);
       if (at in counts) continue;
       counts[at] = -1;
       ports.previewLinkSetRule({ kind: rule.kind, value: rule.value }).then(
@@ -289,7 +289,7 @@
       <div class="tf-panel">
         <header><h3>Applies to</h3></header>
         {#each ruleRows as rule (rule.at)}
-          {@const count = rule.waiting ? undefined : counts[ruleKey(rule)]}
+          {@const count = rule.waiting ? undefined : counts[countKey(rule)]}
           <div class="tf-rule">
             <select aria-label="Rule" value={rule.kind} onchange={(event) => rekind(rule.at, event.currentTarget.value as LinkSetRuleKind)}>
               {#each RULE_KINDS as option (option.kind)}<option value={option.kind}>{option.label}</option>{/each}

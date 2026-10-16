@@ -41,11 +41,6 @@ export const APPLIES_BY: readonly { value: LinkSetRuleKind; label: string }[] = 
   { value: "manual", label: "By hand" },
 ];
 
-/** What a rule's value names: a ticket's key, or a project's key. */
-export function ruleKey(rule: Pick<LinkSetRuleRow, "kind" | "value">): string {
-  return keyOf(rule.value);
-}
-
 /**
  * One line per rule, in prototype-6's words (`ruleLabel`): *Every ticket
  * under epic PAY-200 Payout reliability*, *Every ticket in project OPS*,
@@ -53,7 +48,8 @@ export function ruleKey(rule: Pick<LinkSetRuleRow, "kind" | "value">): string {
  * follows its key only when the source gave it one of its own.
  */
 export function ruleLabel(rule: LinkSetRuleRow): string {
-  const key = ruleKey(rule);
+  // The value is an entity id or `<source>:<project key>`: either way, its key half.
+  const key = keyOf(rule.value);
   switch (rule.kind) {
     case "epic": {
       const title = rule.title && rule.title !== key ? ` ${rule.title}` : "";

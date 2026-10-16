@@ -606,7 +606,8 @@ mod tests {
     #[test]
     fn a_draft_is_refused_for_what_cannot_be_a_set() {
         assert_eq!(refusal(&draft()), None);
-        let cases: [(fn(&mut LinkSetDraft), &str); 6] = [
+        type Change = fn(&mut LinkSetDraft);
+        let cases: [(Change, &str); 6] = [
             (|d| d.name = "  ".to_owned(), "a link set needs a name"),
             (|d| d.id = Some("Not A Slug".to_owned()), "is not a link set id"),
             (|d| d.members[0].kind = "build".to_owned(), "member kind `build`"),

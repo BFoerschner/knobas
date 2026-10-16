@@ -3252,6 +3252,13 @@ Ruled by the implementer (PR for #866).
   Kept word for word: "1 pages", "1 tickets". **Reversing:** low.
 - **Patterns (*Add a pattern…*, "(N match now)"), the hint card, *Apply a link set…* and the
   drawer are not here:** #868, #870, #869, #867. **Reversing:** n/a.
+- ***Shows on N tickets now* draws your tickets' keys in the card yellow.** R-7.7, which the
+  ticket cites, says "yours in yellow", and prototype-6 draws it; the design system says nothing
+  but the job card, the selected ticket, the running timer and the job chip gets yellow. The
+  ticket's requirement is followed, and the conflict is named for the milestone review.
+  **Reversing:** low (`.tf-keys a.tf-mine` in `tf.css`).
+- **The slug helpers are a copy of `ticket_views`' rather than a shared module**, so this PR
+  edits no other feature's file; the review's Standards pass named it. **Reversing:** low.
 - **The fake IPC adds its sets to `job_reach` through a registry** (`SET_REACH`), recorded in the
   shell conventions. PAY-231's fixture reach now carries *Payments staging* and *Payout stack*
   rows. **Reversing:** low.
