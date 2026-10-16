@@ -39,10 +39,14 @@ KUMA_PASSWORD=knobas-dev
 # by `--env`, so a consumer never has to know where the seed put things.
 print_env() {
   [ -r "$STATE" ] || { echo "seed: $STATE not found -- run ./seed first" >&2; exit 1; }
-  echo "export KNOBAS_GITEA_URL=$(jq -r '.gitea.url' "$STATE")"
-  echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$STATE")"
-  echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$STATE")"
-  echo "export KNOBAS_GITEA_REPO=payout-service"
+  # Only a state that holds a Gitea block: a Confluence-only session writes one
+  # without it, and `jq -r` would print the literal `null` for each field (#982).
+  if [ "$(jq -r 'has("gitea")' "$STATE")" = "true" ]; then
+    echo "export KNOBAS_GITEA_URL=$(jq -r '.gitea.url' "$STATE")"
+    echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$STATE")"
+    echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$STATE")"
+    echo "export KNOBAS_GITEA_REPO=payout-service"
+  fi
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_URL=$KUMA_URL"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_API_KEY=$(cat "$KEY_FILE")"
   [ -r "$KEY_FILE" ] && echo "export KNOBAS_KUMA_USER=$KUMA_USER"

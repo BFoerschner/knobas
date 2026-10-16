@@ -504,6 +504,7 @@ witness-unit:
     scripts/append-only-merge-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
+    testenv/seed-env-test.sh
     testenv/gitea-pr-state-test.sh
     testenv/live-lock-test.sh
 
