@@ -75,6 +75,43 @@ pub async fn write(pool: &PgPool, key: &str, value: Option<&str>) -> Result<(), 
     Ok(())
 }
 
+/// One `knobas.setting` row as the JSON it holds, or nothing: for a setting
+/// that is a structure rather than one string (the *Open in…* applications,
+/// #844).
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the query fails.
+pub async fn read_value(pool: &PgPool, key: &str) -> Result<Option<serde_json::Value>, IpcError> {
+    sqlx::query_scalar("select value from knobas.setting where key = $1")
+        .bind(key)
+        .fetch_optional(pool)
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// Store one `knobas.setting` row as JSON.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn write_value(
+    pool: &PgPool,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), IpcError> {
+    sqlx::query(
+        "insert into knobas.setting (key, value) values ($1, $2)
+         on conflict (key) do update set value = excluded.value, updated_at = now()",
+    )
+    .bind(key)
+    .bind(value)
+    .execute(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    Ok(())
+}
+
 /// A value a person typed, cleared to `None` when it is blank.
 ///
 /// One function because every write through this module means the same thing by

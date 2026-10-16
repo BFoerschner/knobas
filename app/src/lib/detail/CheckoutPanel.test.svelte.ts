@@ -82,7 +82,8 @@ vi.mock("../ipc/entity", () => ({
       ? Promise.reject({ code: "internal", message: "no database", source_id: null })
       : Promise.resolve(commands);
   },
-  openCheckout: (entityId: string, action: string) => {
+  openCheckout: (entityId: string, at: { application?: string | null }) => {
+    const action = at.application ?? "";
     opens.push({ entityId, action });
     if (action === refuseOpen) {
       return Promise.reject({
@@ -93,7 +94,7 @@ vi.mock("../ipc/entity", () => ({
         source_id: null,
       });
     }
-    return Promise.resolve(undefined);
+    return Promise.resolve([]);
   },
 }));
 

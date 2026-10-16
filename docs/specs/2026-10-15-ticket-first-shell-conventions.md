@@ -39,6 +39,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A list of items from everywhere names each item's job as its own ticket, else the first open job (a live ticket context, the current one first) whose `job_reach` holds it; nothing reaches it, *no job*. (#834, PR #958)
 - Which job a row belongs to is `tf/job/open-jobs.ts` (`readOpenJobs`, `jobIndex`), one read for every list that names a job. (#837)
 - The shell reads declared paths only, never a payload (ADR-0007). A field a card needs becomes a declared path, not a payload read. (#810, PR #895; #816, PR #898)
+- A `?fake-ipc` feature module that emits an event (a clone's `clone:progress`) exports `attach(bridge)`, which the installer calls with the installed bridge. (#846)
 - `?fake-ipc` fixtures grow with the ticket that needs them: enough rows to compare with prototype-6 (eleven more PAY tickets in #810; a small link graph and the workflow in #816). Where the fixture diverges from the mock adapter, the PR says so. (PR #895; PR #898)
 - The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
 - A `?fake-ipc` row's state chip, path and source ride in its payload as `chip`, `path` and `source`, which `mirrorRow` reads; the mock adapter declares none of them. (#817)
@@ -74,6 +75,11 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 - A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's 6.5 s and then sent; the toast's *Undo* cancels it, and the toast on screen is the sign a write is still held. Quitting, closing or reloading the window inside those 6.5 s loses the decision: nothing is written, and the proposal is back next time. Moving to another view does not; the write still goes. (#835)
 - A write a page queues is drawn at once where it lands (a branch *queued*, a branch *delete queued*, a file's commit as a banner), held for the session as module `$state` and dropped once the source's read shows it; never stored. The toast reads `Queued: <what>. Sends with the next sync.` with *Show queue*. (#839, #845)
+
+## Checkouts
+
+- Every place a checkout is offered draws `tf/openin/TfOpenIn.svelte`: *Open in… ▾* when the repository is on this machine, *Clone* (and *Cloning… N %*, *Stop*) when it is not. Its applications are one store, `tf/openin/apps.svelte.ts`, and running clones another, `tf/openin/clones.svelte.ts`; a page reads its checkouts again when `clones.finished` moves. (#844, #846)
+- A table row that opens its item on click ignores a click inside `.tf-openin` or `.tf-modal`, so the control and its dialogs are not the row. (#844)
 
 ## Filter keys
 

@@ -8,7 +8,8 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { AssetDetail } from "../../ipc/assets";
 import type {
-  CheckoutCommand,
+  CheckoutSettings,
+  OpenAt,
   CheckoutView,
   ContextRow,
   EntityDetail,
@@ -22,6 +23,7 @@ import type { CredentialHealth, SourceSyncStatus, WriteOpPayload } from "../../i
 import type { RunningTimer, Week } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
+import { createApps } from "../openin/apps.svelte";
 import type { JobPorts } from "./ports";
 import TfJob from "./TfJob.svelte";
 
@@ -34,7 +36,7 @@ const calls = {
   list: [] as EntityFilter[],
   writes: [] as WriteOpPayload[],
   checkout: [] as string[],
-  open: [] as [string, string][],
+  open: [] as [string, OpenAt][],
   stop: 0,
   start: [] as [string, string][],
   visits: [] as string[],
@@ -133,10 +135,15 @@ const CHECKOUT: CheckoutView = {
   },
 };
 
-const APPS: CheckoutCommand[] = [
-  { action: "vscode", label: "Open in VS Code", template: "open -a Code {path}", is_default: true },
-  { action: "jetbrains", label: "Open in JetBrains", template: null, is_default: true },
-];
+const APPS: CheckoutSettings = {
+  clones_root: "~/code",
+  git: { status: "found", path: "/usr/bin/git" },
+  default_application: "vscode",
+  applications: [
+    { id: "jetbrains", name: "IntelliJ IDEA", command: "idea {path}", file_command: null },
+    { id: "vscode", name: "VS Code", command: "code {path}", file_command: null },
+  ],
+};
 
 function week(): Week {
   const cell = (logged: number, unlogged: number) => ({
@@ -189,11 +196,6 @@ function ports(
       calls.checkout.push(id);
       return Promise.resolve(CHECKOUT);
     },
-    checkoutCommands: () => Promise.resolve(APPS),
-    openCheckout: (id, action) => {
-      calls.open.push([id, action]);
-      return Promise.resolve();
-    },
     weekTimesheet: () => Promise.resolve(week()),
     visitEntity: (id) => {
       calls.visits.push(id);
@@ -241,6 +243,14 @@ function open(
       onstarttimer: (id: string, title: string) => calls.start.push([id, title]),
       ports: over.ports ?? ports(),
       today: () => new Date(2026, 9, 15, 14, 0),
+      apps: createApps({
+        checkoutSettings: () => Promise.resolve(APPS),
+        setCheckoutApplications: () => Promise.reject(new Error("not in this suite")),
+        openCheckout: (id, at) => {
+          calls.open.push([id, at]);
+          return Promise.resolve(["code", "~/code/payout-service"]);
+        },
+      }),
     },
   });
   flushSync();
@@ -435,7 +445,7 @@ test("past four rows the section shows four, with a filter, Show all N and All i
   expect(text()).toContain("1 match");
 });
 
-test("the checkout line names the clone, its branch and changes, and Open in… runs a configured application", async () => {
+test("the checkout line names the clone, its branch and changes, and Open in… runs the default application", async () => {
   const layers = createLayers();
   open("PAY-231", { layers });
   await settle();
@@ -448,12 +458,19 @@ test("the checkout line names the clone, its branch and changes, and Open in… 
   line.querySelector<HTMLButtonElement>("button[aria-haspopup='menu']")!.click();
   flushSync();
   const items = [...line.querySelectorAll<HTMLButtonElement>("[role='menuitem']")];
-  expect(items.map((item) => item.textContent)).toEqual(["Open in VS Code"]);
+  // The default first, marked, with its command filled in for this checkout.
+  expect(items.map((item) => item.textContent?.replace(/\s+/g, " ").trim())).toEqual([
+    "VS Code (default)code ~/code/payout-service",
+    "IntelliJ IDEAidea ~/code/payout-service",
+    "Add an application…",
+    "Manage applications…",
+  ]);
   expect(layers.open).toHaveLength(1);
   items[0]!.click();
   await settle();
-  expect(calls.open).toEqual([[BRANCH.entity_id, "vscode"]]);
+  expect(calls.open).toEqual([[BRANCH.entity_id, { application: "vscode", file: null, line: null }]]);
   expect(layers.open).toHaveLength(0);
+  expect(toasts.items.map((toast) => toast.text)).toContain("Started VS Code: code ~/code/payout-service");
 });
 
 test("a job with no code says nothing is connected and asks for no checkout", async () => {

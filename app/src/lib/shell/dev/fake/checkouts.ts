@@ -1,9 +1,9 @@
 /**
- * `?fake-ipc`: Checkouts (#499): the clones root, a repository's checkout and diff, and
- * the open commands. `seed` reads `?fake-clones-root`, `?fake-open-fails` and
- * `?fake-open-unset`.
+ * `?fake-ipc`: Checkouts (#499): the clones root, a repository's checkout and diff, the
+ * *Open in…* applications (#844) and clones (#846). `seed` reads `?fake-clones-root`,
+ * `?fake-open-fails`, `?fake-no-git` and `?fake-clone-percent`.
  */
-import type { Handler } from "../fake-tauri";
+import type { FakeBridge, Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 
 /**
@@ -81,7 +81,7 @@ function fakeCheckout(entityId: string) {
   // under a root nobody set.
   const scanned =
     repo === null || fakeClonesRoot !== DEFAULT_CLONES_ROOT ? undefined : FAKE_SCANNED[repo];
-  const path = override ?? scanned ?? null;
+  const path = override ?? scanned ?? (repo === null ? undefined : fakeCloned[repo]) ?? null;
   return {
     repo_entity_id: repo,
     repo_url: url,
@@ -159,182 +159,246 @@ function fakeCheckoutDiff(entityId: string) {
 }
 
 /**
- * The open commands (#501): what each button on a repo detail would run.
- *
- * The fixture has no processes, so nothing here starts one — what it stands in
- * for is the *state* the panel and the settings section branch on: a template
- * set, a template that is this platform's default, and none at all. macOS's
- * three defaults are transcribed, because the browser this runs in has no
- * platform to ask.
+ * The *Open in…* applications (#844): macOS's shipped four, transcribed,
+ * because the browser this runs in has no platform to ask. The list a
+ * session saves replaces them, as the backend's one settings row does.
  */
-const FAKE_COMMANDS: { action: string; label: string; default: string | null }[] = [
-  { action: "vscode", label: "Open in VS Code", default: 'open -a "Visual Studio Code" {path}' },
-  { action: "jetbrains", label: "Open in JetBrains", default: 'open -a "IntelliJ IDEA" {path}' },
-  { action: "terminal", label: "Open terminal here", default: "open -a Terminal {path}" },
+interface FakeApp {
+  id: string;
+  name: string;
+  command: string;
+  file_command: string | null;
+}
+
+const SHIPPED: FakeApp[] = [
+  { id: "vscode", name: "VS Code", command: 'open -a "Visual Studio Code" {path}', file_command: 'open -a "Visual Studio Code" {file}' },
+  { id: "terminal", name: "Terminal", command: "open -a Terminal {path}", file_command: null },
+  { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null },
+  { id: "jetbrains", name: "IntelliJ IDEA", command: 'open -a "IntelliJ IDEA" {path}', file_command: 'open -a "IntelliJ IDEA" {file}' },
 ];
 
-/** What this session has set, per action. */
-const fakeTemplates: Record<string, string> = {};
+let fakeApps: FakeApp[] = SHIPPED.map((app) => ({ ...app }));
+let fakeDefault: string | null = "vscode";
 
 /**
- * The action whose spawn refuses, from `?fake-open-fails=<action>`.
- *
- * The `?fake-clones-root` precedent: a QA pass has to be able to put a screen
- * in a state the default fixture is not in, and *the program would not start*
- * is the one arm of this feature a fixture cannot reach by itself. With it
- * set, pressing that button draws the failure the real backend produces for a
- * template naming a program this machine has not got.
+ * The application whose spawn refuses, from `?fake-open-fails=<id>`: the one
+ * arm of this feature a fixture cannot reach by itself, a program this
+ * machine has not got.
  */
 let fakeOpenFails: string | null = null;
 
-/**
- * The action with no template at all, from `?fake-open-unset=<action>`.
- *
- * *Not configured* is the state every action is in off macOS, and macOS is the
- * only platform anyone has run knobas on — so without this the one screen spec
- * #491 describes for Windows and Linux could not be looked at by anybody. It
- * is the same shape as `?fake-clones-root`: a QA pass putting a screen into a
- * state the default fixture is not in.
- */
-let fakeOpenUnset: string | null = null;
+/** `?fake-no-git`: Settings › Checkouts as a machine without git draws it. */
+let fakeNoGit = false;
 
 function seedOpenState(params: URLSearchParams): void {
   const fails = params.get("fake-open-fails");
   if (fails !== null) fakeOpenFails = fails.trim() === "" ? null : fails.trim();
-  const unset = params.get("fake-open-unset");
-  if (unset !== null) fakeOpenUnset = unset.trim() === "" ? null : unset.trim();
-}
-
-/** `checkout_commands` — the stored template, else the platform's default. */
-function fakeCommands() {
-  return FAKE_COMMANDS.map((command) => {
-    const stored = fakeTemplates[command.action];
-    const platform = command.action === fakeOpenUnset ? null : command.default;
-    return {
-      action: command.action,
-      label: command.label,
-      template: stored ?? platform,
-      is_default: stored === undefined,
-    };
-  });
+  if (params.has("fake-no-git")) fakeNoGit = true;
 }
 
 /**
- * `set_checkout_command`, refusals included.
- *
- * A **second** implementation of the template rule, deliberately narrow: the
- * rule is `knobas_core::checkout::expand` and is asserted there over every
- * shape. What this owes is the one refusal a QA pass has to be able to see —
- * a placeholder that is not `{path}`, named — plus the empty-clears-it
- * behaviour the Reset button depends on.
+ * The template rule, deliberately narrow: `knobas_core::checkout::open` is
+ * asserted over every shape. What this owes is the refusal a QA pass has to
+ * be able to see, a placeholder knobas does not fill, named.
  */
-function fakeSetCommand(action: string, template: unknown) {
-  const known = FAKE_COMMANDS.find((command) => command.action === action);
-  if (!known) {
-    throw {
-      code: "invalid",
-      message: `'${action}' is not something knobas opens a checkout with`,
-      source_id: null,
-    };
-  }
-  const value = typeof template === "string" ? template.trim() : "";
-  if (value === "") {
-    delete fakeTemplates[action];
-    return fakeCommands();
-  }
-  const other = [...value.matchAll(/\{([^}]*)\}/g)].map((match) => match[1]).find((n) => n !== "path");
+function refuse(command: string, who: string): void {
+  const other = [...command.matchAll(/\{([^}]*)\}/g)].map((match) => match[1]!).find((n) => !["path", "file", "line", "name"].includes(n));
   if (other !== undefined) {
     throw {
       code: "invalid",
-      message:
-        `'${value}' cannot be run: {${other}} is not something knobas fills in: ` +
-        "the only value a command knobas runs may take is {path}, the checkout on this disk",
+      message: `${who} cannot be run: {${other}} is not something knobas fills in: a command may take {path}, {file}, {line} and {name}, all from this disk`,
       source_id: null,
     };
   }
-  if (!value.includes("{path}")) {
-    throw {
-      code: "invalid",
-      message: `'${value}' cannot be run: the command has no {path}, so it would open nothing`,
-      source_id: null,
-    };
+  if (command.trim() === "") {
+    throw { code: "invalid", message: `${who} cannot be run: the command is empty, so there is no program to run`, source_id: null };
   }
-  fakeTemplates[action] = value;
+}
+
+function slug(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "app";
+}
+
+/** `checkout_settings`. */
+function fakeSettings() {
+  return {
+    clones_root: fakeClonesRoot,
+    git: fakeNoGit ? { status: "no_git" } : { status: "found", path: "/usr/bin/git" },
+    default_application: fakeApps.some((app) => app.id === fakeDefault) ? fakeDefault : (fakeApps[0]?.id ?? null),
+    applications: fakeApps.map((app) => ({ ...app })),
+  };
+}
+
+/** `set_checkout_applications`, refusals included. */
+function fakeSetApps(drafts: unknown, defaultId: unknown) {
+  const list = Array.isArray(drafts) ? (drafts as Partial<FakeApp>[]) : [];
+  const out: FakeApp[] = [];
+  list.forEach((draft, index) => {
+    const name = String(draft.name ?? "").trim();
+    if (name === "") throw { code: "invalid", message: `application ${index + 1} has no name`, source_id: null };
+    const command = String(draft.command ?? "").trim();
+    refuse(command, `${name}'s command`);
+    const file = String(draft.file_command ?? "").trim() || null;
+    if (file !== null) refuse(file, `${name}'s file command`);
+    const given = String(draft.id ?? "").trim();
+    let id = given !== "" && !out.some((app) => app.id === given) ? given : slug(name);
+    for (let n = 2; out.some((app) => app.id === id); n += 1) id = `${slug(name)}-${n}`;
+    out.push({ id, name, command, file_command: file });
+  });
+  fakeApps = out;
+  fakeDefault = typeof defaultId === "string" ? defaultId : null;
+  return fakeSettings();
+}
+
+/** `checkout_commands` (#501), over the list. */
+function fakeCommands() {
+  return fakeApps.map((app) => ({
+    action: app.id,
+    label: `Open in ${app.name}`,
+    template: app.command,
+    is_default: SHIPPED.some((known) => known.id === app.id && known.command === app.command),
+  }));
+}
+
+/** `set_checkout_command` (#501), over the list. */
+function fakeSetCommand(action: string, template: unknown) {
+  const app = fakeApps.find((one) => one.id === action);
+  if (!app) throw { code: "invalid", message: `'${action}' is not something knobas opens a checkout with`, source_id: null };
+  const value = typeof template === "string" ? template.trim() : "";
+  if (value === "") {
+    const shipped = SHIPPED.find((known) => known.id === action);
+    if (!shipped) throw { code: "invalid", message: `${app.name} has no command on this platform to go back to`, source_id: null };
+    app.command = shipped.command;
+  } else {
+    refuse(value, `'${value}'`);
+    app.command = value;
+  }
   return fakeCommands();
 }
 
-/**
- * `open_checkout`. Starts nothing — there is no process in a browser — and
- * refuses for the action `?fake-open-fails` names, in the shape the real
- * command refuses a program that is not installed.
- */
-function fakeOpen(action: string) {
-  const known = fakeCommands().find((command) => command.action === action);
-  if (!known || known.template === null) {
-    throw {
-      code: "invalid",
-      message: `${known?.label ?? action} is not configured on this platform`,
-      source_id: null,
-    };
-  }
-  if (action === fakeOpenFails) {
-    throw {
-      code: "invalid",
-      message: `'${known.template}' could not be run: No such file or directory (os error 2)`,
-      source_id: null,
-    };
-  }
-  return null;
+/** A command split into words, quotes grouping only, as the backend splits it. */
+function words(command: string): string[] {
+  return [...command.matchAll(/"([^"]*)"|'([^']*)'|(\S+)/g)].map((match) => match[1] ?? match[2] ?? match[3] ?? "");
 }
 
-/** The repos a `clone_repo` started and nobody has stopped. */
-const fakeCloning = new Set<string>();
+/**
+ * `open_checkout`. Starts nothing (there is no process in a browser) and
+ * answers the argv the backend would start; refuses for the application
+ * `?fake-open-fails` names, in the shape the real command refuses a program
+ * that is not installed.
+ */
+function fakeOpen(args: Record<string, unknown>) {
+  const entityId = String(args["entityId"] ?? "");
+  const checkout = fakeCheckout(entityId);
+  if (checkout.path === null) {
+    throw { code: "not_found", message: `${entityId} has no checkout on this machine, so there is nothing to open`, source_id: null };
+  }
+  const file = typeof args["file"] === "string" && args["file"] !== "" ? `${checkout.path}/${args["file"]}` : null;
+  const line = typeof args["line"] === "number" ? args["line"] : 1;
+  let template: string;
+  if (typeof args["command"] === "string") {
+    template = args["command"];
+  } else {
+    const id = typeof args["application"] === "string" ? args["application"] : fakeSettings().default_application;
+    const app = fakeApps.find((one) => one.id === id);
+    if (!app) throw { code: "invalid", message: `'${id}' is not one of your applications: see Settings › Checkouts`, source_id: null };
+    if (app.id === fakeOpenFails) {
+      throw { code: "invalid", message: `'${app.command}' could not be run: No such file or directory (os error 2)`, source_id: null };
+    }
+    template = file !== null && app.file_command ? app.file_command : app.command;
+  }
+  refuse(template, `'${template}'`);
+  const name = checkout.path.split("/").pop() ?? "";
+  return words(template).map((word) =>
+    word
+      .replace(/\{path\}/g, checkout.path!)
+      .replace(/\{file\}/g, file ?? checkout.path!)
+      .replace(/\{line\}/g, String(line))
+      .replace(/\{name\}/g, name),
+  );
+}
+
+/**
+ * Clones (#846): what `clone_repo` started, ticking `clone:progress` through
+ * the bridge as prototype-6's `startClone` does (8 %, 21 %, … 100 %, a step
+ * every 350 ms), and done: the repository is then on this machine, at
+ * `<clones root>/<name>`.
+ *
+ * `?fake-clone-percent=<n>` stops every clone at `n` %, for a screenshot of
+ * one running.
+ */
+const fakeCloning = new Map<string, ReturnType<typeof setInterval>>();
+const fakeCloned: Record<string, string> = {};
+let fakeClonePercent: number | null = null;
+let bridge: FakeBridge | null = null;
+
+const STEPS = [8, 21, 37, 52, 68, 81, 93, 100];
+
+function seedClones(params: URLSearchParams): void {
+  const percent = params.get("fake-clone-percent");
+  if (percent !== null && !Number.isNaN(Number(percent))) fakeClonePercent = Number(percent);
+}
+
+function emit(entityId: string, path: string, state: Record<string, unknown>): void {
+  bridge?.emit("clone:progress", { entity_id: entityId, path, ...state });
+}
+
+function fakeClone(args: Record<string, unknown>) {
+  const id = String(args["entityId"] ?? "");
+  const entry = CORPUS.find((candidate) => candidate.entity_id === id);
+  if (!entry || entry.kind !== "repo") {
+    throw { code: "invalid", message: `${id} is not a repository in the mirror`, source_id: null };
+  }
+  if (fakeClonesRoot === null) {
+    throw { code: "invalid", message: "no clones root is set: choose where clones go in Settings › Checkouts", source_id: null };
+  }
+  const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
+  if (args["stop"] === true) {
+    const timer = fakeCloning.get(id);
+    if (timer === undefined) return { status: "not_cloning" };
+    clearInterval(timer);
+    fakeCloning.delete(id);
+    return { status: "stopped", path, removed: true };
+  }
+  if (fakeCheckout(id).path !== null) return { status: "adopted", path };
+  if (fakeCloning.has(id)) return { status: "cloning", path };
+  let step = 0;
+  const timer = setInterval(() => {
+    const percent = fakeClonePercent ?? STEPS[step++]!;
+    if (percent >= 100) {
+      clearInterval(timer);
+      fakeCloning.delete(id);
+      fakeCloned[id] = path;
+      emit(id, path, { state: "done" });
+      return;
+    }
+    emit(id, path, { state: "progress", phase: "Receiving objects", percent });
+    if (fakeClonePercent !== null) clearInterval(timer);
+  }, 350);
+  fakeCloning.set(id, timer);
+  return { status: "cloning", path };
+}
 
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
     // Checkouts (#499). The fixture has no filesystem, so what stands in for
-    // the scan is `FAKE_CHECKOUTS` -- one repo with a path and one without --
-    // and the override is a variable this file keeps. That is enough for the
-    // panel, which branches on `found_by` and on whether `path` is there;
-    // whether a directory really holds a clone is `knobas-core`'s question and
-    // is answered by its own tests over a real temporary tree.
+    // the scan is `FAKE_SCANNED`, what a clone made (`fakeCloned`) and the
+    // overrides this file keeps.
     clones_root: () => fakeClonesRoot,
     set_clones_root: (args) => {
       const path = args["path"];
-      fakeClonesRoot = typeof path === "string" && path.trim() !== "" ? path.trim() : null;
+      fakeClonesRoot = typeof path === "string" && path.trim() !== "" ? path.trim().replace(/^~(?=\/|$)/, "/Users/mara") : null;
       return null;
     },
     entity_checkout: (args) => fakeCheckout(String(args["entityId"] ?? "")),
     checkout_commands: () => fakeCommands(),
-    set_checkout_command: (args) =>
-      fakeSetCommand(String(args["action"] ?? ""), args["template"]),
-    open_checkout: (args) => fakeOpen(String(args["action"] ?? "")),
+    set_checkout_command: (args) => fakeSetCommand(String(args["action"] ?? ""), args["template"]),
+    open_checkout: (args) => fakeOpen(args),
+    checkout_settings: () => fakeSettings(),
+    set_checkout_applications: (args) => fakeSetApps(args["applications"], args["defaultApplication"]),
     entity_checkout_diff: (args) => fakeCheckoutDiff(String(args["entityId"] ?? "")),
-    // Clone (#846; `clone_repo`, #823). The answers are real, the progress is
-    // not: a handler cannot emit `clone:progress`, so a started clone stays
-    // `cloning` until it is stopped, and the screen's bar, its done state and
-    // its failure causes are witnessed by `clone_ipc.rs` and the component
-    // tests, not by this fixture. A repo the scan already found is `adopted`,
-    // as in the backend; a folder is `<clones root>/<repo name>`.
-    clone_repo: (args) => {
-      const id = String(args["entityId"] ?? "");
-      const entry = CORPUS.find((candidate) => candidate.entity_id === id);
-      if (!entry || entry.kind !== "repo") {
-        throw { code: "invalid", message: `${id} is not a repository in the mirror`, source_id: null };
-      }
-      if (fakeClonesRoot === null) {
-        throw { code: "invalid", message: "set a clones root first", source_id: null };
-      }
-      const path = `${fakeClonesRoot}/${entry.title.split("/").pop()}`;
-      if (args["stop"] === true) {
-        const was = fakeCloning.delete(id);
-        return was ? { status: "stopped", path, removed: true } : { status: "not_cloning" };
-      }
-      if (fakeCheckout(id).path !== null) return { status: "adopted", path };
-      fakeCloning.add(id);
-      return { status: "cloning", path };
-    },
+    clone_repo: (args) => fakeClone(args),
     set_checkout_override: (args) => {
       const id = String(args["entityId"] ?? "");
       const repo = fakeRepoOf(id);
@@ -356,4 +420,10 @@ export function handlers(): Record<string, Handler> {
 export function seed(params: URLSearchParams): void {
   seedClonesRoot(params);
   seedOpenState(params);
+  seedClones(params);
+}
+
+/** The bridge, once installed: what a clone's progress is emitted through. */
+export function attach(installed: FakeBridge): void {
+  bridge = installed;
 }

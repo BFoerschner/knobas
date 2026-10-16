@@ -3778,13 +3778,14 @@ pub async fn entity_thread(
 //
 // Beside #499's four and for its reason: a repo and a branch are entities, and
 // §10.8 freezes the `commands/` + `ipc/` layout. The behaviour is
-// `crate::checkout`; these three are the shims.
+// `crate::checkout`; these are the shims. #844 adds `checkout_settings` and
+// `set_checkout_applications` here, and `open_checkout` takes an application.
 
-/// Every *open* action, with the command it would run on this machine.
+/// Every application as #501's buttons draw it, with the command it would run.
 ///
-/// Read by the settings section and by the checkout panel: the panel needs to
-/// know whether an action has a template at all, because a button with none is
-/// drawn as *not configured* rather than pressed into a refusal.
+/// Read by the rooms UI's settings section and checkout panel. Since #844 a
+/// view over the *Open in…* list: one row per application, its id as the
+/// action.
 ///
 /// # Errors
 ///
@@ -3798,13 +3799,13 @@ pub async fn checkout_commands(
     crate::checkout::commands(&pool).await
 }
 
-/// Set one action's command template, or clear it back to the platform's.
+/// Set one application's command, or put back the one this platform ships.
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
-/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an action that
-/// does not exist or a template that cannot be run,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an application
+/// that does not exist or a command that cannot be run,
 /// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
 /// fails.
 #[tauri::command]
@@ -3818,35 +3819,83 @@ pub async fn set_checkout_command(
     crate::checkout::commands(&pool).await
 }
 
-/// Run an action's command at this entity's checkout.
+/// Run an application at this entity's checkout (#501, #844), at a file in it
+/// when `file` names one. Answers the argument vector it started.
 ///
-/// The one place knobas starts a program. What it starts is a template a
-/// person set in settings; the only value substituted into it is the checkout
-/// path this machine's disk answered, never a field of the mirrored repo
-/// (ADR-0016).
+/// `application` is an id from `checkout_settings`, the default when it is
+/// `None`. `command` instead runs a command typed into *Add an application*
+/// that is not saved yet (*Try it*). `file` is a path relative to the
+/// checkout and must be a file inside it on disk; `line` fills `{line}`.
 ///
-/// It returns as soon as the program has started, and says nothing about what
-/// the program then did: an editor that opens a window is not something an IPC
-/// call can wait for.
+/// The one place knobas starts a program a person chose. Every value filled
+/// into it is from this disk: the checkout path and a file inside it, never a
+/// field of the mirrored repo (ADR-0016). It returns as soon as the program
+/// has started.
 ///
 /// # Errors
 ///
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an unknown
-/// action, an address that is not a repo or a branch, an action with no
-/// template on this platform, a template that cannot be run, or a program that
-/// would not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound)
-/// if the mirror does not hold the entity or it has no checkout on this
-/// machine; [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a
-/// query failure.
+/// application, an address that is not a repo or a branch, a file that is not
+/// inside the checkout, a command that cannot be run, or a program that would
+/// not start; [`IpcErrorCode::NotFound`](crate::IpcErrorCode::NotFound) if the
+/// mirror does not hold the entity or it has no checkout on this machine;
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) for a query
+/// failure.
 #[tauri::command]
 pub async fn open_checkout(
     lifecycle: State<'_, Lifecycle>,
     entity_id: String,
-    action: String,
-) -> Result<(), IpcError> {
+    application: Option<String>,
+    file: Option<String>,
+    line: Option<u32>,
+    command: Option<String>,
+) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
-    crate::checkout::open(&pool, &entity_id, &action).await
+    let run = match command.as_deref() {
+        Some(command) => crate::checkout::Run::Command(command),
+        None => crate::checkout::Run::Application(application.as_deref()),
+    };
+    crate::checkout::open::open(&pool, &entity_id, run, file.as_deref(), line).await
+}
+
+/// Settings › Checkouts (#844, R-13a.3): the clones root, the git found, the
+/// *Open in…* applications in their order and the default's id. What every
+/// *Open in…* menu reads.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn checkout_settings(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<crate::checkout::CheckoutSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::settings(&pool).await
+}
+
+/// Save the *Open in…* applications, in order, and which is the default
+/// (#844, R-8.21, R-8.23). Each entry is `{ id?, name, command,
+/// file_command? }`; a new one has no id and gets one from its name. Answers
+/// the fresh settings.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`IpcErrorCode::Invalid`](crate::IpcErrorCode::Invalid) for an entry with
+/// no name or a command that cannot be run,
+/// [`IpcErrorCode::Internal`](crate::IpcErrorCode::Internal) if the write
+/// fails.
+#[tauri::command]
+pub async fn set_checkout_applications(
+    lifecycle: State<'_, Lifecycle>,
+    applications: Vec<knobas_core::checkout::open::Draft>,
+    default_application: Option<String>,
+) -> Result<crate::checkout::CheckoutSettings, IpcError> {
+    let pool = lifecycle.pool()?;
+    crate::checkout::set_applications(&pool, &applications, default_application.as_deref()).await?;
+    crate::checkout::settings(&pool).await
 }
 
 /// Clone a repository into the clones root, or stop the clone that is running

@@ -151,6 +151,31 @@ test("settings preferences keep what they are told, and a clone answers cloning 
   }
 });
 
+// -- Open in… (#844) ----------------------------------------------------------
+
+test("the applications are macOS's four, a saved list replaces them, and opening answers the argv", () => {
+  const h = demoHandlers() as Calls;
+  type Settings = { default_application: string | null; applications: { id: string; name: string }[] };
+  const first = h["checkout_settings"]!({}) as Settings;
+  expect(first.applications.map((app) => app.name)).toEqual(["VS Code", "Terminal", "Fork", "IntelliJ IDEA"]);
+  expect(first.default_application).toBe("vscode");
+
+  const argv = h["open_checkout"]!({ entityId: "mock:tidewater/payout-service", application: null, file: "src/lib.rs", line: 3 });
+  expect(argv).toEqual(["open", "-a", "Visual Studio Code", "/Users/mara/src/payout-service/src/lib.rs"]);
+
+  expect(() =>
+    h["set_checkout_applications"]!({ applications: [{ id: null, name: "X", command: "x {branch}", file_command: null }], defaultApplication: null }),
+  ).toThrow();
+  const saved = h["set_checkout_applications"]!({
+    applications: [...first.applications, { id: null, name: "My Git Viewer", command: "mgv {path}", file_command: null }],
+    defaultApplication: "my-git-viewer",
+  }) as Settings;
+  expect(saved.applications.at(-1)?.id).toBe("my-git-viewer");
+  expect(saved.default_application).toBe("my-git-viewer");
+  // Put the shipped list back for the tests after this one: the fixture is module state.
+  h["set_checkout_applications"]!({ applications: first.applications, defaultApplication: "vscode" });
+});
+
 // -- the job's reach and Start work (#817, #818) ------------------------------
 
 test("job_reach labels a sub-task's parent links behind the switch, and list_entities scopes by the same table", () => {

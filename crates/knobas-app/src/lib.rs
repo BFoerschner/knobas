@@ -530,6 +530,10 @@ pub fn run() {
             // append-only (§10.8).
             commands::entity::older_pipeline_runs,
             commands::entity::pipeline_settings,
+            // #844's *Open in…* applications, appended at the foot: the list
+            // is append-only (§10.8).
+            commands::entity::checkout_settings,
+            commands::entity::set_checkout_applications,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

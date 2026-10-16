@@ -5,9 +5,8 @@
 
   Sources and a source's page are built here (#830); Time, Notifications,
   Standup, Monitoring, Backup and export, Appearance, Keyboard, and Logs and
-  database each draw from their own component (#831). Checkouts and Notes
-  and capture name themselves and offer the rooms UI, which still has them,
-  until #844 and #832 build them.
+  database each draw from their own component (#831), Checkouts and Open in…
+  too (#844).
 
   This component owns the reads both Sources pages draw from: the source
   list, each source's sync status and the adapters' descriptors. A finished
@@ -31,6 +30,7 @@
   import TfSources from "./TfSources.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
+  import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
@@ -73,7 +73,7 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs", "checkouts"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -227,6 +227,8 @@
         <TfKeyboardSection />
       {:else if place.section === "logs"}
         <TfLogsSection ports={sectionPorts} />
+      {:else if place.section === "checkouts"}
+        <TfCheckoutsSection {layers} />
       {:else if place.section === "notes"}
         <TfNotesSection />
       {:else if place.section !== "sources"}

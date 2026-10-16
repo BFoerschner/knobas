@@ -7,7 +7,7 @@
   opened, and every directory above the file the address names. A file the
   local checkout changed is marked `M`; open, it warns above its text. The
   file is drawn with its line numbers; *History* goes to Commits. *Open in…*
-  (#844) is not built yet.
+  (#844) opens the file in the checkout, with an application's file command.
 
   *Edit* (#845, R-8.6) is the file's address under `edit/`: the file turns
   into an editor with line numbers under the banner that the commit goes to
@@ -24,9 +24,10 @@
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { TreeEntry, ViewBlock } from "../../ipc/entity";
+  import type { CheckoutView, TreeEntry, ViewBlock } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { queuedCommit } from "./queued.svelte";
+  import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { ancestors, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
@@ -43,6 +44,8 @@
     editing = false,
     job = null,
     checkoutBranch = null,
+    checkout = undefined,
+    title = "",
   }: {
     ports: Pick<RepoPorts, "entityView" | "submitWrite">;
     repoId: string;
@@ -60,6 +63,10 @@
     job?: string | null;
     /** The branch the local checkout is on, `null` without one. */
     checkoutBranch?: string | null;
+    /** The repository's checkout, for *Open in…*; `undefined` while it is read. */
+    checkout?: CheckoutView | undefined;
+    /** The repository's `owner/name`. */
+    title?: string;
   } = $props();
 
   /** Each directory read so far at `at`, by its path (`""` the top). */
@@ -280,9 +287,7 @@
             <button type="button" class="tf-btn tf-sm" aria-disabled="true" title={notEditable}>Edit</button>
           {/if}
           <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>History</a>
-          <button type="button" class="tf-btn tf-sm tf-ghost" aria-disabled="true" title="Not built in the new shell yet"
-            >Open in…</button
-          >
+          <TfOpenIn entityId={repoId} {title} {checkout} file={file.path} />
         </span>
       </header>
       {#if queued !== null}

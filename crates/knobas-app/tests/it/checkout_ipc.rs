@@ -7,8 +7,8 @@
 //! override winning over the scan and giving it back when cleared, a branch
 //! answering its repository's checkout, and a repo with no clone answering
 //! *no checkout* with a clone command built from its own URL -- and, since
-//! #501, that pressing one of the three buttons starts a real process with the
-//! checkout path and nothing else in its argument list.
+//! #501 and #844, that running an application starts a real process with the
+//! checkout path, and a file inside it, and nothing else in its argument list.
 //!
 //! # Why every test gets a database of its own
 //!
@@ -25,12 +25,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
+use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
 use knobas_app::checkout::{
-    CheckoutView, FoundBy, clones_root, commands, local_changes, open, set_clones_root,
-    set_command, set_override, view,
+    CheckoutView, FoundBy, Run, clones_root, commands, local_changes, set_applications,
+    set_clones_root, set_command, set_override, settings, view,
 };
+use knobas_core::checkout::open::{Draft, shipped};
 use sqlx::PgPool;
 
 const HOST: &str = "gitea.example.com";
@@ -845,20 +847,36 @@ async fn recorded(record: &Path) -> Vec<String> {
     panic!("the stub at {} never recorded anything", record.display());
 }
 
-/// The whole feature, end to end: a clones root, a scan, a template, and a
-/// real process that is handed the path the scan found -- and nothing else.
+fn app(id: Option<&str>, name: &str, command: &str, file: Option<&str>) -> Draft {
+    Draft {
+        id: id.map(str::to_owned),
+        name: name.to_owned(),
+        command: command.to_owned(),
+        file_command: file.map(str::to_owned),
+    }
+}
+
+/// A repo with its clone found by the scan, and a stub to record what runs.
 #[cfg(unix)]
-#[tokio::test]
-async fn opening_a_checkout_runs_the_template_with_the_scanned_path() {
-    let pool = pool().await;
-    let repo = repo(&pool).await;
+async fn scanned(pool: &PgPool) -> (Repo, tempfile::TempDir, PathBuf, PathBuf, tempfile::TempDir) {
+    let repo = repo(pool).await;
     let root = clones_root_with(&repo);
-    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
+    set_clones_root(pool, Some(&root.path().to_string_lossy()))
         .await
         .unwrap();
     let workshop = tempfile::tempdir().unwrap();
     let (stub, record) = recording_stub(workshop.path());
+    (repo, root, stub, record, workshop)
+}
 
+/// The whole feature, end to end: a clones root, a scan, an application, and
+/// a real process that is handed the path the scan found -- and nothing else.
+/// Named by #501's id through #501's own write, and as the default.
+#[cfg(unix)]
+#[tokio::test]
+async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
+    let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
     set_command(
         &pool,
         "vscode",
@@ -866,66 +884,86 @@ async fn opening_a_checkout_runs_the_template_with_the_scanned_path() {
     )
     .await
     .unwrap();
+    let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
+    let expected = ["--wait".to_owned(), checkout.clone()];
 
-    open(&pool, &repo.id, "vscode").await.unwrap();
-
-    // Exactly two arguments: the flag the template carried, and the checkout.
+    let argv = open(
+        &pool,
+        &repo.id,
+        Run::Application(Some("vscode")),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    // Exactly two arguments: the flag the command carried, and the checkout.
     // The repo's URL, its key, its title and its source are all in scope at
     // the call site and **none of them** reaches the process (ADR-0016).
-    assert_eq!(
-        recorded(&record).await,
-        [
-            "--wait".to_owned(),
-            root.path().join(&repo.name).to_string_lossy().into_owned()
-        ]
-    );
+    assert_eq!(recorded(&record).await, expected);
+    assert_eq!(argv[1..], expected, "the answer is the argv it started");
+
+    // No application named is the default, which VS Code is out of the box.
+    fs::remove_file(&record).unwrap();
+    open(&pool, &repo.id, Run::Application(None), None, None)
+        .await
+        .unwrap();
+    assert_eq!(recorded(&record).await, expected);
 }
 
-/// The override is a path, and the path is what runs -- so a worktree the scan
-/// cannot see opens in the editor as readily as a clone it can.
+/// The override is a path, and the path is what runs. It holds a space, and
+/// there is no shell between here and `exec`: it arrives as **one** argument.
 #[cfg(unix)]
 #[tokio::test]
-async fn an_override_is_what_the_command_is_given() {
+async fn an_override_with_a_space_is_one_argument() {
     let pool = pool().await;
     let repo = repo(&pool).await;
     let workshop = tempfile::tempdir().unwrap();
     let (stub, record) = recording_stub(workshop.path());
-    // A path with a space in it, because there is no shell between here and
-    // `exec`: it must arrive as **one** argument.
-    let worktree = workshop.path().join("my work/payout-service");
+    let worktree = workshop.path().join("my work/pay; rm -rf ~");
     set_override(&pool, &repo.id, Some(&worktree.to_string_lossy()))
         .await
         .unwrap();
-    set_command(
+    set_applications(
         &pool,
-        "terminal",
-        Some(&format!("{} {{path}}", stub.display())),
+        &[app(
+            None,
+            "Viewer",
+            &format!("{} {{path}} {{name}}", stub.display()),
+            None,
+        )],
+        None,
     )
     .await
     .unwrap();
 
-    open(&pool, &repo.id, "terminal").await.unwrap();
+    open(
+        &pool,
+        &repo.id,
+        Run::Application(Some("viewer")),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         recorded(&record).await,
-        [worktree.to_string_lossy().into_owned()]
+        [
+            worktree.to_string_lossy().into_owned(),
+            // `{name}` is the checkout folder's own name, not the repo's.
+            "pay; rm -rf ~".to_owned()
+        ]
     );
 }
 
-/// A branch opens its repository's checkout, which is what makes the same
-/// three buttons right on both details.
+/// A branch opens its repository's checkout: nothing checks anything out, so
+/// what opens is the working tree as the person left it (ADR-0016).
 #[cfg(unix)]
 #[tokio::test]
 async fn a_branch_opens_its_repositorys_checkout() {
     let pool = pool().await;
-    let repo = repo(&pool).await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
     let branch = branch_of(&pool, &repo, "feature/PAY-231-sepa-retry").await;
-    let root = clones_root_with(&repo);
-    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
-        .await
-        .unwrap();
-    let workshop = tempfile::tempdir().unwrap();
-    let (stub, record) = recording_stub(workshop.path());
     set_command(
         &pool,
         "vscode",
@@ -934,14 +972,113 @@ async fn a_branch_opens_its_repositorys_checkout() {
     .await
     .unwrap();
 
-    open(&pool, &branch, "vscode").await.unwrap();
+    open(&pool, &branch, Run::Application(Some("vscode")), None, None)
+        .await
+        .unwrap();
 
-    // The repository's clone, and **not** the branch: nothing checks anything
-    // out, so what opens is the working tree as the person left it (ADR-0016).
     assert_eq!(
         recorded(&record).await,
         [root.path().join(&repo.name).to_string_lossy().into_owned()]
     );
+}
+
+/// With a file, the file command runs, filled with the file inside the
+/// checkout and the line; without a file command, the application's command
+/// runs at the checkout.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_file_opens_with_the_file_command_and_its_line() {
+    let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::create_dir_all(checkout.join("src/sepa")).unwrap();
+    fs::write(checkout.join("src/sepa/retry.rs"), "fn retry() {}\n").unwrap();
+    set_applications(
+        &pool,
+        &[
+            app(
+                None,
+                "Editor",
+                &format!("{} {{path}}", stub.display()),
+                Some(&format!("{} --goto {{file}}:{{line}}", stub.display())),
+            ),
+            app(None, "Plain", &format!("{} {{path}}", stub.display()), None),
+        ],
+        None,
+    )
+    .await
+    .unwrap();
+
+    open(
+        &pool,
+        &repo.id,
+        Run::Application(None),
+        Some("src/sepa/retry.rs"),
+        Some(42),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded(&record).await,
+        [
+            "--goto".to_owned(),
+            format!("{}:42", checkout.join("src/sepa/retry.rs").display())
+        ]
+    );
+
+    fs::remove_file(&record).unwrap();
+    open(
+        &pool,
+        &repo.id,
+        Run::Application(Some("plain")),
+        Some("src/sepa/retry.rs"),
+        None,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        recorded(&record).await,
+        [checkout.to_string_lossy().into_owned()]
+    );
+}
+
+/// A file is opened only when it is a file inside the checkout **on disk**:
+/// by its words (`..`, a root) and by where it really is (a symlink out of
+/// the checkout), and one that is not there. Nothing runs for any of them.
+#[cfg(unix)]
+#[tokio::test]
+async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
+    let pool = pool().await;
+    let (repo, root, stub, record, workshop) = scanned(&pool).await;
+    let checkout = root.path().join(&repo.name);
+    fs::write(workshop.path().join("secret"), "x").unwrap();
+    std::os::unix::fs::symlink(workshop.path().join("secret"), checkout.join("link")).unwrap();
+    set_applications(
+        &pool,
+        &[app(
+            None,
+            "Editor",
+            &format!("{} {{path}}", stub.display()),
+            Some(&format!("{} {{file}}", stub.display())),
+        )],
+        None,
+    )
+    .await
+    .unwrap();
+
+    for file in ["../secret", "/etc/hosts", "link", "missing.rs", ".git"] {
+        let error = open(&pool, &repo.id, Run::Application(None), Some(file), None)
+            .await
+            .expect_err(file);
+        assert_eq!(error.code, IpcErrorCode::Invalid, "{file}");
+        assert!(
+            error.message.contains("not a file inside"),
+            "{}",
+            error.message
+        );
+    }
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert!(!record.exists(), "nothing may have run");
 }
 
 /// A repo with no clone on this machine refuses, and the refusal names the
@@ -950,9 +1087,7 @@ async fn a_branch_opens_its_repositorys_checkout() {
 async fn a_repo_with_no_checkout_refuses_and_names_it() {
     let pool = pool().await;
     let repo = repo(&pool).await;
-    // No clones root and no override: *no checkout*, which the panel draws as
-    // a state and this command refuses as an address with nothing behind it.
-    let error = open(&pool, &repo.id, "vscode")
+    let error = open(&pool, &repo.id, Run::Application(None), None, None)
         .await
         .expect_err("there is nothing to open");
     assert_eq!(error.code, IpcErrorCode::NotFound);
@@ -960,130 +1095,204 @@ async fn a_repo_with_no_checkout_refuses_and_names_it() {
     assert!(error.message.contains("no checkout"), "{}", error.message);
 }
 
-/// The three ways a template is refused before anything is spawned, each
-/// naming what is wrong with it.
+/// A list with an entry that cannot be run is refused where it is typed,
+/// naming the entry and the placeholder, and stores nothing.
 #[tokio::test]
-async fn a_template_that_cannot_be_run_is_refused_where_it_is_typed() {
+async fn a_command_that_cannot_be_run_is_refused_where_it_is_typed() {
     let pool = pool().await;
+    let before = settings(&pool).await.unwrap();
 
     // The refusal ADR-0016 is about: a placeholder that would carry a field
     // the mirror wrote.
-    let error = set_command(&pool, "vscode", Some("code {repo_url}"))
-        .await
-        .expect_err("only {path} may be substituted");
+    let error = set_applications(
+        &pool,
+        &[app(None, "Viewer", "viewer {repo_url}", None)],
+        None,
+    )
+    .await
+    .expect_err("only the four placeholders fill");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("{repo_url}"), "{}", error.message);
-    assert!(
-        error.message.contains("code {repo_url}"),
-        "{}",
-        error.message
-    );
+    assert!(error.message.contains("Viewer"), "{}", error.message);
 
-    // A command that would open nothing.
-    let error = set_command(&pool, "vscode", Some("code ."))
+    let error = set_applications(&pool, &[app(None, "  ", "viewer {path}", None)], None)
         .await
-        .expect_err("a template with no path is refused");
+        .expect_err("an application has a name");
     assert_eq!(error.code, IpcErrorCode::Invalid);
 
-    // An action nobody has.
     let error = set_command(&pool, "emacs", Some("emacs {path}"))
         .await
-        .expect_err("emacs is not an action");
+        .expect_err("emacs is not an application");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("emacs"), "{}", error.message);
 
-    // And none of the three stored anything.
-    let stored = commands(&pool).await.unwrap();
-    assert!(
-        stored.iter().all(|command| command.is_default),
-        "a refused write must leave the row alone: {stored:?}"
+    assert_eq!(
+        settings(&pool).await.unwrap(),
+        before,
+        "a refusal stores nothing"
     );
 }
 
-/// A template whose program is not on this machine refuses, and the refusal
-/// names the template -- the string somebody has to go and change.
+/// A command whose program is not on this machine refuses, and the refusal
+/// names the command -- the string somebody has to go and change.
 #[cfg(unix)]
 #[tokio::test]
-async fn a_program_that_will_not_start_names_the_template() {
+async fn a_program_that_will_not_start_names_the_command() {
     let pool = pool().await;
-    let repo = repo(&pool).await;
-    let root = clones_root_with(&repo);
-    set_clones_root(&pool, Some(&root.path().to_string_lossy()))
-        .await
-        .unwrap();
-    let template = "/nonexistent/knobas-not-an-editor {path}";
-    set_command(&pool, "jetbrains", Some(template))
-        .await
-        .unwrap();
-
-    let error = open(&pool, &repo.id, "jetbrains")
+    let (repo, _root, _stub, _record, _workshop) = scanned(&pool).await;
+    let command = "/nonexistent/knobas-not-an-editor {path}";
+    let error = open(&pool, &repo.id, Run::Command(command), None, None)
         .await
         .expect_err("there is no such program");
     assert_eq!(error.code, IpcErrorCode::Invalid);
-    assert!(error.message.contains(template), "{}", error.message);
+    assert!(error.message.contains(command), "{}", error.message);
 }
 
-/// The settings round trip: nothing stored reads as this platform's default,
-/// a stored template wins, and clearing it hands the default back.
+/// *Try it*: a command that is not saved runs at the checkout as a saved one
+/// would, and saves nothing.
+#[cfg(unix)]
 #[tokio::test]
-async fn a_stored_template_wins_over_the_platform_default_and_clearing_gives_it_back() {
+async fn trying_a_command_runs_it_unsaved() {
     let pool = pool().await;
+    let (repo, root, stub, record, _workshop) = scanned(&pool).await;
+    let before = settings(&pool).await.unwrap();
+    let command = format!("{} --try {{path}}", stub.display());
 
+    open(&pool, &repo.id, Run::Command(&command), None, None)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        recorded(&record).await,
+        [
+            "--try".to_owned(),
+            root.path().join(&repo.name).to_string_lossy().into_owned()
+        ]
+    );
+    assert_eq!(settings(&pool).await.unwrap(), before);
+}
+
+/// Until a list is saved, the list is this platform's shipped one with #501's
+/// stored templates over it, VS Code the default. Saving keeps the order and
+/// the default given; a default whose entry is gone is the first entry.
+#[tokio::test]
+async fn the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved() {
+    let pool = pool().await;
+    sqlx::query("insert into knobas.setting (key, value) values ($1, to_jsonb($2::text))")
+        .bind(legacy_key("terminal"))
+        .bind("my-term {path}")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let first = settings(&pool).await.unwrap();
+    let mut expected = shipped();
+    match expected.iter_mut().find(|a| a.id == "terminal") {
+        Some(terminal) => terminal.command = "my-term {path}".to_owned(),
+        // Off macOS nothing ships, and #501's template is an entry of its own.
+        None => expected.push(knobas_core::checkout::open::Application {
+            id: "terminal".to_owned(),
+            name: "Terminal".to_owned(),
+            command: "my-term {path}".to_owned(),
+            file_command: None,
+        }),
+    }
+    assert_eq!(first.applications, expected);
+    assert_eq!(
+        first.default_application.as_deref(),
+        Some(if shipped().is_empty() {
+            "terminal"
+        } else {
+            "vscode"
+        })
+    );
+    assert!(
+        matches!(first.git, GitFound::Found { .. }),
+        "{:?}",
+        first.git
+    );
+
+    set_applications(
+        &pool,
+        &[
+            app(Some("terminal"), "Terminal", "my-term {path}", None),
+            app(None, "MyGitViewer", "MyGitViewer {path}", None),
+        ],
+        Some("mygitviewer"),
+    )
+    .await
+    .unwrap();
+    let saved = settings(&pool).await.unwrap();
+    let ids: Vec<&str> = saved.applications.iter().map(|a| a.id.as_str()).collect();
+    assert_eq!(ids, ["terminal", "mygitviewer"]);
+    assert_eq!(saved.default_application.as_deref(), Some("mygitviewer"));
+    let row: Option<serde_json::Value> =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(APPLICATIONS_KEY)
+            .fetch_optional(&pool)
+            .await
+            .unwrap();
+    assert!(
+        row.is_some(),
+        "the list is one row under {APPLICATIONS_KEY}"
+    );
+
+    set_applications(
+        &pool,
+        &[app(Some("terminal"), "Terminal", "t {path}", None)],
+        Some("gone"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        settings(&pool)
+            .await
+            .unwrap()
+            .default_application
+            .as_deref(),
+        Some("terminal")
+    );
+}
+
+/// #501's settings write, over the list: a stored command wins, and clearing
+/// it puts back the one this platform ships.
+#[cfg(target_os = "macos")]
+#[tokio::test]
+async fn a_stored_command_wins_and_clearing_gives_the_shipped_one_back() {
+    let pool = pool().await;
     let before = commands(&pool).await.unwrap();
     let ids: Vec<&str> = before.iter().map(|c| c.action.as_str()).collect();
-    assert_eq!(ids, ["vscode", "jetbrains", "terminal"]);
+    assert_eq!(ids, ["vscode", "terminal", "fork", "jetbrains"]);
     assert!(before.iter().all(|command| command.is_default));
+    assert_eq!(before[0].label, "Open in VS Code");
 
     set_command(&pool, "vscode", Some("  code --new-window {path}  "))
         .await
         .unwrap();
     let after = commands(&pool).await.unwrap();
-    let vscode = after.iter().find(|c| c.action == "vscode").unwrap();
-    // Trimmed on the way in: a leading space would be a program name nothing
-    // resolves.
-    assert_eq!(vscode.template.as_deref(), Some("code --new-window {path}"));
-    assert!(!vscode.is_default);
-    // And only that one moved.
+    assert_eq!(
+        after[0].template.as_deref(),
+        Some("code --new-window {path}")
+    );
+    assert!(!after[0].is_default);
     assert!(
-        after
-            .iter()
-            .filter(|c| c.action != "vscode")
-            .all(|c| c.is_default)
+        after[1..].iter().all(|c| c.is_default),
+        "only that one moved"
     );
 
     set_command(&pool, "vscode", None).await.unwrap();
     assert_eq!(commands(&pool).await.unwrap(), before);
 }
 
-/// Clearing a template hands **this platform's** default back.
-///
-/// The other arm -- *not configured*, which is what an action with no default
-/// answers -- is `knobas_app::checkout`'s
-/// `an_action_with_no_template_on_this_platform_is_not_configured`, and it is
-/// there rather than here because no Mac can reach the state through a
-/// database: macOS ships a default for all three actions, so clearing the row
-/// is exactly this test. The platform default is an argument to the function
-/// that decides, which is what lets a unit test reach the arm the gate's
-/// machine cannot.
+/// *Where should clones go?* offers `~/code`; nothing knobas runs expands a
+/// tilde, so the root is stored with the home directory spelled out (#846).
 #[tokio::test]
-async fn clearing_a_template_hands_this_platforms_default_back() {
+async fn a_clones_root_typed_with_a_tilde_is_stored_under_home() {
     let pool = pool().await;
-    set_command(&pool, "jetbrains", Some("idea {path}"))
-        .await
-        .unwrap();
-    set_command(&pool, "jetbrains", None).await.unwrap();
-
-    let jetbrains = commands(&pool)
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|command| command.action == "jetbrains")
-        .unwrap();
-
-    assert!(jetbrains.is_default, "nothing is stored any more");
+    let home = std::env::var("HOME").expect("the gate runs with a HOME");
+    set_clones_root(&pool, Some("~/code")).await.unwrap();
     assert_eq!(
-        jetbrains.template.as_deref(),
-        knobas_core::checkout::OpenAction::JetBrains.default_template(),
-        "the platform's own answer is what comes back"
+        clones_root(&pool).await.unwrap(),
+        Some(format!("{}/code", home.trim_end_matches('/')))
     );
 }

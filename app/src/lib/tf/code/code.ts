@@ -6,7 +6,7 @@
  * payload: a pull request's group is the attention read's (#712), its state
  * the declared chip, its repository the declared parent path.
  */
-import type { AttentionGroup, CheckoutView, EntityPage, EntityRow } from "../../ipc/entity";
+import type { AttentionGroup, CheckoutView, EntityPage, EntityRow, WorkingTreeState } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
 
 /** A pull request's group on the *Pull requests* tab, in draw order. */
@@ -134,13 +134,18 @@ export function checkoutLine(view: CheckoutView | undefined): { text: string; di
   if (view.path === null) return { text: "not on this machine", dim: true };
   const tree = view.tree;
   if (tree === null || tree.status !== "read") return { text: view.path, dim: false };
+  return { text: `${tree.branch ?? "detached"}, ${treeStanding(tree)}`, dim: false };
+}
+
+/** Where a working tree stands, without its branch: `3 ahead, 1 changed`, or `clean`. */
+export function treeStanding(tree: Pick<WorkingTreeState, "ahead" | "behind" | "changed" | "untracked">): string {
   const changed = tree.changed + tree.untracked;
   const parts = [
     tree.ahead > 0 ? `${tree.ahead} ahead` : null,
     tree.behind > 0 ? `${tree.behind} behind` : null,
     changed > 0 ? `${changed} changed` : null,
   ].filter((part): part is string => part !== null);
-  return { text: `${tree.branch ?? "detached"}, ${parts.length > 0 ? parts.join(", ") : "clean"}`, dim: false };
+  return parts.length > 0 ? parts.join(", ") : "clean";
 }
 
 /** A repository's key among pull requests: its source and its full name, which a pull request's parent path is. */

@@ -8,11 +8,13 @@
     checkout (`entity_checkout`: where it is cloned and how it stands, or *Not
     on this machine yet*); the *Branch* dropdown, which sets the branch every
     tab reads at and is held per repository for the session; *New branch…*,
-    *New pull request* (the compare page, #840) and *Open in…* (#844).
+    *New pull request* (the compare page, #840) and *Open in…* (#844), or
+    *Clone* for a repository not on this machine (#846).
   - **The tabs**, `REPO_TABS` in `repo.ts`: Files (and its edit, #845),
-    Commits, Branches (#839) and Pull requests (and the compare page, #840) are
-    drawn here; Local changes (#847) says it is not built yet. A ticket that
-    builds one replaces its `NOT_BUILT` entry below with its component.
+    Commits, Branches (#839), Pull requests (and the compare page, #840) and
+    Local changes (#847).
+  - The checkout is read again when the window gets focus and when a clone
+    finishes (ADR-0021).
   - **Writes** go through the write queue (`submit_write`): *New branch…*
     (`CreateBranch`), a branch's *Delete…* (`DeleteBranch`), *Create pull
     request* (`CreatePullRequest`) and an edit's commit (`CommitFile`).
@@ -41,6 +43,7 @@
     entityView: (entityId: string, section: string | null) => Promise<SourceView | null>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
+    setCheckoutOverride: (entityId: string, path: string | null) => Promise<CheckoutView>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   }
 
@@ -66,6 +69,7 @@
     jobReach,
     listContexts,
     listEntities,
+    setCheckoutOverride,
     submitWrite,
     type EntityRow,
   } from "../../ipc/entity";
@@ -92,6 +96,9 @@
   import TfRepoBranches from "./TfRepoBranches.svelte";
   import TfRepoCompare from "./TfRepoCompare.svelte";
   import TfRepoPrs from "./TfRepoPrs.svelte";
+  import TfRepoLocal from "./TfRepoLocal.svelte";
+  import TfOpenIn from "../openin/TfOpenIn.svelte";
+  import { clones } from "../openin/clones.svelte";
 
   let {
     ready,
@@ -103,6 +110,7 @@
       entityView: (entityId, section) => entityView(entityId, section),
       entityCheckout: (entityId) => entityCheckout(entityId),
       entityCheckoutDiff: (entityId) => entityCheckoutDiff(entityId),
+      setCheckoutOverride: (entityId, path) => setCheckoutOverride(entityId, path),
       listContexts: () => listContexts(),
       listSources: () => listSources(),
       jobReach: (entityId) => jobReach(entityId),
@@ -183,25 +191,50 @@
         if (live) branches = [];
       },
     );
+    readCheckout(id, () => live);
+    const again = () => readCheckout(id, () => live);
+    window.addEventListener("focus", again);
+    return () => {
+      live = false;
+      window.removeEventListener("focus", again);
+    };
+  });
+
+  /** The checkout, and its diff when it has changes: for the `M` marks. */
+  function readCheckout(id: string, alive: () => boolean) {
     ports.entityCheckout(id).then(
       (view) => {
-        if (!live) return;
+        if (!alive()) return;
         checkout = view;
         const tree = view.tree;
-        if (tree?.status !== "read" || tree.changed + tree.untracked === 0) return;
+        if (tree?.status !== "read" || tree.changed + tree.untracked === 0) {
+          local = null;
+          return;
+        }
         ports.entityCheckoutDiff(id).then(
           (read) => {
-            if (live) local = read;
+            if (alive()) local = read;
           },
           () => {},
         );
       },
       () => {},
     );
-    return () => {
-      live = false;
-    };
+  }
+
+  // A clone that finished: *Clone* becomes *Open in…*.
+  let seenClones = clones.finished;
+  $effect(() => {
+    if (clones.finished === seenClones) return;
+    seenClones = clones.finished;
+    const id = repoId;
+    if (id !== null && ready) readCheckout(id, () => repoId === id);
   });
+
+  async function setPath(path: string) {
+    if (repoId === null) return;
+    checkout = await ports.setCheckoutOverride(repoId, path);
+  }
 
   const defaultBranch = $derived(branches?.find((option) => option.isDefault) ?? null);
   const selected = $derived(
@@ -242,9 +275,7 @@
     chosen[repoId] = (event.currentTarget as HTMLSelectElement).value;
   }
 
-  const NOT_BUILT: Partial<Record<RepoTab, string>> = {
-    local: "Local changes",
-  };
+  const NOT_BUILT: Partial<Record<RepoTab, string>> = {};
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
   let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
@@ -290,12 +321,11 @@
           type="button"
           class="tf-btn"
           disabled={branches === null || branches.length === 0}
-          onclick={() => (newBranch = { from: null })}>New branch…</button
-        >
+          onclick={() => (newBranch = { from: null })}>New branch…</button>
         {#if proposed !== null}
           <a class="tf-btn" href={repoHash(repoId, "compare", encodeURIComponent(proposed))}>New pull request</a>
         {/if}
-        <button type="button" class="tf-btn" aria-disabled="true" title="Not built in the new shell yet">Open in…</button>
+        <TfOpenIn entityId={repoId} title={repo?.title ?? ""} {checkout} size="md" />
       </div>
     </header>
     <nav class="tf-tabs" aria-label="Repository">
@@ -310,6 +340,8 @@
     <div class="tf-cbody">
       {#if NOT_BUILT[route.tab] !== undefined}
         <div class="tf-empty"><p>{NOT_BUILT[route.tab]} is not built in the new shell yet.</p></div>
+      {:else if route.tab === "local"}
+        <TfRepoLocal {repoId} title={repo?.title ?? ""} {checkout} readDiff={ports.entityCheckoutDiff} {setPath} />
       {:else if branches === null || at === null}
         <!-- The branch every tab reads at is not known yet. -->
       {:else if route.tab === "files" || route.tab === "edit"}
@@ -323,6 +355,8 @@
           editing={route.tab === "edit"}
           {job}
           checkoutBranch={checkout?.tree?.status === "read" ? checkout.tree.branch : null}
+          {checkout}
+          title={repo?.title ?? ""}
         />
       {:else if route.tab === "commits" && route.commit !== null}
         <TfRepoCommit {ports} {repoId} commitId={route.commit} {now} onNewBranch={(from) => (newBranch = { from })} />

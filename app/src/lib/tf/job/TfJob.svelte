@@ -26,7 +26,6 @@
   import { onMount, untrack } from "svelte";
 
   import type {
-    CheckoutCommand,
     CheckoutView,
     EntityDetail,
     EntityFilter,
@@ -74,6 +73,8 @@
   import { bridgePorts, type JobPorts } from "./ports";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
+  import { clones } from "../openin/clones.svelte";
+  import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
@@ -91,6 +92,7 @@
     onstarttimer,
     ports = bridgePorts,
     today = () => new Date(),
+    apps = sharedApps,
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
@@ -104,6 +106,8 @@
     onstarttimer: (entityId: string, title: string) => void;
     ports?: JobPorts;
     today?: () => Date;
+    /** The *Open in…* applications (#844). */
+    apps?: Apps;
   } = $props();
 
   /** `undefined` while reading, `null` when nothing answers to the address. */
@@ -113,7 +117,6 @@
   let code = $state<EntityRow[] | null>(null);
   let checkout = $state<CheckoutView | null>(null);
   let checkoutOf = $state<string | null>(null);
-  let commands = $state<CheckoutCommand[]>([]);
   let failure = $state<string | null>(null);
   let thread = $state<Thread | null>(null);
   let threadFailure = $state<string | null>(null);
@@ -386,6 +389,9 @@
       ...sorted.filter((row) => row.kind === "branch"),
       ...sorted.filter((row) => row.kind === "repo"),
     ].slice(0, CHECKOUT_TRIES);
+    // The first clone found; else the first repository, which then offers
+    // *Clone* on the line (R-8.25).
+    let uncloned: { view: CheckoutView; of: string } | null = null;
     for (const row of candidates) {
       try {
         const view = await ports.entityCheckout(row.entity_id);
@@ -395,14 +401,33 @@
           checkoutOf = row.entity_id;
           break;
         }
+        if (uncloned === null && row.kind === "repo") uncloned = { view, of: row.entity_id };
       } catch {
         // A checkout that cannot be read is a checkout not shown.
       }
     }
-    if (checkout !== null && commands.length === 0) {
-      commands = await ports.checkoutCommands().catch(() => []);
+    if (checkout === null && uncloned !== null) {
+      checkout = uncloned.view;
+      checkoutOf = uncloned.of;
     }
   }
+
+  // A clone that finished: the line reads its checkout again, and *Clone*
+  // becomes *Open in…*.
+  let seenClones = clones.finished;
+  $effect(() => {
+    if (clones.finished === seenClones) return;
+    seenClones = clones.finished;
+    const of = checkoutOf;
+    const mine = token;
+    if (of === null || checkout?.path) return;
+    void ports.entityCheckout(of).then(
+      (view) => {
+        if (mine === token && of === checkoutOf) checkout = view;
+      },
+      () => {},
+    );
+  });
 
   async function move(status: string) {
     if (!detail) return;
@@ -553,7 +578,7 @@
           {/if}
           <div class="tf-grid">
             {#if !starting}
-              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {commands} onopen={ports.openCheckout} {layers} />
+              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {layers} {apps} />
               <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
                 {#snippet before()}
                   {#each stale as warning (warning.sourceId)}

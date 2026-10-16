@@ -1,0 +1,103 @@
+/** Settings › Checkouts and Open in… (#844, R-13a.3) over `checkout_settings`. */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type { CheckoutApplicationDraft, CheckoutSettings } from "../../ipc/entity";
+import { createLayers } from "../layers.svelte";
+import { createApps } from "../openin/apps.svelte";
+import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+let stored: CheckoutSettings;
+let saved: [CheckoutApplicationDraft[], string | null][];
+let roots: (string | null)[];
+
+beforeEach(() => {
+  saved = [];
+  roots = [];
+  stored = {
+    clones_root: "/Users/mara/code",
+    git: { status: "found", path: "/usr/bin/git" },
+    default_application: "vscode",
+    applications: [
+      { id: "vscode", name: "VS Code", command: "code {path}", file_command: "code --goto {file}:{line}" },
+      { id: "fork", name: "Fork", command: "open -a Fork {path}", file_command: null },
+    ],
+  };
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+});
+
+async function settle() {
+  for (let round = 0; round < 3; round += 1) {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    flushSync();
+  }
+}
+
+const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+
+async function draw() {
+  const apps = createApps({
+    checkoutSettings: () => Promise.resolve(stored),
+    setCheckoutApplications: (drafts, defaultApplication) => {
+      saved.push([drafts, defaultApplication]);
+      stored = { ...stored, default_application: defaultApplication };
+      return Promise.resolve(stored);
+    },
+    openCheckout: () => Promise.resolve([]),
+  });
+  view = mount(TfCheckoutsSection, {
+    target,
+    props: {
+      apps,
+      layers: createLayers(),
+      saveRoot: (path) => {
+        roots.push(path);
+        stored = { ...stored, clones_root: path };
+        return Promise.resolve();
+      },
+    },
+  });
+  await settle();
+}
+
+test("the section draws the clones root, the git found and the applications, the default marked", async () => {
+  await draw();
+  expect(text(target.querySelector("h1"))).toBe("Checkouts and Open in…");
+  const rows = [...target.querySelectorAll(".tf-stg-row")].map(text);
+  expect(rows[0]).toContain("Clones root");
+  expect(rows[0]).toContain("/Users/mara/code");
+  expect(rows[1]).toContain("git at /usr/bin/git");
+  const apps = [...target.querySelectorAll("tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
+  expect(apps).toEqual([
+    ["VS Code default", "code {path}", "code --goto {file}:{line}", ""],
+    ["Fork", "open -a Fork {path}", "opens the checkout", "Make default"],
+  ]);
+});
+
+test("Make default saves the list with the new default, and Change… sets the clones root", async () => {
+  await draw();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Make default")!.click();
+  await settle();
+  expect(saved.at(-1)![1]).toBe("fork");
+  expect(text(target.querySelector("tbody tr:nth-child(2) td"))).toBe("Fork default");
+
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Change…")!.click();
+  flushSync();
+  const field = target.querySelector<HTMLInputElement>("input[aria-label='Clones root']")!;
+  field.value = "~/src";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => text(b) === "Save")!.click();
+  await settle();
+  expect(roots).toEqual(["~/src"]);
+  expect(text(target.querySelector(".tf-stg-row"))).toContain("~/src");
+});

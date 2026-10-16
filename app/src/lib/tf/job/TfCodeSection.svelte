@@ -3,20 +3,19 @@
   (#817): `list_entities` scoped by what the ticket reaches.
 
   - The **local checkout line** first: path, branch, changed count and
-    *Open in…* (BUILT `entity_checkout`, `open_checkout`). Asked of the job's
-    branches first, then its repositories, until one has a clone on this disk.
+    *Open in…* (`tf/openin/TfOpenIn.svelte`, #844). Asked of the job's
+    branches first, then its repositories, until one has a clone on this disk;
+    with none, the first repository's line offers *Clone* (#846, R-8.25).
   - A one-line **rollup**: the repositories and the open pull requests.
   - The rest is every section's (`TfSection.svelte`).
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
-
-  import type { CheckoutCommand, CheckoutView, EntityRow, Reached } from "../../ipc/entity";
+  import type { CheckoutView, EntityRow, Reached } from "../../ipc/entity";
   import { kindSingular } from "../../shell/kinds";
   import { ago } from "../../shell/time";
-  import { push } from "../../shell/toasts.svelte";
-  import { ipcErrorMessage } from "../../ipc";
   import type { Layers } from "../layers.svelte";
+  import type { Apps } from "../openin/apps.svelte";
+  import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { byAttention, itemHash, openPrs, originLabel, reposOf, type SectionRow } from "./job";
   import TfSection from "./TfSection.svelte";
 
@@ -25,29 +24,24 @@
     reached = new Map(),
     checkout,
     checkoutOf,
-    commands,
-    onopen,
     layers,
+    apps,
   }: {
     /** The section's rows, or `null` while the read is out. */
     rows: EntityRow[] | null;
     /** The job-reach read, by entity id, for the rows' labels. */
     reached?: Map<string, Reached>;
-    /** The first clone found, or `null` (none found, or still looking). */
+    /** The first clone found, else the first repository's no-clone view, or `null` (still looking). */
     checkout: CheckoutView | null;
     /** The entity the checkout was read for, which *Open in…* names. */
     checkoutOf: string | null;
-    commands: CheckoutCommand[];
-    onopen: (entityId: string, action: string) => Promise<void>;
-    layers: Layers;
+    layers?: Layers;
+    apps?: Apps | undefined;
   } = $props();
-
-  let menuOpen = $state(false);
 
   const sorted = $derived(byAttention(rows ?? []));
   const repos = $derived(reposOf(sorted));
   const open = $derived(openPrs(sorted));
-  const apps = $derived(commands.filter((command) => command.template !== null));
   const tree = $derived(checkout?.tree?.status === "read" ? checkout.tree : null);
   const changed = $derived(tree ? tree.changed + tree.untracked : 0);
   const lines = $derived<SectionRow[] | null>(
@@ -66,21 +60,10 @@
         })),
   );
 
-  $effect(() => {
-    if (!menuOpen) return;
-    // Untracked: registering reads the stack it writes.
-    return untrack(() => layers.add({ kind: "dialog", close: () => (menuOpen = false) }));
-  });
-
-  async function run(action: string, label: string) {
-    menuOpen = false;
-    if (checkoutOf === null) return;
-    try {
-      await onopen(checkoutOf, action);
-    } catch (cause) {
-      push({ text: `Could not ${label.charAt(0).toLowerCase()}${label.slice(1)}: ${ipcErrorMessage(cause)}`, tone: "err" });
-    }
-  }
+  /** The repository the line is about, for *Clone*'s folder. */
+  const repoTitle = $derived(
+    sorted.find((row) => row.entity_id === checkout?.repo_entity_id)?.title ?? checkout?.repo_entity_id?.split(":").pop() ?? "",
+  );
 
   function sub(row: EntityRow): string {
     const when = row.updated_at ? `, ${ago(row.updated_at)}` : "";
@@ -98,22 +81,16 @@
     {/if}
   {/snippet}
   {#snippet before()}
-    {#if checkout?.path}
+    {#if checkout?.path && checkoutOf !== null}
       <div class="tf-checkout">
         <span><span class="tf-dim">Local</span> <span class="tf-mono">{checkout.path}</span>{#if tree?.branch}{" on "}<span class="tf-mono">{tree.branch}</span>{/if}</span>
         {#if changed > 0}<span class="tf-chip tf-warn">{changed} changed</span>{/if}
-        {#if apps.length > 0}
-          <span class="tf-acts tf-openin">
-            <button class="tf-btn tf-sm" aria-haspopup="menu" aria-expanded={menuOpen} onclick={() => (menuOpen = !menuOpen)}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button>
-            {#if menuOpen}
-              <div class="tf-menu" role="menu">
-                {#each apps as app (app.action)}
-                  <button role="menuitem" onclick={() => run(app.action, app.label)}>{app.label}</button>
-                {/each}
-              </div>
-            {/if}
-          </span>
-        {/if}
+        <span class="tf-acts"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
+      </div>
+    {:else if checkout !== null && checkoutOf !== null}
+      <div class="tf-checkout">
+        <span><span class="tf-mono">{repoTitle}</span> <span class="tf-dim">is not on this machine yet.</span></span>
+        <span class="tf-acts"><TfOpenIn entityId={checkoutOf} title={repoTitle} {checkout} {layers} {apps} /></span>
       </div>
     {/if}
   {/snippet}

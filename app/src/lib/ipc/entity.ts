@@ -2287,35 +2287,31 @@ export function setCheckoutOverride(
 }
 
 /**
- * One *open* action and the command it would run —
- * `knobas_app::checkout::OpenCommandView` (#501).
+ * One application as #501's buttons draw it —
+ * `knobas_app::checkout::open::OpenCommandView`. Since #844 a view over the
+ * *Open in…* list (`checkoutSettings`): one row per application.
  *
- * `template` is what somebody set, else this platform's default; `null` is
- * *not configured*, which is every action off macOS until a template is set.
- * `is_default` says which of the two the string is, so the settings field can
- * offer to go back to the default rather than making somebody retype it.
+ * `is_default` says whether the command is the one this platform ships for
+ * that id, so the rooms settings field can offer to go back to it.
  */
 export interface CheckoutCommand {
-  /** `"vscode"`, `"jetbrains"`, `"terminal"` — what {@link openCheckout} takes. */
+  /** The application's id — what {@link openCheckout} takes. */
   action: string;
-  /** What the button says. */
+  /** What the button says: "Open in VS Code". */
   label: string;
   template: string | null;
   is_default: boolean;
 }
 
-/** Every open action, with the command it would run — `checkout_commands` (#501). */
+/** Every application as a button — `checkout_commands` (#501, #844). */
 export function checkoutCommands(): Promise<CheckoutCommand[]> {
   return invoke<CheckoutCommand[]>("checkout_commands");
 }
 
 /**
- * Set one action's command template, or clear it back to the platform's —
- * `set_checkout_command` (#501).
- *
- * Answers the fresh list, so a field draws what is now stored rather than what
- * was typed at it. Rejects with `invalid` for a template knobas could not run,
- * including one that reaches for any placeholder but `{path}`.
+ * Set one application's command, or put back the one this platform ships —
+ * `set_checkout_command` (#501, #844). Answers the fresh list. Rejects with
+ * `invalid` for a command knobas could not run.
  */
 export function setCheckoutCommand(
   action: string,
@@ -2325,19 +2321,96 @@ export function setCheckoutCommand(
 }
 
 /**
- * Run an action's command at this entity's checkout — `open_checkout` (#501).
- *
- * The one call that starts a program on this machine. The program is the
- * template a person set; the only value substituted into it is the checkout
- * path knobas found on this disk, never a field of the mirrored repo
- * (ADR-0016).
- *
- * Resolves as soon as the program has started. It says nothing about what the
- * program then did — an editor drawing a window is not something an IPC call
- * can wait for.
+ * One *Open in…* application — `knobas_core::checkout::open::Application`
+ * (#844, R-8.21). Its commands take `{path}`, `{file}`, `{line}` and
+ * `{name}`, all filled from this disk.
  */
-export function openCheckout(entityId: string, action: string): Promise<void> {
-  return invoke<void>("open_checkout", { entityId, action });
+export interface CheckoutApplication {
+  /** What {@link openCheckout} takes. */
+  id: string;
+  name: string;
+  /** Opens the checkout. */
+  command: string;
+  /** Opens a file in it, if the application has one. */
+  file_command: string | null;
+}
+
+/** An application as the dialog saves it: a new one has no id. */
+export interface CheckoutApplicationDraft {
+  id: string | null;
+  name: string;
+  command: string;
+  file_command: string | null;
+}
+
+/**
+ * The `git` knobas runs at a checkout — `knobas_app::checkout::open::GitFound`
+ * (#844). Where it is, not its version: knobas runs git only for `status`,
+ * `diff` and `clone`.
+ */
+export type GitFound =
+  | { status: "found"; path: string }
+  | { status: "no_git" }
+  | { status: "failed"; reason: string };
+
+/**
+ * Settings › Checkouts, and what every *Open in…* menu reads —
+ * `knobas_app::checkout::open::CheckoutSettings` (#844, R-13a.3).
+ */
+export interface CheckoutSettings {
+  clones_root: string | null;
+  git: GitFound;
+  /** The default's id; `null` only when there are no applications. */
+  default_application: string | null;
+  /** In the order the person put them. */
+  applications: CheckoutApplication[];
+}
+
+/** The applications, the default, the clones root and the git — `checkout_settings` (#844). */
+export function checkoutSettings(): Promise<CheckoutSettings> {
+  return invoke<CheckoutSettings>("checkout_settings");
+}
+
+/**
+ * Save the applications in order, and which is the default —
+ * `set_checkout_applications` (#844). Answers the fresh settings. Rejects
+ * with `invalid` for an entry with no name or a command knobas could not run.
+ */
+export function setCheckoutApplications(
+  applications: CheckoutApplicationDraft[],
+  defaultApplication: string | null,
+): Promise<CheckoutSettings> {
+  return invoke<CheckoutSettings>("set_checkout_applications", { applications, defaultApplication });
+}
+
+/** What {@link openCheckout} runs, and where. */
+export interface OpenAt {
+  /** An application's id; the default when absent. */
+  application?: string | null;
+  /** A file inside the checkout, relative to it: the file command runs. */
+  file?: string | null;
+  /** Fills `{line}`. */
+  line?: number | null;
+  /** A command not saved yet, run instead of an application (*Try it*). */
+  command?: string | null;
+}
+
+/**
+ * Run an application at this entity's checkout — `open_checkout` (#501,
+ * #844). Answers the argument vector it started.
+ *
+ * The one call that starts a program a person chose. Every value filled into
+ * it is from this disk: the checkout path and a file inside it, never a field
+ * of the mirrored repo (ADR-0016). Resolves once the program has started.
+ */
+export function openCheckout(entityId: string, at: OpenAt = {}): Promise<string[]> {
+  return invoke<string[]>("open_checkout", {
+    entityId,
+    application: at.application ?? null,
+    file: at.file ?? null,
+    line: at.line ?? null,
+    command: at.command ?? null,
+  });
 }
 
 /** Why a clone failed — `knobas_app::checkout::clone::FailureCause` (#823). */

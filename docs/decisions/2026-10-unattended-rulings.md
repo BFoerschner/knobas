@@ -2924,3 +2924,77 @@ Implementer rulings, PR for issues #839, #840 and #845 (one bundle).
   answer) and every other corpus pull request as a plain one. A proposal on commit `a41f2c` joins
   `suggestions.ts`, so the tray's count is eight. Divergences: the corpus title (*Idempotent retry
   window*), Gitea's check states (`failure`, `pending`). **Reversing:** low.
+## #844, #846 and #847 — Open in… with your own applications, Clone everywhere, Local changes (2026-10-16)
+
+Ruled by the implementer (PR for #844, #846, #847).
+
+- **The list is one `knobas.setting` row, not a table.** `checkout.applications` holds the list
+  and the default as JSON; no migration. #501's three templates are read once, over the shipped
+  entries of the same id, until a list is saved. **Reversing:** a migration and a table; the row's
+  shape is the table's.
+- **The shipped commands are `open -a <application>`, not `code` and `idea`** as prototype-6
+  writes them: an app started from Finder has no `/usr/local/bin` on `PATH`, where those shims
+  are, and `open -a` takes no line, so VS Code's and IntelliJ's file commands open the file
+  without one. A person with the shim edits the command. **Reversing:** low (`shipped_on`).
+- **`{path}` is no longer required.** #501 refused a template without it; R-8.23 makes that a
+  warning, so the backend accepts it and the dialog warns. A placeholder other than the four is
+  still refused by name. **Reversing:** low (`knobas_core::checkout::open::check`).
+- **#501's `checkout_commands` and `set_checkout_command` stay, as a view over the list.** The
+  rooms UI's checkout panel and Settings section, and ADR-0016's desktop witness (which types into
+  the *Open in VS Code* field and presses the *Open in VS Code* button), keep working with no
+  change to the driver. **Reversing:** retire both once the rooms UI goes.
+- **`open_checkout` answers the argv it started**, so the toast says the command it ran (R-8.22),
+  and takes an unsaved `command` for *Try it*. Same trust as saving it: the person typed it.
+  **Reversing:** low.
+- **A file is checked on disk**, by its words and by its canonical path under the checkout's
+  canonical path, and must be a file. **Reversing:** low (`file_inside`).
+- **Settings says where git is, not its version** ("git at /usr/bin/git", where prototype-6 has
+  "git 2.46.0 at …"): asking `git --version` would be a fourth git command, past ADR-0021,
+  ADR-0026 and ADR-0023's three. **Reversing:** an ADR amendment and one more call.
+- **The clones root takes a leading `~`** and stores it as `$HOME`: *Where should clones go?* offers
+  `~/code`, and nothing knobas runs is a shell. **Reversing:** low (`expand_home`).
+- **The *Add an application* preview, from Settings**, fills a stand-in path
+  (`/Users/you/code/repository`) and has no *Try it*, since there is no checkout there; from a
+  repository it is that checkout, and the file preview is the open file or `README.md`.
+  **Reversing:** low.
+- **Clone errors.** The folder and in-flight conflicts are the backend's sentences (#823); sign-in
+  is R-8.25's sentence with the repository URL's host; network and others are git's last line; a
+  full disk is "The disk is full. Free some space, then try again." Each in place, the button
+  reading *Try again*. **Reversing:** low (`cloneFailure`).
+- **The job's Code line offers *Clone*** when none of its branches and repositories is on this
+  machine, naming the first repository ("… is not on this machine yet."); prototype-6 draws the
+  line only for a clone. R-8.25 lists the job's line. **Reversing:** low.
+- **Local changes** marks a staged file "modified, staged" beside the unstaged "modified, not
+  staged", lists untracked files under *Untracked*, and re-reads the diff on window focus, as its
+  own sentence says. **Reversing:** low (`localFiles`).
+- **Copy departures from prototype-6:** the repository header's second *Clone into ~/code/<name>*
+  link is left out (the header's *Clone* button does the same); Settings' "9 clones found." is
+  left out (no read counts clones); the Local changes' *git diff: LOW* tag is a prototype
+  annotation and is left out; *Where is <name> cloned?* drops "knobas checks that the folder's
+  origin is this repository.", since `set_checkout_override` does not check it. **Reversing:**
+  low.
+- **The PR page's checkout panel** (R-8.22's last place, #841's screen, which landed while this
+  was built) mounts `TfOpenIn` in place of its disabled *Open in…*. **Reversing:** low.
+
+Ruled by the merge-manager (PR #997).
+
+- **_Try it_ running an unsaved command fits ADR-0016 as worded.** The ADR's rule is "a program
+  knobas spawns is built from a command template the user set in settings, and its arguments come
+  only from what knobas found on the local disk or was told by hand". *Add an application* is the
+  settings surface for those templates (the ADR's Consequences: "Command templates are a settings
+  surface"), wherever it is opened from. The command *Try it* runs is the person's own words, typed
+  there a moment before. The ADR names who sets the program and where, against the two sources it
+  rejects (a URL scheme handler, a mirrored field). It does not say the template must be stored
+  first. The arguments go through the same `knobas_core::checkout::open::fill` as a saved entry:
+  the checkout this disk resolved, a file checked on disk, a number, and any other placeholder
+  refused by name. The unsaved path also adds no reach over the IPC: `set_checkout_applications`
+  followed by `open_checkout` already runs any command a caller sends. **Reversing:** low. *Try
+  it* saves the draft first and passes its id; `open_checkout` drops `command`.
+- **The desktop witness for the default editor stays open.** `just desktop-witness
+  open-in-editor` ran once on this PR's head, because the PR changes both things the driver
+  presses (`set_checkout_command` now writes the list, and `open_checkout` and `CheckoutPanel`'s
+  call to it). It refused on its precondition: Launch Services resolves `dev.knobas.desktop` to
+  `/Applications/knobas.app`. ADR-0016 makes moving that copy aside the runner's job and says a
+  refusal is no witness. The merge-manager did not move an installed application with nobody at
+  the Mac. The criterion goes to the TF3 milestone review. **Reversing:** run it with the
+  installed copy moved aside.

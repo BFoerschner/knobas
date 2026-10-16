@@ -1593,3 +1593,34 @@ a.tf-r:hover { background: var(--sheet-2); }
 @media (max-width: 900px) {
   .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
 }
+/* Open in… and Clone (#844, #846): prototype-6's `.appmenu`, `.phs`, `pre.log`. */
+.tf-openin { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.tf-menu.tf-appmenu { width: 300px; padding: 4px 0; }
+.tf-appmenu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 12px; border-radius: 0; color: var(--ink); font-size: var(--t-sm); }
+.tf-appmenu button:focus-visible { background: var(--sheet-2); outline: none; }
+.tf-appmenu b { font-weight: 600; }
+.tf-appmenu .tf-plain { font-weight: 400; }
+.tf-appmenu .tf-mono { font-size: var(--t-xs); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.tf-appmenu hr { border: 0; border-top: 1px solid var(--rule-2); margin: 4px 0; }
+.tf-dialog.tf-app-dialog { width: min(640px, calc(100vw - 32px)); }
+.tf-app-dialog .tf-body { display: flex; flex-direction: column; gap: 8px; }
+.tf-phs { display: flex; flex-wrap: wrap; gap: 6px; }
+.tf-phb { border: 1px solid var(--rule); background: var(--sheet); border-radius: 4px; padding: 3px 8px; cursor: pointer; font-size: var(--t-sm); color: var(--ink-2); }
+.tf-phb .tf-mono { color: var(--ink); font-weight: 600; }
+.tf-log { margin: 0; font: var(--t-xs)/1.5 var(--mono); background: var(--paper); border-radius: 4px; padding: 8px 10px; overflow: auto; color: var(--ink); white-space: pre-wrap; }
+.tf-dialog .tf-remove { margin-right: auto; color: var(--err); }
+.tf-applist { display: flex; flex-direction: column; border: 1px solid var(--rule); border-radius: 4px; }
+.tf-approw { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-approw:last-child { border-bottom: 0; }
+.tf-approw .tf-appname .tf-mono { display: block; font-size: var(--t-xs); }
+.tf-approw .tf-appacts { margin-left: auto; display: flex; gap: 4px; }
+.tf-dnote { font-size: var(--t-sm); }
+.tf-clonefail { font-size: var(--t-sm); color: var(--err); max-width: 60ch; }
+.tf-banner.tf-err { background: var(--err-bg); color: var(--err); }
+.tf-stg-ok { display: inline-flex; align-items: center; gap: 6px; }
+.tf .tf-right { text-align: right; }
+.tf-local-line { margin: 0 0 12px; }
+.tf-local-note { margin: 0 0 10px; font-size: var(--t-sm); }
+.tf-local-acts { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
+.tf-untracked { margin-top: 14px; }
+.tf-untracked ul { margin: 0; padding: 0 12px 12px 30px; font-size: var(--t-sm); }
