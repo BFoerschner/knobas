@@ -42,9 +42,14 @@ async fn ids(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
 #[tokio::test]
 async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
     let pool = pool().await;
-    let note = create_note_inner(&pool, Some("Zephyrine standup"), Some("zephyrine body"), &[])
-        .await
-        .expect("a note");
+    let note = create_note_inner(
+        &pool,
+        Some("Zephyrine standup"),
+        Some("zephyrine body"),
+        &[],
+    )
+    .await
+    .expect("a note");
     let id = note.note.id;
 
     // Off is the default: no row has been written.
