@@ -717,6 +717,17 @@ pub(crate) fn pipeline_settings(
         triggers,
         parameters: parameter_settings(record),
         parameter_write_op: Some(crate::WRITE_OP_SET_PARAMETER.to_owned()),
+        parameter_specs: record
+            .parameters
+            .property
+            .iter()
+            .map(|p| {
+                crate::spec::parse(
+                    &p.name,
+                    p.spec.as_ref().and_then(|t| t.raw_value.as_deref()),
+                )
+            })
+            .collect(),
     }
 }
 
@@ -1427,7 +1438,8 @@ mod tests {
         let record: ConfigRecord = serde_json::from_value(serde_json::json!({
             "id": "Payout_IntegrationTests",
             "parameters": { "property": [
-                { "name": "env", "value": "staging", "inherited": false },
+                { "name": "env", "value": "staging", "inherited": false,
+                  "type": { "rawValue": "select data_1='staging' data_2='prod' label_2='Production'" } },
                 { "name": "deploy.token", "value": "s3cret", "inherited": true,
                   "type": { "rawValue": "password" } }
             ]},
@@ -1496,6 +1508,36 @@ mod tests {
         assert_eq!(
             settings.parameter_write_op.as_deref(),
             Some(crate::WRITE_OP_SET_PARAMETER)
+        );
+
+        // One spec per parameter, in the same order (#852): the select's
+        // values, and the password as text, its secret kept by `secret`.
+        use knobas_source::pipeline::{ParameterKind, ParameterOption};
+        let specs: Vec<(&str, &ParameterKind)> = settings
+            .parameter_specs
+            .iter()
+            .map(|p| (p.name.as_str(), &p.kind))
+            .collect();
+        assert_eq!(
+            specs,
+            [
+                (
+                    "env",
+                    &ParameterKind::Select {
+                        options: vec![
+                            ParameterOption {
+                                value: "staging".into(),
+                                label: None
+                            },
+                            ParameterOption {
+                                value: "prod".into(),
+                                label: Some("Production".into())
+                            },
+                        ]
+                    }
+                ),
+                ("deploy.token", &ParameterKind::Text),
+            ]
         );
     }
 

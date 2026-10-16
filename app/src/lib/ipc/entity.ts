@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 // write-back is an operation on an entity, which is why `submitWrite` is here;
 // what it hands over and what comes back are the queue's, and a second
 // declaration of either would be two shapes for one wire format.
-import type { QueuedWrite, ReviewSide, WriteOpPayload, WriteState } from "./sources";
+import type { BuildParameter, QueuedWrite, ReviewSide, WriteOpPayload, WriteState } from "./sources";
 // A day is a day wherever it is asked for: the digest takes the same
 // `DayWindow` the timesheet does rather than declaring a second shape for one
 // wire format, which is the rule the import above follows for the queue's.
@@ -564,6 +564,55 @@ export interface PipelineSettings {
   parameters: Setting[];
   /** The write op a parameter's default changes through, or `null`. */
   parameter_write_op: string | null;
+  /** How each parameter is asked for in Run…, one per parameter in order (#852). */
+  parameter_specs: ParameterSpec[];
+}
+
+/** How one parameter is asked for — `knobas_source::pipeline::ParameterSpec` (#852). */
+export interface ParameterSpec {
+  name: string;
+  /** What the source shows instead of the name. */
+  label: string | null;
+  /** What the source says about the value, such as what empty means. */
+  hint: string | null;
+  kind: ParameterKind;
+}
+
+/** The field a parameter is asked with — `knobas_source::pipeline::ParameterKind`. */
+export type ParameterKind =
+  | { type: "text" }
+  | { type: "select"; options: ParameterOption[] }
+  | { type: "checkbox"; checked: string; unchecked: string };
+
+/** One value a select offers — `knobas_source::pipeline::ParameterOption`. */
+export interface ParameterOption {
+  value: string;
+  label: string | null;
+}
+
+/**
+ * One Run… preset — `knobas_app::run_presets::RunPreset` (#852): what a run
+ * of one pipeline starts from, saved under a name. Knobas-local.
+ */
+export interface RunPreset {
+  pipeline_id: string;
+  name: string;
+  /** `null` is the default branch. */
+  branch: string | null;
+  /** The overrides only, in order. */
+  parameters: BuildParameter[];
+  clean_checkout: boolean;
+  first_in_queue: boolean;
+}
+
+/** A pipeline's Run… presets, in the order they were first saved (#852). */
+export function runPresets(pipelineId: string): Promise<RunPreset[]> {
+  return invoke<RunPreset[]>("run_presets", { pipelineId });
+}
+
+/** Save a Run… preset, replacing the pipeline's preset of that name (#852). */
+export function saveRunPreset(preset: RunPreset): Promise<RunPreset> {
+  return invoke<RunPreset>("save_run_preset", { preset });
 }
 
 /** One pipeline's settings, read live; `null` for a source with no pipelines (#851). */

@@ -43,6 +43,8 @@ fn run(entity: &str, branch: Option<&str>, parameters: &[(&str, &str)]) -> Write
                 value: (*value).to_owned(),
             })
             .collect(),
+        clean_checkout: false,
+        first_in_queue: false,
     }
 }
 
@@ -114,6 +116,52 @@ async fn a_run_without_a_branch_or_overrides_sends_neither() {
         only_body(&server).await,
         json!({ "buildType": { "id": "Payout_IntegrationTests" } })
     );
+}
+
+/// The run options (#852, R-9.7): a clean checkout and first in the queue
+/// cross as TeamCity's own `triggeringOptions` -- `cleanSources` and
+/// `queueAtTop`, the keys its *Run custom build* dialog sends -- and only the
+/// ones the reader ticked, so a run with neither is the body above.
+#[tokio::test]
+async fn a_runs_options_cross_as_triggering_options_and_only_when_ticked() {
+    for (clean, first, expected) in [
+        (
+            true,
+            true,
+            Some(json!({ "cleanSources": true, "queueAtTop": true })),
+        ),
+        (true, false, Some(json!({ "cleanSources": true }))),
+        (false, true, Some(json!({ "queueAtTop": true }))),
+        (false, false, None),
+    ] {
+        let server = MockServer::start().await;
+        queue_answers(&server).await;
+        let WriteOp::RunBuild {
+            entity,
+            branch,
+            parameters,
+            ..
+        } = run(CONFIG, None, &[])
+        else {
+            unreachable!()
+        };
+        source(&server)
+            .write(WriteOp::RunBuild {
+                entity,
+                branch,
+                parameters,
+                clean_checkout: clean,
+                first_in_queue: first,
+            })
+            .await
+            .expect("queued");
+        let body = only_body(&server).await;
+        assert_eq!(
+            body.get("triggeringOptions").cloned(),
+            expected,
+            "clean {clean}, first {first}: {body}"
+        );
+    }
 }
 
 /// A queue that accepted the run but answered nothing readable still queued

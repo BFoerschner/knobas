@@ -199,6 +199,8 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
                 name: "contract.battery.probe".into(),
                 value: "contract battery probe".into(),
             }],
+            clean_checkout: false,
+            first_in_queue: false,
         },
         // A commit would put a file on somebody's branch. The target is no
         // repository's address -- it has no `owner/` -- so an adapter that

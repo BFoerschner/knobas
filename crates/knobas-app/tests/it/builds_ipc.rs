@@ -525,6 +525,7 @@ impl knobas_source::Source for Answers {
             }],
             parameters: vec![],
             parameter_write_op: Some("set_parameter".to_owned()),
+            parameter_specs: vec![],
         }))
     }
     async fn older_runs(

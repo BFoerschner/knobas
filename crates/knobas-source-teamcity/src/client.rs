@@ -231,8 +231,9 @@ impl HttpRest {
     }
 
     /// `POST /app/rest/buildQueue` for a custom run (issue #669): the
-    /// trigger's body with `branchName` when there is a branch and
-    /// `properties` when there are overrides, neither sent empty.
+    /// trigger's body with `branchName` when there is a branch,
+    /// `properties` when there are overrides, and `triggeringOptions` with
+    /// the options set (#852), none sent empty.
     ///
     /// Answers the queued build's id from TeamCity's answer, which is the
     /// queued build in full. A body without one is still a run TeamCity
@@ -247,6 +248,7 @@ impl HttpRest {
         build_type_id: &str,
         branch: Option<&str>,
         overrides: &[knobas_source::BuildParameter],
+        options: crate::write::RunOptions,
     ) -> Result<Option<i64>, SourceError> {
         let mut body = serde_json::json!({ "buildType": { "id": build_type_id } });
         if let Some(branch) = branch {
@@ -254,6 +256,16 @@ impl HttpRest {
         }
         if !overrides.is_empty() {
             body["properties"] = serde_json::json!({ "property": overrides });
+        }
+        let mut triggering = serde_json::Map::new();
+        if options.clean_checkout {
+            triggering.insert("cleanSources".to_owned(), true.into());
+        }
+        if options.first_in_queue {
+            triggering.insert("queueAtTop".to_owned(), true.into());
+        }
+        if !triggering.is_empty() {
+            body["triggeringOptions"] = serde_json::Value::Object(triggering);
         }
         let request = self
             .client

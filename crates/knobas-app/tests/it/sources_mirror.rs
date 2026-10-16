@@ -707,6 +707,8 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
                 name: "env.SEPA_RETRIES".to_owned(),
                 value: "9".to_owned(),
             }],
+            clean_checkout: true,
+            first_in_queue: true,
         },
         knobas_source::WriteOp::SubmitReview {
             entity: "gitea:tidewater/payout-service#142".to_owned(),

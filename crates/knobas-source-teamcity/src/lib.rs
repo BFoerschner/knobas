@@ -38,6 +38,7 @@ mod map;
 mod projects;
 mod rest;
 mod source;
+mod spec;
 mod sync;
 mod view;
 mod write;

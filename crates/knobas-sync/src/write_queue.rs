@@ -978,6 +978,8 @@ mod tests {
                     entity: "teamcity:buildType:Payout_Build".to_owned(),
                     branch: Some("feature/PAY-231-sepa-retry".to_owned()),
                     parameters: Vec::new(),
+                    clean_checkout: false,
+                    first_in_queue: false,
                 },
                 "teamcity:buildType:Payout_Build",
             ),

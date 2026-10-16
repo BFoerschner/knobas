@@ -43,6 +43,47 @@ pub struct PipelineSettings {
     /// The write op a parameter's default is changed through, where the
     /// source declares one (`set_parameter`); `None` draws them read-only.
     pub parameter_write_op: Option<String>,
+    /// How each parameter is asked for in the Run… dialog (#852, R-9.7): one
+    /// per entry of `parameters`, by name, in the same order. Absent from an
+    /// older peer's answer, which reads as every parameter plain text.
+    #[serde(default)]
+    pub parameter_specs: Vec<ParameterSpec>,
+}
+
+/// How one parameter is asked for when a run is started (#852): the
+/// source's own spec of it, parsed. A parameter the source says nothing
+/// about, or says something the adapter cannot read, is [`ParameterKind::Text`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParameterSpec {
+    /// The parameter's full name, as in [`PipelineSettings::parameters`].
+    pub name: String,
+    /// What the source shows instead of the name, where it sets one.
+    pub label: Option<String>,
+    /// What the source says about the value, such as what empty means.
+    pub hint: Option<String>,
+    pub kind: ParameterKind,
+}
+
+/// The field a parameter is asked with. Tagged on `type`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ParameterKind {
+    /// Free text: anything typed is the value.
+    #[default]
+    Text,
+    /// One of a fixed list, in the source's order.
+    Select { options: Vec<ParameterOption> },
+    /// On or off, each with the value it sends.
+    Checkbox { checked: String, unchecked: String },
+}
+
+/// One value a [`ParameterKind::Select`] offers.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParameterOption {
+    /// What the run sends.
+    pub value: String,
+    /// What the source shows for it, where it differs from the value.
+    pub label: Option<String>,
 }
 
 /// One repository a pipeline builds.

@@ -504,7 +504,9 @@ invents none, exactly as mockd does.
 nothing about either, so the seed decides, all on `Payout_IntegrationTests`:
 `tidewater.region = eu-central-1` on project `Payout` (so the configuration
 shows it as *inherited*), `env.SEPA_RETRIES = 5` of its own, the password
-parameter `env.SEPA_SANDBOX_KEY`, and one VCS trigger on `+:feature/*` that is
+parameter `env.SEPA_SANDBOX_KEY`, the select `env.LOG_LEVEL` (`info` or
+`debug`, labelled *Debug*, default `info`) for the Run… dialog's typed fields
+(#852), and one VCS trigger on `+:feature/*` that is
 **disabled** -- enabled, it would queue a build on every push the Gitea live
 suite makes. `seed-state.json`'s `teamcity.settings` records the configuration
 and the password's made-up value, which `live_teamcity_seeded.rs` proves never

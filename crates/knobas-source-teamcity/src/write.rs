@@ -126,13 +126,23 @@ pub(crate) async fn set_parameter(
     rest.put_parameter(build_type_id, name, value).await
 }
 
+/// A custom run's options (#852): what TeamCity's *Run custom build* dialog
+/// calls *clean all files in the checkout directory* and *put the build at
+/// the queue top*, sent as `triggeringOptions` `cleanSources` and
+/// `queueAtTop`, each only when set.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) struct RunOptions {
+    pub(crate) clean_checkout: bool,
+    pub(crate) first_in_queue: bool,
+}
+
 /// Put one build of `build_type_id` on the queue on `branch`, with
 /// `overrides` for this build only (issue #669), and answer the queued
 /// build's id where TeamCity said it.
 ///
 /// The same `POST /app/rest/buildQueue` as [`trigger`], with `branchName`
-/// and `properties` -- the body TeamCity's own *Run custom build* sends.
-/// Neither key is sent empty: no branch is the default branch, and no
+/// and `properties` -- the body TeamCity's own *Run custom build* sends --
+/// and `triggeringOptions` for the [`RunOptions`] set. No key is sent empty: no branch is the default branch, and no
 /// override is the configuration's own values, which is exactly the trigger.
 /// An override does not change the configuration (measured on the seeded
 /// 2026.1.3 server, 2026-10-13: the build's resulting parameter carries the
@@ -154,6 +164,7 @@ pub(crate) async fn run(
     build_type_id: &str,
     branch: Option<&str>,
     overrides: &[BuildParameter],
+    options: RunOptions,
 ) -> Result<Option<i64>, SourceError> {
     if let Some(branch) = branch.filter(|b| b.trim().is_empty()) {
         return Err(SourceError::protocol(format!(
@@ -165,5 +176,6 @@ pub(crate) async fn run(
             "teamcity: a parameter override has no name".to_owned(),
         ));
     }
-    rest.queue_run(build_type_id, branch, overrides).await
+    rest.queue_run(build_type_id, branch, overrides, options)
+        .await
 }

@@ -1818,6 +1818,62 @@ pub async fn set_pipeline_pinned(
     set_pipeline_pinned_inner(&pool, &pipeline_id, pinned).await
 }
 
+// -- Run… presets (#852) -----------------------------------------------------
+
+/// The Run… presets of one pipeline (#852, R-9.7): [`crate::run_presets::list`].
+///
+/// # Errors
+///
+/// As [`crate::run_presets::list`].
+pub async fn run_presets_inner(
+    pool: &PgPool,
+    pipeline_id: &str,
+) -> Result<Vec<crate::run_presets::RunPreset>, IpcError> {
+    crate::run_presets::list(pool, pipeline_id).await
+}
+
+/// Save one Run… preset (#852, R-9.7): [`crate::run_presets::save`].
+///
+/// # Errors
+///
+/// As [`crate::run_presets::save`].
+pub async fn save_run_preset_inner(
+    pool: &PgPool,
+    preset: crate::run_presets::RunPreset,
+) -> Result<crate::run_presets::RunPreset, IpcError> {
+    crate::run_presets::save(pool, preset).await
+}
+
+/// The Run… presets of a pipeline (#852).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`run_presets_inner`] refuses with.
+#[tauri::command]
+pub async fn run_presets(
+    lifecycle: State<'_, Lifecycle>,
+    pipeline_id: String,
+) -> Result<Vec<crate::run_presets::RunPreset>, IpcError> {
+    let pool = lifecycle.pool()?;
+    run_presets_inner(&pool, &pipeline_id).await
+}
+
+/// Save a Run… preset, replacing the pipeline's preset of that name (#852).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`save_run_preset_inner`] refuses with.
+#[tauri::command]
+pub async fn save_run_preset(
+    lifecycle: State<'_, Lifecycle>,
+    preset: crate::run_presets::RunPreset,
+) -> Result<crate::run_presets::RunPreset, IpcError> {
+    let pool = lifecycle.pool()?;
+    save_run_preset_inner(&pool, preset).await
+}
+
 /// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
 /// link set (#866) joins as one more arm without changing these.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]

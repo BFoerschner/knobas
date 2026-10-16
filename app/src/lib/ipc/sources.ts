@@ -739,9 +739,19 @@ export type WriteOpPayload =
    * Run one build of a configuration (#669). `entity` is the
    * **configuration**; `branch` the source's name for it, `null` for the
    * default branch; `parameters` only the values the reader changed, for this
-   * build alone. Mirrors `knobas_source::WriteOp::RunBuild`.
+   * build alone; `clean_checkout` and `first_in_queue` the source's run
+   * options (#852), absent read as `false`. Mirrors
+   * `knobas_source::WriteOp::RunBuild`.
    */
-  | { RunBuild: { entity: string; branch: string | null; parameters: BuildParameter[] } }
+  | {
+      RunBuild: {
+        entity: string;
+        branch: string | null;
+        parameters: BuildParameter[];
+        clean_checkout?: boolean;
+        first_in_queue?: boolean;
+      };
+    }
   /**
    * Review a pull request (#705). `entity` is the **pull request**; `verdict`
    * is `knobas_source::ReviewVerdict`; `comments` the line comments that go
