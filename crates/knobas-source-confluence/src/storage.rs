@@ -66,6 +66,29 @@ pub(crate) struct Account<'a> {
 /// direction the misses fall in.
 #[must_use]
 pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
+    scan(storage, me, None)
+}
+
+/// [`to_text`] with the Docs search's marks (#860, #861;
+/// `knobas_source::docs::indexed`): each heading's line opens with
+/// [`SECTION`](knobas_source::docs::indexed::SECTION), and every `ri:page`
+/// the body links to is returned as `(space key, title)`, the space `None`
+/// where the link names none (the page's own).
+#[must_use]
+pub(crate) fn to_indexed_text(
+    storage: &str,
+    me: Option<Account<'_>>,
+) -> (String, Vec<(Option<String>, String)>) {
+    let mut links = Vec::new();
+    let text = scan(storage, me, Some(&mut links));
+    (text, links)
+}
+
+fn scan(
+    storage: &str,
+    me: Option<Account<'_>>,
+    mut links: Option<&mut Vec<(Option<String>, String)>>,
+) -> String {
     let mut out = String::with_capacity(storage.len());
     let mut rest = storage;
     while let Some(open) = rest.find('<') {
@@ -104,6 +127,26 @@ pub(crate) fn to_text(storage: &str, me: Option<Account<'_>>) -> String {
             }
         } else if is_block(&name) {
             out.push('\n');
+            if links.is_some()
+                && !tag.starts_with('/')
+                && matches!(name.as_str(), "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+            {
+                out.push(knobas_source::docs::indexed::SECTION);
+            }
+        } else if name == "ri:page"
+            && let Some(links) = links.as_deref_mut()
+            && let Some(title) = attr(tag, "ri:content-title").filter(|t| !t.trim().is_empty())
+        {
+            let space = attr(tag, "ri:space-key")
+                .filter(|k| !k.trim().is_empty())
+                .map(|k| decode_entities(k).trim().to_owned());
+            let title = decode_entities(title).trim().to_owned();
+            // A link with no body of its own reads as the page's title, as
+            // Confluence draws it, so the sentence keeps its words.
+            if tail.trim_start().starts_with("</ac:link>") {
+                out.push_str(&title.replace('&', "&amp;"));
+            }
+            links.push((space, title));
         }
         rest = tail;
     }
@@ -348,6 +391,81 @@ pub(crate) fn from_text(text: &str) -> String {
         }
         out.push_str("</p>");
     }
+    out
+}
+
+/// The Docs editor's plain text in, storage format out (#862): what a section
+/// edit and a new page are written in (R-10.13, R-10.16).
+///
+/// `## ` (one to six `#`) starts a heading, `- ` or `* ` a list item, a blank
+/// line a new paragraph, and a single newline inside one is a `<br/>`.
+/// Everything else is text, escaped as [`from_text`] escapes it: no other
+/// markup is read, so what a reader typed arrives as typed.
+#[must_use]
+pub(crate) fn from_plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut items: Vec<&str> = Vec::new();
+    let flush = |out: &mut String, paragraph: &mut Vec<&str>, items: &mut Vec<&str>| {
+        if !paragraph.is_empty() {
+            out.push_str("<p>");
+            out.push_str(
+                &paragraph
+                    .iter()
+                    .map(|l| escape(l))
+                    .collect::<Vec<_>>()
+                    .join("<br/>"),
+            );
+            out.push_str("</p>");
+            paragraph.clear();
+        }
+        if !items.is_empty() {
+            out.push_str("<ul>");
+            for item in items.iter() {
+                out.push_str("<li>");
+                out.push_str(&escape(item));
+                out.push_str("</li>");
+            }
+            out.push_str("</ul>");
+            items.clear();
+        }
+    };
+    let text = text.replace("\r\n", "\n");
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            flush(&mut out, &mut paragraph, &mut items);
+            continue;
+        }
+        let hashes = trimmed.len() - trimmed.trim_start_matches('#').len();
+        if (1..=6).contains(&hashes)
+            && let Some(heading) = trimmed[hashes..].strip_prefix(' ')
+        {
+            flush(&mut out, &mut paragraph, &mut items);
+            out.push_str(&format!(
+                "<h{hashes}>{}</h{hashes}>",
+                escape(heading.trim())
+            ));
+            continue;
+        }
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            if !paragraph.is_empty() {
+                let mut none = Vec::new();
+                flush(&mut out, &mut paragraph, &mut none);
+            }
+            items.push(item.trim());
+            continue;
+        }
+        if !items.is_empty() {
+            let mut none = Vec::new();
+            flush(&mut out, &mut none, &mut items);
+        }
+        paragraph.push(trimmed);
+    }
+    flush(&mut out, &mut paragraph, &mut items);
     out
 }
 
@@ -667,5 +785,16 @@ mod tests {
             Some(me()),
         );
         assert_eq!(text, "@knobas knobas?");
+    }
+
+    #[test]
+    fn plain_text_becomes_headings_lists_and_paragraphs() {
+        assert_eq!(
+            from_plain("Intro <b>\nsecond line\n\n## Steps\n- one & two\n* three\nAfter."),
+            "<p>Intro &lt;b&gt;<br/>second line</p><h2>Steps</h2>\
+             <ul><li>one &amp; two</li><li>three</li></ul><p>After.</p>"
+        );
+        assert_eq!(from_plain("  \n "), "");
+        assert_eq!(from_plain("#hashtag"), "<p>#hashtag</p>");
     }
 }

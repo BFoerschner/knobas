@@ -2601,6 +2601,17 @@ export interface DocsTree {
   spaces: DocSpace[];
   /** The page opened most recently (`visit_entity`) while it is still live; `#/docs` opens it. */
   last_read: string | null;
+  /** *For you* (#860): the pages whose mention of the reader is in the inbox now, newest first. */
+  for_you: DocForYou[];
+}
+
+/** A page that needs the reader, and who asked — `DocForYou`. */
+export interface DocForYou {
+  entity_id: string;
+  title: string;
+  space_key: string | null;
+  /** Who mentioned the reader; `null` where the record does not say. */
+  by_name: string | null;
 }
 
 /** One space and its pages — `DocSpace`. */
@@ -2646,6 +2657,108 @@ export interface DocPage {
   comments: DocComment[];
   /** The identity `@me` resolves to. */
   me: string[];
+  /** The sections, numbered as the anchors are, each with its text or why knobas does not edit it (#862). */
+  sections: DocSection[];
+  /** The versions the record names, newest first (#861). */
+  history: DocVersion[];
+  /** The pages of the same source whose body links here (#861). */
+  backlinks: DocBacklink[];
+  /** The tickets the page references or is linked to, with their status now (#861). */
+  work: DocWork[];
+  /** Which Docs writes the page's source takes (#862). */
+  writes: DocWrite[];
+}
+
+/** A Docs write a page's source takes — `DocPage.writes`. */
+export type DocWrite = "comment" | "update_page" | "create_page";
+
+/** Why knobas does not edit a section — `SectionRefusal`. */
+export type SectionRefusal = "table" | "code" | "macro" | "formatting";
+
+/** One section of a page — `knobas_source::docs::DocSection`. */
+export interface DocSection {
+  /** 1 for the first top-level heading. */
+  number: number;
+  /** The plain text the editor opens with; `null` when refused. */
+  text: string | null;
+  refusal: SectionRefusal | null;
+}
+
+/** One version of a page — `knobas_source::docs::DocVersion`. */
+export interface DocVersion {
+  number: number | null;
+  by: string | null;
+  by_name: string | null;
+  /** RFC 3339, as the source wrote it. */
+  at: string | null;
+  message: string | null;
+}
+
+/** A page that links here — `DocBacklink`. */
+export interface DocBacklink {
+  entity_id: string;
+  title: string;
+  space_key: string | null;
+}
+
+/** A ticket a page belongs to — `DocWork`. */
+export interface DocWork {
+  entity_id: string;
+  /** The job's address. */
+  key: string;
+  title: string;
+  status: string | null;
+  /** Whether a knobas link draws it (else the body references it). */
+  linked: boolean;
+}
+
+/** The Docs search's answer — `DocsHits` (#860). */
+export interface DocsHits {
+  /** Every page the query admits, before the limit. */
+  total: number;
+  took_ms: number;
+  /** The words and phrases to mark, lowercased. */
+  needles: string[];
+  unknown_tokens: string[];
+  hits: DocHit[];
+}
+
+/** One page the Docs search found — `DocHit`. */
+export interface DocHit {
+  entity_id: string;
+  title: string;
+  space: DocSpaceRef | null;
+  /** The parent chain as one line, `null` at the top of a space. */
+  path: string | null;
+  snippet: DocSnippet;
+  matches: number;
+  editor: string | null;
+  editor_name: string | null;
+  updated_at: string | null;
+}
+
+/** A hit's best sentence and where it is — `DocSnippet`. Source text, never markup. */
+export interface DocSnippet {
+  /** The section heading it sits under. */
+  section: string | null;
+  /** The comment's author when it is a comment's (`""` for a nameless one). */
+  comment_by: string | null;
+  segments: { text: string; hit: boolean }[];
+}
+
+/** What *Export as Markdown* wrote — `DocExport` (#861). */
+export interface DocExport {
+  file: string;
+  folder: string;
+}
+
+/** What *New page* asks for — `NewPage` (#862). */
+export interface NewPage {
+  /** The mirrored page it goes under. */
+  parent: string;
+  title: string;
+  /** Plain text: `## ` a section, `- ` a list item. */
+  text: string;
 }
 
 /** A space, named — `DocSpaceRef`. */
@@ -2709,4 +2822,40 @@ export function docsTree(): Promise<DocsTree> {
  */
 export function docsPage(entityId: string): Promise<DocPage> {
   return invoke<DocPage>("docs_page", { entityId });
+}
+
+/**
+ * The Docs search — `docs_search` (#860): the pages `query` admits in `space`
+ * (the picker's; a typed `space:` wins), or `null` for a query with neither
+ * words nor a filter.
+ */
+export function docsSearch(
+  query: string,
+  space: { source_id: string; key: string } | null,
+): Promise<DocsHits | null> {
+  return invoke<DocsHits | null>("docs_search", { query, space });
+}
+
+/** *Export as Markdown* — `docs_export_markdown` (#861): the page as `.md` in Downloads. */
+export function docsExportMarkdown(entityId: string): Promise<DocExport> {
+  return invoke<DocExport>("docs_export_markdown", { entityId });
+}
+
+/**
+ * *Edit section* — `docs_edit_section` (#862): queue section `section`'s new
+ * text against the version read. Rejects with `invalid` for a section knobas
+ * does not edit or a page that moved on.
+ */
+export function docsEditSection(
+  entityId: string,
+  section: number,
+  version: number | null,
+  text: string,
+): Promise<QueuedWrite> {
+  return invoke<QueuedWrite>("docs_edit_section", { entityId, section, version, text });
+}
+
+/** *New page* — `docs_create_page` (#862), linked to `linkTo` (a ticket id) once it lands. */
+export function docsCreatePage(page: NewPage, linkTo: string | null): Promise<QueuedWrite> {
+  return invoke<QueuedWrite>("docs_create_page", { page, linkTo });
 }

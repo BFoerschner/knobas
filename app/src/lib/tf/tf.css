@@ -1103,7 +1103,7 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-runs { padding-left: 16px; padding-right: 16px; }
 }
 /* ---------- Docs: the reader (#859, requirements §10, prototype-6's .rd) ---------- */
-.tf-rd { display: grid; grid-template-columns: 320px minmax(0, 1fr); height: 100%; }
+.tf-rd { display: grid; grid-template-columns: 320px minmax(0, 1fr) 250px; height: 100%; }
 .tf-rd-tree { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
 .tf-dl-head { padding: 12px; display: flex; flex-direction: column; gap: 8px; border-bottom: 1px solid var(--rule); }
 .tf-dl-head select {
@@ -1152,10 +1152,11 @@ a.tf-r:hover { background: var(--sheet-2); }
   vertical-align: 4px; display: inline-flex; gap: 4px;
 }
 .tf-doc h2:hover .tf-tools, .tf-doc h2 .tf-tools:focus-within { opacity: 1; }
-.tf-doc h2 .tf-tools a {
+.tf-doc h2 .tf-tools a, .tf-doc h2 .tf-tools button {
   border: 1px solid var(--rule); background: var(--sheet); border-radius: 3px; padding: 1px 7px;
-  color: var(--ink-2); text-decoration: none; font: inherit;
+  color: var(--ink-2); text-decoration: none; font: inherit; cursor: pointer;
 }
+.tf-doc h2 .tf-tools button:disabled { cursor: not-allowed; opacity: .55; }
 .tf-doc p { margin: 0 0 15px; }
 .tf-doc ul, .tf-doc ol { margin: 0 0 15px; padding-left: 24px; }
 .tf-doc li { margin: 4px 0; }
@@ -1203,7 +1204,73 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-cmts .tf-who { color: var(--ink-2); font-size: var(--t-sm); }
 .tf-cmts .tf-who b { color: var(--ink); }
 .tf-cmts .tf-cmt-body p { margin: 2px 0 6px; }
-@media (max-width: 1240px) { .tf-rd { grid-template-columns: 220px minmax(0, 1fr); } }
+/* The Docs search, the rail, the find bar and the writes (#860 to #862) */
+.tf-dl-head .tf-fsearch { max-width: none; flex: none; padding: 6px 9px; }
+.tf-dl-hint { font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-hint code { font: var(--t-2xs) var(--mono); background: var(--sheet-2); padding: 0 3px; border-radius: 2px; color: var(--ink); }
+.tf-dl-foot { padding: 10px 12px; border-top: 1px solid var(--rule-2); }
+.tf-dl-meta { padding: 6px 14px 8px; font-size: var(--t-xs); color: var(--ink-2); border-bottom: 1px solid var(--rule-2); }
+.tf-rd-tree a.tf-dl-hit {
+  display: flex; flex-direction: column; gap: 2px; padding: 9px 14px; white-space: normal; overflow: visible;
+  border-bottom: 1px solid var(--rule-2); text-decoration: none;
+}
+.tf-rd-tree a.tf-dl-hit[aria-current="true"] { background: var(--paper); color: var(--ink); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-dl-hit .tf-t { font-family: var(--serif); font-size: var(--t-lg); font-weight: 600; line-height: 1.3; }
+.tf-dl-hit .tf-pth, .tf-dl-hit .tf-n { font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-hit .tf-sn { font-family: var(--serif); font-size: var(--t-sm); line-height: 1.45; }
+.tf-dl-hit .tf-sn b { font-family: var(--sans); font-size: var(--t-2xs); color: var(--ink-2); }
+.tf-dl-for { padding: 2px 0 8px; margin-bottom: 6px; border-bottom: 1px solid var(--rule-2); }
+.tf-dl-for h4 { font-size: var(--t-xs); font-weight: 600; color: var(--ink-2); margin: 6px 12px 2px; }
+.tf-rd-tree .tf-dl-for a { white-space: normal; }
+.tf-dl-for .tf-why { display: block; font-size: var(--t-2xs); color: var(--warn); font-weight: 600; }
+.tf-rd-tree a[aria-current="true"] .tf-why { color: inherit; }
+.tf-rd-meta button.tf-chip { border: 0; background: var(--muted-bg); color: var(--muted); font-family: inherit; cursor: pointer; }
+.tf-findbar {
+  position: sticky; top: 0; z-index: 3; display: flex; gap: 8px; align-items: center; background: var(--card);
+  color: var(--card-ink); padding: 6px 16px; font-size: var(--t-sm);
+}
+.tf-findbar input {
+  border: 1px solid var(--card-ink-2); background: var(--paper); border-radius: 4px; padding: 3px 8px;
+  color: var(--ink); min-width: 200px;
+}
+.tf-findbar button {
+  border: 1px solid var(--card-ink-2); background: transparent; border-radius: 3px; cursor: pointer;
+  min-width: 26px; height: 26px; color: inherit;
+}
+.tf-findbar .tf-findx { margin-left: auto; }
+.tf mark.tf-cur { outline: 2px solid var(--card-ink); }
+.tf-rd-rail {
+  border-left: 1px solid var(--rule); overflow: auto; padding: 18px 16px; font-size: var(--t-sm);
+  display: flex; flex-direction: column; gap: 22px; min-height: 0;
+}
+.tf-rd-rail h3 { font-size: var(--t-xs); color: var(--ink-2); margin: 0 0 6px; font-weight: 600; }
+.tf-toc a {
+  display: block; padding: 3px 0 3px 10px; border-left: 2px solid var(--rule); text-decoration: none;
+  color: var(--ink-2); font-size: var(--t-sm);
+}
+.tf-toc a.tf-on { border-left-color: var(--ink); color: var(--ink); font-weight: 600; }
+.tf-toc .tf-hits {
+  font-size: var(--t-2xs); font-weight: 700; color: var(--card-ink); background: var(--card); border-radius: 8px;
+  padding: 0 5px; margin-left: 4px;
+}
+.tf-rail-list a, .tf-rail-list div { display: block; padding: 4px 0; text-decoration: none; line-height: 1.35; }
+.tf-rail-list .tf-s { display: block; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-sec-edit {
+  border: 1.5px solid var(--ink); border-radius: 6px; padding: 10px; margin: 0 0 18px; font-family: var(--sans);
+  background: var(--sheet);
+}
+.tf-sec-edit textarea {
+  width: 100%; min-height: 150px; font: 17.5px/1.65 var(--serif); border: 1px solid var(--rule); border-radius: 4px;
+  padding: 10px; background: var(--paper); color: var(--ink); resize: vertical;
+}
+.tf-sec-edit .tf-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; align-items: center; }
+.tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
+.tf-cmts .tf-compose { margin-top: 12px; }
+.tf-np-text {
+  width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
+  background: var(--paper); color: var(--ink); resize: vertical;
+}
+@media (max-width: 1240px) { .tf-rd { grid-template-columns: 220px minmax(0, 1fr); } .tf-rd-rail { display: none; } }
 @media (max-width: 900px) {
   .tf-rd { grid-template-columns: minmax(0, 1fr); height: auto; }
   .tf-rd-tree { display: none; }

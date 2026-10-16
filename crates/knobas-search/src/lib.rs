@@ -64,8 +64,8 @@ pub use saved::{Refusal, SavedList};
 pub use suggest::{FIELD_SUGGESTIONS, PARENT_SUGGESTIONS};
 pub use types::{
     EntityRow, FieldSuggestion, FilterAnswer, FilterCoverage, FilterDimension, FilterSuggestions,
-    KindSuggestion, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters, SearchHit,
-    SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
+    KindSuggestion, PageSearch, ParentSuggestion, ParsedQuery, Prefix, ResultGroup, SearchFilters,
+    SearchHit, SearchQuery, SearchResponse, Segment, SourceAnswer, SourceSuggestion,
 };
 pub use vocab::{KindCatalog, SourceVocab, Vocabulary};
 
@@ -394,6 +394,93 @@ impl Searcher {
         let built = sql::ids_sql(&words, &filters);
         let ids: Vec<(String,)> = sql::query_as_with(built).fetch_all(&self.pool).await?;
         Ok(Some(ids.into_iter().map(|(id,)| id).collect()))
+    }
+
+    /// The Docs search (#860, R-10.3, R-10.4): the live pages a query
+    /// admits, best first, at most `limit` of them, with how many there are
+    /// in all and the words and phrases a reader marks.
+    ///
+    /// The launcher's grammar and statement ([`query::parse`],
+    /// [`sql::search_sql`]) over the mirror, kept to pages: every word must
+    /// appear, English stemming, `"…"` a phrase, `-word` leaves out, `by:`
+    /// and `updated:` filter, and `space:` is `project:` under another name.
+    /// `space` is the picker's `(source id, space key)`; a `space:` the reader
+    /// typed wins over it, as typed text wins over a chip in the launcher. A
+    /// `type:` naming another kind admits nothing.
+    ///
+    /// `None` for a query with neither words nor a filter, which the Docs
+    /// pane answers with its tree.
+    ///
+    /// # Errors
+    ///
+    /// [`SearchError::Invalid`] for a query past the launcher's length,
+    /// [`SearchError::Db`] if the statement fails.
+    pub async fn page_search(
+        &self,
+        raw: &str,
+        space: Option<(&str, &str)>,
+        limit: u32,
+    ) -> Result<Option<PageSearch>, SearchError> {
+        const PAGE: &str = "page";
+        let started = Instant::now();
+        let query = validate(SearchQuery {
+            raw: raw.to_owned(),
+            limit,
+            filters: SearchFilters::default(),
+        })?;
+        let vocab = self.vocabulary().await?;
+        let mut parsed = query::parse(&query.raw, &vocab);
+        under::report_unknown(&self.pool, &mut parsed).await?;
+        let mut filters = query::merge(&parsed, &query.filters);
+        let text = (!parsed.query.text.trim().is_empty()).then_some(parsed.query.text.as_str());
+        if text.is_none() && filters.is_empty() {
+            return Ok(None);
+        }
+        let answer = |hits: Vec<SearchHit>, total: u32| PageSearch {
+            total,
+            hits,
+            needles: query::needles(&parsed.query.text),
+            unknown_tokens: parsed.query.unknown_tokens.clone(),
+            took_ms: took_ms(started),
+        };
+        if !filters.kinds.is_empty() && !filters.kinds.iter().any(|k| k == PAGE) {
+            return Ok(Some(answer(Vec::new(), 0)));
+        }
+        filters.kinds = vec![PAGE.to_owned()];
+        let typed_space = filters
+            .fields
+            .iter()
+            .any(|f| f.key == query::FieldKey::Project && !f.negated);
+        if let Some((source, key)) = space
+            && !typed_space
+        {
+            if filters.sources.is_empty() {
+                filters.sources = vec![source.to_owned()];
+            }
+            filters.fields.push(query::FieldFilter {
+                key: query::FieldKey::Project,
+                negated: false,
+                values: vec![key.to_lowercase()],
+                within_days: None,
+                me: Vec::new(),
+            });
+        }
+        let built = sql::search_sql(
+            &[&corpus::LIVE_ITEM],
+            text,
+            parsed.prefix_last_term,
+            &filters,
+            query.limit,
+            query.limit,
+        );
+        let rows: Vec<RawHit> = sql::query_as_with(built).fetch_all(&self.pool).await?;
+        let group = group::group(rows, &vocab.kinds)
+            .into_iter()
+            .find(|g| g.kind == PAGE);
+        Ok(Some(match group {
+            Some(group) => answer(group.hits, group.total),
+            None => answer(Vec::new(), 0),
+        }))
     }
 
     /// What each stored text reads as today (#812): how many rows of `kind`

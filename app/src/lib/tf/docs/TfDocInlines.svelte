@@ -4,28 +4,36 @@
 
   A web link is a button handed to the OS, as `detail/StorageBody.svelte`
   does: an anchor with an absolute `href` would navigate the webview.
+
+  With `stems` (#860, R-10.5), every match in the words is a `<mark>`, as the
+  backend marks a snippet.
 -->
 <script lang="ts">
   import type { DocInline } from "../../ipc/entity";
   import { jobHash } from "../route";
+  import TfMarked from "./TfMarked.svelte";
   import { mentionText, pageHash, statusTone } from "./docs";
 
-  let { text, onopen }: { text: DocInline[]; onopen: (url: string) => void } = $props();
+  let {
+    text,
+    onopen,
+    stems = [],
+  }: { text: DocInline[]; onopen: (url: string) => void; stems?: string[] } = $props();
 </script>
 
-{#each text as run, index (index)}{#if run.type === "text"}{#if run.code}<code>{run.text}</code
-      >{:else if run.strong && run.emphasis}<b><em>{run.text}</em></b>{:else if run.strong}<b>{run.text}</b
-      >{:else if run.emphasis}<em>{run.text}</em>{:else}{run.text}{/if}{:else if run.type === "link"}<button
-      type="button"
-      class="tf-doc-link"
-      title={run.href}
-      onclick={() => onopen(run.href)}>{run.text}</button
+{#snippet words(value: string)}<TfMarked text={value} {stems} />{/snippet}
+
+{#each text as run, index (index)}{#if run.type === "text"}{#if run.code}<code>{@render words(run.text)}</code
+      >{:else if run.strong && run.emphasis}<b><em>{@render words(run.text)}</em></b>{:else if run.strong}<b
+        >{@render words(run.text)}</b
+      >{:else if run.emphasis}<em>{@render words(run.text)}</em>{:else}{@render words(run.text)}{/if}{:else if run.type ===
+    "link"}<button type="button" class="tf-doc-link" title={run.href} onclick={() => onopen(run.href)}
+      >{@render words(run.text)}</button
     >{:else if run.type === "page_link"}{#if run.entity_id}<a class="tf-pgl" href={pageHash(run.entity_id)}
-        >{run.text}</a
-      >{:else}{run.text}{/if}{:else if run.type === "issue"}{#if run.entity_id}{@const tone = statusTone(run.status)}<a
-        class="tf-tchip"
-        href={jobHash(run.key)}
-        title={run.title ?? undefined}
+        >{@render words(run.text)}</a
+      >{:else}{@render words(run.text)}{/if}{:else if run.type === "issue"}{#if run.entity_id}{@const tone = statusTone(
+        run.status,
+      )}<a class="tf-tchip" href={jobHash(run.key)} title={run.title ?? undefined}
         ><span class="tf-k">{run.key}</span>{#if run.title}{run.title}{/if}{#if run.status}
           <span class="tf-chip" class:tf-ok={tone === "ok"}>{run.status}</span
           >{/if}</a

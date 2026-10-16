@@ -1071,7 +1071,9 @@ select b.* from (
 /// sources.
 const DETAIL: &str = concat!(
     r#"
-select i.entity_id, i.source_id, i.kind, i.title, i.body_text, i.author,
+select i.entity_id, i.source_id, i.kind, i.title, "#,
+    knobas_core::body_text_shown!("i.body_text"),
+    r#" as body_text, i.author,
        i.item_updated_at, i.synced_at, i.payload, i.web_url,
        "#,
     knobas_core::path_line_read!("$2"),
@@ -4675,7 +4677,18 @@ pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, Ipc
     // declarations, which every search command writes first (#759).
     crate::commands::search::searcher(pool).await?;
     let declarations = declared_paths(pool).await?;
-    crate::docs::tree(pool, &declarations).await
+    let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+        .await
+        .map_err(IpcError::internal)?
+        .identity;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::tree(
+        pool,
+        &declarations,
+        |kind| registry.doc_projection(kind),
+        &me,
+    )
+    .await
 }
 
 /// One page as the Docs reader draws it: header fields, blocks and comments
@@ -4711,14 +4724,199 @@ pub async fn docs_page_inner(
         .map_err(IpcError::internal)?
         .identity;
     let registry = crate::sources::Registry::builtin();
+    let templates = registry.templates();
     crate::docs::page(
         pool,
         &declarations,
         |kind| registry.doc_projection(kind),
+        |kind| crate::docs::docs_writes(&templates, registry.doc_writes(kind).is_some(), kind),
         &me,
         entity_id,
     )
     .await
+}
+
+/// The Docs search (#860, R-10.3, R-10.4): the pages a query admits, best
+/// first, each with its snippet, match count, space, path and editor; `None`
+/// for a query with neither words nor a filter, which the pane answers with
+/// its tree. `space` is the picker's space; a typed `space:` wins over it.
+///
+/// # Errors
+///
+/// `invalid` for a query past the launcher's length, `internal` for a query
+/// failure, `not_ready` before bring-up.
+#[tauri::command]
+pub async fn docs_search(
+    lifecycle: State<'_, Lifecycle>,
+    query: String,
+    space: Option<crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let pool = lifecycle.pool()?;
+    docs_search_inner(&pool, &query, space.as_ref()).await
+}
+
+/// [`docs_search`] with the pool handed in, for a test.
+///
+/// # Errors
+///
+/// As [`docs_search`].
+pub async fn docs_search_inner(
+    pool: &PgPool,
+    query: &str,
+    space: Option<&crate::docs::DocsScope>,
+) -> Result<Option<crate::docs::DocsHits>, IpcError> {
+    let searcher = crate::commands::search::searcher(pool).await?;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::search(
+        pool,
+        &searcher,
+        |kind| registry.doc_projection(kind),
+        query,
+        space,
+    )
+    .await
+}
+
+/// *Export as Markdown* (#861, R-10.17): one page as `.md` in Downloads,
+/// through the one block-to-Markdown converter.
+///
+/// # Errors
+///
+/// As [`docs_page`]; `invalid` for a page knobas cannot read; `internal` if
+/// there is no Downloads folder or the file cannot be written.
+#[tauri::command]
+pub async fn docs_export_markdown<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::docs::DocExport, IpcError> {
+    use tauri::Manager;
+    let pool = lifecycle.pool()?;
+    let downloads = app.path().download_dir().map_err(IpcError::internal)?;
+    docs_export_markdown_inner(&pool, &entity_id, &downloads).await
+}
+
+/// [`docs_export_markdown`] into `folder`, for a test.
+///
+/// # Errors
+///
+/// As [`docs_export_markdown`].
+pub async fn docs_export_markdown_inner(
+    pool: &PgPool,
+    entity_id: &str,
+    folder: &std::path::Path,
+) -> Result<crate::docs::DocExport, IpcError> {
+    crate::commands::search::searcher(pool).await?;
+    let declarations = declared_paths(pool).await?;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::export(
+        pool,
+        &declarations,
+        |kind| registry.doc_projection(kind),
+        entity_id,
+        folder,
+    )
+    .await
+}
+
+/// *Edit section* (#862, R-10.13): queue a section's new text as the page's
+/// whole new body (`UpdatePage`) through the write queue. `version` is the
+/// version the reader read; a page that moved since is refused.
+///
+/// # Errors
+///
+/// As [`docs_edit_section_payload`], then whatever the write queue refuses.
+#[tauri::command]
+pub async fn docs_edit_section<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    entity_id: String,
+    section: u32,
+    version: Option<u64>,
+    text: String,
+) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let payload =
+        docs_edit_section_payload(&state.pool, &entity_id, section, version, &text).await?;
+    crate::sources::write_queue::submit_in_background(&state, payload).await
+}
+
+/// The `UpdatePage` [`docs_edit_section`] queues, for a test.
+///
+/// # Errors
+///
+/// `invalid` for a section knobas does not edit, a page that moved past
+/// `version`, or a source that writes no pages; `not_found` for a page the
+/// live mirror does not hold.
+pub async fn docs_edit_section_payload(
+    pool: &PgPool,
+    entity_id: &str,
+    section: u32,
+    version: Option<u64>,
+    text: &str,
+) -> Result<serde_json::Value, IpcError> {
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::section_edit(
+        pool,
+        |kind| registry.doc_writes(kind),
+        entity_id,
+        section,
+        version,
+        text,
+    )
+    .await
+}
+
+/// *New page* (#862, R-10.16): queue a `CreatePage` under a mirrored page,
+/// its body the editor's plain text in the source's markup. With `link_to`
+/// (a ticket's entity id, *Link it to <job>*), the new page is linked to it
+/// once the write has landed and a sync has brought the page in.
+///
+/// # Errors
+///
+/// As [`docs_create_page_payload`], then whatever the write queue refuses.
+#[tauri::command]
+pub async fn docs_create_page<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    page: crate::docs::NewPage,
+    link_to: Option<String>,
+) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let (payload, source_id) = docs_create_page_payload(&state.pool, &page).await?;
+    let (queued, source) = crate::sources::write_queue::queue(&state, payload).await?;
+    let write_id = queued.id;
+    crate::sources::write_queue::send_in_background_then(
+        &state,
+        source,
+        write_id,
+        source_id,
+        move |state| async move {
+            if let Some(ticket) = link_to
+                && let Err(error) =
+                    crate::docs::link_created_page(&state.pool, write_id, &ticket).await
+            {
+                tracing::warn!(%error, "a new page could not be linked to its job yet");
+            }
+        },
+    );
+    Ok(queued)
+}
+
+/// The `CreatePage` [`docs_create_page`] queues and the source it goes to,
+/// for a test.
+///
+/// # Errors
+///
+/// `invalid` for a blank title, a parent with no space or a source that
+/// writes no pages; `not_found` for a parent the live mirror does not hold.
+pub async fn docs_create_page_payload(
+    pool: &PgPool,
+    page: &crate::docs::NewPage,
+) -> Result<(serde_json::Value, String), IpcError> {
+    // The space comes from the census table, kept from the stored
+    // declarations every search command writes first (#759).
+    crate::commands::search::searcher(pool).await?;
+    let registry = crate::sources::Registry::builtin();
+    crate::docs::create_page(pool, |kind| registry.doc_writes(kind), page).await
 }
 
 // -- the standup digest (#288) ----------------------------------------------

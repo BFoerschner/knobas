@@ -37,7 +37,10 @@
 
 use std::collections::HashMap;
 
-use knobas_source::docs::{DocBlock, DocComment, DocContent, Inline, PanelKind, TableCell};
+use knobas_source::docs::{
+    DocBlock, DocComment, DocContent, DocSection, DocVersion, EditRefused, Inline, PanelKind,
+    SectionEdit, SectionRefusal, TableCell,
+};
 use serde_json::Value;
 
 use crate::storage::{attr, decode_entities, split_tag, tag_name};
@@ -99,7 +102,282 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
         labels,
         blocks: to_blocks(storage, &people),
         comments,
+        sections: sections(storage),
+        history: history(payload),
     })
+}
+
+/// The versions the record names (R-10.15): the one it is, and, when that is
+/// not the first, the page's creation as version 1.
+fn history(payload: &Value) -> Vec<DocVersion> {
+    let string = |v: Option<&Value>| {
+        v.and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .map(str::to_owned)
+    };
+    let mut out = Vec::new();
+    let number = payload.pointer("/version/number").and_then(Value::as_u64);
+    if payload.get("version").is_some() {
+        out.push(DocVersion {
+            number,
+            by: string(payload.pointer("/version/by/username")),
+            by_name: string(payload.pointer("/version/by/displayName")),
+            at: string(payload.pointer("/version/when")),
+            message: string(payload.pointer("/version/message")),
+        });
+    }
+    if number.is_some_and(|n| n > 1) && payload.pointer("/history/createdBy").is_some() {
+        out.push(DocVersion {
+            number: Some(1),
+            by: string(payload.pointer("/history/createdBy/username")),
+            by_name: string(payload.pointer("/history/createdBy/displayName")),
+            at: string(payload.pointer("/history/createdDate")),
+            message: None,
+        });
+    }
+    out
+}
+
+// -- sections and their edits (#862) ------------------------------------------
+
+/// Elements the reader reads through to their children (`Blocks::node`'s
+/// transparent arm): a heading inside one is still one of the page's.
+fn is_transparent(name: &str) -> bool {
+    matches!(
+        name,
+        "div"
+            | "section"
+            | "blockquote"
+            | "ac:layout"
+            | "ac:layout-section"
+            | "ac:layout-cell"
+            | "ac:rich-text-body"
+    )
+}
+
+fn is_heading(name: &str) -> bool {
+    matches!(name, "h1" | "h2" | "h3" | "h4" | "h5" | "h6")
+}
+
+/// The headings the reader numbers, in order, each with whether it sits at
+/// the top of the body (and not inside a layout or a wrapper).
+fn headings<'a>(nodes: &'a [Node], top: bool, out: &mut Vec<(&'a Node, bool)>) {
+    for node in nodes {
+        match node.name() {
+            Some(name) if is_heading(name) => out.push((node, top)),
+            Some(name) if is_transparent(name) => headings(node.children(), false, out),
+            _ => {}
+        }
+    }
+}
+
+/// The worst thing a section holds, for its refusal: a table outranks code,
+/// code a macro, a macro formatting.
+fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
+    let Node::Element { name, children, .. } = node else {
+        return None;
+    };
+    let own = match name.as_str() {
+        "table" => Some(SectionRefusal::Table),
+        "pre" => Some(SectionRefusal::Code),
+        "ac:structured-macro" | "ac:macro"
+            if matches!(node.attr("ac:name"), Some("code" | "noformat")) =>
+        {
+            Some(SectionRefusal::Code)
+        }
+        n if n.starts_with("ac:") || n.starts_with("ri:") => Some(SectionRefusal::Macro),
+        // A numbered list would come back bulleted: the editor's text has
+        // only `- ` items, and `from_plain` writes them as `<ul>`.
+        "ol" => Some(SectionRefusal::Formatting),
+        "ul" if in_item => Some(SectionRefusal::Formatting),
+        "p" | "ul" | "li" | "br" => None,
+        _ => Some(SectionRefusal::Formatting),
+    };
+    let item = in_item || name == "li";
+    children
+        .iter()
+        .filter_map(|c| refusal_of(c, item))
+        .chain(own)
+        .min_by_key(|r| rank(*r))
+}
+
+fn rank(refusal: SectionRefusal) -> u8 {
+    match refusal {
+        SectionRefusal::Table => 0,
+        SectionRefusal::Code => 1,
+        SectionRefusal::Macro => 2,
+        SectionRefusal::Formatting => 3,
+    }
+}
+
+/// One section's place in the body: where its text starts and ends, and
+/// whether knobas edits it.
+struct Span {
+    from: usize,
+    to: usize,
+    verdict: Result<String, SectionRefusal>,
+}
+
+fn spans(storage: &str) -> Vec<Span> {
+    let nodes = parse(storage);
+    let mut found = Vec::new();
+    headings(&nodes, true, &mut found);
+    found
+        .iter()
+        .enumerate()
+        .map(|(i, (heading, top))| {
+            let next = found.get(i + 1);
+            let Node::Element {
+                span: (_, from), ..
+            } = heading
+            else {
+                unreachable!("a heading is an element")
+            };
+            let to = match next {
+                Some((
+                    Node::Element {
+                        span: (start, _), ..
+                    },
+                    _,
+                )) => *start,
+                _ => storage.len(),
+            };
+            let verdict = if !top || next.is_some_and(|(_, next_top)| !next_top) {
+                Err(SectionRefusal::Macro)
+            } else {
+                let inside: Vec<&Node> = nodes
+                    .iter()
+                    .skip_while(|n| !std::ptr::eq(*n, *heading))
+                    .skip(1)
+                    .take_while(|n| next.is_none_or(|(h, _)| !std::ptr::eq(*n, *h)))
+                    .collect();
+                match inside
+                    .iter()
+                    .filter_map(|n| refusal_of(n, false))
+                    .min_by_key(|r| rank(*r))
+                {
+                    Some(refusal) => Err(refusal),
+                    None => Ok(plain_text(&inside)),
+                }
+            };
+            Span {
+                from: *from,
+                to,
+                verdict,
+            }
+        })
+        .collect()
+}
+
+/// An editable section's body as the editor's plain text.
+fn plain_text(nodes: &[&Node]) -> String {
+    fn line(node: &Node) -> String {
+        match node {
+            Node::Element { name, .. } if name == "br" => "\n".to_owned(),
+            // A paragraph ends its line, so two inside one list item read
+            // as two sentences and not as one run-together word.
+            Node::Element { name, children, .. } if name == "p" => {
+                children.iter().map(line).chain(["\n".to_owned()]).collect()
+            }
+            Node::Element { children, .. } => children.iter().map(line).collect(),
+            Node::Text(t) | Node::Cdata(t) => t.clone(),
+        }
+    }
+    let tidy = |text: String| {
+        text.lines()
+            .map(|l| l.split_whitespace().collect::<Vec<_>>().join(" "))
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_owned()
+    };
+    let mut blocks: Vec<String> = Vec::new();
+    for node in nodes {
+        match node.name() {
+            Some("ul" | "ol") => {
+                let items: Vec<String> = node
+                    .children()
+                    .iter()
+                    .filter(|c| c.name() == Some("li"))
+                    .map(|li| format!("- {}", tidy(line(li)).replace('\n', " ")))
+                    .collect();
+                if !items.is_empty() {
+                    blocks.push(items.join("\n"));
+                }
+            }
+            _ => {
+                let text = tidy(line(node));
+                if !text.is_empty() {
+                    blocks.push(text);
+                }
+            }
+        }
+    }
+    blocks.join("\n\n")
+}
+
+/// The page's sections as the reader numbers them, each with its text or the
+/// reason knobas does not edit it.
+fn sections(storage: &str) -> Vec<DocSection> {
+    spans(storage)
+        .into_iter()
+        .zip(1..)
+        .map(|(span, number)| match span.verdict {
+            Ok(text) => DocSection {
+                number,
+                text: Some(text),
+                refusal: None,
+            },
+            Err(refusal) => DocSection {
+                number,
+                text: None,
+                refusal: Some(refusal),
+            },
+        })
+        .collect()
+}
+
+/// `knobas_source::docs::DocWrites::edit_section` for this adapter: section
+/// `number`'s body replaced with `text` in storage format, everything outside
+/// it byte for byte as it was, against the record's version.
+///
+/// # Errors
+///
+/// [`EditRefused::Section`] for a section knobas does not edit,
+/// [`EditRefused::Missing`] for a record with no such section, no body or no
+/// version.
+pub fn edit_section(
+    kind: &str,
+    payload: &Value,
+    number: u32,
+    text: &str,
+) -> Result<SectionEdit, EditRefused> {
+    if kind != crate::KIND_PAGE {
+        return Err(EditRefused::Missing);
+    }
+    let storage = payload
+        .pointer("/body/storage/value")
+        .and_then(Value::as_str)
+        .ok_or(EditRefused::Missing)?;
+    let base_version = payload
+        .pointer("/version/number")
+        .and_then(Value::as_i64)
+        .ok_or(EditRefused::Missing)?;
+    let index = usize::try_from(number)
+        .ok()
+        .and_then(|n| n.checked_sub(1))
+        .ok_or(EditRefused::Missing)?;
+    let span = spans(storage)
+        .into_iter()
+        .nth(index)
+        .ok_or(EditRefused::Missing)?;
+    span.verdict.map_err(EditRefused::Section)?;
+    let mut body = String::with_capacity(storage.len() + text.len());
+    body.push_str(&storage[..span.from]);
+    body.push_str(&crate::storage::from_plain(text));
+    body.push_str(&storage[span.to..]);
+    Ok(SectionEdit { body, base_version })
 }
 
 fn comment(raw: &Value, people: &People) -> Option<DocComment> {
@@ -162,6 +440,10 @@ enum Node {
         /// The tag's inside, for attribute reads.
         tag: String,
         children: Vec<Node>,
+        /// Where the element's open tag starts and where it ends (past its
+        /// close tag, or where an unclosed element was cut), as byte offsets
+        /// into the storage body: what a section edit splices at (#862).
+        span: (usize, usize),
     },
     /// Character data, entities decoded.
     Text(String),
@@ -218,19 +500,23 @@ fn is_void(name: &str) -> bool {
     matches!(name, "br" | "hr" | "img" | "col")
 }
 
+/// One open element on the parse stack: name, tag, children, start offset.
+type Open = (String, String, Vec<Node>, usize);
+
 fn parse(storage: &str) -> Vec<Node> {
     // The stack of open elements; the bottom is the document.
-    let mut stack: Vec<(String, String, Vec<Node>)> = vec![(String::new(), String::new(), vec![])];
+    let mut stack: Vec<Open> = vec![(String::new(), String::new(), vec![], 0)];
     let mut rest = storage;
-    let push = |stack: &mut Vec<(String, String, Vec<Node>)>, node: Node| {
+    let at = |rest: &str| storage.len() - rest.len();
+    let push = |stack: &mut Vec<Open>, node: Node| {
         stack
             .last_mut()
             .expect("the document is never popped")
             .2
             .push(node);
     };
-    let close = |stack: &mut Vec<(String, String, Vec<Node>)>| {
-        let (name, tag, children) = stack.pop().expect("only called above the document");
+    let close = |stack: &mut Vec<Open>, end: usize| {
+        let (name, tag, children, start) = stack.pop().expect("only called above the document");
         stack
             .last_mut()
             .expect("the document is never popped")
@@ -239,17 +525,20 @@ fn parse(storage: &str) -> Vec<Node> {
                 name,
                 tag,
                 children,
+                span: (start, end),
             });
     };
     while !rest.is_empty() {
         let Some(open) = rest.find('<') else {
             push(&mut stack, Node::Text(decode_entities(rest)));
+            rest = "";
             break;
         };
         if open > 0 {
             push(&mut stack, Node::Text(decode_entities(&rest[..open])));
         }
         rest = &rest[open..];
+        let start = at(rest);
         if let Some(tail) = rest.strip_prefix("<![CDATA[") {
             let (inside, tail) = tail.split_once("]]>").unwrap_or((tail, ""));
             push(&mut stack, Node::Cdata(inside.to_owned()));
@@ -262,6 +551,7 @@ fn parse(storage: &str) -> Vec<Node> {
         }
         let Some((tag, tail)) = split_tag(rest) else {
             push(&mut stack, Node::Text(decode_entities(rest)));
+            rest = "";
             break;
         };
         rest = tail;
@@ -271,13 +561,15 @@ fn parse(storage: &str) -> Vec<Node> {
         }
         if tag.starts_with('/') {
             // Close up to the matching opener; a close with no opener is
-            // dropped.
-            if let Some(depth) = stack.iter().rposition(|(open, _, _)| *open == name)
+            // dropped. An element closed by an ancestor's close tag ends where
+            // that tag starts.
+            if let Some(depth) = stack.iter().rposition(|(open, _, _, _)| *open == name)
                 && depth > 0
             {
-                while stack.len() > depth {
-                    close(&mut stack);
+                while stack.len() > depth + 1 {
+                    close(&mut stack, start);
                 }
+                close(&mut stack, at(rest));
             }
             continue;
         }
@@ -288,16 +580,21 @@ fn parse(storage: &str) -> Vec<Node> {
                     name,
                     tag: tag.to_owned(),
                     children: vec![],
+                    span: (start, at(rest)),
                 },
             );
             continue;
         }
-        stack.push((name, tag.to_owned(), vec![]));
+        stack.push((name, tag.to_owned(), vec![], start));
     }
+    let end = at(rest);
     while stack.len() > 1 {
-        close(&mut stack);
+        close(&mut stack, end);
     }
-    stack.pop().map(|(_, _, nodes)| nodes).unwrap_or_default()
+    stack
+        .pop()
+        .map(|(_, _, nodes, _)| nodes)
+        .unwrap_or_default()
 }
 
 // -- blocks -----------------------------------------------------------------
@@ -1201,5 +1498,140 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
             None
         );
         assert_eq!(doc_content("page", &json!({"title": "no body"})), None);
+    }
+
+    // -- sections and their edits (#862) --
+
+    fn page(storage: &str) -> Value {
+        serde_json::json!({"body": {"storage": {"value": storage}}, "version": {"number": 4}})
+    }
+
+    #[test]
+    fn sections_are_numbered_by_heading_and_say_whether_knobas_edits_them() {
+        let storage = "<p>Lead.</p>\
+            <h2>Text</h2><p>One <br/>two.</p><ul><li>a</li><li>b</li></ul>\
+            <h2>Table</h2><table><tr><td>x</td></tr></table>\
+            <h2>Code</h2><ac:structured-macro ac:name=\"code\"><ac:plain-text-body><![CDATA[x]]></ac:plain-text-body></ac:structured-macro>\
+            <h2>Panel</h2><ac:structured-macro ac:name=\"info\"><ac:rich-text-body><p>i</p></ac:rich-text-body></ac:structured-macro>\
+            <h2>Bold</h2><p>a <strong>b</strong></p>\
+            <h2>Mention</h2><p><ac:link><ri:user ri:username=\"mara\" /></ac:link></p>\
+            <h2>Nested</h2><ul><li>a<ul><li>b</li></ul></li></ul>\
+            <h2>Empty</h2>\
+            <h2>Numbered</h2><ol><li>a</li></ol>\
+            <h2>Item paragraphs</h2><ul><li><p>a</p><p>b</p></li></ul>";
+        let got: Vec<(u32, Option<String>, Option<SectionRefusal>)> = sections(storage)
+            .into_iter()
+            .map(|s| (s.number, s.text, s.refusal))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (1, Some("One\ntwo.\n\n- a\n- b".to_owned()), None),
+                (2, None, Some(SectionRefusal::Table)),
+                (3, None, Some(SectionRefusal::Code)),
+                (4, None, Some(SectionRefusal::Macro)),
+                (5, None, Some(SectionRefusal::Formatting)),
+                (6, None, Some(SectionRefusal::Macro)),
+                (7, None, Some(SectionRefusal::Formatting)),
+                (8, Some(String::new()), None),
+                (9, None, Some(SectionRefusal::Formatting)),
+                (10, Some("- a b".to_owned()), None),
+            ]
+        );
+    }
+
+    #[test]
+    fn the_numbering_is_the_readers() {
+        // Every top-level heading block the projection draws is a section,
+        // in its order, and nothing else is: the reader's anchors and the
+        // edit address the same sections.
+        let storage = "<h1>A</h1><p>x</p><ac:layout><ac:layout-section><ac:layout-cell><h2>B</h2><p>y</p></ac:layout-cell></ac:layout-section></ac:layout>\
+            <ac:structured-macro ac:name=\"info\"><ac:rich-text-body><h3>Inside</h3></ac:rich-text-body></ac:structured-macro><h2>C</h2>";
+        let headings = blocks(storage)
+            .iter()
+            .filter(|b| matches!(b, DocBlock::Heading { .. }))
+            .count();
+        let sections = sections(storage);
+        assert_eq!(sections.len(), headings);
+        assert_eq!(sections.len(), 3);
+        assert_eq!(
+            sections[0].refusal,
+            Some(SectionRefusal::Macro),
+            "A runs into a layout"
+        );
+        assert_eq!(
+            sections[1].refusal,
+            Some(SectionRefusal::Macro),
+            "B is inside one"
+        );
+        assert_eq!(sections[2].text.as_deref(), Some(""));
+    }
+
+    #[test]
+    fn an_edit_replaces_one_sections_body_and_keeps_the_rest_byte_for_byte() {
+        let storage = "<p>Lead.</p><h2>Backoff</h2><p>old</p><h2>Table</h2><table><tr><td>x</td></tr></table>";
+        let edit = edit_section(
+            "page",
+            &page(storage),
+            1,
+            "New <text> & more\n\n- one\n- two",
+        )
+        .unwrap();
+        assert_eq!(edit.base_version, 4);
+        assert_eq!(
+            edit.body,
+            "<p>Lead.</p><h2>Backoff</h2><p>New &lt;text&gt; &amp; more</p><ul><li>one</li><li>two</li></ul>\
+             <h2>Table</h2><table><tr><td>x</td></tr></table>"
+        );
+        // The last section runs to the end of the body.
+        let last = "<h2>A</h2><p>a</p><h2>B</h2><p>b</p>";
+        assert_eq!(
+            edit_section("page", &page(last), 2, "c").unwrap().body,
+            "<h2>A</h2><p>a</p><h2>B</h2><p>c</p>"
+        );
+    }
+
+    #[test]
+    fn an_edit_is_refused_where_the_section_is_or_is_not_there() {
+        let storage = "<h2>A</h2><table></table>";
+        assert_eq!(
+            edit_section("page", &page(storage), 1, "x"),
+            Err(EditRefused::Section(SectionRefusal::Table))
+        );
+        assert_eq!(
+            edit_section("page", &page(storage), 2, "x"),
+            Err(EditRefused::Missing)
+        );
+        assert_eq!(
+            edit_section("page", &page(storage), 0, "x"),
+            Err(EditRefused::Missing)
+        );
+        assert_eq!(
+            edit_section("blogpost", &page(storage), 1, "x"),
+            Err(EditRefused::Missing)
+        );
+        let unversioned = serde_json::json!({"body": {"storage": {"value": "<h2>A</h2>"}}});
+        assert_eq!(
+            edit_section("page", &unversioned, 1, "x"),
+            Err(EditRefused::Missing)
+        );
+    }
+
+    #[test]
+    fn history_is_this_version_and_the_creation() {
+        let payload = serde_json::json!({
+            "version": {"number": 7, "when": "2026-08-22T10:40:00Z", "message": "Cap at 5",
+                        "by": {"username": "tomasz", "displayName": "Tomasz Wójcik"}},
+            "history": {"createdBy": {"username": "mara", "displayName": "Mara Lindqvist"},
+                        "createdDate": "2026-07-01T09:00:00Z"}
+        });
+        let h = history(&payload);
+        assert_eq!(h.len(), 2);
+        assert_eq!(h[0].number, Some(7));
+        assert_eq!(h[0].by_name.as_deref(), Some("Tomasz Wójcik"));
+        assert_eq!(h[0].message.as_deref(), Some("Cap at 5"));
+        assert_eq!(h[1].number, Some(1));
+        assert_eq!(h[1].by.as_deref(), Some("mara"));
+        assert_eq!(h[1].message, None);
     }
 }

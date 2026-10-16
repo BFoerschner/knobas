@@ -52,6 +52,93 @@ pub struct DocContent {
     pub blocks: Vec<DocBlock>,
     /// The page's comments, oldest first.
     pub comments: Vec<DocComment>,
+    /// The page's sections in the order of its top-level headings, numbered
+    /// from 1 as the reader numbers them, each with whether knobas edits it
+    /// (#862, R-10.13).
+    #[serde(default)]
+    pub sections: Vec<DocSection>,
+    /// The versions the record names, newest first: at least the one it is
+    /// (R-10.15's *History*). Comparing them is out of scope.
+    #[serde(default)]
+    pub history: Vec<DocVersion>,
+}
+
+/// One section of a page body: a top-level heading and what follows it up to
+/// the next one (#862).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocSection {
+    /// 1 for the first top-level heading.
+    pub number: u32,
+    /// The section's body as the plain text the editor opens with (`- ` for
+    /// a list item, a blank line between paragraphs), `None` when it is
+    /// refused.
+    pub text: Option<String>,
+    /// Why knobas does not edit it, `None` when it does.
+    pub refusal: Option<SectionRefusal>,
+}
+
+/// Why a section is edited in the source and not in knobas (R-10.13): a text
+/// box round-trips plain text, and what it cannot hold would be lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionRefusal {
+    /// A table.
+    Table,
+    /// A code block.
+    Code,
+    /// A macro, a panel, a layout, a mention, a page or ticket link: markup
+    /// of the source's own that text cannot carry.
+    Macro,
+    /// Bold, italics, links, a nested or a numbered list, which the text box
+    /// would flatten.
+    Formatting,
+}
+
+/// One version of a page, as the record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocVersion {
+    pub number: Option<u64>,
+    /// The account that made it.
+    pub by: Option<String>,
+    pub by_name: Option<String>,
+    /// When, RFC 3339, as the source wrote it.
+    pub at: Option<String>,
+    /// The version's message, where the editor left one.
+    pub message: Option<String>,
+}
+
+/// A section edit, made: the whole new body in the source's markup and the
+/// version it was made against (`WriteOp::UpdatePage`'s fields).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionEdit {
+    pub body: String,
+    pub base_version: i64,
+}
+
+/// Why a section edit was not made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRefused {
+    /// The section is one knobas does not edit.
+    Section(SectionRefusal),
+    /// The record has no such section, no body or no version.
+    Missing,
+}
+
+/// A docs source's writes in its own markup (#862, ADR-0022's `create_page`
+/// and `update_page` by section): plain functions, as [`DocProjection`] is.
+#[derive(Debug, Clone, Copy)]
+pub struct DocWrites {
+    /// Replace section `number`'s body of the mirrored record with `text`
+    /// (the editor's plain text), keeping everything else byte for byte.
+    pub edit_section: fn(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<SectionEdit, EditRefused>,
+    /// A new page's body from plain text: `## ` starts a section, `- ` a list
+    /// item, a blank line a paragraph.
+    pub body_from_text: fn(text: &str) -> String,
 }
 
 /// One comment on a page.
@@ -228,6 +315,130 @@ fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
     }
 }
 
+/// What a docs source writes into a page's `body_text` beside the words, at
+/// sync (#860, #861; spec #808, *Docs*): the section each run of text sits
+/// in, who wrote each comment, and the pages the body links to.
+///
+/// `body_text` is what full-text search indexes, and the Docs search needs
+/// two things the words alone lose: the section a snippet comes from ("Backoff
+/// policy: …", "Comment by Priya: …") and, for *Pages that link here*, which
+/// pages a page links to. Re-projecting every hit's markup per keystroke would
+/// put the adapter's parse on the search's hot path, so the adapter writes
+/// both once, when it syncs, as **lines that open with a control character**.
+/// The characters are not words: `to_tsvector` and `ts_headline` read them as
+/// separators, so the index holds what it held before, plus the titles of the
+/// linked pages.
+///
+/// The lines, in the order a source writes them:
+///
+/// * the page's own words first, its title and any text before the first
+///   heading (no mark);
+/// * [`SECTION`] and a heading: the text below it, up to the next mark, is
+///   that section's;
+/// * [`COMMENT`] and the author's display name (empty when the record names
+///   nobody): the text below it is that comment's;
+/// * [`LINK`], the linked page's space key, [`LINK`], its title, [`LINK`]:
+///   one line per page the body links to, last, so a backlink is a substring
+///   ([`link_line`]).
+pub mod indexed {
+    /// Opens a section's heading line.
+    pub const SECTION: char = '\u{1E}';
+    /// Opens a comment's author line.
+    pub const COMMENT: char = '\u{1F}';
+    /// Delimits a page-link line's space and title.
+    pub const LINK: char = '\u{1D}';
+
+    /// Whether `ch` is one of the three marks.
+    #[must_use]
+    pub fn is_mark(ch: char) -> bool {
+        matches!(ch, SECTION | COMMENT | LINK)
+    }
+
+    /// The line a source writes for a section heading.
+    #[must_use]
+    pub fn section_line(heading: &str) -> String {
+        format!("{SECTION}{}", heading.trim())
+    }
+
+    /// The line a source writes before a comment's text.
+    #[must_use]
+    pub fn comment_line(author_name: Option<&str>) -> String {
+        format!("{COMMENT}{}", author_name.unwrap_or_default().trim())
+    }
+
+    /// The line a source writes for a link to the page `title` in the space
+    /// `space`. Closed by a mark, so `strpos(body_text, link_line(..))` finds
+    /// exactly that page and never a longer title that starts the same way.
+    #[must_use]
+    pub fn link_line(space: &str, title: &str) -> String {
+        format!("{LINK}{}{LINK}{}{LINK}", space.trim(), title.trim())
+    }
+
+    /// Which part of a page a run of indexed text belongs to.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub enum Part {
+        /// The title and whatever comes before the first heading.
+        Lead,
+        /// The section under this heading.
+        Section(String),
+        /// A comment by this display name; empty where the record named
+        /// nobody.
+        Comment(String),
+    }
+
+    /// One part and its text, its lines joined by `\n`.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    pub struct Run {
+        pub part: Part,
+        pub text: String,
+    }
+
+    /// A page's `body_text`, read back: its parts in order, and the pages it
+    /// links to as `(space, title)`.
+    #[derive(Debug, Clone, Default, PartialEq, Eq)]
+    pub struct Indexed {
+        pub runs: Vec<Run>,
+        pub links: Vec<(String, String)>,
+    }
+
+    /// Read a `body_text` written by these rules. Text with no mark at all
+    /// (a page synced before the marks, or a source that writes none) is one
+    /// [`Part::Lead`].
+    #[must_use]
+    pub fn read(body_text: &str) -> Indexed {
+        let mut out = Indexed::default();
+        let mut part = Part::Lead;
+        let mut lines: Vec<&str> = Vec::new();
+        let flush = |out: &mut Indexed, part: &Part, lines: &mut Vec<&str>| {
+            let text = lines.join("\n").trim().to_owned();
+            lines.clear();
+            if !text.is_empty() || !matches!(part, Part::Lead) {
+                out.runs.push(Run {
+                    part: part.clone(),
+                    text,
+                });
+            }
+        };
+        for line in body_text.lines() {
+            if let Some(heading) = line.strip_prefix(SECTION) {
+                flush(&mut out, &part, &mut lines);
+                part = Part::Section(heading.trim().to_owned());
+            } else if let Some(name) = line.strip_prefix(COMMENT) {
+                flush(&mut out, &part, &mut lines);
+                part = Part::Comment(name.trim().to_owned());
+            } else if let Some(rest) = line.strip_prefix(LINK) {
+                if let Some((space, title)) = rest.trim_end_matches(LINK).split_once(LINK) {
+                    out.links.push((space.to_owned(), title.to_owned()));
+                }
+            } else {
+                lines.push(line);
+            }
+        }
+        flush(&mut out, &part, &mut lines);
+        out
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,5 +499,66 @@ mod tests {
             },
         ];
         assert_eq!(inlines_mut(&mut blocks).len(), 3);
+    }
+
+    #[test]
+    fn indexed_text_reads_back_its_sections_comments_and_links() {
+        use indexed::*;
+        let body = [
+            "SEPA payout retry design".to_owned(),
+            "Why we retry.".to_owned(),
+            section_line("Backoff policy"),
+            "Base 30 s, factor 2.".to_owned(),
+            "Cap at 5 attempts.".to_owned(),
+            section_line("Empty"),
+            comment_line(Some("Priya Nair")),
+            "Should the cap be 6?".to_owned(),
+            comment_line(None),
+            "Anonymous.".to_owned(),
+            link_line("ENG", "Retry budget"),
+            link_line("OPS", "Payout worker restart"),
+        ]
+        .join("\n");
+        let read = read(&body);
+        let parts: Vec<(Part, &str)> = read
+            .runs
+            .iter()
+            .map(|r| (r.part.clone(), r.text.as_str()))
+            .collect();
+        assert_eq!(
+            parts,
+            vec![
+                (Part::Lead, "SEPA payout retry design\nWhy we retry."),
+                (
+                    Part::Section("Backoff policy".into()),
+                    "Base 30 s, factor 2.\nCap at 5 attempts."
+                ),
+                (Part::Section("Empty".into()), ""),
+                (Part::Comment("Priya Nair".into()), "Should the cap be 6?"),
+                (Part::Comment(String::new()), "Anonymous."),
+            ]
+        );
+        assert_eq!(
+            read.links,
+            vec![
+                ("ENG".to_owned(), "Retry budget".to_owned()),
+                ("OPS".to_owned(), "Payout worker restart".to_owned())
+            ]
+        );
+    }
+
+    #[test]
+    fn text_with_no_marks_is_one_lead() {
+        let read = indexed::read("Title\n\nJust words.");
+        assert_eq!(read.runs.len(), 1);
+        assert_eq!(read.runs[0].part, indexed::Part::Lead);
+        assert!(read.links.is_empty());
+    }
+
+    #[test]
+    fn the_marks_are_not_whitespace_so_a_tidy_pass_keeps_them() {
+        for mark in [indexed::SECTION, indexed::COMMENT, indexed::LINK] {
+            assert!(!mark.is_whitespace(), "{mark:?}");
+        }
     }
 }

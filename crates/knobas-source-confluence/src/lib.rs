@@ -50,6 +50,12 @@ pub use api::EXPAND as EXPAND_FOR_TESTS;
 /// The Docs projection (#859, ADR-0022): a mirrored page as the reader's
 /// blocks, comments, version and labels. The registry's row for this adapter.
 pub use blocks::doc_content;
+/// The Docs writes in storage format (#862): a section edit and a new page's
+/// body from the editor's plain text. The registry's row for this adapter.
+pub const DOC_WRITES: knobas_source::docs::DocWrites = knobas_source::docs::DocWrites {
+    edit_section: blocks::edit_section,
+    body_from_text: storage::from_plain,
+};
 pub use config::{ConfluenceConfig, Flavor};
 pub use descriptor::descriptor_template;
 pub use source::{ConfluenceSource, build};

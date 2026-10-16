@@ -1,7 +1,7 @@
-//! The incremental position: `{"v":1,…}`, opaque to everything but this crate.
+//! The incremental position: `{"v":2,…}`, opaque to everything but this crate.
 //!
 //! ```text
-//! {"v":1,
+//! {"v":2,
 //!  "modified_to":"2026-08-22T10:40:00Z",  // the newest lastmodified delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
 //!  "seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}]}
@@ -26,8 +26,11 @@
 use chrono::{DateTime, Utc};
 
 /// Bump when the envelope's shape changes: an unrecognised version reads as
-/// "no cursor", which is a full sync.
-pub(crate) const CURSOR_VERSION: u8 = 1;
+/// "no cursor", which is a full sync. Bumped to 2 by #860, whose `body_text`
+/// carries the Docs search's marks: one full sync re-indexes every page that
+/// was mirrored before them, where an incremental one would only reach the
+/// pages edited since.
+pub(crate) const CURSOR_VERSION: u8 = 2;
 
 /// How far back of the watermark the next query starts.
 ///
@@ -229,6 +232,10 @@ mod tests {
         assert_eq!(ConfluenceCursor::parse(&encoded), Some(good));
         assert_eq!(ConfluenceCursor::parse("not json"), None);
         assert_eq!(ConfluenceCursor::parse(r#"{"v":99}"#), None);
+        // A cursor from before #860's marks is a full sync, which re-indexes.
+        let mut old: serde_json::Value = serde_json::from_str(&encoded).unwrap();
+        old["v"] = serde_json::json!(1);
+        assert_eq!(ConfluenceCursor::parse(&old.to_string()), None);
         // A TeamCity or Jira cursor handed to this adapter is not this
         // adapter's cursor, and reads as a full sync rather than as a position.
         assert_eq!(

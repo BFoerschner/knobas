@@ -379,6 +379,60 @@ async fn the_snippet_is_segments_of_raw_text_with_the_match_flagged() {
     assert_eq!(flagged, [t.as_str()], "{:?}", hit.snippet);
 }
 
+/// A page's `body_text` carries the Docs search's marks (#860): a heading's
+/// mark, a comment's author line and a line per linked page. The launcher's
+/// excerpt shows the words the page holds and none of the three: no mark, no
+/// author line, no link line run together as `ENGRetry budget`.
+#[tokio::test]
+async fn a_pages_docs_marks_never_reach_the_launcher_excerpt() {
+    use knobas_source::docs::indexed::{comment_line, link_line, section_line};
+    let pool = pool().await;
+    let t = token("marks");
+    let body = [
+        section_line("Backoff policy"),
+        "Base 30 s.".to_owned(),
+        comment_line(Some("Priya Nair")),
+        format!("Should {t} cap?"),
+        link_line("ENG", &format!("Retry {t} budget")),
+    ]
+    .join("\n");
+    seed(
+        &pool,
+        &format!("cf:{t}-marked"),
+        "page",
+        "confluence",
+        "SEPA payout retry design",
+        &body,
+        None,
+        Utc::now(),
+    )
+    .await;
+
+    let r = searcher(&pool).search(q(&t)).await.unwrap();
+    let hit = &r.groups[0].hits[0];
+    let joined: String = hit.snippet.iter().map(|s| s.text.as_str()).collect();
+    assert!(joined.contains(&format!("Should {t} cap")), "{joined:?}");
+    assert!(
+        !joined.contains(knobas_source::docs::indexed::is_mark),
+        "{joined:?}"
+    );
+    assert!(!joined.contains("Priya"), "{joined:?}");
+    assert!(!joined.contains("ENG"), "{joined:?}");
+    assert!(!joined.contains("budget"), "{joined:?}");
+}
+
+/// `knobas_core::body_text_shown!` spells the SPI's three marks as regex
+/// escapes; this holds the spelling to the characters.
+#[test]
+fn the_shown_body_text_macro_names_the_three_marks() {
+    use knobas_source::docs::indexed::{COMMENT, LINK, SECTION};
+    let sql = knobas_core::body_text_shown!("x");
+    for mark in [SECTION, COMMENT, LINK] {
+        let escape = format!("\\x{:x}", u32::from(mark));
+        assert!(sql.contains(&escape), "{escape} missing from {sql}");
+    }
+}
+
 #[tokio::test]
 async fn a_deleted_item_disappears_from_the_index() {
     let pool = pool().await;

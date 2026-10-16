@@ -395,6 +395,8 @@ const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
+const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
+const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -1561,6 +1563,53 @@ const CASES: Case[] = [
   },
   {
     /**
+     * A page body by section (#862): its one effect closes the editor when
+     * the page changes; nothing is read.
+     */
+    name: "TfDocBody",
+    source: "lib/tf/docs/TfDocBody.svelte",
+    open: (target) => ({
+      app: mount(TfDocBody, {
+        target,
+        props: {
+          blocks: [],
+          entityId: "confluence:1",
+          sourceName: "Confluence",
+          webUrl: null,
+          sections: [],
+          editable: true,
+          onopen: () => {},
+          oncopy: () => {},
+          onsave: () => new Promise<boolean>(() => {}),
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * *New page* (#862): its effect picks the parent in the chosen space; the
+     * dialog registers itself on the layer stack it is handed.
+     */
+    name: "TfNewPage",
+    source: "lib/tf/docs/TfNewPage.svelte",
+    open: (target) => ({
+      app: mount(TfNewPage, {
+        target,
+        props: {
+          tree: { spaces: [{ source_id: "c", key: "ENG", name: null, pages: [{ entity_id: "c:1", title: "Home", parent: null }] }], last_read: null, for_you: [] },
+          space: "c/ENG",
+          parent: null,
+          job: "PAY-231",
+          sourceName: "Confluence",
+          layers: createLayers(),
+          onclose: () => {},
+          oncreate: () => new Promise<boolean>(() => {}),
+        },
+      }),
+    }),
+  },
+  {
+    /**
      * Docs (#859): the tree read, then the page read and its visit, all
      * `deferred`; a page that lands after the unmount must arm nothing.
      */
@@ -1574,7 +1623,7 @@ const CASES: Case[] = [
           rest: ["confluence:1"],
           job: null,
           ports: {
-            docsTree: () => deferred({ spaces: [], last_read: null }),
+            docsTree: () => deferred({ spaces: [], last_read: null, for_you: [] }),
             docsPage: () =>
               deferred({
                 entity_id: "confluence:1",
@@ -1593,7 +1642,17 @@ const CASES: Case[] = [
                 blocks: [],
                 comments: [],
                 me: [],
+                sections: [],
+                history: [],
+                backlinks: [],
+                work: [],
+                writes: [],
               }),
+            docsSearch: () => deferred(null),
+            docsExportMarkdown: () => deferred({ file: "page.md", folder: "/d" }),
+            docsEditSection: () => new Promise(() => {}),
+            docsCreatePage: () => new Promise(() => {}),
+            submitWrite: () => new Promise(() => {}),
             visitEntity: () => deferred(null),
             openExternal: async () => {},
             copy: async () => {},

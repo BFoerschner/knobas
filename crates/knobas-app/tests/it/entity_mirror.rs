@@ -1587,8 +1587,13 @@ fn the_notification_clicked_shape_matches_its_typescript_mirror() {
 /// with every nullable field `None` somewhere.
 #[test]
 fn the_docs_shapes_match_their_typescript_mirror() {
-    use knobas_app::docs::{DocAncestor, DocNode, DocPage, DocSpace, DocSpaceRef, DocsTree};
-    use knobas_source::docs::{DocBlock, DocComment, Inline, PanelKind, TableCell};
+    use knobas_app::docs::{
+        DocAncestor, DocBacklink, DocExport, DocForYou, DocHit, DocNode, DocPage, DocSnippet,
+        DocSpace, DocSpaceRef, DocWork, DocsHits, DocsTree,
+    };
+    use knobas_source::docs::{
+        DocBlock, DocComment, DocSection, DocVersion, Inline, PanelKind, SectionRefusal, TableCell,
+    };
 
     let tree = DocsTree {
         spaces: vec![DocSpace {
@@ -1602,9 +1607,20 @@ fn the_docs_shapes_match_their_typescript_mirror() {
             }],
         }],
         last_read: None,
+        for_you: vec![DocForYou {
+            entity_id: "confluence:2".to_owned(),
+            title: "SEPA payout retry design".to_owned(),
+            space_key: None,
+            by_name: None,
+        }],
     };
     let wire = serde_json::to_value(&tree).unwrap();
-    assert_shape("DocsTree", &wire, &["last_read", "spaces"]);
+    assert_shape("DocsTree", &wire, &["for_you", "last_read", "spaces"]);
+    assert_shape(
+        "DocForYou",
+        &wire["for_you"][0],
+        &["by_name", "entity_id", "space_key", "title"],
+    );
     assert_shape(
         "DocSpace",
         &wire["spaces"][0],
@@ -1649,6 +1665,31 @@ fn the_docs_shapes_match_their_typescript_mirror() {
             blocks: vec![],
         }],
         me: vec![],
+        sections: vec![DocSection {
+            number: 1,
+            text: None,
+            refusal: Some(SectionRefusal::Table),
+        }],
+        history: vec![DocVersion {
+            number: None,
+            by: None,
+            by_name: None,
+            at: None,
+            message: None,
+        }],
+        backlinks: vec![DocBacklink {
+            entity_id: "confluence:3".to_owned(),
+            title: "Payout design".to_owned(),
+            space_key: None,
+        }],
+        work: vec![DocWork {
+            entity_id: "jira:PAY-231".to_owned(),
+            key: "PAY-231".to_owned(),
+            title: "Retry".to_owned(),
+            status: None,
+            linked: true,
+        }],
+        writes: vec!["comment".to_owned()],
     };
     let wire = serde_json::to_value(&page).unwrap();
     assert_shape(
@@ -1656,14 +1697,17 @@ fn the_docs_shapes_match_their_typescript_mirror() {
         &wire,
         &[
             "ancestors",
+            "backlinks",
             "blocks",
             "comments",
             "editor",
             "editor_name",
             "entity_id",
+            "history",
             "labels",
             "me",
             "readable",
+            "sections",
             "source_id",
             "source_name",
             "space",
@@ -1671,7 +1715,113 @@ fn the_docs_shapes_match_their_typescript_mirror() {
             "updated_at",
             "version",
             "web_url",
+            "work",
+            "writes",
         ],
+    );
+    assert_shape(
+        "DocSection",
+        &wire["sections"][0],
+        &["number", "refusal", "text"],
+    );
+    assert_shape(
+        "DocVersion",
+        &wire["history"][0],
+        &["at", "by", "by_name", "message", "number"],
+    );
+    assert_shape(
+        "DocBacklink",
+        &wire["backlinks"][0],
+        &["entity_id", "space_key", "title"],
+    );
+    assert_shape(
+        "DocWork",
+        &wire["work"][0],
+        &["entity_id", "key", "linked", "status", "title"],
+    );
+    let refusals: Vec<String> = [
+        SectionRefusal::Table,
+        SectionRefusal::Code,
+        SectionRefusal::Macro,
+        SectionRefusal::Formatting,
+    ]
+    .iter()
+    .map(|r| {
+        serde_json::to_value(r)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned()
+    })
+    .collect();
+    assert_same_members(
+        &refusals.iter().map(String::as_str).collect::<Vec<_>>(),
+        declared_union(MIRROR, "SectionRefusal"),
+        "SectionRefusal in entity.ts must be exactly the Rust enum's spellings",
+    );
+
+    // The search (#860) and the export (#861).
+    let hits = DocsHits {
+        total: 1,
+        took_ms: 1,
+        needles: vec!["retry".to_owned()],
+        unknown_tokens: vec![],
+        hits: vec![DocHit {
+            entity_id: "confluence:2".to_owned(),
+            title: "SEPA payout retry design".to_owned(),
+            space: Some(DocSpaceRef {
+                key: "ENG".to_owned(),
+                name: None,
+            }),
+            path: None,
+            snippet: DocSnippet {
+                section: None,
+                comment_by: None,
+                segments: vec![knobas_search::Segment {
+                    text: "retry".to_owned(),
+                    hit: true,
+                }],
+            },
+            matches: 1,
+            editor: None,
+            editor_name: None,
+            updated_at: None,
+        }],
+    };
+    let found = serde_json::to_value(&hits).unwrap();
+    assert_shape(
+        "DocsHits",
+        &found,
+        &["hits", "needles", "took_ms", "total", "unknown_tokens"],
+    );
+    assert_shape(
+        "DocHit",
+        &found["hits"][0],
+        &[
+            "editor",
+            "editor_name",
+            "entity_id",
+            "matches",
+            "path",
+            "snippet",
+            "space",
+            "title",
+            "updated_at",
+        ],
+    );
+    assert_shape(
+        "DocSnippet",
+        &found["hits"][0]["snippet"],
+        &["comment_by", "section", "segments"],
+    );
+    let export = DocExport {
+        file: "retry-budget.md".to_owned(),
+        folder: "/Users/x/Downloads".to_owned(),
+    };
+    assert_shape(
+        "DocExport",
+        &serde_json::to_value(&export).unwrap(),
+        &["file", "folder"],
     );
     assert_shape("DocSpaceRef", &wire["space"], &["key", "name"]);
     assert_shape(

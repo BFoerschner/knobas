@@ -435,7 +435,11 @@ pub const LIVE_ITEM: Corpus = Corpus {
     source_id: "i.source_id",
     title: "i.title",
     fts: "i.fts",
-    headline_text: "i.title || ' — ' || i.body_text",
+    // The words alone: a page's Docs-search marks never reach an excerpt (#860).
+    headline_text: concat!(
+        "i.title || ' — ' || ",
+        knobas_core::body_text_shown!("i.body_text")
+    ),
     author: Some("i.author"),
     updated_at: "i.item_updated_at",
     synced_at: "i.synced_at",

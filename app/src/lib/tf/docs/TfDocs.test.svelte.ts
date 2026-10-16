@@ -6,6 +6,7 @@ import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocPage, DocsTree } from "../../ipc/entity";
+import type { QueuedWrite } from "../../ipc/sources";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
 const TREE: DocsTree = {
@@ -22,6 +23,7 @@ const TREE: DocsTree = {
     { source_id: "confluence", key: "ENG", name: "Engineering", pages: [{ entity_id: "confluence:9", title: "Eng home", parent: null }] },
   ],
   last_read: "confluence:2",
+  for_you: [],
 };
 
 function text(t: string) {
@@ -62,6 +64,29 @@ const PAGE: DocPage = {
   ],
   comments: [{ author: "priya", author_name: "Priya Nair", at: "2026-08-19T10:00:00Z", blocks: [{ type: "paragraph", text: [text("Rewriting it.")] }] }],
   me: ["mara"],
+  sections: [{ number: 1, text: null, refusal: "code" }],
+  history: [],
+  backlinks: [],
+  work: [],
+  writes: [],
+};
+
+const QUEUED: QueuedWrite = {
+  id: 1,
+  source_id: "confluence",
+  entity_id: "confluence:2",
+  op: "comment",
+  payload: {} as QueuedWrite["payload"],
+  target_snapshot: null,
+  state: "pending",
+  wait_reason: null,
+  detail: null,
+  queued_at: "2026-10-16T10:00:00Z",
+  attempted_at: null,
+  attempts: 0,
+  held_snapshot: null,
+  settled_at: null,
+  source_enabled: true,
 };
 
 let target: HTMLDivElement;
@@ -82,6 +107,11 @@ function ports(over: Partial<DocsPorts> = {}): DocsPorts {
   return {
     docsTree: vi.fn(async () => TREE),
     docsPage: vi.fn(async () => PAGE),
+    docsSearch: vi.fn(async () => null),
+    docsExportMarkdown: vi.fn(async () => ({ file: "x.md", folder: "/d" })),
+    docsEditSection: vi.fn(async () => QUEUED),
+    docsCreatePage: vi.fn(async () => QUEUED),
+    submitWrite: vi.fn(async () => QUEUED),
     visitEntity: vi.fn(async () => null),
     openExternal: vi.fn(async () => {}),
     copy: vi.fn(async () => {}),
@@ -196,4 +226,223 @@ test("comments are listed with their author, or say there are none", async () =>
   target.innerHTML = "";
   await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...PAGE, comments: [] })) }));
   expect(target.querySelector(".tf-cmts")?.textContent).toContain("No comments yet.");
+});
+
+// -- the search, the find bar, the rail and the writes (#860 to #862) --
+
+import type { DocsHits } from "../../ipc/entity";
+
+const HITS: DocsHits = {
+  total: 2,
+  took_ms: 3,
+  needles: ["ledger"],
+  unknown_tokens: [],
+  hits: [
+    {
+      entity_id: "confluence:2",
+      title: "On-call handbook",
+      space: { key: "OPS", name: "Operations" },
+      path: "Ops home",
+      snippet: { section: "Ledger", comment_by: null, segments: [{ text: "The ", hit: false }, { text: "ledger", hit: true }] },
+      matches: 2,
+      editor: "tomasz",
+      editor_name: "Tomasz Wójcik",
+      updated_at: "2026-07-02T09:00:00Z",
+    },
+    {
+      entity_id: "confluence:1",
+      title: "Ops home",
+      space: { key: "OPS", name: "Operations" },
+      path: null,
+      snippet: { section: null, comment_by: "Priya Nair", segments: [{ text: "ledger", hit: true }] },
+      matches: 1,
+      editor: "mara",
+      editor_name: "Mara Lindqvist",
+      updated_at: "2026-07-02T09:00:00Z",
+    },
+  ],
+};
+
+function type(value: string): HTMLInputElement {
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
+  input.value = value;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  return input;
+}
+
+const button = (label: string) => [...target.querySelectorAll("button")].find((b) => b.textContent?.trim() === label);
+
+test("the search names its scope, searches on every keystroke in the picker's space and lists the hits", async () => {
+  const io = await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='Search pages']")!;
+  expect(input.placeholder).toBe("Search Operations");
+  expect(target.querySelector(".tf-dl-hint")?.textContent).toBe('"…" phrase, -word leave out, by: updated:7d');
+  type("ledger");
+  await settle();
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", { source_id: "confluence", key: "OPS" });
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("2 pages in Operations, 3 ms. Search all spaces");
+  const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
+  expect(hits.map((h) => h.querySelector(".tf-pth")?.textContent)).toEqual(["Ops home", "top level"]);
+  expect(hits[0]!.querySelector(".tf-sn")?.textContent).toBe("Ledger: The ledger");
+  expect(hits[0]!.querySelector(".tf-sn mark")?.textContent).toBe("ledger");
+  expect(hits[1]!.querySelector(".tf-sn b")?.textContent).toBe("Comment by Priya:");
+  expect(hits[0]!.querySelector(".tf-n")?.textContent).toBe("2 matches, Tomasz, 2026-07-02");
+  expect(hits[1]!.querySelector(".tf-n")?.textContent).toBe("1 match, you, 2026-07-02");
+  expect(hits[0]!.getAttribute("aria-current")).toBe("true");
+  expect(target.querySelector("nav[aria-label='Docs'] details")).toBeNull();
+
+  button("Search all spaces")!.click();
+  await settle();
+  expect(io.docsSearch).toHaveBeenLastCalledWith("ledger", null);
+});
+
+test("no hit explains the AND rule; an empty field brings the tree back", async () => {
+  await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => ({ ...HITS, total: 0, hits: [] })) }));
+  type("zzz");
+  await settle();
+  expect(target.querySelector(".tf-dl-body")?.textContent).toContain(
+    "No page matches. Every word has to appear in the page or its comments.",
+  );
+  type("");
+  await settle();
+  expect(target.querySelector("nav[aria-label='Docs'] details")).not.toBeNull();
+});
+
+test("/ focuses the search, and arrows open the next hit with every match marked and the find bar", async () => {
+  await draw(["confluence:2"], ports({ docsSearch: vi.fn(async () => HITS) }));
+  window.dispatchEvent(new KeyboardEvent("keydown", { key: "/" }));
+  expect(document.activeElement?.getAttribute("aria-label")).toBe("Search pages");
+  const input = type("ledger");
+  await settle();
+  location.hash = "";
+  input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true }));
+  await settle();
+  expect(location.hash).toBe("#/page/confluence%3A1");
+  // The page drawn is still the handbook (the ports answer one page): it is
+  // the query that is carried, and the handbook holds "Ledger" twice.
+  const bar = target.querySelector(".tf-findbar")!;
+  expect(bar.querySelector("input")?.value).toBe("ledger");
+  const marks = [...target.querySelectorAll(".tf-rd-page mark")];
+  expect(marks.map((m) => m.textContent)).toEqual(["Ledger"]);
+  expect(bar.textContent).toContain("1 of 1");
+  expect(target.querySelector(".tf-toc .tf-hits")?.textContent).toBe("1");
+  button("✕")!.click();
+  await settle();
+  expect(target.querySelector(".tf-findbar")).toBeNull();
+  expect(target.querySelector(".tf-rd-page mark")).toBeNull();
+  location.hash = "";
+});
+
+const RICH: DocPage = {
+  ...PAGE,
+  sections: [{ number: 1, text: "Ask Mara.", refusal: null }],
+  history: [
+    { number: 31, by: "tomasz", by_name: "Tomasz Wójcik", at: "2026-07-02T09:00:00Z", message: null },
+    { number: 1, by: "mara", by_name: "Mara Lindqvist", at: "2026-01-02T09:00:00Z", message: null },
+  ],
+  backlinks: [{ entity_id: "confluence:5", title: "Payout design", space_key: "ENG" }],
+  work: [{ entity_id: "jira:OPS-77", key: "OPS-77", title: "On-call runbook outdated", status: "To Do", linked: false }],
+  writes: ["comment", "update_page", "create_page"],
+};
+
+test("the rail: the outline, the work, the pages that link here and the history", async () => {
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const rail = target.querySelector("aside[aria-label='About this page']")!;
+  expect([...rail.querySelectorAll("h3")].map((h) => h.textContent)).toEqual([
+    "On this page",
+    "Work it belongs to",
+    "Pages that link here",
+    "History",
+  ]);
+  expect(rail.querySelector(".tf-toc a")?.getAttribute("href")).toBe("#/page/confluence%3A2/1");
+  expect(rail.querySelector("a[href='#/job/OPS-77']")?.textContent).toContain("To Do");
+  expect(rail.querySelector("a[href='#/page/confluence%3A5']")?.textContent).toBe("Payout designENG");
+  expect([...rail.querySelectorAll(".tf-rail-list div")].map((d) => d.textContent)).toEqual([
+    "EditedTomasz, 2026-07-02",
+    "Createdyou, 2026-01-02",
+  ]);
+});
+
+test("Edit section opens the text, saves it through the queue against the version read; a refused one says why", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("Edit section")!.click();
+  await settle();
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!;
+  expect(box.value).toBe("Ask Mara.");
+  box.value = "Ask Priya.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Save section")!.click();
+  await settle();
+  expect(io.docsEditSection).toHaveBeenCalledWith("confluence:2", 1, 31, "Ask Priya.");
+  expect(target.querySelector("textarea[aria-label='Section text']")).toBeNull();
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => ({ ...RICH, sections: [{ number: 1, text: null, refusal: "table" as const }] })) }));
+  const refused = button("Edit section")!;
+  expect(refused.disabled).toBe(true);
+  expect(refused.title).toBe(
+    "This section has a table, code or a macro. knobas edits text-only sections; edit this one in Confluence.",
+  );
+});
+
+test("a comment goes through the queue; export, copy link and the actions a source does not take", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Comment on this page']")!;
+  box.value = "Done.";
+  box.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-compose button")][0]!.click();
+  await settle();
+  expect(io.submitWrite).toHaveBeenCalledWith({ Comment: { entity: "confluence:2", body: "Done." } });
+  button("Export as Markdown")!.click();
+  await settle();
+  expect(io.docsExportMarkdown).toHaveBeenCalledWith("confluence:2");
+  button("Copy link")!.click();
+  await settle();
+  expect(io.copy).toHaveBeenCalledWith("#/page/confluence%3A2\nhttp://wiki.example/pages/2");
+
+  if (view) unmount(view);
+  target.innerHTML = "";
+  await draw(["confluence:2"]);
+  expect(button("Comment")).toBeUndefined();
+  expect(button("New page here")).toBeUndefined();
+  expect(button("Edit section")).toBeUndefined();
+});
+
+test("New page asks for the space, the parent and the title, and queues the plain text", async () => {
+  const io = await draw(["confluence:2"], ports({ docsPage: vi.fn(async () => RICH) }));
+  button("New page here")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  expect(dialog.querySelector<HTMLSelectElement>("select[aria-label='Space']")?.value).toBe("confluence/OPS");
+  const under = dialog.querySelector<HTMLSelectElement>("select[aria-label='Under']")!;
+  expect(under.value).toBe("confluence:2");
+  expect([...under.options].map((o) => o.textContent)).toEqual(["Ops home", "Ops home › On-call handbook"]);
+  const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
+  title.value = "Rota";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  const text = dialog.querySelector<HTMLTextAreaElement>("textarea[aria-label='Page text']")!;
+  text.value = "## Who\n- Mara";
+  text.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!.click();
+  await settle();
+  expect(io.docsCreatePage).toHaveBeenCalledWith({ parent: "confluence:2", title: "Rota", text: "## Who\n- Mara" }, null);
+  expect(document.querySelector("[role='dialog']")).toBeNull();
+});
+
+test("For you lists the pages that mention me, with who asked", async () => {
+  await draw(
+    ["confluence:2"],
+    ports({
+      docsTree: vi.fn(async () => ({
+        ...TREE,
+        for_you: [{ entity_id: "confluence:1", title: "Ops home", space_key: "OPS", by_name: "Priya Nair" }],
+      })),
+    }),
+  );
+  const forYou = target.querySelector(".tf-dl-for")!;
+  expect(forYou.querySelector("h4")?.textContent).toBe("For you");
+  expect(forYou.querySelector("a")?.textContent).toBe("Ops homePriya mentioned you");
 });

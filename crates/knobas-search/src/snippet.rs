@@ -58,6 +58,9 @@ pub fn segments(headline: &str) -> Vec<Segment> {
         match ch {
             HIT_START => hit = true,
             HIT_STOP => hit = false,
+            // The Docs search's marks (#860) are structure, not words: a
+            // launcher excerpt of a page never shows one.
+            c if knobas_source::docs::indexed::is_mark(c) => {}
             _ => match out.last_mut() {
                 Some(last) if last.hit == hit => last.text.push(ch),
                 _ => out.push(Segment {
@@ -141,6 +144,17 @@ mod tests {
         assert!(!script[0].hit);
         assert_eq!(script[1].text, "x");
         assert!(script[1].hit);
+    }
+
+    /// A page's `body_text` carries the Docs search's marks (#860); an
+    /// excerpt of it reads as the words alone.
+    #[test]
+    fn a_docs_mark_never_reaches_an_excerpt() {
+        let headline = format!(
+            "\u{1e}Backoff {HIT_START}policy{HIT_STOP}\n\u{1f}Priya\n\u{1d}ENG\u{1d}X\u{1d}"
+        );
+        let text: String = segments(&headline).into_iter().map(|s| s.text).collect();
+        assert_eq!(text, "Backoff policy\nPriya\nENGX");
     }
 
     /// Source text is arbitrary and could in principle contain a sentinel

@@ -2738,3 +2738,69 @@ Implementer, PR for #851.
   The sleep costs only the live recipe. The Docker host choice was checked against the pinned
   image: 2.5.3's `afterLogin` awaits `sendDockerHostList` before the login's callback, so the
   push arrives before the ack the socket waits for. **Reversing:** low.
+## #860, #861 and #862 — Docs search, reader rail and export, section edit, comments and new page (2026-10-16)
+
+Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the implementer's).
+
+- **The section heading, each comment's author and the page links ride in `body_text` as lines
+  that open with a control character** (`knobas_source::docs::indexed`), written by the adapter
+  at sync. The spec puts both extractions at sync; `body_text` is the one per-item field an adapter
+  writes beyond the verbatim payload, and the marks are separators to `to_tsvector`, so the index
+  holds the same words plus the linked titles. Projecting every hit's storage format per keystroke
+  would put the adapter's parse on the search's hot path. The Confluence cursor goes to `v: 2` so
+  the first sync re-indexes the pages mirrored before. **Reversing:** a `sync.item` column (a
+  migration and a `SyncItem` field) and a read of it in `docs::search`.
+- **The snippet is cut in Rust from the marked `body_text`, not by `ts_headline`**: prototype-6's
+  rule (the sentence with the most needles, 150 characters around the first match, its section or
+  commenter), with prototype-6's stemming, which the shell repeats for the find bar's marks. Rows
+  still come from the launcher's statement (one grammar, ranked by `ts_rank_cd`). **Reversing:**
+  `docs::snippet`.
+- **Search is kept to the space the picker shows, and typing pins it**: a search started while the
+  picker follows the open page keeps that space, so opening a hit in another space does not narrow
+  the hits under the reader. A typed `space:` wins over the picker, as typed text wins over a chip
+  in the launcher. **Reversing:** `typed` in `TfDocs.svelte`, `page_search`.
+- **Backlinks are the same source's live pages whose `body_text` holds the page's link line**,
+  narrowed first by the title's words through the full-text index. **Reversing:**
+  `docs::BACKLINKS`.
+- ***For you* is the inbox's open mentions that are pages** (done or snoozed in the inbox is not
+  for you), "<first name> mentioned you" from the newest comment that mentions the reader, else
+  the page's editor. Prototype-6's other reason ("SLA section is empty") is not declared by any
+  source, so nothing else is listed. **Reversing:** `docs::for_you`.
+- **A section edit is the adapter's** (`DocWrites::edit_section`), from the mirrored record and
+  against the version the reader read; the shell sends section number, version and text. The
+  rooms UI's frontend reassembly reads the payload, which the new shell may not (ADR-0007).
+  **Reversing:** a `docs_edit_section` that takes the whole body.
+- **A section is editable when its body is paragraphs and flat lists of plain text at the top of
+  the page.** R-10.13 names panels as editable, but a panel is a Confluence macro and the text box
+  would delete it; marks, links, mentions and chips would flatten too. So a panel or any `ac:`
+  element refuses as a macro, and marks, links and nested lists refuse as formatting, with a
+  sentence of their own. Follow-up #975 rules whether panels become editable.
+  **Reversing:** `blocks::refusal_of`.
+- **New page goes under a mirrored page; *Under* has no *Top of the space*.** `CreatePage` names a
+  parent page (its SPI doc: every page has one), so the dialog defaults to the open page, else the
+  space's first page. **Reversing:** a `CreatePage` with an optional parent and the option back.
+- ***Link to <job>* and *Link it to <job>* draw a `documents` link from the page to the job's
+  ticket.** With no job, *Link to…* opens the job's link dialog with the page as its end.
+  **Reversing:** `docs::LINK_RELATION`.
+- **A write's toast is "Queued: <what>."** without prototype-6's "Sends with the next sync": the
+  write is sent at once in the background. **Reversing:** the three `push` calls.
+- **History lists the version the record is and, when that is not the first, the creation**;
+  a version with no message reads as prototype-6's *Edited* / *Created*. *Attachments* and
+  *compare versions* are out of scope (spec #808) and not drawn. **Reversing:** `blocks::history`,
+  `TfDocRail`.
+
+Merge-manager review of PR #980 (2026-10-16):
+
+- **What a reader is shown of `body_text` has no Docs-search marks.** The launcher's excerpt, the
+  proposal evidence and the detail panel read `body_text` through `knobas_core::body_text_shown!`,
+  which drops a comment's author line and a page-link line whole and a heading's mark alone. Before
+  this, a launcher excerpt of a page could read `ENGRetry budget` and *Priya Nair* as words, and
+  the evidence for *this page mentions PAY-231* quoted the link line as a second mention. The index
+  (`fts`) still holds the linked titles and the authors' names. **Reversing:** the macro's three
+  uses.
+- **A numbered list refuses as formatting in *Edit section*.** The editor's text has only `- `
+  items and `from_plain` writes `<ul>`, so saving an unchanged numbered section would have turned it
+  into bullets. Two paragraphs inside one list item now read as two sentences, not one run-together
+  word. **Reversing:** `blocks::refusal_of`'s `ol` arm and `plain_text`'s `p` arm.
+- **Refusing a panel in *Edit section* (#975) is the safe reading of R-10.13** and stays: splicing
+  the editor's plain text over a panel macro would delete the macro.
