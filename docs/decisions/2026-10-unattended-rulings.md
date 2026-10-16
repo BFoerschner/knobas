@@ -2250,3 +2250,21 @@ Merge-manager, PR #946 for #848.
   pipeline)`; TeamCity configuration ids are unique within one server, so the case a reused id can
   hit is a second server. `a_run_joins_its_pipeline_by_id_within_its_source_only` holds both
   statements' source predicates (each mutant drops one and fails it). **Reversing:** low.
+## #883 File view draws the file's blob sha
+
+- **Gitea reads the file's `contents` entry on every file read, beside the `raw` read
+  (`tokio::try_join!`).** Before, it read the entry only for a cut answer without a length. The
+  blob sha is in no other answer the file read already makes, so the entry is always read now.
+  It runs in parallel, so the wait is the slower of the two reads, not their sum, and the
+  size fallback reuses the same entry. The cost is Gitea's base64 `content` in that answer, for
+  files under its API blob limit: up to about 1.33× the file's bytes, once per file opened.
+  The seeded 1.27.3 also answers `contents-ext/{path}?ref=` with the same `sha` and
+  `content: null` (checked by hand on 2026-10-16), which would avoid that cost. But it is a newer
+  route than `contents`, and an older server would fail every file read on it, while the issue
+  names the contents API. A follow-up can switch if the cost shows.
+  **Reversing:** low, one call in `view/files.rs`.
+- **A failed entry read fails the section**, as a failed `raw` read already did, rather than
+  drawing the file with `sha: None`. A file drawn without its blob would let *Edit* (#845) send no
+  base. **Reversing:** low.
+- **The field is `sha`, as Gitea and `file_on` in the live suite name it**, documented as the blob
+  sha at the ref drawn. **Reversing:** medium, a §10.8 field rename.
