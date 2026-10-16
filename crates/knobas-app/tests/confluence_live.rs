@@ -1095,10 +1095,7 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     let env = env();
     let parent = env.page(PARENT);
     let mut litter = Litter::default();
-    let word = format!(
-        "zq{}",
-        &uuid::Uuid::new_v4().simple().to_string()[..8]
-    );
+    let word = format!("zq{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
 
     let title = format!("Docs search marks {word} [{LITTER}]");
     let storage = format!(
@@ -1168,25 +1165,33 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
         Some("Backoff policy"),
         "the section heading was kept beside the indexed text at sync"
     );
-    let snippet: String = hit.snippet.segments.iter().map(|s| s.text.as_str()).collect();
+    let snippet: String = hit
+        .snippet
+        .segments
+        .iter()
+        .map(|s| s.text.as_str())
+        .collect();
     assert_eq!(snippet, format!("Retries stop after five {word} attempts."));
-    assert_eq!(hit.space.as_ref().map(|s| s.key.as_str()), Some(env.space.as_str()));
+    assert_eq!(
+        hit.space.as_ref().map(|s| s.key.as_str()),
+        Some(env.space.as_str())
+    );
 
-    let found = knobas_app::commands::entity::docs_search_inner(
-        &state.pool,
-        &format!("{word} cap"),
-        None,
-    )
-    .await
-    .expect("the search runs")
-    .expect("words are a query");
+    let found =
+        knobas_app::commands::entity::docs_search_inner(&state.pool, &format!("{word} cap"), None)
+            .await
+            .expect("the search runs")
+            .expect("words are a query");
     let hit = found
         .hits
         .iter()
         .find(|h| h.entity_id == entity)
         .expect("the comment's words find the page");
     assert!(
-        hit.snippet.comment_by.as_deref().is_some_and(|by| !by.is_empty()),
+        hit.snippet
+            .comment_by
+            .as_deref()
+            .is_some_and(|by| !by.is_empty()),
         "the comment's author was kept beside its words: {:?}",
         hit.snippet
     );
@@ -1214,7 +1219,9 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     assert_eq!(page.sections[0].refusal, None);
     assert_eq!(
         page.sections[0].text.as_deref(),
-        Some(format!("Retries stop after five {word} attempts. Then the batch is parked.").as_str())
+        Some(
+            format!("Retries stop after five {word} attempts. Then the batch is parked.").as_str()
+        )
     );
     assert_eq!(
         page.sections[1].refusal,
