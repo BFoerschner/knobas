@@ -743,6 +743,38 @@ expect "list agents" 200
 [ "$(printf '%s' "$REST_BODY" | jq '.count // 0')" -ge 1 ] \
   || die "no connected, authorised, enabled agent -- nothing would run the builds (./seed --teamcity authorises one)"
 
+# 0. A project whose finished build names a commit this Gitea never held (#964).
+#    A build keeps the commit it ran on, and TeamCity's data outlives Gitea's:
+#    a Gitea recreated and reseeded since has other shas for the same fixture
+#    (the repository's first commit carries the seed's own date), so the
+#    build's Revision row names a commit no sync can mirror. Re-running the
+#    build is not enough -- the VCS root keeps the old modifications, and the
+#    new build then lists the whole branch as its changes instead of none, as
+#    the first build of a configuration must. So the project goes whole, with
+#    its roots, configurations and builds, and step 1 makes it again. Not
+#    touched while its builds still name commits Gitea has.
+drop_projects_built_from_another_gitea() {
+  for _cfg in $(jqf '[.builds[].cfg] | unique | .[]'); do
+    _proj=$(project_of "$_cfg")
+    rest GET "/app/rest/builds?locator=buildType:(id:$_cfg),defaultFilter:false,state:finished,count:1&fields=build(id,revisions(revision(version)))"
+    [ "$REST_STATUS" = "200" ] || continue
+    _sha=$(printf '%s' "$REST_BODY" | jq -r '.build[0].revisions.revision[0].version // empty')
+    [ -n "$_sha" ] || continue
+    gitea GET "/repos/$GITEA_ORG/$(repo_for_project "$_proj")/git/commits/$_sha"
+    case "$GITEA_STATUS" in
+      200) continue ;;
+      404|422) ;;
+      *) die "look for commit $_sha of $_cfg in Gitea: HTTP $GITEA_STATUS: $GITEA_BODY" ;;
+    esac
+    rest GET "/app/rest/projects/id:$_proj"
+    [ "$REST_STATUS" = "200" ] || continue
+    rest DELETE "/app/rest/projects/id:$_proj"
+    expect "delete project $_proj, whose build of $_cfg ran on commit $_sha" 200 204
+    say "deleted project $_proj: its build of $_cfg ran on $_sha, which is not a commit of this Gitea; it is made again"
+  done
+}
+drop_projects_built_from_another_gitea
+
 # 1. Projects, VCS roots, build configurations, ascending by configuration id
 #    as tc_state.rs lists them (first appearance in the fixture would make
 #    the order a matter of presentation).
