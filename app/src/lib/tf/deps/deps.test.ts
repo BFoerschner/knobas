@@ -1,7 +1,19 @@
 import { describe, expect, test } from "vitest";
 
 import type { Dependencies, DepItem } from "../../ipc/assets";
-import { bandsOf, railOf, stateOf, unplacedOf } from "./deps";
+import { stateOf } from "./deps";
+import { drawOf, NO_GESTURES } from "./draw";
+import { settingsOf } from "./views";
+
+/** The bands with every layer shown, or with `hidden` hidden. */
+function bandsOf(read: Dependencies, hidden: ReadonlySet<string>) {
+  return drawOf(read, settingsOf({}, hidden), NO_GESTURES).bands.map((band) => ({
+    ...band,
+    items: band.open.flatMap((group) => group.tiles),
+  }));
+}
+const railOf = (read: Dependencies, hidden: ReadonlySet<string>) => drawOf(read, settingsOf({}, hidden), NO_GESTURES).rail;
+const unplacedOf = (read: Dependencies) => drawOf(read, settingsOf({}, new Set()), NO_GESTURES).unplaced;
 
 function item(over: Partial<DepItem> & Pick<DepItem, "id" | "kind">): DepItem {
   return {
