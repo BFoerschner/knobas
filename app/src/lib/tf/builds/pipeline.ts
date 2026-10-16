@@ -150,10 +150,29 @@ export function resultOf(run: RunRow): (typeof RESULTS)[number] | null {
   return null;
 }
 
+/** How many characters of a sha a trigger names: prototype-6's `a41f2c`. */
+const SHORT_SHA = 6;
+
+/**
+ * How a run was started, as the Runs table and the run page say it (#961):
+ * *VCS change a41f2c* for a change, *Schedule*, the person's account, *you*
+ * for the reader. A run whose trigger misses but names a person is that
+ * person; one that names neither says nothing.
+ */
+export function triggerLabel(run: RunRow): string {
+  if (run.trigger === "change") return run.revision !== null ? `VCS change ${run.revision.slice(0, SHORT_SHA)}` : "VCS change";
+  if (run.trigger === "schedule") return "Schedule";
+  if (run.started_by_me) return "you";
+  return run.started_by ?? "";
+}
+
 /** Where the Runs filter stands. */
 export interface RunFilter {
   text: string;
-  /** `job` keeps the runs on the job's branches; anything else keeps all. */
+  /**
+   * `job` keeps the runs on the job's branches, `mine` the runs the reader
+   * started; anything else keeps all.
+   */
   scope: string | null;
   results: readonly string[];
   branch: string | null;
@@ -161,12 +180,15 @@ export interface RunFilter {
 
 /**
  * The runs the filter keeps, in their order: the words over the run's
- * number and branch, the scope, any of the result chips, and the branch.
+ * number, branch, commit and who or what started it, the scope, any of the
+ * result chips, and the branch.
  */
 export function keptRuns(runs: readonly RunRow[], filter: RunFilter, jobBranches: readonly string[]): RunRow[] {
   return runs.filter((run) => {
-    if (!matchesAll(`#${run.number ?? ""} ${run.branch ?? ""}`, filter.text)) return false;
+    const words = `#${run.number ?? ""} ${run.branch ?? ""} ${run.revision ?? ""} ${triggerLabel(run)} ${run.started_by ?? ""}`;
+    if (!matchesAll(words, filter.text)) return false;
     if (filter.scope === "job" && !(run.branch !== null && jobBranches.includes(run.branch))) return false;
+    if (filter.scope === "mine" && !run.started_by_me) return false;
     if (filter.results.length > 0) {
       const result = resultOf(run);
       if (result === null || !filter.results.includes(result)) return false;

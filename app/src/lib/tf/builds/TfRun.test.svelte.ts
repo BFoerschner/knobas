@@ -46,13 +46,17 @@ function run(no: number, tone: "ok" | "err" | null, branch: string, extra: Parti
     duration_seconds: tone === null ? null : 252,
     updated_at: "2026-10-16T08:05:12Z",
     web_url: `http://ci.example/build/${no}`,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
     ...extra,
   };
 }
 
 const RUNS: RunRow[] = [
   run(1188, null, FEATURE),
-  run(1187, "err", FEATURE),
+  run(1187, "err", FEATURE, { trigger: "change", revision: "a41f2c0e9b8d7c6a" }),
   run(1186, "ok", "main", { duration_seconds: 241 }),
   run(1185, "err", FEATURE, { duration_seconds: 268 }),
 ];
@@ -94,7 +98,9 @@ function viewOf(running: boolean): SourceView {
           {
             type: "facts",
             facts: [
-              { label: "Triggered by", value: "VCS change a41f2c", tone: null },
+              // The source's own fact, which the shell no longer reads: who
+              // started a run is the run's declared trigger (#961).
+              { label: "Triggered by", value: "the view's own words", tone: null },
               ...(running ? [{ label: "Now", value: "Step 3 of 5 is running.", tone: null }] : []),
               { label: "Agent", value: "linux-agent-03", tone: null },
             ],

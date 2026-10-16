@@ -3806,3 +3806,48 @@ Ruled by the merge-manager (PR #1034).
   release carries `2.0.0` in Cargo and Tauri, but its MSI must still outrank the last milestone's,
   so that release PR sets `wix.version` to the next free number (for example `2.1.0`).
   **Reversing:** low (one JSON value per release PR).
+
+## #961 and #947 — a run's trigger and who started it; the rest of R-9.12 (2026-10-17)
+
+Implementer, one PR for both.
+
+- **The trigger is a mapped word, not a raw path.** `trigger: Vec<TriggerPath>`, each candidate a
+  path and a map from the source's words to the shell's three (`change`, `schedule`, `person`),
+  read the way `state` reads its tone map. A raw `triggered.type` would put TeamCity's `vcs` in
+  the shell, which ADR-0022 keeps to the header. A word no map names is a miss, so TeamCity's
+  `buildType` (a finished dependency) draws no trigger. **Reversing:** low; a fourth variant is
+  additive.
+- **Who started a run is its own field, `started_by`, beside the trigger.** It is the account as
+  the source spells it (`triggered.user.username`), compared with the configured usernames the
+  way `assignee` is. **Reversing:** low.
+- **The battery does not count an absent `started_by` against a run its trigger says nobody
+  started.** This is the #848 objection (100 of 100 public builds lack `triggered.user`, #106)
+  answered with the trigger, which #947 suggested: TeamCity omits the key on a VCS build, so the
+  absence is the source saying nothing. mockd's quiet configuration has only VCS builds and failed
+  clause 3 without it. A misspelling still fails on any corpus with one person-started run, and
+  the seeded server's runs are queued over REST, which TeamCity records as a person (1187 reads
+  `{"type":"user","user":{"username":"knobas"}}`). **Reversing:** medium; drop
+  the `nobody_started` excuse in `check_payload_paths`, and mockd's battery then needs a
+  person-started quiet build in its fixture.
+- ***you* is `started_by_me` on `RunRow`, computed in Rust from `@me`'s identity**, not in the
+  frontend. The identity is the union of the configured usernames (`Vocabulary::identity`), the
+  one "who am I" every other read uses. The frontend holds no per-source username. **Reversing:**
+  low.
+- **A person shows as their account (`jonas`), not a first name.** prototype-6's `first(name)`
+  needs a display name, and `BUILD_FIELDS` asks for the username only, which the row matches on.
+  **Reversing:** low; add `user(name)` and a display field.
+- **The commit on `RunRow` is the first declared revision.** A build with two VCS roots has two;
+  the trigger names the first, as prototype-6 names one. **Reversing:** low.
+- ***Started by me* shows without a job too**, between *My job's branches* (when there is a job)
+  and *All*. prototype-6 always draws its three scopes; the job scope alone needs a job.
+  **Reversing:** low.
+- **A run queued from the page reads *you*** before a read holds it, as prototype-6's `startRun`
+  marks it with `ME`. **Reversing:** low.
+- **The run page's *started by* reads the trigger, not the view's `Triggered by` fact.** prototype-6
+  draws `trigLabel` in both places. The agent, *Now* and the commit link still read the view
+  (`factOf`, `commitOf`), so #1004 stays open for the agent and those two. **Reversing:** low.
+- **#947's remaining fields are ruled out as declarations.** Agent: #1004 declares it, which
+  needs mockd to serve an agent its dataset does not name. Steps: they are `run_log`'s steps
+  (#854, #1003); no build record carries them. Test summary: `run_tests` (#855) reads it live.
+  Parameter specs, repository, default branch and triggers: #851's and #852's live
+  `pipeline_settings`. **Reversing:** low; each would be a new §10.8 entry.
