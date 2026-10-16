@@ -907,3 +907,147 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
 
     drop(state);
 }
+
+/// **The Docs reader's blocks, from a page Confluence itself stored** (#859,
+/// ADR-0022): each mapped macro comes back from the real server's storage
+/// format as its block, a macro the reader does not draw is the named
+/// placeholder, and the declarations around the body -- the space, the
+/// parent chain, the version, the labels and a mention of the account --
+/// resolve on the record the adapter really fetched.
+///
+/// The page is made through Confluence's REST API, not through knobas, so the
+/// storage format is the server's own after its own normalisation; it is
+/// deleted again by [`Litter`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
+    use knobas_source::docs::{DocBlock, Inline, PanelTone};
+
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+
+    let (status, me) = env.call(reqwest::Method::GET, "rest/api/user/current", None).await;
+    assert_eq!(status, 200, "who am I: {me}");
+    let my_key = me["userKey"].as_str().expect("the account has a user key").to_owned();
+
+    let title = format!("Docs reader blocks [{LITTER}]");
+    let storage = format!(
+        concat!(
+            r#"<p>Owner <ac:link><ri:user ri:userkey="{key}" /></ac:link>, see "#,
+            r#"<ac:link><ri:page ri:content-title="{parent}" /></ac:link> and "#,
+            r#"<ac:structured-macro ac:name="jira" ac:schema-version="1"><ac:parameter ac:name="key">PAY-231</ac:parameter></ac:structured-macro>.</p>"#,
+            r#"<h2>Backoff</h2>"#,
+            r#"<ac:structured-macro ac:name="code" ac:schema-version="1"><ac:parameter ac:name="language">sql</ac:parameter><ac:plain-text-body><![CDATA[select 1 < 2;]]></ac:plain-text-body></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="info" ac:schema-version="1"><ac:rich-text-body><p>In review.</p></ac:rich-text-body></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="warning" ac:schema-version="1"><ac:rich-text-body><p>No SLA yet.</p></ac:rich-text-body></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="note" ac:schema-version="1"><ac:rich-text-body><p>A note.</p></ac:rich-text-body></ac:structured-macro>"#,
+            r#"<ac:structured-macro ac:name="tip" ac:schema-version="1"><ac:rich-text-body><p>A tip.</p></ac:rich-text-body></ac:structured-macro>"#,
+            r#"<table><tbody><tr><th>Code</th><th>Retried?</th></tr><tr><td>HTTP 503</td><td>yes</td></tr></tbody></table>"#,
+            r#"<ac:structured-macro ac:name="toc" ac:schema-version="1" />"#,
+        ),
+        key = my_key,
+        parent = parent.title,
+    );
+    let (status, made) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": env.space },
+                "ancestors": [{ "id": parent.id }],
+                "body": { "storage": { "value": storage, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the page: {made}");
+    let id = made["id"].as_str().expect("the new page's id").to_owned();
+    litter.created.push(id.clone());
+    let (status, labelled) = env
+        .call(
+            reqwest::Method::POST,
+            &format!("rest/api/content/{id}/label"),
+            Some(json!([{ "prefix": "global", "name": "knobas-docs" }])),
+        )
+        .await;
+    assert_eq!(status, 200, "labelling the page: {labelled}");
+
+    let state = app("confluence_live_docs", &env).await;
+    sync_until(&state, &id, "the new page with its label", |payload| {
+        payload["metadata"]["labels"]["results"]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|x| x["name"] == "knobas-docs"))
+    })
+    .await;
+
+    let entity = format!("{CONFLUENCE}:{id}");
+    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
+        .await
+        .expect("the reader reads the page");
+    assert!(page.readable);
+    assert_eq!(page.space.as_ref().map(|s| s.key.as_str()), Some(env.space.as_str()));
+    assert_eq!(
+        page.ancestors.last().map(|a| a.title.as_str()),
+        Some(parent.title.as_str()),
+        "the declared chain ends at the parent"
+    );
+    assert_eq!(
+        page.ancestors.last().and_then(|a| a.entity_id.clone()),
+        Some(format!("{CONFLUENCE}:{}", parent.id)),
+        "the parent is the mirrored page"
+    );
+    assert_eq!(page.version, Some(1));
+    assert_eq!(page.labels, vec!["knobas-docs"]);
+    assert!(page.web_url.is_some());
+
+    let DocBlock::Paragraph { text } = &page.blocks[0] else {
+        panic!("the first block is the paragraph: {:#?}", page.blocks)
+    };
+    assert!(
+        text.iter().any(|i| matches!(i, Inline::Mention { user: Some(u), me: true, .. } if *u == env.user)),
+        "the mention of the account resolves by key to it, and is mine: {text:?}"
+    );
+    assert!(
+        text.iter().any(|i| matches!(i, Inline::PageLink { entity_id: Some(e), .. } if *e == format!("{CONFLUENCE}:{}", parent.id))),
+        "the page link names the mirrored parent: {text:?}"
+    );
+    assert!(
+        text.iter().any(|i| matches!(i, Inline::Issue { key, .. } if key == "PAY-231")),
+        "the Jira macro is a ticket chip: {text:?}"
+    );
+    let rest: Vec<&DocBlock> = page.blocks.iter().skip(1).collect();
+    assert!(matches!(rest[0], DocBlock::Heading { .. }), "{rest:#?}");
+    assert_eq!(
+        rest[1],
+        &DocBlock::Code { code: "select 1 < 2;".into(), language: Some("sql".into()) }
+    );
+    let tones: Vec<PanelTone> = rest
+        .iter()
+        .filter_map(|b| match b {
+            DocBlock::Panel { tone, .. } => Some(*tone),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(tones, vec![PanelTone::Info, PanelTone::Warning, PanelTone::Note, PanelTone::Tip]);
+    let DocBlock::Table { rows } = rest[6] else {
+        panic!("the table: {rest:#?}")
+    };
+    assert!(rows[0].iter().all(|c| c.header) && !rows[1][0].header);
+    assert_eq!(rest[7], &DocBlock::Placeholder { name: "toc".into() }, "the unknown macro is named");
+
+    // The tree: the new page hangs under its parent.
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+        .await
+        .expect("the tree reads");
+    let node = tree
+        .spaces
+        .iter()
+        .flat_map(|s| &s.pages)
+        .find(|p| p.entity_id == entity)
+        .expect("the new page is in the tree");
+    assert_eq!(node.parent, Some(format!("{CONFLUENCE}:{}", parent.id)));
+
+    drop(state);
+}

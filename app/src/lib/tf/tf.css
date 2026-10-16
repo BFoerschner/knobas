@@ -1079,9 +1079,9 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-rd-main { overflow: auto; min-height: 0; }
 .tf-rd-page { max-width: 74ch; margin: 0 auto; padding: 22px 32px 90px; }
 .tf-rd-crumb { font-size: 12.5px; color: var(--ink-2); }
-.tf-rd-crumb a { color: inherit; }
+.tf-rd-crumb a { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
 .tf-rd-crumb a.tf-jobchip { text-decoration: none; padding: 1px 6px; }
-.tf-rd-title {
+.tf .tf-rd-title {
   font-family: var(--serif); font-size: 40px; line-height: 1.1; font-weight: 600; margin: 8px 0 10px; letter-spacing: -.01em;
 }
 .tf-rd-meta { font-size: var(--t-sm); color: var(--ink-2); display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: center; }
@@ -1109,7 +1109,6 @@ a.tf-r:hover { background: var(--sheet-2); }
   font: 13.5px/1.55 var(--mono); background: var(--sheet-2); border: 1px solid var(--rule); border-radius: 6px;
   padding: 12px 14px; overflow: auto; position: relative; margin: 0 0 18px; white-space: pre;
 }
-.tf-doc pre code { font: inherit; background: none; padding: 0; }
 .tf-doc pre .tf-copy { position: absolute; top: 6px; right: 6px; font: var(--t-xs) var(--sans); }
 .tf-doc pre .tf-lang { position: absolute; bottom: 4px; right: 10px; font: var(--t-2xs) var(--sans); color: var(--ink-2); }
 .tf-doc table { border-collapse: collapse; width: 100%; font-family: var(--sans); font-size: 14.5px; line-height: 1.45; margin: 0 0 18px; }
@@ -1153,5 +1152,5 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-rd { grid-template-columns: minmax(0, 1fr); height: auto; }
   .tf-rd-tree { display: none; }
   .tf-rd-page { padding: 18px 16px 60px; }
-  .tf-rd-title { font-size: 30px; }
+  .tf .tf-rd-title { font-size: 30px; }
 }

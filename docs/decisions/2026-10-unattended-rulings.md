@@ -2286,3 +2286,45 @@ Merge-manager, PR #948 for #883.
   text, and an edit of that text would land over the push unseen. The cost is one small round
   trip of added wait per file opened. A mock cannot order two requests, so nothing witnesses the
   order. **Reversing:** low.
+## #859 Docs tracer: the reader over declared docs
+
+Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the implementer's).
+
+- **The body, comments, version, labels and editor's name are an adapter *projection* of the
+  mirrored record** (`knobas_source::docs::DocProjection`, a plain function named in the registry
+  table), not declared paths and not a live `Source` read. Only the adapter can read Confluence's
+  storage format (ADR-0007); a function of the mirror opens pages offline, needs no credential, and
+  re-projects every page without a re-sync when the mapping improves. Space and tree stay the
+  existing declared `project_*` and `parent` paths. **Reversing:** a `Source` method with a
+  default `None`, and the registry column goes.
+- **A page's direct parent is the innermost name of its declared chain, matched by title inside
+  its space** (a Confluence title is unique in a space). A parent the mirror lacks puts the page
+  at the top. **Reversing:** `docs::tree`.
+- **A mention resolves by `ri:username`, or by a `ri:userkey` the record itself names** (the
+  page's editor, creator or a comment's author); any other key is a mention of nobody, drawn
+  `@someone`. The miss direction: never somebody else's mention claimed as mine. Resolving every
+  key needs a user lookup at sync, filed as a backlog follow-up. **Reversing:** `blocks::people`.
+- **Every macro outside the subset, `ac:image` and `ac:task-list` are placeholders named by
+  `ac:name`**; a block macro inside a sentence ends the paragraph there so it is never dropped.
+  The generic `panel` macro is a note; `tip` is its own tone, drawn in the ok colours (prototype-6
+  has no tip). **Reversing:** `blocks::Blocks::r#macro`.
+- **The tree is ordered by title**, so a space's first page is its first top page by title.
+  Prototype-6 keeps the author's order; Confluence's own child position is not read yet (backlog
+  follow-up). **Reversing:** `PAGES`' `order by` and `firstPage`.
+- **"Read last" is the newest `visit_entity` line on a live page**, and the reader records a visit
+  on every page it opens. **Reversing:** `LAST_READ`.
+- **The source's words are its configured display name**: *Open in Tidewater Confluence*, and
+  the placeholder names it the same way, because R-10.18 lets only those two be source-specific
+  and a Markdown wiki must not read "Confluence". **Reversing:** `source_name`.
+- **A ticket chip's tone follows prototype-6 on the status name** (done ok, to do plain, the rest
+  info); a key the mirror does not hold is a bare key, not a link. **Reversing:** `statusTone`.
+- **Section anchors use prototype-6's numbering** (`#/page/<id>/<n>`, the first heading is 1) so
+  #861's outline can link the same addresses. **Reversing:** `sectionNumbers`.
+- **Left to #860–#863, not drawn:** the search field and its hint line, *For you*, the right
+  rail, *Comment*, *Link to*, *New page here*, *Export as Markdown*, *Copy link*, *Edit section*,
+  the composer, *New page* and the *This job* scope. Labels are chips, not buttons, until search
+  exists to send them to.
+- **Words prototype-6 lacks:** "No pages are synced yet. A source with pages, such as Confluence,
+  fills this tree.", "Nothing to read yet. Pages appear here once a docs source has synced.",
+  "knobas cannot read this page's body. Open it in <source>." and "No comments yet." (the last is
+  prototype-6's).
