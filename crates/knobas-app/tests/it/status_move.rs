@@ -39,7 +39,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use knobas_app::sources::{Registry, SourcesState};
 use knobas_core::write_queue::WriteState;
-use knobas_mockd::spawn_mock_jira;
+use knobas_mockd::{MockServer, ViolationKind, spawn_mock_jira};
 use knobas_secrets::{MemoryStore, Secret, SecretStore};
 use knobas_source::AuthMethod;
 use knobas_sync::SyncTrigger;
@@ -338,7 +338,37 @@ async fn a_legal_move_lands_and_an_illegal_one_is_refused_by_name() {
         "a refused move changes nothing at the source and nothing on the board"
     );
 
-    jira.assert_no_violations();
+    assert_only_the_field_probe(&jira);
+}
+
+/// `assert_no_violations`, minus the one violation mockd cannot help
+/// recording: the field-id discovery probe. A source saved without its Sprint
+/// and Epic Link field ids asks `GET /rest/api/2/field` at its next sync
+/// (#889); the WADL declares that path and mockd, frozen (ADR-0013), serves no
+/// handler for it, so it records `Unimplemented` and answers 501, which the
+/// adapter reads as "no field table". The same exemption as
+/// `knobas-source-jira`'s `tests/it/mockd.rs`; every other violation fails.
+fn assert_only_the_field_probe(jira: &MockServer) {
+    let unexpected: Vec<String> = jira
+        .violations()
+        .into_iter()
+        .filter(|v| {
+            !(v.kind == ViolationKind::Unimplemented
+                && v.method == "GET"
+                && v.path == "/rest/api/2/field")
+        })
+        .map(|v| {
+            format!(
+                "{:?} {} {}{}: {}",
+                v.kind, v.method, v.path, v.query, v.detail
+            )
+        })
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "jira: contract violation(s) beyond the field-table probe:\n  {}",
+        unexpected.join("\n  ")
+    );
 }
 
 // -- the read the select is offered (#498) -----------------------------------
@@ -421,5 +451,5 @@ async fn the_read_offers_the_workflow_and_a_source_without_one_refuses_by_name()
         .expect_err("an unconfigured source has nothing to ask");
     assert!(unknown.contains("nowhere"), "{unknown}");
 
-    jira.assert_no_violations();
+    assert_only_the_field_probe(&jira);
 }

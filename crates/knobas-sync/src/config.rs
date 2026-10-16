@@ -318,6 +318,48 @@ pub async fn patch(
     Ok(row.map(Into::into))
 }
 
+/// Whether a stored config names `key` with a value a reader (or an earlier
+/// discovery) put there: present, a string, and not blank.
+#[must_use]
+pub fn config_names(config: &serde_json::Value, key: &str) -> bool {
+    config
+        .get(key)
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|v| !v.trim().is_empty())
+}
+
+/// Record values an adapter discovered, **only** under keys the stored config
+/// leaves empty (#889).
+///
+/// One statement, so a reader saving a typed id between the scheduler's read
+/// and this write is never overwritten: the `where` in the sub-select is
+/// evaluated against the row as it is when the update runs. Returns the row as
+/// stored, or `None` for a source that is gone.
+///
+/// # Errors
+/// [`sqlx::Error`] if the update fails.
+pub async fn fill_missing(
+    pool: &PgPool,
+    id: &str,
+    found: &std::collections::BTreeMap<String, String>,
+) -> Result<Option<SourceConfigRow>, sqlx::Error> {
+    let sql = format!(
+        "update knobas.source_config set config = config || coalesce(
+             (select jsonb_object_agg(e.k, e.v)
+                from jsonb_each_text($2::jsonb) as e(k, v)
+               where btrim(coalesce(config ->> e.k, '')) = ''),
+             '{{}}'::jsonb)
+         where id = $1
+         returning {COLUMNS}"
+    );
+    let row: Option<RawRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(id)
+        .bind(serde_json::to_value(found).unwrap_or_default())
+        .fetch_optional(pool)
+        .await?;
+    Ok(row.map(Into::into))
+}
+
 /// Purge one source's mirror: drop its `sync.item` rows and tombstone the
 /// entities they named.
 ///

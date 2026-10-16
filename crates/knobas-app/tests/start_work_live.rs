@@ -1139,7 +1139,30 @@ async fn a_ticket_becomes_a_branch_a_pull_request_and_a_status_and_comes_back() 
     );
 
     state.scheduler.shutdown().await;
-    jira.assert_no_violations();
+    // Every violation but the field-id discovery probe a source saved without
+    // its Sprint and Epic Link ids makes at its next sync (#889): mockd,
+    // frozen (ADR-0013), declares `GET /rest/api/2/field` and serves no
+    // handler, and the adapter reads its 501 as "no field table".
+    let unexpected: Vec<String> = jira
+        .violations()
+        .into_iter()
+        .filter(|v| {
+            !(v.kind == knobas_mockd::ViolationKind::Unimplemented
+                && v.method == "GET"
+                && v.path == "/rest/api/2/field")
+        })
+        .map(|v| {
+            format!(
+                "{:?} {} {}{}: {}",
+                v.kind, v.method, v.path, v.query, v.detail
+            )
+        })
+        .collect();
+    assert!(
+        unexpected.is_empty(),
+        "jira: contract violation(s) beyond the field-table probe:\n  {}",
+        unexpected.join("\n  ")
+    );
 }
 
 /// **`under:` a repository, by its full name and by its bare name, finds it

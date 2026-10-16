@@ -16,6 +16,7 @@ mod config;
 mod cursor;
 mod dedicated;
 mod delete_during_run;
+mod discovered_config;
 mod flush_all_isolation;
 mod progress;
 mod run;

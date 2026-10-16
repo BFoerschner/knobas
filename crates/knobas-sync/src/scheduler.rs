@@ -352,7 +352,9 @@ pub(crate) async fn build_source(
 pub enum RunMode {
     /// Resume from the stored position: every scheduled run, *Sync now*, and
     /// a source's first sync (which is cursor-less because nothing is stored
-    /// yet, not because the run asked for that).
+    /// yet, not because the run asked for that). The one exception is a run
+    /// that records a discovered field id: `attempt` relabels it a backfill
+    /// first and then runs it as one (#889).
     #[default]
     Incremental,
     /// Ignore the stored position and re-read the source from the top, without
@@ -370,7 +372,9 @@ impl From<SyncTrigger> for RunMode {
     /// which is a guard compiled out of the shipped binary -- exactly where a
     /// mislabelled `swept` would mislead. Deriving makes the pairing
     /// structural instead. `execute_run` still takes the mode, because it is
-    /// below the log and the trigger does not reach it.
+    /// below the log and the trigger does not reach it. `attempt` turns an
+    /// incremental run into a backfill only after the log row says so
+    /// (`run_log::relabel_as_backfill`, #889), so the pairing still holds.
     fn from(trigger: SyncTrigger) -> Self {
         match trigger {
             SyncTrigger::Backfill => Self::Backfill,
@@ -529,6 +533,110 @@ async fn ending_of_record(
     )))
 }
 
+/// The config properties an adapter discovers from its far end and that a
+/// reader should never have to type (#297 Epic Link, #811 Sprint).
+const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
+
+/// How long a sync waits for the field discovery before it goes on without it.
+///
+/// Discovery is three reads on a healthy instance. On one that is down, the
+/// first of them would spend the HTTP client's whole retry budget (45 s)
+/// before the sync itself spends another, so a failing run would take twice
+/// as long. Past this the run syncs as it would have, and asks again next time.
+const DISCOVERY_BUDGET: Duration = Duration::from_secs(10);
+
+/// A source saved before its adapter could discover a field id gets that id
+/// once, at its next sync (#889).
+///
+/// Only for keys the adapter's own `config_schema` declares **and** the stored
+/// config leaves empty, so a source with nothing to find costs nothing, and an
+/// id the reader typed is never asked about, let alone replaced
+/// ([`config::fill_missing`] repeats that rule inside the one statement). The
+/// discovery is best-effort: a source that fails or times out here
+/// ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the real
+/// failure itself.
+///
+/// Returns the ids found for empty keys, or `None` when there is nothing to
+/// record, so the caller builds the adapter again only then. Nothing is
+/// written here: [`record_discovered`] does that after the run succeeds.
+async fn discover(
+    deps: &SchedulerDeps,
+    cfg: &config::SourceConfigRow,
+    source: &dyn Source,
+) -> Option<std::collections::BTreeMap<String, String>> {
+    let declared = deps
+        .registry
+        .descriptors()
+        .into_iter()
+        .find(|d| d.id == cfg.adapter_kind)
+        .map(|d| d.config_schema);
+    let wanted: Vec<&str> = DISCOVERABLE
+        .into_iter()
+        .filter(|key| {
+            declared
+                .as_ref()
+                .is_some_and(|schema| schema["properties"].get(*key).is_some())
+                && !config::config_names(&cfg.config, key)
+        })
+        .collect();
+    if wanted.is_empty() {
+        return None;
+    }
+    let found: std::collections::BTreeMap<String, String> =
+        match tokio::time::timeout(DISCOVERY_BUDGET, source.test_connection()).await {
+            Ok(Ok(info)) => info
+                .discovered
+                .into_iter()
+                .filter(|(key, _)| wanted.contains(&key.as_str()))
+                .collect(),
+            Ok(Err(error)) => {
+                tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
+                return None;
+            }
+            Err(_) => {
+                tracing::debug!(source_id = %cfg.id, "field discovery timed out");
+                return None;
+            }
+        };
+    (!found.is_empty()).then_some(found)
+}
+
+/// `cfg` as the run that records `found` builds its adapter: the stored config
+/// with each found id under its (empty) key.
+fn with_discovered(
+    cfg: &config::SourceConfigRow,
+    found: &std::collections::BTreeMap<String, String>,
+) -> config::SourceConfigRow {
+    let mut widened = cfg.clone();
+    if !widened.config.is_object() {
+        widened.config = serde_json::json!({});
+    }
+    if let Some(map) = widened.config.as_object_mut() {
+        for (key, id) in found {
+            map.insert(key.clone(), serde_json::Value::String(id.clone()));
+        }
+    }
+    widened
+}
+
+/// Record the ids a successful run synced with. [`config::fill_missing`]
+/// writes a key only where the row is still empty, so an id the reader typed
+/// during the run wins and the next run uses it. Best-effort: on a failure the
+/// next run discovers again.
+async fn record_discovered(
+    deps: &SchedulerDeps,
+    source_id: &str,
+    found: &std::collections::BTreeMap<String, String>,
+) {
+    match config::fill_missing(&deps.pool, source_id, found).await {
+        Ok(_) => tracing::info!(source_id, keys = ?found.keys().collect::<Vec<_>>(),
+            "recorded the field ids the source discovered"),
+        Err(error) => {
+            tracing::warn!(source_id, %error, "recording discovered field ids failed");
+        }
+    }
+}
+
 async fn attempt(
     deps: &SchedulerDeps,
     source_id: &str,
@@ -541,7 +649,31 @@ async fn attempt(
         .await
         .map_err(RunFailure::Db)?
         .ok_or(RunFailure::NotConfigured)?;
-    let source = build_source(deps, &cfg).await?;
+    let mut mode = mode;
+    let mut source = build_source(deps, &cfg).await?;
+    let discovered = discover(deps, &cfg, source.as_ref()).await;
+    if let Some(found) = &discovered {
+        source = build_source(deps, &with_discovered(&cfg, found)).await?;
+        // A new field id widens what the adapter keeps of every ticket, and an
+        // incremental run re-fetches only what changed upstream, so a ticket
+        // nobody touched would keep `sprints: []` for ever. The run that
+        // records the id is therefore a backfill (CONTEXT.md), and is logged
+        // as one. A source with no stored position reads from the top anyway.
+        // The id is recorded only once that run has succeeded, so a run that
+        // fails leaves the config as it was and the next one tries again.
+        // The log is relabelled first and the mode follows only if that
+        // worked, so the two never disagree (see `From<SyncTrigger>`); on a
+        // failed relabel the run stays incremental and *Backfill* is the
+        // reader's remedy, as it was before #889.
+        if mode == RunMode::Incremental && cfg.cursor.is_some() {
+            match run_log::relabel_as_backfill(&deps.pool, run_id).await {
+                Ok(()) => mode = RunMode::Backfill,
+                Err(error) => {
+                    tracing::warn!(source_id, run_id, %error, "relabelling the run as a backfill failed");
+                }
+            }
+        }
+    }
 
     // §10.6(c): the run's transaction and advisory lock go on this, and it
     // belongs to nobody else. Opened *after* the refusals above, so a source
@@ -578,6 +710,9 @@ async fn attempt(
     // should hand its backend back politely. A failure here is not the run's.
     if let Err(error) = sqlx::Connection::close(conn).await {
         tracing::debug!(source_id, %error, "closing the run's connection failed");
+    }
+    if let (Ok(_), Some(found)) = (&report, &discovered) {
+        record_discovered(deps, source_id, found).await;
     }
     report.map_err(RunFailure::Sync)
 }

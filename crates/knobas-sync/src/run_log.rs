@@ -257,6 +257,23 @@ pub async fn start(
     Ok(id)
 }
 
+/// Relabel an open run as a [`SyncTrigger::Backfill`], for a run the scheduler
+/// turned into one after it started (#889: the run that records a discovered
+/// field id re-reads its source from the top). The trigger and the mode must
+/// never disagree, so the log says what the run did.
+///
+/// # Errors
+///
+/// [`sqlx::Error`] if the update fails.
+pub async fn relabel_as_backfill(pool: &sqlx::PgPool, run_id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("update knobas.sync_run set trigger = $2 where id = $1 and finished_at is null")
+        .bind(run_id)
+        .bind(SyncTrigger::Backfill.as_str())
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// Close a run.
 ///
 /// # Errors
