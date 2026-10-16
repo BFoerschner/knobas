@@ -2732,3 +2732,9 @@ Implementer, PR for #851.
   refused as `unauthorized` (30 s was not enough). The new live test makes three logins and
   witnesses TCP and the Docker refusal; ping stays at the unit seam. **Reversing:** low (the
   recipe line), but the budget comes back.
+- **Merge review (PR #979): the 61 s sleep stays; session reuse is #983.** Reusing one login
+  across writes would fix both the recipe and a product burst of more than twenty Kuma writes a
+  minute, but it changes the adapter's one-session-per-call design, which is beyond this ticket.
+  The sleep costs only the live recipe. The Docker host choice was checked against the pinned
+  image: 2.5.3's `afterLogin` awaits `sendDockerHostList` before the login's callback, so the
+  push arrives before the ack the socket waits for. **Reversing:** low.

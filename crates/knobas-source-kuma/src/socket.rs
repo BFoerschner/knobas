@@ -724,11 +724,6 @@ mod tests {
         );
     }
 
-    /// The emit's bytes, which are not JSON and cannot be built by a JSON
-    /// body: `42` is the packet type, the digit after it is the ack id, and
-    /// only what follows is a document. A client that posted
-    /// `"42[\"login\",…]"` -- the JSON *string* -- would send a packet of type
-    /// `"`, which engine.io discards silently.
     /// The Docker hosts a login pushes, read by id; any other push is not
     /// mistaken for them, and an empty list is a list (#864).
     #[test]
@@ -745,6 +740,11 @@ mod tests {
         assert_eq!(docker_hosts_of("2"), None);
     }
 
+    /// The emit's bytes, which are not JSON and cannot be built by a JSON
+    /// body: `42` is the packet type, the digit after it is the ack id, and
+    /// only what follows is a document. A client that posted
+    /// `"42[\"login\",…]"` -- the JSON *string* -- would send a packet of type
+    /// `"`, which engine.io discards silently.
     #[test]
     fn an_emit_is_a_packet_type_an_ack_id_and_a_document() {
         assert_eq!(

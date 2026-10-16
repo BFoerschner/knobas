@@ -226,15 +226,15 @@ fn http_fields(url: &str) -> Result<serde_json::Value, SourceError> {
             ))
         })?;
     Ok(serde_json::json!({
-            "type": TYPE,
-            // The parsed URL and not the caller's string: a paste carrying a
-            // trailing space or a missing path is normalised once, here, so the
-            // monitor knobas asks for is the monitor Kuma reports back -- and
-            // `monitor_url_host`'s suggestion rule reads that same URL out of the
-            // mirror (#478).
-            "url": parsed.as_str(),
-            "method": "GET",
-            "maxredirects": MAX_REDIRECTS,
+        "type": TYPE,
+        // The parsed URL and not the caller's string: a paste carrying a
+        // trailing space or a missing path is normalised once, here, so the
+        // monitor knobas asks for is the monitor Kuma reports back -- and
+        // `monitor_url_host`'s suggestion rule reads that same URL out of the
+        // mirror (#478).
+        "url": parsed.as_str(),
+        "method": "GET",
+        "maxredirects": MAX_REDIRECTS,
     }))
 }
 
