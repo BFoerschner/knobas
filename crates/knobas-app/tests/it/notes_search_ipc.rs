@@ -4,7 +4,9 @@
 
 use knobas_app::capture::SHOWN_KEY;
 use knobas_app::commands::entity::create_note_inner;
-use knobas_app::commands::search::{filter_suggestions_inner, search_inner};
+use knobas_app::commands::search::{
+    create_smart_list_inner, filter_suggestions_inner, search_inner, smart_lists_inner,
+};
 use knobas_search::{SearchFilters, SearchQuery};
 
 async fn pool() -> sqlx::PgPool {
@@ -79,12 +81,19 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
         .expect("suggestions")
         .kinds;
     assert!(kinds.iter().any(|kind| kind.kind == "note"));
+    let list = create_smart_list_inner(&pool, "Zephyrine notes", "note:zephyrine")
+        .await
+        .expect("a saved list");
+    assert_eq!(list.count, 1, "the saved list counts the shown note");
 
     // Off again: the note is still there, only the search leaves it out.
     knobas_app::settings::write(&pool, SHOWN_KEY, None)
         .await
         .expect("notes hidden");
     assert!(!ids(&pool, "zephyrine").await.contains(&id));
+    let rail = smart_lists_inner(&pool).await.expect("the rail");
+    let row = rail.iter().find(|row| row.id == list.id).expect("the list");
+    assert_eq!(row.count, 0, "the saved list counts a hidden note");
     let kept: i64 = sqlx::query_scalar("select count(*) from knobas.note where id = $1")
         .bind(&id)
         .fetch_one(&pool)
