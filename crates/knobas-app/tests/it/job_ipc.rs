@@ -164,6 +164,7 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
             project: None,
             order: EntityOrder::UpdatedDesc,
             include_deleted: false,
+            reach: None,
         },
         200,
         0,
@@ -173,4 +174,57 @@ async fn opening_a_job_twice_promotes_its_ticket_once() {
     .unwrap();
     let ids: Vec<&str> = code.rows.iter().map(|r| r.entity_id.as_str()).collect();
     assert_eq!(ids, vec![pr.as_str()]);
+}
+
+/// **A job's sections read through the reach** (#817): `list_entities` with
+/// `reach` keeps what the ticket reaches -- its pull request and the build
+/// one hop past it -- and nothing the ticket does not reach.
+#[tokio::test]
+async fn list_entities_scoped_by_reach_keeps_what_the_ticket_reaches() {
+    let pool = pool().await;
+    let key = key();
+    let ticket = issue(&pool, &key, serde_json::json!({})).await;
+    let source = format!("gitea-{key}");
+    let pr = format!("{source}:tidewater/payout-service#1");
+    let build = format!("{source}:build-1");
+    let other = format!("{source}:build-2");
+    item(&pool, &pr, &source, "pr", serde_json::json!({})).await;
+    item(&pool, &build, &source, "build", serde_json::json!({})).await;
+    item(&pool, &other, &source, "build", serde_json::json!({})).await;
+    create_link_inner(&pool, &ticket, &pr, Some("implements"), None)
+        .await
+        .unwrap();
+    create_link_inner(&pool, &pr, &build, Some("built-by"), None)
+        .await
+        .unwrap();
+
+    let filter = |kinds: &[&str]| EntityFilter {
+        sources: Vec::new(),
+        kinds: kinds.iter().map(|k| (*k).to_owned()).collect(),
+        updated_within_days: None,
+        context: None,
+        project: None,
+        order: EntityOrder::UpdatedDesc,
+        include_deleted: false,
+        reach: Some(ticket.clone()),
+    };
+    let none = knobas_core::payload::Declarations::empty();
+    let builds = list_entities_inner(&pool, &filter(&["build"]), 50, 0, &none)
+        .await
+        .unwrap();
+    let ids: Vec<&str> = builds.rows.iter().map(|r| r.entity_id.as_str()).collect();
+    assert_eq!(
+        ids,
+        vec![build.as_str()],
+        "the build via the PR, not the other"
+    );
+    assert_eq!(builds.total, 1);
+
+    let everything = list_entities_inner(&pool, &filter(&[]), 50, 0, &none)
+        .await
+        .unwrap();
+    assert_eq!(
+        everything.total, 2,
+        "the PR and the build, never the ticket"
+    );
 }

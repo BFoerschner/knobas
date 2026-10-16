@@ -389,6 +389,8 @@ struct BoundFilters {
     authors: Option<String>,
     /// The declarations and the values, in that order: `under:` needs both.
     under: Option<(String, String)>,
+    /// The `reach:` values' placeholder (#817).
+    reach: Option<String>,
     /// The ticket-key conditions (#811), each with the placeholders it reads.
     fields: Vec<BoundField>,
     /// The declarations' placeholder, once a filter has bound it: `under:`
@@ -473,6 +475,9 @@ fn bind_dimensions(
                 builder.param(Bind::Texts(filters.under.clone())),
             )
         }),
+        reach: filters
+            .filters_by_reach()
+            .then(|| builder.param(Bind::Texts(filters.reach.clone()))),
         fields: Vec::new(),
         declarations: None,
     }
@@ -538,6 +543,9 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
             None => "false".to_owned(),
         });
     }
+    if let Some(values) = &bound.reach {
+        predicates.push(format!("{} in ({})", corpus.entity_id, reach_ids(values)));
+    }
     for field in &bound.fields {
         // `fd` is the one row a fragment reads its binds from, as `ud` is for
         // `under:`. A fragment that misses yields null, and null is "does not
@@ -570,6 +578,25 @@ fn corpus_predicates(corpus: &Corpus, fts: Option<&str>, bound: &BoundFilters) -
         });
     }
     predicates
+}
+
+/// What the tickets a `reach:` names reach (#817), as one subquery over the
+/// values' placeholder: `knobas_core::reach_walk!`, the walk the job-reach
+/// read makes, started from every ticket whose id or key is one of the
+/// values. Every corpus reads the same ids, so an asset, a note or a route is
+/// kept exactly when the read would list it.
+fn reach_ids(values: &str) -> String {
+    format!(
+        "with recursive start(t) as (
+        select e.id from knobas.entity e
+         where e.kind = 'ticket'
+           and (lower(e.id) = any({values}::text[])
+                or lower(substr(e.id, strpos(e.id, ':') + 1)) = any({values}::text[]))
+    ),
+    {}
+    select r.id from reached r",
+        knobas_core::reach_walk!()
+    )
 }
 
 /// The CTEs a statement with a ticket key needs, each ending in `,\n`, or

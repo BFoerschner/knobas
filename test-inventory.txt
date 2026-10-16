@@ -628,6 +628,7 @@ knobas-app	test/it	entity::the_web_url_the_adapter_reported_survives_the_mirror
 knobas-app	test/it	entity::title_order_is_a_second_statement_not_string_interpolation
 knobas-app	test/it	entity::unlinking_an_unknown_id_is_not_found_and_a_malformed_one_is_invalid
 knobas-app	test/it	entity::unlinking_keeps_the_row_and_the_pair_can_be_linked_again
+knobas-app	test/it	entity_mirror::a_filter_without_reach_is_unscoped
 knobas-app	test/it	entity_mirror::a_proposal_and_a_confirmed_link_are_the_same_shape_in_two_states
 knobas-app	test/it	entity_mirror::the_action_item_ticket_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_activity_row_shape_matches_its_typescript_mirror
@@ -654,6 +655,7 @@ knobas-app	test/it	entity_mirror::the_note_row_shape_matches_its_typescript_mirr
 knobas-app	test/it	entity_mirror::the_notification_clicked_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_notification_draft_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_project_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_mirror::the_reached_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_source_ref_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_standup_digest_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_standup_protocol_shape_matches_its_typescript_mirror
@@ -710,6 +712,7 @@ knobas-app	test/it	ipc::the_two_argument_shapes_decode_as_the_split_needs
 knobas-app	test/it	ipc::unlinking_announces_its_line_and_an_already_withdrawn_link_announces_nothing
 knobas-app	test/it	job_ipc::a_missing_or_unreadable_estimate_is_none
 knobas-app	test/it	job_ipc::a_tickets_detail_carries_its_type_priority_and_estimate
+knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_reaches
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
 knobas-app	test/it	probe_snapshot::tests::a_change_to_the_pass_code_or_the_migrations_names_another_after_pass_snapshot
 knobas-app	test/it	probe_snapshot::tests::a_changed_added_or_removed_migration_changes_the_hash
@@ -1123,6 +1126,8 @@ knobas-core	lib/knobas_core	payload::tests::a_value_that_is_not_a_usable_string_
 knobas-core	lib/knobas_core	payload::tests::declarations_are_keyed_by_source_then_kind
 knobas-core	lib/knobas_core	payload::tests::the_field_names_the_sql_macros_use_are_the_serialized_ones
 knobas-core	lib/knobas_core	payload::tests::the_first_candidate_that_lands_on_a_string_wins
+knobas-core	lib/knobas_core	reach::tests::an_origin_serialises_tagged_on_kind
+knobas-core	lib/knobas_core	reach::tests::the_walk_reads_the_setting_by_its_constants
 knobas-core	lib/knobas_core	signals::tests::a_kind_is_spelled_on_the_wire_as_has_takes_it
 knobas-core	lib/knobas_core	start_work::tests::a_failed_step_stops_the_sequence_rather_than_advancing_past_it
 knobas-core	lib/knobas_core	start_work::tests::a_failure_part_way_through_stops_everything_after_it
@@ -1300,6 +1305,13 @@ knobas-core	test/it	projects::a_whitespace_only_project_key_contributes_nothing
 knobas-core	test/it	projects::every_project_the_corpus_shows_is_reported_once
 knobas-core	test/it	projects::one_key_in_two_sources_is_two_projects
 knobas-core	test/it	projects::teamcitys_own_two_words_read_as_well_as_jiras
+knobas-core	test/it	reach::a_parent_whose_type_cannot_be_read_brings_nothing
+knobas-core	test/it	reach::a_vm_brings_what_it_holds_and_nothing_brings_its_ancestors
+knobas-core	test/it	reach::an_epic_parent_brings_nothing
+knobas-core	test/it	reach::an_unknown_ticket_reaches_nothing
+knobas-core	test/it	reach::parent_links_come_in_labelled_behind_the_switch
+knobas-core	test/it	reach::reasons_name_the_first_step_and_the_walk_stops_at_one_hop
+knobas-core	test/it	reach::the_reach_is_membership_plus_the_parents_links
 knobas-core	test/it	similar_text_incremental::a_batch_that_always_times_out_is_halved_then_its_item_skipped
 knobas-core	test/it	similar_text_incremental::a_pass_with_nothing_new_judges_nothing
 knobas-core	test/it	similar_text_incremental::a_word_crossing_the_line_compares_again_only_the_items_holding_it
@@ -1665,6 +1677,7 @@ knobas-search	lib/knobas_search	query::tests::inline_key_values_fill_the_filters
 knobas-search	lib/knobas_search	query::tests::leading_prefixes_are_exclusive_and_consume_their_marker
 knobas-search	lib/knobas_search	query::tests::me_and_a_name_are_both_bound_but_only_the_name_is_echoed
 knobas-search	lib/knobas_search	query::tests::mine_without_an_identity_resolves_to_no_authors_but_stays_set
+knobas-search	lib/knobas_search	query::tests::reach_is_a_typed_filter_that_ignores_case
 knobas-search	lib/knobas_search	query::tests::repeated_values_mean_any_and_a_minus_negates
 knobas-search	lib/knobas_search	query::tests::source_aliases_resolve_to_every_instance_of_that_adapter
 knobas-search	lib/knobas_search	query::tests::text_filters_win_over_chips_dimension_by_dimension
@@ -1777,6 +1790,8 @@ knobas-search	test/it	ranking::a_strong_body_match_still_beats_a_weak_title_matc
 knobas-search	test/it	ranking::a_title_match_ranks_above_a_body_match_in_every_kind
 knobas-search	test/it	ranking::the_cap_and_the_limit_keep_the_title_match_and_the_true_total
 knobas-search	test/it	ranking::the_item_named_exactly_the_word_ranks_above_its_hyphenated_siblings
+knobas-search	test/it	reach::reach_of_an_unknown_key_is_empty
+knobas-search	test/it	reach::reach_returns_the_same_ids_as_the_read
 knobas-search	test/it	search::a_clicked_chip_is_applied_and_echoed_like_a_typed_one
 knobas-search	test/it	search::a_deleted_item_disappears_from_the_index
 knobas-search	test/it	search::a_filter_with_no_text_browses_rather_than_answering_nothing

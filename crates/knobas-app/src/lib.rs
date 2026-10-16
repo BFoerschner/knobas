@@ -489,6 +489,11 @@ pub fn run() {
             // is append-only (§10.8).
             commands::entity::visit_entity,
             commands::entity::entity_thread,
+            // #817's job-reach read and R-7.3's switch, appended at the foot:
+            // the list is append-only (§10.8).
+            commands::entity::job_reach,
+            commands::entity::parent_links,
+            commands::entity::set_parent_links,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

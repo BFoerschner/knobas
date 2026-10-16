@@ -181,7 +181,24 @@ export function moving(steps: readonly StartWorkStep[]): boolean {
   return current !== undefined && (current.outcome === "running" || current.outcome === "pending");
 }
 
-export function createStartWork(entityId: string): StartWork {
+/** The five commands the stepper calls, injectable so a test needs no bridge. */
+export interface StartWorkApi {
+  flow: (entityId: string, repoId: string | null) => Promise<StartWorkStep[]>;
+  run: (entityId: string) => Promise<StartWorkStep[]>;
+  retry: (stepId: number) => Promise<StartWorkStep[]>;
+  skip: (stepId: number) => Promise<StartWorkStep[]>;
+  amend: (stepId: number, payload: unknown) => Promise<StartWorkStep[]>;
+}
+
+export const BRIDGE: StartWorkApi = {
+  flow: (entityId, repoId) => startWorkFlow(entityId, repoId),
+  run: (entityId) => startWorkRun(entityId),
+  retry: (stepId) => startWorkRetry(stepId),
+  skip: (stepId) => startWorkSkip(stepId),
+  amend: (stepId, payload) => startWorkAmend(stepId, payload),
+};
+
+export function createStartWork(entityId: string, api: StartWorkApi = BRIDGE): StartWork {
   const state = $state<{
     steps: StartWorkStep[];
     error: string | null;
@@ -200,7 +217,7 @@ export function createStartWork(entityId: string): StartWork {
 
   async function load(repoId: string | null): Promise<void> {
     try {
-      state.steps = await startWorkFlow(entityId, repoId);
+      state.steps = await api.flow(entityId, repoId);
       state.error = null;
     } catch (error) {
       // The steps are left where they were rather than emptied: a failed read
@@ -231,7 +248,7 @@ export function createStartWork(entityId: string): StartWork {
       void (async () => {
         let steps: StartWorkStep[];
         try {
-          steps = await startWorkFlow(entityId, null);
+          steps = await api.flow(entityId, null);
         } catch {
           // A failed read changes nothing; the next one asks again.
           return;
@@ -285,10 +302,10 @@ export function createStartWork(entityId: string): StartWork {
       return state.following;
     },
     load,
-    run: () => act(() => startWorkRun(entityId), true),
-    retry: (stepId) => act(() => startWorkRetry(stepId), true),
-    skip: (stepId) => act(() => startWorkSkip(stepId), true),
-    amend: (stepId, payload) => act(() => startWorkAmend(stepId, payload)),
+    run: () => act(() => api.run(entityId), true),
+    retry: (stepId) => act(() => api.retry(stepId), true),
+    skip: (stepId) => act(() => api.skip(stepId), true),
+    amend: (stepId, payload) => act(() => api.amend(stepId, payload)),
     stop,
   };
 }

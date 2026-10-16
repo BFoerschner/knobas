@@ -348,6 +348,7 @@ const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
+const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
@@ -791,7 +792,45 @@ const CASES: Case[] = [
             roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
             search: () => new Promise(() => {}),
             launcherHome: () => new Promise(() => {}),
+            jobReach: () => deferred([]),
+            getAsset: () => new Promise(() => {}),
+            credentialHealth: () => deferred([]),
+            syncStatus: () => deferred([]),
+            startWork: {
+              flow: () => deferred([]),
+              run: () => deferred([]),
+              retry: () => deferred([]),
+              skip: () => deferred([]),
+              amend: () => deferred([]),
+            },
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The job's *Start work* (#818): its proposing effect and the flow's
+     * read, `deferred` so the answer lands after the unmount.
+     */
+    name: "TfStartWork",
+    source: "lib/tf/job/TfStartWork.svelte",
+    open: (target) => ({
+      app: mount(TfStartWork, {
+        target,
+        props: {
+          detail: DETAIL,
+          repos: [{ entity_id: "mock:tidewater/payout-service", title: "tidewater/payout-service" }],
+          suggested: null,
+          timer: { current: null },
+          api: {
+            flow: () => deferred([]),
+            run: () => deferred([]),
+            retry: () => deferred([]),
+            skip: () => deferred([]),
+            amend: () => deferred([]),
+          },
+          onstarttimer: () => {},
         },
       }),
     }),

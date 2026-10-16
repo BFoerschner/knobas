@@ -6,6 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
+import type { AssetDetail } from "../../ipc/assets";
 import type {
   CheckoutCommand,
   CheckoutView,
@@ -13,9 +14,11 @@ import type {
   EntityDetail,
   EntityFilter,
   EntityRow,
+  Reached,
+  StartWorkStep,
   StateChip,
 } from "../../ipc/entity";
-import type { WriteOpPayload } from "../../ipc/sources";
+import type { CredentialHealth, SourceSyncStatus, WriteOpPayload } from "../../ipc/sources";
 import type { RunningTimer, Week } from "../../ipc/time";
 import { toasts } from "../../shell/toasts.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
@@ -156,8 +159,11 @@ function week(): Week {
   };
 }
 
-function ports(over: Partial<JobPorts> & { rows?: EntityRow[]; reachable?: string[] | "fails" } = {}): JobPorts {
+function ports(
+  over: Partial<JobPorts> & { rows?: EntityRow[]; others?: EntityRow[]; reachable?: string[] | "fails" } = {},
+): JobPorts {
   const rows = over.rows ?? [PR_OPEN, BRANCH, REPO];
+  const all = [...rows, ...(over.others ?? [])];
   return {
     listSources: () => Promise.resolve([{ id: "gitea" }, { id: "jira" }]),
     getEntity: (id) => {
@@ -170,7 +176,8 @@ function ports(over: Partial<JobPorts> & { rows?: EntityRow[]; reachable?: strin
     },
     listEntities: (filter) => {
       calls.list.push(filter);
-      return Promise.resolve({ rows, total: rows.length, tally: null, groups: null });
+      const kept = all.filter((row) => filter.kinds.length === 0 || filter.kinds.includes(row.kind));
+      return Promise.resolve({ rows: kept, total: kept.length, tally: null, groups: null });
     },
     reachableTransitions: () =>
       over.reachable === "fails" ? Promise.reject({ code: "unreachable", message: "down", source_id: "jira" }) : Promise.resolve(over.reachable ?? ["In Review", "To Do"]),
@@ -204,6 +211,17 @@ function ports(over: Partial<JobPorts> & { rows?: EntityRow[]; reachable?: strin
     roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.reject(new Error("not in this test")),
+    jobReach: () => Promise.resolve([]),
+    getAsset: (id) => Promise.reject({ code: "not_found", message: `no asset ${id}`, source_id: null }),
+    credentialHealth: () => Promise.resolve([]),
+    syncStatus: () => Promise.resolve([]),
+    startWork: {
+      flow: () => Promise.resolve([]),
+      run: () => Promise.resolve([]),
+      retry: () => Promise.resolve([]),
+      skip: () => Promise.resolve([]),
+      amend: () => Promise.resolve([]),
+    },
     ...over,
   };
 }
@@ -257,12 +275,15 @@ test("a key opens its ticket and promotes it once, and the card shows key, summa
   expect(calls.promote).toEqual([ID]);
 });
 
-test("the Code section reads the job's context for code kinds only", async () => {
+test("every section reads through what the ticket reaches, each for its own kinds", async () => {
   open();
   await settle();
-  expect(calls.list).toHaveLength(1);
-  expect(calls.list[0]!.context).toBe("ctx:1");
-  expect([...calls.list[0]!.kinds].sort()).toEqual(["branch", "commit", "pr", "repo"]);
+  // The ticket's context is promoted first, and the reach starts from it.
+  expect(calls.promote).toEqual([ID]);
+  expect(calls.list.every((filter) => filter.reach === ID && filter.context === null)).toBe(true);
+  const kinds = calls.list.map((filter) => [...filter.kinds].sort().join(","));
+  expect(kinds.sort()).toEqual(["branch,commit,pr,repo", "build", "monitor", "page"]);
+  expect(calls.list.find((filter) => filter.kinds.includes("build"))?.order).toBe("latest_per_parent");
 });
 
 test("a key nothing answers to says so and offers the way back", async () => {
@@ -454,4 +475,334 @@ test("Map is a tab that names itself until it is built", async () => {
   ]);
   expect(text()).toContain("Map is not built in the new shell yet.");
   expect(target.querySelector("[aria-labelledby='tf-sec-code']")).toBeNull();
+});
+
+// ---- #817: the other four sections ----
+
+const PARENT = "jira:PAY-200";
+
+function build(id: string, title: string, tone: StateChip["tone"], text: string, source = "teamcity"): EntityRow {
+  return { entity_id: id, kind: "build", source_id: source, title, updated_at: "2026-10-15T10:00:00Z", synced_at: "", path: "Payments › Payouts", state: { text, tone } };
+}
+const B_FAIL = build("teamcity:it#1187", "Payout_IntegrationTests #1187", "err", "failed");
+const B_RUN = build("teamcity:build#1188", "Payout_Build #1188", "info", "running");
+const B_OK = build("teamcity:lint#904", "Payout_Lint #904", "ok", "success");
+const PAGE = { ...code("confluence:ENG-1", "page", "SEPA payout retry design", "2026-10-15T10:40:00Z", { text: "mentions you", tone: "warn" } as StateChip, "ENG › Payments"), source_id: "confluence" };
+const MONITOR = { ...code("kuma:flows-stage", "monitor", "flows-stage", "2026-10-15T12:40:00Z", { text: "down", tone: "err" } as StateChip, null), source_id: "kuma" };
+const MON_OK = { ...code("kuma:payouts-stage", "monitor", "payouts-stage /health", "2026-10-15T12:00:00Z", { text: "up", tone: "ok" } as StateChip, null), source_id: "kuma" };
+
+function own(entity_id: string, kind: string): Reached {
+  return { entity_id, kind, step: entity_id, origin: { kind: "own" } };
+}
+
+function section(id: string): Element {
+  return target.querySelector(`[aria-labelledby='tf-sec-${id}']`)!;
+}
+
+/** A rollup's words, one part per drawn span (the gap between them is CSS). */
+function roll(id: string): string {
+  const parts = [...section(id).querySelectorAll(".tf-roll > span")];
+  return parts.map((part) => part.textContent?.replace(/\s+/g, " ").trim()).join(" ");
+}
+
+test("Builds rolls up configurations by state, sorts the failing first, and labels a row from the parent", async () => {
+  open("PAY-231", {
+    ports: ports({
+      others: [B_OK, B_RUN, B_FAIL],
+      jobReach: () =>
+        Promise.resolve([
+          own(B_FAIL.entity_id, "build"),
+          own(B_RUN.entity_id, "build"),
+          { entity_id: B_OK.entity_id, kind: "build", step: PARENT, origin: { kind: "parent", ticket: PARENT } },
+        ]),
+    }),
+  });
+  await settle();
+  expect(roll("builds")).toBe("3 configurations: 1 failing 1 running 1 passing");
+  const rows = [...section("builds").querySelectorAll(".tf-rows a")];
+  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+    `#/build/${encodeURIComponent(B_FAIL.entity_id)}`,
+    `#/build/${encodeURIComponent(B_RUN.entity_id)}`,
+    `#/build/${encodeURIComponent(B_OK.entity_id)}`,
+  ]);
+  expect(rows[2]!.querySelector(".tf-via")?.textContent).toBe("Parent PAY-200");
+  expect(rows[0]!.querySelector(".tf-via")).toBeNull();
+  expect(section("builds").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Builds view");
+});
+
+test("Builds warns when a source that holds builds cannot sign in, with the fix", async () => {
+  const failing: CredentialHealth = { source_id: "teamcity", state: "unauthorized", checked_at: null, detail: null, secret_expires_at: null };
+  const run = {
+    source_id: "teamcity",
+    running: false,
+    run_id: 9,
+    started_at: null,
+    last_finished_at: new Date(2026, 9, 15, 13, 22).toISOString(),
+    last_outcome: "unauthorized",
+    next_run_at: null,
+    backoff_until: null,
+    last_changed: false,
+  } as SourceSyncStatus;
+  open("PAY-231", {
+    ports: ports({
+      others: [B_FAIL],
+      listSources: () => Promise.resolve([{ id: "teamcity", display_name: "TeamCity" }, { id: "jira" }]),
+      credentialHealth: () => Promise.resolve([failing]),
+      syncStatus: () => Promise.resolve([run]),
+    }),
+  });
+  await settle();
+  const stale = section("builds").querySelector(".tf-stale")!;
+  expect(stale.textContent?.replace(/\s+/g, " ").trim()).toBe("TeamCity data is 38 min old: sign-in failing. Re-enter password");
+  expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
+});
+
+test("a source that signs in draws no warning", async () => {
+  open("PAY-231", {
+    ports: ports({
+      others: [B_OK],
+      listSources: () => Promise.resolve([{ id: "teamcity", display_name: "TeamCity" }, { id: "jira" }]),
+      credentialHealth: () => Promise.resolve([{ source_id: "teamcity", state: "ok", checked_at: null, detail: null, secret_expires_at: null }]),
+    }),
+  });
+  await settle();
+  expect(section("builds").querySelector(".tf-stale")).toBeNull();
+});
+
+test("Assets reads each reached asset and rolls up environments and problems", async () => {
+  const detail = (id: string, name: string, type_label: string, health: "up" | "down", env: "prod" | "stage", on: string | null) =>
+    ({
+      asset: { id, name, type_label, health } as AssetDetail["asset"],
+      effective_environment: { value: env, source_id: id, source_name: name },
+      held_by: on ? [{ name: on } as AssetDetail["asset"]] : [],
+    }) as AssetDetail;
+  const assets: Record<string, AssetDetail> = {
+    "asset:c": detail("asset:c", "payout-service", "Container", "down", "stage", "vm-pay-stage-01"),
+    "asset:vm": detail("asset:vm", "vm-pay-stage-01", "VM", "up", "stage", null),
+  };
+  open("PAY-231", {
+    ports: ports({
+      jobReach: () => Promise.resolve([own("asset:vm", "asset"), own("asset:c", "asset"), own(PR_OPEN.entity_id, "pr")]),
+      getAsset: (id) => Promise.resolve(assets[id]!),
+    }),
+  });
+  await settle();
+  expect(roll("assets")).toBe("2 assets in stage 1 with a problem");
+  const rows = [...section("assets").querySelectorAll(".tf-rows a")];
+  expect(rows.map((row) => row.getAttribute("href"))).toEqual([`#/asset/${encodeURIComponent("asset:c")}`, `#/asset/${encodeURIComponent("asset:vm")}`]);
+  expect(rows[0]!.textContent).toContain("Container, stage, on vm-pay-stage-01");
+  expect(section("assets").querySelector("a.tf-open")?.getAttribute("href")).toBe("#/job/PAY-231/map");
+});
+
+test("Monitors and Pages roll up in prototype-6's words", async () => {
+  open("PAY-231", { ports: ports({ others: [MON_OK, MONITOR, PAGE] }) });
+  await settle();
+  expect(roll("monitors")).toBe("2 watched: 1 down 1 fine");
+  expect(section("monitors").querySelector(".tf-rows a")?.getAttribute("href")).toBe("#/monitors");
+  expect(roll("pages")).toBe("1 page in ENG 1 ask something of you");
+  expect(section("pages").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Docs view");
+});
+
+test("a section with nothing in it says so", async () => {
+  open();
+  await settle();
+  expect(roll("monitors")).toBe("Nothing connected.");
+  expect(section("monitors").textContent).toContain("Nothing connected yet. Use the connections drawer to link something.");
+});
+
+// ---- #818: the blocked banner and Start work ----
+
+test("a blocked ticket shows the red banner naming the blocker, with a button to open it", async () => {
+  const blocked = ticket({
+    links: [
+      {
+        link: { id: "l1", from_id: "jira:OPS-77", to_id: ID, relation: "blocks", origin: "source", note: "Staging needs the updated runbook.", created_by: "sync", created_at: "" } as never,
+        other: { entity_id: "jira:OPS-77", kind: "ticket", title: "On-call runbook outdated", deleted_at: null },
+      },
+    ],
+  });
+  open("PAY-231", { ports: ports({ getEntity: (id) => (id === ID ? Promise.resolve(blocked) : Promise.reject({ code: "not_found" })) }) });
+  await settle();
+  const banner = target.querySelector(".tf-blocked")!;
+  expect(banner.querySelector("strong")?.textContent).toBe("Blocked by OPS-77 On-call runbook outdated");
+  expect(banner.textContent).toContain("Staging needs the updated runbook.");
+  const button = banner.querySelector("a")!;
+  expect(button.textContent).toBe("Open OPS-77");
+  expect(button.getAttribute("href")).toBe("#/job/OPS-77");
+});
+
+test("an unblocked ticket draws no banner", async () => {
+  open();
+  await settle();
+  expect(target.querySelector(".tf-blocked")).toBeNull();
+});
+
+/** A flow as the backend answers it, each step in `outcomes`' state. */
+function flow(outcomes: StartWorkStep["outcome"][], repo = REPO.entity_id): StartWorkStep[] {
+  const kinds: StartWorkStep["step"][] = ["create_branch", "create_pull_request", "link_pull_request", "transition"];
+  const payloads: unknown[] = [
+    { CreateBranch: { entity: repo, name: "feature/PAY-231-retry-failed-sepa-payouts", from_ref: "main" } },
+    { CreatePullRequest: { entity: repo, title: "WIP: Retry failed SEPA payouts", body: "", head: "feature/PAY-231", base: "main" } },
+    { relation: "implements" },
+    { Transition: { entity: ID, status: "In Progress" } },
+  ];
+  return kinds.map((step, index) => ({
+    id: index + 1,
+    ticket_id: ID,
+    step,
+    position: index,
+    outcome: outcomes[index]!,
+    payload: payloads[index],
+    write_id: null,
+    detail: null,
+    updated_at: "",
+  }));
+}
+
+const TODO_MINE = () => ticket({ status: "To Do", author: "mara" });
+const MARA = () => Promise.resolve([{ id: "jira", config: { username: "mara" } }, { id: "gitea" }]);
+
+function steps(): [string | undefined, string | undefined][] {
+  return [...target.querySelectorAll(".tf-step")].map((row) => [row.querySelector("strong")?.textContent ?? undefined, row.querySelector(".tf-state")?.textContent ?? undefined]);
+}
+
+test("a To Do ticket of mine shows Start work, proposed in the suggested repository, in place of Code and Builds", async () => {
+  const asked: (string | null)[] = [];
+  let stored: StartWorkStep[] = [];
+  const OTHER = code("gitea:tidewater/ledger", "repo", "tidewater/ledger", "2026-10-01T08:00:00Z", null, null);
+  open("PAY-231", {
+    ports: ports({
+      rows: [REPO, OTHER],
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      jobReach: () => Promise.resolve([own(REPO.entity_id, "repo")]),
+      startWork: {
+        flow: (_id, repo) => {
+          asked.push(repo);
+          if (repo !== null && stored.length === 0) stored = flow(["pending", "pending", "pending", "pending"], repo);
+          return Promise.resolve(stored);
+        },
+        run: () => Promise.resolve(stored),
+        retry: () => Promise.resolve(stored),
+        skip: () => Promise.resolve(stored),
+        amend: () => Promise.resolve(stored),
+      },
+    }),
+  });
+  await settle();
+  expect(asked).toEqual([null, REPO.entity_id]);
+  expect(steps()).toEqual([
+    ["Create branch", "ready"],
+    ["Open pull request", "ready"],
+    ["Link PR to ticket", "ready"],
+    ["Move ticket", "ready"],
+    ["Start timer", "ready"],
+  ]);
+  const select = target.querySelector<HTMLSelectElement>(".tf-step select[aria-label='Repository']")!;
+  expect([...select.options].map((option) => option.textContent)).toEqual(["tidewater/payout-service (suggested)", "tidewater/ledger"]);
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Create branch']")?.value).toBe("feature/PAY-231-retry-failed-sepa-payouts");
+  expect(target.querySelector<HTMLInputElement>("input[aria-label='Move ticket']")?.value).toBe("To Do to In Progress");
+  expect(section("code")).toBeNull();
+  expect(section("builds")).toBeNull();
+  expect(section("assets")).not.toBeNull();
+});
+
+test("each step's state follows the flow as its writes move through the queue, and the step it stopped at can be retried or skipped", async () => {
+  let answer = flow(["pending", "pending", "pending", "pending"]);
+  const acted: string[] = [];
+  open("PAY-231", {
+    ports: ports({
+      listSources: MARA,
+      getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+      startWork: {
+        flow: () => Promise.resolve(answer),
+        run: () => {
+          acted.push("run");
+          answer = flow(["succeeded", "queued", "pending", "pending"]);
+          return Promise.resolve(answer);
+        },
+        retry: (id) => {
+          acted.push(`retry ${id}`);
+          return Promise.resolve(answer);
+        },
+        skip: (id) => {
+          acted.push(`skip ${id}`);
+          answer = flow(["succeeded", "skipped", "succeeded", "succeeded"]);
+          return Promise.resolve(answer);
+        },
+        amend: () => Promise.resolve(answer),
+      },
+    }),
+  });
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
+  await settle();
+  expect(acted).toEqual(["run"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "queued", "ready", "ready"]);
+  const queued = target.querySelector(".tf-step[data-step='pr']")!;
+  [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Retry")!.click();
+  await settle();
+  expect(acted).toEqual(["run", "retry 2"]);
+  [...queued.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Skip")!.click();
+  await settle();
+  expect(acted).toEqual(["run", "retry 2", "skip 2"]);
+  expect(steps().slice(0, 4).map(([, state]) => state)).toEqual(["done", "skipped", "done", "done"]);
+  // A step that already landed offers neither.
+  const done = target.querySelector(".tf-step[data-step='branch']")!;
+  expect([...done.querySelectorAll("button")].map((b) => b.textContent)).toEqual([]);
+});
+
+test("Run all steps starts the timer as step 5, through the shell's start, which opens a running timer's draft first", async () => {
+  let ran = false;
+  const order: string[] = [];
+  const current = { target: { kind: "entity", entity_id: "jira:PAY-228" }, started_at: new Date().toISOString() } as RunningTimer;
+  calls.start.length = 0;
+  job = mount(TfJob, {
+    target,
+    props: {
+      segment: "PAY-231",
+      tab: null,
+      timer: { current, elapsed: "1:00" },
+      layers: createLayers(),
+      ontimer: () => {},
+      onstarttimer: (id: string) => order.push(`start ${id} after run: ${ran}`),
+      ports: ports({
+        listSources: MARA,
+        getEntity: (id) => (id === ID ? Promise.resolve(TODO_MINE()) : Promise.reject({ code: "not_found" })),
+        startWork: {
+          flow: () => Promise.resolve(flow(["pending", "pending", "pending", "pending"])),
+          run: () => {
+            ran = true;
+            return Promise.resolve(flow(["succeeded", "succeeded", "succeeded", "succeeded"]));
+          },
+          retry: () => Promise.resolve([]),
+          skip: () => Promise.resolve([]),
+          amend: () => Promise.resolve([]),
+        },
+      }),
+      today: () => new Date(2026, 9, 15, 14, 0),
+    },
+  });
+  flushSync();
+  await settle();
+  expect(target.querySelector(".tf-step[data-step='timer']")?.textContent).toContain("stops the timer on PAY-228 first");
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Run all steps")!.click();
+  await settle();
+  expect(order).toEqual([`start ${ID} after run: true`]);
+});
+
+test("a To Do ticket of somebody else's, or mine in progress, shows no Start work", async () => {
+  open("PAY-231", {
+    ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "To Do", author: "jonas" })) : Promise.reject({ code: "not_found" })) }),
+  });
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  unmount(job!);
+  job = null;
+  open("PAY-231", {
+    ports: ports({ listSources: MARA, getEntity: (id) => (id === ID ? Promise.resolve(ticket({ status: "In Progress", author: "mara" })) : Promise.reject({ code: "not_found" })) }),
+  });
+  await settle();
+  expect(target.querySelector(".tf-steps")).toBeNull();
+  expect(section("code")).not.toBeNull();
 });

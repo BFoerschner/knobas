@@ -261,6 +261,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
         "context": null,
         "project": null,
         "include_deleted": true,
+        "reach": null,
     });
     let decoded: EntityFilter =
         serde_json::from_value(payload.clone()).expect("the mirror's EntityFilter decodes");
@@ -275,6 +276,7 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
             "kinds",
             "order",
             "project",
+            "reach",
             "sources",
             "updated_within_days",
         ],
@@ -292,6 +294,43 @@ fn the_entity_filter_shape_matches_its_typescript_mirror() {
     // And `null` on the project dimension is *unscoped* rather than "the
     // project spelled nothing", which is the same distinction (#208).
     assert_eq!(decoded.project, None);
+}
+
+/// A filter written before #817 carries no `reach`, and reads as unscoped.
+#[test]
+fn a_filter_without_reach_is_unscoped() {
+    let decoded: EntityFilter = serde_json::from_value(serde_json::json!({
+        "sources": [], "kinds": [], "updated_within_days": null, "order": "updated_desc",
+        "context": null, "project": null, "include_deleted": false,
+    }))
+    .unwrap();
+    assert_eq!(decoded.reach, None);
+}
+
+/// The job-reach read's row (#817), both origins, against `entity.ts`.
+#[test]
+fn the_reached_shape_matches_its_typescript_mirror() {
+    use knobas_core::reach::{Origin as ReachOrigin, Reached};
+    let own = Reached {
+        entity_id: "gitea:svc#1".into(),
+        kind: "pr".into(),
+        step: "gitea:svc#1".into(),
+        origin: ReachOrigin::Own,
+    };
+    assert_shape(
+        "Reached",
+        &serde_json::to_value(&own).unwrap(),
+        &["entity_id", "kind", "step", "origin"],
+    );
+    let parent = serde_json::to_value(ReachOrigin::Parent {
+        ticket: "jira:PAY-231".into(),
+    })
+    .unwrap();
+    assert!(MIRROR.contains(r#"{ kind: "own" } | { kind: "parent"; ticket: string }"#));
+    assert_eq!(
+        parent,
+        serde_json::json!({ "kind": "parent", "ticket": "jira:PAY-231" })
+    );
 }
 
 /// The projects read's one DTO (#208), against what `entity.ts` declares.

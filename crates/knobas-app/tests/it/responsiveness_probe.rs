@@ -283,6 +283,7 @@ fn filter(
         project: project.map(str::to_owned),
         order,
         include_deleted: false,
+        reach: None,
     }
 }
 

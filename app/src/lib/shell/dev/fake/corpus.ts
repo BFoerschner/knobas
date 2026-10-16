@@ -4,6 +4,7 @@
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
 import type { Handler } from "../fake-tauri";
+import { JOB_ROWS, fakeReach } from "./job-reach";
 
 // -- the demo corpus --------------------------------------------------------
 
@@ -154,6 +155,10 @@ export const CORPUS: {
     repo: "payout-service",
     state: "open",
     approvals: "1/2",
+    // The state chip and path the real Gitea declarations give a pull
+    // request (#817), so the job's Code section rolls up its open PR.
+    chip: { text: "open", tone: "info" },
+    path: "tidewater/payout-service",
   }),
   // A pull request that asks the fixture's user for a review (#815), so
   // PAY-236's card says *review asked of you* as prototype-6's does.
@@ -208,6 +213,9 @@ export const CORPUS: {
     web_url: null,
     deleted_at: "2026-08-22T12:00:00Z",
   },
+  // What PAY-231's job draws beyond the rows above (#817): its builds,
+  // monitors and pages. See `job-reach.ts`.
+  ...JOB_ROWS,
 ];
 
 /** One corpus entry, with the fields every row shares filled in. */
@@ -255,15 +263,24 @@ export function fakeContext(kind: string, title: string, anchor_id: string | nul
   };
 }
 
-/** The mirror row `list_entities` returns — the six columns, and no more. */
+/**
+ * The mirror row `list_entities` returns. The path and the state chip are
+ * the fixture's own `path` and `chip` payload keys where a row carries them
+ * (#817's job rows), and `null` otherwise, as the mock adapter declares
+ * neither; a row from another source names it as `source`.
+ */
 export function mirrorRow(entry: (typeof CORPUS)[number]) {
+  const text = (value: unknown) => (typeof value === "string" ? value : null);
+  const chip = entry.payload["chip"] as { text: string; tone: string } | undefined;
   return {
     entity_id: entry.entity_id,
     kind: entry.kind,
-    source_id: "mock",
+    source_id: text(entry.payload["source"]) ?? "mock",
     title: entry.title,
     updated_at: entry.updated_at,
     synced_at: SYNCED_AT,
+    path: text(entry.payload["path"]),
+    state: chip ?? null,
   };
 }
 
@@ -523,6 +540,7 @@ function listEntities(args: Record<string, unknown>) {
     context?: string | null;
     project?: string | null;
     include_deleted?: boolean;
+    reach?: string | null;
   };
   const limit = Number(args["limit"] ?? 50);
   const offset = Number(args["offset"] ?? 0);
@@ -537,7 +555,12 @@ function listEntities(args: Record<string, unknown>) {
   const members = filter.context ? fakeMembers(filter.context) : null;
   let rows = CORPUS.filter((entry) => filter.include_deleted || entry.deleted_at === null);
   if (members !== null) rows = rows.filter((entry) => members.includes(entry.entity_id));
-  if (filter.sources?.length) rows = rows.filter(() => filter.sources?.includes("mock"));
+  // What a ticket reaches (#817): `job-reach.ts`'s table.
+  if (filter.reach) {
+    const reached = new Set(fakeReach(filter.reach).map((entry) => entry.entity_id));
+    rows = rows.filter((entry) => reached.has(entry.entity_id));
+  }
+  if (filter.sources?.length) rows = rows.filter((entry) => filter.sources?.includes(mirrorRow(entry).source_id));
   if (filter.kinds?.length) rows = rows.filter((entry) => filter.kinds?.includes(entry.kind));
   rows = rows.filter((entry) => inProject(entry, filter.project));
 

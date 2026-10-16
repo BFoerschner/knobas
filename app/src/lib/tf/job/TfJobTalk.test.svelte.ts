@@ -167,6 +167,17 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     roomSuggestions: () => Promise.resolve({ rows: [PROPOSAL, ELSEWHERE], total: 2, more: [] }),
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.resolve({ recent: [], smart_lists: [], stale_sources: [] } as never),
+    jobReach: () => Promise.resolve([]),
+    getAsset: () => Promise.reject(new Error("not in this test")),
+    credentialHealth: () => Promise.resolve([]),
+    syncStatus: () => Promise.resolve([]),
+    startWork: {
+      flow: () => Promise.resolve([]),
+      run: () => Promise.resolve([]),
+      retry: () => Promise.resolve([]),
+      skip: () => Promise.resolve([]),
+      amend: () => Promise.resolve([]),
+    },
     ...over,
   };
 }

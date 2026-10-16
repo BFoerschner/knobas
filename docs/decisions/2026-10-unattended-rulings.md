@@ -2040,3 +2040,43 @@ Merge-manager, PR #938 for #831.
 - **Monitoring's bounds are the rooms section's** (days 1–3650, ms 0–600 000), not one 1–1 000 000
   for both: the backend clamps to these, and a warning threshold of 0 was settable in the rooms UI.
   **Reversing:** low.
+## #817 Job reach and the other four sections, #818 Start work, the blocked banner (one PR)
+
+- **The reach is ADR-0025's read as written: the context's members by ADR-0008's rule, unchanged,
+  then the parent's own links** (ruled by the merge-manager, PR #937). The implementer's walk went
+  only down from a VM, proxy or host and added every ancestor and `monitored-by` monitor of a
+  reached asset, per spec #808 and R-2.8, and amended ADR-0025 to say so. That changes a decision
+  the ADR made ("A job shows its context's members (ADR-0008, unchanged)"), and a ruling may not
+  contradict an ADR, so the walk follows the ADR, the amendment is dropped, and the conflict
+  between the spec and the ADR is a follow-up. **Reversing:** medium; the downward rule, `under`
+  and `watched` are in PR #937's history (`912036a3`), and the ADR needs its amendment back.
+- **The parent is `fields.parent.key` only, and not when that parent reads as an epic.** The
+  classic `epic.key` arm names an epic, and an epic's links reach its tickets through link sets
+  (TF5), not through R-7.3's sub-task switch. **Reversing:** drop the issue-type clause in the
+  `parent` CTE.
+- **The parent's own links are one layer, never walked further** (R-7.3 says "its parent's own
+  links"). An item reached both ways keeps its own path (R-7.4: first origin wins).
+- **`reach:` is in TF1, not TF5.** The spec's milestone map lists it under TF5, but #817's body
+  asks for it and the ticket is the contract. **Reversing:** n/a.
+- **The switch is two commands and no UI yet.** R-7.6 puts it in the Link sets view (TF5); the
+  commands and the stored row exist now, on by default. **Reversing:** n/a.
+- **Every section reads `list_entities` with a new `EntityFilter.reach`**, and the Code section
+  moved from the context to it, so a parent's repository shows with its label; `promote_context`
+  still runs first, because the reach starts from the context's explicit adds. **Reversing:** the
+  `filterOf` helper in `TfJob.svelte`.
+- **Assets are read one `get_asset` per reached asset, at most 50.** No list read takes ids, and
+  the round's rule is no perf work. **Reversing:** a batched read, as its own ticket.
+- **The Builds warning names every source that holds builds** (declares the `build` kind, or a
+  drawn row came from it) whose credential the reader has to fix; the age is since the sign-in
+  started failing, the moment the status bar dates the failure from. **Reversing:** `staleBuilds`
+  in `job.ts`.
+- **Start work proposes as soon as the repositories are read**, in a repository the ticket
+  already reaches, else the first by name. Proposing dispatches nothing, and it is what puts real
+  names in the fields; picking another repository amends the two steps that name one. Step 5 is
+  the shell's *Start timer*, called once the run answered, which opens a running timer's worklog
+  draft first. The step the flow is on shows *Skip*, and *Retry* when it failed or is queued; the
+  prototype draws neither, R-4.9 asks for both. **Reversing:** `TfStartWork.svelte`.
+- **"Mine" on the job is the ticket's assignee equal to the username its source is configured
+  with**, the rule `mini_board`'s `mine` reads. **Reversing:** `isMine` in `job.ts`.
+- **Sections stay in R-4.6's order on every job** (Code, Builds, Assets, Monitors, Pages);
+  prototype-6 draws PAY-228's in another order. **Reversing:** the grid in `TfJob.svelte`.
