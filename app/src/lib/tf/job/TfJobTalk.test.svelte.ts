@@ -580,3 +580,29 @@ test("Hide here hides one member on this ticket only and never edits the set; Un
   expect(writes.at(-1)).toEqual([ID, "teamcity:Payout_Build", false]);
   expect(drawer.querySelector("button[aria-label='Hide here: Payout_Build']")).not.toBeNull();
 });
+
+test("Undo after moving to another job shows the member again on the ticket it was hidden on", async () => {
+  const writes: [string, string, boolean][] = [];
+  const base = setPorts(new Set(), writes);
+  const other = { ...ticket(), row: { ...ticket().row, entity_id: "jira:PAY-232" } };
+  const props = $state({
+    segment: "PAY-231",
+    tab: null as string | null,
+    timer: { current: null, elapsed: null },
+    layers: createLayers(),
+    ontimer: () => {},
+    onstarttimer: () => {},
+    ports: { ...base, getEntity: (id: string) => (id === other.row.entity_id ? Promise.resolve(other) : base.getEntity(id)) },
+    today: () => new Date(2026, 9, 15, 14, 0),
+  });
+  job = mount(TfJob, { target, props });
+  await settle();
+  drawerOpen().querySelector<HTMLButtonElement>("button[aria-label='Hide here: payout-service']")!.click();
+  await settle();
+  const toast = toasts.items.find((t) => t.text === "Hidden on PAY-231. The link set stays as it is.")!;
+  props.segment = "PAY-232";
+  await settle();
+  toast.action!.run();
+  await settle();
+  expect(writes.at(-1)).toEqual([ID, "gitea:tidewater/payout-service", false]);
+});

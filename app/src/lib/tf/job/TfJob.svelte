@@ -289,9 +289,11 @@
   /**
    * After *Hide here* or *Show again*: the groups, the labels and the
    * sections' rows again, since a hidden member leaves the job's reach. The
-   * checkout line stays as it was.
+   * checkout line stays as it was. Nothing when the page has moved on to
+   * another job while the write was out.
    */
   function rereadReach(id: string) {
+    if (detail?.row.entity_id !== id) return;
     const mine = token;
     void readInherited(id, mine);
     void readReach(id, mine);
@@ -324,17 +326,19 @@
       rereadReach(id);
       push({
         text: `Hidden on ${key}. The link set stays as it is.`,
-        action: { label: "Undo", run: () => void showAgain(row.id) },
+        action: { label: "Undo", run: () => void showAgain(row.id, id) },
       });
     } catch (cause) {
       push({ text: `Could not hide it: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
   }
 
-  /** *Show again*: the member back on this ticket. */
-  async function showAgain(memberId: string) {
-    if (!detail) return;
-    const id = detail.row.entity_id;
+  /**
+   * *Show again*: the member back on the ticket it was hidden on. *Undo*
+   * passes that ticket, since its toast outlives a move to another job.
+   */
+  async function showAgain(memberId: string, id = detail?.row.entity_id) {
+    if (!id) return;
     try {
       await ports.hideLinkSetMember(id, memberId, false);
       rereadReach(id);
