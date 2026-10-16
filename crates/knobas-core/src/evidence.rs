@@ -501,10 +501,13 @@ fn issue_keys(text: &str) -> Vec<&str> {
     keys
 }
 
+/// A byte range of a text: a match, or a window around matches.
+type Span = (usize, usize);
+
 /// The excerpts around `matches` in `text`: [`CONTEXT_CHARS`] on each side,
 /// windows that touch merged into one, `…` where the text goes on.
-fn excerpts(text: &str, matches: &[(usize, usize)]) -> Vec<Vec<Part>> {
-    let mut windows: Vec<(usize, usize, Vec<(usize, usize)>)> = Vec::new();
+fn excerpts(text: &str, matches: &[Span]) -> Vec<Vec<Part>> {
+    let mut windows: Vec<(usize, usize, Vec<Span>)> = Vec::new();
     for &(start, end) in matches {
         let from = back(text, start, CONTEXT_CHARS);
         let to = forward(text, end, CONTEXT_CHARS);
