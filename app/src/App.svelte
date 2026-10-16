@@ -52,6 +52,7 @@
   import { EVENTS } from "./lib/ipc";
   import { recordCaptureContext } from "./lib/ipc/entity";
   import { readShellChoice, windowStorage } from "./lib/tf/shell-choice";
+  import { currentJob } from "./lib/tf/job/current.svelte";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -265,9 +266,12 @@
    * the reader was on disagree about one minute.
    */
   const foreground = $derived.by(() => {
-    // The new shell has no rooms; its job page states its own foreground in
-    // the ticket that builds it. Until then ⌘T with nothing running asks.
-    if (ticketFirst) return null;
+    // The new shell has no rooms: the job on screen is the foreground (R-1.4),
+    // and a page with no job leaves ⌘T asking.
+    if (ticketFirst) {
+      const job = currentJob.entityId;
+      return job === null ? null : ({ kind: "entity", entity_id: job } as const);
+    }
     const route = router.route;
     if (route.view === "assets") {
       const held = route.assetId;

@@ -72,6 +72,7 @@
     type WeekReading,
   } from "./job";
   import { bridgePorts, type JobPorts } from "./ports";
+  import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
@@ -132,6 +133,9 @@
   let sync = $state<SourceSyncStatus[]>([]);
   /** Every repository, for *Start work*'s dropdown; `null` until asked. */
   let repos = $state<{ entity_id: string; title: string }[] | null>(null);
+
+  // The job on screen is what the timer chip and ⌘T start on (R-1.4).
+  $effect(() => currentJob.set(detail?.row.entity_id ?? null));
 
   /** The read's generation, so an answer for a ticket left behind is dropped. */
   let token = 0;
