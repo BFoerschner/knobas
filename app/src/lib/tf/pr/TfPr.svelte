@@ -354,8 +354,6 @@
     if (row.entity_id === null || repo === null || (event.target as Element | null)?.closest("a")) return;
     location.hash = commitHash(repo.entity_id, row.entity_id);
   }
-
-  const NOT_BUILT = "Not built in the new shell yet";
 </script>
 
 <div class="tf-full">

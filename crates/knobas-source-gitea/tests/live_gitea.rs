@@ -2762,8 +2762,16 @@ async fn a_mergeable_pull_request_is_merged_from_its_view_and_the_next_sync_read
             .map(|f| (f.value.clone(), f.tone))
     };
     let ok = Some(knobas_source::view::Tone::Ok);
-    assert_eq!(read("Approvals"), Some(("none required".to_owned(), ok)), "{facts:?}");
-    assert_eq!(read("Conflicts"), Some((format!("none with {base}"), ok)), "{facts:?}");
+    assert_eq!(
+        read("Approvals"),
+        Some(("none required".to_owned(), ok)),
+        "{facts:?}"
+    );
+    assert_eq!(
+        read("Conflicts"),
+        Some((format!("none with {base}"), ok)),
+        "{facts:?}"
+    );
     println!("LIVE Merge… action: {offered:?}");
     assert_eq!(
         offered.disabled, None,

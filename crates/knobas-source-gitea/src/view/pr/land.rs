@@ -504,7 +504,11 @@ pub(super) fn ready_facts(pull: &Pull, reviews: &[Review], landing: &Landing) ->
         Fact {
             label: "Approvals".to_owned(),
             value: format!("{given} of {required}"),
-            tone: Some(if given >= required { Tone::Ok } else { Tone::Warn }),
+            tone: Some(if given >= required {
+                Tone::Ok
+            } else {
+                Tone::Warn
+            }),
         }
     };
     let mut facts = vec![approvals];

@@ -112,8 +112,12 @@ async fn each_pull_request_keeps_its_own_ticks() {
     let pool = pool().await;
     let one = pull(&pool, &source(&pool).await, "c90d11").await;
     let two = pull(&pool, &source(&pool).await, "c90d11").await;
-    set_pr_file_viewed_inner(&pool, &one, "a.rs", true).await.unwrap();
-    set_pr_file_viewed_inner(&pool, &two, "b.rs", true).await.unwrap();
+    set_pr_file_viewed_inner(&pool, &one, "a.rs", true)
+        .await
+        .unwrap();
+    set_pr_file_viewed_inner(&pool, &two, "b.rs", true)
+        .await
+        .unwrap();
     assert_eq!(pr_viewed_files_inner(&pool, &one).await.unwrap(), ["a.rs"]);
     assert_eq!(pr_viewed_files_inner(&pool, &two).await.unwrap(), ["b.rs"]);
 }

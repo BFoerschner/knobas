@@ -1316,10 +1316,7 @@ async fn the_overview_declares_its_approvals_and_its_conflicts() {
     checking["mergeable"] = Value::Null;
     let server = gitea(checking, json!([])).await;
     let view = source(&server).view(PR, None).await.unwrap().unwrap();
-    assert_eq!(
-        approvals_and_conflicts(&view),
-        (ok("none required"), None)
-    );
+    assert_eq!(approvals_and_conflicts(&view), (ok("none required"), None));
 
     // A work-in-progress title: Gitea's `false` is not a conflict.
     let mut wip = open_pull();
@@ -2379,7 +2376,14 @@ async fn a_pull_requests_head_commit_statuses_are_its_checks() {
         assert_eq!(title.as_deref(), Some("Checks"));
         let drawn: Vec<_> = rows
             .iter()
-            .map(|r| (r.title.as_str(), r.chip.as_deref(), r.tone, r.meta.as_deref()))
+            .map(|r| {
+                (
+                    r.title.as_str(),
+                    r.chip.as_deref(),
+                    r.tone,
+                    r.meta.as_deref(),
+                )
+            })
             .collect();
         // Each row's time (#994) after its description, as long ago as the
         // shell's `ago()` says it: these are days old, so their UTC date.
