@@ -91,6 +91,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     shareExport: vi.fn(() => Promise.resolve({ taken_at: NOW.toISOString(), file: "knobas-share-new.knobas", bytes: 1024 })),
     restoreBackup: vi.fn(() => Promise.resolve()),
     smartLists: vi.fn(() => Promise.resolve([{ saved: false }])),
+    ticketViews: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
     dbStats: vi.fn(() =>
       Promise.resolve({
@@ -269,7 +270,7 @@ test("Backup: the last backup, the schedule and keep, and Back up now", async ()
 test("Share ticks map to the export's parts, and a part that does not exist is not drawn", async () => {
   const p = await open("backup");
   const ticks = () => [...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim());
-  // No saved smart list: no tick for it. Link sets and ticket views are no part yet.
+  // No saved smart list and no ticket view: no tick for either. Link sets are no part yet.
   expect(ticks()).toEqual(["Links", "Contexts", "Assets and routes", "Sources, without passwords", "Notes", "Time"]);
   const notes = [...target.querySelectorAll<HTMLLabelElement>(".tf-stg-checks label")].find((el) =>
     el.textContent?.includes("Notes"),
@@ -284,6 +285,7 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
     assets: true,
     sources: true,
     smart_lists: false,
+    ticket_views: false,
     notes: true,
     time: false,
   });
@@ -296,6 +298,14 @@ test("a saved smart list draws its tick, on by default", async () => {
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ smart_lists: true }));
+});
+
+test("a ticket view draws its tick, on by default (#812)", async () => {
+  const p = await open("backup", sectionPorts({ ticketViews: vi.fn(() => Promise.resolve([{ id: "my-work" }])) }));
+  expect([...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim())).toContain("Ticket views");
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ ticket_views: true }));
 });
 
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {

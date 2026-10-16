@@ -31,6 +31,7 @@
   // svelte-ignore state_referenced_locally
   let group = $state(draft.group);
   let saving = $state(false);
+  const named = $derived(name.trim() !== "");
   let failed = $state<string | null>(null);
   const uid = $props.id();
 
@@ -60,11 +61,11 @@
     >
       <label>
         <span>Name</span>
-        <input type="text" bind:value={name} placeholder="For example, Payments bugs this sprint" />
+        <input type="text" aria-label="Name" bind:value={name} placeholder="For example, Payments bugs this sprint" />
       </label>
       <label>
         <span>Group</span>
-        <input type="text" bind:value={group} list="tf-vw-groups-{uid}" />
+        <input type="text" aria-label="Group" bind:value={group} list="tf-vw-groups-{uid}" />
         <datalist id="tf-vw-groups-{uid}">
           {#each groups as option (option)}<option value={option}></option>{/each}
         </datalist>
@@ -84,11 +85,6 @@
   {#snippet footer()}
     <span class="tf-first tf-dim tf-vw-store">Kept in knobas. Jira never sees it.</span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button
-      type="submit"
-      class="tf-btn tf-primary"
-      form="tf-vw-form-{uid}"
-      disabled={name.trim() === "" || saving}>Create view</button
-    >
+    <button type="submit" class="tf-btn tf-primary" form="tf-vw-form-{uid}" disabled={!named || saving}>Create view</button>
   {/snippet}
 </TfDialog>

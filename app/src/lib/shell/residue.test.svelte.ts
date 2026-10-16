@@ -548,6 +548,7 @@ function sectionPorts() {
     shareExport: () => new Promise<never>(() => {}),
     restoreBackup: () => new Promise<never>(() => {}),
     smartLists: () => deferred([]),
+    ticketViews: () => deferred([]),
     appStatus: () => deferred({ app_version: "1.6.0" }),
     dbStats: () =>
       deferred({ db_bytes: 1, entity_count: 0, item_count: 0, per_source: [], oldest_synced_at: null, newest_synced_at: null }),
