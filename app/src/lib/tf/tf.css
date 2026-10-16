@@ -1856,7 +1856,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-keys a.tf-mine { background: var(--card); color: var(--card-ink); }
 .tf-keys .tf-dim { font-size: var(--t-xs); }
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
-.tf-fsearch.tf-wide { max-width: none; }
+.tf-fsearch.tf-wide { max-width: none; flex: none; }
 .tf-picks { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
 .tf-picks label { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
 .tf-picks label .tf-dim { margin-left: auto; font-size: var(--t-xs); }

@@ -3211,3 +3211,47 @@ Implementer's rulings, PR for issues #872, #873 and #875 (spec #808, TF5).
   (`TfCreateMonitor.svelte`) for the asset. **Reversing:** low.
 - **Migration `0038` collides with #866's `0038`** in its open branch; whichever merges second
   renumbers to the next free number. **Reversing:** none needed.
+## #866 — Link sets tracer (2026-10-16)
+
+Ruled by the implementer (PR for #866).
+
+- **A set's member is one layer on the job: no link hop from it and no descent into what it
+  holds.** ADR-0025 says the walk never takes a hop from a set's item; an asset member bringing
+  its children would be the same widening one step down. **Reversing:** low (`reach_walk!`'s set
+  arm).
+- ***Hide here* hides only rows a set brought.** The table is `link_set_hidden` and R-7.5 is about
+  a set's member; the ticket's own links have *Unlink*, and the parent's are behind the global
+  switch. Prototype-6's drawer hides any origin's row, so #867 may widen it. **Reversing:** low.
+- **First reason: own, then a set's, then the parent's; of two sets, the id that sorts first.**
+  R-7.4's order, with a tie-break that answers the same on every read. **Reversing:** low.
+- **`epic` is everything under the ticket, up to five levels; `parent` is its direct children.**
+  Both read `sync.item_parent`'s child arm, which stores the first declared parent that resolves
+  (a sub-task's story, a story's epic). So on a classic Data Center project a story naming its
+  epic through `epic.key` is a direct child of the epic for a `parent` rule too. **Reversing:**
+  low (`knobas_core::link_set`).
+- **Rule values are entity ids** (`jira:PAY-200`), and a project is `<source id>:<key>`, because a
+  key is unique only inside its source (ADR-0010). **Reversing:** a migration rewriting values.
+- **Set names are not unique; the id is a slug of the first name**, as a ticket view's, so two
+  *New link set* clicks are two sets. **Reversing:** a unique index, after renaming duplicates.
+- **A `pipeline` member is any entity kind except the other member kinds and the kinds that are
+  never pipelines.** A pipeline's kind is its source's word (`build_config`), and the frame
+  declarations that name it are per source. **Reversing:** low (`NOT_PIPELINES`).
+- ***Yours* is a ticket whose declared assignee is a configured source's username**, the identity
+  `assignee:@me` reads, so "N (M yours)" and the Tickets view's *Mine* agree. **Reversing:** low.
+- **The editor saves the whole set on every change**, members and rules replaced in order.
+  Prototype-6 has no Save button and edits in place; one write per change keeps a half-edited set
+  from existing anywhere but on screen. **Reversing:** low.
+- ***Add a rule* opens a row waiting for its value; the rule is saved when a value is chosen.**
+  Prototype-6 adds `epic PAY-200` at once, which would apply a set nobody chose to an epic.
+  **Reversing:** low.
+- **Copy departures:** the kind panel and the intro say *Pipelines* (`CONTEXT.md`: pipeline,
+  avoid *build configuration*) and the intro also names assets (R-7.7's five kinds); the switch's
+  second line is general ("A sub-task shows what is linked on its parent…") instead of naming
+  fixture tickets; the *Add…* picker says "Link sets stay in knobas and are never written to a
+  source." (the conventions' stays-in-knobas line); the list is in name order, the backend's.
+  Kept word for word: "1 pages", "1 tickets". **Reversing:** low.
+- **Patterns (*Add a pattern…*, "(N match now)"), the hint card, *Apply a link set…* and the
+  drawer are not here:** #868, #870, #869, #867. **Reversing:** n/a.
+- **The fake IPC adds its sets to `job_reach` through a registry** (`SET_REACH`), recorded in the
+  shell conventions. PAY-231's fixture reach now carries *Payments staging* and *Payout stack*
+  rows. **Reversing:** low.

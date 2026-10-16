@@ -33,7 +33,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A Builds row opens `#/build/<entity id>`, a Pages row `#/page/<entity id>`, an Assets row `#/asset/<asset id>`, a Monitors row `#/monitors`. (#817)
 - Under Dependencies, `#/deps` (and the retired `#/map`) draws Dependencies, and `#/assets`, `#/asset/<id>` and `#/route/<id>` draw the Asset tree, each matching on `head`. (#871)
 - Dependencies opens in a saved view (`dep_views`): the top bar's default, its draft held for the session in `tf/deps/views.svelte.ts`; the reader's gestures (Find, the trace, folds opened by hand) hold for the page. (#873)
-- Every job section is `tf/job/TfSection.svelte` reading `list_entities` with `reach: <ticket id>`; a row from the parent (or, from TF5, a link set) carries a `.tf-via` label naming it ("Parent PAY-231"). (#817)
+- Link sets' addresses are `#/sets` (the list) and `#/sets/<set id>` (its editor), the id a slug of the name the set was first saved under, kept through a rename, as a ticket view's. (#866)
+- Every job section is `tf/job/TfSection.svelte` reading `list_entities` with `reach: <ticket id>`; a row from the parent (or, from TF5, a link set) carries a `.tf-via` label naming it ("Parent PAY-231"). (#817) A row from a link set is labelled with the set's name, through `originLabel` (`tf/job/job.ts`). (#866)
 
 ## Data, fixtures and screenshots
 
@@ -41,6 +42,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Which job a row belongs to is `tf/job/open-jobs.ts` (`readOpenJobs`, `jobIndex`), one read for every list that names a job. (#837)
 - The shell reads declared paths only, never a payload (ADR-0007). A field a card needs becomes a declared path, not a payload read. (#810, PR #895; #816, PR #898)
 - A `?fake-ipc` feature module that emits an event (a clone's `clone:progress`) exports `attach(bridge)`, which the installer calls with the installed bridge. (#846)
+- A `?fake-ipc` feature that adds rows to another feature's read registers a function in an array that module exports (`SET_REACH` in `fake/job-reach.ts`), so the read's module imports nothing from it and no import cycle runs through `corpus.ts`. (#866)
 - `?fake-ipc` fixtures grow with the ticket that needs them: enough rows to compare with prototype-6 (eleven more PAY tickets in #810; a small link graph and the workflow in #816). Where the fixture diverges from the mock adapter, the PR says so. (PR #895; PR #898)
 - The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
 - A `?fake-ipc` row's state chip, path and source ride in its payload as `chip`, `path` and `source`, which `mirrorRow` reads; the mock adapter declares none of them. (#817)
