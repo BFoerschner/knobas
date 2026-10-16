@@ -312,6 +312,11 @@ fn identifier_slug(text: &str) -> String {
 /// counter or a nonce, so there is no caller-supplied text in it -- `create
 /// database` takes no parameter.
 ///
+/// The database is a copy of this process's migrated template (#925): the
+/// migrations run once per process, into [`template_name`], and every database
+/// after that is `create database ... template` of it, instead of a fresh
+/// `create database` plus every migration for each one.
+///
 /// # Panics
 ///
 /// Panics if the database cannot be created, connected to, or migrated.
@@ -319,27 +324,55 @@ async fn create_migrated_database(
     server: &crate::embedded::Connector,
     name: &str,
 ) -> crate::embedded::Connector {
+    let template = template_name(server).await;
+    create_database(server, name, Some(template)).await;
+    server.with_database(name)
+}
+
+/// This process's template: a database created and migrated on first use and
+/// never connected to again, so `create database ... template` can copy it
+/// (Postgres refuses a template that has a session open).
+///
+/// One per process rather than one per server: the binaries of a run share the
+/// gate's server, and a template they all copied would need them to agree on
+/// who migrates it. One migration per binary instead of one per scratch
+/// database is the saving that matters.
+async fn template_name(server: &crate::embedded::Connector) -> &'static str {
+    static TEMPLATE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    TEMPLATE
+        .get_or_init(|| async {
+            let name = format!("knobas_template_{}", identifier_slug(run_nonce()));
+            create_database(server, &name, None).await;
+            let pool = server
+                .with_database(&name)
+                .pool(2)
+                .await
+                .expect("connect to the template database");
+            crate::migrate::run(&pool)
+                .await
+                .expect("migrate the template database");
+            pool.close().await;
+            name
+        })
+        .await
+}
+
+/// `create database name`, copied from `template` when there is one.
+async fn create_database(server: &crate::embedded::Connector, name: &str, template: Option<&str>) {
     let mut admin = server
         .with_database(crate::embedded::MAINTENANCE_DATABASE)
         .connect()
         .await
         .expect("connect to the maintenance database");
-    sqlx::raw_sql(sqlx::AssertSqlSafe(format!("create database {name}")))
+    let statement = match template {
+        Some(template) => format!("create database {name} template {template}"),
+        None => format!("create database {name}"),
+    };
+    sqlx::raw_sql(sqlx::AssertSqlSafe(statement))
         .execute(&mut admin)
         .await
         .expect("create a scratch database");
     let _ = admin.close().await;
-
-    let created = server.with_database(name);
-    let pool = created
-        .pool(2)
-        .await
-        .expect("connect to the scratch database");
-    crate::migrate::run(&pool)
-        .await
-        .expect("migrate the scratch database");
-    pool.close().await;
-    created
 }
 
 /// Connections a test pool gets. The same five the application pool has, so a
