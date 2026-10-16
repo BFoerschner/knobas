@@ -218,6 +218,9 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
     entityCheckoutDiff: async () => {
       throw { code: "not_found", message: "clean" };
     },
+    setCheckoutOverride: async () => {
+      throw { code: "invalid", message: "no override in this suite" };
+    },
     listContexts: async () => [],
     listSources: async () => [{ id: "gitea" }] as never,
     jobReach: async () => [],

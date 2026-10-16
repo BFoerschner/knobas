@@ -237,6 +237,9 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
       if (!cloned) throw { code: "not_found", message: "no checkout" };
       return LOCAL;
     },
+    setCheckoutOverride: async () => {
+      throw { code: "invalid", message: "no override in this suite" };
+    },
     listContexts: async () => [],
     listSources: async () => [],
     jobReach: async () => [],

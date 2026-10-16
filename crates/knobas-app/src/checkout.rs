@@ -136,13 +136,28 @@ pub async fn clones_root(pool: &PgPool) -> Result<Option<String>, IpcError> {
 ///
 /// A blank path clears the setting rather than storing an empty string: an
 /// empty root would make the scan walk whatever the process's working
-/// directory happens to be.
+/// directory happens to be. A leading `~` is this user's home, stored spelled
+/// out (#846): *Where should clones go?* offers `~/code`, and no program
+/// knobas runs expands a tilde, because none of them runs in a shell.
 ///
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
 pub async fn set_clones_root(pool: &PgPool, path: Option<&str>) -> Result<(), IpcError> {
-    write_setting(pool, CLONES_ROOT_KEY, settable(path)).await
+    let home = std::env::var("HOME").ok();
+    let path = settable(path).map(|path| expand_home(path, home.as_deref()));
+    write_setting(pool, CLONES_ROOT_KEY, path.as_deref()).await
+}
+
+/// `~` and `~/...` with `home` put in; anything else, and everything when
+/// there is no home, as it is.
+fn expand_home(path: &str, home: Option<&str>) -> String {
+    match (home, path.strip_prefix('~')) {
+        (Some(home), Some(rest)) if rest.is_empty() || rest.starts_with('/') => {
+            format!("{}{rest}", home.trim_end_matches('/'))
+        }
+        _ => path.to_owned(),
+    }
 }
 
 /// Set a repository's checkout path by hand, or clear it back to the scan.
@@ -390,6 +405,18 @@ async fn repo_of(pool: &PgPool, entity_id: &str) -> Result<RepoOf, IpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A leading tilde is the home directory; a tilde anywhere else, or a
+    /// `~user`, is a name like any other.
+    #[test]
+    fn a_leading_tilde_is_the_home_directory() {
+        let home = Some("/Users/mara/");
+        assert_eq!(expand_home("~/code", home), "/Users/mara/code");
+        assert_eq!(expand_home("~", home), "/Users/mara");
+        assert_eq!(expand_home("~bob/code", home), "~bob/code");
+        assert_eq!(expand_home("/src/~/x", home), "/src/~/x");
+        assert_eq!(expand_home("~/code", None), "~/code");
+    }
 
     /// The setting key is one string in two files, and the migration is the
     /// one a reader looking for the clones root's storage will open.

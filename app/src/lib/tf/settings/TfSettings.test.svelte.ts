@@ -286,7 +286,7 @@ test("Test connection tests what is stored and says what it found", async () => 
   expect(target.querySelector(".tf-stg-note")?.textContent).toContain("Found when tested: Connected as mara · 9.12.4 · 214 ms");
 });
 
-test("a source's page shows its runs, and a section not built yet offers the rooms UI", async () => {
+test("a source's page shows its runs, and Checkouts draws its own section", async () => {
   await open(["source", "teamcity"]);
   expect(target.querySelector(".tf-tbl tbody td.tf-stg-errt")?.textContent).toBe(
     "401 Unauthorized. Re-enter the password.",
@@ -300,9 +300,10 @@ test("a source's page shows its runs, and a section not built yet offers the roo
     props: { rest: ["checkouts"], job: null, ready: true, onrooms, ports: ports(), health: createHealthStub(), layers: createLayers() },
   });
   await settle();
-  expect(target.querySelector(".tf-stg-body")?.textContent).toContain("Checkouts and Open in… is not built in the new shell yet.");
-  button("Switch back to the rooms UI").click();
-  expect(onrooms).toHaveBeenCalledOnce();
+  // Built since #844: its own section, and no offer of the rooms UI.
+  expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in…");
+  expect(target.querySelector(".tf-stg-body")?.textContent).not.toContain("not built in the new shell yet");
+  expect(onrooms).not.toHaveBeenCalled();
 });
 
 test("Esc closes a dialog through the shell's layer stack", async () => {

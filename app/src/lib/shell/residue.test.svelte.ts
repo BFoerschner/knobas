@@ -1157,6 +1157,7 @@ const CASES: Case[] = [
                 ) as never,
               entityCheckout: () => deferred({ path: null, tree: null } as never),
               entityCheckoutDiff: () => deferred({ status: "no_git" } as never),
+              setCheckoutOverride: () => deferred({} as never),
               listContexts: () => deferred([]),
               listSources: () => deferred([]),
               jobReach: () => deferred([]),

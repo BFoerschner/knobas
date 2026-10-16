@@ -8,7 +8,7 @@
  * commit's diff, all read live, so a repository nobody cloned reads the same
  * as one on this disk. Section ids are the source's and never taken apart.
  */
-import type { CheckoutView, ChoiceOption, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
+import type { CheckoutView, ChoiceOption, DiffFile, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
 
@@ -147,6 +147,32 @@ export function changedPaths(read: DiffRead | null): Set<string> {
   for (const file of [...read.unstaged.files, ...read.staged.files]) paths.add(file.path);
   for (const path of read.untracked) if (!path.endsWith("/")) paths.add(path);
   return paths;
+}
+
+/** How a change reads after its path on *Local changes* (#847): "modified, not staged". */
+const CHANGE_WORD: Record<DiffFile["change"], string> = {
+  added: "added",
+  modified: "modified",
+  deleted: "deleted",
+  renamed: "renamed",
+  binary: "modified",
+};
+
+/**
+ * *Local changes*' files (#847, R-8.9): each unstaged file marked "modified,
+ * not staged", each staged one "modified, staged", in that order, so the
+ * one diff block draws them as a pull request's.
+ */
+export function localFiles(read: DiffRead | null): DiffFile[] {
+  if (read === null || read.status !== "read") return [];
+  const marked = (file: DiffFile, how: string): DiffFile => ({
+    ...file,
+    path: `${file.path} (${CHANGE_WORD[file.change]}, ${how})`,
+  });
+  return [
+    ...read.unstaged.files.map((file) => marked(file, "not staged")),
+    ...read.staged.files.map((file) => marked(file, "staged")),
+  ];
 }
 
 /** A file's lines, without the empty one a final newline would add. */

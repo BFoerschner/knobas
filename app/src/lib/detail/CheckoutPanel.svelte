@@ -162,7 +162,7 @@
     if (command.template === null) return;
     opening = command.action;
     try {
-      await openCheckout(entityId, command.action);
+      await openCheckout(entityId, { application: command.action });
     } catch (rejection) {
       push({
         text: `Could not run ${command.template} — ${ipcErrorMessage(rejection)}`,

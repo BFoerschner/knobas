@@ -40,6 +40,8 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { clones } from "../openin/clones.svelte";
+  import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { itemHash, keyOf } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import { when } from "../tickets/tickets";
@@ -164,6 +166,15 @@
     };
   });
 
+  // A clone that finished: its row reads its checkout again (R-8.25).
+  let seenClones = clones.finished;
+  $effect(() => {
+    if (clones.finished === seenClones) return;
+    seenClones = clones.finished;
+    const ids = (repos?.rows ?? []).filter((row) => !checkouts[row.entity_id]?.path).map((row) => row.entity_id);
+    void readCheckouts(ids, () => true);
+  });
+
   /** Each repository's checkout, a few at a time; one that fails draws nothing. */
   async function readCheckouts(ids: string[], alive: () => boolean) {
     const queue = [...ids];
@@ -270,9 +281,9 @@
     filter.scope = "all";
   };
 
-  /** A row opens its item; a click on the link inside already did. */
+  /** A row opens its item; a click on the link inside already did, and *Open in…* and its dialogs are not the row. */
   function open(event: MouseEvent, href: string) {
-    if ((event.target as Element | null)?.closest("a")) return;
+    if ((event.target as Element | null)?.closest("a, .tf-openin, .tf-modal")) return;
     location.hash = href;
   }
 </script>
@@ -324,7 +335,7 @@
     {#if shownRepos.length > 0}
       <table class="tf-tbl">
         <thead>
-          <tr><th>Repository</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th></tr>
+          <tr><th>Repository</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th><th><span class="tf-sr">Open or clone</span></th></tr>
         </thead>
         <tbody>
           {#each shownRepos as row (row.entity_id)}
@@ -338,6 +349,7 @@
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
+              <td class="tf-nowrap"><TfOpenIn entityId={row.entity_id} title={row.title} checkout={checkouts[row.entity_id]} variant="ghost" /></td>
             </tr>
           {/each}
         </tbody>

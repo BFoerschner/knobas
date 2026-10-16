@@ -6,21 +6,18 @@
  */
 import { getAsset, type AssetDetail } from "../../ipc/assets";
 import {
-  checkoutCommands,
   createLink,
   entityCheckout,
   entityThread,
   getEntity,
   jobReach,
   listEntities,
-  openCheckout,
   promoteContext,
   reachableTransitions,
   roomSuggestions,
   submitWrite,
   unlink,
   visitEntity,
-  type CheckoutCommand,
   type CheckoutView,
   type ContextRow,
   type EntityDetail,
@@ -54,8 +51,6 @@ export interface JobPorts {
   reachableTransitions: (entityId: string) => Promise<string[]>;
   submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
   entityCheckout: (entityId: string) => Promise<CheckoutView>;
-  checkoutCommands: () => Promise<CheckoutCommand[]>;
-  openCheckout: (entityId: string, action: string) => Promise<void>;
   weekTimesheet: (days: DayWindow[]) => Promise<Week>;
   // The conversation (#819) and the Connections drawer (#820).
   visitEntity: (entityId: string) => Promise<string | null>;
@@ -90,8 +85,6 @@ export const bridgePorts: JobPorts = {
   reachableTransitions: (entityId) => reachableTransitions(entityId),
   submitWrite: (payload) => submitWrite(payload),
   entityCheckout: (entityId) => entityCheckout(entityId),
-  checkoutCommands: () => checkoutCommands(),
-  openCheckout: (entityId, action) => openCheckout(entityId, action),
   weekTimesheet: (days) => weekTimesheet(days),
   visitEntity: (entityId) => visitEntity(entityId),
   entityThread: (entityId) => entityThread(entityId),

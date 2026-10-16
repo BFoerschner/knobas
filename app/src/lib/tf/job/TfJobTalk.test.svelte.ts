@@ -149,8 +149,6 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
       return Promise.resolve({} as never);
     },
     entityCheckout: () => Promise.reject(new Error("none")),
-    checkoutCommands: () => Promise.resolve([]),
-    openCheckout: () => Promise.resolve(),
     weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
     visitEntity: () => Promise.resolve(VISIT),
     entityThread: () => Promise.resolve(thread()),
