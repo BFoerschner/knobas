@@ -1,16 +1,17 @@
 <!--
   A page body's blocks (#859, R-10.11), drawn from the fixed set and nothing
-  else. A heading carries its section anchor (`#/page/<id>/<n>`, prototype-6's
-  numbering); a part the source has and knobas does not draw says so, with
-  *Open this part in <source>* (story 134).
+  else. A part the source has and knobas does not draw says so, with *Open
+  this part in <source>* (story 134). The page's sections and their anchors
+  are `TfDocBody`'s; a heading here is one inside a panel or a comment.
 
   Recurses into lists and panels by importing itself.
 -->
 <script lang="ts">
   import Self from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
+  import TfMarked from "./TfMarked.svelte";
   import type { DocBlock } from "../../ipc/entity";
-  import { headed, markText, pageHash, panelLabel, panelTone, sectionNumbers } from "./docs";
+  import { headed, panelLabel, panelTone } from "./docs";
 
   let {
     blocks,
@@ -19,7 +20,6 @@
     webUrl,
     onopen,
     oncopy,
-    anchors = false,
     stems = [],
   }: {
     blocks: DocBlock[];
@@ -28,24 +28,14 @@
     webUrl: string | null;
     onopen: (url: string) => void;
     oncopy: (code: string) => void;
-    /** Whether headings are the page's sections (the body, not a panel or a comment). */
-    anchors?: boolean;
     /** What the find bar marks (#860). */
     stems?: string[];
   } = $props();
-
-  const sections = $derived(anchors ? sectionNumbers(blocks) : new Map<number, number>());
 </script>
 
 {#each blocks as block, index (index)}
   {#if block.type === "heading"}
-    {@const n = sections.get(index)}
-    <h2 id={n === undefined ? undefined : `s-${n}`}>
-      <TfDocInlines text={block.text} {onopen} {stems} />
-      {#if n !== undefined}
-        <span class="tf-tools"><a href={pageHash(entityId, n)} title="Link to this section">#</a></span>
-      {/if}
-    </h2>
+    <h2><TfDocInlines text={block.text} {onopen} {stems} /></h2>
   {:else if block.type === "paragraph"}
     <p><TfDocInlines text={block.text} {onopen} {stems} /></p>
   {:else if block.type === "list"}
@@ -57,7 +47,7 @@
   {:else if block.type === "code"}
     {@const code = block.code}
     <pre><button type="button" class="tf-btn tf-sm tf-ghost tf-copy" onclick={() => oncopy(code)}>Copy</button><code
-        >{#each markText(code, stems) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</code
+        ><TfMarked text={code} {stems} /></code
       >{#if block.language}<span class="tf-lang">{block.language}</span>{/if}</pre>
   {:else if block.type === "table"}
     {@const head = headed(block.rows)}

@@ -11,7 +11,8 @@
 <script lang="ts">
   import type { DocInline } from "../../ipc/entity";
   import { jobHash } from "../route";
-  import { markText, mentionText, pageHash, statusTone } from "./docs";
+  import TfMarked from "./TfMarked.svelte";
+  import { mentionText, pageHash, statusTone } from "./docs";
 
   let {
     text,
@@ -20,8 +21,7 @@
   }: { text: DocInline[]; onopen: (url: string) => void; stems?: string[] } = $props();
 </script>
 
-{#snippet words(value: string)}{#each markText(value, stems) as part, i (i)}{#if part.hit}<mark>{part.text}</mark
-      >{:else}{part.text}{/if}{/each}{/snippet}
+{#snippet words(value: string)}<TfMarked text={value} {stems} />{/snippet}
 
 {#each text as run, index (index)}{#if run.type === "text"}{#if run.code}<code>{@render words(run.text)}</code
       >{:else if run.strong && run.emphasis}<b><em>{@render words(run.text)}</em></b>{:else if run.strong}<b

@@ -1260,14 +1260,14 @@ a.tf-r:hover { background: var(--sheet-2); }
   background: var(--sheet);
 }
 .tf-sec-edit textarea {
-  width: 100%; min-height: 150px; font: 16px/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px;
+  width: 100%; min-height: 150px; font: 17.5px/1.65 var(--serif); border: 1px solid var(--rule); border-radius: 4px;
   padding: 10px; background: var(--paper); color: var(--ink); resize: vertical;
 }
 .tf-sec-edit .tf-acts { display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px; align-items: center; }
 .tf-sec-edit .tf-acts .tf-dim { font-size: var(--t-xs); margin-right: auto; }
 .tf-cmts .tf-compose { margin-top: 12px; }
 .tf-np-text {
-  width: 100%; font: 15px/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
+  width: 100%; font: var(--t-lg)/1.6 var(--serif); border: 1px solid var(--rule); border-radius: 4px; padding: 8px;
   background: var(--paper); color: var(--ink); resize: vertical;
 }
 @media (max-width: 1240px) { .tf-rd { grid-template-columns: 220px minmax(0, 1fr); } .tf-rd-rail { display: none; } }

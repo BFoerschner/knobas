@@ -10,7 +10,8 @@
 <script lang="ts">
   import type { DocsHits } from "../../ipc/entity";
   import { when } from "../tickets/tickets";
-  import { hitLine, hitsLine, markText, pageHash, snippetLabel, stem } from "./docs";
+  import TfMarked from "./TfMarked.svelte";
+  import { hitLine, hitsLine, pageHash, snippetLabel, stem } from "./docs";
 
   let {
     found,
@@ -49,7 +50,7 @@
     onclick={() => onpick(hit.entity_id)}
   >
     <span class="tf-t"
-      >{#each markText(hit.title, stems) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}</span
+      ><TfMarked text={hit.title} {stems} /></span
     >
     <span class="tf-pth">{!inSpace && hit.space ? `${hit.space.key} › ` : ""}{hit.path ?? "top level"}</span>
     <span class="tf-sn"

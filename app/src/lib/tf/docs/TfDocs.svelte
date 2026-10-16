@@ -29,14 +29,12 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import {
-    createLink as realCreateLink,
     docsCreatePage as realDocsCreatePage,
     docsEditSection as realDocsEditSection,
     docsExportMarkdown as realDocsExportMarkdown,
     docsPage as realDocsPage,
     docsSearch as realDocsSearch,
     docsTree as realDocsTree,
-    getEntity as realGetEntity,
     submitWrite as realSubmitWrite,
     visitEntity as realVisitEntity,
     type DocPage,
@@ -44,7 +42,6 @@
     type DocsTree,
     type NewPage,
   } from "../../ipc/entity";
-  import { listSources as realListSources } from "../../ipc/sources";
   import { drawn } from "../../detail/relations";
   import { openExternal as realOpenExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
@@ -59,13 +56,15 @@
   import TfDocHits from "./TfDocHits.svelte";
   import TfDocRail from "./TfDocRail.svelte";
   import TfDocTree from "./TfDocTree.svelte";
+  import TfMarked from "./TfMarked.svelte";
   import TfNewPage from "./TfNewPage.svelte";
   import {
     copyLinkText,
+    LINK_RELATION,
     firstPage,
+    firstName,
     forYouWhy,
     inlineWords,
-    markText,
     pageHash,
     pageToOpen,
     person,
@@ -127,20 +126,6 @@
       copy: (text) => navigator.clipboard.writeText(text),
     },
   );
-  const links: LinkPorts = $derived(
-    linkPorts ?? {
-      listSources: () => realListSources(),
-      getEntity: (id) => realGetEntity(id),
-      createLink: (from, to, relation, note) => realCreateLink(from, to, relation, note),
-      search: async () => {
-        throw new Error("search is not wired here");
-      },
-      launcherHome: async () => {
-        throw new Error("search is not wired here");
-      },
-    },
-  );
-
   let tree = $state<DocsTree | null>(null);
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
@@ -385,10 +370,11 @@
     }
   }
 
-  /** The job's ticket, as `create_link` names it. */
+  /** The job's ticket, as `create_link` names it; `null` without the job's ports. */
   async function jobTicket(key: string): Promise<string | null> {
-    const sources = await links.listSources().catch(() => []);
-    const found = await resolveTicket(key, sources, links.getEntity);
+    if (!linkPorts) return null;
+    const sources = await linkPorts.listSources().catch(() => []);
+    const found = await resolveTicket(key, sources, linkPorts.getEntity);
     return found?.row.entity_id ?? null;
   }
 
@@ -399,8 +385,8 @@
         push({ text: `${key} is not in the mirror`, tone: "err" });
         return;
       }
-      const row = drawn("documents", p.entity_id, ticket);
-      await links.createLink(row.fromId, row.toId, row.relation);
+      const row = drawn(LINK_RELATION, p.entity_id, ticket);
+      await linkPorts!.createLink(row.fromId, row.toId, row.relation);
       push({ text: `Linked to ${key}` });
       page = await io.docsPage(p.entity_id);
     } catch (cause) {
@@ -447,9 +433,6 @@
     }
   }
 
-  function firstName(name: string): string {
-    return name.split(/\s+/)[0] ?? name;
-  }
 </script>
 
 <div class="tf-rd">
@@ -565,7 +548,7 @@
           {/if}
         </div>
         <h1 class="tf-rd-title">
-          {#each markText(p.title, stems) as part, i (i)}{#if part.hit}<mark>{part.text}</mark>{:else}{part.text}{/if}{/each}
+          <TfMarked text={p.title} {stems} />
         </h1>
         <div class="tf-rd-meta">
           {#if p.editor !== null || p.updated_at !== null}
@@ -582,7 +565,7 @@
           {#if p.writes.includes("comment")}
             <button type="button" class="tf-btn tf-sm" onclick={() => composer?.focus()}>Comment</button>
           {/if}
-          {#if job !== null}
+          {#if job !== null && linkPorts}
             {@const key = job}
             <button type="button" class="tf-btn tf-sm" onclick={() => linkToJob(p, key)}>Link to {key}</button>
           {:else if linkPorts}
@@ -679,7 +662,7 @@
   <TfLinkTo
     jobKey={p.title}
     entityId={p.entity_id}
-    ports={links}
+    ports={linkPorts}
     {layers}
     onclose={() => (linking = false)}
     onlinked={() => {

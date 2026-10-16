@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { DocBlock, DocPage, DocsTree } from "../../ipc/entity";
-import { holds, mentionText, pageToOpen, placeOf, readingMinutes, sectionNumbers, statusTone } from "./docs";
+import { holds, mentionText, pageToOpen, placeOf, readingMinutes, sectionsOf, statusTone } from "./docs";
 
 const TREE: DocsTree = {
   spaces: [
@@ -54,9 +54,10 @@ test("the first heading opens section 1, as prototype-6 numbers them", () => {
     { type: "paragraph", text: [] },
     { type: "heading", level: 3, text: [] },
   ];
-  expect([...sectionNumbers(blocks)]).toEqual([
-    [1, 1],
-    [3, 2],
+  expect(sectionsOf(blocks).map((s) => [s.number, s.heading === null ? "lead" : "heading", s.blocks.length])).toEqual([
+    [0, "lead", 1],
+    [1, "heading", 1],
+    [2, "heading", 0],
   ]);
 });
 
@@ -92,7 +93,6 @@ import {
   markText,
   refusalReason,
   sectionMatches,
-  sectionsOf,
   snippetLabel,
   stem,
   stemsOf,

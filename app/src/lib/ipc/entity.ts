@@ -2665,9 +2665,12 @@ export interface DocPage {
   backlinks: DocBacklink[];
   /** The tickets the page references or is linked to, with their status now (#861). */
   work: DocWork[];
-  /** Which of `comment`, `update_page`, `create_page` the page's source takes (#862). */
-  writes: string[];
+  /** Which Docs writes the page's source takes (#862). */
+  writes: DocWrite[];
 }
+
+/** A Docs write a page's source takes — `DocPage.writes`. */
+export type DocWrite = "comment" | "update_page" | "create_page";
 
 /** Why knobas does not edit a section — `SectionRefusal`. */
 export type SectionRefusal = "table" | "code" | "macro" | "formatting";

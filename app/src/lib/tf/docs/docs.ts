@@ -146,25 +146,28 @@ export function readingMinutes(page: DocPage): number {
   return Math.max(1, Math.round(words / 220));
 }
 
-/**
- * The section number of each heading, prototype-6's numbering: section 0 is
- * whatever comes before the first heading, so the first heading opens
- * section 1. Keyed by the heading's index in the page's top-level blocks.
- */
-export function sectionNumbers(blocks: DocBlock[]): Map<number, number> {
-  const out = new Map<number, number>();
-  let n = 0;
-  blocks.forEach((block, index) => {
-    if (block.type === "heading") out.set(index, ++n);
-  });
-  return out;
-}
-
 /** How a mention reads: `@` and the display name's first word, else the account. */
 export function mentionText(mention: Extract<DocInline, { type: "mention" }>): string {
   const first = mention.name?.split(/\s+/)[0];
   return `@${first || mention.user || "someone"}`;
 }
+
+/** A display name's first word, the way prototype-6 names a person in a line. */
+export function firstName(name: string): string {
+  return name.trim().split(/\s+/)[0] ?? name;
+}
+
+/** The person a line names: *you* for the reader, else the first name, else the account. */
+export function shortWho(user: string | null, name: string | null, me: string[]): string {
+  if (user !== null && me.includes(user)) return "you";
+  return name ? firstName(name) : (user ?? "someone");
+}
+
+/**
+ * The relation *Link to <job>* draws from a page to the job's ticket:
+ * `knobas_app::docs::LINK_RELATION`, the one *Link it to <job>* draws.
+ */
+export const LINK_RELATION = "documents";
 
 /** *You* for the reader, else the person as the source names them. */
 export function person(user: string | null, name: string | null, me: string[]): string {
@@ -278,7 +281,7 @@ export interface Section {
   blocks: DocBlock[];
 }
 
-/** A body's sections, prototype-6's numbering (`sectionNumbers`). */
+/** A body's sections, prototype-6's numbering: the first heading opens section 1. */
 export function sectionsOf(blocks: DocBlock[]): Section[] {
   const out: Section[] = [{ number: 0, heading: null, blocks: [] }];
   for (const block of blocks) {
@@ -314,7 +317,7 @@ export function hitsLine(total: number, scope: string, ms: number): string {
 /** What a snippet opens with: its section, or *Comment by Priya*. */
 export function snippetLabel(snippet: DocSnippet): string | null {
   if (snippet.comment_by !== null) {
-    const first = snippet.comment_by.split(/\s+/)[0];
+    const first = firstName(snippet.comment_by);
     return first ? `Comment by ${first}:` : "Comment:";
   }
   return snippet.section === null ? null : `${snippet.section}:`;
@@ -322,16 +325,13 @@ export function snippetLabel(snippet: DocSnippet): string | null {
 
 /** A hit's last line: *3 matches, Priya, today 10:40* (*you* for the reader). */
 export function hitLine(hit: DocHit, me: string[], when: (iso: string | null) => string): string {
-  const who =
-    hit.editor !== null && me.includes(hit.editor)
-      ? "you"
-      : (hit.editor_name?.split(/\s+/)[0] ?? hit.editor ?? "someone");
+  const who = shortWho(hit.editor, hit.editor_name, me);
   return `${hit.matches} match${hit.matches === 1 ? "" : "es"}, ${who}, ${when(hit.updated_at)}`;
 }
 
 /** Why a page is *For you*: *Priya mentioned you*. */
 export function forYouWhy(item: DocForYou): string {
-  const first = item.by_name?.split(/\s+/)[0];
+  const first = item.by_name ? firstName(item.by_name) : "";
   return first ? `${first} mentioned you` : "You are mentioned here";
 }
 

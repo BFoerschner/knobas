@@ -9,7 +9,7 @@
   import type { DocPage } from "../../ipc/entity";
   import { jobHash } from "../route";
   import { when } from "../tickets/tickets";
-  import { inlineWords, pageHash, sectionMatches, sectionsOf } from "./docs";
+  import { inlineWords, pageHash, sectionMatches, sectionsOf, shortWho } from "./docs";
 
   let {
     page,
@@ -25,10 +25,6 @@
   const outline = $derived(sectionsOf(page.blocks).filter((s) => s.heading !== null));
   const counts = $derived(sectionMatches(page.blocks, stems));
 
-  function who(by: string | null, name: string | null): string {
-    if (by !== null && page.me.includes(by)) return "you";
-    return name?.split(/\s+/)[0] ?? by ?? "someone";
-  }
 </script>
 
 <aside class="tf-rd-rail" aria-label="About this page">
@@ -77,7 +73,7 @@
       {#each page.history as version, i (i)}
         <div>
           {version.message ?? (version.number === 1 ? "Created" : "Edited")}<span class="tf-s"
-            >{who(version.by, version.by_name)}, {when(version.at)}</span
+            >{shortWho(version.by, version.by_name, page.me)}, {when(version.at)}</span
           >
         </div>
       {/each}
