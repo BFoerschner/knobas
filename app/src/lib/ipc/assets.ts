@@ -1122,6 +1122,8 @@ export interface MonitoredAsset {
   name: string;
   /** The ancestors' names, outermost first; `null` at the top of the estate. */
   path: string | null;
+  /** What its type is called, resolved by the backend: the *Watches* column's (#864). */
+  type_label: string;
 }
 
 /** One sample as the bar draws it — `assets::MonitorSample`. */
@@ -1235,6 +1237,10 @@ export interface UnmonitoredAsset {
   name: string;
   /** The ancestors' names, outermost first; `null` at the top of the estate. */
   path: string | null;
+  /** The environment in force, own or inherited; `null` where nothing sets one (#864). */
+  environment: string | null;
+  /** The owner in force, the same way (#864). */
+  owner: string | null;
 }
 
 /**

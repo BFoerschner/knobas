@@ -1455,3 +1455,17 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-repo { grid-template-columns: minmax(0, 1fr); }
   .tf-ftree { position: static; }
 }
+/* Monitors (#864): prototype-6's `.bar`, the roster's columns, the unwatched tab. */
+.tf-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.tf-mbar { display: flex; gap: 1px; height: 12px; width: 96px; flex: none; }
+.tf-mbar i { flex: 1; border-radius: 1px; background: var(--ok); opacity: .8; }
+.tf-mbar i.tf-seg-down { background: var(--err); opacity: 1; }
+.tf-mbar i.tf-seg-warn { background: var(--warn); opacity: 1; }
+.tf-mbar i.tf-seg-paused { background: var(--rule); opacity: 1; }
+.tf-mbar i.tf-seg-gap { background: var(--sheet-2); opacity: 1; }
+.tf-mon .tf-mon-type { font-size: var(--t-xs); }
+.tf-mon .tf-mon-asset { font-size: var(--t-xs); color: inherit; }
+.tf-mon-acts { white-space: nowrap; text-align: right; }
+.tf-mon-acts .tf-btn + .tf-btn { margin-left: 4px; }
+.tf-mon-lead { margin: 0 0 10px; font-size: var(--t-sm); }
+.tf-mfail { color: var(--err); font-size: var(--t-sm); }

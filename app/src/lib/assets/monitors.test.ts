@@ -220,6 +220,8 @@ function unwatched(name: string, typeId: string, label: string): UnmonitoredAsse
     monogram: label.slice(0, 2).toUpperCase(),
     name,
     path: null,
+    environment: null,
+    owner: null,
   };
 }
 

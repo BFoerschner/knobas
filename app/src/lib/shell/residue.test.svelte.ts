@@ -361,6 +361,7 @@ const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
+const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
@@ -1160,6 +1161,33 @@ const CASES: Case[] = [
       }),
     }),
   ),
+  {
+    /** Monitors (#864): the roster, the unwatched list, the sources and the jobs' reach, answering late. */
+    name: "TfMonitors",
+    source: "lib/tf/monitors/TfMonitors.svelte",
+    open: (target) => ({
+      app: mount(TfMonitors, {
+        target,
+        props: {
+          ready: true,
+          rest: [],
+          job: "PAY-231",
+          ports: {
+            monitorRoster: () => deferred([]),
+            unmonitoredAssets: () => deferred([]),
+            ackAlert: () => deferred({} as never),
+            submitWrite: () => deferred({ id: 1 } as never),
+            getAsset: () => deferred({} as never),
+            editAsset: () => deferred({} as never),
+            listSources: () => deferred([{ id: "jira" }]),
+            listContexts: () => deferred([]),
+            getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
+            jobReach: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
   {
     /** Dependencies (#871): its one read behind a ready database, answering late. */
     name: "TfDeps",
