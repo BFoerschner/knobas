@@ -44,6 +44,8 @@ function card(key: string, title: string, extra: Partial<MiniBoardCard> = {}): M
     updated_at: null,
     path: null,
     mine: false,
+    labels: [],
+    signals: [],
     ...extra,
   };
 }
@@ -61,7 +63,17 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
       updated_at: `2026-08-${String(22 - i).padStart(2, "0")}T10:00:00Z`,
     }),
   })),
-  { status: "In Progress", card: card("PAY-40", "Payout dashboard latency", { mine: true, assignee: "mara.lindqvist" }) },
+  {
+    status: "In Progress",
+    card: card("PAY-40", "Payout dashboard latency", {
+      mine: true,
+      assignee: "mara.lindqvist",
+      signals: [
+        { kind: "failing-build", text: "build failed", tone: "err" },
+        { kind: "open-pr", text: "PR #142 open", tone: "info" },
+      ],
+    }),
+  },
   ...Array.from({ length: 5 }, (_, i) => ({ status: "Done", card: card(`PAY-${50 + i}`, `Done ${i}`) })),
 ];
 
@@ -255,7 +267,7 @@ test("the list draws the same tickets newest first, the selected row yellow", as
     .click();
   await settle();
   const head = [...target.querySelectorAll(".tf-tbl th")].map((th) => th.textContent);
-  expect(head).toEqual(["Key", "Summary", "Status", "Priority", "Assignee", "Updated"]);
+  expect(head).toEqual(["Key", "Summary", "Status", "Priority", "Signals", "Assignee", "Updated"]);
   const rows = [...target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")];
   expect(rows[0]!.querySelector("td")!.textContent).toBe("PAY-1");
   expect(rows[0]!.classList.contains("tf-card")).toBe(true);
@@ -332,4 +344,205 @@ test("the preview reads its ticket once, not again on every board answer that ke
   await settle();
   expect(asked).toEqual(["jira:PAY-1"]);
   expect(preview().textContent).toContain("The description of jira:PAY-1.");
+});
+
+const layoutButton = (name: string) =>
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === name)!;
+const lanesSelect = () => target.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]');
+function chooseLanes(value: string) {
+  const select = lanesSelect()!;
+  select.value = value;
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+function press(key: string, init: KeyboardEventInit = {}) {
+  const at = document.activeElement instanceof HTMLElement ? document.activeElement : document.body;
+  at.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...init }));
+  flushSync();
+}
+const selectedKey = () =>
+  target.querySelector('[aria-current="true"][data-entity]')?.getAttribute("data-entity")?.replace("jira:", "") ?? null;
+
+test("lanes split the board into bands by size, each with its columns and count, read whole", async () => {
+  const h = harness();
+  await open(h);
+  chooseLanes("assignee");
+  await settle();
+  expect(h.reads.at(-1)).toEqual({ perColumn: null, query: null });
+  const lanes = [...target.querySelectorAll(".tf-lane")].map((lane) => ({
+    head: lane.querySelector("h2")!.textContent!.replace(/\s+/g, " ").trim(),
+    columns: [...lane.querySelectorAll(".tf-col")].map((col) => ({
+      head: col.querySelector("h3")!.textContent!.replace(/\s+/g, " ").trim(),
+      cards: col.querySelectorAll(".tf-tcard").length,
+      more: col.querySelector(".tf-more")?.textContent ?? null,
+    })),
+  }));
+  expect(lanes).toEqual([
+    {
+      head: "jonas.becker 11",
+      columns: [
+        { head: "To Do 11", cards: 8, more: "Show 3 more" },
+        { head: "In Progress 0", cards: 0, more: null },
+        { head: "Done 0", cards: 0, more: null },
+      ],
+    },
+    {
+      head: "Unassigned 5",
+      columns: [
+        { head: "To Do 0", cards: 0, more: null },
+        { head: "In Progress 0", cards: 0, more: null },
+        { head: "Done 5", cards: 3, more: "Show 2 more done" },
+      ],
+    },
+    {
+      head: "mara.lindqvist 2",
+      columns: [
+        { head: "To Do 1", cards: 1, more: null },
+        { head: "In Progress 1", cards: 1, more: null },
+        { head: "Done 0", cards: 0, more: null },
+      ],
+    },
+  ]);
+  // One lane's Show N more expands that lane's column only, with no read.
+  const reads = h.reads.length;
+  target.querySelector<HTMLButtonElement>(".tf-lane .tf-more")!.click();
+  await settle();
+  expect(h.reads.length).toBe(reads);
+  expect(target.querySelectorAll(".tf-lane")[0]!.querySelectorAll(".tf-tcard").length).toBe(11);
+  expect(target.querySelectorAll(".tf-lane")[1]!.querySelectorAll(".tf-tcard").length).toBe(3);
+});
+
+test("j/k and the arrows move the selection through the visible cards in reading order across lanes", async () => {
+  await open(harness());
+  chooseLanes("assignee");
+  await settle();
+  const reading = [
+    ...["PAY-2", "PAY-3", "PAY-4", "PAY-5", "PAY-6", "PAY-7", "PAY-8", "PAY-9"],
+    ...["PAY-50", "PAY-51", "PAY-52"],
+    ...["PAY-1", "PAY-40"],
+  ];
+  expect(selectedKey()).toBe(reading[0]);
+  const walked = [selectedKey()];
+  for (let step = 1; step < reading.length; step += 1) {
+    press(step % 2 === 0 ? "j" : "ArrowDown");
+    walked.push(selectedKey());
+  }
+  expect(walked).toEqual(reading);
+  // The selected card has the focus, so the next key starts from it.
+  expect(document.activeElement?.getAttribute("data-entity")).toBe("jira:PAY-40");
+  press("j");
+  expect(selectedKey()).toBe("PAY-40");
+  press("k");
+  expect(selectedKey()).toBe("PAY-1");
+  press("ArrowUp");
+  expect(selectedKey()).toBe("PAY-52");
+  // A modifier, or a key typed in the filter, moves nothing.
+  press("j", { metaKey: true });
+  expect(selectedKey()).toBe("PAY-52");
+  field().focus();
+  press("j");
+  expect(selectedKey()).toBe("PAY-52");
+  expect(preview().textContent).toContain("PAY-52");
+});
+
+test("j/k walk the list's rows in their sorted order, and a double click opens the job", async () => {
+  await open(harness());
+  layoutButton("List").click();
+  await settle();
+  const keyHeader = [...target.querySelectorAll<HTMLButtonElement>(".tf-tbl th button")].find(
+    (b) => b.textContent === "Key",
+  )!;
+  keyHeader.click();
+  await settle();
+  const first = [...target.querySelectorAll(".tf-tbl tbody tr")].map((row) => row.querySelector("td")!.textContent);
+  expect(first.slice(0, 3)).toEqual(["PAY-1", "PAY-2", "PAY-3"]);
+  press("j");
+  press("j");
+  expect(selectedKey()).toBe("PAY-3");
+  target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")[4]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  expect(location.hash).toBe("#/job/PAY-5");
+  location.hash = "#/tickets";
+  layoutButton("Board").click();
+  await settle();
+  target.querySelectorAll<HTMLElement>(".tf-tcard")[1]!.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+  expect(location.hash).toBe("#/job/PAY-2");
+});
+
+test("list headers sort on click and show the direction; Key and Status never wrap", async () => {
+  await open(harness());
+  layoutButton("List").click();
+  await settle();
+  const header = (name: string) =>
+    [...target.querySelectorAll<HTMLElement>(".tf-tbl th")].find((th) => th.textContent === name)!;
+  const keys = () => [...target.querySelectorAll(".tf-tbl tbody tr")].map((row) => row.querySelector("td")!.textContent);
+  expect(header("Updated").getAttribute("aria-sort")).toBe("descending");
+  expect(header("Key").getAttribute("aria-sort")).toBeNull();
+  expect(header("Signals").querySelector("button")).toBeNull();
+  header("Key").querySelector("button")!.click();
+  await settle();
+  expect(header("Key").getAttribute("aria-sort")).toBe("ascending");
+  expect(header("Updated").getAttribute("aria-sort")).toBeNull();
+  expect(keys().slice(0, 2)).toEqual(["PAY-1", "PAY-2"]);
+  header("Key").querySelector("button")!.click();
+  await settle();
+  expect(header("Key").getAttribute("aria-sort")).toBe("descending");
+  expect(keys()[0]).toBe("PAY-54");
+  const row = target.querySelector(".tf-tbl tbody tr")!;
+  const cells = [...row.querySelectorAll("td")];
+  expect(cells[0]!.classList.contains("tf-nowrap")).toBe(true);
+  expect(cells[2]!.classList.contains("tf-nowrap")).toBe(true);
+});
+
+test("the Board / List and Lanes switches hold for the session only: nothing is saved, a restart forgets them", async () => {
+  const h = harness();
+  const written: string[] = [];
+  const setItem = Storage.prototype.setItem;
+  Storage.prototype.setItem = function (key: string, value: string) {
+    written.push(key);
+    return setItem.call(this, key, value);
+  };
+  try {
+    await open(h);
+    chooseLanes("epic");
+    await settle();
+    expect(lanesSelect()!.value).toBe("epic");
+    layoutButton("List").click();
+    await settle();
+    expect(lanesSelect()).toBeNull();
+    // Away and back within the session: both switches held.
+    unmount(page!);
+    page = null;
+    await open(h);
+    expect(layoutButton("List").getAttribute("aria-pressed")).toBe("true");
+    layoutButton("Board").click();
+    await settle();
+    expect(lanesSelect()!.value).toBe("epic");
+    expect(written).toEqual([]);
+  } finally {
+    Storage.prototype.setItem = setItem;
+  }
+  // A restart: the session is new, and the board opens as it always does.
+  unmount(page!);
+  page = null;
+  forgetTicketsSession();
+  await open(h);
+  expect(layoutButton("Board").getAttribute("aria-pressed")).toBe("true");
+  expect(lanesSelect()!.value).toBe("none");
+});
+
+test("signals are drawn on the card and in the list's Signals column, each a tone dot and its words", async () => {
+  await open(harness());
+  const signals = (root: Element) =>
+    [...root.querySelectorAll(".tf-signal")].map((s) => [s.querySelector(".tf-dot")!.className, s.textContent]);
+  const cardOf = target.querySelector('.tf-tcard[data-entity="jira:PAY-40"]')!;
+  expect(signals(cardOf)).toEqual([
+    ["tf-dot tf-err", "build failed"],
+    ["tf-dot tf-info", "PR #142 open"],
+  ]);
+  layoutButton("List").click();
+  await settle();
+  const row = target.querySelector('.tf-tbl tr[data-entity="jira:PAY-40"]')!;
+  expect(signals(row.querySelectorAll("td")[4]!)).toEqual([
+    ["tf-dot tf-err", "build failed"],
+    ["tf-dot tf-info", "PR #142 open"],
+  ]);
 });

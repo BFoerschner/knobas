@@ -277,7 +277,7 @@ const FIELDS_SQL: &str = concat!(
 
 /// The ticket keys' values (#811), `@me` first among the assignees while
 /// knobas knows who the user is, and `assigned:`'s windows, which every
-/// installation has.
+/// installation has, and `has:`'s four signals (#815).
 async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion>, SearchError> {
     let rows: Vec<(String, String, Option<String>)> = sqlx::query_as(FIELDS_SQL)
         .bind(vocab.declarations.as_param())
@@ -311,6 +311,12 @@ async fn fields(pool: &PgPool, vocab: &Vocabulary) -> Result<Vec<FieldSuggestion
                     "week",
                     "assigned to you, changed in the last 7 days",
                 ));
+            }
+            // The signals (#815): the four every installation has.
+            FieldKey::Has => {
+                for signal in knobas_core::signals::SignalKind::ALL {
+                    out.push(suggestion(key, signal.as_str(), signal.detail()));
+                }
             }
             _ => {}
         }

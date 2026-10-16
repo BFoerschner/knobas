@@ -61,6 +61,8 @@ function card(key: string, priority: string | null = null): MiniBoardCard {
     updated_at: null,
     path: null,
     mine: false,
+    labels: [],
+    signals: [],
   };
 }
 

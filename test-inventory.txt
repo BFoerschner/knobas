@@ -772,6 +772,11 @@ knobas-app	test/it	search_ipc::the_suggestions_carry_kinds_sources_and_parents_w
 knobas-app	test/it	search_ipc::the_trees_search_answers_with_assets_and_their_paths
 knobas-app	test/it	search_ipc::the_wire_shape_is_the_contract
 knobas-app	test/it	search_ipc::under_reads_the_parent_the_compiled_in_gitea_adapter_declares
+knobas-app	test/it	signals_ipc::a_card_carries_its_labels_in_the_records_order
+knobas-app	test/it	signals_ipc::a_resolved_or_unconfirmed_fact_makes_no_signal
+knobas-app	test/it	signals_ipc::an_unknown_has_value_is_reported
+knobas-app	test/it	signals_ipc::each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets
+knobas-app	test/it	signals_ipc::the_filter_suggestions_offer_the_four_signals
 knobas-app	test/it	sources_crud::a_credential_that_is_still_wrong_does_not_release_the_backoff
 knobas-app	test/it	sources_crud::a_discovered_config_value_reaches_the_report
 knobas-app	test/it	sources_crud::a_draft_for_a_saved_source_re_tests_the_stored_secret
@@ -1118,6 +1123,7 @@ knobas-core	lib/knobas_core	payload::tests::a_value_that_is_not_a_usable_string_
 knobas-core	lib/knobas_core	payload::tests::declarations_are_keyed_by_source_then_kind
 knobas-core	lib/knobas_core	payload::tests::the_field_names_the_sql_macros_use_are_the_serialized_ones
 knobas-core	lib/knobas_core	payload::tests::the_first_candidate_that_lands_on_a_string_wins
+knobas-core	lib/knobas_core	signals::tests::a_kind_is_spelled_on_the_wire_as_has_takes_it
 knobas-core	lib/knobas_core	start_work::tests::a_failed_step_stops_the_sequence_rather_than_advancing_past_it
 knobas-core	lib/knobas_core	start_work::tests::a_failure_part_way_through_stops_everything_after_it
 knobas-core	lib/knobas_core	start_work::tests::a_flow_runs_from_the_front_and_ends_when_every_step_is_settled

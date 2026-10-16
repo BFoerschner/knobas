@@ -75,11 +75,15 @@ pub enum FieldKey {
     /// `assigned:<window>` -- assigned to the user and changed within the
     /// window (`today`, `week`, `7d`, as `updated:` reads them).
     Assigned,
+    /// `has:<signal>` (#815) -- the ticket carries that signal
+    /// (`failing-build`, `blocker`, `open-pr`, `review-for-me`), as
+    /// `knobas_core::signals` reads it for the cards.
+    Has,
 }
 
 impl FieldKey {
     /// Every key, in the order the box offers them.
-    pub const ALL: [FieldKey; 8] = [
+    pub const ALL: [FieldKey; 9] = [
         FieldKey::Project,
         FieldKey::Status,
         FieldKey::IssueType,
@@ -88,6 +92,7 @@ impl FieldKey {
         FieldKey::Label,
         FieldKey::Sprint,
         FieldKey::Assigned,
+        FieldKey::Has,
     ];
 
     /// The key as the grammar spells it, without the colon.
@@ -102,6 +107,7 @@ impl FieldKey {
             FieldKey::Label => "label",
             FieldKey::Sprint => "sprint",
             FieldKey::Assigned => "assigned",
+            FieldKey::Has => "has",
         }
     }
 
@@ -127,6 +133,10 @@ pub struct FieldFilter {
     pub values: Vec<String>,
     /// `assigned:`'s window in days; `None` for every other key.
     pub within_days: Option<u32>,
+    /// `has:`'s user (#815): in [`EffectiveFilters::fields`] the identity's
+    /// usernames, lowercased, which `has:review-for-me` reads; empty for
+    /// every other key and before [`merge`].
+    pub me: Vec<String>,
 }
 
 /// The result of parsing one raw box string.
@@ -402,6 +412,15 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
                 }
                 FieldFilter {
                     values,
+                    me: if filter.key == FieldKey::Has {
+                        parsed
+                            .identity
+                            .iter()
+                            .map(|name| name.to_lowercase())
+                            .collect()
+                    } else {
+                        Vec::new()
+                    },
                     ..filter.clone()
                 }
             })
@@ -443,6 +462,7 @@ impl Parsed {
                     negated,
                     values: Vec::new(),
                     within_days: None,
+                    me: Vec::new(),
                 });
                 self.fields.len() - 1
             }
@@ -677,6 +697,9 @@ fn apply_field(key: FieldKey, negated: bool, value: &str, token: &str, parsed: &
     }
     match key {
         FieldKey::Sprint if value != "current" => parsed.unknown(token),
+        FieldKey::Has if knobas_core::signals::SignalKind::from_spelling(&value).is_none() => {
+            parsed.unknown(token);
+        }
         FieldKey::Assigned => match duration_days(&value) {
             Some(days) => parsed.field(key, negated, None, Some(days)),
             None => parsed.unknown(token),
@@ -1279,6 +1302,7 @@ mod tests {
             negated,
             values: values.iter().map(|v| (*v).to_owned()).collect(),
             within_days: None,
+            me: Vec::new(),
         }
     }
 
