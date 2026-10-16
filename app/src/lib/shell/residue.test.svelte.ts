@@ -345,6 +345,8 @@ const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
 const TicketsPage = (await import("../tf/tickets/TicketsPage.svelte")).default;
 const ViewMenu = (await import("../tf/tickets/ViewMenu.svelte")).default;
+const ViewEditor = (await import("../tf/tickets/ViewEditor.svelte")).default;
+const { draftNew } = await import("../tf/tickets/views");
 const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
@@ -689,9 +691,28 @@ const CASES: Case[] = [
     name: "ViewMenu",
     source: "lib/tf/tickets/ViewMenu.svelte",
     open: (target) => ({
-      app: mount(ViewMenu, { target, props: { name: "My work", onduplicate: () => {}, ondelete: () => {} } }),
+      app: mount(ViewMenu, { target, props: { name: "My work", onedit: () => {}, onduplicate: () => {}, ondelete: () => {} } }),
     }),
     exercise: (target) => target.querySelector<HTMLButtonElement>("button[aria-haspopup]")?.click(),
+  },
+  {
+    /** The view editor (#814): its preview read waits a moment after each change, on a timer. */
+    name: "ViewEditor",
+    source: "lib/tf/tickets/ViewEditor.svelte",
+    open: (target) => ({
+      app: mount(ViewEditor, {
+        target,
+        props: {
+          draft: draftNew(),
+          groups: ["Mine"],
+          fields: [],
+          parents: [],
+          board: () => Promise.resolve({ columns: [{ status: "To Do", cards: [], total: 0 }], sources: [] }),
+          onsave: () => Promise.resolve(),
+          onclose: () => {},
+        },
+      }),
+    }),
   },
   {
     name: "StatusBar",

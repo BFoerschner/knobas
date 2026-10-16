@@ -801,3 +801,164 @@ test("an address naming no view says so and offers All tickets", async () => {
   expect(target.querySelector(".tf-empty")!.textContent).toContain("No view is called gone.");
   expect(h.reads).toEqual([]);
 });
+
+// ---- the view editor (#814) ----
+
+/** The preview reads a moment after a change. */
+async function previewed() {
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  await settle();
+}
+
+const inDialog = (label: string) =>
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent!.trim() === label)!;
+const searchLine = () => dialog()!.querySelector(".tf-vw-q code")!;
+const previewCols = () =>
+  [...dialog()!.querySelectorAll(".tf-vw-mcol")].map((col) => col.querySelector(".tf-vw-mh")!.textContent!.trim());
+
+function input(element: HTMLInputElement | HTMLSelectElement, value: string) {
+  element.value = value;
+  element.dispatchEvent(new Event(element instanceof HTMLSelectElement ? "change" : "input", { bubbles: true }));
+}
+
+test("+ New view opens the editor: conditions write the search line, the preview counts and draws, Create view saves it", async () => {
+  const h = harness();
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  await previewed();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
+  expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
+  expect(dialog()!.textContent).toContain("No conditions yet, so it holds every synced ticket.");
+  expect(searchLine().textContent).toBe("every synced ticket");
+  // Every ticket, one column per status of the board.
+  expect(dialog()!.querySelector(".tf-vw-n b")!.textContent).toBe("18");
+  expect(previewCols()).toEqual(["To Do12", "In Progress1", "Done5"]);
+  expect(inDialog("Create view").disabled).toBe(true);
+
+  inDialog("+ Add a condition").click();
+  await settle();
+  // The first field is Project; pick Issue type, Bug, then is not.
+  input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "issuetype");
+  await settle();
+  inDialog("Bug").click();
+  inDialog("is not").click();
+  input(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Words in the key or summary"]')!, "payout");
+  await previewed();
+  expect(searchLine().textContent).toBe("-issuetype:Bug payout");
+  expect(h.reads.at(-1)!.query).toBe("-issuetype:Bug payout");
+
+  input(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!, "Payout work");
+  await settle();
+  expect(inDialog("Create view").disabled).toBe(false);
+  inDialog("Create view").click();
+  await settle();
+  expect(h.saved).toEqual([
+    expect.objectContaining({ id: null, name: "Payout work", group: "Mine", query: "-issuetype:Bug payout", columns: [] }),
+  ]);
+  expect(dialog()).toBeNull();
+  expect(toasts.items.at(-1)!.text).toBe("Created Payout work");
+  expect(location.hash).toBe("#/tickets/payout-work");
+});
+
+test("Edit view opens the text as conditions, saves over the view under its id, and keeps a text left alone as typed", async () => {
+  const h = harness([], [view("bugs", "Bugs", "Mine", 0, { query: 'issuetype:Bug   assignee:me "sepa retry"' })]);
+  await open(h, null, "bugs");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  await previewed();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("Edit Bugs");
+  const fields = [...dialog()!.querySelectorAll<HTMLSelectElement>('select[aria-label="Field"]')].map((s) => s.value);
+  expect(fields).toEqual(["issuetype", "assignee"]);
+  // `me` is the Me the suggestions offer as `@me`.
+  expect(inDialog("Me").getAttribute("aria-pressed")).toBe("true");
+  expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Words in the key or summary"]')!.value).toBe('"sepa retry"');
+  inDialog("Save view").click();
+  await settle();
+  expect(h.saved.at(-1)).toEqual(
+    expect.objectContaining({ id: "bugs", position: 0, query: 'issuetype:Bug   assignee:me "sepa retry"' }),
+  );
+  expect(toasts.items.at(-1)!.text).toBe("Saved Bugs");
+
+  // Changed, it writes new text.
+  menuOf("this view").click();
+  await settle();
+  menuItem("Edit view").click();
+  await previewed();
+  inDialog("Story").click();
+  await settle();
+  inDialog("Save view").click();
+  await settle();
+  expect(h.saved.at(-1)!.query).toBe('issuetype:Bug issuetype:Story assignee:me "sepa retry"');
+});
+
+test("each status sits on one column, an over-limit column is err, tickets on no column are called out, and One column per status resets", async () => {
+  const h = harness();
+  await open(h);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  await previewed();
+  const cols = () => [...dialog()!.querySelectorAll<HTMLElement>(".tf-vw-col")];
+  const pressed = (col: HTMLElement) =>
+    [...col.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.textContent);
+  // In Progress onto the first column leaves its own.
+  [...cols()[0]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "In Progress")!.click();
+  await settle();
+  expect(cols().map(pressed)).toEqual([["To Do", "In Progress"], [], ["Done"]]);
+  input(cols()[0]!.querySelector<HTMLInputElement>('input[aria-label="At most"]')!, "10");
+  // Done off its column: on no column.
+  [...cols()[2]!.querySelectorAll<HTMLButtonElement>(".tf-vw-val")].find((b) => b.textContent === "Done")!.click();
+  await previewed();
+  expect(dialog()!.textContent).toContain("Done is on no column, so those tickets do not show on the board.");
+  expect(previewCols()).toEqual(["To Do13 of 10", "In Progress0", "Done0"]);
+  expect(dialog()!.querySelector(".tf-vw-mcol")!.classList.contains("tf-vw-over")).toBe(true);
+  expect(dialog()!.textContent).toContain("5 of them sit in a status on no column.");
+  inDialog("One column per status").click();
+  await settle();
+  expect(cols().map(pressed)).toEqual([["To Do"], ["In Progress"], ["Done"]]);
+  expect(dialog()!.textContent).not.toContain("on no column");
+});
+
+test("the search line underlines what the grammar does not read, and Signal is a field only once the signals answer", async () => {
+  const h = harness([], [view("odd", "Odd", "Mine", 0, { query: "sprint:next -under:PAY-200 label:sepa" })]);
+  await open(h, null, "odd");
+  menuOf("this view").click();
+  await settle();
+  menuItem("Edit view").click();
+  await previewed();
+  expect([...searchLine().querySelectorAll(".tf-vw-newq")].map((s) => s.textContent)).toEqual(["sprint:next", "-under:PAY-200"]);
+  expect(searchLine().textContent).toBe("sprint:next -under:PAY-200 label:sepa");
+  const options = () => [...dialog()!.querySelector('select[aria-label="Field"]')!.querySelectorAll("option")].map((o) => o.textContent);
+  // The harness's suggestions name no `has:` values.
+  expect(options()).not.toContain("Signal");
+  inDialog("Cancel").click();
+  await settle();
+
+  const ports = h.ports;
+  h.ports = {
+    ...ports,
+    suggestions: () =>
+      Promise.resolve({ fields: [{ key: "has", value: "blocker", detail: "something blocks it" }], parents: [] }),
+  };
+  unmount(page!);
+  await open(h, null, "odd");
+  menuOf("this view").click();
+  await settle();
+  menuItem("Edit view").click();
+  await previewed();
+  expect(options()).toContain("Signal");
+  input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Field"]')!, "signal");
+  await settle();
+  inDialog("blocked").click();
+  await settle();
+  expect(searchLine().textContent).toBe("has:blocker -under:PAY-200 label:sepa");
+});
+
+test("Delete view in the editor deletes it, with Undo in the toast", async () => {
+  const h = harness([], VIEWS);
+  await open(h, null, "backlog");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "Edit view")!.click();
+  await previewed();
+  inDialog("Delete view").click();
+  await settle();
+  expect(dialog()).toBeNull();
+  expect(h.deleted).toEqual(["backlog"]);
+  expect(toasts.items.at(-1)!.action!.label).toBe("Undo");
+});

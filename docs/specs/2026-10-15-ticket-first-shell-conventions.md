@@ -9,6 +9,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Every class in `tf.css` starts with `tf-`, and `tf-css.test.ts` holds it. `app.css` styles bare names globally (`.btn`, `.toast`, `.timer`) and those would leak. (#809, PR #885)
 - Tokens live on the new shell's root, not on `:root`, and the shell has its own stylesheet. (Design system, "Getting it into the app")
 - Durations and clocks are Archivo with tabular figures, not mono; mono is for code values. Where the design system and prototype-6 differ, the design system decides. (#809, PR #885; reused by #816, PR #898)
+- A dialog of its own width passes `className` to `tf/settings/TfDialog.svelte` (the view editor's `tf-vw-dialog`), never a second dialog shell. (#814)
 - A selected card is `aria-current="true"` with the `tf-card` class, so the focus ring follows the design system's `--card-ink` rule. Not `aria-selected` on a button. (#810, PR #895)
 
 ## Mounting and the shell switch
