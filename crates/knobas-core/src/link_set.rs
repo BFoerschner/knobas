@@ -232,13 +232,16 @@ mod tests {
     #[test]
     fn the_pipeline_exclusions_are_spelled_once() {
         let fits = crate::link_set_member_fits!("m", "e");
-        for kind in super::NOT_PIPELINE_KINDS {
-            assert!(fits.contains(&format!("'{kind}'")), "{kind}");
-        }
-        assert_eq!(
-            fits.matches("', '").count() + 1,
-            super::NOT_PIPELINE_KINDS.len()
-        );
+        let listed = fits
+            .split_once("all(array[")
+            .and_then(|(_, rest)| rest.split_once("])"))
+            .map(|(list, _)| list)
+            .expect("the exclusions are an array literal");
+        let spelled: Vec<&str> = listed
+            .split(',')
+            .map(|kind| kind.trim().trim_matches('\''))
+            .collect();
+        assert_eq!(spelled, super::NOT_PIPELINE_KINDS);
     }
 
     #[test]

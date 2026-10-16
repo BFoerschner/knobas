@@ -40,6 +40,8 @@
   const query = $derived(patternQuery(kind, project, typed));
   const projects = $derived(answer?.projects ?? []);
   const addable = $derived(answer !== null && answer.refusal === null && failed === null);
+  /** What the query matches now; a refused query matches nothing. */
+  const matched = $derived(answer && answer.refusal === null ? answer : { count: 0, matches: [] });
 
   $effect(() => {
     const wanted = query;
@@ -90,9 +92,9 @@
     {:else if answer?.refusal}
       <p class="tf-ifail">{answer.refusal}</p>
     {/if}
-    <div class="tf-pane-h" aria-live="polite">Matches now: {answer?.refusal ? 0 : (answer?.count ?? 0)}</div>
+    <div class="tf-pane-h" aria-live="polite">Matches now: {matched.count}</div>
     <div class="tf-picks tf-pat-matches" role="list" aria-label="Matches now">
-      {#each answer?.refusal ? [] : (answer?.matches ?? []).slice(0, DRAWN) as row (row.entity_id)}
+      {#each matched.matches.slice(0, DRAWN) as row (row.entity_id)}
         <div class="tf-pat-match" role="listitem">
           <span class="tf-dot {dotClass(row.state)}"></span>{row.title ?? row.entity_id}<span class="tf-dim">{row.line ?? ""}</span>
         </div>

@@ -209,6 +209,15 @@ function patternHits(pattern: LinkSetPattern): string[] | string {
     .sort((a, b) => (title(a) ?? a).toLowerCase().localeCompare((title(b) ?? b).toLowerCase()));
 }
 
+/** A set's fixed members, then what its patterns match now, each item once. */
+function setItems(set: FakeSet): { kind: LinkSetMemberKind; entity_id: string }[] {
+  const matched = set.patterns.flatMap((pattern) => {
+    const hits = patternHits(pattern);
+    return typeof hits === "string" ? [] : hits.map((entity_id) => ({ kind: pattern.kind, entity_id }));
+  });
+  return [...set.members, ...matched].filter((item, at, all) => all.findIndex((other) => other.entity_id === item.entity_id) === at);
+}
+
 function patternRow(pattern: LinkSetPattern): LinkSetPatternRow {
   const hits = patternHits(pattern);
   const ids = typeof hits === "string" ? [] : hits;
@@ -297,11 +306,7 @@ export function fakeSetReach(ticketId: string): Reached[] {
   const out: Reached[] = [];
   for (const set of [...SETS].sort((a, b) => a.id.localeCompare(b.id))) {
     if (!set.rules.some((rule) => matches(rule, ticket))) continue;
-    const matched = set.patterns.flatMap((pattern) => {
-      const hits = patternHits(pattern);
-      return typeof hits === "string" ? [] : hits.map((entity_id) => ({ kind: pattern.kind, entity_id }));
-    });
-    for (const member of [...set.members, ...matched]) {
+    for (const member of setItems(set)) {
       if (HIDDEN.has(`${ticketId}|${member.entity_id}`) || out.some((row) => row.entity_id === member.entity_id)) continue;
       out.push({ entity_id: member.entity_id, kind: member.kind, step: member.entity_id, origin: { kind: "link_set", set: set.id, name: set.name } });
     }
@@ -325,7 +330,7 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
               id: set.id,
               name: set.name,
               via: { ...via, title: EPIC_TITLES[via.value] ?? title(via.value) },
-              members: set.members
+              members: setItems(set)
                 .filter((member) => member.entity_id !== ticketId)
                 .map((member) => ({
                   ...member,

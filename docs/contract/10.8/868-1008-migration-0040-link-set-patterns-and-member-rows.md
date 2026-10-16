@@ -36,7 +36,8 @@
   `EntityFilter.reach` and `reach:`): the `link_set` arm gains the items every pattern of an
   applying set matches when the read runs (CTEs `set_patterns` and `set_pattern_hits`), same rank,
   same origin, same *Hide here*. A pipeline that syncs into the project later is on the job's next
-  read with no edit to the set.
+  read with no edit to the set. `job_link_sets` (#867) lists those matches among each set's
+  members, after its fixed ones, each item once per set, so *Hide here* reaches them too.
 
   **The command and the shapes**, in the existing `commands/entity.rs`, appended after
   `preview_link_set_rule`:

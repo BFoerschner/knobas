@@ -1069,6 +1069,36 @@ const JOB_SETS: &str = concat!(
      order by lower(s.name), s.id"
 );
 
+/// The members of the sets `$1` as the job of `$2` shows them: the fixed
+/// members, then what each pattern matches now (#868, the reach's own
+/// `link_set_pattern_hits!`), each item once per set, in the set's order,
+/// and whether *Hide here* hid it on this ticket.
+const JOB_MEMBERS: &str = concat!(
+    "with pat as (
+  select set_id, position, kind, pattern from knobas.link_set_member
+   where set_id = any($1) and pattern is not null
+),
+held as (
+  select m.set_id, m.position, 0 as hit, m.kind, m.entity_id
+    from knobas.link_set_member m
+   where m.set_id = any($1) and m.entity_id is not null
+  union all
+  select h.set_id, h.position, 1, p.kind, h.id
+    from (",
+    knobas_core::link_set_pattern_hits!("pat"),
+    ") h
+    join pat p on p.set_id = h.set_id and p.position = h.position
+)
+select x.set_id, x.kind, x.entity_id, e.kind as entity_kind, e.title,
+       exists (select 1 from knobas.link_set_hidden h
+                where h.ticket_id = $2 and h.member_id = x.entity_id) as hidden
+  from (select distinct on (set_id, entity_id) * from held
+         where entity_id <> $2
+         order by set_id, entity_id, position, hit) x
+  left join knobas.entity e on e.id = x.entity_id
+ order by x.set_id, x.position, x.hit, lower(e.title), x.entity_id"
+);
+
 /// The parent `$1` shows the links of, and each far end of those links
 /// (`entity_id` null for a parent with none): [`knobas_core::reach_walk!`]'s
 /// own `parent` term, so the drawer and the reach never disagree.
@@ -1103,15 +1133,7 @@ pub async fn on_job(pool: &PgPool, ticket_id: &str) -> Result<JobLinkSets, IpcEr
         .fetch_all(pool)
         .await?;
     let ids: Vec<String> = sets.iter().map(|row| row.get("id")).collect();
-    let members = sqlx::query(
-        "select m.set_id, m.kind, m.entity_id, e.kind as entity_kind, e.title,
-                exists (select 1 from knobas.link_set_hidden h
-                         where h.ticket_id = $2 and h.member_id = m.entity_id) as hidden
-           from knobas.link_set_member m
-           left join knobas.entity e on e.id = m.entity_id
-          where m.set_id = any($1) and m.entity_id is not null and m.entity_id <> $2
-          order by m.set_id, m.position",
-    )
+    let members = sqlx::query(JOB_MEMBERS)
     .bind(&ids)
     .bind(ticket_id)
     .fetch_all(pool)

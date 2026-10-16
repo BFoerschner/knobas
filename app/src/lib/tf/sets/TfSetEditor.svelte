@@ -326,9 +326,8 @@
                   >Remove</button
                 >
               </div>
-            {:else}
-              {#if patterns.length === 0}<div class="tf-member tf-dim">Nothing yet.</div>{/if}
             {/each}
+            {#if members.length === 0 && patterns.length === 0}<div class="tf-member tf-dim">Nothing yet.</div>{/if}
           </div>
         </article>
       {/each}

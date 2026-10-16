@@ -193,6 +193,33 @@ async fn a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit() {
     assert_eq!(from_sets(&pool, &job).await, ids(&[&build, &deploy, &later]));
 }
 
+/// The job's *Also on this job* group (#867) lists what a pattern matches as
+/// the set's members, and *Hide here* on one leaves it off that job's reach.
+#[tokio::test]
+async fn the_jobs_set_group_lists_a_patterns_matches_and_hides_one() {
+    let pool = pool().await;
+    let p = format!("Hide{}", tag());
+    let a = pipeline(&pool, &p, &format!("{p}_A")).await;
+    let b = pipeline(&pool, &p, &format!("{p}_B")).await;
+    let job = ticket(&pool).await;
+    link_sets::save(
+        &pool,
+        draft("Hide", vec![], vec![pattern("pipeline", &format!("project:{p}"))], &job),
+    )
+    .await
+    .unwrap();
+
+    link_sets::hide(&pool, &job, &a, true).await.unwrap();
+    let shown = link_sets::on_job(&pool, &job).await.unwrap();
+    let members: Vec<(String, bool)> = shown.sets[0]
+        .members
+        .iter()
+        .map(|m| (m.entity_id.clone(), m.hidden))
+        .collect();
+    assert_eq!(members, [(a.clone(), true), (b.clone(), false)]);
+    assert_eq!(from_sets(&pool, &job).await, ids(&[&b]));
+}
+
 /// R-7.7's page pattern: a space, and a parent page or the whole space.
 #[tokio::test]
 async fn a_page_pattern_is_a_space_and_a_parent_page() {
