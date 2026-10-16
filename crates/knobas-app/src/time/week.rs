@@ -324,37 +324,6 @@ fn column(days: &[DayWindow], at: DateTime<Utc>) -> Option<usize> {
         .position(|window| at >= window.from && at < window.to)
 }
 
-/// The seconds of `[from, to)` that no interval in `covers` overlaps.
-///
-/// Pure, and the one piece of arithmetic here that can be wrong in a way
-/// nothing else notices: it is what the "no target, app open" row *is*.
-/// `covers` need be neither sorted nor disjoint -- overlapping blocks have
-/// been legal since #279 made them editable -- so it is walked as a sorted
-/// sweep rather than subtracted one at a time.
-fn uncovered_seconds(
-    from: DateTime<Utc>,
-    to: DateTime<Utc>,
-    covers: &[(DateTime<Utc>, DateTime<Utc>)],
-) -> i64 {
-    let mut spans: Vec<(DateTime<Utc>, DateTime<Utc>)> = covers
-        .iter()
-        .map(|(began, ended)| (*began.max(&from), *ended.min(&to)))
-        .filter(|(began, ended)| began < ended)
-        .collect();
-    spans.sort_by_key(|(began, _)| *began);
-
-    let mut free = to - from;
-    let mut reached = from;
-    for (began, ended) in spans {
-        let began = began.max(reached);
-        if ended > began {
-            free -= ended - began;
-            reached = ended;
-        }
-    }
-    free.num_seconds().max(0)
-}
-
 fn stretch_of(row: &sqlx::postgres::PgRow) -> Result<Stretch, IpcError> {
     let entity_id: Option<String> = row.try_get("entity_id")?;
     let label: Option<String> = row.try_get("label")?;
@@ -434,8 +403,8 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
     {
         let stretch = stretch_of(&row)?;
         // The **coverage** rule, which is one of the two this file keeps: a
-        // block covers every day it *overlaps*, and `uncovered_seconds` clips
-        // it to the day. The question here is whether a given instant was
+        // block covers every day it *overlaps*, and `passive::open_spans`
+        // clips it to the focused time it covers. The question here is whether a given instant was
         // inside a block, and a stretch that ran from Monday evening into
         // Tuesday morning was covering both mornings it touched.
         for (index, window) in days.iter().enumerate() {
@@ -505,9 +474,14 @@ pub async fn read(pool: &PgPool, days: &[DayWindow]) -> Result<Week, IpcError> {
             })
             .map(passive::observation_of)
             .collect::<Result<Vec<_>, _>>()?;
-        let seconds: i64 = passive::focused_spans(&observations)
+        // The day read's open stretches, added up: one subtraction for both
+        // (#901), with the same dismissed stretches and running timer set
+        // aside beside the blocks.
+        let mut claimed = passive::set_aside(pool, window.from, window.to).await?;
+        claimed.extend_from_slice(&covers[index]);
+        let seconds: i64 = passive::open_spans(&passive::focused_spans(&observations), &claimed)
             .iter()
-            .map(|span| uncovered_seconds(span.started_at, span.ended_at, &covers[index]))
+            .map(|span| (span.ended_at - span.started_at).num_seconds())
             .sum();
         open[index] = WeekCell {
             tracked_seconds: seconds,
@@ -772,42 +746,6 @@ mod tests {
             from: at(day, 0, 0),
             to: at(day + 1, 0, 0),
         }
-    }
-
-    /// **The number the "no target" row is**, with the three shapes that can
-    /// each be wrong on their own: a block inside the span, two blocks that
-    /// overlap each other, and a block that runs off both ends of it.
-    #[test]
-    fn uncovered_time_is_the_span_minus_the_union_of_what_covers_it() {
-        let span = (at(24, 9, 0), at(24, 12, 0));
-
-        assert_eq!(
-            uncovered_seconds(span.0, span.1, &[]),
-            3 * 3600,
-            "nothing covered is the whole span"
-        );
-        assert_eq!(
-            uncovered_seconds(span.0, span.1, &[(at(24, 10, 0), at(24, 11, 0))]),
-            2 * 3600,
-            "one hour of it is claimed"
-        );
-        assert_eq!(
-            uncovered_seconds(
-                span.0,
-                span.1,
-                &[
-                    (at(24, 10, 0), at(24, 11, 0)),
-                    (at(24, 10, 30), at(24, 11, 30))
-                ],
-            ),
-            90 * 60,
-            "overlapping blocks are legal (#279) and must be counted once, not twice"
-        );
-        assert_eq!(
-            uncovered_seconds(span.0, span.1, &[(at(24, 8, 0), at(24, 13, 0))]),
-            0,
-            "a block running off both ends is clipped, not counted past them"
-        );
     }
 
     /// A day list that would count one block into two columns is refused, and

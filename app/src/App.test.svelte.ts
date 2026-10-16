@@ -332,11 +332,11 @@ vi.mock("./lib/ipc/time", () => ({
   timerHeartbeat: () => Promise.resolve(null),
   // The day review and the settings view are both mounted by the shell; what
   // they call on arrival has to exist here even where no test drives it.
-  dayBlocks: () => Promise.resolve({ blocks: dayAnswer, past_horizon: false }),
-  // The new shell's Day tab reads the day's no-target time from the week (#827).
+  dayBlocks: () => Promise.resolve({ blocks: dayAnswer, past_horizon: false, open: [] }),
   weekTimesheet: () => Promise.resolve({ days: [], rows: [], past_horizon: [] }),
   updateBlock: () => Promise.reject(new Error("no edit in this test")),
   deleteBlock: () => Promise.reject(new Error("no edit in this test")),
+  dismissBlock: () => Promise.reject(new Error("no edit in this test")),
   createBlock: () => Promise.reject(new Error("no edit in this test")),
   passiveAttribution: () => Promise.resolve(false),
   setPassiveAttribution: () => Promise.reject(new Error("no settings write in this test")),

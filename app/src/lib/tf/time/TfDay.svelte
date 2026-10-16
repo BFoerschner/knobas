@@ -23,10 +23,11 @@
     createBlock as realCreateBlock,
     dayBlocks as realDayBlocks,
     deleteBlock as realDeleteBlock,
+    dismissBlock as realDismissBlock,
     updateBlock as realUpdateBlock,
-    weekTimesheet as realWeekTimesheet,
     type AdHocBlock,
     type DayBlock,
+    type OpenStretch,
     type TimerTarget,
   } from "../../ipc/time";
   import { push } from "../../shell/toasts.svelte";
@@ -41,10 +42,10 @@
   interface DayPorts {
     dayBlocks: typeof realDayBlocks;
     adHocBlock: typeof realAdHocBlock;
-    weekTimesheet: typeof realWeekTimesheet;
     updateBlock: typeof realUpdateBlock;
     createBlock: typeof realCreateBlock;
     deleteBlock: typeof realDeleteBlock;
+    dismissBlock: typeof realDismissBlock;
   }
 
   let {
@@ -83,10 +84,10 @@
   const io: DayPorts = {
     dayBlocks: realDayBlocks,
     adHocBlock: realAdHocBlock,
-    weekTimesheet: realWeekTimesheet,
     updateBlock: realUpdateBlock,
     createBlock: realCreateBlock,
     deleteBlock: realDeleteBlock,
+    dismissBlock: realDismissBlock,
     ...ports,
   };
 
@@ -106,31 +107,23 @@
     blocks: DayBlock[];
     pastHorizon: boolean;
     offers: Record<number, AdHocBlock | null>;
-    /** `null` when the week read failed: absent, not zero. */
-    openSeconds: number | null;
+    /** The day's focused time nothing claims (#901). */
+    open: OpenStretch[];
   }
   let loaded = $state<Loaded | null>(null);
   let failure = $state<string | null>(null);
   let issued = 0;
 
   /**
-   * The day, what `ad_hoc_block` says of each unlogged block, and the day's
-   * focused time no block covers, as one answer so they cannot disagree.
+   * The day, its open stretches, and what `ad_hoc_block` says of each
+   * unlogged block, as one answer so they cannot disagree.
    *
    * An offer that fails is left out, and the row falls back on the target's
-   * shape; the week read failing leaves *open* at zero. Neither is worth
-   * blanking the day for.
+   * shape. That is not worth blanking the day for.
    */
   async function read(on: string): Promise<Loaded> {
     const { from, to } = dayBounds(on);
-    const bounds = { day: on, from: from.toISOString(), to: to.toISOString() };
-    const [record, openSeconds] = await Promise.all([
-      io.dayBlocks(bounds.from, bounds.to),
-      io
-        .weekTimesheet([bounds])
-        .then((week) => week.rows.find((row) => row.target === null)?.cells[0]?.tracked_seconds ?? 0)
-        .catch(() => null),
-    ]);
+    const record = await io.dayBlocks(from.toISOString(), to.toISOString());
     const offers: Record<number, AdHocBlock | null> = {};
     const when = { day: on, offsetMinutes: offsetMinutes(from) };
     await Promise.all(
@@ -143,7 +136,7 @@
           ),
         ),
     );
-    return { day: on, blocks: record.blocks, pastHorizon: record.past_horizon, offers, openSeconds };
+    return { day: on, blocks: record.blocks, pastHorizon: record.past_horizon, offers, open: record.open };
   }
 
   async function load(on: string) {
@@ -172,17 +165,23 @@
   const rows = $derived(
     ready === null
       ? []
-      : dayRows({ day: key, blocks: ready.blocks, offers: ready.offers, running: timer.current, now: clock }),
+      : dayRows({
+          day: key,
+          blocks: ready.blocks,
+          offers: ready.offers,
+          open: ready.open,
+          running: timer.current,
+          now: clock,
+        }),
   );
-  const figures = $derived(dayFigures(rows, ready?.openSeconds ?? 0));
+  const figures = $derived(dayFigures(rows));
   /**
    * Past the observation horizon what was in front of you is absent, not zero
-   * (`CONTEXT.md`), so the two figures made from it say so; and so does *open*
-   * when its read failed.
+   * (`CONTEXT.md`), so the two figures made from it say so.
    */
   const unknown = $derived({
     offered: ready?.pastHorizon ?? false,
-    open: (ready?.pastHorizon ?? false) || ready?.openSeconds === null,
+    open: ready?.pastHorizon ?? false,
   });
   const frame = $derived(stripWindow(key, rows));
   const hours = $derived(Array.from({ length: frame.to - frame.from + 1 }, (_, index) => frame.from + index));
@@ -201,7 +200,7 @@
     label: "tf-tm-label",
     running: "tf-tm-run",
     offered: "tf-tm-passive",
-    untracked: "tf-tm-gap",
+    open: "tf-tm-gap",
   };
 
   const hourLabel = (hour: number) => String(hour).padStart(2, "0");
@@ -316,6 +315,13 @@
     );
   }
 
+  /** *Dismiss* on an offered block (#900): knobas stops offering that stretch. */
+  function dismiss(row: DayRow) {
+    const block = row.block;
+    if (block === null) return;
+    void write(() => io.dismissBlock(block.block.id), "Dismissed. knobas will not offer it again.");
+  }
+
   function remove() {
     const current = dialog;
     if (current === null || current.mode !== "edit" || current.row.block === null) return;
@@ -392,7 +398,7 @@
         overflow="visible"
         role="button"
         tabindex="0"
-        aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'untracked'}"
+        aria-label="{span(row)}, {row.target ? targetReading(row.target) : 'open'}"
         onclick={() => select(row)}
         onkeydown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
@@ -420,7 +426,7 @@
     <span><i class="tf-tm-logged"></i>Logged</span>
     <span><i class="tf-tm-run"></i>Timer running</span>
     <span><i class="tf-tm-passive"></i>Offered: what was in front of you</span>
-    <span><i class="tf-tm-gap"></i>Untracked: no block covers it</span>
+    <span><i class="tf-tm-gap"></i>Open: app in front, no target</span>
     <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "add" })}>+ Add a block</button>
   </div>
 
@@ -443,9 +449,9 @@
         >
           <span class="tf-tm-when">{span(row)}<b>{durationOf(row)}</b></span>
           <span class="tf-tm-what">
-            {#if row.state === "untracked"}
-              Nothing tracked
-              <small>No block covers this time. Assign it to a ticket if it was work.</small>
+            {#if row.state === "open"}
+              No target, app open
+              <small>knobas was open and in front, with no timer and nothing it could name.</small>
             {:else if row.target !== null}
               {#if row.state === "offered"}<span class="tf-dim">knobas saw</span>{/if}
               {#if row.target.kind === "entity"}
@@ -475,7 +481,7 @@
             {:else if row.state === "running"}<span class="tf-chip tf-info">timer running</span>
             {:else if row.state === "label"}<span class="tf-chip">needs a ticket</span>
             {:else if row.state === "offered"}<span class="tf-chip">offered</span>
-            {:else}<span class="tf-chip">untracked</span>{/if}
+            {:else}<span class="tf-chip">open</span>{/if}
           </span>
           <span class="tf-tm-acts">
             {#if row.state === "unlogged" && row.target?.kind === "entity"}
@@ -512,7 +518,8 @@
                 </button>
               {/if}
               <button class="tf-btn tf-sm tf-ghost" onclick={() => open({ mode: "assign", row })}>Assign…</button>
-            {:else if row.state === "untracked"}
+              <button class="tf-btn tf-sm tf-ghost" onclick={() => dismiss(row)}>Dismiss</button>
+            {:else if row.state === "open"}
               <button class="tf-btn tf-sm" onclick={() => open({ mode: "assign", row })}>Assign…</button>
             {/if}
           </span>

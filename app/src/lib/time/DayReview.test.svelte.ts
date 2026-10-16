@@ -96,10 +96,11 @@ function render(
       ports: {
         dayBlocks: (from: string, to: string) => {
           asked.push([from, to]);
-          if (over.dayBlocks) return over.dayBlocks();
+          if (over.dayBlocks) return over.dayBlocks().then((record) => ({ ...record, open: [] }));
           return Promise.resolve({
             blocks: listed,
             past_horizon: over.pastHorizon ?? false,
+            open: [],
           });
         },
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {

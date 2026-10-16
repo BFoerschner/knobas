@@ -244,6 +244,55 @@ pub fn focused_spans(observations: &[Observation]) -> Vec<FocusedSpan> {
     spans
 }
 
+/// The parts of `focused` that no interval in `claimed` overlaps: the
+/// **open stretches**, focused time nothing claims (#901).
+///
+/// Pure, and the one subtraction both readers of open time spend: the day
+/// read draws these as rows, and the week's "no target, app open" row adds
+/// them up, so the day's *open* figure and the week's column cannot disagree
+/// about one afternoon. `claimed` need be neither sorted nor disjoint --
+/// blocks may overlap since #279 made them editable -- so it is walked as a
+/// sorted sweep per span. Spans of no length are left out.
+#[must_use]
+pub fn open_spans(
+    focused: &[FocusedSpan],
+    claimed: &[(DateTime<Utc>, DateTime<Utc>)],
+) -> Vec<FocusedSpan> {
+    let mut claims: Vec<(DateTime<Utc>, DateTime<Utc>)> = claimed
+        .iter()
+        .copied()
+        .filter(|(began, ended)| began < ended)
+        .collect();
+    claims.sort_by_key(|(began, _)| *began);
+
+    let mut open = Vec::new();
+    for span in focused {
+        let mut reached = span.started_at;
+        for &(began, ended) in &claims {
+            if ended <= reached || began >= span.ended_at {
+                continue;
+            }
+            if began > reached {
+                open.push(FocusedSpan {
+                    started_at: reached,
+                    ended_at: began,
+                });
+            }
+            reached = reached.max(ended);
+            if reached >= span.ended_at {
+                break;
+            }
+        }
+        if reached < span.ended_at {
+            open.push(FocusedSpan {
+                started_at: reached,
+                ended_at: span.ended_at,
+            });
+        }
+    }
+    open
+}
+
 /// Turn a sequence of observations into the passive blocks it supports.
 ///
 /// **Pure**: no clock, no database, no setting. Give it beats, get spans.
@@ -523,6 +572,150 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
                     entity_id = excluded.entity_id,
                     label = excluded.label";
 
+/// Hold the dismissals still while [`materialize`] reads them and writes the
+/// offers they decide (#900).
+///
+/// Without it a [`dismiss`] committing between the read of [`DISMISSED`] and
+/// the [`OFFER`] upsert is undone: the read missed it, so the upsert writes
+/// the dismissed row back and the read that ran beside the click offers it
+/// again. `share row exclusive` conflicts with the `row exclusive` lock
+/// [`DISMISS`] takes on the table, so a dismissal waits for a reconciliation
+/// in flight (and then deletes the row it wrote) or the reconciliation waits
+/// for it (and then reads it). It also conflicts with itself, so two
+/// reconciliations queue rather than deadlock on each other's
+/// [`DISMISSAL_GROWS`].
+const DISMISSALS_HELD: &str = "lock table knobas.passive_dismissal in share row exclusive mode";
+
+/// The starts of the stretches a person dismissed, inside the day (#900).
+/// Read inside the reconciliation's transaction, under [`DISMISSALS_HELD`].
+const DISMISSED: &str = "select started_at from knobas.passive_dismissal
+      where started_at >= $1 and started_at < $2";
+
+/// Keep a dismissal as long as the stretch it stops offering: today's last
+/// stretch grows by a beat every thirty seconds, and the part past the
+/// dismissal is still dismissed, not open.
+const DISMISSAL_GROWS: &str = "update knobas.passive_dismissal
+      set ended_at = greatest(ended_at, $2)
+      where started_at = $1";
+
+/// Dismiss one offered block: delete the row and remember its stretch, in one
+/// statement. `kind = 'passive'` is the rule that only an offer can be
+/// dismissed; `worklog_id is null` is belt and braces, as in [`FORGET`].
+const DISMISS: &str = "with gone as (
+         delete from knobas.block
+          where id = $1 and kind = 'passive' and worklog_id is null
+         returning started_at, ended_at
+     )
+     insert into knobas.passive_dismissal (started_at, ended_at)
+     select started_at, ended_at from gone
+     on conflict (started_at)
+     do update set ended_at = greatest(knobas.passive_dismissal.ended_at, excluded.ended_at)
+     returning started_at";
+
+/// Why a dismissal matched no row. Read *after* the write, never before it.
+const DISMISS_DIAGNOSE: &str = "select kind from knobas.block where id = $1";
+
+/// What claims time in a day besides its blocks: the stretches a person
+/// dismissed (#900), and the running timer from its start to now, which is not
+/// a block until it stops. Both are not *open*: a dismissed stretch was named
+/// and turned down, and open time is "with no timer".
+const SET_ASIDE: &str = "select started_at, ended_at from knobas.passive_dismissal
+      where started_at < $2 and ended_at > $1
+     union all
+     select started_at, greatest(started_at, now()) from knobas.timer
+      where started_at < $2";
+
+/// Dismiss an offered (passive) block: it is gone, and
+/// [`materialize`] does not offer a stretch starting where it did again (#900).
+///
+/// A table of dismissals rather than a marker on the block (migration `0041`):
+/// a marked row would be a row every other reader of blocks had to learn to
+/// skip, and the one reader that has to respect a dismissal is the one that
+/// writes passive rows. Keyed by the start, a passive block's identity.
+///
+/// # Errors
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a block that is not an offer
+/// (a block a person tracked is deleted, not dismissed),
+/// [`NotFound`](crate::IpcErrorCode::NotFound) for a block that is not there,
+/// [`IpcError`] if the write fails.
+pub async fn dismiss(pool: &PgPool, id: i64) -> Result<(), IpcError> {
+    if sqlx::query(DISMISS)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?
+        .is_some()
+    {
+        return Ok(());
+    }
+    let kind: Option<String> = sqlx::query_scalar(DISMISS_DIAGNOSE)
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+    Err(match kind {
+        None => IpcError::not_found(format!(
+            "there is no block {id} -- it may have been assigned or dismissed in another window"
+        )),
+        Some(_) => IpcError::invalid(
+            "only a block knobas offered can be dismissed. Delete a block you tracked instead.",
+        ),
+    })
+}
+
+/// The intervals in `[from, to)` that claim time besides the day's blocks:
+/// dismissed stretches and the running timer (see [`SET_ASIDE`]).
+///
+/// # Errors
+/// [`IpcError`] if the read fails.
+pub(super) async fn set_aside(
+    pool: &PgPool,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+) -> Result<Vec<(DateTime<Utc>, DateTime<Utc>)>, IpcError> {
+    let rows = sqlx::query(SET_ASIDE)
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| Ok((row.try_get(0)?, row.try_get(1)?)))
+        .collect::<Result<_, sqlx::Error>>()?)
+}
+
+/// The open stretches of `[from, to)` (#901): the day's focused time minus
+/// `blocks` and whatever else [`set_aside`] says claims time.
+///
+/// Nothing past the horizon: the observations are gone, and the day reads as
+/// absent, not as a day with nothing open (#337).
+///
+/// # Errors
+/// [`IpcError`] if a read fails.
+pub(super) async fn open_in(
+    pool: &PgPool,
+    from: DateTime<Utc>,
+    to: DateTime<Utc>,
+    blocks: &[(DateTime<Utc>, DateTime<Utc>)],
+) -> Result<Vec<FocusedSpan>, IpcError> {
+    if horizon_of(pool).await?.passed(from) {
+        return Ok(Vec::new());
+    }
+    let rows = sqlx::query(OBSERVATIONS)
+        .bind(from)
+        .bind(to)
+        .fetch_all(pool)
+        .await?;
+    if rows.is_empty() {
+        return Ok(Vec::new());
+    }
+    let observations = rows
+        .iter()
+        .map(observation_of)
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut claimed = set_aside(pool, from, to).await?;
+    claimed.extend_from_slice(blocks);
+    Ok(open_spans(&focused_spans(&observations), &claimed))
+}
+
 /// Make the day's unassigned passive blocks equal to what the observations
 /// support.
 ///
@@ -562,6 +755,10 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
 ///   wins and the span is dropped whole, the direction that can only lose a
 ///   suggestion and never invent one.
 ///
+/// And one thing stops it offering a span: **a person dismissed it** (#900).
+/// A span starting where a dismissal does is not offered, and the dismissal
+/// grows with it.
+///
 /// # Errors
 /// [`IpcError`] if any of the reads or writes fails.
 pub(super) async fn materialize(
@@ -599,7 +796,7 @@ pub(super) async fn materialize(
         .map(|row| Ok((row.try_get("started_at")?, row.try_get("ended_at")?)))
         .collect::<Result<_, sqlx::Error>>()?;
 
-    let spans: Vec<PassiveSpan> = derive(&observations)
+    let derived: Vec<PassiveSpan> = derive(&observations)
         .into_iter()
         .filter(|span| {
             !owned
@@ -608,8 +805,25 @@ pub(super) async fn materialize(
         })
         .collect();
 
-    let starts: Vec<DateTime<Utc>> = spans.iter().map(|span| span.started_at).collect();
     let mut tx = pool.begin().await?;
+    sqlx::query(DISMISSALS_HELD).execute(&mut *tx).await?;
+    let dismissed: Vec<DateTime<Utc>> = sqlx::query_scalar(DISMISSED)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&mut *tx)
+        .await?;
+    let (turned_down, spans): (Vec<PassiveSpan>, Vec<PassiveSpan>) = derived
+        .into_iter()
+        .partition(|span| dismissed.contains(&span.started_at));
+
+    let starts: Vec<DateTime<Utc>> = spans.iter().map(|span| span.started_at).collect();
+    for span in &turned_down {
+        sqlx::query(DISMISSAL_GROWS)
+            .bind(span.started_at)
+            .bind(span.ended_at)
+            .execute(&mut *tx)
+            .await?;
+    }
     sqlx::query(FORGET)
         .bind(from)
         .bind(to)
@@ -861,6 +1075,66 @@ mod tests {
 
     fn seconds(span: &PassiveSpan) -> i64 {
         span.length().num_seconds()
+    }
+
+    /// `(start, end)` in seconds after nine, for reading spans back.
+    fn shape(spans: &[FocusedSpan]) -> Vec<(i64, i64)> {
+        let nine = at(0);
+        spans
+            .iter()
+            .map(|span| {
+                (
+                    (span.started_at - nine).num_seconds(),
+                    (span.ended_at - nine).num_seconds(),
+                )
+            })
+            .collect()
+    }
+
+    /// **What the open stretches are, and what the "no target" row adds up**
+    /// (#901, moved from `week.rs`'s `uncovered_seconds` test), with the shapes
+    /// that can each be wrong on their own: a claim inside the span, two claims
+    /// that overlap each other, a claim running off both ends, and a claim
+    /// that touches two spans.
+    #[test]
+    fn open_stretches_are_focused_time_minus_the_union_of_what_claims_it() {
+        let span = |from, to| FocusedSpan {
+            started_at: at(from),
+            ended_at: at(to),
+        };
+        let morning = [span(0, 3 * 3600)];
+
+        assert_eq!(
+            shape(&open_spans(&morning, &[])),
+            vec![(0, 3 * 3600)],
+            "nothing claimed is the whole span"
+        );
+        assert_eq!(
+            shape(&open_spans(&morning, &[(at(3600), at(7200))])),
+            vec![(0, 3600), (7200, 3 * 3600)],
+            "one hour of it is claimed, in the middle"
+        );
+        assert_eq!(
+            shape(&open_spans(
+                &morning,
+                &[(at(5400), at(9000)), (at(3600), at(7200))]
+            )),
+            vec![(0, 3600), (9000, 3 * 3600)],
+            "overlapping claims are legal (#279), unsorted, and count once"
+        );
+        assert_eq!(
+            shape(&open_spans(&morning, &[(at(-3600), at(4 * 3600))])),
+            Vec::<(i64, i64)>::new(),
+            "a claim running off both ends leaves nothing"
+        );
+        assert_eq!(
+            shape(&open_spans(
+                &[span(0, 600), span(1200, 1800)],
+                &[(at(300), at(1500))]
+            )),
+            vec![(0, 300), (1500, 1800)],
+            "one claim across two spans trims both"
+        );
     }
 
     /// **A silence is a break in focused time, not more of it**, and the

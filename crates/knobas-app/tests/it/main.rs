@@ -25,6 +25,7 @@ mod clone_ipc;
 mod config_schema_mirror;
 mod contexts_ipc;
 mod conversation_ipc;
+mod day_offers_ipc;
 mod demo;
 mod demo_delete_during_load;
 mod dependencies_ipc;

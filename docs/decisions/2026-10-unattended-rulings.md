@@ -3654,3 +3654,46 @@ Ruled by the merge-manager (PR #1026).
   what is counted, not the copy. **Reversing:** low.
 - **No IPC or fake change.** `?fake-ipc` already answered `job_reach` and the `reach` scope, so
   PAY-231's lines draw under the fixture with no fixture edit, and no §10.8 entry is needed.
+## #900 and #901 — Time Day: Dismiss an offered block, and open stretches (2026-10-16)
+
+- **A dismissal is a row in a table of its own, keyed by the stretch's start** (migration `0041`,
+  `knobas.passive_dismissal`), not a marker on `knobas.block`. `materialize` re-derives passive rows
+  before every day read, and the start is the one thing about a derived stretch that never moves
+  (`0015`'s unique index makes it the passive identity). A marked row would be one the week,
+  worklog and standup reads all had to learn to skip. **Reversing:** medium (a migration and a
+  §10.8 surface).
+- **A new command, `dismiss_block`, not a change to `delete_block`.** The ticket asks for one, and
+  *Delete block* on a block a person tracked keeps meaning delete. **Reversing:** low.
+- **The dismissal grows with its stretch.** `materialize` moves the dismissal's end to the span's
+  end each read, so today's still-growing stretch stays dismissed past the moment of the click.
+  **Reversing:** low (one statement).
+- **Dismissed time is not open time, and neither is the running timer's.** An open row offers
+  *Assign…*, which would offer a dismissed stretch again; and the open copy says "with no timer".
+  Both are set aside (`passive::set_aside`) beside the day's blocks. **Reversing:** low.
+- **The open stretches are a field on `DayRecord`**, the shape the ticket names, computed by one
+  pure function (`passive::open_spans`). **The week's "no target, app open" row now adds up the
+  same stretches** (it replaces `week::uncovered_seconds`), so it too leaves out dismissed
+  stretches and the running timer's time. Without that the Day tab's *open* figure and the week's
+  cell for the same day would disagree. **Reversing:** low.
+- **The Day tab's *open* figure is the sum of its open rows**, read from `day_blocks`; the Day tab
+  no longer reads `week_timesheet` at all (one read fewer per day). **Reversing:** low.
+- **Untracked gap rows are gone.** R-13.4 lists the Day's row kinds and has none for time that is
+  neither a block nor focused, and prototype-6 draws none; a gap may be lunch. *+ Add a block*
+  still makes a block anywhere. **Reversing:** low (`day-view.ts` dropped the gap segments).
+- **Open rows offer *Assign…* only**, not *Add to <current job>*: the Day tab is handed no current
+  job, as #827 ruled for its untracked rows. Follow-up #1027. **Reversing:** with #1027.
+- **The share's time part does not carry dismissals yet**, and dismissals are not pruned with the
+  observations (a day past the horizon is never reconciled, and the rows are tiny). Follow-up
+  #1028 (backlog). **Reversing:** with #1028.
+
+Ruled by the merge-manager (PR #1029).
+
+- **`materialize` locks `knobas.passive_dismissal` in `share row exclusive` mode and reads the
+  dismissals inside its transaction.** It read them before the transaction, so a *Dismiss*
+  committing between that read and the `OFFER` upsert was undone: the upsert wrote the row back
+  and the read beside the click offered it again (witnessed: with the lock removed,
+  `a_dismissal_committing_beside_a_read_is_not_offered_back` fails with the stretch offered).
+  `DISMISS`'s `row exclusive` lock conflicts with it, so one waits for the other; the mode also
+  conflicts with itself, so two reconciliations queue rather than deadlock on
+  `DISMISSAL_GROWS`. The cost is that two day reads reconcile one after the other, for the length
+  of a short transaction. **Reversing:** low (one statement), but the race comes back with it.

@@ -42,7 +42,7 @@ function states(rows: DayRow[]) {
   return rows.map((row) => [row.state, row.from, row.to]);
 }
 
-test("each block is one row with its state, and the time nobody claimed is a row too", () => {
+test("each block is one row with its state, each open stretch is a row, and a gap that is neither is no row", () => {
   const blocks = [
     block(1, at(8, 50), at(9, 25), { worklog_id: 7, target: { kind: "entity", entity_id: "jira:PAY-228" } }),
     block(2, at(9, 25), at(9, 40), { kind: "passive", target: { kind: "entity", entity_id: "gitea:payments#139" } }),
@@ -53,16 +53,21 @@ test("each block is one row with its state, and the time nobody claimed is a row
     day: DAY,
     blocks,
     offers: { 2: offer("jira:PAY-228"), 3: onTicket, 5: offer("jira:PAY-200", "last_logged") },
+    open: [{ started_at: at(12, 35), ended_at: at(13, 10) }],
     running: null,
     now: new Date(2026, 7, 22, 15, 0),
   });
+  // 11:50 to 12:35 is neither a block nor focused time: lunch, as far as
+  // knobas knows, and not a row.
   expect(states(rows)).toEqual([
     ["logged", at(8, 50), at(9, 25)],
     ["offered", at(9, 25), at(9, 40)],
     ["unlogged", at(9, 40), at(11, 50)],
-    ["untracked", at(11, 50), at(13, 10)],
+    ["open", at(12, 35), at(13, 10)],
     ["label", at(13, 10), at(13, 58)],
   ]);
+  expect(rows[3]!.target).toBeNull();
+  expect(rows[3]!.block).toBeNull();
   expect(rows[1]!.suggestion).toEqual({ entity_id: "jira:PAY-228", title: null, rule: "linked_to_target" });
   expect(rows[4]!.suggestion?.entity_id).toBe("jira:PAY-200");
 });
@@ -92,7 +97,7 @@ test("before the backend has answered, an entity block reads as unlogged and a l
   expect(rows.map((row) => row.state)).toEqual(["unlogged", "label"]);
 });
 
-test("the running timer is a row that runs to now, and the gap before it is a row", () => {
+test("the running timer is a row that runs to now, and the gap before it is no row", () => {
   const running: RunningTimer = {
     target: { kind: "entity", entity_id: "jira:PAY-231" },
     started_at: at(13, 58),
@@ -107,7 +112,6 @@ test("the running timer is a row that runs to now, and the gap before it is a ro
   });
   expect(states(rows)).toEqual([
     ["unlogged", at(9, 40), at(11, 50)],
-    ["untracked", at(11, 50), at(13, 58)],
     ["running", at(13, 58), at(14, 41)],
   ]);
   expect(rows.filter((row) => row.state === "running")).toHaveLength(1);
@@ -125,7 +129,7 @@ test("a timer that started yesterday runs on today's strip from midnight, and on
   expect(before).toEqual([]);
 });
 
-test("the five figures: tracked counts the running timer, offered and open stand beside it", () => {
+test("the five figures: tracked counts the running timer, offered and open stand beside it, open is its rows", () => {
   const running: RunningTimer = {
     target: { kind: "entity", entity_id: "jira:PAY-231" },
     started_at: at(13, 58),
@@ -140,10 +144,15 @@ test("the five figures: tracked counts the running timer, offered and open stand
       block(5, at(13, 10), at(13, 58), { target: { kind: "label", label: "Standup" } }),
     ],
     offers: { 2: onTicket, 3: onTicket, 5: offer("jira:PAY-200") },
+    open: [
+      // Two stretches, 25 and 10 minutes: *open* is their sum.
+      { started_at: at(12, 10), ended_at: at(12, 20) },
+      { started_at: at(12, 35), ended_at: at(13, 0) },
+    ],
     running,
     now: new Date(2026, 7, 22, 14, 42),
   });
-  expect(dayFigures(rows, 35 * 60)).toEqual({
+  expect(dayFigures(rows)).toEqual({
     // 35 + 130 + 48 + 44 (running)
     tracked: 257,
     logged: 35,

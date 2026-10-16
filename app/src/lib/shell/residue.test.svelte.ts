@@ -1877,7 +1877,7 @@ const CASES: Case[] = [
           router: createRouter(),
           day: "2026-09-03",
           ports: {
-            dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
+            dayBlocks: () => deferred({ blocks: [], past_horizon: false, open: [] }),
             updateBlock: () => Promise.reject(new Error("no edit in this test")),
             deleteBlock: () => Promise.reject(new Error("no edit in this test")),
           },
@@ -1900,7 +1900,7 @@ const CASES: Case[] = [
           timer: { current: null },
           ontimer: undefined,
           ports: {
-            dayBlocks: () => deferred({ blocks: [], past_horizon: false }),
+            dayBlocks: () => deferred({ blocks: [], past_horizon: false, open: [] }),
             weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
             adHocBlock: () => Promise.reject(new Error("no offer in this test")),
           },

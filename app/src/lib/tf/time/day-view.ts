@@ -2,10 +2,10 @@
  * The Time view's Day tab, as arithmetic (#827, R-13.4): which row each block
  * is, the five figures, and where the strip draws each row.
  *
- * Pure, over the reads the rooms UI's day review already makes: `day_blocks`
- * for the blocks, `ad_hoc_block` for whether a block is on a ticket and what
- * knobas would suggest when it is not, the timer for the running block, and
- * `week_timesheet` for the fifth figure. The component asks; this decides.
+ * Pure, over the reads: `day_blocks` for the blocks and the open stretches,
+ * `ad_hoc_block` for whether a block is on a ticket and what knobas would
+ * suggest when it is not, and the timer for the running block. The component
+ * asks; this decides.
  *
  * ## Six states, one per row
  *
@@ -16,15 +16,19 @@
  * - `running`: the timer, from its start to now. Not a block until it stops,
  *   and the only row the strip draws yellow.
  * - `offered`: a passive block, knobas' guess at what was in front of you.
- * - `untracked`: time between two rows that no block covers.
+ * - `open`: focused time nothing claims (#901), from `day_blocks`' `open`:
+ *   knobas was in front, with no timer and nothing it could name.
+ *
+ * Time between rows that is neither a block nor open is no row: knobas was not
+ * in front, and that may be lunch as easily as work (R-13.4 draws no such row).
  *
  * Whether a block is on a ticket is the backend's answer (`ad_hoc_block` is
  * `null` for a block on a ticket), never a list of kinds kept here.
  */
-import type { AdHocBlock, DayBlock, RunningTimer, Suggestion, TimerTarget } from "../../ipc/time";
+import type { AdHocBlock, DayBlock, OpenStretch, RunningTimer, Suggestion, TimerTarget } from "../../ipc/time";
 import { dayBounds, segmentsOf } from "../../time/day";
 
-export type RowState = "logged" | "unlogged" | "label" | "running" | "offered" | "untracked";
+export type RowState = "logged" | "unlogged" | "label" | "running" | "offered" | "open";
 
 export interface DayRow {
   key: string;
@@ -35,9 +39,9 @@ export interface DayRow {
   to: string;
   /** Milliseconds, so the figures add before they floor. */
   ms: number;
-  /** The block behind the row; `null` for the running timer and untracked time. */
+  /** The block behind the row; `null` for the running timer and open time. */
   block: DayBlock | null;
-  /** What the row is on; `null` for untracked time. */
+  /** What the row is on; `null` for open time. */
   target: TimerTarget | null;
   /** The ticket *Add to* or *Log to* names, or `null`. */
   suggestion: Suggestion | null;
@@ -52,6 +56,8 @@ export interface DayInput {
    * is "not a ticket" with knobas' suggestion, a missing id is not answered yet.
    */
   offers: Record<number, AdHocBlock | null | undefined>;
+  /** The day's open stretches, as `day_blocks` answers them. */
+  open?: OpenStretch[];
   running: RunningTimer | null;
   now: Date;
 }
@@ -79,8 +85,24 @@ function suggestionOf(entry: DayBlock, offer: AdHocBlock | null | undefined): Su
   return null;
 }
 
-/** The day, a row per block, the running timer and every stretch between. */
+/** The day: a row per block, the running timer and each open stretch, in time order. */
 export function dayRows(input: DayInput): DayRow[] {
+  const open = (input.open ?? []).map(
+    (stretch, index): DayRow => ({
+      key: `open-${index}`,
+      state: "open",
+      from: stretch.started_at,
+      to: stretch.ended_at,
+      ms: instant(stretch.ended_at) - instant(stretch.started_at),
+      block: null,
+      target: null,
+      suggestion: null,
+    }),
+  );
+  return [...blockRows(input), ...open].sort((a, b) => instant(a.from) - instant(b.from));
+}
+
+function blockRows(input: DayInput): DayRow[] {
   const { from: start, to: end } = dayBounds(input.day);
   const blocks = [...input.blocks];
 
@@ -102,45 +124,38 @@ export function dayRows(input: DayInput): DayRow[] {
     });
   }
 
-  return segmentsOf(blocks).map((segment): DayRow => {
-    if (segment.kind === "gap") {
-      return {
-        key: segment.key,
-        state: "untracked",
-        from: segment.from,
-        to: segment.to,
-        ms: instant(segment.to) - instant(segment.from),
-        block: null,
-        target: null,
-        suggestion: null,
-      };
-    }
+  return segmentsOf(blocks).flatMap((segment): DayRow[] => {
+    if (segment.kind === "gap") return [];
     const entry = segment.block;
     const { block } = entry;
     const ms = Math.max(0, instant(block.ended_at) - instant(block.started_at));
     if (block.id === RUNNING_ID) {
-      return {
-        key: "running",
-        state: "running",
+      return [
+        {
+          key: "running",
+          state: "running",
+          from: block.started_at,
+          to: block.ended_at,
+          ms,
+          block: null,
+          target: block.target,
+          suggestion: null,
+        },
+      ];
+    }
+    const offer = input.offers[block.id];
+    return [
+      {
+        key: segment.key,
+        state: stateOf(entry, offer),
         from: block.started_at,
         to: block.ended_at,
         ms,
-        block: null,
+        block: entry,
         target: block.target,
-        suggestion: null,
-      };
-    }
-    const offer = input.offers[block.id];
-    return {
-      key: segment.key,
-      state: stateOf(entry, offer),
-      from: block.started_at,
-      to: block.ended_at,
-      ms,
-      block: entry,
-      target: block.target,
-      suggestion: suggestionOf(entry, offer),
-    };
+        suggestion: suggestionOf(entry, offer),
+      },
+    ];
   });
 }
 
@@ -153,13 +168,13 @@ export interface DayFigures {
   toLog: number;
   /** Passive blocks, beside tracked rather than in it. */
   offered: number;
-  /** Focused time no block covers, from `week_timesheet`'s no-target row. */
+  /** Focused time nothing claims: the sum of the open rows. */
   open: number;
 }
 
 const minutes = (ms: number) => Math.floor(ms / 60_000);
 
-export function dayFigures(rows: DayRow[], openSeconds: number): DayFigures {
+export function dayFigures(rows: DayRow[]): DayFigures {
   const sum = (keep: (row: DayRow) => boolean) =>
     minutes(rows.filter(keep).reduce((total, row) => total + row.ms, 0));
   return {
@@ -167,7 +182,7 @@ export function dayFigures(rows: DayRow[], openSeconds: number): DayFigures {
     logged: sum((row) => row.state === "logged"),
     toLog: sum((row) => row.state === "unlogged"),
     offered: sum((row) => row.state === "offered"),
-    open: Math.floor(openSeconds / 60),
+    open: sum((row) => row.state === "open"),
   };
 }
 
