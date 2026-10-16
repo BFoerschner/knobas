@@ -279,3 +279,54 @@ async fn runs_of_something_that_is_no_pipeline_are_refused() {
         );
     }
 }
+
+/// **A run finds its pipeline by identity within its own source** (#848):
+/// TeamCity names are not unique across projects, and a second server can
+/// reuse a configuration id the first one has. Two configurations called
+/// "Integration Tests" in two projects of one source, and a second source
+/// with the first one's id: each pipeline carries its own run and no other,
+/// in both reads.
+#[tokio::test]
+async fn a_run_joins_its_pipeline_by_id_within_its_source_only() {
+    let pool = pool().await;
+    let (a, b) = (source(&pool).await, source(&pool).await);
+    let a_payout = configuration(&pool, &a, "Payout_IntegrationTests", "Integration Tests").await;
+    let a_billing = format!("{a}:buildType:Billing_IntegrationTests");
+    item(
+        &pool,
+        &a_billing,
+        &a,
+        "build_config",
+        "2026-08-20T00:00:00Z",
+        serde_json::json!({ "id": "Billing_IntegrationTests", "name": "Integration Tests",
+                            "projectId": "Billing", "projectName": "Billing" }),
+    )
+    .await;
+    let b_payout = configuration(&pool, &b, "Payout_IntegrationTests", "Integration Tests").await;
+    let at = "2026-08-22T10:09:17Z";
+    let run_a_payout = build(&pool, &a, 1, "Payout_IntegrationTests", Some("SUCCESS"), at).await;
+    let run_a_billing = build(
+        &pool,
+        &a,
+        2,
+        "Billing_IntegrationTests",
+        Some("FAILURE"),
+        at,
+    )
+    .await;
+    let run_b_payout = build(&pool, &b, 3, "Payout_IntegrationTests", Some("SUCCESS"), at).await;
+
+    let all = pipelines_inner(&pool).await.unwrap();
+    for (pipeline, run) in [
+        (&a_payout, &run_a_payout),
+        (&a_billing, &run_a_billing),
+        (&b_payout, &run_b_payout),
+    ] {
+        let row = all.iter().find(|p| &p.entity_id == pipeline).unwrap();
+        let recent: Vec<&str> = row.recent.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(recent, [run.as_str()], "pipelines: {pipeline}");
+        let runs = pipeline_runs_inner(&pool, pipeline, None).await.unwrap();
+        let ids: Vec<&str> = runs.iter().map(|r| r.entity_id.as_str()).collect();
+        assert_eq!(ids, [run.as_str()], "pipeline_runs: {pipeline}");
+    }
+}
