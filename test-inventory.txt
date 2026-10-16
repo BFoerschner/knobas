@@ -443,6 +443,7 @@ knobas-app	test/it	assets_ipc::the_pane_lists_the_monitors_watching_an_asset_wit
 knobas-app	test/it	assets_ipc::the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells
 knobas-app	test/it	assets_ipc::the_panel_refuses_an_id_no_asset_carries
 knobas-app	test/it	assets_ipc::the_rollup_takes_the_worst_of_an_assets_status_and_its_monitors
+knobas-app	test/it	assets_ipc::the_roster_carries_the_environment_and_owner_in_force
 knobas-app	test/it	assets_ipc::the_roster_draws_each_monitors_type_target_reading_uptime_and_certificate
 knobas-app	test/it	assets_ipc::the_roster_is_ordered_by_where_an_asset_sits_and_then_by_name
 knobas-app	test/it	assets_ipc::the_roster_lists_the_assets_nothing_watches_and_leaves_out_the_ones_it_does
@@ -2045,6 +2046,7 @@ knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
 knobas-source	lib/knobas_source	tests::a_commit_file_crosses_in_its_own_shape
+knobas-source	lib/knobas_source	tests::a_create_queued_before_kinds_reads_as_an_http_check
 knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_status_it_came_from
 knobas-source	lib/knobas_source	tests::a_merge_queued_before_the_delete_flag_reads_as_one_that_keeps_the_branch
 knobas-source	lib/knobas_source	tests::a_merge_style_is_its_lowercase_word_and_nothing_else_decodes
@@ -2724,6 +2726,8 @@ knobas-source-kuma	lib/knobas_source_kuma	config::tests::a_key_the_schema_does_n
 knobas-source-kuma	lib/knobas_source_kuma	config::tests::an_empty_blob_is_the_defaults
 knobas-source-kuma	lib/knobas_source_kuma	config::tests::the_degenerate_values_are_refused_by_name
 knobas-source-kuma	lib/knobas_source_kuma	create::tests::a_create_knobas_cannot_deliver_is_refused_here
+knobas-source-kuma	lib/knobas_source_kuma	create::tests::a_target_its_kind_cannot_read_is_refused_here
+knobas-source-kuma	lib/knobas_source_kuma	create::tests::each_kind_names_its_own_type_and_fields
 knobas-source-kuma	lib/knobas_source_kuma	create::tests::the_document_is_the_seeds_own
 knobas-source-kuma	lib/knobas_source_kuma	create::tests::the_minted_id_is_read_out_of_kumas_own_answer
 knobas-source-kuma	lib/knobas_source_kuma	create::tests::the_name_and_the_url_are_the_callers_own
@@ -2765,6 +2769,7 @@ knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_session_that_only_pin
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_ack_is_matched_on_the_whole_id
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_emit_is_a_packet_type_an_ack_id_and_a_document
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_unreadable_answer_is_a_fault_rather_than_a_success
+knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_docker_hosts_come_out_of_the_pushed_list
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::the_session_id_comes_out_of_the_open_packet
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_configuration_that_cannot_work_is_refused_at_build_time
 knobas-source-kuma	lib/knobas_source_kuma	source::tests::a_create_without_an_account_is_refused_by_the_same_sentence
@@ -2789,6 +2794,7 @@ knobas-source-kuma	test/live_kuma	a_monitor_created_through_the_write_op_is_publ
 knobas-source-kuma	test/live_kuma	a_monitor_deleted_through_the_seeds_helper_is_swept
 knobas-source-kuma	test/live_kuma	a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back
 knobas-source-kuma	test/live_kuma	a_refused_account_and_a_refused_write_are_different_faults
+knobas-source-kuma	test/live_kuma	a_tcp_check_and_a_ping_are_published_as_their_own_kinds
 knobas-source-kuma	test/live_kuma	a_wrong_api_key_is_the_credential_health_path
 knobas-source-kuma	test/live_kuma	an_idle_poll_emits_nothing_and_keeps_its_cursor
 knobas-source-kuma	test/live_kuma	only_a_source_with_an_account_offers_the_write_ops
