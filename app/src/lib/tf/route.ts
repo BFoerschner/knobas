@@ -93,8 +93,8 @@ const SECTION_OF: Record<string, Section> = {
  * - `tickets` is home: the empty address lands here, as in the prototype.
  * - `job` carries the ticket key and the job's tab (`#/job/PAY-231/conv`),
  *   either of which may be absent.
- * - `full` is every other section: a full view, with whatever follows its
- *   first segment kept as `rest` for the ticket that builds it.
+ * - `full` is every other section: a full view, its first segment kept as
+ *   `head` and whatever follows it as `rest` for the ticket that builds it.
  * - `unknown` is an address this shell has no place for. A launcher row still
  *   produces rooms-UI addresses (`#/ticket/jira:PAY-231`), and saying so
  *   beats drawing Tickets under an address that names something else.
@@ -102,7 +102,16 @@ const SECTION_OF: Record<string, Section> = {
 export type TfRoute =
   | { view: "tickets"; rest: string[] }
   | { view: "job"; key: string | null; tab: string | null }
-  | { view: "full"; section: Exclude<Section, "tickets" | "job">; rest: string[] }
+  | {
+      view: "full";
+      section: Exclude<Section, "tickets" | "job">;
+      /**
+       * The address's first segment, which several sections have more than
+       * one of: `builds` is the Builds list and `build` a run (#848).
+       */
+      head: string;
+      rest: string[];
+    }
   | { view: "unknown"; hash: string };
 
 /** Read an address. Total: every string is some route. */
@@ -117,7 +126,7 @@ export function parseTfHash(hash: string): TfRoute {
   if (section === "job") {
     return { view: "job", key: segments[1] || null, tab: segments[2] || null };
   }
-  return { view: "full", section, rest: segments.slice(1) };
+  return { view: "full", section, head, rest: segments.slice(1) };
 }
 
 /** The section a route lights in the nav, or `null` for an unknown address. */
