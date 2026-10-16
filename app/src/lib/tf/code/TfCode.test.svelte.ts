@@ -1,0 +1,204 @@
+/**
+ * Code (#837, R-8.1, R-8.2), mounted over stand-in reads: the two tabs and
+ * their counts, the repository rows, the pull request groups from the
+ * attention read (#712), the job column and chip, the filters, and where
+ * *New pull request* goes. What `list_entities` groups is the backend's
+ * (`knobas-app`'s attention tests); here the reads are stand-ins.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type { CheckoutView, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
+import { forgetFilters } from "../filter/filter-state.svelte";
+import type { CodePorts } from "./TfCode.svelte";
+import TfCode from "./TfCode.svelte";
+
+const NOW = new Date(2026, 7, 22, 14, 32);
+
+function row(entity_id: string, kind: string, title: string, extra: Partial<EntityRow> = {}): EntityRow {
+  return {
+    entity_id,
+    kind,
+    source_id: "gitea",
+    title,
+    updated_at: "2026-08-22T08:20:00Z",
+    synced_at: "2026-08-22T14:30:00Z",
+    path: null,
+    state: null,
+    ...extra,
+  };
+}
+
+const PAYOUT = "tidewater/payout-service";
+const repo = (name: string, updated: string) => row(`gitea:tidewater/${name}`, "repo", `tidewater/${name}`, { updated_at: updated });
+const pr = (n: number, title: string, state: "open" | "merged" | "closed", path = PAYOUT, updated = "2026-08-22T08:20:00Z") =>
+  row(`gitea:${path}#${n}`, "pr", title, {
+    path,
+    updated_at: updated,
+    state: { text: state, tone: state === "open" ? "info" : state === "merged" ? "ok" : "muted" },
+  });
+
+const REPOS = [
+  repo("ledger-api", "2026-08-21T10:00:00Z"),
+  repo("payout-service", "2026-08-20T10:00:00Z"),
+  repo("fx-rates", "2026-08-22T09:00:00Z"),
+];
+const OPEN = [
+  pr(144, "Add payout CSV export", "open"),
+  pr(142, "SEPA retry with exponential backoff", "open"),
+  pr(77, "Bump dependencies", "open", "tidewater/ledger-api", "2026-08-10T10:00:00Z"),
+];
+const GROUPS: GroupTally[] = [
+  { group: "review_requested", count: 1 },
+  { group: "my_pull_requests", count: 1 },
+  { group: "open_pull_requests", count: 1 },
+];
+const SETTLED = [pr(139, "Fix ledger drift on partial refunds", "merged", "tidewater/ledger-api")];
+const BRANCH = row(`gitea:${PAYOUT}@refs/heads/feature/PAY-231-sepa-retry`, "branch", "feature/PAY-231-sepa-retry", { path: PAYOUT });
+
+function page(rows: EntityRow[], groups: GroupTally[] | null = null): EntityPage {
+  return { rows, total: rows.length, tally: null, groups };
+}
+
+function checkout(path: string | null): CheckoutView {
+  return {
+    repo_entity_id: null,
+    repo_url: null,
+    path,
+    found_by: path === null ? "nothing" : "scan",
+    clones_root: "/Users/mara/src",
+    clone_command: null,
+    tree:
+      path === null
+        ? null
+        : { status: "read", branch: "feature/PAY-231-sepa-retry", head: null, upstream: null, ahead: 3, behind: 0, changed: 1, untracked: 0, conflicted: 0 },
+  };
+}
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+let reads: EntityFilter[];
+
+beforeEach(() => {
+  forgetFilters();
+  reads = [];
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+});
+
+function ports(over: Partial<CodePorts> = {}): CodePorts {
+  return {
+    listEntities: async (filter) => {
+      reads.push(filter);
+      if (filter.kinds.includes("repo")) return page(REPOS);
+      if (filter.kinds.includes("branch")) return page(filter.reach === "jira:PAY-231" ? [BRANCH] : []);
+      if (filter.order === "attention") return page(OPEN, GROUPS);
+      return page([...OPEN, ...SETTLED]);
+    },
+    entityCheckout: async (id) => checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null),
+    listSources: async () => [{ id: "gitea", base_url: "https://git.example.com" }, { id: "jira" }],
+    listContexts: async () => [],
+    getEntity: async (id) => {
+      if (id !== "jira:PAY-231") throw { code: "not_found" };
+      return { row: { entity_id: id, kind: "ticket" } } as never;
+    },
+    jobReach: async (id): Promise<Reached[]> =>
+      id === "jira:PAY-231"
+        ? [
+            { entity_id: `gitea:${PAYOUT}`, kind: "repo", step: `gitea:${PAYOUT}`, origin: { kind: "own" } as never },
+            { entity_id: `gitea:${PAYOUT}#142`, kind: "pr", step: `gitea:${PAYOUT}#142`, origin: { kind: "own" } as never },
+            { entity_id: BRANCH.entity_id, kind: "branch", step: BRANCH.entity_id, origin: { kind: "own" } as never },
+          ]
+        : [],
+    ...over,
+  };
+}
+
+async function draw(rest: string[], job: string | null = "PAY-231", stand: CodePorts = ports()) {
+  view = mount(TfCode, { target, props: { ready: true, rest, job, ports: stand, now: NOW } });
+  for (let i = 0; i < 10; i += 1) await Promise.resolve();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const cells = (tr: Element) => [...tr.querySelectorAll("td")].map((td) => text(td));
+
+test("#/code opens on Repositories: yours first, then by last push, with open PRs, checkout and job chip", async () => {
+  await draw([]);
+
+  expect(text(target.querySelector("h1"))).toBe("Code");
+  expect(text(target.querySelector(".tf-sub"))).toBe("3 repositories on git.example.com, what asks for you first.");
+  const tabs = [...target.querySelectorAll(".tf-tabs a")];
+  expect(tabs.map(text)).toEqual(["Repositories 3", "Pull requests 4"]);
+  expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
+
+  const rows = [...target.querySelectorAll("tbody tr")];
+  expect(rows.map(cells)).toEqual([
+    ["tidewater/payout-service PAY-231", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20"],
+    ["tidewater/fx-rates", "0", "not on this machine", "today 11:00"],
+    ["tidewater/ledger-api", "1", "not on this machine", "yesterday 12:00"],
+  ]);
+  expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
+});
+
+test("Pull requests are grouped in the attention read's order, then merged or closed, each with its job", async () => {
+  await draw(["prs"]);
+
+  expect([...target.querySelectorAll(".tf-cgroup-h")].map(text)).toEqual([
+    "Asking for your review 1",
+    "Yours 1",
+    "Open, others 1",
+    "Merged or closed 1",
+  ]);
+  const rows = [...target.querySelectorAll("tbody tr")].map(cells);
+  expect(rows).toEqual([
+    ["#144", `Add payout CSV export${PAYOUT}`, "open", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}`, "open", "PAY-231", "today 10:20"],
+    ["#77", "Bump dependenciestidewater/ledger-api, idle for more than 5 days", "open", "", "2026-08-10"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api", "merged", "", "today 10:20"],
+  ]);
+  const attention = reads.find((filter) => filter.order === "attention");
+  expect(attention?.kinds).toEqual(["pr"]);
+});
+
+test("Waiting on me keeps the review asked of you; This job with nothing held offers Search all of Code", async () => {
+  await draw(["prs"]);
+  const chip = [...target.querySelectorAll("button")].find((button) => text(button) === "Waiting on me")!;
+  chip.click();
+  flushSync();
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#144"]);
+  chip.click();
+
+  const merged = [...target.querySelectorAll("button")].find((button) => text(button) === "Merged")!;
+  merged.click();
+  const scope = [...target.querySelectorAll("button")].find((button) => text(button).startsWith("This job"))!;
+  scope.click();
+  flushSync();
+  expect(target.querySelectorAll("tbody tr")).toHaveLength(0);
+  const all = [...target.querySelectorAll("button")].find((button) => text(button) === "Search all of Code")!;
+  all.click();
+  flushSync();
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["#139"]);
+});
+
+test("New pull request opens the compare page for the job's branch; with no job it cannot", async () => {
+  await draw([]);
+  const link = [...target.querySelectorAll("a")].find((a) => text(a) === "New pull request");
+  expect(link?.getAttribute("href")).toBe(
+    "#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2FPAY-231-sepa-retry",
+  );
+  unmount(view!);
+  view = null;
+
+  await draw([], null);
+  const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
+  expect(button?.getAttribute("aria-disabled")).toBe("true");
+  expect(target.querySelector(".tf-chip-job")).toBeNull();
+});

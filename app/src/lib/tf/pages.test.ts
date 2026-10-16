@@ -6,6 +6,7 @@ import { expect, test } from "vitest";
 
 import { page as buildsPage } from "./builds/page";
 import { page as assetTreePage } from "./asset-tree/page";
+import { page as codePage } from "./code/page";
 import { page as depsPage } from "./deps/page";
 import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
@@ -26,6 +27,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(depsPage);
   expect(PAGES).toContain(assetTreePage);
   expect(PAGES).toContain(inboxPage);
+  expect(PAGES).toContain(codePage);
 });
 
 const ADDRESSES = [
@@ -44,7 +46,11 @@ const ADDRESSES = [
   ["#/builds", "builds"],
   ["#/builds/teamcity%3AbuildType%3APayout_Build", "builds"],
   ["#/build/x/y", "builds"],
-  ["#/code", "shell"],
+  ["#/code", "code"],
+  ["#/code/repos", "code"],
+  ["#/code/prs", "code"],
+  ["#/repo/gitea%3Atidewater%2Fpayout-service", "shell"],
+  ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "shell"],
   ["#/deps", "deps"],
   ["#/map", "deps"],
   ["#/assets", "asset tree"],
@@ -66,6 +72,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [depsPage, "deps"],
     [assetTreePage, "asset tree"],
     [inboxPage, "inbox"],
+    [codePage, "code"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);

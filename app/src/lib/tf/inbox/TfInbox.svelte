@@ -34,10 +34,10 @@
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
-  import { keyOf, resolveTicket, type SourceFacts } from "../job/job";
+  import type { SourceFacts } from "../job/job";
+  import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
     failed,
-    jobIndex,
     KIND_CHIPS,
     kindOf,
     opener,
@@ -47,7 +47,6 @@
     untilLabel,
     visible,
     when,
-    type OpenJob,
   } from "./inbox";
 
   /** The reads and the write this view makes beside the inbox store. */
@@ -85,12 +84,6 @@
 
   const now = $derived(fixedNow ?? new Date());
 
-  /**
-   * How many jobs' reaches are read to name a row's job: the open jobs (the
-   * ticket contexts opening a job promotes), newest first.
-   */
-  const JOB_LIMIT = 30;
-
   const filter = sessionFilter("inbox");
   // Prototype-6 opens the Inbox on *All*.
   if (filter.scope === null) filter.scope = "all";
@@ -115,35 +108,12 @@
   );
   const shelf = $derived(snoozedLine(inbox.snoozed));
 
-  /** The open jobs, the current one first, each with what it reaches. */
-  async function readJobs(current: string | null): Promise<OpenJob[]> {
-    const contexts = await ports.listContexts().catch(() => [] as ContextRow[]);
-    let ids = contexts
-      .filter((row) => row.kind === "ticket" && row.anchor_id !== null && row.archived_at === null)
-      .map((row) => row.anchor_id as string);
-    if (current !== null) {
-      let id = ids.find((candidate) => keyOf(candidate) === current) ?? null;
-      if (id === null) {
-        const sources = await ports.listSources().catch(() => [] as SourceFacts[]);
-        const found = await resolveTicket(current, sources, ports.getEntity).catch(() => null);
-        id = found?.row.entity_id ?? null;
-      }
-      if (id !== null) ids = [id, ...ids.filter((candidate) => candidate !== id)];
-    }
-    ids = ids.slice(0, JOB_LIMIT);
-    const answers = await Promise.allSettled(ids.map((id) => ports.jobReach(id)));
-    return ids.map((id, at) => {
-      const answer = answers[at]!;
-      return { id, reached: answer.status === "fulfilled" ? answer.value : [] };
-    });
-  }
-
   $effect(() => {
     if (!ready) return;
     const current = job;
     // An answer that lands after the view is gone, or after the job changed, draws into nothing.
     let live = true;
-    void readJobs(current).then((read) => {
+    void readOpenJobs(ports, current).then((read) => {
       if (live) jobs = read;
     });
     return () => {

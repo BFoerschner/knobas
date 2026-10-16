@@ -27,6 +27,33 @@ const FIXTURE_HOST = "http://127.0.0.1:5399";
 /** When the fixture claims it last synced. Fixed, so screenshots are stable. */
 export const SYNCED_AT = "2026-08-22T14:30:00Z";
 
+/** Code's repositories (#837): name and last push. */
+const CODE_REPOS: [name: string, updated: string][] = [
+  ["psp-client", "2026-08-21T13:20:00Z"],
+  ["refund-worker", "2026-08-22T07:05:00Z"],
+  ["fx-rates", "2026-08-19T09:40:00Z"],
+  ["payout-dashboard", "2026-08-20T15:10:00Z"],
+  ["settlement-reports", "2026-08-14T10:00:00Z"],
+  ["rust-common", "2026-08-21T08:30:00Z"],
+  ["api-contracts", "2026-08-18T16:45:00Z"],
+  ["booking-api", "2026-08-22T12:15:00Z"],
+  ["tracking-events", "2026-08-12T11:00:00Z"],
+  ["auth-gateway", "2026-08-17T14:20:00Z"],
+];
+
+/** Code's pull requests (#837): repository, number, title, state, author, updated, reviewers asked. */
+const CODE_PRS: [string, number, string, "open" | "merged" | "closed", string, string, string[]?][] = [
+  ["ledger", 139, "Fix ledger drift on partial refunds", "merged", "mara", "2026-08-21T16:00:00Z"],
+  ["psp-client", 57, "Treat TEMP_UNAVAILABLE as transient", "merged", "mara", "2026-08-20T15:10:00Z"],
+  ["fx-rates", 88, "Retry on 429", "open", "priya", "2026-08-22T09:10:00Z"],
+  ["booking-api", 121, "Paginate list endpoint", "open", "jonas", "2026-08-21T17:40:00Z"],
+  ["tracking-events", 64, "Add tracing spans", "open", "tomasz", "2026-08-12T10:30:00Z"],
+  ["auth-gateway", 33, "Make timeouts configurable", "open", "lena", "2026-08-22T13:05:00Z", ["mara"]],
+  ["payout-dashboard", 73, "Cache lookup results", "open", "priya", "2026-08-20T09:55:00Z"],
+  ["rust-common", 41, "Bump dependencies", "closed", "sven", "2026-08-18T12:00:00Z"],
+  ["refund-worker", 19, "Batch inserts", "merged", "aylin", "2026-08-22T07:00:00Z"],
+];
+
 /**
  * A slice of the Tidewater dataset, plus one kind nothing declares.
  *
@@ -162,11 +189,14 @@ export const CORPUS: {
   }),
   // A pull request that asks the fixture's user for a review (#815), so
   // PAY-236's card says *review asked of you* as prototype-6's does.
-  row("mock:payout-service#150", "pr", "Payout CSV export", "2026-08-20T11:00:00Z", "jonas", {
+  row("mock:payout-service#150", "pr", "Payout CSV export", "2026-08-22T11:50:00Z", "jonas", {
     num: 150,
     repo: "payout-service",
     state: "open",
     requested_reviewers: ["mara"],
+    // The chip and path Gitea declares (#837), so Code groups it.
+    chip: { text: "open", tone: "info" },
+    path: "tidewater/payout-service",
   }),
   // The commit and the build carry the ticket's key -- in the branch name and
   // in the message body -- because that is the evidence `FAKE_SUGGESTIONS`
@@ -216,6 +246,24 @@ export const CORPUS: {
   // What PAY-231's job draws beyond the rows above (#817): its builds,
   // monitors and pages. See `job-reach.ts`.
   ...JOB_ROWS,
+  // Code (#837): enough repositories and pull requests beside the two above
+  // to compare *Repositories* and *Pull requests* with prototype-6, every
+  // pull request with the chip and parent path Gitea declares.
+  ...CODE_REPOS.map(([name, updated]) => ({
+    ...row(`mock:tidewater/${name}`, "repo", `tidewater/${name}`, updated, null, { full_name: `tidewater/${name}` }),
+    web_url: `https://gitea.example.com/tidewater/${name}`,
+  })),
+  ...CODE_PRS.map(([repo, num, title, state, author, updated, reviewers]) =>
+    row(`mock:${repo}#${num}`, "pr", title, updated, author, {
+      num,
+      repo,
+      state: state === "open" ? "open" : "closed",
+      merged: state === "merged",
+      ...(reviewers ? { requested_reviewers: reviewers } : {}),
+      chip: { text: state, tone: state === "open" ? "info" : state === "merged" ? "ok" : "muted" },
+      path: `tidewater/${repo}`,
+    }),
+  ),
 ];
 
 /** One corpus entry, with the fields every row shares filled in. */
@@ -583,6 +631,11 @@ function listEntities(args: Record<string, unknown>) {
   // The fixture is the mock corpus, whose adapter declares no state: under
   // the tile orders that is §3a's recency fallback, so the rows above are
   // already the answer and the tally is a count per kind with no tone.
+  // Code's pull requests (#837) carry a chip, so for a read of pull requests
+  // alone `attention` does what the real one does (#712): it drops the
+  // settled ones and groups the rest for the fixture's identity, `mara`.
+  const groups = filter.order === "attention" && filter.kinds?.length === 1 && filter.kinds[0] === "pr" ? fakeGroups(rows) : null;
+  if (groups !== null) rows = groups.rows;
   const mirrored = rows.map(mirrorRow);
   const tally = tileOrder
     ? [...new Set(mirrored.map((row) => row.kind))].map((kind) => ({
@@ -591,7 +644,25 @@ function listEntities(args: Record<string, unknown>) {
         count: mirrored.filter((row) => row.kind === kind).length,
       }))
     : null;
-  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally, groups: null };
+  return { rows: mirrored.slice(offset, offset + limit), total: rows.length, tally, groups: groups?.tally ?? null };
+}
+
+/** The attention groups of pull requests (#712), for the fixture's identity: rows group by group, newest first in each. */
+function fakeGroups(rows: (typeof CORPUS)[number][]) {
+  const ME = "mara";
+  const settled = (entry: (typeof CORPUS)[number]) => ["ok", "muted"].includes(mirrorRow(entry).state?.tone ?? "");
+  const groupOf = (entry: (typeof CORPUS)[number]) => {
+    const asked = entry.payload["requested_reviewers"];
+    if (Array.isArray(asked) && asked.includes(ME)) return "review_requested";
+    return entry.author === ME ? "my_pull_requests" : "open_pull_requests";
+  };
+  const order = ["review_requested", "my_pull_requests", "open_pull_requests"];
+  const open = rows.filter((entry) => !settled(entry));
+  const grouped = order.map((group) => open.filter((entry) => groupOf(entry) === group));
+  return {
+    rows: grouped.flat(),
+    tally: order.map((group, at) => ({ group, count: grouped[at]!.length })).filter((tally) => tally.count > 0),
+  };
 }
 
 /**

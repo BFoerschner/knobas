@@ -2533,3 +2533,43 @@ Implementer, one PR for both.
 - **The *This job* screenshots** were taken through a throwaway page that loads the app in an iframe
   at `#/job/PAY-231` and then moves it to `#/builds`, since a job is current only after one was
   opened. Nothing in the app changed for it. **Reversing:** none needed.
+
+## #837 Code: Repositories and Pull requests (2026-10-16)
+
+- **No *Team* or *Language* column or dropdown, and no author on a pull request's line.** Gitea's
+  repository declares no path (`knobas-source-gitea/src/lib.rs`), Gitea keeps no team on a
+  repository record, and `EntityRow` carries no author. The design system's "nothing invented for
+  a field no source declares" decides it; the placeholders drop the words with them ("Filter N
+  repositories by name", "Filter pull requests by title, repo or number"). Follow-up #966 is to
+  declare them. **Reversing:** a column and a dropdown each, once a read answers them.
+- **A repository is named by the mirror's title, `owner/name`,** not prototype-6's bare name: a
+  second owner would make two rows read the same. **Reversing:** low.
+- ***Mine*:** a pull request asking your review or yours (prototype-6's `p.by===ME||p.wait`); a
+  repository holding one of those. Nothing declares a repository's owner. **Reversing:** low
+  (`visiblePrs`, `visibleRepos` in `tf/code/code.ts`).
+- ***Yours* holds open pull requests only.** The attention read (#712) says whose a pull request is
+  and drops settled ones, so a merged pull request of yours is under *Merged or closed*.
+  **Reversing:** needs the author on a row (#966).
+- **With no identity configured** the attention read returns no groups, and the open pull requests
+  are drawn first with no header, then *Merged or closed*; no header claims "others".
+  **Reversing:** low.
+- **Last push is the repository's `updated_at`,** which Gitea moves on a push. **Reversing:** low.
+- **Local checkout** is `entity_checkout` per repository, four at a time: the branch and where it
+  stands (`main, clean`; `feature/x, 3 ahead, 1 changed`, changed counting untracked), the path
+  when git could not be read, *not on this machine* with no clone. **Reversing:** low.
+- ***New pull request*** opens `#/repo/<repo entity id>/compare/<branch>` (#840's page) for the
+  first branch the job reaches whose repository is mirrored. With no job, or a job with no branch,
+  it is a disabled button whose title says why. **Reversing:** low (`compareHash`).
+- **The per-row *Open in…* and *Clone* are not drawn;** they are #844's and #846's. **Reversing:** a
+  column.
+- **A pull request's number is its id's `#<n>`** (`gitea:owner/repo#142`), the one place it is
+  written without a declaration; an id without one draws no number. **Reversing:** a declared
+  number path.
+- **An idle pull request's line says "idle for more than 5 days"** (prototype-6's filler words),
+  computed from `updated_at`. **Reversing:** low.
+- **Which job a row belongs to moved to `tf/job/open-jobs.ts`** (`readOpenJobs`, `jobIndex`), shared
+  by the Inbox and Code. The repository's job chip is drawn in every scope; prototype-6's reason
+  label under *This job* is not. **Reversing:** low.
+- **`?fake-ipc` groups pull requests under `attention`** for a read of pull requests alone, as the
+  real read does for the fixture's identity `mara`; other attention reads are as before.
+  **Reversing:** low (`fakeGroups` in `fake/corpus.ts`).

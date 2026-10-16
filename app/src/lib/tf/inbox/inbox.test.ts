@@ -5,8 +5,8 @@
 import { describe, expect, test } from "vitest";
 
 import type { InboxEntry, InboxItem, Reached } from "../../ipc/entity";
+import { jobIndex } from "../job/open-jobs";
 import {
-  jobIndex,
   kindOf,
   opener,
   rowActions,
