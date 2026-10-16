@@ -782,6 +782,8 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
         source_name: "TeamCity".to_owned(),
         name: "Lint".to_owned(),
         group: None,
+        path: vec!["Payments".to_owned()],
+        pinned: false,
         web_url: None,
         recent: vec![queued],
     };
@@ -793,6 +795,8 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
             "entity_id",
             "group",
             "name",
+            "path",
+            "pinned",
             "recent",
             "source_id",
             "source_name",
@@ -800,6 +804,48 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
         ],
     );
     assert_shape("RunRow", &wire["recent"][0], &run_keys);
+}
+
+/// `job_pipelines` (#850): a pipeline id and its reasons, each tagged on
+/// `kind` -- `ipc/entity.ts`' `JobPipeline` and `PipelineReason`.
+#[test]
+fn the_job_pipeline_shape_matches_its_typescript_mirror() {
+    use knobas_app::commands::entity::{JobPipeline, PipelineReason};
+    let row = JobPipeline {
+        pipeline_id: "teamcity:buildType:Payout_Lint".to_owned(),
+        reasons: vec![
+            PipelineReason::Branch {
+                branch: "feature/PAY-231-sepa-retry".to_owned(),
+            },
+            PipelineReason::PrCheck {
+                pr: "gitea:acme/svc#142".to_owned(),
+            },
+            PipelineReason::Linked {
+                step: "jira:PAY-230".to_owned(),
+                origin: knobas_core::reach::Origin::Parent {
+                    ticket: "jira:PAY-230".to_owned(),
+                },
+            },
+        ],
+    };
+    let wire = serde_json::to_value(&row).unwrap();
+    assert_shape("JobPipeline", &wire, &["pipeline_id", "reasons"]);
+    assert_eq!(
+        wire["reasons"],
+        serde_json::json!([
+            { "kind": "branch", "branch": "feature/PAY-231-sepa-retry" },
+            { "kind": "pr_check", "pr": "gitea:acme/svc#142" },
+            { "kind": "linked", "step": "jira:PAY-230",
+              "origin": { "kind": "parent", "ticket": "jira:PAY-230" } }
+        ])
+    );
+    assert!(MIRROR.contains(concat!(
+        r#"| { kind: "branch"; branch: string }"#,
+        "\n  ",
+        r#"| { kind: "pr_check"; pr: string }"#,
+        "\n  ",
+        r#"| { kind: "linked"; step: string; origin: ReachOrigin };"#
+    )));
 }
 
 fn note_row() -> knobas_core::note::NoteRow {

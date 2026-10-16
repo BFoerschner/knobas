@@ -1285,9 +1285,23 @@ pub struct PipelineRow {
     pub source_name: String,
     pub name: String,
     pub group: Option<String>,
+    /// The chain of groups it sits in, outermost first (#849): the declared
+    /// `group_path`. Empty where the source declares none or the record
+    /// carries none; the list then draws it under its `group`.
+    pub path: Vec<String>,
+    /// Whether the reader pinned it (#849): knobas-local, never the
+    /// source's ([`PINS_SETTING`]).
+    pub pinned: bool,
     pub web_url: Option<String>,
     pub recent: Vec<RunRow>,
 }
+
+/// The `knobas.setting` key holding the pinned pipelines (#849, R-9.3): a
+/// JSON array of entity ids. In `knobas.setting` rather than a table of its
+/// own, for the reason the clones root is (`0002`, comment 6): a short list
+/// of app-level state with no other home. [`PIPELINES`] spells it as a
+/// literal, and `the_pins_are_read_by_their_constant` holds the two together.
+pub const PINS_SETTING: &str = "builds.pins";
 
 /// How many runs a pipeline row carries: the strip of the last twelve.
 pub const PIPELINE_RECENT: i64 = 12;
@@ -1348,11 +1362,25 @@ p as (
     knobas_core::declared_string!("$1", "group"),
     " as grp, ",
     knobas_core::declared_string!("$1", "pipeline"),
-    " as pkey
+    // The declared chain of groups, in order (#849). One candidate is what a
+    // source declares; a second's names would follow the first's.
+    " as pkey,
+         (select coalesce(jsonb_agg(btrim(e.elem #>> c.entry_segs) order by e.ord), '[]'::jsonb) from ",
+    knobas_core::declared_list_candidates!("$1", "group_path"),
+    " c cross join lateral jsonb_array_elements(
+             case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
+                  then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
+           where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
+             and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) as path
     from frames f
     join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
     left join knobas.source_config c on c.id = i.source_id
    where f.frame = 'pipeline'
+),
+pins as (
+  select jsonb_array_elements_text(value) as id
+    from knobas.setting
+   where key = 'builds.pins' and jsonb_typeof(value) = 'array'
 ),
 r as (
   select x.*, row_number() over (partition by x.source_id, x.pkey
@@ -1365,7 +1393,8 @@ r as (
            where f.frame = 'run') x
    where x.pkey is not null
 )
-select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url,
+select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path,
+       exists (select 1 from pins where pins.id = p.entity_id) as pinned,
        coalesce((select jsonb_agg(jsonb_build_object(
                    'entity_id', r.entity_id, 'number', r.number, 'state', r.state,
                    'branch', r.branch, 'started', r.started, 'finished', r.finished,
@@ -1459,12 +1488,15 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
     rows.iter()
         .map(|row| {
             let recent: sqlx::types::Json<Vec<RawRun>> = row.get("recent");
+            let path: sqlx::types::Json<Vec<String>> = row.get("path");
             Ok(PipelineRow {
                 entity_id: row.get("entity_id"),
                 source_id: row.get("source_id"),
                 source_name: row.get("source_name"),
                 name: row.get("name"),
                 group: row.get("grp"),
+                path: path.0,
+                pinned: row.get("pinned"),
                 web_url: row.get("web_url"),
                 recent: recent.0.into_iter().map(RunRow::from).collect(),
             })
@@ -1544,6 +1576,245 @@ pub async fn pipeline_runs(
 ) -> Result<Vec<RunRow>, IpcError> {
     let pool = lifecycle.pool()?;
     pipeline_runs_inner(&pool, &pipeline_id, limit).await
+}
+
+// -- pins and *This job* (#849, #850) ---------------------------------------
+
+/// Pin or unpin one pipeline (#849, R-9.3), and answer what is now stored.
+///
+/// The pins are a set: pinning twice keeps one, unpinning what is not pinned
+/// changes nothing. They are kept by entity id and never checked against the
+/// mirror, so a pin outlives a sync that withdrew its pipeline and is drawn
+/// again when it comes back. A stored value that is not an array (an older or
+/// a broken knobas) reads as no pins and is replaced by the first write.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for an id that is not an entity
+/// id; [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+pub async fn set_pipeline_pinned_inner(
+    pool: &PgPool,
+    pipeline_id: &str,
+    pinned: bool,
+) -> Result<bool, IpcError> {
+    let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    let stored: serde_json::Value = sqlx::query_scalar(
+        "insert into knobas.setting as s (key, value)
+         values ($1, case when $3 then jsonb_build_array($2::text) else '[]'::jsonb end)
+         on conflict (key) do update set
+           value = (select coalesce(jsonb_agg(distinct x order by x), '[]'::jsonb)
+                      from (select jsonb_array_elements_text(
+                                     case when jsonb_typeof(s.value) = 'array'
+                                          then s.value else '[]'::jsonb end) as x
+                            union select $2::text where $3) kept
+                     where $3 or x <> $2),
+           updated_at = now()
+         returning value",
+    )
+    .bind(PINS_SETTING)
+    .bind(entity.to_string())
+    .bind(pinned)
+    .fetch_one(pool)
+    .await?;
+    let id = entity.to_string();
+    Ok(stored
+        .as_array()
+        .is_some_and(|ids| ids.iter().any(|v| v.as_str() == Some(id.as_str()))))
+}
+
+/// Pin or unpin a pipeline (#849).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`set_pipeline_pinned_inner`] refuses with.
+#[tauri::command]
+pub async fn set_pipeline_pinned(
+    lifecycle: State<'_, Lifecycle>,
+    pipeline_id: String,
+    pinned: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    set_pipeline_pinned_inner(&pool, &pipeline_id, pinned).await
+}
+
+/// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
+/// link set (#866) joins as one more arm without changing these.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum PipelineReason {
+    /// One of its runs built a branch the job reaches: a reached branch, by
+    /// its title, or the branch a reached pull request is opened from (its
+    /// declared `head`). *your branch*.
+    Branch { branch: String },
+    /// One of its runs checked a pull request the job reaches: it ran on the
+    /// pull request's declared `commit` (its head), or the job reaches the run
+    /// through the pull request. *PR check*.
+    PrCheck { pr: String },
+    /// The job reaches the pipeline, or one of its runs, some other way: a
+    /// direct link, or the parent's links (R-7.3). `step` and `origin` are
+    /// the reach's own ([`knobas_core::reach::Reached`]).
+    Linked {
+        step: String,
+        origin: knobas_core::reach::Origin,
+    },
+}
+
+/// One pipeline on a job, with every reason it is there (#850): branches
+/// first, then pull requests, then links, as prototype-6 lists them.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct JobPipeline {
+    pub pipeline_id: String,
+    pub reasons: Vec<PipelineReason>,
+}
+
+/// The pipelines a job's reach puts on it, with their reasons (#850).
+///
+/// `$1` is the declarations; `$2`, `$3` and `$4` are the reach's rows as
+/// three arrays: what is reached, the first step of its path, and its
+/// origin. Every field is a declared one (ADR-0007): a run's `branch` and
+/// `pipeline`, a pull request's `head` and `commit`, a run's revisions as
+/// `sync.item_revision` keeps them (#732). A branch's name is its title,
+/// which is what Gitea titles a branch with and what a pull request's `head`
+/// names (#712). A run built on `refs/heads/<name>` counts as `<name>`.
+const JOB_PIPELINES: &str = concat!(
+    "with ",
+    frame_kinds_cte!(),
+    ",
+reached as (
+  select * from unnest($2::text[], $3::text[], $4::text[]) as r(id, step, origin)
+),
+names as (
+  select i.title as name
+    from reached r join sync.live_item i on i.entity_id = r.id
+   where i.kind = 'branch'
+  union
+  select ",
+    knobas_core::declared_string!("$1", "head"),
+    "
+    from reached r join sync.live_item i on i.entity_id = r.id
+),
+heads as (
+  select r.id as pr, ",
+    knobas_core::declared_string!("$1", "commit"),
+    " as sha
+    from reached r join sync.live_item i on i.entity_id = r.id
+   where i.kind = 'pr'
+),
+p as (
+  select i.entity_id, i.source_id, ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " as pkey
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'pipeline'
+),
+x as (
+  select i.entity_id, i.source_id, ",
+    knobas_core::declared_string!("$1", "pipeline"),
+    " as pkey, ",
+    knobas_core::declared_string!("$1", "branch"),
+    " as branch
+    from frames f
+    join sync.live_item i on i.source_id = f.source_id and i.kind = f.kind
+   where f.frame = 'run'
+),
+reasons as (
+  select p.entity_id as pipeline, 1 as ord, 'branch' as kind, n.name as value, null::text as origin
+    from x
+    join p on p.source_id = x.source_id and p.pkey = x.pkey
+    join names n on n.name is not null
+                and (x.branch = n.name or x.branch = 'refs/heads/' || n.name)
+  union
+  select p.entity_id, 2, 'pr_check', h.pr, null
+    from heads h
+    join sync.item_revision rv on rv.revision = h.sha
+    join x on x.entity_id = rv.entity_id
+    join knobas.source_config s on s.id = x.source_id and s.kind = rv.adapter_kind
+    join p on p.source_id = x.source_id and p.pkey = x.pkey
+  union
+  select p.entity_id,
+         case when se.kind = 'pr' and r.origin = 'own' then 2 else 3 end,
+         case when se.kind = 'pr' and r.origin = 'own' then 'pr_check' else 'linked' end,
+         r.step,
+         case when se.kind = 'pr' and r.origin = 'own' then null else r.origin end
+    from reached r
+    left join x on x.entity_id = r.id
+    join p on p.entity_id = r.id or (p.source_id = x.source_id and p.pkey = x.pkey)
+    left join knobas.entity se on se.id = r.step
+)
+select pipeline, kind, value, origin from reasons order by pipeline, ord, value
+"
+);
+
+/// The pipelines on the job of `ticket_id` (#850), each once with its
+/// reasons, by entity id. A ticket that reaches nothing has none.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
+pub async fn job_pipelines_inner(
+    pool: &PgPool,
+    ticket_id: &str,
+) -> Result<Vec<JobPipeline>, IpcError> {
+    let reached = knobas_core::reach::reach(pool, ticket_id).await?;
+    let ids: Vec<&str> = reached.iter().map(|r| r.entity_id.as_str()).collect();
+    let steps: Vec<&str> = reached.iter().map(|r| r.step.as_str()).collect();
+    let origins: Vec<&str> = reached
+        .iter()
+        .map(|r| match r.origin {
+            knobas_core::reach::Origin::Own => "own",
+            knobas_core::reach::Origin::Parent { .. } => "parent",
+        })
+        .collect();
+    let declarations = declared_paths(pool).await?;
+    let rows: Vec<(String, String, String, Option<String>)> = sqlx::query_as(JOB_PIPELINES)
+        .bind(declarations.as_param())
+        .bind(&ids)
+        .bind(&steps)
+        .bind(&origins)
+        .fetch_all(pool)
+        .await?;
+    let mut out: Vec<JobPipeline> = Vec::new();
+    for (pipeline, kind, value, origin) in rows {
+        let reason = match kind.as_str() {
+            "branch" => PipelineReason::Branch { branch: value },
+            "pr_check" => PipelineReason::PrCheck { pr: value },
+            _ => PipelineReason::Linked {
+                origin: if origin.as_deref() == Some("parent") {
+                    knobas_core::reach::Origin::Parent {
+                        ticket: value.clone(),
+                    }
+                } else {
+                    knobas_core::reach::Origin::Own
+                },
+                step: value,
+            },
+        };
+        match out.last_mut() {
+            Some(last) if last.pipeline_id == pipeline => last.reasons.push(reason),
+            _ => out.push(JobPipeline {
+                pipeline_id: pipeline,
+                reasons: vec![reason],
+            }),
+        }
+    }
+    Ok(out)
+}
+
+/// The pipelines on a job, with their reasons (#850).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`job_pipelines_inner`] refuses with.
+#[tauri::command]
+pub async fn job_pipelines(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Vec<JobPipeline>, IpcError> {
+    let pool = lifecycle.pool()?;
+    job_pipelines_inner(&pool, &entity_id).await
 }
 
 // -- the URL a paste names --------------------------------------------------
@@ -3582,6 +3853,13 @@ mod tests {
     use super::*;
 
     const MIRROR: &str = include_str!("../../../../app/src/lib/ipc/entity.ts");
+
+    /// [`PIPELINES`] spells the pins' key as a literal (a `concat!` takes no
+    /// constant), so this holds it to [`PINS_SETTING`] (#849).
+    #[test]
+    fn the_pins_are_read_by_their_constant() {
+        assert!(PIPELINES.contains(&format!("key = '{PINS_SETTING}'")));
+    }
 
     /// Every command this module registers is invoked by that name from the
     /// mirror, and every command the mirror invokes is registered.

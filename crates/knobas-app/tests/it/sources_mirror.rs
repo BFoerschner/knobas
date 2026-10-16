@@ -304,6 +304,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "finished",
             "frame",
             "group",
+            "group_path",
             "issue_type",
             "name",
             "number",

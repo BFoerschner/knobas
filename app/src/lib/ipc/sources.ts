@@ -120,6 +120,8 @@ export interface KindPaths {
   name: PayloadPath[];
   /** The group a pipeline sits in, in the source's word (#848). */
   group: PayloadPath[];
+  /** The chain of groups a pipeline sits in, outermost first (#849). */
+  group_path: ListPath[];
   /** The pipeline's identity, as a pipeline and its runs both spell it (#848). */
   pipeline: PayloadPath[];
   /** A run's number, a string (#848). */

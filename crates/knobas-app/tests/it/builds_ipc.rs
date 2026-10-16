@@ -6,7 +6,7 @@
 //! Each test configures a TeamCity source of its own, so the rows it reads
 //! back are told apart by `source_id` from anything else in this database.
 
-use knobas_app::commands::entity::{pipeline_runs_inner, pipelines_inner};
+use knobas_app::commands::entity::{pipeline_runs_inner, pipelines_inner, set_pipeline_pinned_inner};
 
 /// A TeamCity source nothing else in this database uses.
 async fn source(pool: &sqlx::PgPool) -> String {
@@ -329,4 +329,73 @@ async fn a_run_joins_its_pipeline_by_id_within_its_source_only() {
         let ids: Vec<&str> = runs.iter().map(|r| r.entity_id.as_str()).collect();
         assert_eq!(ids, [run.as_str()], "pipeline_runs: {pipeline}");
     }
+}
+
+/// **The project tree** (#849, R-9.3): a pipeline carries the chain of
+/// groups its source declares, outermost first, and a record without one
+/// carries an empty chain (the list draws it under its group).
+#[tokio::test]
+async fn a_pipeline_carries_its_chain_of_groups_outermost_first() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let deep = format!("{tc}:buildType:Payout_Deploy_Prod");
+    item(
+        &pool,
+        &deep,
+        &tc,
+        "build_config",
+        "2026-08-20T00:00:00Z",
+        serde_json::json!({
+            "id": "Payout_Deploy_Prod", "name": "Deploy to prod",
+            "projectId": "Payments_Payouts_Deploy", "projectName": "Deploy",
+            "projectPath": [
+                { "id": "Payments", "name": "Payments" },
+                { "id": "Payments_Payouts", "name": "Payouts" },
+                { "id": "Payments_Payouts_Deploy", "name": "Deploy" }
+            ]
+        }),
+    )
+    .await;
+    let flat = configuration(&pool, &tc, "Payout_Lint", "Lint").await;
+
+    let all = pipelines_inner(&pool).await.unwrap();
+    let path = |id: &str| all.iter().find(|p| p.entity_id == id).unwrap().path.clone();
+    assert_eq!(path(&deep), ["Payments", "Payouts", "Deploy"]);
+    assert!(path(&flat).is_empty());
+}
+
+/// **Pins** (#849): knobas-local, a set by entity id, read back on the list.
+#[tokio::test]
+async fn a_pin_is_kept_until_it_is_taken_back() {
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let lint = configuration(&pool, &tc, "Payout_Lint", "Lint").await;
+    let pinned = |all: &[knobas_app::commands::entity::PipelineRow], id: &str| {
+        all.iter().find(|p| p.entity_id == id).unwrap().pinned
+    };
+
+    assert!(set_pipeline_pinned_inner(&pool, &tests, true).await.unwrap());
+    assert!(set_pipeline_pinned_inner(&pool, &tests, true).await.unwrap(), "twice is once");
+    assert!(set_pipeline_pinned_inner(&pool, &lint, true).await.unwrap());
+    let all = pipelines_inner(&pool).await.unwrap();
+    assert!(pinned(&all, &tests) && pinned(&all, &lint));
+
+    assert!(!set_pipeline_pinned_inner(&pool, &tests, false).await.unwrap());
+    let all = pipelines_inner(&pool).await.unwrap();
+    assert!(!pinned(&all, &tests), "unpinned");
+    assert!(pinned(&all, &lint), "the other pin is kept");
+
+    let stored: serde_json::Value =
+        sqlx::query_scalar("select value from knobas.setting where key = $1")
+            .bind(knobas_app::commands::entity::PINS_SETTING)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let ids: Vec<&str> = stored.as_array().unwrap().iter().filter_map(|v| v.as_str()).collect();
+    assert_eq!(ids.iter().filter(|id| **id == lint).count(), 1);
+    assert!(!ids.contains(&tests.as_str()));
+
+    let refused = set_pipeline_pinned_inner(&pool, "not an id", true).await.unwrap_err();
+    assert_eq!(refused.code, knobas_app::IpcErrorCode::Invalid);
 }

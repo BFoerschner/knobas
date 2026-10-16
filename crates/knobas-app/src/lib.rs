@@ -518,6 +518,10 @@ pub fn run() {
             // #836's proposal evidence, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::proposal_evidence,
+            // #849's pin and #850's *This job* read, appended at the foot:
+            // the list is append-only (§10.8).
+            commands::entity::set_pipeline_pinned,
+            commands::entity::job_pipelines,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
