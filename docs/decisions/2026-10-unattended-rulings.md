@@ -3697,3 +3697,44 @@ Ruled by the merge-manager (PR #1029).
   conflicts with itself, so two reconciliations queue rather than deadlock on
   `DISMISSAL_GROWS`. The cost is that two day reads reconcile one after the other, for the length
   of a short transaction. **Reversing:** low (one statement), but the race comes back with it.
+## #903, #904, #1021 — Add a source, and a source's own config, in the new shell (2026-10-17)
+
+Ruled by the implementer (one PR for the three).
+
+- **A config save reads the stored config again and lays only the reader's changes over it.**
+  `update_source` replaces `config` whole, and the sync records field ids into it (#889). The page
+  calls `list_sources` at the press, takes that source's config, and sets or removes only the keys
+  the reader changed since the form was read (`tf/settings/source-config.ts`); Connection's *User*
+  goes the same way. What is left is the window between that read and the write, milliseconds
+  against #1018's whole page lifetime. Closing it needs a merge patch on `update_source` (a §10.8
+  change), not done. **Reversing:** low (two functions).
+- **An emptied field is removed from the config, not stored as `null` or `""`**, so the adapter's
+  default applies and the next sync records a field id again where the reader cleared it.
+  *User* keeps its old behaviour (`null`). **Reversing:** low.
+- **The form follows the stored config until the reader changes something**, so an id the sync
+  recorded shows once the list is read again after the run; a changed field is the reader's until
+  saved. **Reversing:** low.
+- **The source page's config is a second *Save* under *What it syncs*,** beside Connection's; the
+  schedule and pause still save as they change. The config's text fields cannot save per
+  keystroke. **Reversing:** low.
+- **The generated form draws every field the schema declares**, Jira's page size, rates and
+  timeouts included, because "no per-adapter branch" leaves no rule to hide them by. Prototype-6's
+  *Tickets from* radio (Projects or a JQL query, with project chips) is not drawn: it is a Jira
+  branch. **Reversing:** medium (a schema-level hint such as `x-advanced`).
+- **An empty text field's placeholder is *None set***, for every adapter, which is how a field id
+  nobody set reads (#1021). **Reversing:** one attribute.
+- **Add a source is one page, as prototype-6 draws it, not the rooms dialog's five steps.** It
+  keeps the rooms dialog's *Name* and *Id* (an id is needed for a second source of one adapter)
+  and drops its *Schedule* step: a new source syncs every 15 minutes, the rooms default, and its
+  page changes that. The first adapter is chosen when it opens, as in prototype-6. *Add source*
+  waits for a passing test of the draft as it stands (today's rule); editing after the test asks
+  for another. **Reversing:** low.
+- **Prototype-6's note "such as the time zone and the epic field" reads "such as your user and the
+  field ids"**: knobas fills no time zone. The toast is prototype-6's *Added. The first sync is
+  running.* **Reversing:** copy.
+- **The dialog mounts inside `.tf` from Settings, and the rooms `AddSource` is no longer mounted by
+  the new shell** (`add-source.svelte.ts` is gone; Settings re-reads its list on the dialog's
+  save). The rooms UI keeps its own dialog. **Reversing:** low.
+- **Jira's schema fixture transcribes `sprint_field` verbatim** (it was an unnamed absence since
+  #889), and the `?fake-ipc` Jira source carries prototype-6's four projects and a recorded
+  Sprint field id. **Reversing:** low.

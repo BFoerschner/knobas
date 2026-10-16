@@ -76,7 +76,10 @@
     ports
       .listAdapters()
       .then((rows) => {
-        if (!dead) adapters = rows;
+        if (dead) return;
+        adapters = rows;
+        // The first one is chosen, as prototype-6 opens, so the form is there to fill.
+        if (chosen === null && rows[0]) choose(rows[0]);
       })
       .catch((cause) => {
         if (!dead) adaptersError = ipcErrorMessage(cause);
