@@ -95,7 +95,7 @@ async fn a_key_in_a_commit_message_is_quoted_with_the_key_marked() {
         "commit",
         "a41f2c",
         "Backoff jitter",
-        "Spread the retries out. Refs PAY-231; see also PAY-240. Not PAY-2311.",
+        "Spread the retries out. Refs PAY-231; see also PAY-240. Not PAY-2311, nor UTF-8.",
     )
     .await;
     run_rule(&pool, "commit_message_key").await;
@@ -120,7 +120,8 @@ async fn a_key_in_a_commit_message_is_quoted_with_the_key_marked() {
     assert_eq!(
         found.against,
         ["It also names PAY-240 and PAY-2311."],
-        "a text naming other keys is weaker evidence for any one of them"
+        "a text naming other keys is weaker evidence for any one of them; \
+         UTF-8 has a key's shape but no mirrored project"
     );
 }
 

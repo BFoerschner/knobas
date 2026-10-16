@@ -2479,3 +2479,9 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   `knobas.proposed_link` holds, and the evidence counts dismissals against a proposal; each of its
   statements names the population it wants in its own `where`. **Reversing:** low (drop the
   dismissed count and read the views).
+- **Merge-manager: *It also names* lists only keys of a project the mirror holds.** The text's
+  key-shaped words were all named against the proposal, so a commit saying `UTF-8` or `SHA-256`
+  drew "It also names UTF-8." Now a key counts when some live ticket shares its project prefix:
+  `PAY-2311` still counts beside a mirrored `PAY-231`, a key of a project not synced does not.
+  One statement over `knobas.entity`, made only when the text names another key. **Reversing:**
+  low (drop `HELD_PROJECTS`).

@@ -28,7 +28,8 @@
   `suggest` (so the responsiveness probe's after-pass snapshot, keyed on `suggest.rs`, survives).
   Per rule: the four key rules quote the item's title and body around the ticket's key, marked as a
   whole word (the rules' `\m…\M`), list items the same rule found and the reader accepted for the
-  same ticket, and name the other issue keys the text holds against it; `similar_text` quotes each
+  same ticket, and name against it the other issue keys the text holds of a project some live
+  ticket belongs to (so `UTF-8` is no key); `similar_text` quotes each
   end around the lexemes both `fts` share (the common words of #776 left out) through
   `ts_headline('english', …)`, lists the shared words, and says wording alone often matches
   unrelated items; `monitor_url_host` quotes the monitor's text around the host its reason names

@@ -10,8 +10,8 @@
 //!   host in a monitor's text; the words two documents share;
 //! * **support** -- items found the same way and already linked to the same
 //!   ticket, a key named more than once, the shared words;
-//! * **against** -- other keys the same text names, proposals found the same
-//!   way at these ends that the reader dismissed, an end its source withdrew,
+//! * **against** -- other keys the same text names (of a project the mirror
+//!   holds), proposals found the same way at these ends that the reader dismissed, an end its source withdrew,
 //!   and for shared wording, that wording alone often matches unrelated items.
 //!
 //! A read beside the tray and not a field on it: the tray's ranking and its
@@ -153,6 +153,18 @@ const SAME_WAY_ELSEWHERE: &str = "select count(*)
    from knobas.link l
   where l.to_id = $1 and l.rule = $2 and l.id <> $3 and l.deleted_at is null";
 
+/// Of `$1`, the issue-key-shaped words, those of a project some live ticket
+/// in the mirror belongs to, in the order given: `PAY-2311` when `PAY-231`
+/// is mirrored, but not `UTF-8` or `SHA-256`, which have the shape of a key
+/// and are no ticket's.
+const HELD_PROJECTS: &str = "select u.k
+   from unnest($1::text[]) with ordinality as u(k, n)
+  where exists (
+          select 1 from knobas.entity t
+           where t.kind = 'ticket' and t.deleted_at is null
+             and split_part(split_part(t.id, ':', 2), '-', 1) = split_part(u.k, '-', 1))
+  order by u.n";
+
 /// The words two items share, as the similarity rule counts them: lexemes of
 /// both `fts`, the common ones (#776) left out.
 const SHARED_LEXEMES: &str = "with common as (
@@ -240,7 +252,8 @@ pub async fn proposal_evidence(pool: &PgPool, id: Uuid) -> Result<ProposalEviden
 }
 
 /// An exact key: the key quoted where the item names it, the items found the
-/// same way and already linked, and the other keys the text names.
+/// same way and already linked, and the other keys the text names of a
+/// project the mirror holds.
 async fn by_key(
     pool: &PgPool,
     id: Uuid,
@@ -275,16 +288,21 @@ async fn by_key(
         found.support.push(format!("It names {key} {times} times."));
     }
 
-    let mut others: Vec<&str> = Vec::new();
+    let mut others: Vec<String> = Vec::new();
     for field in &fields {
         for other in issue_keys(field) {
-            if other != key && !others.contains(&other) {
-                others.push(other);
+            if other != key && !others.iter().any(|k| k == other) {
+                others.push(other.to_owned());
             }
         }
     }
     if !others.is_empty() {
-        let others: Vec<String> = others.iter().map(|k| (*k).to_owned()).collect();
+        others = sqlx::query_scalar(HELD_PROJECTS)
+            .bind(&others)
+            .fetch_all(pool)
+            .await?;
+    }
+    if !others.is_empty() {
         found.against.push(format!(
             "It also names {}.",
             series(&others, others.len(), " and ")

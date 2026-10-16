@@ -75,7 +75,7 @@
 //! scope of the claim. This test covers SQL written as text, which is all of
 //! the SQL there is right now.
 //!
-//! ## The four exemptions
+//! ## The five exemptions
 //!
 //! All five read the base table on purpose, and all five say why in place:
 //!
@@ -189,7 +189,7 @@ fn offends(relative: &str, source: &str) -> bool {
 
 /// The modules allowed to read the base table, in the header's order.
 ///
-/// A list rather than a chain of `!=`, now that there are four: growing it is
+/// A list rather than a chain of `!=`, now that there are five: growing it is
 /// allowed and is meant to be one line a reviewer sees, which is
 /// `write_choke_point.rs`' `HANDS_TO_THE_QUEUE` treatment.
 const EXEMPT: &[&str] = &[LINK, SUGGEST, SUGGEST_TRAY, EVIDENCE, ATTACH];
