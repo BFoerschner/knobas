@@ -237,11 +237,13 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
 // ---------------------------------------------------------------------------
 
 /**
- * The label a row from the parent carries (R-4.6, R-7.3): "Parent PAY-231".
- * `null` for a row the ticket reaches itself. TF5's link sets add theirs.
+ * The label a row from the parent or a link set carries (R-4.6, R-7.3,
+ * #866): "Parent PAY-231", or the set's name, "Payout stack". `null` for a
+ * row the ticket reaches itself.
  */
 export function originLabel(reached: Pick<Reached, "origin"> | undefined): string | null {
   if (reached?.origin.kind === "parent") return `Parent ${keyOf(reached.origin.ticket)}`;
+  if (reached?.origin.kind === "link_set") return reached.origin.name;
   return null;
 }
 

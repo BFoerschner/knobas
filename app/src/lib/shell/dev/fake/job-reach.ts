@@ -134,23 +134,39 @@ const PAY_231: [id: string, kind: string, step: string][] = [
 ];
 
 /** The parent each sub-task names (`fields.parent.key`). */
-const PARENTS: Record<string, string> = { "mock:PAY-232": "mock:PAY-231" };
+export const PARENTS: Record<string, string> = { "mock:PAY-232": "mock:PAY-231" };
 
 /** R-7.3's switch, for the session. */
 let parentLinks = true;
 
-/** What `ticketId` reaches: its own table, then its parent's direct links. */
+/**
+ * What a ticket's link sets add to its reach (#866): `link-sets.ts` registers
+ * its answer here when it loads, so this module imports nothing from it and
+ * `corpus.ts`, which imports this one, stays out of a cycle.
+ */
+export const SET_REACH: ((ticketId: string) => Reached[])[] = [];
+
+/** What `ticketId` reaches: its own table, then its link sets' members (#866), then its parent's direct links. */
 export function fakeReach(ticketId: string): Reached[] {
   const own: Reached[] =
     ticketId === "mock:PAY-231"
       ? PAY_231.map(([entity_id, kind, step]) => ({ entity_id, kind, step, origin: { kind: "own" } }))
       : [];
+  const sets = SET_REACH.flatMap((read) => read(ticketId)).filter((entry) => !own.some((mine) => mine.entity_id === entry.entity_id));
+  const first = [...own, ...sets];
   const parent = PARENTS[ticketId];
-  if (!parent || !parentLinks) return own;
-  const inherited = fakeReach(parent)
-    .filter((entry) => entry.step === entry.entity_id && !own.some((mine) => mine.entity_id === entry.entity_id))
+  if (!parent || !parentLinks) return first;
+  const inherited = ownReach(parent)
+    .filter((entry) => !first.some((held) => held.entity_id === entry.entity_id))
     .map((entry) => ({ ...entry, step: parent, origin: { kind: "parent" as const, ticket: parent } }));
-  return [...own, ...inherited];
+  return [...first, ...inherited];
+}
+
+/** The parent's own links: its direct ones, never its sets' or its own parent's. */
+function ownReach(ticketId: string): Reached[] {
+  return ticketId === "mock:PAY-231"
+    ? PAY_231.filter(([entity_id, , step]) => entity_id === step).map(([entity_id, kind, step]) => ({ entity_id, kind, step, origin: { kind: "own" } }))
+    : [];
 }
 
 // ---- the start-work flow (#44), for the session ----

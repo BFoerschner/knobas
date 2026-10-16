@@ -1704,9 +1704,13 @@ export function contextMembers(ctxId: string): Promise<string[]> {
 
 /**
  * Where a reached entity's path came from — `knobas_core::reach::Origin`.
- * Tagged on `kind`; TF5's link sets join as one more arm.
+ * Tagged on `kind`: the ticket's own links, the parent's (R-7.3), or a link
+ * set whose rule matches the ticket (#866), named as the reader named it.
  */
-export type ReachOrigin = { kind: "own" } | { kind: "parent"; ticket: string };
+export type ReachOrigin =
+  | { kind: "own" }
+  | { kind: "parent"; ticket: string }
+  | { kind: "link_set"; set: string; name: string };
 
 /** One entity a ticket reaches — `knobas_core::reach::Reached` (#817). */
 export interface Reached {
@@ -2995,4 +2999,109 @@ export function docsEditSection(
 /** *New page* — `docs_create_page` (#862), linked to `linkTo` (a ticket id) once it lands. */
 export function docsCreatePage(page: NewPage, linkTo: string | null): Promise<QueuedWrite> {
   return invoke<QueuedWrite>("docs_create_page", { page, linkTo });
+}
+
+// ---- Link sets (#866, ADR-0025) ----
+
+/** What a link-set member can be (R-7.7's five panels) — `link_sets::MEMBER_KINDS`. */
+export type LinkSetMemberKind = "repo" | "pipeline" | "page" | "asset" | "monitor";
+
+/** What a rule matches on (R-7.1) — `link_sets::RULE_KINDS`. */
+export type LinkSetRuleKind = "epic" | "parent" | "project" | "manual";
+
+/** One fixed member — `knobas_app::link_sets::LinkSetMember`. */
+export interface LinkSetMember {
+  kind: LinkSetMemberKind;
+  entity_id: string;
+}
+
+/**
+ * One rule — `knobas_app::link_sets::LinkSetRule`: a ticket entity id for
+ * `epic`, `parent` and `manual`, `<source id>:<project key>` for `project`.
+ */
+export interface LinkSetRule {
+  kind: LinkSetRuleKind;
+  value: string;
+}
+
+/** What `save_link_set` takes — `LinkSetDraft`: the whole set, in order. */
+export interface LinkSetDraft {
+  /** `null` makes a new set with an id from its name. */
+  id: string | null;
+  name: string;
+  description: string;
+  members: LinkSetMember[];
+  rules: LinkSetRule[];
+}
+
+/** A member as the views draw it — `MemberRow`. */
+export interface LinkSetMemberRow {
+  kind: LinkSetMemberKind;
+  entity_id: string;
+  /** `null` when knobas has no entity of that id. */
+  title: string | null;
+}
+
+/** A rule as the views draw it — `RuleRow`: its ticket's title or project's name. */
+export interface LinkSetRuleRow {
+  kind: LinkSetRuleKind;
+  value: string;
+  title: string | null;
+}
+
+/** One set as the Link sets view lists it — `LinkSetRow` (R-7.6). */
+export interface LinkSetRow {
+  /** A slug: `#/sets/<id>`. */
+  id: string;
+  name: string;
+  description: string;
+  members: LinkSetMemberRow[];
+  rules: LinkSetRuleRow[];
+  /** Live tickets its rules match now. */
+  tickets: number;
+  /** How many of them are yours. */
+  mine: number;
+}
+
+/** A ticket a rule or set applies to — `RuleTicket`. */
+export interface RuleTicket {
+  entity_id: string;
+  title: string;
+  mine: boolean;
+}
+
+/** One set as its editor draws it — `LinkSetDetail` (R-7.7). */
+export interface LinkSetDetail extends LinkSetRow {
+  /** The tickets it shows on now, in key order. */
+  shows_on: RuleTicket[];
+}
+
+/** Every link set, by name (R-7.6). */
+export function linkSets(): Promise<LinkSetRow[]> {
+  return invoke<LinkSetRow[]>("link_sets");
+}
+
+/** One link set and the tickets it shows on; `not_found` for an id nobody holds. */
+export function linkSet(id: string): Promise<LinkSetDetail> {
+  return invoke<LinkSetDetail>("link_set", { id });
+}
+
+/** Save a whole set, members and rules replaced in order; answers it as stored. */
+export function saveLinkSet(draft: LinkSetDraft): Promise<LinkSetDetail> {
+  return invoke<LinkSetDetail>("save_link_set", { draft });
+}
+
+/** Delete a set; links drawn on tickets by hand stay. */
+export function deleteLinkSet(id: string): Promise<void> {
+  return invoke<void>("delete_link_set", { id });
+}
+
+/** The live tickets one rule applies to now, yours marked (R-7.7's live counts). */
+export function previewLinkSetRule(rule: LinkSetRule): Promise<RuleTicket[]> {
+  return invoke<RuleTicket[]>("preview_link_set_rule", { rule });
+}
+
+/** *Hide here* (`hidden`) or *Show again* one set member on one ticket (R-7.5); answers the new state. */
+export function hideLinkSetMember(ticketId: string, memberId: string, hidden: boolean): Promise<boolean> {
+  return invoke<boolean>("hide_link_set_member", { ticketId, memberId, hidden });
 }

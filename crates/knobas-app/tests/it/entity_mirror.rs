@@ -326,7 +326,19 @@ fn the_reached_shape_matches_its_typescript_mirror() {
         ticket: "jira:PAY-231".into(),
     })
     .unwrap();
-    assert!(MIRROR.contains(r#"{ kind: "own" } | { kind: "parent"; ticket: string }"#));
+    assert!(MIRROR.contains(
+        r#"| { kind: "own" }
+  | { kind: "parent"; ticket: string }
+  | { kind: "link_set"; set: string; name: string };"#
+    ));
+    assert_eq!(
+        serde_json::to_value(ReachOrigin::LinkSet {
+            set: "payout-stack".into(),
+            name: "Payout stack".into(),
+        })
+        .unwrap(),
+        serde_json::json!({ "kind": "link_set", "set": "payout-stack", "name": "Payout stack" })
+    );
     assert_eq!(
         parent,
         serde_json::json!({ "kind": "parent", "ticket": "jira:PAY-231" })
@@ -2032,4 +2044,105 @@ fn the_docs_shapes_match_their_typescript_mirror() {
         tags("DocInline"),
         "DocInline's tags in entity.ts must be exactly the Rust enum's",
     );
+}
+
+/// #866's link sets: every DTO the six commands answer or take, and the
+/// commands by their registered names.
+#[test]
+fn the_link_set_shapes_match_their_typescript_mirror() {
+    use knobas_app::link_sets::{
+        LinkSetDetail, LinkSetDraft, LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow,
+        RuleTicket,
+    };
+    let row = LinkSetRow {
+        id: "payout-stack".to_owned(),
+        name: "Payout stack".to_owned(),
+        description: String::new(),
+        members: vec![MemberRow {
+            kind: "repo".to_owned(),
+            entity_id: "gitea:tidewater/payout-service".to_owned(),
+            title: None,
+        }],
+        rules: vec![RuleRow {
+            kind: "epic".to_owned(),
+            value: "jira:PAY-200".to_owned(),
+            title: None,
+        }],
+        tickets: 3,
+        mine: 1,
+    };
+    let fields = [
+        "description",
+        "id",
+        "members",
+        "mine",
+        "name",
+        "rules",
+        "tickets",
+    ];
+    let wire = serde_json::to_value(&row).unwrap();
+    assert_shape("LinkSetRow", &wire, &fields);
+    assert_shape(
+        "LinkSetMemberRow",
+        &wire["members"][0],
+        &["entity_id", "kind", "title"],
+    );
+    assert_shape(
+        "LinkSetRuleRow",
+        &wire["rules"][0],
+        &["kind", "title", "value"],
+    );
+    let detail = serde_json::to_value(LinkSetDetail {
+        set: row,
+        shows_on: vec![RuleTicket {
+            entity_id: "jira:PAY-231".to_owned(),
+            title: "PAY-231".to_owned(),
+            mine: true,
+        }],
+    })
+    .unwrap();
+    assert_eq!(
+        detail["id"], "payout-stack",
+        "the row is flattened into the detail"
+    );
+    assert_shape(
+        "RuleTicket",
+        &detail["shows_on"][0],
+        &["entity_id", "mine", "title"],
+    );
+    let draft = serde_json::to_value(LinkSetDraft {
+        id: None,
+        name: "Payout stack".to_owned(),
+        description: String::new(),
+        members: vec![LinkSetMember {
+            kind: "page".to_owned(),
+            entity_id: "confluence:1".to_owned(),
+        }],
+        rules: vec![LinkSetRule {
+            kind: "manual".to_owned(),
+            value: "jira:PAY-231".to_owned(),
+        }],
+    })
+    .unwrap();
+    assert_shape(
+        "LinkSetDraft",
+        &draft,
+        &["description", "id", "members", "name", "rules"],
+    );
+    assert_shape(
+        "LinkSetMember",
+        &draft["members"][0],
+        &["entity_id", "kind"],
+    );
+    assert_shape("LinkSetRule", &draft["rules"][0], &["kind", "value"]);
+    for command in [
+        "\"link_sets\"",
+        "\"link_set\"",
+        "\"save_link_set\"",
+        "\"delete_link_set\"",
+        "\"preview_link_set_rule\"",
+        "\"hide_link_set_member\"",
+    ] {
+        assert!(MIRROR.contains(command), "{command} is not invoked");
+    }
 }

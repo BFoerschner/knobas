@@ -8,7 +8,7 @@
  */
 import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
-import { keyOf } from "../job/job";
+import { originLabel } from "../job/job";
 import { when } from "../tickets/tickets";
 
 /** How many runs the strip under a pipeline's name shows (R-9.4a). */
@@ -237,7 +237,8 @@ export function pinnedOf(list: readonly PipelineRow[]): PipelineRow[] {
 
 /**
  * What a reason says beside a pipeline on a job, in prototype-6's words:
- * *your branch*, *PR check*, *Parent PAY-230*, else *linked to PAY-231*.
+ * *your branch*, *PR check*, *Parent PAY-230*, a link set's name, else
+ * *linked to PAY-231*.
  */
 export function reasonLabel(reason: PipelineReason, job: string): string {
   switch (reason.kind) {
@@ -246,7 +247,8 @@ export function reasonLabel(reason: PipelineReason, job: string): string {
     case "pr_check":
       return "PR check";
     case "linked":
-      return reason.origin.kind === "parent" ? `Parent ${keyOf(reason.origin.ticket)}` : `linked to ${job}`;
+      // The parent's and a link set's labels are the job sections' (#866).
+      return originLabel(reason) ?? `linked to ${job}`;
   }
 }
 

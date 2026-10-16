@@ -198,6 +198,9 @@ knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_int
 knobas-app	lib/knobas_app	inbox::tests::every_inbox_category_has_a_toggle_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
 knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
+knobas-app	lib/knobas_app	link_sets::tests::a_draft_is_refused_for_what_cannot_be_a_set
+knobas-app	lib/knobas_app	link_sets::tests::a_member_fits_its_kind
+knobas-app	lib/knobas_app	link_sets::tests::a_slug_is_an_address_whatever_the_name_was
 knobas-app	lib/knobas_app	logging::tests::a_pool_timeout_is_logged_with_the_running_command
 knobas-app	lib/knobas_app	logging::tests::a_slow_command_is_logged_with_its_name
 knobas-app	lib/knobas_app	logging::tests::redact_leaves_ordinary_text_alone
@@ -707,6 +710,7 @@ knobas-app	test/it	entity_mirror::the_job_pipeline_shape_matches_its_typescript_
 knobas-app	test/it	entity_mirror::the_kind_info_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_link_entry_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_link_row_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_mirror::the_link_set_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_mini_board_shapes_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_note_detail_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_note_link_input_shape_matches_its_typescript_mirror
@@ -779,6 +783,16 @@ knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
 knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
+knobas-app	test/it	link_sets_ipc::a_rules_preview_is_exactly_the_tickets_that_show_the_set
+knobas-app	test/it	link_sets_ipc::a_set_knobas_cannot_store_is_refused
+knobas-app	test/it	link_sets_ipc::a_set_reads_with_its_contents_rules_and_tickets_now
+knobas-app	test/it	link_sets_ipc::a_this_job_list_holds_the_sets_members
+knobas-app	test/it	link_sets_ipc::an_epic_rule_shows_its_members_on_every_ticket_under_the_epic
+knobas-app	test/it	link_sets_ipc::an_item_shows_once_with_its_first_reason
+knobas-app	test/it	link_sets_ipc::editing_a_set_changes_every_job_at_once
+knobas-app	test/it	link_sets_ipc::hiding_a_member_on_one_ticket_leaves_the_set_and_the_others
+knobas-app	test/it	link_sets_ipc::parent_project_and_manual_rules_match_what_they_name
+knobas-app	test/it	link_sets_ipc::sets_never_feed_membership_the_tray_the_inbox_or_the_export
 knobas-app	test/it	notes_export_ipc::every_note_is_one_markdown_file_with_its_refs_kept_as_text
 knobas-app	test/it	notes_export_ipc::no_notes_writes_an_empty_folder
 knobas-app	test/it	pr_viewed_ipc::a_file_is_viewed_until_it_is_unticked_or_the_head_moves
@@ -1201,6 +1215,7 @@ knobas-core	lib/knobas_core	inbox::tests::the_window_constant_matches_the_statem
 knobas-core	lib/knobas_core	link::tests::origin_roundtrips_through_its_column_value
 knobas-core	lib/knobas_core	link::tests::origin_serializes_as_its_column_value
 knobas-core	lib/knobas_core	link::tests::the_origins_are_exactly_what_the_migration_allows
+knobas-core	lib/knobas_core	link_set::tests::the_depth_is_spelled_once
 knobas-core	lib/knobas_core	markdown::tests::a_file_name_keeps_letters_and_digits
 knobas-core	lib/knobas_core	markdown::tests::a_file_name_stays_in_its_folder_and_writable
 knobas-core	lib/knobas_core	markdown::tests::a_heading_is_hashes_by_level_and_clamped

@@ -2051,7 +2051,7 @@ pub enum PipelineReason {
     /// through the pull request. *PR check*.
     PrCheck { pr: String },
     /// The job reaches the pipeline, or one of its runs, some other way: a
-    /// direct link, or the parent's links (R-7.3). `step` and `origin` are
+    /// direct link, the parent's links (R-7.3), or a link set (#866). `step` and `origin` are
     /// the reach's own ([`knobas_core::reach::Reached`]).
     Linked {
         step: String,
@@ -2164,6 +2164,7 @@ pub async fn job_pipelines_inner(
         .map(|r| match r.origin {
             knobas_core::reach::Origin::Own => "own",
             knobas_core::reach::Origin::Parent { .. } => "parent",
+            knobas_core::reach::Origin::LinkSet { .. } => "link_set",
         })
         .collect();
     let declarations = declared_paths(pool).await?;
@@ -2180,12 +2181,20 @@ pub async fn job_pipelines_inner(
             "branch" => PipelineReason::Branch { branch: value },
             "pr_check" => PipelineReason::PrCheck { pr: value },
             _ => PipelineReason::Linked {
-                origin: if origin.as_deref() == Some("parent") {
-                    knobas_core::reach::Origin::Parent {
+                origin: match origin.as_deref() {
+                    Some("parent") => knobas_core::reach::Origin::Parent {
                         ticket: value.clone(),
-                    }
-                } else {
-                    knobas_core::reach::Origin::Own
+                    },
+                    // A set's member is its own first step (#866), so the
+                    // reach row it came from names the set.
+                    Some("link_set") => reached
+                        .iter()
+                        .find(|r| {
+                            r.step == value
+                                && matches!(r.origin, knobas_core::reach::Origin::LinkSet { .. })
+                        })
+                        .map_or(knobas_core::reach::Origin::Own, |r| r.origin.clone()),
+                    _ => knobas_core::reach::Origin::Own,
                 },
                 step: value,
             },
@@ -5815,4 +5824,91 @@ pub async fn action_item_ticket(
     write_id: i64,
 ) -> Result<ActionItemTicket, IpcError> {
     action_item_ticket_inner(&lifecycle.pool()?, &note_id, write_id).await
+}
+
+// -- Link sets (#866) ----------------------------------------------------------
+
+/// Every link set (#866, R-7.6): [`crate::link_sets::list`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::list`] refuses with.
+#[tauri::command]
+pub async fn link_sets(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::link_sets::LinkSetRow>, IpcError> {
+    crate::link_sets::list(&lifecycle.pool()?).await
+}
+
+/// One link set and the tickets it shows on (#866, R-7.7):
+/// [`crate::link_sets::get`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::get`] refuses with.
+#[tauri::command]
+pub async fn link_set(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+) -> Result<crate::link_sets::LinkSetDetail, IpcError> {
+    crate::link_sets::get(&lifecycle.pool()?, &id).await
+}
+
+/// Save a whole link set (#866): [`crate::link_sets::save`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::save`] refuses with.
+#[tauri::command]
+pub async fn save_link_set(
+    lifecycle: State<'_, Lifecycle>,
+    draft: crate::link_sets::LinkSetDraft,
+) -> Result<crate::link_sets::LinkSetDetail, IpcError> {
+    crate::link_sets::save(&lifecycle.pool()?, draft).await
+}
+
+/// Delete a link set (#866): [`crate::link_sets::delete`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::delete`] refuses with.
+#[tauri::command]
+pub async fn delete_link_set(lifecycle: State<'_, Lifecycle>, id: String) -> Result<(), IpcError> {
+    crate::link_sets::delete(&lifecycle.pool()?, &id).await
+}
+
+/// The tickets one rule applies to now (#866, R-7.7):
+/// [`crate::link_sets::preview`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::preview`] refuses with.
+#[tauri::command]
+pub async fn preview_link_set_rule(
+    lifecycle: State<'_, Lifecycle>,
+    rule: crate::link_sets::LinkSetRule,
+) -> Result<Vec<crate::link_sets::RuleTicket>, IpcError> {
+    crate::link_sets::preview(&lifecycle.pool()?, &rule).await
+}
+
+/// *Hide here* or *Show again* on one ticket (#866, R-7.5):
+/// [`crate::link_sets::hide`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::hide`] refuses with.
+#[tauri::command]
+pub async fn hide_link_set_member(
+    lifecycle: State<'_, Lifecycle>,
+    ticket_id: String,
+    member_id: String,
+    hidden: bool,
+) -> Result<bool, IpcError> {
+    crate::link_sets::hide(&lifecycle.pool()?, &ticket_id, &member_id, hidden).await
 }
