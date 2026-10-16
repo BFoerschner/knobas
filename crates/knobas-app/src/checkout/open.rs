@@ -195,7 +195,8 @@ pub async fn set_applications(
     drafts: &[Draft],
     default: Option<&str>,
 ) -> Result<(), IpcError> {
-    let applications = rules::settle(drafts).map_err(|error| IpcError::invalid(error.to_string()))?;
+    let applications =
+        rules::settle(drafts).map_err(|error| IpcError::invalid(error.to_string()))?;
     let stored = Stored {
         default: default.map(str::to_owned),
         applications,
@@ -474,7 +475,10 @@ mod tests {
         assert_eq!(keys(app), ["command", "file_command", "id", "name"]);
         let body = interface("CheckoutApplication");
         for key in keys(app) {
-            assert!(body.contains(&format!("{key}:")), "CheckoutApplication.{key}");
+            assert!(
+                body.contains(&format!("{key}:")),
+                "CheckoutApplication.{key}"
+            );
         }
         // A draft is what the mirror sends back: the same four, the id optional.
         let draft: knobas_core::checkout::open::Draft = serde_json::from_value(serde_json::json!({
@@ -484,7 +488,10 @@ mod tests {
         assert_eq!(draft.id, None);
         let body = interface("CheckoutApplicationDraft");
         for key in ["id", "name", "command", "file_command"] {
-            assert!(body.contains(&format!("{key}:")), "CheckoutApplicationDraft.{key}");
+            assert!(
+                body.contains(&format!("{key}:")),
+                "CheckoutApplicationDraft.{key}"
+            );
         }
     }
 

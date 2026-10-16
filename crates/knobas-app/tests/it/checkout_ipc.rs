@@ -25,9 +25,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use knobas_app::IpcErrorCode;
+use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
 use knobas_app::checkout::uncommitted::DiffRead;
 use knobas_app::checkout::working_tree::TreeRead;
-use knobas_app::checkout::open::{APPLICATIONS_KEY, GitFound, legacy_key, open};
 use knobas_app::checkout::{
     CheckoutView, FoundBy, Run, clones_root, commands, local_changes, set_applications,
     set_clones_root, set_command, set_override, settings, view,
@@ -847,7 +847,6 @@ async fn recorded(record: &Path) -> Vec<String> {
     panic!("the stub at {} never recorded anything", record.display());
 }
 
-
 fn app(id: Option<&str>, name: &str, command: &str, file: Option<&str>) -> Draft {
     Draft {
         id: id.map(str::to_owned),
@@ -888,9 +887,15 @@ async fn opening_a_checkout_runs_the_application_with_the_scanned_path() {
     let checkout = root.path().join(&repo.name).to_string_lossy().into_owned();
     let expected = ["--wait".to_owned(), checkout.clone()];
 
-    let argv = open(&pool, &repo.id, Run::Application(Some("vscode")), None, None)
-        .await
-        .unwrap();
+    let argv = open(
+        &pool,
+        &repo.id,
+        Run::Application(Some("vscode")),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
     // Exactly two arguments: the flag the command carried, and the checkout.
     // The repo's URL, its key, its title and its source are all in scope at
     // the call site and **none of them** reaches the process (ADR-0016).
@@ -920,15 +925,26 @@ async fn an_override_with_a_space_is_one_argument() {
         .unwrap();
     set_applications(
         &pool,
-        &[app(None, "Viewer", &format!("{} {{path}} {{name}}", stub.display()), None)],
+        &[app(
+            None,
+            "Viewer",
+            &format!("{} {{path}} {{name}}", stub.display()),
+            None,
+        )],
         None,
     )
     .await
     .unwrap();
 
-    open(&pool, &repo.id, Run::Application(Some("viewer")), None, None)
-        .await
-        .unwrap();
+    open(
+        &pool,
+        &repo.id,
+        Run::Application(Some("viewer")),
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         recorded(&record).await,
@@ -948,9 +964,13 @@ async fn a_branch_opens_its_repositorys_checkout() {
     let pool = pool().await;
     let (repo, root, stub, record, _workshop) = scanned(&pool).await;
     let branch = branch_of(&pool, &repo, "feature/PAY-231-sepa-retry").await;
-    set_command(&pool, "vscode", Some(&format!("{} {{path}}", stub.display())))
-        .await
-        .unwrap();
+    set_command(
+        &pool,
+        "vscode",
+        Some(&format!("{} {{path}}", stub.display())),
+    )
+    .await
+    .unwrap();
 
     open(&pool, &branch, Run::Application(Some("vscode")), None, None)
         .await
@@ -1051,7 +1071,11 @@ async fn a_file_outside_the_checkout_is_refused_and_nothing_runs() {
             .await
             .expect_err(file);
         assert_eq!(error.code, IpcErrorCode::Invalid, "{file}");
-        assert!(error.message.contains("not a file inside"), "{}", error.message);
+        assert!(
+            error.message.contains("not a file inside"),
+            "{}",
+            error.message
+        );
     }
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     assert!(!record.exists(), "nothing may have run");
@@ -1080,9 +1104,13 @@ async fn a_command_that_cannot_be_run_is_refused_where_it_is_typed() {
 
     // The refusal ADR-0016 is about: a placeholder that would carry a field
     // the mirror wrote.
-    let error = set_applications(&pool, &[app(None, "Viewer", "viewer {repo_url}", None)], None)
-        .await
-        .expect_err("only the four placeholders fill");
+    let error = set_applications(
+        &pool,
+        &[app(None, "Viewer", "viewer {repo_url}", None)],
+        None,
+    )
+    .await
+    .expect_err("only the four placeholders fill");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("{repo_url}"), "{}", error.message);
     assert!(error.message.contains("Viewer"), "{}", error.message);
@@ -1098,7 +1126,11 @@ async fn a_command_that_cannot_be_run_is_refused_where_it_is_typed() {
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("emacs"), "{}", error.message);
 
-    assert_eq!(settings(&pool).await.unwrap(), before, "a refusal stores nothing");
+    assert_eq!(
+        settings(&pool).await.unwrap(),
+        before,
+        "a refusal stores nothing"
+    );
 }
 
 /// A command whose program is not on this machine refuses, and the refusal
@@ -1168,9 +1200,17 @@ async fn the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved() {
     assert_eq!(first.applications, expected);
     assert_eq!(
         first.default_application.as_deref(),
-        Some(if shipped().is_empty() { "terminal" } else { "vscode" })
+        Some(if shipped().is_empty() {
+            "terminal"
+        } else {
+            "vscode"
+        })
     );
-    assert!(matches!(first.git, GitFound::Found { .. }), "{:?}", first.git);
+    assert!(
+        matches!(first.git, GitFound::Found { .. }),
+        "{:?}",
+        first.git
+    );
 
     set_applications(
         &pool,
@@ -1192,13 +1232,24 @@ async fn the_shipped_list_with_501s_templates_is_the_list_until_one_is_saved() {
             .fetch_optional(&pool)
             .await
             .unwrap();
-    assert!(row.is_some(), "the list is one row under {APPLICATIONS_KEY}");
+    assert!(
+        row.is_some(),
+        "the list is one row under {APPLICATIONS_KEY}"
+    );
 
-    set_applications(&pool, &[app(Some("terminal"), "Terminal", "t {path}", None)], Some("gone"))
-        .await
-        .unwrap();
+    set_applications(
+        &pool,
+        &[app(Some("terminal"), "Terminal", "t {path}", None)],
+        Some("gone"),
+    )
+    .await
+    .unwrap();
     assert_eq!(
-        settings(&pool).await.unwrap().default_application.as_deref(),
+        settings(&pool)
+            .await
+            .unwrap()
+            .default_application
+            .as_deref(),
         Some("terminal")
     );
 }
@@ -1219,9 +1270,15 @@ async fn a_stored_command_wins_and_clearing_gives_the_shipped_one_back() {
         .await
         .unwrap();
     let after = commands(&pool).await.unwrap();
-    assert_eq!(after[0].template.as_deref(), Some("code --new-window {path}"));
+    assert_eq!(
+        after[0].template.as_deref(),
+        Some("code --new-window {path}")
+    );
     assert!(!after[0].is_default);
-    assert!(after[1..].iter().all(|c| c.is_default), "only that one moved");
+    assert!(
+        after[1..].iter().all(|c| c.is_default),
+        "only that one moved"
+    );
 
     set_command(&pool, "vscode", None).await.unwrap();
     assert_eq!(commands(&pool).await.unwrap(), before);

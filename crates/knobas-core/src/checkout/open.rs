@@ -371,7 +371,11 @@ fn slug(name: &str) -> String {
         }
     }
     let out = out.trim_end_matches('-').to_owned();
-    if out.is_empty() { "app".to_owned() } else { out }
+    if out.is_empty() {
+        "app".to_owned()
+    } else {
+        out
+    }
 }
 
 #[cfg(test)]
@@ -439,7 +443,12 @@ mod tests {
         };
         assert_eq!(
             filled("open -a Terminal {path}", &at),
-            ["open", "-a", "Terminal", "/Users/mara/My Code/pay; rm -rf ~"]
+            [
+                "open",
+                "-a",
+                "Terminal",
+                "/Users/mara/My Code/pay; rm -rf ~"
+            ]
         );
         // And the template's own shell characters are plain words.
         assert_eq!(
@@ -469,7 +478,10 @@ mod tests {
             let error = fill(&format!("code {{{name}}} {{path}}"), &at_checkout())
                 .expect_err("only the four placeholders fill");
             assert_eq!(error, TemplateError::UnknownPlaceholder(name.to_owned()));
-            assert!(error.to_string().contains(&format!("{{{name}}}")), "{error}");
+            assert!(
+                error.to_string().contains(&format!("{{{name}}}")),
+                "{error}"
+            );
         }
     }
 
@@ -480,7 +492,10 @@ mod tests {
         assert_eq!(check(""), Err(TemplateError::Empty));
         assert_eq!(check("  \t"), Err(TemplateError::Empty));
         assert_eq!(check("code {path"), Err(TemplateError::UnclosedPlaceholder));
-        assert_eq!(check("open -a \"Visual {path}"), Err(TemplateError::UnclosedQuote));
+        assert_eq!(
+            check("open -a \"Visual {path}"),
+            Err(TemplateError::UnclosedQuote)
+        );
         assert_eq!(check("open -a Fork"), Ok(()));
         assert_eq!(check("cp {path} {path}"), Ok(()));
     }
@@ -521,7 +536,12 @@ mod tests {
             [
                 (
                     s(&["open", "-a", "Visual Studio Code", CHECKOUT]),
-                    Some(s(&["open", "-a", "Visual Studio Code", file.to_str().unwrap()]))
+                    Some(s(&[
+                        "open",
+                        "-a",
+                        "Visual Studio Code",
+                        file.to_str().unwrap()
+                    ]))
                 ),
                 (s(&["open", "-a", "Terminal", CHECKOUT]), None),
                 (s(&["open", "-a", "Fork", CHECKOUT]), None),
@@ -539,7 +559,9 @@ mod tests {
         let checkout = Path::new(CHECKOUT);
         assert_eq!(
             inside(checkout, "src/sepa/retry.rs"),
-            Some(PathBuf::from("/Users/mara/code/payout-service/src/sepa/retry.rs"))
+            Some(PathBuf::from(
+                "/Users/mara/code/payout-service/src/sepa/retry.rs"
+            ))
         );
         assert_eq!(
             inside(checkout, "./README.md"),
@@ -566,7 +588,12 @@ mod tests {
         let list = settle(&[
             draft(Some("vscode"), " Code ", " code {path} ", Some("  ")),
             draft(None, "My Git Viewer!", "MyGitViewer {path}", None),
-            draft(None, "My git viewer", "other {path}", Some("x --open {file}")),
+            draft(
+                None,
+                "My git viewer",
+                "other {path}",
+                Some("x --open {file}"),
+            ),
             draft(Some("vscode"), "Copy", "code2 {path}", None),
             draft(None, "+++", "z {path}", None),
         ])
@@ -574,13 +601,7 @@ mod tests {
         let ids: Vec<&str> = list.iter().map(|a| a.id.as_str()).collect();
         assert_eq!(
             ids,
-            [
-                "vscode",
-                "my-git-viewer",
-                "my-git-viewer-2",
-                "copy",
-                "app"
-            ]
+            ["vscode", "my-git-viewer", "my-git-viewer-2", "copy", "app"]
         );
         assert_eq!(list[0].name, "Code");
         assert_eq!(list[0].command, "code {path}");
@@ -592,7 +613,10 @@ mod tests {
     #[test]
     fn a_list_with_an_unusable_entry_is_refused_by_name() {
         assert_eq!(
-            settle(&[draft(None, "A", "a {path}", None), draft(None, " ", "b", None)]),
+            settle(&[
+                draft(None, "A", "a {path}", None),
+                draft(None, " ", "b", None)
+            ]),
             Err(ListError::NoName(1))
         );
         let error = settle(&[draft(None, "Viewer", "v {branch}", None)]).unwrap_err();
@@ -605,9 +629,11 @@ mod tests {
             }
         );
         assert!(error.to_string().contains("Viewer's command"), "{error}");
-        let error =
-            settle(&[draft(None, "Viewer", "v {path}", Some("v \"{file}"))]).unwrap_err();
-        assert!(error.to_string().contains("Viewer's file command"), "{error}");
+        let error = settle(&[draft(None, "Viewer", "v {path}", Some("v \"{file}"))]).unwrap_err();
+        assert!(
+            error.to_string().contains("Viewer's file command"),
+            "{error}"
+        );
         assert_eq!(
             settle(&[draft(None, "Viewer", "  ", None)]).unwrap_err(),
             ListError::Command {

@@ -95,7 +95,11 @@ pub async fn read_value(pool: &PgPool, key: &str) -> Result<Option<serde_json::V
 /// # Errors
 ///
 /// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
-pub async fn write_value(pool: &PgPool, key: &str, value: &serde_json::Value) -> Result<(), IpcError> {
+pub async fn write_value(
+    pool: &PgPool,
+    key: &str,
+    value: &serde_json::Value,
+) -> Result<(), IpcError> {
     sqlx::query(
         "insert into knobas.setting (key, value) values ($1, $2)
          on conflict (key) do update set value = excluded.value, updated_at = now()",
