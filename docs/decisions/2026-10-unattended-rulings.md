@@ -3794,3 +3794,15 @@ Ruled by the merge-manager (PR #1034).
   off. Upgrading therefore hides notes from search until the user turns the setting on; the notes
   and commands stay (D10). No change made. **Reversing:** low (read the absent row as on in
   `capture::shown`, which would also arm the capture shortcut, contradicting #832).
+
+## #833 — The WiX (MSI) version for each TF milestone release (2026-10-17)
+
+- **The fork:** `bundle.windows.wix.version` is numeric only (#658) and #1035 set it to `2.0.0` for
+  `2.0.0-m1`. Windows Installer ignores the fourth field and will not upgrade over an installed MSI
+  with the same version, so m2 needs a higher one. **Ruling:** `2.0.(N-1)` for milestone mN, so m2
+  ships as `2.0.1`, m3 as `2.0.2`, and so on. Patch is a 16-bit field, so it holds far more
+  milestones than TF will have. **Reasoning:** m1 already shipped as `2.0.0`; `2.0.N` would have
+  made m1 `2.0.1` and put m2 at `2.0.2` for no gain, with a gap. **Caveat:** the final `v2.0.0`
+  release carries `2.0.0` in Cargo and Tauri, but its MSI must still outrank the last milestone's,
+  so that release PR sets `wix.version` to the next free number (for example `2.1.0`).
+  **Reversing:** low (one JSON value per release PR).
