@@ -107,15 +107,18 @@ export function fakeOpenAlerts() {
  * would look like.
  */
 function fakeQueuedWrite(args: Record<string, unknown>) {
-  const payload = (args.payload ?? {}) as Record<string, { entity?: string }>;
+  const payload = (args.payload ?? {}) as Record<string, { entity?: string; repo?: string }>;
   const [tag, body] = Object.entries(payload)[0] ?? ["PauseMonitor", {}];
-  const entity = body?.entity ?? "kuma:1";
+  // `CommitFile` names its repository as `repo` (#822), every other op `entity`.
+  const entity = body?.entity ?? body?.repo ?? "kuma:1";
   const now = new Date().toISOString();
   return {
     id: (FIXTURE_WRITE_ID += 1),
     source_id: entity.split(":")[0] ?? "kuma",
     entity_id: entity,
-    op: FIXTURE_OPS[tag] ?? "pause_monitor",
+    // The table's own ops, else `WriteOp::identifier()`'s snake case of the
+    // tag: the repository page's writes (#839, #840, #845) come through here too.
+    op: FIXTURE_OPS[tag] ?? tag.replace(/[A-Z]/g, (letter, at: number) => (at === 0 ? "" : "_") + letter.toLowerCase()),
     payload,
     target_snapshot: null,
     state: "sent",

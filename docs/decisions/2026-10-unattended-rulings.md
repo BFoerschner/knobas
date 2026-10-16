@@ -2804,3 +2804,59 @@ Merge-manager review of PR #980 (2026-10-16):
   word. **Reversing:** `blocks::refusal_of`'s `ol` arm and `plain_text`'s `p` arm.
 - **Refusing a panel in *Edit section* (#975) is the safe reading of R-10.13** and stays: splicing
   the editor's plain text over a panel macro would delete the macro.
+## #839, #840 and #845 — Branches, compare and create a PR, edit a file and commit it (2026-10-16)
+
+Implementer rulings, PR for issues #839, #840 and #845 (one bundle).
+
+- **A branch's standing is its own view, read per branch, four at a time.** The Branches tab reads
+  the repository's *Branches* section for the list, then each branch's whole view (`view/branch.rs`:
+  `compare_as` and `count_commits_not_in`) for ahead and behind, the open pull request and its
+  toolbar. *Merged* is how a branch with nothing ahead is drawn. **Reversing:** low
+  (`TfRepoBranches.svelte`, `branchStanding` in `repo.ts`).
+- ***Open PR* and *Delete…* are the branch view's actions, not a reading of its facts** (ADR-0020
+  rule 4): *Open PR* where `create_pull_request` is offered and enabled, *Delete…* where
+  `delete_branch` is offered, disabled with the source's reason (a protected branch) as its title.
+  The default branch offers neither. **Reversing:** low.
+- **The *Pull request* column shows the open one only.** The branch view lists only the pull
+  request open from it; a merged branch reads *merged* and *none*. **Reversing:** a declared head
+  branch on the pull request row.
+- **No *By* column and no *Mine* chip on Branches**, for #973's reason: no declared author. The
+  *Updated* column draws the listing's own line (`sha · age`). Follow-up #986. **Reversing:** #986.
+- **No *Link to <job>* on *New branch…*, no *Link the PR to <key>* on the compare page.** What they
+  would link is made by a queued write, its id is the source's to mint (#707), `create_link`
+  refuses an end the mirror does not hold, and the job reads confirmed links only (ADR-0025).
+  Follow-up #984. Meanwhile the key in a prefilled name raises a proposed link. **Reversing:** #984.
+- ***Commit to <branch>* is not disabled ahead of time on a protected branch.** No source declares
+  it and the shell may not decide it from a fact (ADR-0020 rule 4); Gitea refuses the commit at
+  the flush with #822's reason, which the queue shows. Follow-up #985. **Reversing:** #985.
+- **The compare page's diff and commits are against the default branch,** what the source's branch
+  view compares; *Into* sets only the pull request's base. A branch the mirror does not hold yet
+  (one this session's edit queued) opens the form, since the pull request names it by name, and
+  says "This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here
+  once it has." **Reversing:** low.
+- **A write is drawn at once where it lands, for the session:** a branch made (*queued*), a branch
+  deleted (*delete queued*, its buttons gone), a file's commit ("A commit of this file is queued:
+  “<message>”. It shows here once Gitea has it."), each dropped once the source's read shows it
+  (the listing holds the branch, the file's blob moved). Held in `tf/repo/queued.svelte.ts`,
+  never stored: a restart reads only the source. **Reversing:** low.
+- ***Edit* needs the file's blob sha** (#883), since the commit is checked against it; a binary
+  file, a cut file and one without a sha draw *Edit* disabled with the reason. The editor keeps
+  what was typed until *Cancel* or a commit. **Reversing:** low.
+- **Commit dialog defaults:** the message `<key>: update <file>` (`update <file>` with no job), the
+  new branch `fix/<key>-<file stem>`; *Commit to <branch>* is picked first. The checkout warning
+  shows only while the commit goes onto the branch the checkout is on. **Reversing:** low
+  (`commitPrefill`).
+- **A held commit over a moved file** shows the reader's file beside the source's ("Yours, <path>"
+  and "On the source now", "The file changed on the source after you queued this."), since the
+  queued snapshot holds only the repository's liveness; *Edit…* edits the file's text and sends it
+  with `base_sha` set to the held side's `base` (#822 left that to #845). **Reversing:** low
+  (`movedFile`, `withBody` in `shell/write-queue.svelte.ts`).
+- **Copy departures from prototype-6:** dialog titles carry no mono span (`TfDialog` takes a
+  string); the commit dialog keeps "It waits in the queue like every other write." and drops the
+  *new write* tag and its sentence, and the compare page "Reviewers are asked on Gitea after it
+  opens." without the *LATER* tag, both prototype annotations; *Against main* names the default
+  branch. **Reversing:** low.
+- **`?fake-ipc`:** `payout-service` has prototype-6's branches (the job's under the fixture's own
+  name), each with a whole view, a diff and a toolbar; files carry a blob sha so *Edit* opens; the
+  fixture's `submit_write` names the op it was handed rather than always a monitor's. The edit's
+  diff is `tf/code/line-diff.ts`, which the fixture's commit diffs now share. **Reversing:** low.

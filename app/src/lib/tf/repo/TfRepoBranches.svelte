@@ -142,6 +142,10 @@
     }
   }
 
+  function confirmDelete() {
+    if (deleting !== null) void remove(deleting);
+  }
+
   const plural = (n: number) => (n === 1 ? "1 commit on this branch is" : `${n} commits on this branch are`);
 </script>
 
@@ -221,12 +225,9 @@
       <button type="button" class="tf-btn tf-ghost" onclick={() => (deleting = null)}>Cancel</button>
       <button
         type="button"
-        class="tf-btn"
-        class:tf-primary={standing.merged}
-        class:tf-danger={!standing.merged}
+        class="tf-btn {standing.merged ? 'tf-primary' : 'tf-danger'}"
         disabled={busy}
-        onclick={() => void remove(row)}>Delete branch</button
-      >
+        onclick={confirmDelete}>Delete branch</button>
     {/snippet}
   </TfDialog>
 {/if}

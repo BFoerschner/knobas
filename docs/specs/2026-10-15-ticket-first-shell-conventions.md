@@ -42,6 +42,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
 - A `?fake-ipc` row's state chip, path and source ride in its payload as `chip`, `path` and `source`, which `mirrorRow` reads; the mock adapter declares none of them. (#817)
 - A repository's files, branches, commits and a commit's diff are read through its source's view (`entity_view` sections), so an uncloned repository reads like a cloned one; a diff is drawn by `tf/code/TfDiff.svelte`. (#838)
+- Whether a row offers a write (a branch's *Open PR*, *Delete…*) is its view's toolbar action: offered and enabled, or drawn disabled with the source's reason as its title; never a reading of a fact. (#839)
 - A source's markup reaches the shell only as a declared block list (`knobas_source::docs`, ADR-0022): the adapter projects its mirrored payload with a plain function, and the shell draws the blocks as text, never as markup. (#859)
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
 - A read whose answer is sentences (a proposal's reason and evidence) is drawn as the backend wrote it; the view adds prototype-6's headings and no words of its own, and leaves out a heading with nothing under it. (#836)
@@ -70,6 +71,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 ## Writes and undo
 
 - A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's 6.5 s and then sent; the toast's *Undo* cancels it, and the toast on screen is the sign a write is still held. Quitting, closing or reloading the window inside those 6.5 s loses the decision: nothing is written, and the proposal is back next time. Moving to another view does not; the write still goes. (#835)
+- A write a page queues is drawn at once where it lands (a branch *queued*, a branch *delete queued*, a file's commit as a banner), held for the session as module `$state` and dropped once the source's read shows it; never stored. The toast reads `Queued: <what>. Sends with the next sync.` with *Show queue*. (#839, #845)
 
 ## Filter keys
 

@@ -58,6 +58,10 @@
 
   const sha = $derived(shaOf(commitId));
   const full = $derived(fullShaOf(commitId));
+
+  function branchHere() {
+    if (full !== null) onNewBranch({ value: full, label: sha ?? full });
+  }
 </script>
 
 <h2 class="tf-cgroup-h">
@@ -70,9 +74,7 @@
   {/if}
   <span class="tf-acts">
     {#if full !== null}
-      <button type="button" class="tf-btn tf-sm" onclick={() => onNewBranch({ value: full, label: sha ?? full })}
-        >New branch from here…</button
-      >
+      <button type="button" class="tf-btn tf-sm" onclick={branchHere}>New branch from here…</button>
     {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
   </span>

@@ -4,14 +4,19 @@
  * a repository's *Branches* (the default first, `default` chip), the tree
  * a directory at a time (`files`, `files:<dir>`, `file:<path>`), *Commits*
  * (the default branch's latest; a branch's, what it carries over the default),
- * and a commit's *Diff*.
+ * and a commit's *Diff*. A branch's whole view (#839, #840) as
+ * `view/branch.rs` draws it: *Overview* (the open pull request, then *Base*,
+ * *Ahead*, *Behind*, the last commit), *Commits*, the deferred *Diff* against
+ * the default branch, and the toolbar's actions. A file carries a blob sha
+ * (#883), so *Edit* (#845) opens under `?fake-ipc`.
  *
  * Answers no command of its own, so it sits below the feature glob:
  * `entity_view` is `entity.ts`'s, which asks {@link repoView} first. The files are prototype-6's `repoFiles` for
  * `payout-service` and its `genericFiles` for every other repository. A
  * divergence: the mock adapter draws no view for a repository at all.
  */
-import type { DiffFile, DiffLine, SourceView, TreeEntry, ViewRow } from "../../../../ipc/entity";
+import type { DiffFile, SourceView, TreeEntry, ViewAction, ViewRow } from "../../../../ipc/entity";
+import { lineDiff } from "../../../../tf/code/line-diff";
 import { CORPUS } from "../corpus";
 
 const RETRY_MAIN = `use std::time::Duration;
@@ -120,6 +125,7 @@ const PAYOUT_FEATURE: Record<string, string> = {
 
 const PAYOUT = "mock:tidewater/payout-service";
 const FEATURE = "feat/PAY-231-idempotent-retry";
+const FEATURE_NAME = FEATURE;
 
 /** The three commits the job's branch carries, newest first: id, subject, author, when, the change. */
 export const PAYOUT_COMMITS: [sha: string, subject: string, author: string, at: string, path: string, before: string, after: string][] = [
@@ -185,39 +191,102 @@ function commitRow(entityId: string | null, sha: string, subject: string, author
   return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null };
 }
 
-/** Prototype-6's `lineDiff` and `hunks`: one hunk per run of changes, three lines of context. */
-function diffOf(path: string, before: string, after: string): DiffFile {
-  const a = before === "" ? [] : before.split("\n");
-  const b = after.split("\n");
-  const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
-  for (let i = a.length - 1; i >= 0; i -= 1)
-    for (let j = b.length - 1; j >= 0; j -= 1)
-      lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
-  const lines: DiffLine[] = [];
-  let i = 0;
-  let j = 0;
-  while (i < a.length || j < b.length) {
-    if (i < a.length && j < b.length && a[i] === b[j]) lines.push({ kind: "context", old: ++i, new: ++j, text: a[i - 1]! });
-    else if (j >= b.length || (i < a.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) lines.push({ kind: "del", old: ++i, new: null, text: a[i - 1]! });
-    else lines.push({ kind: "add", old: null, new: ++j, text: b[j - 1]! });
-  }
-  const near = lines.map((_, at) => lines.slice(Math.max(0, at - 3), at + 4).some((line) => line.kind !== "context"));
-  const hunks: { header: string; lines: DiffLine[] }[] = [];
-  lines.forEach((line, at) => {
-    if (!near[at]) return;
-    if (at === 0 || !near[at - 1]) hunks.push({ header: `@@ -${line.old ?? 0} +${line.new ?? 0} @@`, lines: [] });
-    hunks[hunks.length - 1]!.lines.push(line);
-  });
-  return {
-    path,
-    old_path: null,
-    change: before === "" ? "added" : "modified",
-    additions: lines.filter((line) => line.kind === "add").length,
-    deletions: lines.filter((line) => line.kind === "del").length,
-    hunks,
-    truncated: false,
-    threads: [],
-  };
+/** Prototype-6's `lineDiff` and `hunks`, shared with the commit dialog (#845). */
+const diffOf = (path: string, before: string, after: string): DiffFile => lineDiff(path, before, after);
+
+/** A blob sha for a file's text: the same text, the same sha, as git's is. */
+function blobOf(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let at = 0; at < text.length; at += 1) hash = Math.imul(hash ^ text.charCodeAt(at), 0x01000193) >>> 0;
+  return hash.toString(16).padStart(8, "0").repeat(5);
+}
+
+/**
+ * Prototype-6's branches of `payout-service` (`branches`, `branchMeta`), the
+ * job's branch under the fixture's own name: ahead and behind `main`, the
+ * pull request open from it, its tip, and what it carries.
+ */
+const PAYOUT_BRANCHES: {
+  name: string;
+  ahead: number;
+  behind: number;
+  pr: string | null;
+  tip: [sha: string, subject: string, author: string, at: string];
+}[] = [
+  { name: FEATURE_NAME, ahead: 3, behind: 0, pr: "mock:payout-service#142", tip: ["c90d11e4a7b2", "PAY-231: jitter in backoff, cap at 5 attempts", "mara", "2026-08-22T09:42:00Z"] },
+  { name: "feature/csv-export", ahead: 4, behind: 1, pr: "mock:payout-service#150", tip: ["d41e0a9b7c21", "CSV export: one row per payout", "jonas", "2026-08-22T11:40:00Z"] },
+  { name: "spike/sepa-instant", ahead: 2, behind: 9, pr: null, tip: ["9a1b2c3d4e5f", "Spike: SEPA Instant through the PSP sandbox", "mara", "2026-08-13T15:10:00Z"] },
+  { name: "chore/bump-tokio", ahead: 0, behind: 6, pr: null, tip: ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-17T10:15:00Z"] },
+];
+
+const branchAction = (write_op: string, label: string, over: Partial<ViewAction> = {}): ViewAction => ({
+  write_op,
+  label,
+  fields: [],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled: null,
+  with_settings: false,
+  values: {},
+  entity: PAYOUT,
+  ...over,
+}) as ViewAction;
+
+/** What a branch other than the job's changes against `main`: one file. */
+function sideDiff(name: string): DiffFile[] {
+  if (name === "feature/csv-export")
+    return [diffOf("src/export/csv.rs", "", "pub fn header() -> &'static str {\n    \"payout_id,amount,currency,status\"\n}")];
+  if (name === "spike/sepa-instant")
+    return [diffOf("src/sepa/batch.rs", PAYOUT_MAIN["src/sepa/batch.rs"]!, PAYOUT_MAIN["src/sepa/batch.rs"]!.replace("// 13:00 daily batch, see PAY-231", "// 13:00 daily batch, see PAY-231\n    // spike: instant payouts skip the batch"))];
+  return [];
+}
+
+/** A branch of `payout-service`'s whole view, or one of its sections. */
+function branchView(name: string, sectionId: string | null): SourceView | undefined {
+  const branch = PAYOUT_BRANCHES.find((candidate) => candidate.name === name);
+  if (branch === undefined) return undefined;
+  const isJob = name === FEATURE_NAME;
+  const carried = isJob
+    ? PAYOUT_COMMITS.map(([sha, subject, author, at]) => commitRow(payoutCommitId(sha), sha, subject, author, at))
+    : branch.ahead === 0
+      ? []
+      : [commitRow(null, branch.tip[0], branch.tip[1], branch.tip[2], branch.tip[3])];
+  const files = isJob
+    ? [
+        diffOf("docs/backoff.md", "", PAYOUT_FEATURE["docs/backoff.md"]!),
+        diffOf("src/sepa/retry.rs", RETRY_MAIN, RETRY_HEAD),
+        diffOf("tests/sepa_retry.rs", "", TEST_HEAD),
+      ]
+    : sideDiff(name);
+  if (sectionId === "diff")
+    return { sections: [section("diff", "Diff", [{ type: "diff", files, truncated: false, commentable: null, gone: [] }], files.length)], actions: [] } as unknown as SourceView;
+  const pr = branch.pr === null ? null : CORPUS.find((row) => row.entity_id === branch.pr);
+  const overview = section("overview", "Overview", [
+    ...(pr
+      ? [{ type: "entities", title: "Pull request", rows: [{ entity_id: pr.entity_id, title: pr.title, meta: `#${pr.entity_id.split("#")[1]} · ${name} → main`, tone: "info", chip: "open", url: null }] }]
+      : []),
+    {
+      type: "facts",
+      facts: [
+        { label: "Base", value: "main", tone: null },
+        { label: "Ahead", value: String(branch.ahead), tone: null },
+        { label: "Behind", value: String(branch.behind), tone: null },
+        ...(pr ? [] : [{ label: "Pull request", value: "none", tone: "muted" }]),
+      ],
+    },
+    { type: "entities", title: "Last commit", rows: [commitRow(null, ...branch.tip)] },
+  ]);
+  const commits = section("commits", "Commits", [{ type: "entities", title: null, rows: carried }], carried.length);
+  const actions: ViewAction[] = [
+    ...(pr ? [] : [branchAction("create_pull_request", "Open pull request…", { primary: true, disabled: branch.ahead === 0 ? "No commits ahead of main" : null })]),
+    branchAction("create_branch", "New branch…"),
+    branchAction("delete_branch", "Delete branch…", { danger: true, entity: null }),
+  ];
+  const sections = [overview, commits, { ...section("diff", "Diff", [], files.length), deferred: true }];
+  // One section asked for is that section alone, without the toolbar, as the adapter answers it.
+  if (sectionId !== null) return { sections: sections.filter((candidate) => candidate.id === sectionId), actions: [] } as unknown as SourceView;
+  return { sections, actions } as unknown as SourceView;
 }
 
 /** The tree's three kinds of section, at a ref. */
@@ -230,7 +299,7 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
   return section(id, "Files", [
-    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: null },
+    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text) },
   ]);
 }
 
@@ -252,11 +321,21 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   if (files === null) return undefined;
   const ref = branch ?? "main";
   const one = (built: ReturnType<typeof section>) => ({ sections: [built], actions: [] }) as unknown as SourceView;
+  if (repoId === PAYOUT && branch !== null && branch !== "main" && (sectionId === null || sectionId === "overview" || sectionId === "commits" || sectionId === "diff")) {
+    return branchView(branch, sectionId);
+  }
   if (sectionId === "branches") {
     const rows: ViewRow[] = [
       { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
       ...(repoId === PAYOUT
-        ? [{ entity_id: `${PAYOUT}@refs/heads/${FEATURE}`, title: FEATURE, meta: "c90d11e4a7 · today", tone: null, chip: null, url: null }]
+        ? PAYOUT_BRANCHES.map(({ name, tip }) => ({
+            entity_id: `${PAYOUT}@refs/heads/${name}`,
+            title: name,
+            meta: `${tip[0].slice(0, 10)} · ${age(tip[3])}`,
+            tone: null,
+            chip: null,
+            url: null,
+          }))
         : []),
     ];
     return one(section("branches", "Branches", [{ type: "entities", title: null, rows }], rows.length));

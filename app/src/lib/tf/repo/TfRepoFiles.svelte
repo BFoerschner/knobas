@@ -183,7 +183,8 @@
   /** The editor's text, `null` until the reader types: the file as read. */
   let draft = $state<string | null>(null);
   const text = $derived(draft ?? file?.text ?? "");
-  const numbers = $derived(text.split("\n").map((_, n) => n + 1).join("\n"));
+  const lineCount = $derived(text.split("\n").length);
+  const numbers = $derived(Array.from({ length: lineCount }, (_, n) => n + 1).join("\n"));
   let committing = $state(false);
 
   // Leaving the edit drops what was typed, as *Cancel* does.
@@ -260,6 +261,7 @@
         <div class="tf-nums" aria-hidden="true">{numbers}</div>
         <textarea
           spellcheck="false"
+          rows={lineCount}
           aria-label="Edit {file.path}"
           value={text}
           oninput={(event) => (draft = (event.currentTarget as HTMLTextAreaElement).value)}
