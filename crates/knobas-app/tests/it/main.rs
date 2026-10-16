@@ -33,6 +33,7 @@ mod estate_exit;
 mod inbox_ipc;
 mod ipc;
 mod job_ipc;
+mod notes_export_ipc;
 mod probe_snapshot;
 mod project_census;
 mod protocol_ipc;

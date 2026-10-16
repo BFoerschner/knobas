@@ -27,13 +27,14 @@
   import { theme as sharedTheme, type Theme } from "../theme.svelte";
   import { realSectionPorts, realSettingsPorts, type SectionPorts, type SettingsPorts } from "./ports";
   import { SETTINGS_SECTIONS, settingsPlace, sourceState } from "./settings";
-  import TfSourcePage from "./TfSourcePage.svelte";
+    import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfKeyboardSection from "./TfKeyboardSection.svelte";
   import TfLogsSection from "./TfLogsSection.svelte";
   import TfMonitoringSection from "./TfMonitoringSection.svelte";
+  import TfNotesSection from "./TfNotesSection.svelte";
   import TfNotificationsSection from "./TfNotificationsSection.svelte";
   import TfStandupSection from "./TfStandupSection.svelte";
   import TfTimeSection from "./TfTimeSection.svelte";
@@ -72,7 +73,7 @@
   } = $props();
 
   /** The sections #831 draws whose first paint waits on a read. */
-  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "backup", "logs"]);
+  const SECTIONS_THAT_READ: ReadonlySet<string> = new Set(["time", "notifications", "standup", "monitoring", "notes", "backup", "logs"]);
 
   const place = $derived(settingsPlace(rest));
   const sourceId = $derived("source" in place ? place.source : null);
@@ -226,6 +227,8 @@
         <TfKeyboardSection />
       {:else if place.section === "logs"}
         <TfLogsSection ports={sectionPorts} />
+      {:else if place.section === "notes"}
+        <TfNotesSection />
       {:else if place.section !== "sources"}
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
         <p class="tf-stg-p">{sectionName} is not built in the new shell yet. The rooms UI has every setting today.</p>

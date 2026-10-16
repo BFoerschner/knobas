@@ -44,7 +44,7 @@ import { join } from "node:path";
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test, vi } from "vitest";
 
-import type { EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
+import type { CaptureShortcut, EntityDetail, EntityPage, EntityRow } from "../ipc/entity";
 
 // ---------------------------------------------------------------------------
 // Answers the test hands over on command, never on a timer.
@@ -352,6 +352,7 @@ const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
+const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
@@ -916,6 +917,30 @@ const CASES: Case[] = [
       app: mount(TfSettings, {
         target,
         props: { rest: [], job: null, ready: true, onrooms: () => {}, ports: settingsPorts(), layers: createLayers() },
+      }),
+    }),
+  },
+  {
+    /** Settings › Notes and capture (#832): its one read lands after the unmount. */
+    name: "TfNotesSection",
+    source: "lib/tf/settings/TfNotesSection.svelte",
+    open: (target) => ({
+      app: mount(TfNotesSection, {
+        target,
+        props: {
+          ports: {
+            captureShortcut: () =>
+              deferred<CaptureShortcut>({
+                accelerator: null,
+                refusal: null,
+                shown: false,
+                note_count: 0,
+                last_note_at: null,
+              }),
+            setNotesShown: () => Promise.reject(new Error("no write in this test")),
+            exportNotes: () => Promise.reject(new Error("no export in this test")),
+          },
+        },
       }),
     }),
   },
@@ -1705,9 +1730,12 @@ const CASES: Case[] = [
         props: {
           ports: {
             captureShortcut: () =>
-              deferred<{ accelerator: string | null; refusal: string | null }>({
+              deferred<CaptureShortcut>({
                 accelerator: "CmdOrCtrl+Shift+N",
                 refusal: null,
+                shown: true,
+                note_count: 0,
+                last_note_at: null,
               }),
             setCaptureShortcut: () =>
               Promise.reject(new Error("no settings write in this test")),

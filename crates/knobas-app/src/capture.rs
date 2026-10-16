@@ -78,6 +78,15 @@ use crate::settings;
 /// `the_shortcut_is_stored_under_its_own_key` pins the spelling.
 pub const SHORTCUT_KEY: &str = "capture.shortcut";
 
+/// The `knobas.setting` key holding *Show notes and quick capture* (#832, D10).
+///
+/// **Off unless this row says `"true"`.** The redesign hides notes and quick
+/// capture for one release: their data and commands stay, and the capture
+/// shortcut is registered only while this is on. So an upgraded knobas with a
+/// shortcut stored holds no key until the reader turns notes back on, and
+/// turning them on registers the stored shortcut again.
+pub const SHOWN_KEY: &str = "capture.notes_shown";
+
 /// The label of the capture window, and the label
 /// `capabilities/capture.json` scopes its one permission to.
 pub const WINDOW_LABEL: &str = "capture";
@@ -122,8 +131,16 @@ pub struct ShortcutView {
     /// no shortcut is registered and knobas has taken no key from anybody.
     pub accelerator: Option<String>,
     /// Why the stored accelerator is not registered, or `None` when it is (or
-    /// when there is nothing to register).
+    /// when there is nothing to register, or notes are hidden).
     pub refusal: Option<String>,
+    /// *Show notes and quick capture* (#832). Off, the stored accelerator is
+    /// kept and not registered.
+    pub shown: bool,
+    /// How many notes there are (#832): Settings › Notes and capture draws
+    /// the count beside the switch, from this one read.
+    pub note_count: u64,
+    /// When the newest note was last changed, or `None` with no notes.
+    pub last_note_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// The process-wide capture state: what the main window recorded, and why the
@@ -251,17 +268,60 @@ impl<R: Runtime> Registrar for Plugin<R> {
 /// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
 pub async fn shortcut(pool: &PgPool, capture: &CaptureState) -> Result<ShortcutView, IpcError> {
     let accelerator = settings::read(pool, SHORTCUT_KEY).await?;
+    let shown = shown(pool).await?;
+    let (note_count, last_note_at) = knobas_core::note::summary(pool).await?;
     Ok(ShortcutView {
-        // The refusal is reported only beside an accelerator. A stored
-        // shortcut that was cleared while a refusal was on record would
-        // otherwise draw "not registered" under an empty field.
-        refusal: accelerator.as_ref().and_then(|_| capture.refusal()),
+        // The refusal is reported only beside an accelerator that is meant to
+        // hold. A stored shortcut that was cleared, or hidden with notes,
+        // while a refusal was on record would otherwise draw "not registered"
+        // where nothing was asked for.
+        refusal: accelerator
+            .as_ref()
+            .filter(|_| shown)
+            .and_then(|_| capture.refusal()),
         accelerator,
+        shown,
+        note_count,
+        last_note_at,
     })
 }
 
+/// Whether *Show notes and quick capture* is on.
+async fn shown(pool: &PgPool) -> Result<bool, IpcError> {
+    Ok(settings::read(pool, SHOWN_KEY).await?.as_deref() == Some("true"))
+}
+
+/// The accelerator to hold: the stored one while notes are shown, else none.
+async fn wanted(pool: &PgPool) -> Result<Option<String>, IpcError> {
+    Ok(if shown(pool).await? {
+        settings::read(pool, SHORTCUT_KEY).await?
+    } else {
+        None
+    })
+}
+
+/// Turn *Show notes and quick capture* on or off (#832, D10), and register or
+/// release the stored shortcut to match.
+///
+/// Off is stored as no row, `settings`' rule for *unset*.
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails. A refused
+/// registration is reported in the answer, as [`set_shortcut`]'s is.
+pub async fn set_shown(
+    pool: &PgPool,
+    capture: &CaptureState,
+    registrar: &dyn Registrar,
+    shown: bool,
+) -> Result<ShortcutView, IpcError> {
+    settings::write(pool, SHOWN_KEY, shown.then_some("true")).await?;
+    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
+    shortcut(pool, capture).await
+}
+
 /// Store the capture shortcut, or clear it with a blank one, and register what
-/// was stored.
+/// was stored while notes are shown (#832; hidden, it is kept and not held).
 ///
 /// Answers the fresh view rather than nothing, which is `set_checkout_command`'s
 /// rule and for its reason: the field draws what is **stored**, so a write that
@@ -280,11 +340,12 @@ pub async fn set_shortcut(
 ) -> Result<ShortcutView, IpcError> {
     let accelerator = settings::settable(accelerator);
     settings::write(pool, SHORTCUT_KEY, accelerator).await?;
-    capture.set_refusal(apply(registrar, accelerator));
+    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
     shortcut(pool, capture).await
 }
 
-/// Register whatever is stored, at bring-up.
+/// Register whatever is stored, at bring-up -- and nothing while notes are
+/// hidden (#832).
 ///
 /// Called once the database is up and off the main thread, because the plugin
 /// hands its work to the main thread and waits for it: calling this from
@@ -300,8 +361,7 @@ pub async fn register_stored(
     capture: &CaptureState,
     registrar: &dyn Registrar,
 ) -> Result<(), IpcError> {
-    let accelerator = settings::read(pool, SHORTCUT_KEY).await?;
-    capture.set_refusal(apply(registrar, accelerator.as_deref()));
+    capture.set_refusal(apply(registrar, wanted(pool).await?.as_deref()));
     Ok(())
 }
 
@@ -435,6 +495,7 @@ mod tests {
             SHORTCUT_KEY.starts_with("capture."),
             "settings keys are namespaced by the feature that owns them"
         );
+        assert_eq!(SHOWN_KEY, "capture.notes_shown");
     }
 
     /// The document the window loads is the second entry point, not the shell.

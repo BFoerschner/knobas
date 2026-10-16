@@ -16,6 +16,15 @@ import type { CaptureShortcut } from "../ipc/entity";
 
 const SHORTCUT = "CmdOrCtrl+Shift+N";
 
+/** Notes shown (#832), so a stored shortcut is meant to hold. */
+const BASE: CaptureShortcut = {
+  accelerator: null,
+  refusal: null,
+  shown: true,
+  note_count: 0,
+  last_note_at: null,
+};
+
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
@@ -31,11 +40,11 @@ let app: Record<string, unknown> | undefined;
  * behaviour and not this section's.
  */
 function render(
-  initial: CaptureShortcut = { accelerator: null, refusal: null },
+  initial: Partial<CaptureShortcut> = {},
   refuse: string | null = null,
 ) {
   const sent: (string | null)[] = [];
-  let stored = initial;
+  let stored: CaptureShortcut = { ...BASE, ...initial };
   app = mount(CaptureSection, {
     target,
     props: {
@@ -46,8 +55,9 @@ function render(
           const trimmed = accelerator?.trim() ?? "";
           stored =
             trimmed === ""
-              ? { accelerator: null, refusal: null }
+              ? { ...BASE }
               : {
+                  ...BASE,
                   accelerator: trimmed,
                   refusal:
                     trimmed === refuse ? `${trimmed} is registered by another application` : null,
@@ -167,6 +177,14 @@ test("Clear sends nothing and the section goes back to unset", async () => {
   expect(sent).toEqual([null]);
   expect(field().value).toBe("");
   expect(text()).toContain("Not set — no shortcut is registered");
+});
+
+test("a stored shortcut reads as not registered while notes are hidden (#832)", async () => {
+  render({ accelerator: SHORTCUT, shown: false });
+  await settle();
+
+  expect(text()).toContain("Not registered while notes are hidden");
+  expect(text()).not.toContain("Registered.");
 });
 
 test("Save is not offered while the field matches what is stored", async () => {

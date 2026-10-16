@@ -34,6 +34,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The `?fake-ipc` fixture is one module per feature under `app/src/lib/shell/dev/fake/`, found by a glob; a ticket adds or edits its feature's module only, except that a row a command returns goes in the module that answers the command (the Week's refused worklog in `fake/write-queue.ts`, #828). A new screen registers itself in its folder's `page.ts` (`definePage`, `tf/page-entry.ts`) and does not edit `TfPage.svelte`. (#908, PR #916)
 - A `?fake-ipc` row's state chip, path and source ride in its payload as `chip`, `path` and `source`, which `mirrorRow` reads; the mock adapter declares none of them. (#817)
 - Screenshots under `?fake-ipc` are compared with prototype-6 at the same route, theme and 1440 x 900. (Design system, intro)
+- Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
 ## Copy and display
 

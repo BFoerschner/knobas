@@ -33,6 +33,7 @@ pub mod conversation;
 mod error;
 pub mod inbox;
 pub mod logging;
+pub mod notes_export;
 pub mod notify;
 mod profile;
 pub mod protocol;
@@ -494,6 +495,10 @@ pub fn run() {
             commands::entity::job_reach,
             commands::entity::parent_links,
             commands::entity::set_parent_links,
+            // #832's notes and capture setting and the notes export,
+            // appended at the foot: the list is append-only (§10.8).
+            commands::entity::set_notes_shown,
+            commands::entity::export_notes_markdown,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
