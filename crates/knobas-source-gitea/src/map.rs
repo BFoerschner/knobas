@@ -101,11 +101,30 @@ pub(crate) fn url_path(name: &str) -> String {
         .replace('?', "%3F")
 }
 
+/// A repository's record, with its teams beside it where Gitea listed them
+/// (#966): `teams` is the team records the listing answered, less any that
+/// holds every repository of its organization (*Owners*), which says nothing
+/// about this one. Absent where Gitea would not say ([`None`]), so a reader
+/// misses rather than reading "no team".
+fn with_teams(raw: &Value, teams: Option<&[Value]>) -> Value {
+    let mut payload = raw.clone();
+    if let (Some(teams), Some(record)) = (teams, payload.as_object_mut()) {
+        let own = teams
+            .iter()
+            .filter(|team| team.get("includes_all_repositories") != Some(&Value::Bool(true)))
+            .cloned()
+            .collect();
+        record.insert("teams".to_owned(), Value::Array(own));
+    }
+    payload
+}
+
 pub(crate) fn repo_item(
     source_id: &str,
     raw: &Value,
     repo: &model::Repo,
     at: RepoRef<'_>,
+    teams: Option<&[Value]>,
 ) -> SyncItem {
     SyncItem {
         entity: EntityRef::new(source_id, &keys::repo_key(at.owner, at.name)),
@@ -121,7 +140,7 @@ pub(crate) fn repo_item(
             .as_ref()
             .and_then(|o| non_blank(o.login.as_deref())),
         updated_at: real_time(repo.updated_at),
-        payload: raw.clone(),
+        payload: with_teams(raw, teams),
         web_url: non_blank(repo.html_url.as_deref()),
         deleted: false,
     }
@@ -294,7 +313,7 @@ mod tests {
     fn a_repository_becomes_a_searchable_item() {
         let raw = raw_repo();
         let repo: crate::model::Repo = serde_json::from_value(raw.clone()).unwrap();
-        let item = repo_item(SOURCE, &raw, &repo, at());
+        let item = repo_item(SOURCE, &raw, &repo, at(), None);
         assert_eq!(item.entity.to_string(), "gitea:tidewater/payout-service");
         assert_eq!(item.kind, crate::KIND_REPO);
         assert_eq!(item.title, "tidewater/payout-service");

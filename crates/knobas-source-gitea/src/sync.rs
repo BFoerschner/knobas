@@ -580,9 +580,20 @@ async fn sync_repo(
     if before.repo_updated_at != updated_at
         || before.repo_fingerprint.as_deref() != Some(fingerprint.as_str())
     {
+        // Its teams (#966), read only when the record is written: a team
+        // change shows with the repository's next change, or the next full
+        // sync, at one request per changed repository rather than one per
+        // repository per run.
+        let teams = source.client.repo_teams(owner, name).await?;
         push(
             sink,
-            map::repo_item(&source.id, &selected.raw, &selected.repo, at),
+            map::repo_item(
+                &source.id,
+                &selected.raw,
+                &selected.repo,
+                at,
+                teams.as_deref(),
+            ),
             emitted,
         )
         .await?;

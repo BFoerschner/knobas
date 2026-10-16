@@ -783,7 +783,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 21] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 22] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -805,16 +805,19 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::STARTED, &paths.started, Wanted::Instant),
             (field::FINISHED, &paths.finished, Wanted::Instant),
             (field::STARTED_BY, &paths.started_by, Wanted::Text),
+            (field::LANGUAGE, &paths.language, Wanted::Text),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
-        // pipeline's chain of groups (#849). One rule for all five.
-        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 5] = [
+        // pipeline's chain of groups (#849), a repository's teams (#966). One
+        // rule for all six.
+        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 6] = [
             (field::REVIEWERS, &paths.reviewers),
             (field::REVISION, &paths.revision),
             (field::LABELS, &paths.labels),
             (field::SPRINT_STATE, &paths.sprint_state),
             (field::GROUP_PATH, &paths.group_path),
+            (field::TEAMS, &paths.teams),
         ];
 
         // Clause 2 for one path on one item, and the evidence clause 3 wants

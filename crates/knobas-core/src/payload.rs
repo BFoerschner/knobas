@@ -350,6 +350,21 @@ pub struct KindPaths {
     /// a run a change or a schedule started has none.
     #[serde(default)]
     pub started_by: Vec<PayloadPath>,
+    /// The language a repository is written in, in the source's own word
+    /// (#966, R-8.1): Gitea's `language`, which it works out from the
+    /// default branch's files. Gitea writes `""` for a repository it found
+    /// no language in, which every reader takes as a miss. Empty for every
+    /// kind that is not a repository.
+    #[serde(default)]
+    pub language: Vec<PayloadPath>,
+    /// The teams a repository belongs to, by name (#966, R-8.1). A list: a
+    /// repository may sit in more than one. For Gitea, the organization teams
+    /// the repository was added to, which `map` writes beside the record from
+    /// `/repos/{owner}/{repo}/teams`, leaving out a team that holds every
+    /// repository of its organization (*Owners*). Empty for every kind that
+    /// is not a repository, and a miss names no team.
+    #[serde(default)]
+    pub teams: Vec<ListPath>,
 }
 
 /// How a run was started, in the shell's words (#961).
@@ -513,6 +528,8 @@ pub mod field {
     pub const FINISHED: &str = "finished";
     pub const TRIGGER: &str = "trigger";
     pub const STARTED_BY: &str = "started_by";
+    pub const LANGUAGE: &str = "language";
+    pub const TEAMS: &str = "teams";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -549,6 +566,8 @@ pub mod field {
         FINISHED,
         TRIGGER,
         STARTED_BY,
+        LANGUAGE,
+        TEAMS,
     ];
 }
 

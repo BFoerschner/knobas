@@ -60,6 +60,64 @@ async fn a_full_sync_emits_the_repository_and_every_branch() {
     );
 }
 
+/// A repository's teams (#966): the ones it was added to, by name, written
+/// beside Gitea's record where the descriptor declares them. *Owners* holds
+/// every repository of its organization, so it says nothing about this one.
+#[tokio::test]
+async fn a_repository_carries_the_teams_it_was_added_to_and_not_owners() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+
+    let repo = items
+        .iter()
+        .find(|i| i.kind == "repo")
+        .expect("the repository is emitted");
+    let declared = knobas_source_gitea::descriptor_template()
+        .payload_paths
+        .into_iter()
+        .find(|p| p.kind == "repo")
+        .expect("a repository declares its paths");
+    assert_eq!(
+        knobas_core::payload::resolve_list(&repo.payload, &declared.teams),
+        vec!["Payments".to_owned()]
+    );
+    assert_eq!(
+        knobas_core::payload::resolve_string(&repo.payload, &declared.language).as_deref(),
+        Some("Rust")
+    );
+}
+
+/// A repository whose teams Gitea will not list costs the teams and nothing
+/// else (#966): one owned by a user (Gitea answers 405, so no team at all)
+/// reads as none, one the token may not ask about (403) as a miss, and both
+/// runs succeed.
+#[tokio::test]
+async fn teams_gitea_will_not_list_name_none_and_the_run_goes_on() {
+    let mut state = State::tidewater().with_elsewhere();
+    state
+        .teams
+        .insert("elsewhere/unrelated".to_owned(), (405, serde_json::json!({ "message": "repo is not owned by an organization" })));
+    state
+        .teams
+        .insert("tidewater/payout-service".to_owned(), (403, serde_json::json!({ "message": "token does not have at least one of required scope(s): [read:organization]" })));
+    let fake = Fake::start(&state).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let (items, _) = full(&*source).await;
+
+    let teams_of = |entity: &str| {
+        items
+            .iter()
+            .find(|i| i.entity.to_string() == entity)
+            .unwrap_or_else(|| panic!("{entity} is emitted"))
+            .payload
+            .get("teams")
+            .cloned()
+    };
+    assert_eq!(teams_of("gitea:elsewhere/unrelated"), Some(serde_json::json!([])));
+    assert_eq!(teams_of("gitea:tidewater/payout-service"), None);
+}
+
 /// Interfaces §4.1, battery clause 2: nothing changed, nothing emitted, and the
 /// cursor comes back byte-identical -- otherwise a five-minute schedule writes
 /// 288 "synced nothing" activity lines a day.
