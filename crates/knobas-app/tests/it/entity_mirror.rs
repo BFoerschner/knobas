@@ -1769,7 +1769,10 @@ fn the_docs_shapes_match_their_typescript_mirror() {
         hits: vec![DocHit {
             entity_id: "confluence:2".to_owned(),
             title: "SEPA payout retry design".to_owned(),
-            space: None,
+            space: Some(DocSpaceRef {
+                key: "ENG".to_owned(),
+                name: None,
+            }),
             path: None,
             snippet: DocSnippet {
                 section: None,
@@ -1785,15 +1788,15 @@ fn the_docs_shapes_match_their_typescript_mirror() {
             updated_at: None,
         }],
     };
-    let wire = serde_json::to_value(&hits).unwrap();
+    let found = serde_json::to_value(&hits).unwrap();
     assert_shape(
         "DocsHits",
-        &wire,
+        &found,
         &["hits", "needles", "took_ms", "total", "unknown_tokens"],
     );
     assert_shape(
         "DocHit",
-        &wire["hits"][0],
+        &found["hits"][0],
         &[
             "editor",
             "editor_name",
@@ -1808,7 +1811,7 @@ fn the_docs_shapes_match_their_typescript_mirror() {
     );
     assert_shape(
         "DocSnippet",
-        &wire["hits"][0]["snippet"],
+        &found["hits"][0]["snippet"],
         &["comment_by", "section", "segments"],
     );
     let export = DocExport {
