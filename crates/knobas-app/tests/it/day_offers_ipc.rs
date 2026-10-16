@@ -10,8 +10,8 @@
 
 use chrono::{DateTime, Duration, SubsecRound, TimeZone, Utc};
 use knobas_app::IpcErrorCode;
-use knobas_app::time::{self, BlockKind, TimerTarget};
 use knobas_app::time::week::DayWindow;
+use knobas_app::time::{self, BlockKind, TimerTarget};
 use sqlx::PgPool;
 
 const TICKET: &str = "jira:PAY-231";
@@ -103,7 +103,13 @@ async fn a_dismissed_offer_is_gone_and_the_next_reads_do_not_offer_it_again() {
     );
 
     // The stretch goes on: more beats on the same ticket, unbroken.
-    beats(&pool, Some(&on(TICKET)), at(9, 10) + Duration::seconds(30), 20).await;
+    beats(
+        &pool,
+        Some(&on(TICKET)),
+        at(9, 10) + Duration::seconds(30),
+        20,
+    )
+    .await;
     let later = read(&pool).await;
     assert_eq!(
         offered(&later),
