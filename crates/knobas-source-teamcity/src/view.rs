@@ -410,7 +410,25 @@ fn age(d: chrono::TimeDelta) -> String {
 /// held is not editable. Drawn by [`drawn_value`],
 /// the rule the build view uses too.
 fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
-    let values: Vec<Setting> = record
+    let values = parameter_settings(record);
+    let count = values.len();
+    tab(
+        Tab::Parameters,
+        "Parameters",
+        Some(count),
+        vec![Block::Settings {
+            title: None,
+            entity: entity.to_owned(),
+            write_op: crate::WRITE_OP_SET_PARAMETER.to_owned(),
+            values,
+        }],
+    )
+}
+
+/// A configuration's parameters as [`parameters`] draws them, for the view's
+/// tab and the Builds frame's pipeline settings (#851) alike.
+fn parameter_settings(record: &ConfigRecord) -> Vec<Setting> {
+    record
         .parameters
         .property
         .iter()
@@ -429,19 +447,7 @@ fn parameters(entity: &str, record: &ConfigRecord) -> ViewSection {
                 description: None,
             }
         })
-        .collect();
-    let count = values.len();
-    tab(
-        Tab::Parameters,
-        "Parameters",
-        Some(count),
-        vec![Block::Settings {
-            title: None,
-            entity: entity.to_owned(),
-            write_op: crate::WRITE_OP_SET_PARAMETER.to_owned(),
-            values,
-        }],
-    )
+        .collect()
 }
 
 // --- Steps --------------------------------------------------------------
@@ -654,6 +660,64 @@ fn root_facts(entry: &VcsRootEntry) -> Vec<Fact> {
         facts.push(fact("Checkout rules", rules, None));
     }
     facts
+}
+
+// --- The Builds frame's pipeline settings (#851) ---------------------------
+
+/// A configuration's settings as the Builds frame draws them (ADR-0022): its
+/// VCS roots as repositories, its triggers, and its parameters. Read off the
+/// record the view reads, through the same scrubbing: a root's URL without
+/// its credential, a trigger's properties picked by name, a password
+/// parameter without its value.
+pub(crate) fn pipeline_settings(
+    record: &ConfigRecord,
+) -> knobas_source::pipeline::PipelineSettings {
+    use knobas_source::pipeline::{PipelineRepository, PipelineSettings, PipelineTrigger};
+    let repositories = record
+        .vcs_root_entries
+        .entry
+        .iter()
+        .map(|entry| {
+            let root = entry.root.as_ref();
+            PipelineRepository {
+                name: root
+                    .and_then(|r| nonblank(r.name.as_deref()).or(nonblank(r.id.as_deref())))
+                    .or(nonblank(entry.id.as_deref()))
+                    .unwrap_or("unnamed")
+                    .to_owned(),
+                url: root
+                    .and_then(|r| r.properties.get("url"))
+                    .and_then(without_userinfo),
+                default_branch: root
+                    .and_then(|r| r.properties.get("branch"))
+                    .map(str::to_owned),
+                entity_id: None,
+            }
+        })
+        .collect();
+    let triggers = record
+        .triggers
+        .trigger
+        .iter()
+        .map(|trigger| {
+            // The view's facts lead with the trigger's name and say when it
+            // is off; the frame carries both as fields of their own.
+            let mut facts = trigger_facts(trigger);
+            let name = facts.remove(0).value;
+            facts.retain(|f| f.label != "Disabled");
+            PipelineTrigger {
+                name,
+                facts,
+                disabled: trigger.disabled,
+            }
+        })
+        .collect();
+    PipelineSettings {
+        repositories,
+        triggers,
+        parameters: parameter_settings(record),
+        parameter_write_op: Some(crate::WRITE_OP_SET_PARAMETER.to_owned()),
+    }
 }
 
 /// A step or trigger that is switched off: said, quietly.
@@ -1351,6 +1415,86 @@ mod tests {
         ] {
             assert_eq!(drawn(ambiguous), None, "{ambiguous}");
         }
+    }
+
+    /// The Builds frame's settings (#851): a root as a repository, its URL
+    /// without the credential and its default branch; a trigger by its name
+    /// with the properties picked by name, switched off said once; a password
+    /// parameter without its value. Read off the record
+    /// `BUILD_CONFIG_VIEW_FIELDS` asks for.
+    #[test]
+    fn a_configurations_settings_fill_the_pipeline_frame_scrubbed() {
+        let record: ConfigRecord = serde_json::from_value(serde_json::json!({
+            "id": "Payout_IntegrationTests",
+            "parameters": { "property": [
+                { "name": "env", "value": "staging", "inherited": false },
+                { "name": "deploy.token", "value": "s3cret", "inherited": true,
+                  "type": { "rawValue": "password" } }
+            ]},
+            "triggers": { "trigger": [
+                { "id": "t1", "type": "vcsTrigger", "properties": { "property": [
+                    { "name": "branchFilter", "value": "+:*" } ]}},
+                { "id": "t2", "type": "schedulingTrigger", "disabled": true,
+                  "properties": { "property": [
+                    { "name": "schedulingPolicy", "value": "daily" },
+                    { "name": "hour", "value": "2" } ]}}
+            ]},
+            "vcs-root-entries": { "vcs-root-entry": [
+                { "id": "Payout_Git", "vcs-root": { "id": "Payout_Git", "name": "payout-service",
+                  "vcsName": "jetbrains.git", "properties": { "property": [
+                    { "name": "url", "value": "https://knobas:s3cret@gitea.example/tidewater/payout-service.git" },
+                    { "name": "branch", "value": "refs/heads/main" },
+                    { "name": "secure:password", "value": null } ]}}}
+            ]}
+        }))
+        .expect("a configuration record");
+        let settings = pipeline_settings(&record);
+        assert_eq!(settings.repositories.len(), 1);
+        let repo = &settings.repositories[0];
+        assert_eq!(repo.name, "payout-service");
+        assert_eq!(
+            repo.url.as_deref(),
+            Some("https://gitea.example/tidewater/payout-service.git")
+        );
+        assert_eq!(repo.default_branch.as_deref(), Some("refs/heads/main"));
+        assert_eq!(repo.entity_id, None, "the app's to fill, not the adapter's");
+
+        let triggers: Vec<(&str, bool, Vec<(&str, &str)>)> = settings
+            .triggers
+            .iter()
+            .map(|t| {
+                (
+                    t.name.as_str(),
+                    t.disabled,
+                    t.facts
+                        .iter()
+                        .map(|f| (f.label.as_str(), f.value.as_str()))
+                        .collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            triggers,
+            [
+                ("VCS", false, vec![("Branch filter", "+:*")]),
+                ("Schedule", true, vec![("When", "daily at 02:00")]),
+            ]
+        );
+
+        let params: Vec<(&str, &str, bool)> = settings
+            .parameters
+            .iter()
+            .map(|p| (p.name.as_str(), p.value.as_str(), p.secret))
+            .collect();
+        assert_eq!(
+            params,
+            [("env", "staging", false), ("deploy.token", "", true)],
+            "in the source's order, a password without its value"
+        );
+        assert_eq!(
+            settings.parameter_write_op.as_deref(),
+            Some(crate::WRITE_OP_SET_PARAMETER)
+        );
     }
 
     #[test]

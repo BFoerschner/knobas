@@ -1,0 +1,570 @@
+<!--
+  The pipeline page (#851, R-9.4 to R-9.6, ADR-0022): the right-hand side of
+  Builds at `#/builds/<pipeline>[/<tab>]`, drawn over the declared pipeline
+  and run and the two live reads of `knobas_source::pipeline`.
+
+  - **Header**: the name; one line saying what it is in the source's word
+    (the label its descriptor gives the pipeline kind), its group, the
+    repository it builds (a link where the mirror holds it) and what triggers
+    it; *Run…*, *Run on <job branch>* (or the default branch), *Open in
+    <source>*. A warn line when the source's sign-in or last sync failed.
+  - **History**: the last thirty runs as bars, height duration and colour
+    result, each a link to its run with its facts as the tip; *Passed*,
+    *Usual duration*, *Last passing*.
+  - **Tabs**: *Runs* (the filter bar, runs by day, each with result, branch
+    and the job's chip, duration bar, start, *Log* and *Run again…*; older
+    runs asked of the source when the end scrolls into view), *Parameters*
+    (each default with *Change…* through the write queue), *Triggers*.
+
+  *Run…* and *Run again…* open the Run… dialog, which is #852's; until it
+  lands they say so. *Pin* writes through the list's pins (#849, `onpin`). A run started here shows as
+  *queued* at once, never as started (R-9.8).
+-->
+<script lang="ts">
+  import { onDestroy, onMount, untrack } from "svelte";
+
+  import { ipcErrorMessage } from "../../ipc";
+  import type { PipelineRow, PipelineSettings, RunRow, Setting } from "../../ipc/entity";
+  import type { SourceDescriptor, SourceSummary, SourceSyncStatus } from "../../ipc/sources";
+  import { push } from "../../shell/toasts.svelte";
+  import { openWriteQueue } from "../../shell/write-queue.svelte";
+  import { settingPayload } from "../../detail/view/settings";
+  import FilterBar from "../filter/FilterBar.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
+  import Marked from "../filter/Marked.svelte";
+  import type { FilterConfig } from "../filter/filter";
+  import { duration, runHash, runTone, shortTime } from "./builds";
+  import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
+  import {
+    BAR_STEP,
+    BAR_WIDTH,
+    CHART_HEIGHT,
+    DURBAR_WIDTH,
+    RESULTS,
+    TABS,
+    appendOlder,
+    barHeight,
+    barTip,
+    branchesOf,
+    byDay,
+    defaultBranch,
+    durbarWidth,
+    historyFacts,
+    historyOf,
+    isStartedHere,
+    jobBranchFor,
+    keptRuns,
+    longest,
+    pipelineWord,
+    resultWord,
+    staleLine,
+    startedHere,
+    tabHash,
+    tabOf,
+    triggerDetail,
+    triggersSentence,
+  } from "./pipeline";
+
+  let {
+    pipeline,
+    rest,
+    job,
+    runs: readRuns,
+    onpin,
+    ports = BRIDGE,
+  }: {
+    pipeline: PipelineRow;
+    /** What follows `builds` in the address: the pipeline, then the tab. */
+    rest: string[];
+    /** The job the reader was last in. */
+    job: string | null;
+    /** The mirrored runs, newest first (`pipeline_runs`). */
+    runs: (pipelineId: string) => Promise<RunRow[]>;
+    /** *Pin* / *Unpin*: the list's pins (#849), which the list owns. */
+    onpin?: () => void;
+    ports?: PipelinePorts;
+  } = $props();
+
+  const tab = $derived(tabOf(rest));
+  const id = $derived(pipeline.entity_id);
+
+  // -- reads ----------------------------------------------------------------
+
+  let held = $state<RunRow[] | null>(null);
+  let failed = $state<string | null>(null);
+  /** Runs started here, drawn as queued until the next read holds them (R-9.8). */
+  let started = $state<RunRow[]>([]);
+  let settings = $state<PipelineSettings | null>(null);
+  let settingsFailed = $state<string | null>(null);
+  let settingsRead = $state(false);
+  let jobBranches = $state<string[]>([]);
+  let adapters = $state<SourceDescriptor[]>([]);
+  let sources = $state<SourceSummary[]>([]);
+  let sync = $state<SourceSyncStatus[]>([]);
+  /** Older history: `more` while the source may hold more, `end` once it said none. */
+  let older = $state<"more" | "loading" | "end">("more");
+  let olderFailed = $state<string | null>(null);
+  /** Bumped on every new pipeline, so an answer for the last one is dropped. */
+  let token = 0;
+
+  $effect(() => {
+    const wanted = id;
+    untrack(() => open(wanted));
+  });
+
+  function open(wanted: string) {
+    const mine = ++token;
+    held = null;
+    failed = null;
+    started = [];
+    settings = null;
+    settingsFailed = null;
+    settingsRead = false;
+    older = "more";
+    olderFailed = null;
+    readRuns(wanted).then(
+      (rows) => {
+        if (mine === token) held = rows;
+      },
+      (cause: unknown) => {
+        if (mine === token) failed = ipcErrorMessage(cause);
+      },
+    );
+    ports.settings(wanted).then(
+      (answer) => {
+        if (mine !== token) return;
+        settings = answer;
+        settingsRead = true;
+      },
+      (cause: unknown) => {
+        if (mine !== token) return;
+        settingsFailed = ipcErrorMessage(cause);
+        settingsRead = true;
+      },
+    );
+  }
+
+  // Facts about the sources, read once: the word, the warn line.
+  onMount(() => {
+    void ports.adapters().then((rows) => (adapters = rows), () => {});
+    void ports.sources().then((rows) => (sources = rows), () => {});
+    void ports.syncStatus().then((rows) => (sync = rows), () => {});
+  });
+
+  $effect(() => {
+    const wanted = job;
+    jobBranches = [];
+    if (wanted === null) return;
+    ports.jobBranches(wanted).then(
+      (names) => {
+        if (job === wanted) jobBranches = names;
+      },
+      () => {},
+    );
+  });
+
+  const all = $derived(held === null ? null : [...started, ...held]);
+
+  async function more() {
+    if (held === null || older !== "more" || held.length === 0) return;
+    const mine = token;
+    const before = held.at(-1)!.entity_id;
+    older = "loading";
+    olderFailed = null;
+    try {
+      const rows = await ports.older(id, before);
+      if (mine !== token) return;
+      held = appendOlder(held, rows);
+      older = rows.length === 0 ? "end" : "more";
+    } catch (cause) {
+      if (mine !== token) return;
+      olderFailed = ipcErrorMessage(cause);
+      older = "more";
+    }
+  }
+
+  // The end of the list in view asks for the next page (R-9.5).
+  let sentinel: HTMLElement | undefined = $state();
+  $effect(() => {
+    const at = sentinel;
+    if (at === undefined || typeof IntersectionObserver === "undefined") return;
+    const watcher = new IntersectionObserver((entries) => {
+      if (entries.some((entry) => entry.isIntersecting) && olderFailed === null) void more();
+    });
+    watcher.observe(at);
+    return () => watcher.disconnect();
+  });
+
+  // -- header ----------------------------------------------------------------
+
+  const adapterKind = $derived(sources.find((s) => s.id === pipeline.source_id)?.adapter_kind ?? null);
+  const word = $derived(pipelineWord(adapters, adapterKind));
+  /** The project path, as the source nests it (#849), else the group. */
+  const project = $derived(pipeline.path.length > 0 ? pipeline.path.join(" › ") : (pipeline.group ?? ""));
+  const repositories = $derived(settings?.repositories ?? []);
+  const triggers = $derived(triggersSentence(settings));
+  const health = $derived(sources.map((source) => source.health));
+  const stale = $derived(staleLine(pipeline, health, sync));
+  const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
+  const fallback = $derived(defaultBranch(settings));
+
+  /** *Run on <branch>*: one run on the queue, drawn queued at once (R-9.8). */
+  async function runOn(branch: string | null) {
+    const words = branch ?? fallback ?? "the default branch";
+    try {
+      const queued = await ports.submitWrite({ RunBuild: { entity: id, branch, parameters: [] } });
+      started = [
+        {
+          entity_id: startedHere(queued.id),
+          number: null,
+          state: { text: "queued", tone: "info" },
+          branch: branch ?? fallback,
+          started: null,
+          finished: null,
+          duration_seconds: null,
+          updated_at: new Date().toISOString(),
+          web_url: null,
+        },
+        ...started,
+      ];
+      push({
+        text: `Queued: run ${pipeline.name}. On ${words}, defaults. ${stale?.fix ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync."}`,
+        action: { label: "Show queue", run: openWriteQueue },
+      });
+    } catch (cause) {
+      push({ text: `Could not queue the run: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  /** *Run…* and *Run again…*: the dialog is #852's. */
+  function runDialog(from: RunRow | null) {
+    push({
+      text: from
+        ? `Run ${pipeline.name} again from ${from.number !== null ? `#${from.number}` : "this run"}: the Run… dialog is not built in the new shell yet.`
+        : `Run ${pipeline.name}: the Run… dialog is not built in the new shell yet.`,
+    });
+  }
+
+  function openInSource() {
+    if (pipeline.web_url === null) return;
+    void ports.openExternal(pipeline.web_url).catch((cause: unknown) => {
+      push({ text: `Could not open ${pipeline.source_name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    });
+  }
+
+  // -- history ---------------------------------------------------------------
+
+  const history = $derived(all === null ? [] : historyOf(all));
+  const max = $derived(longest(all ?? []));
+  const facts = $derived(historyFacts(all ?? []));
+
+  // -- runs tab --------------------------------------------------------------
+
+  const filter = sessionFilter("builds-runs");
+  if (filter.scope === null) filter.scope = "all";
+  const config = $derived<FilterConfig>({
+    id: "builds-runs",
+    placeholder: "Filter runs by number or branch",
+    noun: "runs",
+    scopes:
+      job !== null
+        ? [
+            { id: "job", label: "My job’s branches", query: "" },
+            { id: "all", label: "All", query: "" },
+          ]
+        : [],
+    chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
+    dropdowns: [{ key: "branch", label: "Branch", options: branchesOf(all ?? []).map((value) => ({ value, label: value })) }],
+  });
+  const kept = $derived(
+    all === null
+      ? []
+      : keptRuns(
+          all,
+          {
+            text: filter.text,
+            scope: job !== null ? filter.scope : "all",
+            results: filter.chips["result"] ?? [],
+            branch: filter.dropdowns["branch"] ?? null,
+          },
+          jobBranches,
+        ),
+  );
+  const days = $derived(byDay(kept));
+
+  function chipTone(run: RunRow): string {
+    const tone = runTone(run);
+    if (tone === "run" || tone === "q") return "tf-info";
+    return tone === "ok" || tone === "err" || tone === "warn" ? `tf-${tone}` : "";
+  }
+
+  // -- parameters tab --------------------------------------------------------
+
+  let editing = $state<string | null>(null);
+  let draft = $state("");
+  let queuedValues = $state<Record<string, string>>({});
+
+  function change(setting: Setting) {
+    editing = setting.name;
+    draft = setting.secret ? "" : setting.value;
+  }
+
+  async function save(setting: Setting) {
+    const op = settings?.parameter_write_op ?? null;
+    const payload = op === null ? null : settingPayload(op, id, setting.name, draft, setting.secret ? null : setting.value);
+    if (payload === null) return;
+    try {
+      await ports.submitWrite(payload);
+      queuedValues = { ...queuedValues, [setting.name]: setting.secret ? "" : draft };
+      editing = null;
+      push({
+        text: `Queued: set ${setting.name} on ${pipeline.name}. Sends with the next sync.`,
+        action: { label: "Show queue", run: openWriteQueue },
+      });
+    } catch (cause) {
+      push({ text: `Could not queue the change: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  onDestroy(() => {
+    token += 1;
+  });
+</script>
+
+<header class="tf-fhead tf-bhead">
+  <div>
+    <h1>{pipeline.name}</h1>
+    <div class="tf-sub">
+      {pipeline.source_name}{word !== null ? ` ${word}` : ""}{project !== "" ? ` in project ${project}` : ""}{#if repositories.length > 0}, builds
+        {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
+              class="tf-mono"
+              href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
+            >{:else}<span class="tf-mono">{repository.name}</span>{/if}{/each}{/if}.{triggers !== "" ? ` ${triggers}` : ""}
+    </div>
+  </div>
+  <div class="tf-acts">
+    <button type="button" class="tf-btn tf-primary" onclick={() => runDialog(null)}>Run…</button>
+    {#if jobBranch !== null}
+      <button type="button" class="tf-btn" onclick={() => runOn(jobBranch)}>Run on <span class="tf-mono">{jobBranch}</span></button>
+    {:else}
+      <button type="button" class="tf-btn" onclick={() => runOn(null)}
+        >Run on {#if fallback !== null}<span class="tf-mono">{fallback}</span>{:else}the default branch{/if}</button
+      >
+    {/if}
+    {#if onpin !== undefined}
+      <button type="button" class="tf-btn tf-ghost" onclick={onpin}>{pipeline.pinned ? "Unpin" : "Pin"}</button>
+    {/if}
+    {#if pipeline.web_url !== null}
+      <button type="button" class="tf-btn tf-ghost" onclick={openInSource}>Open in {pipeline.source_name}</button>
+    {/if}
+  </div>
+</header>
+
+{#if stale !== null}
+  <div class="tf-stale tf-bstale">
+    {stale.text}
+    {#if stale.fix !== null}<a href={stale.fix}>Re-enter password</a>{/if}
+  </div>
+{/if}
+
+{#if failed !== null}
+  <p class="tf-dim tf-runs">Runs could not be read: {failed}</p>
+{:else if all !== null && all.length > 0}
+  <div class="tf-hist">
+    <div class="tf-chart">
+      <svg
+        class="tf-bars"
+        width={history.length * (BAR_STEP)}
+        height={CHART_HEIGHT}
+        role="group"
+        aria-label={`Duration of the last ${history.length} runs`}
+      >
+        {#each history as run, at (run.entity_id)}
+          {@const h = barHeight(run, max)}
+          <a href={runHash(id, run.entity_id)} aria-label={`Run ${run.number ?? "queued"}, ${resultWord(run)}`}>
+            <title>{barTip(run)}</title>
+            <rect class={`tf-bar tf-run-${runTone(run)}`} x={at * (BAR_STEP)} y={CHART_HEIGHT - h} width={BAR_WIDTH} height={h} rx="2" />
+          </a>
+        {/each}
+      </svg>
+      <div class="tf-axis">
+        <span>{history[0]?.started ? shortTime(history[0].started) : ""}</span><span>now</span>
+      </div>
+      <div class="tf-legend">
+        <span><i class="tf-run-ok"></i>passed</span><span><i class="tf-run-err"></i>failed</span><span
+          ><i class="tf-run-run"></i>running</span
+        ><span>bar height is duration</span>
+      </div>
+    </div>
+    <div class="tf-facts2">
+      <div><b>Passed</b>{facts.passed} of the last {facts.finished}</div>
+      <div><b>Usual duration</b>{facts.usual !== null ? duration(facts.usual) : "none"}</div>
+      <div>
+        <b>Last passing</b>{#if facts.lastPassing !== null}<a href={runHash(id, facts.lastPassing.entity_id)}
+            >#{facts.lastPassing.number}</a
+          >{facts.lastPassing.started ? `, ${shortTime(facts.lastPassing.started)}` : ""}{:else}none{/if}
+      </div>
+    </div>
+  </div>
+{/if}
+
+<nav class="tf-tabs" aria-label="Pipeline">
+  {#each TABS as entry (entry.id)}
+    <a href={tabHash(id, entry.id)} aria-current={entry.id === tab ? "page" : undefined}
+      >{entry.name}{#if entry.id === "runs" && all !== null && all.length > 0}{" "}<span class="tf-count">{all.length}</span>{/if}</a
+    >
+  {/each}
+</nav>
+
+{#if tab === "runs"}
+  <div class="tf-runbar">
+    <FilterBar {config} {filter} shown={all === null ? null : kept.length} total={all?.length ?? null} />
+  </div>
+  <div class="tf-runs">
+    {#if all === null && failed === null}
+      <p class="tf-dim">Reading runs…</p>
+    {:else if all !== null && all.length === 0}
+      <div class="tf-empty"><p>No runs yet.</p></div>
+    {:else if all !== null && kept.length === 0}
+      <div class="tf-empty"><p>No run matches.</p></div>
+    {/if}
+    {#each days as day (day.label)}
+      <h3 class="tf-dayh">{day.label}</h3>
+      <table class="tf-tbl" aria-label={`Runs, ${day.label}`}>
+        <tbody>
+          {#each day.runs as run (run.entity_id)}
+            {@const tone = runTone(run)}
+            <tr>
+              <td class="tf-nowrap tf-run-no">
+                {#if isStartedHere(run)}
+                  <b>queued</b>
+                {:else}
+                  <a href={runHash(id, run.entity_id)}><b><Marked text={run.number !== null ? `#${run.number}` : "queued"} typed={filter.text} /></b></a>
+                {/if}
+                {#if run.state !== null}<span class={`tf-chip ${chipTone(run)}`}>{tone === "q" ? "queued" : run.state.text}</span>{/if}
+              </td>
+              <td class="tf-mono tf-run-br"
+                >{#if run.branch !== null}<Marked text={run.branch} typed={filter.text} />{/if}{#if run.branch !== null && jobBranches.includes(run.branch) && job !== null}{" "}<span
+                    class="tf-chip tf-jobchip-sm">{job}</span
+                  >{/if}</td
+              >
+              <td class="tf-nowrap tf-num tf-run-dur">
+                {#if run.duration_seconds !== null}
+                  <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"
+                    ><rect width={durbarWidth(run.duration_seconds, max)} height="4" rx="2" /></svg
+                  >{duration(run.duration_seconds)}
+                {:else if tone === "run"}
+                  <progress class="tf-progress" aria-label="Running"></progress> running
+                {:else}
+                  waiting
+                {/if}
+              </td>
+              <td class="tf-nowrap tf-dim tf-num tf-run-at">{run.started !== null ? shortTime(run.started) : ""}</td>
+              <td class="tf-nowrap tf-run-acts">
+                {#if !isStartedHere(run)}
+                  <a class="tf-btn tf-sm tf-ghost" href={`${runHash(id, run.entity_id)}/log`}>Log</a>
+                  {#if run.finished !== null}
+                    <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => runDialog(run)}>Run again…</button>
+                  {/if}
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/each}
+    {#if all !== null && all.length > 0}
+      <div class="tf-older" bind:this={sentinel}>
+        {#if olderFailed !== null}
+          <p class="tf-dim">Older runs could not be read: {olderFailed}</p>
+          <button type="button" class="tf-btn tf-sm" onclick={() => ((olderFailed = null), void more())}>Try again</button>
+        {:else if older === "loading"}
+          <p class="tf-dim">Reading older runs…</p>
+        {:else if older === "end"}
+          <p class="tf-dim">The start of this pipeline’s history.</p>
+        {:else}
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => void more()}>Older runs</button>
+        {/if}
+      </div>
+    {/if}
+  </div>
+{:else if tab === "params"}
+  <div class="tf-runs tf-bsettings">
+    {#if settingsFailed !== null}
+      <p class="tf-dim">Parameters could not be read from {pipeline.source_name}: {settingsFailed}</p>
+    {:else if !settingsRead}
+      <p class="tf-dim">Reading parameters…</p>
+    {:else if settings === null || settings.parameters.length === 0}
+      <div class="tf-empty"><p>No parameters. Parameters added in {pipeline.source_name} show here.</p></div>
+    {:else}
+      <p class="tf-dim">
+        The defaults every run starts from. A run can override them in Run…; changing a default here writes to {pipeline.source_name}.
+      </p>
+      <table class="tf-tbl" aria-label="Parameters">
+        <thead><tr><th>Parameter</th><th>Default</th><th>Kind</th><th></th></tr></thead>
+        <tbody>
+          {#each settings.parameters as setting (setting.name)}
+            <tr>
+              <td class="tf-mono">{setting.name}</td>
+              <td class="tf-mono">
+                {#if editing === setting.name}
+                  <input
+                    type={setting.secret ? "password" : "text"}
+                    aria-label={`New default for ${setting.name}`}
+                    bind:value={draft}
+                    onkeydown={(event) => {
+                      if (event.key === "Enter") void save(setting);
+                      if (event.key === "Escape") {
+                        event.stopPropagation();
+                        editing = null;
+                      }
+                    }}
+                  />
+                {:else if setting.secret}
+                  <span class="tf-dim">(hidden)</span>
+                {:else}
+                  {(queuedValues[setting.name] ?? setting.value) || "(empty)"}
+                {/if}
+                {#if setting.name in queuedValues}<span class="tf-chip tf-info">queued</span>{/if}
+              </td>
+              <td class="tf-dim">{setting.secret ? "password" : setting.inherited ? "text, inherited" : "text"}</td>
+              <td class="tf-nowrap">
+                {#if editing === setting.name}
+                  <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void save(setting)}>Save</button>
+                  <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
+                {:else if settings.parameter_write_op !== null && setting.editable}
+                  <button type="button" class="tf-btn tf-sm" onclick={() => change(setting)}>Change…</button>
+                {/if}
+              </td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {/if}
+  </div>
+{:else}
+  <div class="tf-runs tf-bsettings">
+    {#if settingsFailed !== null}
+      <p class="tf-dim">Triggers could not be read from {pipeline.source_name}: {settingsFailed}</p>
+    {:else if !settingsRead}
+      <p class="tf-dim">Reading triggers…</p>
+    {:else if settings === null || settings.triggers.length === 0}
+      <div class="tf-empty"><p>No triggers. Runs start only when someone starts one.</p></div>
+    {:else}
+      <table class="tf-tbl" aria-label="Triggers">
+        <tbody>
+          {#each settings.triggers as trigger, at (at)}
+            <tr>
+              <td
+                ><b>{trigger.name} trigger</b>{#if trigger.disabled}{" "}<span class="tf-chip">disabled</span>{/if}{#if trigger.facts.length > 0}<span
+                    class="tf-sub">{triggerDetail(trigger)}</span
+                  >{/if}</td
+              >
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+      <p class="tf-dim">Read only. Edit triggers in {pipeline.source_name}.</p>
+    {/if}
+  </div>
+{/if}

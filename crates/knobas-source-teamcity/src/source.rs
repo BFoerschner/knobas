@@ -2,10 +2,12 @@
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
-    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, WriteOp, WriteReceipt,
+    ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
+    WriteReceipt,
 };
 
 use crate::client::{HttpRest, Rest, connection_info};
+use crate::rest::Locator;
 use crate::write;
 use crate::{TeamCityConfig, descriptor_template, sync};
 
@@ -274,6 +276,55 @@ impl Source for TeamCitySource {
             rest: &self.rest,
         };
         crate::view::draw(&viewer, entity, &key, section).await
+    }
+
+    /// A configuration's VCS roots, triggers and parameters (#851), off the
+    /// record its source view reads and scrubbed the same way.
+    async fn pipeline_settings(
+        &self,
+        entity: &str,
+    ) -> Result<Option<knobas_source::pipeline::PipelineSettings>, SourceError> {
+        let config = self.build_config_id(entity)?;
+        let config = crate::ids::config_id(entity, &config)?;
+        let record = self.rest.build_config(config).await?;
+        Ok(Some(crate::view::pipeline_settings(&record)))
+    }
+
+    /// A configuration's builds older than `before` (#851): the classes the
+    /// sync's per-configuration query emits -- canceled, failed to start and
+    /// every branch, personal builds kept out -- so an older run is the item
+    /// the sync would have made of it.
+    async fn older_runs(
+        &self,
+        entity: &str,
+        before: &str,
+        count: u32,
+    ) -> Result<Option<Vec<SyncItem>>, SourceError> {
+        let config = self.build_config_id(entity)?;
+        let config = crate::ids::config_id(entity, &config)?;
+        let before = self.build_id(before)?;
+        let count = count.clamp(1, knobas_source::pipeline::OLDER_RUNS_MAX);
+        let page = self
+            .rest
+            .builds(&Locator {
+                build_type_id: Some(config.to_owned()),
+                until_build_id: Some(before),
+                canceled_any: true,
+                failed_to_start_any: true,
+                branch_any: true,
+                // One more than asked: TeamCity answers `before` itself too.
+                count: count + 1,
+                ..Locator::default()
+            })
+            .await?;
+        Ok(Some(
+            page.items
+                .iter()
+                .filter(|b| b.rec.id != before)
+                .take(count as usize)
+                .map(|b| crate::map::build_item(&self.id, &self.base_url, &b.raw, &b.rec))
+                .collect(),
+        ))
     }
 }
 

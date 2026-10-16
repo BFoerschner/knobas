@@ -522,6 +522,10 @@ pub fn run() {
             // the list is append-only (§10.8).
             commands::entity::set_pipeline_pinned,
             commands::entity::job_pipelines,
+            // #851's two pipeline reads, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::older_pipeline_runs,
+            commands::entity::pipeline_settings,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

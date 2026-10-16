@@ -148,11 +148,12 @@ test("the filter keeps what its words match, and the chips keep the failing or t
   expect(names()).toEqual(["Payout_Build"]);
 });
 
-test("the source's word appears once, as the header line over its pipelines", async () => {
+test("the source's word appears once in the list, as the header line over its pipelines", async () => {
   draw([]);
   await settle();
   expect(target.querySelector(".tf-pl h3")?.textContent).toBe("TeamCity");
-  expect(target.textContent?.split("TeamCity")).toHaveLength(2);
+  // The pipeline page's header names it again, as prototype-6's does (#851).
+  expect(target.querySelector(".tf-pl")?.textContent?.split("TeamCity")).toHaveLength(2);
 });
 
 test("a run's address says the run page is not built yet, and leads back to its pipeline", async () => {
@@ -283,7 +284,7 @@ const ON_JOB: JobPipeline[] = [
 test("This job is on by default with a job: the tree pruned to its pipelines, each with its reasons", async () => {
   drawTree({ job: "PAY-231", reasons: ON_JOB });
   await settle();
-  const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-seg button")];
+  const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-pl .tf-seg button")];
   expect(scope.map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
     ["This job PAY-231", "true"],
     ["All", "false"],

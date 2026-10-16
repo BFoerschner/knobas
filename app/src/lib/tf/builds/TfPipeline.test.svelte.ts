@@ -1,0 +1,290 @@
+/**
+ * The pipeline page (#851) over the IPC mirror: the header with the source's
+ * word, the repository and the triggers; the history chart and its facts;
+ * runs by day with the job's chip and the filter; older history on demand;
+ * a run started here drawn queued at once; and the Parameters and Triggers
+ * tabs over the live settings read.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
+import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
+import { forgetFilters } from "../filter/filter-state.svelte";
+import type { PipelinePorts } from "./pipeline-ports";
+import TfPipeline from "./TfPipeline.svelte";
+
+let target: HTMLElement;
+let page: ReturnType<typeof mount> | null = null;
+
+beforeEach(() => {
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (page) unmount(page);
+  page = null;
+  target.remove();
+  forgetFilters();
+});
+
+async function settle() {
+  for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));
+  flushSync();
+}
+
+const today = (h: number, m = 0) => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, m).toISOString();
+};
+const daysAgo = (n: number, h: number) => {
+  const now = new Date();
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate() - n, h).toISOString();
+};
+
+function run(no: number, tone: "ok" | "err", started: string, extra: Partial<RunRow> = {}): RunRow {
+  return {
+    entity_id: `teamcity:build:${no}`,
+    number: String(no),
+    state: { text: tone === "err" ? "FAILURE" : "SUCCESS", tone },
+    branch: "main",
+    started,
+    finished: started,
+    duration_seconds: 240,
+    updated_at: started,
+    web_url: null,
+    ...extra,
+  };
+}
+
+const RUNS: RunRow[] = [
+  run(1187, "err", today(0, 5), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 252 }),
+  run(1186, "ok", daysAgo(1, 18), { duration_seconds: 241 }),
+  run(1185, "err", daysAgo(1, 17), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 268 }),
+  ...Array.from({ length: 31 }, (_, i) => run(1184 - i, "ok", daysAgo(3, 12), { duration_seconds: 200 + i })),
+];
+
+const PIPELINE: PipelineRow = {
+  entity_id: "teamcity:buildType:Payout_IntegrationTests",
+  source_id: "teamcity",
+  source_name: "TeamCity",
+  name: "Payout_IntegrationTests",
+  group: "Payouts",
+  path: ["Payments", "Payouts"],
+  pinned: false,
+  web_url: "http://ci.example/buildConfiguration/Payout_IntegrationTests",
+  recent: RUNS.slice(0, 12),
+};
+
+const SETTINGS: PipelineSettings = {
+  repositories: [
+    { name: "payout-service", url: "http://gitea.example/tidewater/payout-service.git", default_branch: "refs/heads/main", entity_id: "gitea:repo:tidewater/payout-service" },
+  ],
+  triggers: [
+    { name: "VCS", facts: [{ label: "Branch filter", value: "+:refs/heads/*", tone: null }], disabled: false },
+    { name: "Schedule", facts: [{ label: "When", value: "daily at 02:00", tone: null }], disabled: false },
+  ],
+  parameters: [
+    { name: "env", value: "staging", inherited: false, secret: false, editable: true, description: null },
+    { name: "deploy.token", value: "", inherited: true, secret: true, editable: true, description: null },
+  ],
+  parameter_write_op: "set_parameter",
+};
+
+const DESCRIPTOR = {
+  adapter_kind: "teamcity",
+  entity_kinds: [{ id: "build_config", label: "Build configuration" }],
+  payload_paths: [{ kind: "build_config", frame: "pipeline" }],
+} as unknown as SourceDescriptor;
+
+const SOURCE = {
+  id: "teamcity",
+  adapter_kind: "teamcity",
+  health: { source_id: "teamcity", state: "ok", checked_at: null, detail: null, secret_expires_at: null },
+} as unknown as SourceSummary;
+
+interface Drawn {
+  pinned: number;
+  writes: WriteOpPayload[];
+  olderAsked: string[];
+}
+
+function draw(
+  rest: string[] = [PIPELINE.entity_id],
+  job: string | null = "PAY-231",
+  overrides: Partial<PipelinePorts> = {},
+  older: RunRow[][] = [[run(1150, "ok", daysAgo(9, 9))], []],
+): Drawn {
+  const drawn: Drawn = { pinned: 0, writes: [], olderAsked: [] };
+  const ports: PipelinePorts = {
+    older: (_id, before) => {
+      drawn.olderAsked.push(before);
+      return Promise.resolve(older.shift() ?? []);
+    },
+    settings: () => Promise.resolve(SETTINGS),
+    adapters: () => Promise.resolve([DESCRIPTOR]),
+    sources: () => Promise.resolve([SOURCE]),
+    syncStatus: () => Promise.resolve([]),
+    jobBranches: () => Promise.resolve(["feature/PAY-231-sepa-retry"]),
+    submitWrite: (payload) => {
+      drawn.writes.push(payload);
+      return Promise.resolve({ id: 41 } as QueuedWrite);
+    },
+    openExternal: () => Promise.resolve(),
+    ...overrides,
+  };
+  page = mount(TfPipeline, {
+    target,
+    props: { pipeline: PIPELINE, rest, job, runs: () => Promise.resolve(RUNS), onpin: () => (drawn.pinned += 1), ports },
+  });
+  return drawn;
+}
+
+const button = (words: string) =>
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent?.replace(/\s+/g, " ").trim() === words);
+
+test("the header says what it is in the source's word, the repository it builds and what triggers it", async () => {
+  draw();
+  await settle();
+  expect(target.querySelector("h1")?.textContent).toBe("Payout_IntegrationTests");
+  const sub = target.querySelector(".tf-bhead .tf-sub")!;
+  expect(sub.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "TeamCity build configuration in project Payments › Payouts, builds payout-service. Triggered by VCS and Schedule.",
+  );
+  expect(sub.querySelector("a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Atidewater%2Fpayout-service");
+  expect(button("Run…")).toBeDefined();
+  expect(button("Run on feature/PAY-231-sepa-retry")).toBeDefined();
+  expect(button("Open in TeamCity")).toBeDefined();
+  expect(target.querySelector(".tf-stale")).toBeNull();
+});
+
+test("Pin writes through the list's pins", async () => {
+  const drawn = draw();
+  await settle();
+  button("Pin")!.click();
+  expect(drawn.pinned).toBe(1);
+});
+
+test("with no job branch it built, Run on names the default branch; a failing sign-in draws the warn line and its fix", async () => {
+  draw(undefined, null, {
+    sources: () =>
+      Promise.resolve([{ ...SOURCE, health: { ...SOURCE.health, state: "unauthorized", checked_at: new Date(Date.now() - 38 * 60_000).toISOString() } }]),
+  });
+  await settle();
+  expect(button("Run on main")).toBeDefined();
+  const stale = target.querySelector(".tf-stale")!;
+  expect(stale.textContent).toContain("TeamCity data is 38 min old: sign-in failing. Runs you start wait in the queue until it works again.");
+  expect(stale.querySelector("a")?.getAttribute("href")).toBe("#/settings/source/teamcity");
+});
+
+test("the chart draws the last thirty runs as links to each run, with Passed, Usual duration and Last passing", async () => {
+  draw();
+  await settle();
+  const bars = target.querySelectorAll(".tf-bars a");
+  expect(bars).toHaveLength(30);
+  // The newest is the right-most, and says what it was.
+  const newest = bars[29]!;
+  expect(newest.getAttribute("href")).toBe("#/build/teamcity%3AbuildType%3APayout_IntegrationTests/teamcity%3Abuild%3A1187");
+  expect(newest.getAttribute("aria-label")).toBe("Run 1187, FAILURE");
+  expect(newest.querySelector("title")?.textContent).toContain("#1187 FAILURE, feature/PAY-231-sepa-retry · 4 m 12 s");
+  const facts = target.querySelector(".tf-facts2")!.textContent!.replace(/\s+/g, " ");
+  expect(facts).toContain("Passed32 of the last 34");
+  expect(facts).toContain("Last passing#1186");
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 34");
+});
+
+test("runs come by day, a run on the job's branch carries the job's chip, and the result chips filter", async () => {
+  draw();
+  await settle();
+  const heads = [...target.querySelectorAll(".tf-dayh")].map((h) => h.textContent);
+  expect(heads.slice(0, 2)).toEqual(["Today", "Yesterday"]);
+  const first = target.querySelector(".tf-runs tbody tr")!;
+  expect(first.textContent).toContain("#1187");
+  expect(first.querySelector(".tf-jobchip-sm")?.textContent).toBe("PAY-231");
+  expect(first.querySelector("a.tf-btn")?.getAttribute("href")).toMatch(/\/log$/);
+  expect(first.textContent).toContain("Run again…");
+
+  button("Failed")!.click();
+  flushSync();
+  const numbers = [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no b")].map((b) => b.textContent);
+  expect(numbers).toEqual(["#1187", "#1185"]);
+  expect(target.querySelector(".tf-fcount")?.textContent).toContain("2");
+});
+
+test("older runs are asked of the source from the oldest run held, appended, until it answers none", async () => {
+  const drawn = draw();
+  await settle();
+  button("Older runs")!.click();
+  await settle();
+  expect(drawn.olderAsked).toEqual(["teamcity:build:1154"]);
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")?.textContent).toContain("Runs 35");
+  button("Older runs")!.click();
+  await settle();
+  expect(drawn.olderAsked).toEqual(["teamcity:build:1154", "teamcity:build:1150"]);
+  expect(target.querySelector(".tf-older")?.textContent).toContain("The start of this pipeline’s history.");
+});
+
+test("a failed older read says so and offers to try again", async () => {
+  draw(undefined, null, { older: () => Promise.reject({ code: "unreachable", message: "connection refused" }) });
+  await settle();
+  button("Older runs")!.click();
+  await settle();
+  expect(target.querySelector(".tf-older")?.textContent).toContain("Older runs could not be read: connection refused");
+  expect(button("Try again")).toBeDefined();
+});
+
+test("Run on queues one run on that branch and draws it queued at once, never as started", async () => {
+  const drawn = draw();
+  await settle();
+  button("Run on feature/PAY-231-sepa-retry")!.click();
+  await settle();
+  expect(drawn.writes).toEqual([
+    { RunBuild: { entity: PIPELINE.entity_id, branch: "feature/PAY-231-sepa-retry", parameters: [] } },
+  ]);
+  const first = target.querySelector(".tf-runs tbody tr")!;
+  expect(first.querySelector(".tf-run-no")?.textContent).toContain("queued");
+  expect(first.textContent).toContain("waiting");
+  expect(first.textContent).toContain("feature/PAY-231-sepa-retry");
+});
+
+test("Parameters: each default with its kind; Change… queues the new default against the old one; a secret is never drawn", async () => {
+  const drawn = draw([PIPELINE.entity_id, "params"]);
+  await settle();
+  const rows = [...target.querySelectorAll("table[aria-label='Parameters'] tbody tr")];
+  expect(rows.map((r) => r.querySelector("td")?.textContent)).toEqual(["env", "deploy.token"]);
+  expect(rows[1]!.textContent).toContain("(hidden)");
+  rows[0]!.querySelector<HTMLButtonElement>("button")!.click();
+  flushSync();
+  const input = target.querySelector<HTMLInputElement>("input[aria-label='New default for env']")!;
+  input.value = "prod-dryrun";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  button("Save")!.click();
+  await settle();
+  expect(drawn.writes).toEqual([
+    { SetParameter: { entity: PIPELINE.entity_id, name: "env", value: "prod-dryrun", base: "staging" } },
+  ]);
+  expect(rows[0]!.textContent).toContain("prod-dryrun");
+  expect(rows[0]!.textContent).toContain("queued");
+});
+
+test("Triggers: each by name with what it fires on, read only", async () => {
+  draw([PIPELINE.entity_id, "triggers"]);
+  await settle();
+  const rows = [...target.querySelectorAll("table[aria-label='Triggers'] tr")].map((r) => [
+    r.querySelector("b")?.textContent,
+    r.querySelector(".tf-sub")?.textContent,
+  ]);
+  expect(rows).toEqual([
+    ["VCS trigger", "branch filter +:refs/heads/*"],
+    ["Schedule trigger", "when daily at 02:00"],
+  ]);
+  expect(target.textContent).toContain("Read only. Edit triggers in TeamCity.");
+});
+
+test("settings that cannot be read say so on their tab, and the runs still draw", async () => {
+  draw([PIPELINE.entity_id, "triggers"], null, { settings: () => Promise.reject({ code: "unreachable", message: "connection refused" }) });
+  await settle();
+  expect(target.textContent).toContain("Triggers could not be read from TeamCity: connection refused");
+  expect(target.querySelectorAll(".tf-bars a")).toHaveLength(30);
+});

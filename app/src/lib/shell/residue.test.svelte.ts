@@ -157,6 +157,9 @@ vi.mock("../ipc/entity", () => ({
   // The write the ticket detail's status select queues (#179). Not what this
   // file is about, so it refuses.
   submitWrite: () => Promise.reject(new Error("no write in this test")),
+  // The pipeline page's two live reads (#851), answering late.
+  pipelineSettings: () => deferred(null),
+  olderPipelineRuns: () => deferred([]),
   // The desktop notification send (#339): the notifier store imports it at
   // module level. Nothing here notifies, so it refuses.
   notify: () => Promise.reject(new Error("no notification in this test")),
@@ -350,6 +353,7 @@ const { draftNew } = await import("../tf/tickets/views");
 const { createBadges } = await import("../tf/badges.svelte");
 const TfJob = (await import("../tf/job/TfJob.svelte")).default;
 const TfBuilds = (await import("../tf/builds/TfBuilds.svelte")).default;
+const TfPipeline = (await import("../tf/builds/TfPipeline.svelte")).default;
 const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
@@ -831,6 +835,35 @@ const CASES: Case[] = [
               ]),
             runs: () => deferred([]),
           },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The pipeline page (#851): the runs, the settings, the job's branches
+     * and the sources' facts all answering late, through the real ports.
+     */
+    name: "TfPipeline",
+    source: "lib/tf/builds/TfPipeline.svelte",
+    open: (target) => ({
+      app: mount(TfPipeline, {
+        target,
+        props: {
+          pipeline: {
+            entity_id: "teamcity:buildType:A",
+            source_id: "teamcity",
+            source_name: "TeamCity",
+            name: "A",
+            group: null,
+            path: [],
+            pinned: false,
+            web_url: null,
+            recent: [],
+          },
+          rest: ["teamcity:buildType:A"],
+          job: "PAY-231",
+          runs: () => deferred([]),
         },
       }),
     }),

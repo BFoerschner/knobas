@@ -848,6 +848,49 @@ fn the_job_pipeline_shape_matches_its_typescript_mirror() {
     )));
 }
 
+/// #851's pipeline settings: every field on the wire, in both directions,
+/// through the repository and the trigger it nests.
+#[test]
+fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
+    use knobas_source::pipeline::{PipelineRepository, PipelineSettings, PipelineTrigger};
+    let settings = PipelineSettings {
+        repositories: vec![PipelineRepository {
+            name: "payout-service".to_owned(),
+            url: None,
+            default_branch: None,
+            entity_id: None,
+        }],
+        triggers: vec![PipelineTrigger {
+            name: "VCS".to_owned(),
+            facts: vec![],
+            disabled: false,
+        }],
+        parameters: vec![],
+        parameter_write_op: None,
+    };
+    let wire = serde_json::to_value(&settings).unwrap();
+    assert_shape(
+        "PipelineSettings",
+        &wire,
+        &[
+            "parameter_write_op",
+            "parameters",
+            "repositories",
+            "triggers",
+        ],
+    );
+    assert_shape(
+        "PipelineRepository",
+        &wire["repositories"][0],
+        &["default_branch", "entity_id", "name", "url"],
+    );
+    assert_shape(
+        "PipelineTrigger",
+        &wire["triggers"][0],
+        &["disabled", "facts", "name"],
+    );
+}
+
 fn note_row() -> knobas_core::note::NoteRow {
     knobas_core::note::NoteRow {
         id: "note:7f2cf0d4-1f1e-4b2f-9a4a-0d1c2e3f4a5b".to_owned(),

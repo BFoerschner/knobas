@@ -29,6 +29,7 @@ pub mod contract;
 pub mod diff;
 pub mod docs;
 pub mod instance;
+pub mod pipeline;
 pub mod view;
 
 /// Everything knobas needs to know about a configured adapter instance.
@@ -1234,6 +1235,47 @@ pub trait Source: Send + Sync {
         entity: &str,
         section: Option<&str>,
     ) -> Result<Option<view::SourceView>, SourceError>;
+    /// A pipeline's settings, read live (ADR-0022, issue #851): the
+    /// repositories it builds, its triggers and its parameters, scrubbed of
+    /// every credential. `entity` is a pipeline's [`EntityRef`] in string
+    /// form.
+    ///
+    /// `Ok(None)` is **this adapter keeps no pipelines**, and is the default:
+    /// a source with no Builds frame has nothing to answer, and every adapter
+    /// but a CI one is that. An adapter whose descriptor declares a
+    /// [`Frame::Pipeline`](knobas_core::payload::Frame::Pipeline) kind
+    /// overrides it, and must never answer `None` for a read that failed.
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    async fn pipeline_settings(
+        &self,
+        entity: &str,
+    ) -> Result<Option<pipeline::PipelineSettings>, SourceError> {
+        let _ = entity;
+        Ok(None)
+    }
+    /// Runs of the pipeline `entity` older than the run `before`, newest
+    /// first, at most `count` (capped at [`pipeline::OLDER_RUNS_MAX`]) (ADR-0022,
+    /// issue #851): the history beyond the window the sync keeps, asked for
+    /// when the reader scrolls past the end of it.
+    ///
+    /// Each run is the [`SyncItem`] the sync would have emitted for it, so the
+    /// app reads it through the run kind's declared paths; nothing is stored.
+    /// `before` is a run's [`EntityRef`] in string form, and is not itself in
+    /// the answer. An empty answer is the start of the history.
+    ///
+    /// `Ok(None)` as for [`pipeline_settings`](Source::pipeline_settings).
+    ///
+    /// [`EntityRef`]: knobas_core::entity::EntityRef
+    async fn older_runs(
+        &self,
+        entity: &str,
+        before: &str,
+        count: u32,
+    ) -> Result<Option<Vec<SyncItem>>, SourceError> {
+        let _ = (entity, before, count);
+        Ok(None)
+    }
 }
 
 /// Where a syncing adapter hands its items. Implemented by the sync engine;

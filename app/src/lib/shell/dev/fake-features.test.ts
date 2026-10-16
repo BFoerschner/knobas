@@ -233,3 +233,23 @@ test("builds: job_pipelines answers PAY-231's pipelines with their reasons, and 
   expect(rows.some((r) => r.pipeline_id === "teamcity:buildType:Dbt_Test")).toBe(false);
   expect(h["job_pipelines"]!({ entityId: "jira:NOPE-1" })).toEqual([]);
 });
+
+test("builds: older_pipeline_runs pages back from any run until the history ends; pipeline_settings answers every pipeline (#851)", () => {
+  const h = demoHandlers() as Calls;
+  const id = "teamcity:buildType:Payout_IntegrationTests";
+  const mirrored = h["pipeline_runs"]!({ pipelineId: id, limit: null }) as { entity_id: string; number: string }[];
+  const first = h["older_pipeline_runs"]!({ pipelineId: id, before: mirrored.at(-1)!.entity_id, limit: 50 }) as { entity_id: string; number: string }[];
+  expect(first).toHaveLength(50);
+  expect(Number(first[0]!.number)).toBeLessThan(Number(mirrored.at(-1)!.number));
+  const next = h["older_pipeline_runs"]!({ pipelineId: id, before: first.at(-1)!.entity_id, limit: 50 }) as { entity_id: string; number: string }[];
+  expect(Number(next[0]!.number)).toBeLessThan(Number(first.at(-1)!.number));
+  let page = next as { entity_id: string }[];
+  for (let turn = 0; turn < 10 && page.length > 0; turn += 1) {
+    page = h["older_pipeline_runs"]!({ pipelineId: id, before: page.at(-1)!.entity_id, limit: 50 }) as { entity_id: string }[];
+  }
+  expect(page).toEqual([]);
+  const settings = h["pipeline_settings"]!({ pipelineId: id }) as { repositories: { entity_id: string }[]; parameters: { name: string }[] };
+  expect(settings.repositories[0]!.entity_id).toBe("mock:tidewater/payout-service");
+  expect(settings.parameters.map((p) => p.name)).toEqual(["env", "test.filter", "log.level"]);
+  expect(() => h["pipeline_settings"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
+});
