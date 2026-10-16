@@ -168,6 +168,12 @@
     if (all !== null) all = all.map((p) => (p.entity_id === pipeline.entity_id ? { ...p, pinned: now } : p));
   }
 
+  /** A row's indent class: 14px a level, as prototype-6's, up to {@link DEEPEST}. */
+  const DEEPEST = 8;
+  function indent(depth: number): string {
+    return `tf-d${Math.min(depth, DEEPEST)}`;
+  }
+
   function rememberFold(f: Fold, event: Event) {
     const open = (event.currentTarget as HTMLDetailsElement).open;
     // Only the reader's own toggle is remembered, not the one the open
@@ -254,11 +260,11 @@
   </nav>
 {/snippet}
 
-{#snippet item(pipeline: PipelineRow)}
+{#snippet item(pipeline: PipelineRow, depth: number)}
   {@const strip = stripOf(pipeline)}
   {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
   <a
-    class="tf-pi"
+    class={`tf-pi ${indent(depth)}`}
     href={pipelineHash(pipeline.entity_id)}
     aria-current={pipeline.entity_id === selected?.entity_id}
     title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
@@ -278,19 +284,19 @@
   </a>
 {/snippet}
 
-{#snippet foldView(f: Fold)}
+{#snippet foldView(f: Fold, depth: number)}
   <details
     class="tf-pl-fold"
     open={foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)}
     ontoggle={(event) => rememberFold(f, event)}
   >
-    <summary
+    <summary class={indent(depth)}
       >{f.name} <span class="tf-count">{f.count}</span>{#if f.failing > 0}<span class="tf-chip tf-err">{f.failing} failing</span
         >{/if}</summary
     >
     <div class="tf-fold-in">
-      {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline)}{/each}
-      {#each f.folds as kid (kid.key)}{@render foldView(kid)}{/each}
+      {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, depth + 1)}{/each}
+      {#each f.folds as kid (kid.key)}{@render foldView(kid, depth + 1)}{/each}
     </div>
   </details>
 {/snippet}
@@ -344,13 +350,13 @@
       {/if}
       {#if pinned.length > 0}
         <h3>Pinned</h3>
-        {#each pinned as pipeline (pipeline.entity_id)}{@render item(pipeline)}{/each}
+        {#each pinned as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
       {/if}
       {#if scope === "job" && trees.length > 0}<h3>By project</h3>{/if}
       {#each trees as tree (tree.sourceId)}
         {#if scope === "all"}<h3>{tree.source}</h3>{/if}
-        {#each tree.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline)}{/each}
-        {#each tree.folds as f (f.key)}{@render foldView(f)}{/each}
+        {#each tree.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
+        {#each tree.folds as f (f.key)}{@render foldView(f, 0)}{/each}
       {/each}
     </div>
   </nav>
