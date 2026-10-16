@@ -100,7 +100,7 @@ export function fakeOpenAlerts() {
 
 /**
  * `submit_write`: the row the queue answers with, for the fixture's own
- * Pause / Resume.
+ * Pause, Resume and Create monitor (#864).
  *
  * `sent`, with no wait reason: what a fixture must not do is show a write
  * *pending* for ever, which is what a `pending` row with nothing to flush it
@@ -115,7 +115,7 @@ function fakeQueuedWrite(args: Record<string, unknown>) {
     id: (FIXTURE_WRITE_ID += 1),
     source_id: entity.split(":")[0] ?? "kuma",
     entity_id: entity,
-    op: tag === "ResumeMonitor" ? "resume_monitor" : "pause_monitor",
+    op: FIXTURE_OPS[tag] ?? "pause_monitor",
     payload,
     target_snapshot: null,
     state: "sent",
@@ -131,6 +131,13 @@ function fakeQueuedWrite(args: Record<string, unknown>) {
 }
 
 let FIXTURE_WRITE_ID = 0;
+
+/** Each payload tag this fixture queues, by the op identifier the queue records. */
+const FIXTURE_OPS: Record<string, string> = {
+  PauseMonitor: "pause_monitor",
+  ResumeMonitor: "resume_monitor",
+  CreateMonitor: "create_monitor",
+};
 
 /**
  * The monitors a reader has acked in this session, by monitor entity id.
@@ -177,12 +184,30 @@ export function fakeUnmonitored() {
       monogram: asset.monogram,
       name: asset.name,
       path: assetPathText(asset),
+      // In force, the backend's walk (#864): the asset's own, else the
+      // nearest ancestor's.
+      environment: inForce(asset, (row) => row.environment),
+      owner: inForce(asset, (row) => row.owner),
     }))
     .sort(
       (left, right) =>
         (left.path ?? "").localeCompare(right.path ?? "") ||
         left.name.localeCompare(right.name),
     );
+}
+
+/** A field in force on `asset`: its own value, else the nearest ancestor's (#431). */
+function inForce(
+  asset: (typeof FIXTURE_ESTATE)[number],
+  of: (row: (typeof FIXTURE_ESTATE)[number]) => string | null,
+): string | null {
+  for (let at: (typeof FIXTURE_ESTATE)[number] | undefined = asset; at; ) {
+    const value = of(at);
+    if (value !== null) return value;
+    const parent: string | null = at.parent_id;
+    at = parent === null ? undefined : FIXTURE_ESTATE.find((row) => row.id === parent);
+  }
+  return null;
 }
 
 /**
@@ -204,8 +229,9 @@ const FIXTURE_PORT_CHECKS = new Set(["teamcity", "jira", "confluence"]);
  */
 export function fakeMonitorRoster() {
   const now = Date.now();
-  const named = SEEDED_MONITORS.map(({ name }) => ({
+  const named = SEEDED_MONITORS.map(({ name, type }) => ({
     name,
+    type,
     watching: FIXTURE_ESTATE.filter((asset) => asset.monitors.includes(name)),
   }));
   return named.map((entry, index) => {
@@ -222,7 +248,7 @@ export function fakeMonitorRoster() {
       source_id: "kuma",
       name: entry.name,
       state: last?.state ?? null,
-      monitor_type: FIXTURE_PORT_CHECKS.has(entry.name) ? "port" : "http",
+      monitor_type: FIXTURE_PORT_CHECKS.has(entry.name) ? "port" : entry.type,
       target: FIXTURE_PORT_CHECKS.has(entry.name)
         ? `${entry.name}.invalid:8080`
         : `http://localhost:3001/${entry.name.replace(/\W+/g, "-")}`,
@@ -241,6 +267,7 @@ export function fakeMonitorRoster() {
         id: asset.id,
         name: asset.name,
         path: assetPathText(asset),
+        type_label: asset.type_label,
       })),
       // The fixture's Kuma has an account, so the tab draws its buttons
       // (issue #452) -- and the per-row half of the rule is the fixture's

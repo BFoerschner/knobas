@@ -17,13 +17,21 @@
 //!
 //! # What a reader chooses, and what is chosen for them
 //!
-//! Two fields: the **name** and the **URL**. Everything else is fixed, and
-//! each of the three groups is fixed for its own reason.
+//! Three fields: the **name**, the **kind** of check and **what it checks**
+//! (#864 added the kind). Everything else is fixed, and each of the groups is
+//! fixed for its own reason.
 //!
-//! * **`type` is `http`.** [`knobas_source::WriteOp::CreateMonitor`] carries a
-//!   URL and no type, because a monitor of a URL is an HTTP check. The pane's
-//!   form is prefilled from an asset's route or its hostname, so a URL is what
-//!   a reader has.
+//! * **The kind picks Kuma's `type` and the fields it reads.** An HTTP check
+//!   is `http` with a `url`; a TCP check is Kuma's `port` with a `hostname`
+//!   and a `port`; a ping is `ping` with a `hostname`; a Docker check is
+//!   `docker` with a `docker_container` and a `docker_host`. The HTTP document
+//!   is the seed's own; the other three are it with the URL swapped for their
+//!   own fields, read off the pinned image's `monitor.js` (2.5.3).
+//! * **A Docker check names a Docker host, and knobas does not ask for one.**
+//!   Kuma pushes the account's Docker hosts at login (`dockerHostList`); the
+//!   create takes the first, lowest id, and an account with none is refused
+//!   here with the reason, since a Docker monitor with no host is created and
+//!   then down for ever.
 //! * **The schedule** -- a check a minute, a 16-second timeout, no retries --
 //!   is Uptime Kuma's own default schedule and the one every monitor in
 //!   `testenv/monitors.json` runs on. Making it a form field would be asking a
@@ -36,9 +44,9 @@
 //!   something to be watched, not for a policy, and every one of these has a
 //!   sensible home in Kuma and none in a small form.
 
-use knobas_source::SourceError;
+use knobas_source::{MonitorKind, SourceError};
 
-/// The one monitor type this adapter creates. See the module note.
+/// Kuma's `type` for an HTTP check, the seed's own. See the module note.
 pub(crate) const TYPE: &str = "http";
 
 /// Every field the `add` document carries beside the name, the URL and the
@@ -59,15 +67,153 @@ const MAX_REDIRECTS: i64 = 10;
 /// create with its own validation message, which reads as knobas having sent
 /// something reasonable and Kuma having disagreed. What is actually true is
 /// that the write could never have been delivered.
+#[cfg(test)]
 pub(crate) fn document(name: &str, url: &str) -> Result<serde_json::Value, SourceError> {
+    document_of(name, MonitorKind::Http, url, None)
+}
+
+/// The document `add` is emitted with, for a check of `kind` called `name`
+/// watching `target` (#864): an http(s) URL, `host:port`, a host, or a
+/// container's name. `docker_hosts` is what the login pushed, `None` when it
+/// pushed nothing; only a Docker check reads it.
+///
+/// # Errors
+///
+/// [`SourceError::Protocol`] for a check knobas will not send, for the
+/// reason the HTTP-only `document` gives: a blank name or target, a target the
+/// kind cannot read, or a Docker check on an account with no Docker host.
+pub(crate) fn document_of(
+    name: &str,
+    kind: MonitorKind,
+    target: &str,
+    docker_hosts: Option<&[i64]>,
+) -> Result<serde_json::Value, SourceError> {
+    let (name, mut fields) = checked(name, kind, target)?;
+    if kind == MonitorKind::Docker {
+        let host = docker_hosts
+            .and_then(|hosts| hosts.first().copied())
+            .ok_or_else(|| {
+                SourceError::protocol(
+                    "this Uptime Kuma has no Docker host, so it cannot watch a container -- add \
+                 one in Kuma's settings, or pick another kind of check"
+                        .to_owned(),
+                )
+            })?;
+        if let Some(map) = fields.as_object_mut() {
+            map.insert("docker_host".into(), host.into());
+        }
+    }
+    Ok(with_common(name, fields))
+}
+
+/// The name, trimmed, and the kind's own fields: everything [`document_of`]
+/// can refuse before a session opens. A Docker check's host is the one thing
+/// left out, since which hosts exist is known only inside the session.
+///
+/// # Errors
+///
+/// [`document_of`]'s, but the missing Docker host.
+pub(crate) fn checked<'a>(
+    name: &'a str,
+    kind: MonitorKind,
+    target: &str,
+) -> Result<(&'a str, serde_json::Value), SourceError> {
     let name = name.trim();
-    let url = url.trim();
+    let url = target.trim();
     if name.is_empty() {
         return Err(SourceError::protocol(
             "an Uptime Kuma monitor needs a name -- it is also what attaches it to an asset"
                 .to_owned(),
         ));
     }
+    let fields = match kind {
+        MonitorKind::Http => http_fields(url)?,
+        MonitorKind::Tcp => {
+            let (host, port) = host_and_port(url)?;
+            serde_json::json!({ "type": "port", "hostname": host, "port": port })
+        }
+        MonitorKind::Ping => serde_json::json!({ "type": "ping", "hostname": host_of(url)? }),
+        MonitorKind::Docker => serde_json::json!({
+            "type": "docker",
+            "docker_container": plain(url, "a Docker check needs a container's name")?,
+        }),
+    };
+    Ok((name, fields))
+}
+
+/// `fields` with the name and every field fixed for every kind (the module
+/// note's schedule and switches) added.
+fn with_common(name: &str, mut fields: serde_json::Value) -> serde_json::Value {
+    let common = serde_json::json!({
+        "name": name,
+        "interval": INTERVAL_SECS,
+        "retryInterval": RETRY_INTERVAL_SECS,
+        "resendInterval": 0,
+        "maxretries": 0,
+        "timeout": TIMEOUT_SECS,
+        // Kuma runs `.every(...)` over this for every monitor of every type.
+        "accepted_statuscodes": ["200-299"],
+        "active": true,
+        "expiryNotification": false,
+        "ignoreTls": false,
+        "upsideDown": false,
+        "notificationIDList": {},
+        "conditions": [],
+    });
+    if let (Some(map), Some(common)) = (fields.as_object_mut(), common.as_object()) {
+        for (key, value) in common {
+            map.insert(key.clone(), value.clone());
+        }
+    }
+    fields
+}
+
+/// A target with no whitespace and nothing in it, or the protocol fault
+/// `missing` names.
+fn plain<'a>(target: &'a str, missing: &str) -> Result<&'a str, SourceError> {
+    if target.is_empty() || target.chars().any(char::is_whitespace) {
+        return Err(SourceError::protocol(format!(
+            "{missing}, and {target:?} is not one"
+        )));
+    }
+    Ok(target)
+}
+
+/// A host to ping: no scheme, no path, no port.
+fn host_of(target: &str) -> Result<&str, SourceError> {
+    let host = plain(target, "a ping needs a host")?;
+    // One colon is `host:port`; an IPv6 address has several.
+    if host.contains('/') || host.matches(':').count() == 1 {
+        return Err(SourceError::protocol(format!(
+            "a ping needs a host with no scheme, port or path, and {host:?} is not one"
+        )));
+    }
+    Ok(host.trim_start_matches('[').trim_end_matches(']'))
+}
+
+/// `host:port` (or `[v6]:port`) for a TCP check.
+fn host_and_port(target: &str) -> Result<(&str, u16), SourceError> {
+    let target = plain(target, "a TCP check needs host:port")?;
+    let refused = || {
+        SourceError::protocol(format!(
+            "a TCP check needs host:port, and {target:?} is not one"
+        ))
+    };
+    let (host, port) = target.rsplit_once(':').ok_or_else(refused)?;
+    let host = host.trim_start_matches('[').trim_end_matches(']');
+    if host.is_empty() || host.contains('/') {
+        return Err(refused());
+    }
+    let port = port
+        .parse::<u16>()
+        .ok()
+        .filter(|port| *port > 0)
+        .ok_or_else(refused)?;
+    Ok((host, port))
+}
+
+/// The HTTP check's own fields; with [`with_common`]'s, the seed's document.
+fn http_fields(url: &str) -> Result<serde_json::Value, SourceError> {
     // The same two schemes `KumaHttp` accepts for the base URL, and the same
     // reason: what Kuma does with anything else is fetch nothing and report a
     // check that never runs.
@@ -81,25 +227,12 @@ pub(crate) fn document(name: &str, url: &str) -> Result<serde_json::Value, Sourc
         })?;
     Ok(serde_json::json!({
         "type": TYPE,
-        "name": name,
         // The parsed URL and not the caller's string: a paste carrying a
         // trailing space or a missing path is normalised once, here, so the
         // monitor knobas asks for is the monitor Kuma reports back -- and
         // `monitor_url_host`'s suggestion rule reads that same URL out of the
         // mirror (#478).
         "url": parsed.as_str(),
-        "interval": INTERVAL_SECS,
-        "retryInterval": RETRY_INTERVAL_SECS,
-        "resendInterval": 0,
-        "maxretries": 0,
-        "timeout": TIMEOUT_SECS,
-        "accepted_statuscodes": ["200-299"],
-        "active": true,
-        "expiryNotification": false,
-        "ignoreTls": false,
-        "upsideDown": false,
-        "notificationIDList": {},
-        "conditions": [],
         "method": "GET",
         "maxredirects": MAX_REDIRECTS,
     }))
@@ -234,6 +367,72 @@ mod tests {
         // one a suggestion rule matches on are the same string.
         let doc = document("gitea", "http://gitea:3000").expect("a legal create");
         assert_eq!(doc["url"], "http://gitea:3000/");
+    }
+
+    /// The other three kinds (#864): Kuma's `type` and the fields it reads
+    /// for each, with every fixed field the HTTP document carries but the
+    /// three that only an HTTP check reads.
+    #[test]
+    fn each_kind_names_its_own_type_and_fields() {
+        let tcp = document_of("pg", MonitorKind::Tcp, " db.internal:5432 ", None).unwrap();
+        assert_eq!(tcp["type"], "port");
+        assert_eq!(tcp["hostname"], "db.internal");
+        assert_eq!(tcp["port"], 5432);
+        assert_eq!(tcp["accepted_statuscodes"], serde_json::json!(["200-299"]));
+        assert_eq!(tcp["active"], true);
+        assert!(tcp.get("url").is_none(), "{tcp}");
+
+        let v6 = document_of("pg", MonitorKind::Tcp, "[fd00::5]:5432", None).unwrap();
+        assert_eq!(v6["hostname"], "fd00::5");
+
+        let ping = document_of("vm", MonitorKind::Ping, "10.0.0.4", None).unwrap();
+        assert_eq!(ping["type"], "ping");
+        assert_eq!(ping["hostname"], "10.0.0.4");
+        assert_eq!(ping["name"], "vm");
+
+        let docker = document_of(
+            "worker",
+            MonitorKind::Docker,
+            "payout-worker",
+            Some(&[3, 7]),
+        )
+        .unwrap();
+        assert_eq!(docker["type"], "docker");
+        assert_eq!(docker["docker_container"], "payout-worker");
+        assert_eq!(docker["docker_host"], 3);
+
+        let http = document_of("gitea", MonitorKind::Http, "http://gitea:3000", None).unwrap();
+        assert_eq!(http, document("gitea", "http://gitea:3000").unwrap());
+    }
+
+    /// A target its kind cannot read, and a Docker check with no Docker host
+    /// to ask, are refused before Kuma is asked (#864).
+    #[test]
+    fn a_target_its_kind_cannot_read_is_refused_here() {
+        for (kind, target) in [
+            (MonitorKind::Tcp, "db.internal"),
+            (MonitorKind::Tcp, "db.internal:0"),
+            (MonitorKind::Tcp, "db.internal:99999"),
+            (MonitorKind::Tcp, ":5432"),
+            (MonitorKind::Tcp, "http://db:5432"),
+            (MonitorKind::Ping, ""),
+            (MonitorKind::Ping, "vm 1"),
+            (MonitorKind::Ping, "vm-1:22"),
+            (MonitorKind::Ping, "http://vm-1"),
+            (MonitorKind::Docker, ""),
+        ] {
+            assert!(
+                matches!(
+                    document_of("n", kind, target, Some(&[1])),
+                    Err(SourceError::Protocol { .. })
+                ),
+                "{kind:?} {target:?} must be refused"
+            );
+        }
+        for hosts in [None, Some(&[][..])] {
+            let refused = document_of("n", MonitorKind::Docker, "worker", hosts).unwrap_err();
+            assert!(refused.to_string().contains("no Docker host"), "{refused}");
+        }
     }
 
     /// The receipt, and the two ways it can be absent.

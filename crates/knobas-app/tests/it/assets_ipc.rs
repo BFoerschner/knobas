@@ -5469,6 +5469,15 @@ async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
         ],
         "both ends of the relation, by name, each with where it sits"
     );
+    assert_eq!(
+        row(&roster, "gitea")
+            .assets
+            .iter()
+            .map(|asset| asset.type_label.as_str())
+            .collect::<Vec<_>>(),
+        ["Container", "VM"],
+        "the *Watches* column names each asset's type (#864)"
+    );
     assert!(
         row(&roster, "canary").assets.is_empty(),
         "a `related` link is not monitoring, so this monitor watches nothing"
@@ -5543,6 +5552,58 @@ async fn the_roster_lists_the_assets_nothing_watches_and_leaves_out_the_ones_it_
         roster.first().map(|row| row.id.as_str()),
         Some(site.id.as_str()),
         "the row carries the asset's own address, so a reader can open it"
+    );
+}
+
+/// **The environment and owner in force** ride on each row (#864): the new
+/// shell's *Assets nothing watches* tab draws both columns. Set on the site
+/// and inherited by the VM below it, which sets an owner of its own: a read of
+/// the asset's own columns would answer the VM's environment as none.
+#[tokio::test]
+async fn the_roster_carries_the_environment_and_owner_in_force() {
+    let pool = pool("assets-unmonitored-in-force").await;
+    let (site, vm, _) = three_levels(&pool).await;
+    assets::edit(
+        &pool,
+        &site.id,
+        &[
+            AssetEdit::Environment {
+                value: Some(Environment::Prod),
+            },
+            AssetEdit::Owner {
+                value: Some("ops".to_owned()),
+            },
+        ],
+    )
+    .await
+    .expect("the site's two");
+    assets::edit(
+        &pool,
+        &vm.id,
+        &[AssetEdit::Owner {
+            value: Some("Björn".to_owned()),
+        }],
+    )
+    .await
+    .expect("the VM's own owner");
+
+    let roster = assets::unmonitored_assets(&pool)
+        .await
+        .expect("the not-monitored roster");
+    assert_eq!(
+        roster
+            .iter()
+            .map(|row| (
+                row.name.as_str(),
+                row.environment.as_deref(),
+                row.owner.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("hel1", Some("prod"), Some("ops")),
+            ("vm-db-01", Some("prod"), Some("Björn")),
+            ("postgres", Some("prod"), Some("Björn")),
+        ]
     );
 }
 
@@ -5773,6 +5834,7 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
             entity: knobas_source::monitor_target("kuma"),
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         }
         .identifier()
     );

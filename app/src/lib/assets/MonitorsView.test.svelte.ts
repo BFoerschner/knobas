@@ -77,7 +77,7 @@ const GITEA = monitor({
   cert_days_remaining: 9,
   web_url: "http://127.0.0.1:3001/dashboard/7",
   assets: [
-    { id: "asset:knobas-gitea", name: "knobas-gitea", path: "notebook / knobas-stack" },
+    { id: "asset:knobas-gitea", name: "knobas-gitea", path: "notebook / knobas-stack", type_label: "Container" },
   ],
   // Two hours of samples with one bad half hour in the middle: a bar of one
   // colour cannot witness that a bucket is coloured by what is in it.
@@ -90,7 +90,7 @@ const JIRA = monitor({
   target: "hetzner-jira.invalid:8080",
   response_time_ms: 2100,
   samples: [at(10, "warn")],
-  assets: [{ id: "asset:hetzner-jira", name: "hetzner-jira", path: null }],
+  assets: [{ id: "asset:hetzner-jira", name: "hetzner-jira", path: null, type_label: "VM" }],
 });
 const TEAMCITY = monitor({
   name: "knobas-teamcity",
@@ -438,6 +438,8 @@ function gap(name: string, typeId: string, label: string, path: string | null): 
     monogram: label.slice(0, 2).toUpperCase(),
     name,
     path,
+    environment: null,
+    owner: null,
   };
 }
 

@@ -683,6 +683,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             entity: knobas_source::monitor_target("kuma"),
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         },
         knobas_source::WriteOp::MergePullRequest {
             entity: "gitea:tidewater/payout-service#142".to_owned(),

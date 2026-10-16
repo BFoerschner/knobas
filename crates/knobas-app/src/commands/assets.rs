@@ -1342,6 +1342,7 @@ mod tests {
                 id: "asset:7f2c".to_owned(),
                 name: "gitea".to_owned(),
                 path: Some("notebook / knobas-stack".to_owned()),
+                type_label: "Container".to_owned(),
             }],
             actions: vec!["pause_monitor".to_owned()],
             samples: vec![assets::MonitorSample {
@@ -1382,7 +1383,7 @@ mod tests {
             MIRROR,
             "MonitoredAsset",
             &json["assets"][0],
-            &["id", "name", "path"],
+            &["id", "name", "path", "type_label"],
         );
         assert_shape(
             MIRROR,
@@ -1413,9 +1414,20 @@ mod tests {
                 monogram: "CT".to_owned(),
                 name: "postgres".to_owned(),
                 path: Some("notebook / knobas-stack".to_owned()),
+                environment: Some("prod".to_owned()),
+                owner: Some("ops".to_owned()),
             })
             .unwrap(),
-            &["id", "type_id", "type_label", "monogram", "name", "path"],
+            &[
+                "id",
+                "type_id",
+                "type_label",
+                "monogram",
+                "name",
+                "path",
+                "environment",
+                "owner",
+            ],
         );
     }
 

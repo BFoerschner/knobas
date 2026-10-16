@@ -280,10 +280,21 @@ impl Source for KumaSource {
             // monitor is attached to an asset -- that is the name, resolved by
             // the next poll -- because the receipt exists only on the machine
             // that made the write and only until the row settles.
-            WriteOp::CreateMonitor { entity, name, url } => {
+            WriteOp::CreateMonitor {
+                entity,
+                name,
+                url,
+                kind,
+            } => {
                 create_target(&self.id, entity)?;
+                // Checked before a session opens, so a refused target costs no
+                // login; the document is built inside it, where a Docker check
+                // learns which Docker hosts the account has (#864).
+                create::checked(name, *kind, url)?;
                 let answered = socket
-                    .call(socket::ADD_EVENT, &create::document(name, url)?)
+                    .call_with(socket::ADD_EVENT, |pushed| {
+                        create::document_of(name, *kind, url, pushed.docker_hosts.as_deref())
+                    })
                     .await?;
                 return Ok(
                     create::minted_id(&answered).map_or_else(WriteReceipt::none, WriteReceipt::id)
@@ -558,6 +569,7 @@ mod tests {
                 entity: knobas_source::monitor_target("kuma"),
                 name: "gitea".to_owned(),
                 url: "http://gitea:3000/api/healthz".to_owned(),
+                kind: knobas_source::MonitorKind::Http,
             })
             .await;
         let message = match refused {

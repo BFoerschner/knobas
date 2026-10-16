@@ -2695,3 +2695,46 @@ Implementer, PR for #851.
   page ships without them and #973 (blocked by #966) adds them. **Reversing:** #973.
 - **Merge-manager, PR #971: a one-line file says "1 line, on <branch>",** not prototype-6's
   unconditional "lines". **Reversing:** low (`TfRepoFiles.svelte`).
+
+## #864 — Monitors and Assets nothing watches (2026-10-16)
+
+- **`CreateMonitor` gains `kind` (`http | tcp | ping | docker`, default `http`); `url` keeps its
+  name and holds the target as the kind spells it.** R-11.4 prefills by asset type, and the op
+  could only make HTTP checks. Keeping `url` lets queued rows decode. §10.8 entry
+  `864-create-monitor-kind-and-monitor-answers.md`. **Reversing:** medium (a frozen surface).
+- **A Docker check takes the account's lowest-id Docker host, read from Kuma's login push; with
+  none, the adapter refuses before sending.** A Docker monitor with no host is down for ever.
+  **Reversing:** low (`create::document_of`).
+- **Prototype-6's *Every* and *Cert expiry* are not in the dialog.** The create runs on Kuma's
+  one-minute default and knobas makes no certificate check. **Reversing:** a field on the op.
+- **Assets nothing watches lists assets only, so its lead reads "Containers, services, databases
+  and VMs that no monitor watches."** `unmonitored_assets` reads assets, and a route is not one;
+  prototype-6 lists routes too. Follow-up filed. **Reversing:** low.
+- **The tab lists types `vm`, `container`, `service`, `database_server` and `database`.** A
+  database server takes the same TCP check as a database. **Reversing:** low (`WATCHABLE`).
+- **A kind of check reads in prototype-6's words (`http` HTTP, `port` TCP, `ping` Ping, `docker`
+  Docker); any other word as the source spells it.** **Reversing:** low (`KIND_WORDS`).
+- **The roster opens on *All*; *My jobs* keeps a monitor that any open job reaches, by itself or
+  by an asset it watches; *This job* the same for the current job.** **Reversing:** low.
+- **The prefill:** TCP from the asset's `host`/`hostname`/`ip` and `port`, else the first
+  `//host:port` a property spells (a JDBC URL); Docker from `container_name`, else the asset's
+  name; Ping from `hostname`, else `ip`; HTTP from a service's `url` property or the first http(s)
+  route, plus `health_path` or `/health`. The name is the asset's, plus ` /health` for HTTP, as
+  prototype-6. **Reversing:** low (`prefill`).
+- ***Ack* reads *Acked* for the rest of the visit.** The roster carries no ack. **Reversing:** a
+  field on `MonitorRow`.
+- **The bar draws a half-hour with no reading in `--sheet-2`.** Prototype-6 never has one.
+  **Reversing:** low.
+- **The header names the source by its display name from `list_sources`.** Under `?fake-ipc` the
+  sources fixture has no Uptime Kuma, so it reads "kuma". **Reversing:** low.
+- **`just kuma-live` waits 61 s between `live_kuma` and `kuma_write_live`.** Kuma allows twenty
+  logins per fixed minute window; with this ticket's live test the second binary's last test was
+  refused as `unauthorized` (30 s was not enough). The new live test makes three logins and
+  witnesses TCP and the Docker refusal; ping stays at the unit seam. **Reversing:** low (the
+  recipe line), but the budget comes back.
+- **Merge review (PR #979): the 61 s sleep stays; session reuse is #983.** Reusing one login
+  across writes would fix both the recipe and a product burst of more than twenty Kuma writes a
+  minute, but it changes the adapter's one-session-per-call design, which is beyond this ticket.
+  The sleep costs only the live recipe. The Docker host choice was checked against the pinned
+  image: 2.5.3's `afterLogin` awaits `sendDockerHostList` before the login's callback, so the
+  push arrives before the ack the socket waits for. **Reversing:** low.

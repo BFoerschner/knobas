@@ -228,7 +228,24 @@ impl KumaSocket {
         event: &str,
         argument: &serde_json::Value,
     ) -> Result<serde_json::Value, SourceError> {
-        let Ok(exchanged) = tokio::time::timeout(self.budget, self.exchange(event, argument)).await
+        self.call_with(event, |_| Ok(argument.clone())).await
+    }
+
+    /// [`KumaSocket::call`], with the argument built from what the login
+    /// pushed (#864): a Docker check names one of the account's Docker hosts,
+    /// and the only place Kuma says which exist is the `dockerHostList` it
+    /// pushes before it acknowledges the login. `build` runs after the login
+    /// and before the emit; its error is the call's, and nothing is emitted.
+    ///
+    /// # Errors
+    ///
+    /// [`KumaSocket::call`]'s, and whatever `build` refuses with.
+    pub(crate) async fn call_with(
+        &self,
+        event: &str,
+        build: impl FnOnce(&Pushed) -> Result<serde_json::Value, SourceError>,
+    ) -> Result<serde_json::Value, SourceError> {
+        let Ok(exchanged) = tokio::time::timeout(self.budget, self.exchange(event, build)).await
         else {
             // `{:?}` and not `as_secs()`, which is how `knobas_http` prints
             // its own budget: this one is shortened to milliseconds by a test,
@@ -270,7 +287,7 @@ impl KumaSocket {
     async fn exchange(
         &self,
         event: &str,
-        argument: &serde_json::Value,
+        build: impl FnOnce(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<(Session<'_>, String), SourceError> {
         let opened = self.open().await?;
         let session = Session {
@@ -282,11 +299,13 @@ impl KumaSocket {
         session
             .send(emit(LOGIN_ACK, "login", &self.login_argument()))
             .await?;
-        let login = session.wait_for(LOGIN_ACK).await?;
+        let mut pushed = Pushed::default();
+        let login = session.wait_for(LOGIN_ACK, Some(&mut pushed)).await?;
         login_verdict(&login, &self.account.username)?;
 
-        session.send(emit(CALL_ACK, event, argument)).await?;
-        let answered = session.wait_for(CALL_ACK).await?;
+        let argument = build(&pushed)?;
+        session.send(emit(CALL_ACK, event, &argument)).await?;
+        let answered = session.wait_for(CALL_ACK, None).await?;
         Ok((session, answered))
     }
 
@@ -355,7 +374,11 @@ impl Session<'_> {
     /// Everything else in the stream is discarded on purpose: what a login
     /// pushes is the dashboard's whole state, and this module has no use for
     /// any of it -- reading a monitor is `/metrics`' job and stays so.
-    async fn wait_for(&self, ack: u32) -> Result<String, SourceError> {
+    async fn wait_for(
+        &self,
+        ack: u32,
+        mut pushed: Option<&mut Pushed>,
+    ) -> Result<String, SourceError> {
         loop {
             let request = self
                 .socket
@@ -371,6 +394,10 @@ impl Session<'_> {
                     self.send("3".to_owned()).await?;
                 } else if let Some(payload) = ack_of(packet, ack) {
                     return Ok(payload.to_owned());
+                } else if let Some(pushed) = pushed.as_deref_mut()
+                    && let Some(hosts) = docker_hosts_of(packet)
+                {
+                    pushed.docker_hosts = Some(hosts);
                 }
             }
         }
@@ -383,6 +410,36 @@ async fn text_of(response: knobas_http::Response) -> Result<String, SourceError>
         .text()
         .await
         .map_err(|error| SourceError::protocol(format!("reading {PATH}: {error}")))
+}
+
+/// What a login pushed that a call may need (#864). Everything else a login
+/// pushes is still discarded ([`Session::wait_for`]'s note).
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(crate) struct Pushed {
+    /// The account's Docker hosts by id, lowest first, as `dockerHostList`
+    /// named them; `None` when the login pushed no list at all.
+    pub(crate) docker_hosts: Option<Vec<i64>>,
+}
+
+/// The Docker host ids out of a pushed `42["dockerHostList",[{"id":1,…}]]`,
+/// lowest first, or `None` for any other packet. Kuma 2.5.3's `afterLogin`
+/// awaits this push before the login's callback runs, so it is in the stream
+/// before the login's ack.
+fn docker_hosts_of(packet: &str) -> Option<Vec<i64>> {
+    let body = packet.strip_prefix("42")?;
+    let event: serde_json::Value = serde_json::from_str(body).ok()?;
+    let event = event.as_array()?;
+    if event.first()?.as_str()? != "dockerHostList" {
+        return None;
+    }
+    let mut ids: Vec<i64> = event
+        .get(1)?
+        .as_array()?
+        .iter()
+        .filter_map(|host| host.get("id")?.as_i64())
+        .collect();
+    ids.sort_unstable();
+    Some(ids)
 }
 
 /// One socket.io emit with an ack id: `42<ack>["<event>",<argument>]`.
@@ -665,6 +722,22 @@ mod tests {
             "{polls} reads in {elapsed:?} and {more} in {longer:?}: the reads one write \
              makes have to be whatever fit inside its own deadline, not a fixed count"
         );
+    }
+
+    /// The Docker hosts a login pushes, read by id; any other push is not
+    /// mistaken for them, and an empty list is a list (#864).
+    #[test]
+    fn the_docker_hosts_come_out_of_the_pushed_list() {
+        assert_eq!(
+            docker_hosts_of(
+                r#"42["dockerHostList",[{"id":4,"name":"b","dockerDaemon":"/var/run/docker.sock"},{"id":2,"name":"a"}]]"#
+            ),
+            Some(vec![2, 4])
+        );
+        assert_eq!(docker_hosts_of(r#"42["dockerHostList",[]]"#), Some(vec![]));
+        assert_eq!(docker_hosts_of(r#"42["monitorList",{}]"#), None);
+        assert_eq!(docker_hosts_of(r#"431[{"ok":true}]"#), None);
+        assert_eq!(docker_hosts_of("2"), None);
     }
 
     /// The emit's bytes, which are not JSON and cannot be built by a JSON

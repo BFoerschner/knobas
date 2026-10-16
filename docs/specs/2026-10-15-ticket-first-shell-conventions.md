@@ -26,6 +26,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A ticket view's address is `#/tickets/<id>`, the id a slug of its name made when it is first saved and kept through a rename; `#/tickets` is *All tickets*. (#812)
 - The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
 - A Code row opens `#/pr/<entity id>`, `#/repo/<entity id>`, `#/branch/<entity id>` or `#/commit/<entity id>`. The address carries the entity id, because a pull request's number is unique only inside its repository. `branch` and `commit` light the Code nav. (#816, PR #898)
+- Monitors' addresses are `#/monitors` (*Monitors*) and `#/monitors/unmonitored` (*Assets nothing watches*), two tabs of one page. (#864)
 - Code's addresses are `#/code` and `#/code/repos` (*Repositories*) and `#/code/prs` (*Pull requests*); *New pull request* opens `#/repo/<repo entity id>/compare/<branch>`. (#837)
 - The repository page is `#/repo/<repo entity id>/<tab>` (`files`, `commits`, `branches`, `prs`, `local`); `files/<path>` opens a file, its path encoded segment by segment so its slashes stay, and `commits/<commit entity id>` a commit's diff under the Commits tab. The tab row is `REPO_TABS` in `tf/repo/repo.ts`. (#838)
 - A Builds row opens `#/build/<entity id>`, a Pages row `#/page/<entity id>`, an Assets row `#/asset/<asset id>`, a Monitors row `#/monitors`. (#817)

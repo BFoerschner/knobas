@@ -980,6 +980,9 @@ pub struct MonitoredAsset {
     /// The ancestors' names, outermost first, `" / "` between; `null` for an
     /// asset at the top of the estate.
     pub path: Option<String>,
+    /// What its type is called, resolved here, [`AssetRow`]'s rule: the new
+    /// shell's *Watches* column names it beside the asset (#864).
+    pub type_label: String,
 }
 
 /// One sample as the bar draws it: when it was taken and what it read.
@@ -2017,7 +2020,7 @@ const ROSTER_SAMPLES: &str = "select entity_id, taken_at, state
 ///
 /// `$1` is the monitor ids and `$2` the relation ([`MONITORED_BY`]), bound
 /// rather than written into the text, which is [`MONITORED_ASSETS`]' rule.
-const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name,
+const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
                                     nullif(a.path_text, '') as path
   from unnest($1::text[]) as m(id)
   join knobas.confirmed_link l on m.id in (l.from_id, l.to_id)
@@ -2095,6 +2098,7 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
                 id: row.try_get("id")?,
                 name: row.try_get("name")?,
                 path: row.try_get("path")?,
+                type_label: type_label_of(&row.try_get::<String, _>("type_id")?),
             });
     }
 
@@ -2211,6 +2215,18 @@ pub struct UnmonitoredAsset {
     /// asset at the top of the estate. [`MonitoredAsset::path`]'s field and
     /// its spelling.
     pub path: Option<String>,
+    /// The environment in force, own or inherited (#431), as the new shell's
+    /// *Assets nothing watches* tab draws it (#864); `null` where nothing
+    /// above it sets one.
+    pub environment: Option<String>,
+    /// The owner in force, the same way.
+    pub owner: Option<String>,
+}
+
+/// What a type is called: the label of [`knobas_core::asset::TYPES`], or the
+/// id itself for a type this build has lost (`row_of`'s rule).
+fn type_label_of(type_id: &str) -> String {
+    asset::find(type_id).map_or_else(|| type_id.to_owned(), |t| t.label.to_owned())
 }
 
 /// Every asset with no confirmed [`MONITORED_BY`] link to a monitor.
@@ -2245,9 +2261,20 @@ pub struct UnmonitoredAsset {
 /// Ordered by where an asset sits and then by name, `path_text` first so the
 /// top of the estate leads -- the inbox's own pick order (#446) and, like it,
 /// total: `id` breaks the tie two siblings of the same name would leave.
-const UNMONITORED: &str = "select a.id, a.type_id, a.name,
-                                  nullif(a.path_text, '') as path
+///
+/// `in_force` is #431's inheritance, the walk `dependencies::ESTATE` makes: an
+/// asset's own environment and owner, else its parent's in force.
+const UNMONITORED: &str = "with recursive in_force (id, environment, owner) as (
+         select a.id, a.environment, a.owner from knobas.asset a where a.parent_id is null
+       union all
+         select c.id, coalesce(c.environment, f.environment), coalesce(c.owner, f.owner)
+           from knobas.asset c join in_force f on c.parent_id = f.id
+     )
+select a.id, a.type_id, a.name,
+                                  nullif(a.path_text, '') as path,
+                                  f.environment, f.owner
   from knobas.asset a
+  left join in_force f on f.id = a.id
  where not exists (select 1
                      from knobas.confirmed_link l
                      join knobas.entity m
@@ -2308,7 +2335,7 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
             let declared = asset::find(&type_id);
             Ok(UnmonitoredAsset {
                 id: row.try_get("id")?,
-                type_label: declared.map_or_else(|| type_id.clone(), |t| t.label.to_owned()),
+                type_label: type_label_of(&type_id),
                 // `??` for a type this build has lost, `row_of`'s rule and for
                 // its reason: an estate file may name a type this build does
                 // not carry, and the asset still has to be visible.
@@ -2316,6 +2343,8 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
                 type_id,
                 name: row.try_get("name")?,
                 path: row.try_get("path")?,
+                environment: row.try_get("environment")?,
+                owner: row.try_get("owner")?,
             })
         })
         .collect()

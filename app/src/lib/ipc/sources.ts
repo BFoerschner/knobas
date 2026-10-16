@@ -820,8 +820,13 @@ export type WriteOpPayload =
          * `monitored-by` link to every asset carrying this name.
          */
         name: string;
-        /** The http(s) URL it will check. A monitor of a URL is an HTTP check. */
+        /**
+         * What it checks, spelled as `kind` reads it: an http(s) URL, `host:port`,
+         * a host, or a container's name (#864).
+         */
         url: string;
+        /** The kind of check; absent is `http`, what every create meant before #864. */
+        kind?: MonitorKind;
       };
     }
   | {
@@ -852,6 +857,9 @@ export type WriteOpPayload =
   | { PauseMonitor: { entity: string } }
   /** Start a paused monitor checking again (#452). */
   | { ResumeMonitor: { entity: string } };
+
+/** What kind of check a `CreateMonitor` asks for — `knobas_source::MonitorKind` (#864). */
+export type MonitorKind = "http" | "tcp" | "ping" | "docker";
 
 /**
  * One write knobas still owes a source —
