@@ -225,10 +225,14 @@ front-changed base="origin/main": deps
     npm run build
 
 # Screenshots under `?fake-ipc`, one dev server for all routes:
-# `just shot 3 shots time job/PAY-231`. `SHOT_THEME=light|dark` sets the colour scheme.
+# `just shot 3 shots time job/PAY-231`; the leading `#/` is optional but quote it
+# (`'#/time'`). Steps, one argument per shot: `'#/job/PAY-231 > #/builds'` opens a
+# job first; `'#/repo/x/branches + click:New branch…'` clicks, then captures the dialog.
+# `SHOT_THEME=light|dark` sets the colour scheme.
 # See scripts/shot.sh for query parameters, size and the rooms UI.
+[positional-arguments]
 shot slot out +routes:
-    scripts/shot.sh {{slot}} {{out}} {{routes}}
+    scripts/shot.sh "$@"
 
 # The merge gate: `check-front` when `scripts/gate-scope.sh BASE` says the head
 # is frontend-only against BASE, the full `check` otherwise.
