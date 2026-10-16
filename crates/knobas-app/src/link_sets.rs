@@ -1,5 +1,5 @@
 //! Link sets (#866, spec #808 *Link sets*, R-7.1, R-7.2, R-7.4, R-7.6,
-//! R-7.7, R-7.11, ADR-0025): the knobas-owned rows of migration `0038` behind
+//! R-7.7, R-7.11, ADR-0025): the knobas-owned rows of migration `0039` behind
 //! six commands on `commands::entity` -- `link_sets`, `link_set`,
 //! `save_link_set`, `delete_link_set`, `preview_link_set_rule` and
 //! `hide_link_set_member`.

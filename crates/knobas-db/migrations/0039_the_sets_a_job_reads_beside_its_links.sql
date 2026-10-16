@@ -1,11 +1,11 @@
--- 0038_the_sets_a_job_reads_beside_its_links.sql -- four tables, and nothing
+-- 0039_the_sets_a_job_reads_beside_its_links.sql -- four tables, and nothing
 -- else (issue #866, spec #808 *Link sets*, requirements R-7.1, R-7.2, R-7.4,
 -- R-7.11, ADR-0025).
 --
 -- Single-writer, like every migration: a later ticket that needs more schema
 -- takes the next number and never edits this file. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/866-migration-0038-link-sets-and-six-commands.md`).
+-- (`docs/contract/10.8/866-migration-0039-link-sets-and-six-commands.md`).
 --
 -- ## What a link set is
 --

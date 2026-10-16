@@ -1,4 +1,4 @@
-- **Migration `0038`, the IPC command schema, the Rust handler barrel and what `job_reach`
+- **Migration `0039`, the IPC command schema, the Rust handler barrel and what `job_reach`
   answers — issue #866 (2026-10-16): link sets (`knobas.link_set`, `link_set_member`,
   `link_set_rule`, `link_set_hidden`), six commands, and the set term in the job's reach.** Spec
   #808, *Link sets*; requirements R-7.1, R-7.2 (fixed members), R-7.4, R-7.6, R-7.7 (without
