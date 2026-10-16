@@ -6,6 +6,7 @@ import type { LinkEntry, LinkRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { FAKE_ACTIVITY } from "./activity";
 import { CORPUS, mirrorRow } from "./corpus";
+import { repoView } from "./views/repos";
 
 /**
  * `resolve_url` (#496): what a pasted link names, over this fixture's corpus.
@@ -153,6 +154,9 @@ function fakeTransitions(args: Record<string, unknown>): string[] {
  */
 function entityView(args: Record<string, unknown>) {
   const id = String(args["entityId"] ?? "");
+  // A repository, its branches and its commits: the repository page (#838).
+  const drawn = repoView(id, (args["section"] as string | null | undefined) ?? null);
+  if (drawn !== undefined) return drawn;
   if (id !== "mock:9f2c1ab") return null;
   const section = (args["section"] as string | null | undefined) ?? null;
   const overview = {

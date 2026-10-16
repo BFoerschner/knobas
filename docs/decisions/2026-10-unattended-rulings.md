@@ -2640,3 +2640,53 @@ Implementer, PR for #851.
   on backoff, so `last_finished_at` is the last try, and "data is 1 min old" would understate the
   age; no status field holds the last good sync. The credential line keeps prototype-6's "data is
   N old" over the same instant #848's job page uses. **Reversing:** low (copy in `staleLine`).
+## #838 Repository page: header, Files, Commits, PRs (2026-10-16)
+
+- **Every read is an existing command.** The repository is read through its source's own view
+  (`entity_view`: section `branches`, the tree's `files` / `files:<dir>` / `file:<path>`,
+  `commits`, a commit's `diff`), the header from `get_entity` and `entity_checkout`, the `M` marks
+  from `entity_checkout_diff`, the pull requests from `list_entities`. No command, migration or
+  §10.8 entry. **Reversing:** low.
+- **The tree is read a directory at a time and drawn nested;** a directory opens on click, and the
+  directories above the address's file open by themselves. Prototype-6 draws every file of the
+  repository at once under flat directory headers; a real repository is too large to read whole.
+  **Reversing:** low (`TfRepoFiles.svelte`).
+- **The branch is held per repository for the session** (module `$state`, never written), and the
+  page opens on the default branch; prototype-6 opens `payout-service` on the job's branch. The
+  default branch is read at the repository itself, any other at its branch entity. **Reversing:**
+  low.
+- **The dropdown offers the branches the mirror holds,** plus the default branch: the view clears
+  the id of a branch the mirror does not hold (ADR-0020 rule 7), and nothing can be read at it.
+  **Reversing:** needs a read at a branch name.
+- **Commits on the default branch are its latest; on another branch, what it carries over the
+  default** (the branch view's *Commits*), and the count says so (`commits on <b> not in main`).
+  Who and when is the source's `author · age` line, drawn in one cell rather than prototype-6's two
+  columns, and there is no *Author: Mine* chip: a view row declares no author to match. The filter's
+  words reach the author. **Reversing:** a declared author on a commit row.
+- **A commit opens at `#/repo/<repo id>/commits/<commit entity id>`,** under the repository's
+  header with Commits lit, as prototype-6's `renderCommitView`. A commit the mirror does not hold
+  has no id and is drawn plain. The header is the mirror's row (title, author, time); the short sha
+  is the id's `@<sha>` cut to ten characters, as the source shortens it. **Reversing:** low.
+- ***New branch…*, *New branch from here…* (#839), *Edit* (#845) and *Open in…* (#844) are disabled
+  buttons titled "Not built in the new shell yet";** the Branches and Local changes tabs, the edit
+  and the compare places draw "<name> is not built in the new shell yet." under the tab they light.
+  An uncloned repository says "Not on this machine yet." without prototype-6's *Clone into…*
+  (#846). **Reversing:** each ticket replaces its arm.
+- **The `M` marks and the warning come from the checkout's uncommitted diff whatever branch is
+  picked:** the change is in the working tree, not on a branch. Unstaged, staged (a rename under
+  its new path) and untracked files are marked; an untracked directory marks nothing.
+  **Reversing:** low (`changedPaths`).
+- **Tab counts:** Branches is the branches offered, Pull requests the open ones, Local changes the
+  checkout's changed and untracked paths in the warn tone; each drawn only above zero.
+  **Reversing:** low.
+- **The repository's pull requests** are the mirror's whose declared parent is the repository, in
+  its source, every state, newest first; a row has no author line (no author on `EntityRow`,
+  #966). **Reversing:** low.
+- **The diff block is `tf/code/TfDiff.svelte`,** drawn from the source's `DiffFile`, for #842 and
+  #847 to reuse. **Reversing:** low.
+- **`?fake-ipc`:** the repository, branch and commit views live in `fake/views/repos.ts`, below the
+  feature glob because they answer no command of their own; `entity.ts`'s `entity_view` asks it
+  first. The checkout's fixture change moved to `src/sepa/retry.rs`, the file prototype-6 marks,
+  and three of the job branch's commits joined the corpus so their rows open. **Reversing:** low.
+- **The repository name is `--t-2xl`** (prototype-6's 22 px sits between 20 and 24).
+  **Reversing:** low.

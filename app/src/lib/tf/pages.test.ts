@@ -12,6 +12,7 @@ import { page as inboxPage } from "./inbox/page";
 import { page as jobPage } from "./job/page";
 import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
+import { page as repoPage } from "./repo/page";
 import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
 import { page as ticketsPage } from "./tickets/page";
@@ -28,6 +29,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(assetTreePage);
   expect(PAGES).toContain(inboxPage);
   expect(PAGES).toContain(codePage);
+  expect(PAGES).toContain(repoPage);
 });
 
 const ADDRESSES = [
@@ -49,7 +51,8 @@ const ADDRESSES = [
   ["#/code", "code"],
   ["#/code/repos", "code"],
   ["#/code/prs", "code"],
-  ["#/repo/gitea%3Atidewater%2Fpayout-service", "shell"],
+  ["#/repo/gitea%3Atidewater%2Fpayout-service", "repo"],
+  ["#/repo/gitea%3Atidewater%2Fpayout-service/files/src/lib.rs", "repo"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "shell"],
   ["#/deps", "deps"],
   ["#/map", "deps"],
@@ -73,6 +76,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [assetTreePage, "asset tree"],
     [inboxPage, "inbox"],
     [codePage, "code"],
+    [repoPage, "repo"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);

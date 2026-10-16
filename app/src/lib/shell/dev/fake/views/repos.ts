@@ -1,0 +1,277 @@
+/**
+ * `?fake-ipc`: the repository page's reads (#838), the source view of a
+ * repository, a branch and a commit, as `knobas-source-gitea` draws them:
+ * a repository's *Branches* (the default first, `default` chip), the tree
+ * a directory at a time (`files`, `files:<dir>`, `file:<path>`), *Commits*
+ * (the default branch's latest; a branch's, what it carries over the default),
+ * and a commit's *Diff*.
+ *
+ * Answers no command of its own, so it sits below the feature glob:
+ * `entity_view` is `entity.ts`'s, which asks {@link repoView} first. The files are prototype-6's `repoFiles` for
+ * `payout-service` and its `genericFiles` for every other repository. A
+ * divergence: the mock adapter draws no view for a repository at all.
+ */
+import type { DiffFile, DiffLine, SourceView, TreeEntry, ViewRow } from "../../../../ipc/entity";
+import { CORPUS } from "../corpus";
+
+const RETRY_MAIN = `use std::time::Duration;
+
+use crate::psp::errors::PspError;
+
+pub const RETRY_DELAY: Duration = Duration::from_secs(60);
+
+/// Sends the batch once more after a fixed delay.
+pub async fn send_with_retry<F, Fut>(mut send: F) -> Result<(), PspError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), PspError>>,
+{
+    match send().await {
+        Ok(()) => Ok(()),
+        Err(_) => {
+            tokio::time::sleep(RETRY_DELAY).await;
+            send().await
+        }
+    }
+}`;
+
+const RETRY_A41 = `use std::time::Duration;
+use rand::Rng;
+
+use crate::psp::errors::PspError;
+
+pub const BASE: Duration = Duration::from_secs(30);
+pub const FACTOR: u32 = 2;
+pub const MAX_ATTEMPTS: u32 = 10;
+pub const JITTER: f64 = 0.2;
+
+/// Delay before the given attempt, with jitter.
+pub fn next_delay(attempt: u32) -> Duration {
+    let mut rng = rand::thread_rng();
+    let jitter = rng.gen_range(-JITTER..JITTER);
+    let base = BASE * FACTOR.pow(attempt);
+    base.mul_f64(1.0 + jitter)
+}
+
+pub fn is_transient(err: &PspError) -> bool {
+    matches!(err, PspError::Http(503) | PspError::Code(ref c) if c == "TEMP_UNAVAILABLE")
+}
+
+pub async fn send_with_retry<F, Fut>(mut send: F) -> Result<(), PspError>
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = Result<(), PspError>>,
+{
+    let mut attempt = 0;
+    while attempt <= MAX_ATTEMPTS {
+        match send().await {
+            Ok(()) => return Ok(()),
+            Err(e) if is_transient(&e) => {
+                tokio::time::sleep(next_delay(attempt)).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    Err(PspError::GaveUp { attempts: attempt })
+}`;
+
+const RETRY_HEAD = RETRY_A41.replace("MAX_ATTEMPTS: u32 = 10", "MAX_ATTEMPTS: u32 = 5")
+  .replace("JITTER: f64 = 0.2", "JITTER: f64 = 0.1")
+  .replace("with jitter.", "with ±10 % jitter.");
+
+const TEST_HEAD = `use payout_service::sepa::retry::{send_with_retry, MAX_ATTEMPTS};
+use payout_service::psp::errors::PspError;
+use std::sync::atomic::{AtomicU32, Ordering};
+
+#[tokio::test(start_paused = true)]
+async fn gives_up_after_max_attempts() {
+    let attempts = AtomicU32::new(0);
+    let result = send_with_retry(|| async {
+        attempts.fetch_add(1, Ordering::SeqCst);
+        Err(PspError::Http(503))
+    })
+    .await;
+    assert!(result.is_err());
+    assert_eq!(attempts.load(Ordering::SeqCst), MAX_ATTEMPTS);
+}`;
+
+/** `payout-service` on its default branch, as prototype-6's `repoFiles` (with `main`'s retry). */
+const PAYOUT_MAIN: Record<string, string> = {
+  "Cargo.toml": `[package]\nname = "payout-service"\nversion = "1.9.0-rc1"\nedition = "2021"\n\n[dependencies]\ntokio = { version = "1.40", features = ["full"] }\nreqwest = "0.12"\nrand = "0.8"\nthiserror = "1"`,
+  "README.md": `# payout-service\n\nSends payout batches to the PSP and books them in the ledger.\n\n## Run locally\n\n    cargo run -- --env dev\n\n## Tests\n\n    cargo test`,
+  "src/main.rs": `use payout_service::run;\n\n#[tokio::main]\nasync fn main() {\n    run().await.expect("payout-service failed");\n}`,
+  "src/lib.rs": `pub mod psp;\npub mod sepa;\n\npub async fn run() -> anyhow::Result<()> {\n    sepa::batch::schedule().await\n}`,
+  "src/psp/client.rs": `use crate::psp::errors::PspError;\n\npub struct PspClient { base_url: String }\n\nimpl PspClient {\n    pub async fn send_batch(&self, body: &[u8]) -> Result<(), PspError> {\n        todo!("POST {}/batches", self.base_url)\n    }\n}`,
+  "src/psp/errors.rs": `#[derive(Debug, thiserror::Error)]\npub enum PspError {\n    #[error("http {0}")]\n    Http(u16),\n    #[error("psp code {0}")]\n    Code(String),\n    #[error("gave up after {attempts} attempts")]\n    GaveUp { attempts: u32 },\n}`,
+  "src/sepa/mod.rs": `pub mod batch;\npub mod retry;`,
+  "src/sepa/batch.rs": `pub async fn schedule() -> anyhow::Result<()> {\n    // 13:00 daily batch, see PAY-231\n    Ok(())\n}`,
+  "src/sepa/retry.rs": RETRY_MAIN,
+  ".teamcity/settings.kts": `import jetbrains.buildServer.configs.kotlin.*\n\nproject {\n    buildType(Payout_Build)\n    buildType(Payout_IntegrationTests)\n}`,
+};
+
+/** The job's branch: the retry rewritten, its test and the design note added. */
+const PAYOUT_FEATURE: Record<string, string> = {
+  ...PAYOUT_MAIN,
+  "src/sepa/retry.rs": RETRY_HEAD,
+  "tests/sepa_retry.rs": TEST_HEAD,
+  "docs/backoff.md": `# Backoff for SEPA payouts\n\nTransient PSP errors (HTTP 503, TEMP_UNAVAILABLE) are retried.\n\n- base delay 30 s, factor 2\n- at most 5 attempts\n- jitter ±10 %`,
+};
+
+const PAYOUT = "mock:tidewater/payout-service";
+const FEATURE = "feat/PAY-231-idempotent-retry";
+
+/** The three commits the job's branch carries, newest first: id, subject, author, when, the change. */
+export const PAYOUT_COMMITS: [sha: string, subject: string, author: string, at: string, path: string, before: string, after: string][] = [
+  ["c90d11e4a7b2", "PAY-231: jitter in backoff, cap at 5 attempts", "mara", "2026-08-22T09:42:00Z", "src/sepa/retry.rs", RETRY_A41, RETRY_HEAD],
+  ["a41f2c08d3e9", "PAY-231 backoff jitter", "mara", "2026-08-22T08:02:00Z", "src/sepa/retry.rs", RETRY_MAIN, RETRY_A41],
+  ["7be0e4f15c60", "PAY-231: retry SEPA payouts on transient PSP errors", "mara", "2026-08-21T15:30:00Z", "tests/sepa_retry.rs", "", TEST_HEAD],
+];
+
+/** A commit's entity id on `payout-service`, in the Gitea key grammar (`owner/repo@sha`). */
+export const payoutCommitId = (sha: string) => `${PAYOUT}@${sha}`;
+
+/** The default branch's latest, none of them in the mirror: drawn plain, opening nothing. */
+const MAIN_COMMITS: [string, string, string, string][] = [
+  ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-21T10:15:00Z"],
+  ["3a9c40b1e2f7", "Settlement export: one file per currency", "priya", "2026-08-20T14:02:00Z"],
+  ["e81f2d6c0a95", "Ledger booking for partial refunds", "tomasz", "2026-08-19T09:30:00Z"],
+  ["b07c93e4d1a8", "README: how to run locally", "jonas", "2026-08-18T16:44:00Z"],
+];
+
+function filesOf(repoId: string, branch: string | null): Record<string, string> | null {
+  const repo = CORPUS.find((entry) => entry.entity_id === repoId && entry.kind === "repo");
+  if (!repo) return null;
+  if (repoId === PAYOUT) return branch === FEATURE ? PAYOUT_FEATURE : PAYOUT_MAIN;
+  const name = repo.title.slice(repo.title.indexOf("/") + 1);
+  return {
+    "README.md": `# ${name}\n\nOwned by the payments team.`,
+    "src/main.rs": `// ${name}\n`,
+    ".teamcity/settings.kts": "project { }",
+  };
+}
+
+const section = (id: string, title: string, blocks: unknown[], count: number | null = null) => ({
+  id,
+  title,
+  count,
+  deferred: false,
+  blocks,
+});
+
+/** One directory's listing: its directories first, then its files, each by name. */
+function listing(files: Record<string, string>, dir: string): TreeEntry[] {
+  const prefix = dir === "" ? "" : `${dir}/`;
+  const dirs = new Set<string>();
+  const entries: TreeEntry[] = [];
+  for (const [path, text] of Object.entries(files)) {
+    if (!path.startsWith(prefix)) continue;
+    const rest = path.slice(prefix.length);
+    if (rest.includes("/")) dirs.add(rest.slice(0, rest.indexOf("/")));
+    else entries.push({ name: rest, kind: "file", size: text.length, section: `file:${path}` });
+  }
+  return [
+    ...[...dirs].sort().map((name): TreeEntry => ({ name, kind: "dir", size: null, section: `files:${prefix}${name}` })),
+    ...entries.sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())),
+  ];
+}
+
+const age = (at: string) => {
+  const days = Math.max(0, Math.round((Date.parse("2026-08-22T14:30:00Z") - Date.parse(at)) / 86_400_000));
+  return days === 0 ? "today" : days === 1 ? "1 day ago" : `${days} days ago`;
+};
+
+function commitRow(entityId: string | null, sha: string, subject: string, author: string, at: string): ViewRow {
+  return { entity_id: entityId, title: subject, meta: `${author} · ${age(at)}`, tone: null, chip: sha.slice(0, 10), url: null };
+}
+
+/** Prototype-6's `lineDiff` and `hunks`: one hunk per run of changes, three lines of context. */
+function diffOf(path: string, before: string, after: string): DiffFile {
+  const a = before === "" ? [] : before.split("\n");
+  const b = after.split("\n");
+  const lcs = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = a.length - 1; i >= 0; i -= 1)
+    for (let j = b.length - 1; j >= 0; j -= 1)
+      lcs[i]![j] = a[i] === b[j] ? lcs[i + 1]![j + 1]! + 1 : Math.max(lcs[i + 1]![j]!, lcs[i]![j + 1]!);
+  const lines: DiffLine[] = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length || j < b.length) {
+    if (i < a.length && j < b.length && a[i] === b[j]) lines.push({ kind: "context", old: ++i, new: ++j, text: a[i - 1]! });
+    else if (j >= b.length || (i < a.length && lcs[i + 1]![j]! >= lcs[i]![j + 1]!)) lines.push({ kind: "del", old: ++i, new: null, text: a[i - 1]! });
+    else lines.push({ kind: "add", old: null, new: ++j, text: b[j - 1]! });
+  }
+  const near = lines.map((_, at) => lines.slice(Math.max(0, at - 3), at + 4).some((line) => line.kind !== "context"));
+  const hunks: { header: string; lines: DiffLine[] }[] = [];
+  lines.forEach((line, at) => {
+    if (!near[at]) return;
+    if (at === 0 || !near[at - 1]) hunks.push({ header: `@@ -${line.old ?? 0} +${line.new ?? 0} @@`, lines: [] });
+    hunks[hunks.length - 1]!.lines.push(line);
+  });
+  return {
+    path,
+    old_path: null,
+    change: before === "" ? "added" : "modified",
+    additions: lines.filter((line) => line.kind === "add").length,
+    deletions: lines.filter((line) => line.kind === "del").length,
+    hunks,
+    truncated: false,
+    threads: [],
+  };
+}
+
+/** The tree's three kinds of section, at a ref. */
+function treeSection(files: Record<string, string>, id: string, ref: string) {
+  if (id === "files" || id.startsWith("files:")) {
+    const dir = id === "files" ? "" : id.slice("files:".length);
+    return section(id, "Files", [{ type: "tree", trail: [], entries: listing(files, dir), truncated: false, url: null }]);
+  }
+  const path = id.slice("file:".length);
+  const text = files[path];
+  if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
+  return section(id, "Files", [
+    { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: null },
+  ]);
+}
+
+/**
+ * The view of a repository, one of its branches or one of `payout-service`'s
+ * commits, or `undefined` for an entity this module does not draw.
+ */
+export function repoView(entityId: string, sectionId: string | null): SourceView | undefined {
+  const commit = PAYOUT_COMMITS.find(([sha]) => payoutCommitId(sha) === entityId);
+  if (commit) {
+    const [, , , , path, before, after] = commit;
+    const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after)], truncated: false, commentable: null, gone: [] }], 1);
+    return { sections: [diff], actions: [] } as SourceView;
+  }
+  const branchAt = entityId.indexOf("@refs/heads/");
+  const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);
+  const branch = branchAt === -1 ? null : entityId.slice(branchAt + "@refs/heads/".length);
+  const files = filesOf(repoId, branch);
+  if (files === null) return undefined;
+  const ref = branch ?? "main";
+  const one = (built: ReturnType<typeof section>) => ({ sections: [built], actions: [] }) as unknown as SourceView;
+  if (sectionId === "branches") {
+    const rows: ViewRow[] = [
+      { entity_id: `${repoId}@refs/heads/main`, title: "main", meta: "5d77e1a2c3 · 1 day ago", tone: "muted", chip: "default", url: null },
+      ...(repoId === PAYOUT
+        ? [{ entity_id: `${PAYOUT}@refs/heads/${FEATURE}`, title: FEATURE, meta: "c90d11e4a7 · today", tone: null, chip: null, url: null }]
+        : []),
+    ];
+    return one(section("branches", "Branches", [{ type: "entities", title: null, rows }], rows.length));
+  }
+  if (sectionId === "commits") {
+    const rows =
+      repoId === PAYOUT && branch === FEATURE
+        ? PAYOUT_COMMITS.map(([sha, subject, author, at]) => commitRow(payoutCommitId(sha), sha, subject, author, at))
+        : branch !== null && branch !== "main"
+          ? []
+          : MAIN_COMMITS.map(([sha, subject, author, at]) => commitRow(null, sha, subject, author, at));
+    return one(section("commits", "Commits", [{ type: "entities", title: null, rows }]));
+  }
+  if (sectionId !== null && (sectionId === "files" || sectionId.startsWith("files:") || sectionId.startsWith("file:"))) {
+    return one(treeSection(files, sectionId, ref));
+  }
+  return { sections: [], actions: [] };
+}

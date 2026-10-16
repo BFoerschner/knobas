@@ -360,6 +360,7 @@ const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
+const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
@@ -1095,6 +1096,70 @@ const CASES: Case[] = [
       }),
     }),
   },
+  // The repository page (#838): its own reads and each tab's, behind a ready
+  // database, answering late. A tab mounts once the branches answer, so each
+  // tab's component is reached through the page at that tab's address.
+  ...(
+    [
+      ["TfRepo", "lib/tf/repo/TfRepo.svelte", []],
+      ["TfRepoFiles", "lib/tf/repo/TfRepoFiles.svelte", ["files", "src", "lib.rs"]],
+      ["TfRepoCommits", "lib/tf/repo/TfRepoCommits.svelte", ["commits"]],
+      ["TfRepoCommit", "lib/tf/repo/TfRepoCommit.svelte", ["commits", "gitea:tidewater/payout-service@c90d11"]],
+      ["TfRepoPrs", "lib/tf/repo/TfRepoPrs.svelte", ["prs"]],
+    ] as const
+  ).map(
+    ([name, source, tail]): Case => ({
+      name,
+      source,
+      open: (target) => ({
+        app: mount(TfRepo, {
+          target,
+          props: {
+            ready: true,
+            rest: ["gitea:tidewater/payout-service", ...tail],
+            job: "PAY-231",
+            ports: {
+              getEntity: () =>
+                deferred({
+                  row: { entity_id: "gitea:tidewater/payout-service", kind: "repo", source_id: "gitea", title: "tidewater/payout-service" },
+                } as never),
+              listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null }),
+              entityView: (_id: string, section: string | null) =>
+                deferred(
+                  section === "files"
+                    ? {
+                        sections: [
+                          {
+                            id: "files",
+                            title: "Files",
+                            count: null,
+                            deferred: false,
+                            blocks: [
+                              {
+                                type: "tree",
+                                trail: [],
+                                entries: [{ name: "src", kind: "dir", size: null, section: "files:src" }],
+                                truncated: false,
+                                url: null,
+                              },
+                            ],
+                          },
+                        ],
+                        actions: [],
+                      }
+                    : null,
+                ) as never,
+              entityCheckout: () => deferred({ path: null, tree: null } as never),
+              entityCheckoutDiff: () => deferred({ status: "no_git" } as never),
+              listContexts: () => deferred([]),
+              listSources: () => deferred([]),
+              jobReach: () => deferred([]),
+            },
+          },
+        }),
+      }),
+    }),
+  ),
   {
     /** Dependencies (#871): its one read behind a ready database, answering late. */
     name: "TfDeps",

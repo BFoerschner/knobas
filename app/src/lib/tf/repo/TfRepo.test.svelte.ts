@@ -1,0 +1,368 @@
+/**
+ * The repository page (#838, R-8.3 to R-8.5, R-8.7, R-8.10), mounted over
+ * stand-in reads: the header and its checkout, the branch dropdown that sets
+ * the branch for every tab, the Files tree with the checkout's changes marked,
+ * the file with line numbers, Commits and a commit's diff, the repository's
+ * pull requests, and the tabs built later. What the source's view holds is
+ * `knobas-source-gitea`'s (its view tests and `gitea-live`); here it is a
+ * stand-in shaped like it.
+ */
+import { flushSync, mount, unmount } from "svelte";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import type {
+  CheckoutView,
+  DiffRead,
+  EntityDetail,
+  EntityPage,
+  EntityRow,
+  SourceView,
+  TreeEntry,
+  ViewBlock,
+  ViewRow,
+} from "../../ipc/entity";
+import { forgetFilters } from "../filter/filter-state.svelte";
+import TfRepo, { forgetBranches, type RepoPorts } from "./TfRepo.svelte";
+
+const NOW = new Date(2026, 7, 22, 14, 32);
+const REPO = "gitea:tidewater/payout-service";
+const MAIN = `${REPO}@refs/heads/main`;
+const FEATURE = `${REPO}@refs/heads/feature/PAY-231-sepa-retry`;
+const C1 = `${REPO}@c90d11a2b3c4`;
+
+function row(entity_id: string, kind: string, title: string, extra: Partial<EntityRow> = {}): EntityRow {
+  return {
+    entity_id,
+    kind,
+    source_id: "gitea",
+    title,
+    updated_at: "2026-08-22T10:30:00Z",
+    synced_at: "2026-08-22T14:30:00Z",
+    path: null,
+    state: null,
+    ...extra,
+  };
+}
+
+const vrow = (entity_id: string | null, title: string, chip: string | null = null, meta: string | null = null): ViewRow => ({
+  entity_id,
+  title,
+  meta,
+  tone: null,
+  chip,
+  url: null,
+});
+
+const section = (id: string, blocks: ViewBlock[]): SourceView => ({
+  sections: [{ id, title: id, count: null, deferred: false, blocks }],
+  actions: [],
+});
+
+const entry = (name: string, kind: TreeEntry["kind"], at: string): TreeEntry => ({
+  name,
+  kind,
+  size: kind === "dir" ? null : 10,
+  section: kind === "dir" ? `files:${at}` : `file:${at}`,
+});
+
+/** The tree at each ref: a directory's section → its entries. */
+const TREES: Record<string, Record<string, TreeEntry[]>> = {
+  [REPO]: {
+    files: [entry("src", "dir", "src"), entry("README.md", "file", "README.md")],
+    "files:src": [entry("lib.rs", "file", "src/lib.rs"), entry("retry.rs", "file", "src/retry.rs")],
+  },
+  [FEATURE]: {
+    files: [entry("src", "dir", "src"), entry("README.md", "file", "README.md"), entry("NEW.md", "file", "NEW.md")],
+    "files:src": [entry("retry.rs", "file", "src/retry.rs")],
+  },
+};
+
+function checkout(path: string | null): CheckoutView {
+  return {
+    repo_entity_id: REPO,
+    repo_url: null,
+    path,
+    found_by: path === null ? "nothing" : "scan",
+    clones_root: "/Users/mara/src",
+    clone_command: null,
+    tree:
+      path === null
+        ? null
+        : { status: "read", branch: "main", head: null, upstream: null, ahead: 1, behind: 0, changed: 1, untracked: 0, conflicted: 0 },
+  };
+}
+
+const LOCAL: DiffRead = {
+  status: "read",
+  unstaged: {
+    files: [{ path: "src/retry.rs", old_path: null, change: "modified", additions: 1, deletions: 1, hunks: [], truncated: false, threads: [] }],
+    truncated: false,
+  },
+  staged: { files: [], truncated: false },
+  untracked: [],
+  untracked_truncated: false,
+};
+
+const PRS = [
+  row(`${REPO}#142`, "pr", "SEPA retry with exponential backoff", { path: "tidewater/payout-service", state: { text: "open", tone: "info" } }),
+  row(`${REPO}#139`, "pr", "Fix drift", { path: "tidewater/payout-service", state: { text: "merged", tone: "ok" } }),
+  row("gitea:tidewater/ledger#9", "pr", "Elsewhere", { path: "tidewater/ledger", state: { text: "open", tone: "info" } }),
+];
+
+let target: HTMLElement;
+let view: ReturnType<typeof mount> | null = null;
+let viewReads: [string, string | null][];
+
+beforeEach(() => {
+  forgetFilters();
+  forgetBranches();
+  viewReads = [];
+  target = document.createElement("div");
+  document.body.appendChild(target);
+});
+
+afterEach(() => {
+  if (view) unmount(view);
+  view = null;
+  target.remove();
+});
+
+function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
+  return {
+    getEntity: async (id) => {
+      if (id === REPO) return { row: row(REPO, "repo", "tidewater/payout-service"), author: null } as unknown as EntityDetail;
+      if (id === C1)
+        return {
+          row: row(C1, "commit", "PAY-231: jitter in backoff", { updated_at: "2026-08-22T09:42:00Z" }),
+          author: "mara",
+        } as unknown as EntityDetail;
+      throw { code: "not_found", message: `${id} is not in the mirror` };
+    },
+    listEntities: async (): Promise<EntityPage> => ({ rows: PRS, total: PRS.length, tally: null, groups: null }),
+    entityView: async (id, sectionId) => {
+      viewReads.push([id, sectionId]);
+      if (id === REPO && sectionId === "branches")
+        return section("branches", [
+          {
+            type: "entities",
+            title: null,
+            rows: [vrow(MAIN, "main", "default"), vrow(FEATURE, "feature/PAY-231-sepa-retry"), vrow(null, "spike/x")],
+          },
+        ]);
+      const at = id === MAIN ? REPO : id;
+      if (sectionId === "commits")
+        return section("commits", [
+          {
+            type: "entities",
+            title: null,
+            rows:
+              at === REPO
+                ? [vrow(C1, "PAY-231: jitter in backoff", "c90d11a2b3", "mara · 3 hours ago"), vrow(null, "Bump deps", "a41f2c0000", "jonas · 2 days ago")]
+                : [vrow(null, "Only on the feature", "7be0e40000", "mara · 1 day ago")],
+          },
+        ]);
+      if (id === C1 && sectionId === "diff")
+        return section("diff", [
+          {
+            type: "diff",
+            truncated: false,
+            commentable: null,
+            gone: [],
+            files: [
+              {
+                path: "src/retry.rs",
+                old_path: null,
+                change: "modified",
+                additions: 1,
+                deletions: 1,
+                truncated: false,
+                threads: [],
+                hunks: [
+                  {
+                    header: "@@ -1,2 +1,2 @@",
+                    lines: [
+                      { kind: "context", old: 1, new: 1, text: "fn retry() {" },
+                      { kind: "del", old: 2, new: null, text: "    3" },
+                      { kind: "add", old: null, new: 2, text: "    5" },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ]);
+      const tree = TREES[at];
+      if (tree && sectionId !== null && tree[sectionId])
+        return section(sectionId, [{ type: "tree", trail: [], entries: tree[sectionId]!, truncated: false, url: null }]);
+      if (tree && sectionId?.startsWith("file:")) {
+        const path = sectionId.slice(5);
+        return section(sectionId, [
+          {
+            type: "file",
+            trail: [],
+            path,
+            text: at === FEATURE ? `// ${path} on the feature\n` : `// ${path}\nfn main() {}\n`,
+            language: null,
+            size: 20,
+            truncated: false,
+            binary: false,
+            url: null,
+            sha: null,
+          },
+        ]);
+      }
+      throw { code: "invalid", message: `no section ${sectionId}` };
+    },
+    entityCheckout: async () => checkout(cloned ? "/Users/mara/src/payout-service" : null),
+    entityCheckoutDiff: async () => {
+      if (!cloned) throw { code: "not_found", message: "no checkout" };
+      return LOCAL;
+    },
+    listContexts: async () => [],
+    listSources: async () => [],
+    jobReach: async () => [],
+    ...over,
+  };
+}
+
+async function draw(rest: string[], stand: RepoPorts = ports()) {
+  view = mount(TfRepo, { target, props: { ready: true, rest, job: null, ports: stand, now: NOW } });
+  await settle();
+}
+
+async function settle() {
+  for (let round = 0; round < 4; round += 1) {
+    for (let i = 0; i < 10; i += 1) await Promise.resolve();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    flushSync();
+  }
+}
+
+const text = (el: Element | null) => el?.textContent?.replace(/\s+/g, " ").trim() ?? "";
+const tree = () => [...target.querySelectorAll(".tf-ftree a, .tf-ftree button")].map(text);
+
+test("the header names the repository, its last push and its checkout; the tabs follow with their counts", async () => {
+  await draw([REPO]);
+
+  expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
+  expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe(
+    "Last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
+  );
+  expect([...target.querySelectorAll(".tf-crumbs a.tf-crumb, .tf-crumbs strong")].map(text)).toEqual([
+    "Code",
+    "Repositories",
+    "tidewater/payout-service",
+  ]);
+  const tabs = [...target.querySelectorAll(".tf-tabs a")];
+  expect(tabs.map(text)).toEqual(["Files", "Commits", "Branches 2", "Pull requests 1", "Local changes 1"]);
+  expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
+  expect(tabs[1]!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/commits");
+  const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
+  expect([...select.options].map((o) => o.textContent)).toEqual(["main", "feature/PAY-231-sepa-retry"]);
+  expect(select.value).toBe("main");
+});
+
+test("Files opens the README, marks the locally changed file M, and a changed file warns", async () => {
+  await draw([REPO]);
+  expect(tree()).toEqual(["src/", "README.md"]);
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("README.md 2 lines, on main");
+  expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// README.md", "2fn main() {}"]);
+  expect(target.querySelector(".tf-banner")).toBeNull();
+  unmount(view!);
+  view = null;
+
+  await draw([REPO, "files", "src", "retry.rs"]);
+  expect(tree()).toEqual(["src/", "lib.rs", "retry.rs", "README.md"]);
+  const changed = [...target.querySelectorAll(".tf-ftree a")].find((a) => text(a) === "retry.rs")!;
+  expect(changed.classList.contains("tf-changed")).toBe(true);
+  expect(changed.getAttribute("aria-current")).toBe("true");
+  expect(changed.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/files/src/retry.rs");
+  expect(text(target.querySelector(".tf-banner"))).toBe("Your checkout has an uncommitted change to this file. See local changes");
+  expect(target.querySelector(".tf-banner a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/local");
+});
+
+test("an uncloned repository reads its files through the source and says it is not on this machine", async () => {
+  await draw([REPO, "files", "src", "lib.rs"], ports({}, false));
+  expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe("Last push today 12:30. Not on this machine yet.");
+  expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// src/lib.rs", "2fn main() {}"]);
+  expect(target.querySelector(".tf-changed")).toBeNull();
+  expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toContain("Local changes");
+});
+
+test("the branch dropdown sets the branch for Files and for Commits", async () => {
+  await draw([REPO]);
+  const select = target.querySelector<HTMLSelectElement>(".tf-fhead select")!;
+  select.value = "feature/PAY-231-sepa-retry";
+  select.dispatchEvent(new Event("change", { bubbles: true }));
+  await settle();
+
+  expect(tree()).toEqual(["src/", "README.md", "NEW.md"]);
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("1 lines, on feature/PAY-231-sepa-retry");
+  expect(viewReads.some(([id, s]) => id === FEATURE && s === "file:README.md")).toBe(true);
+  unmount(view!);
+  view = null;
+
+  // Held for the session: the Commits tab opens on the same branch.
+  await draw([REPO, "commits"]);
+  expect(target.querySelector<HTMLSelectElement>(".tf-fhead select")!.value).toBe("feature/PAY-231-sepa-retry");
+  expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["7be0e40000Only on the featuremara · 1 day ago"]);
+});
+
+test("Commits lists sha, message and who and when; the filter narrows; a mirrored commit opens its diff", async () => {
+  await draw([REPO, "commits"]);
+  const rows = [...target.querySelectorAll(".tf-cbody tbody tr")];
+  expect(rows.map(text)).toEqual(["c90d11a2b3PAY-231: jitter in backoffmara · 3 hours ago", "a41f2c0000Bump depsjonas · 2 days ago"]);
+  expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe(
+    "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Atidewater%2Fpayout-service%40c90d11a2b3c4",
+  );
+  // Not in the mirror: nothing to open it at.
+  expect(rows[1]!.querySelector("a")).toBeNull();
+
+  const field = target.querySelector<HTMLInputElement>("input[data-filter]")!;
+  field.value = "jonas";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+});
+
+test("a commit draws its sha, message, author and time, its diff per file, and the later New branch", async () => {
+  await draw([REPO, "commits", C1]);
+  expect(text(target.querySelector(".tf-cgroup-h"))).toContain("c90d11a2b3 PAY-231: jitter in backoff mara, today 11:42");
+  const diff = target.querySelector(".tf-diff")!;
+  expect(text(diff.querySelector(".tf-fh"))).toBe("src/retry.rs +1 −1");
+  expect([...diff.querySelectorAll(".tf-ln")].map(text)).toEqual(["1 fn retry() {", "2− 3", "2+ 5"]);
+  expect(diff.querySelector(".tf-ln.tf-del")).not.toBeNull();
+  const branch = [...target.querySelectorAll("button")].find((b) => text(b) === "New branch from here…")!;
+  expect(branch.getAttribute("aria-disabled")).toBe("true");
+  expect(target.querySelector(".tf-tabs a[aria-current='page']")!.textContent).toContain("Commits");
+});
+
+test("Pull requests lists this repository's, with a state filter", async () => {
+  await draw([REPO, "prs"]);
+  const rows = () => [...target.querySelectorAll(".tf-cbody tbody tr")].map((tr) => text(tr.querySelector("td")));
+  expect(rows()).toEqual(["#142", "#139"]);
+  const merged = [...target.querySelectorAll("button")].find((b) => text(b) === "Merged")!;
+  merged.click();
+  flushSync();
+  expect(rows()).toEqual(["#139"]);
+});
+
+test("Branches, Local changes, an edit and the compare page say they are not built yet, under their tab", async () => {
+  for (const [rest, lit, name] of [
+    [[REPO, "branches"], "Branches", "Branches"],
+    [[REPO, "local"], "Local changes", "Local changes"],
+    [[REPO, "edit", "README.md"], "Files", "Editing a file"],
+    [[REPO, "compare", "feature/x"], "Pull requests", "Comparing a branch"],
+  ] as const) {
+    await draw([...rest]);
+    expect(text(target.querySelector(".tf-tabs a[aria-current='page']"))).toContain(lit);
+    expect(text(target.querySelector(".tf-cbody .tf-empty"))).toBe(`${name} is not built in the new shell yet.`);
+    unmount(view!);
+    view = null;
+  }
+});
+
+test("a repository the mirror does not hold says so", async () => {
+  await draw(["gitea:tidewater/nowhere"]);
+  expect(text(target.querySelector(".tf-cbody"))).toContain("gitea:tidewater/nowhere is not in the mirror");
+});

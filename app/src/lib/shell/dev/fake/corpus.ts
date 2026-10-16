@@ -246,6 +246,17 @@ export const CORPUS: {
   // What PAY-231's job draws beyond the rows above (#817): its builds,
   // monitors and pages. See `job-reach.ts`.
   ...JOB_ROWS,
+  // The repository page (#838): the three commits the job's branch carries,
+  // in the mirror, so their rows open their diffs (`repos.ts` draws them).
+  ...(
+    [
+      ["c90d11e4a7b2", "PAY-231: jitter in backoff, cap at 5 attempts", "2026-08-22T09:42:00Z"],
+      ["a41f2c08d3e9", "PAY-231 backoff jitter", "2026-08-22T08:02:00Z"],
+      ["7be0e4f15c60", "PAY-231: retry SEPA payouts on transient PSP errors", "2026-08-21T15:30:00Z"],
+    ] as const
+  ).map(([sha, title, at]) =>
+    row(`mock:tidewater/payout-service@${sha}`, "commit", title, at, "mara", { sha, path: "tidewater/payout-service" }),
+  ),
   // Code (#837): enough repositories and pull requests beside the two above
   // to compare *Repositories* and *Pull requests* with prototype-6, every
   // pull request with the chip and parent path Gitea declares.

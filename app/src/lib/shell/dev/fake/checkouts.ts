@@ -128,19 +128,21 @@ function fakeCheckoutDiff(entityId: string) {
     unstaged: {
       files: [
         {
-          path: "src/retry.rs",
+          // The file prototype-6's repository page marks `M` (#838).
+          path: "src/sepa/retry.rs",
           old_path: null,
           change: "modified",
           additions: 1,
           deletions: 1,
           hunks: [
             {
-              header: "@@ -12,3 +12,3 @@ fn backoff()",
+              header: "@@ -27,4 +27,4 @@ where",
               lines: [
-                { kind: "context", old: 12, new: 12, text: "    let base = 200;" },
-                { kind: "del", old: 13, new: null, text: "    let tries = 3;" },
-                { kind: "add", old: null, new: 13, text: "    let tries = 5;" },
-                { kind: "context", old: 14, new: 14, text: "    base * tries" },
+                { kind: "context", old: 27, new: 27, text: "    Fut: std::future::Future<Output = Result<(), PspError>>," },
+                { kind: "context", old: 28, new: 28, text: "{" },
+                { kind: "del", old: 29, new: null, text: "    let mut attempt = 0;" },
+                { kind: "add", old: null, new: 29, text: "    let mut attempt = 1;" },
+                { kind: "context", old: 30, new: 30, text: "    while attempt <= MAX_ATTEMPTS {" },
               ],
             },
           ],
