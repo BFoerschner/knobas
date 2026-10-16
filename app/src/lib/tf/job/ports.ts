@@ -1,8 +1,8 @@
 /**
  * The reads and writes the job page (#816, #817, #818, #819, #820) calls,
  * injectable so a test needs no bridge. Every one is an existing command but
- * the two conversation reads #819 adds (`visit_entity`, `entity_thread`) and
- * `job_reach`, which #817 adds.
+ * the two conversation reads #819 adds (`visit_entity`, `entity_thread`),
+ * `job_reach`, which #817 adds, and `job_link_sets`, #867's.
  */
 import { getAsset, type AssetDetail } from "../../ipc/assets";
 import {
@@ -10,6 +10,8 @@ import {
   entityCheckout,
   entityThread,
   getEntity,
+  hideLinkSetMember,
+  jobLinkSets,
   jobReach,
   listEntities,
   promoteContext,
@@ -23,6 +25,7 @@ import {
   type EntityDetail,
   type EntityFilter,
   type EntityPage,
+  type JobLinkSets,
   type LinkRow,
   type SuggestionPage,
   type Thread,
@@ -63,6 +66,10 @@ export interface JobPorts {
   launcherHome: SessionPorts["launcherHome"];
   /** What the ticket reaches (#817). */
   jobReach: (entityId: string) => Promise<Reached[]>;
+  /** The link sets that apply and the parent (#867): *Also on this job* and the drawer's groups. */
+  jobLinkSets: (entityId: string) => Promise<JobLinkSets>;
+  /** *Hide here* and *Show again* (R-7.5); never edits the set. */
+  hideLinkSetMember: (ticketId: string, memberId: string, hidden: boolean) => Promise<boolean>;
   /** One reached asset, for the Assets section. */
   getAsset: (assetId: string) => Promise<AssetDetail>;
   /** Every source's credential, for the Builds section's warning. */
@@ -94,6 +101,8 @@ export const bridgePorts: JobPorts = {
   search: (query) => search(query),
   launcherHome: () => launcherHome(),
   jobReach: (entityId) => jobReach(entityId),
+  jobLinkSets: (entityId) => jobLinkSets(entityId),
+  hideLinkSetMember: (ticketId, memberId, hidden) => hideLinkSetMember(ticketId, memberId, hidden),
   getAsset: (assetId) => getAsset(assetId),
   credentialHealth: () => credentialHealth(),
   syncStatus: () => syncStatus(),

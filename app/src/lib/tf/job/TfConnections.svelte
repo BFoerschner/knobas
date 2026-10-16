@@ -3,11 +3,12 @@
   job, from the right, over a scrim, without moving the page.
 
   Top row: a filter field, then *Link to…* (*Apply a link set…* and *Save as a
-  link set…* arrive with link sets, #869). Groups: **Linked on KEY**, the links
-  drawn on the ticket, each with *Unlink* on hover or focus; **Hidden on KEY**
-  with *Show again*, which holds the per-ticket hides link sets bring (#867)
-  and so draws nothing until then; and the proposals box with *Judge them one
-  by one*.
+  link set…* arrive with #869). Groups: **Linked on KEY**, the links drawn on
+  the ticket, each with *Unlink* on hover or focus and "also in" the sets that
+  hold it too; **From Payout stack, via epic PAY-200**, one per link set that
+  applies and one for the parent (#867), a set's rows with *Hide here* and the
+  group with *Edit set*; **Hidden on KEY** with *Show again*; and the
+  proposals box with *Judge them one by one*.
 
   It registers with the shell's layer stack while open, so `Esc` closes it
   (rung 2), as does a click on the scrim; focus goes to its filter and returns
@@ -19,18 +20,21 @@
   import type { LinkEntry, SuggestionEntry } from "../../ipc/entity";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
-  import { filterLinks, sectionOf } from "./connections";
+  import { filterLinks, filterRows, sectionOf, type Origin, type OriginRow } from "./connections";
   import { itemHash } from "./job";
 
   let {
     jobKey,
     links,
     proposals,
+    origins = [],
     hidden = [],
+    alsoIn = () => [],
     layers,
     onclose,
     onunlink,
     onlinkto,
+    onhide = () => {},
     onshow = () => {},
   }: {
     jobKey: string;
@@ -38,12 +42,18 @@
     links: LinkEntry[];
     /** This ticket's proposals, `null` while the read is out. */
     proposals: SuggestionEntry[] | null;
-    /** Rows hidden on this ticket (link sets, #867). */
+    /** The link sets that apply, then the parent (#867): a group each. */
+    origins?: Origin[];
+    /** A set's rows hidden on this ticket (R-7.5). */
     hidden?: { id: string; title: string }[];
+    /** The names of the sets that also hold a linked entity. */
+    alsoIn?: (entityId: string) => string[];
     layers: Layers;
     onclose: () => void;
     onunlink: (entry: LinkEntry) => void;
     onlinkto: () => void;
+    /** *Hide here* on a set's row. */
+    onhide?: (row: OriginRow) => void;
     onshow?: (id: string) => void;
   } = $props();
 
@@ -85,22 +95,45 @@
   <div class="tf-dbody">
     <h3>Linked on {jobKey} <span class="tf-count">{shown.length}</span></h3>
     {#each shown as entry (entry.link.id)}
+      {@const also = alsoIn(entry.other.entity_id)}
       <div class="tf-lk">
         <div>
           <a href={itemHash(entry.other)} onclick={onclose}><Marked text={entry.other.title} typed={text} /></a>
-          <div class="tf-how">{sectionOf(entry.other.kind)}</div>
+          <div class="tf-how">{sectionOf(entry.other.kind)}{#if also.length > 0}, also in {also.join(", ")}{/if}</div>
         </div>
         <button type="button" class="tf-x" onclick={() => onunlink(entry)} aria-label="Unlink {entry.other.title}">Unlink</button>
       </div>
     {:else}
       <p class="tf-dnone">Nothing linked on the ticket itself.</p>
     {/each}
+    {#each origins as origin (origin.key)}
+      {@const rows = filterRows(origin.rows, text)}
+      <h3>
+        From {origin.label}, {origin.via} <span class="tf-count">{rows.length}</span>
+        {#if origin.setId !== null}<a class="tf-linkish tf-dedit" href={origin.href} onclick={onclose}>Edit set</a>{/if}
+      </h3>
+      {#each rows as row (row.id)}
+        <div class="tf-lk">
+          <div>
+            {#if row.href !== null}
+              <a href={row.href} onclick={onclose}><Marked text={row.title} typed={text} /></a>
+            {:else}
+              <Marked text={row.title} typed={text} />
+            {/if}
+            <div class="tf-how">{row.section}</div>
+          </div>
+          {#if origin.setId !== null}
+            <button type="button" class="tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
+          {/if}
+        </div>
+      {/each}
+    {/each}
     {#if hidden.length > 0}
       <h3>Hidden on {jobKey} <span class="tf-count">{hidden.length}</span></h3>
       {#each hidden as row (row.id)}
         <div class="tf-lk">
           <div class="tf-dim">{row.title}</div>
-          <button type="button" class="tf-x tf-shown" onclick={() => onshow(row.id)}>Show again</button>
+          <button type="button" class="tf-x tf-shown" onclick={() => onshow(row.id)} aria-label="Show again: {row.title}">Show again</button>
         </div>
       {/each}
     {/if}
