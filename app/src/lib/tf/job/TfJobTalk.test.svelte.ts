@@ -166,6 +166,8 @@ function ports(over: Partial<JobPorts> = {}): JobPorts {
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.resolve({ recent: [], smart_lists: [], stale_sources: [] } as never),
     jobReach: () => Promise.resolve([]),
+    jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
+    hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
     getAsset: () => Promise.reject(new Error("not in this test")),
     credentialHealth: () => Promise.resolve([]),
     syncStatus: () => Promise.resolve([]),
@@ -460,4 +462,147 @@ test("a ticket with nothing linked says so, and no proposals draw no box", async
   flushSync();
   expect(squash(target.querySelector(".tf-dbody"))).toContain("Nothing linked on the ticket itself.");
   expect(target.querySelector(".tf-proposed")).toBeNull();
+});
+
+// ---- link sets on the job (#867, R-4.4, R-6.2, R-7.5) ----
+
+/**
+ * Payout stack applies through the epic and holds the page the ticket links
+ * too, a repo and a pipeline; the parent PAY-230 links one page. `hides` is
+ * what `link_set_hidden` holds for PAY-231, and `jobLinkSets` reads it.
+ */
+function setPorts(hides = new Set<string>(), writes: [string, string, boolean][] = []): JobPorts {
+  const member = (kind: "repo" | "page" | "pipeline", entity_id: string, entity_kind: string, title: string) => ({
+    kind,
+    entity_id,
+    entity_kind,
+    title,
+    hidden: hides.has(entity_id),
+  });
+  return ports({
+    jobLinkSets: () =>
+      Promise.resolve({
+        sets: [
+          {
+            id: "payout-stack",
+            name: "Payout stack",
+            via: { kind: "epic", value: "jira:PAY-200", title: "PAY-200" },
+            members: [
+              member("page", PAGE.other.entity_id, "page", PAGE.other.title),
+              member("repo", "gitea:tidewater/payout-service", "repo", "payout-service"),
+              member("pipeline", "teamcity:Payout_Build", "build_config", "Payout_Build"),
+            ],
+          },
+        ],
+        parent: { ticket: "jira:PAY-230", title: "PAY-230", links: [{ entity_id: "confluence:RUN", kind: "page", title: "Payout runbook" }] },
+      }),
+    hideLinkSetMember: (ticket, memberId, hidden) => {
+      writes.push([ticket, memberId, hidden]);
+      if (hidden) hides.add(memberId);
+      else hides.delete(memberId);
+      return Promise.resolve(hidden);
+    },
+  });
+}
+
+function drawerOpen() {
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  return target.querySelector("[aria-label='Connections']")!;
+}
+
+test("Also on this job names each set that applies with its reason, then the parent; not on the Conversation tab", async () => {
+  open(null, { ports: setPorts() });
+  await settle();
+  const bar = target.querySelector(".tf-setsbar")!;
+  expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections");
+  expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/PAY-230"]);
+  // Two own links and three more from the set and the parent, the page once.
+  expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
+  if (job) unmount(job);
+  open("conversation", { ports: setPorts() });
+  await settle();
+  expect(target.querySelector(".tf-setsbar")).toBeNull();
+});
+
+test("with nothing applying the bar says so", async () => {
+  open();
+  await settle();
+  expect(squash(target.querySelector(".tf-setsbar"))).toBe("Also on this job no link sets yet");
+});
+
+test("the drawer draws a group per set and the parent; a linked row says which set also holds it", async () => {
+  open(null, { ports: setPorts() });
+  await settle();
+  const drawer = drawerOpen();
+  expect([...drawer.querySelectorAll("h3")].map((h) => squash(h))).toEqual([
+    "Linked on PAY-231 2",
+    "From Payout stack, via epic PAY-200 3 Edit set",
+    "From Parent PAY-230, sub-tasks show their parent’s connections 1",
+  ]);
+  expect(drawer.querySelector("h3 a")?.getAttribute("href")).toBe("#/sets/payout-stack");
+  expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
+    "Idempotent retry window Code Unlink",
+    "SEPA payout retry design Pages, also in Payout stack Unlink",
+    "SEPA payout retry design Pages Hide here",
+    "payout-service Code Hide here",
+    "Payout_Build Builds Hide here",
+    "Payout runbook Pages",
+  ]);
+  expect(drawer.querySelector("a[href='#/builds/teamcity%3APayout_Build']")).not.toBeNull();
+});
+
+test("Hide here hides one member on this ticket only and never edits the set; Undo and Show again bring it back", async () => {
+  const writes: [string, string, boolean][] = [];
+  open(null, { ports: setPorts(new Set(), writes) });
+  await settle();
+  const drawer = drawerOpen();
+  drawer.querySelector<HTMLButtonElement>("button[aria-label='Hide here: payout-service']")!.click();
+  await settle();
+  expect(writes).toEqual([[ID, "gitea:tidewater/payout-service", true]]);
+  expect(calls.writes).toEqual([]);
+  expect(calls.links).toEqual([]);
+  const hidden = [...drawer.querySelectorAll("h3")].find((h) => squash(h).startsWith("Hidden on"))!;
+  expect(squash(hidden)).toBe("Hidden on PAY-231 1");
+  expect(drawer.querySelector("button[aria-label='Hide here: payout-service']")).toBeNull();
+  const toast = toasts.items.find((t) => t.text === "Hidden on PAY-231. The link set stays as it is.")!;
+  expect(toast.action?.label).toBe("Undo");
+
+  toast.action!.run();
+  await settle();
+  expect(writes.at(-1)).toEqual([ID, "gitea:tidewater/payout-service", false]);
+  expect([...drawer.querySelectorAll("h3")].some((h) => squash(h).startsWith("Hidden on"))).toBe(false);
+
+  drawer.querySelector<HTMLButtonElement>("button[aria-label='Hide here: Payout_Build']")!.click();
+  await settle();
+  drawer.querySelector<HTMLButtonElement>("button[aria-label='Show again: Payout_Build']")!.click();
+  await settle();
+  expect(writes.at(-1)).toEqual([ID, "teamcity:Payout_Build", false]);
+  expect(drawer.querySelector("button[aria-label='Hide here: Payout_Build']")).not.toBeNull();
+});
+
+test("Undo after moving to another job shows the member again on the ticket it was hidden on", async () => {
+  const writes: [string, string, boolean][] = [];
+  const base = setPorts(new Set(), writes);
+  const other = { ...ticket(), row: { ...ticket().row, entity_id: "jira:PAY-232" } };
+  const props = $state({
+    segment: "PAY-231",
+    tab: null as string | null,
+    timer: { current: null, elapsed: null },
+    layers: createLayers(),
+    ontimer: () => {},
+    onstarttimer: () => {},
+    ports: { ...base, getEntity: (id: string) => (id === other.row.entity_id ? Promise.resolve(other) : base.getEntity(id)) },
+    today: () => new Date(2026, 9, 15, 14, 0),
+  });
+  job = mount(TfJob, { target, props });
+  await settle();
+  drawerOpen().querySelector<HTMLButtonElement>("button[aria-label='Hide here: payout-service']")!.click();
+  await settle();
+  const toast = toasts.items.find((t) => t.text === "Hidden on PAY-231. The link set stays as it is.")!;
+  props.segment = "PAY-232";
+  await settle();
+  toast.action!.run();
+  await settle();
+  expect(writes.at(-1)).toEqual([ID, "gitea:tidewater/payout-service", false]);
 });

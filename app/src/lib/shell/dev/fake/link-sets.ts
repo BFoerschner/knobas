@@ -1,6 +1,7 @@
 /**
  * `?fake-ipc`: Link sets (#866): `link_sets`, `link_set`, `save_link_set`,
- * `delete_link_set`, `preview_link_set_rule` and `hide_link_set_member`, over
+ * `delete_link_set`, `preview_link_set_rule`, `hide_link_set_member` and
+ * `job_link_sets` (#867, the job's *Also on this job* and drawer groups), over
  * a session-long list seeded with prototype-6's five sets (its `sets` array),
  * each member a fixture item by id.
  *
@@ -16,6 +17,7 @@
  * view under `?fake-ipc` sees set members.
  */
 import type {
+  JobLinkSets,
   LinkSetDetail,
   LinkSetDraft,
   LinkSetMemberKind,
@@ -29,7 +31,7 @@ import type { Handler } from "../fake-tauri";
 import { fakePipelines } from "./builds";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE } from "./estate";
-import { PARENTS, SET_REACH } from "./job-reach";
+import { PARENTS, SET_REACH, fakeParentOwn } from "./job-reach";
 import { fakeMonitorRoster } from "./monitors";
 
 interface FakeSet {
@@ -196,6 +198,43 @@ export function fakeSetReach(ticketId: string): Reached[] {
 
 SET_REACH.push(fakeSetReach);
 
+/** `job_link_sets`: every set whose rules match, by name, with its first matching rule, and the parent. */
+export function fakeJobLinkSets(ticketId: string): JobLinkSets {
+  const ticket = tickets().find((row) => row.entity_id === ticketId);
+  const sets = ticket
+    ? [...SETS]
+        .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()) || a.id.localeCompare(b.id))
+        .flatMap((set) => {
+          const via = set.rules.find((rule) => matches(rule, ticket));
+          if (!via) return [];
+          return [
+            {
+              id: set.id,
+              name: set.name,
+              via: { ...via, title: EPIC_TITLES[via.value] ?? title(via.value) },
+              members: set.members
+                .filter((member) => member.entity_id !== ticketId)
+                .map((member) => ({
+                  ...member,
+                  entity_kind: member.kind === "pipeline" ? "build_config" : member.kind,
+                  title: title(member.entity_id),
+                  hidden: HIDDEN.has(`${ticketId}|${member.entity_id}`),
+                })),
+            },
+          ];
+        })
+    : [];
+  const parent = fakeParentOwn(ticketId);
+  return {
+    sets,
+    parent: parent && {
+      ticket: parent.ticket,
+      title: title(parent.ticket),
+      links: parent.reached.map((row) => ({ entity_id: row.entity_id, kind: row.kind, title: title(row.entity_id) })),
+    },
+  };
+}
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
@@ -221,6 +260,7 @@ export function handlers(): Record<string, Handler> {
       return null;
     },
     preview_link_set_rule: (args) => ruleTickets([args["rule"] as LinkSetRule]),
+    job_link_sets: (args) => fakeJobLinkSets(String(args["entityId"] ?? "")),
     hide_link_set_member: (args) => {
       const pair = `${String(args["ticketId"])}|${String(args["memberId"])}`;
       if (args["hidden"]) HIDDEN.add(pair);

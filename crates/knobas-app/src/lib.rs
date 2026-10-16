@@ -575,6 +575,9 @@ pub fn run() {
             commands::entity::run_artifacts,
             commands::entity::artifact_preview,
             commands::entity::download_run_file,
+            // #867's job link sets read, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::job_link_sets,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

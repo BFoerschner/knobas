@@ -15,6 +15,10 @@
 
   **The Connections button (#820)** sits at the right of the tab bar, with the
   ticket's link count and its proposals, and opens the drawer (also `L`).
+  **Link sets (#867)**: `job_link_sets` is read once per job opened, for the
+  *Also on this job* chips above the tab's body (not on Conversation, R-4.4)
+  and the drawer's set and parent groups; *Hide here* and *Show again* re-read
+  it with the reach and the sections, and never edit the set (R-7.5).
   the five sections (#817): Code, Builds, Assets, Monitors and Pages, each read
   through the job-reach read (`job_reach`, and `list_entities` scoped by it),
   so a row from the parent carries its label. Above them, a blocked ticket's
@@ -31,6 +35,7 @@
     EntityFilter,
     EntityOrder,
     EntityRow,
+    JobLinkSets,
     LinkEntry,
     Reached,
     SuggestionEntry,
@@ -46,7 +51,16 @@
   import { weekWindows } from "../../time/week";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { Layers } from "../layers.svelte";
-  import { PROPOSAL_LIMIT, linkedOn, proposalsFor } from "./connections";
+  import {
+    PROPOSAL_LIMIT,
+    alsoIn,
+    connectedCount,
+    hiddenOf,
+    linkedOn,
+    groupsOf,
+    proposalsFor,
+    type GroupRow,
+  } from "./connections";
   import { summary } from "./conversation";
   import {
     CODE_KINDS,
@@ -128,6 +142,8 @@
   let linking = $state(false);
   /** The job-reach read, by entity id: the rows' labels. */
   let reached = $state<Map<string, Reached>>(new Map());
+  /** The link sets that apply and the parent (#867), `null` until read. */
+  let inherited = $state<JobLinkSets | null>(null);
   let builds = $state<EntityRow[] | null>(null);
   let pages = $state<EntityRow[] | null>(null);
   let monitors = $state<EntityRow[] | null>(null);
@@ -161,6 +177,7 @@
     drawer = false;
     linking = false;
     reached = new Map();
+    inherited = null;
     builds = null;
     pages = null;
     monitors = null;
@@ -185,20 +202,13 @@
       void readWeek(id, mine);
       void readConversation(id, mine);
       void readStale(mine);
+      void readInherited(id, mine);
       // The reach starts from the ticket's context, so the context first.
       const context = await ports.promoteContext(id);
       if (mine !== token) return;
       void readProposals(context.id, id, mine);
       void readReach(id, mine);
-      void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
-        if (mine === token && rows) builds = rows;
-      });
-      void readRows(id, ["page"], "updated_desc", mine).then((rows) => {
-        if (mine === token && rows) pages = rows;
-      });
-      void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
-        if (mine === token && rows) monitors = rows;
-      });
+      readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
       await readCode(id, mine);
     } catch (cause) {
@@ -264,6 +274,77 @@
           ]
         : [],
     );
+  }
+
+  /** The link sets that apply and the parent; nothing of either when the read fails. */
+  async function readInherited(id: string, mine: number) {
+    try {
+      const read = await ports.jobLinkSets(id);
+      if (mine === token) inherited = read;
+    } catch {
+      if (mine === token) inherited = { sets: [], parent: null };
+    }
+  }
+
+  /**
+   * After *Hide here* or *Show again*: the groups, the labels and the
+   * sections' rows again, since a hidden member leaves the job's reach. The
+   * checkout line stays as it was. Nothing when the page has moved on to
+   * another job while the write was out.
+   */
+  function rereadReach(id: string) {
+    if (detail?.row.entity_id !== id) return;
+    const mine = token;
+    void readInherited(id, mine);
+    void readReach(id, mine);
+    readSections(id, mine);
+    void readRows(id, [...CODE_KINDS], "updated_desc", mine).then((rows) => {
+      if (mine === token && rows) code = rows;
+    });
+  }
+
+  /** Builds, Pages and Monitors, each through the reach. */
+  function readSections(id: string, mine: number) {
+    void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
+      if (mine === token && rows) builds = rows;
+    });
+    void readRows(id, ["page"], "updated_desc", mine).then((rows) => {
+      if (mine === token && rows) pages = rows;
+    });
+    void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
+      if (mine === token && rows) monitors = rows;
+    });
+  }
+
+  /** *Hide here* (R-7.5): one member off this ticket only, with *Undo*. The set is not touched. */
+  async function hideHere(row: GroupRow) {
+    if (!detail) return;
+    const id = detail.row.entity_id;
+    const key = keyOf(id);
+    try {
+      await ports.hideLinkSetMember(id, row.id, true);
+      rereadReach(id);
+      push({
+        text: `Hidden on ${key}. The link set stays as it is.`,
+        action: { label: "Undo", run: () => void showAgain(row.id, id) },
+      });
+    } catch (cause) {
+      push({ text: `Could not hide it: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  /**
+   * *Show again*: the member back on the ticket it was hidden on. *Undo*
+   * passes that ticket, since its toast outlives a move to another job.
+   */
+  async function showAgain(memberId: string, id = detail?.row.entity_id) {
+    if (!id) return;
+    try {
+      await ports.hideLinkSetMember(id, memberId, false);
+      rereadReach(id);
+    } catch (cause) {
+      push({ text: `Could not show it again: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
   }
 
   /** What the Builds section's warning reads: every source's credential and last run. */
@@ -453,6 +534,7 @@
   const current = $derived(TABS.find((candidate) => candidate.id === tab) ?? TABS[0]);
   const conversation = $derived(thread === null ? null : summary(thread, lastVisit));
   const connected = $derived(detail ? linkedOn(detail) : []);
+  const groups = $derived(groupsOf(inherited));
 
   onMount(() => {
     // `L` opens the drawer (R-4.3), outside a text field and with nothing open over the page.
@@ -554,15 +636,26 @@
                   >{/if}{#if conversation.fresh > 0}{" "}<span class="tf-count tf-info">{conversation.fresh} new</span>{/if}{/if}</a
           >
         {/each}
-        <button type="button" class="tf-conn" title="Connections (L)" onclick={() => (drawer = true)}>
+        <button type="button" class="tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
             ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
-          ><b>{connected.length}</b> connected{#if proposals !== null && proposals.length > 0},
+          ><b>{connectedCount(connected, groups)}</b> connected{#if proposals !== null && proposals.length > 0},
             <span class="tf-p">{proposals.length} proposed</span>{/if}
           <kbd>L</kbd>
         </button>
       </div>
       <div class="tf-wbody">
+        {#if current.id !== "conversation" && inherited !== null}
+          <!-- R-4.4: hidden while the Conversation tab is open. -->
+          <div class="tf-setsbar">
+            <span class="tf-dim">Also on this job</span>
+            {#each groups as group (group.key)}
+              <a class="tf-setchip" href={group.href}><b>{group.label}</b> <span>{group.via}</span></a>{" "}
+            {:else}
+              <span class="tf-dim">no link sets yet</span>
+            {/each}
+          </div>
+        {/if}
         {#if current.id === "work"}
           {#if failure !== null}
             <p class="tf-dim">Could not read what this job holds: {failure}</p>
@@ -616,11 +709,16 @@
     <TfConnections
       jobKey={key}
       links={connected}
+      {groups}
+      hidden={hiddenOf(inherited)}
+      alsoIn={(entityId) => alsoIn(inherited, entityId)}
       {proposals}
       {layers}
       onclose={() => (drawer = false)}
       onunlink={(entry) => void unlinkEntry(entry)}
       onlinkto={() => (linking = true)}
+      onhide={(row) => void hideHere(row)}
+      onshow={(memberId) => void showAgain(memberId)}
     />
   {/if}
   {#if linking}

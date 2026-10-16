@@ -6301,3 +6301,19 @@ pub async fn hide_link_set_member(
 ) -> Result<bool, IpcError> {
     crate::link_sets::hide(&lifecycle.pool()?, &ticket_id, &member_id, hidden).await
 }
+
+/// What a job shows beside its own links (#867, R-4.4, R-6.2): the link sets
+/// that apply, each with its reason and members, and the parent's own links:
+/// [`crate::link_sets::on_job`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::on_job`] refuses with.
+#[tauri::command]
+pub async fn job_link_sets(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<crate::link_sets::JobLinkSets, IpcError> {
+    crate::link_sets::on_job(&lifecycle.pool()?, &entity_id).await
+}

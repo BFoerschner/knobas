@@ -2071,8 +2071,8 @@ fn the_docs_shapes_match_their_typescript_mirror() {
 #[test]
 fn the_link_set_shapes_match_their_typescript_mirror() {
     use knobas_app::link_sets::{
-        LinkSetDetail, LinkSetDraft, LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow,
-        RuleTicket,
+        JobLink, JobLinkSets, JobMember, JobParent, JobSet, LinkSetDetail, LinkSetDraft,
+        LinkSetMember, LinkSetRow, LinkSetRule, MemberRow, RuleRow, RuleTicket,
     };
     let row = LinkSetRow {
         id: "payout-stack".to_owned(),
@@ -2155,6 +2155,55 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         &["entity_id", "kind"],
     );
     assert_shape("LinkSetRule", &draft["rules"][0], &["kind", "value"]);
+    let on_job = serde_json::to_value(JobLinkSets {
+        sets: vec![JobSet {
+            id: "payout-stack".to_owned(),
+            name: "Payout stack".to_owned(),
+            via: RuleRow {
+                kind: "epic".to_owned(),
+                value: "jira:PAY-200".to_owned(),
+                title: None,
+            },
+            members: vec![JobMember {
+                kind: "repo".to_owned(),
+                entity_id: "gitea:tidewater/payout-service".to_owned(),
+                entity_kind: Some("repo".to_owned()),
+                title: None,
+                hidden: true,
+            }],
+        }],
+        parent: Some(JobParent {
+            ticket: "jira:PAY-230".to_owned(),
+            title: None,
+            links: vec![JobLink {
+                entity_id: "confluence:1".to_owned(),
+                kind: "page".to_owned(),
+                title: None,
+            }],
+        }),
+    })
+    .unwrap();
+    assert_shape("JobLinkSets", &on_job, &["parent", "sets"]);
+    assert_shape(
+        "JobSet",
+        &on_job["sets"][0],
+        &["id", "members", "name", "via"],
+    );
+    assert_shape(
+        "JobMember",
+        &on_job["sets"][0]["members"][0],
+        &["entity_id", "entity_kind", "hidden", "kind", "title"],
+    );
+    assert_shape(
+        "JobParent",
+        &on_job["parent"],
+        &["links", "ticket", "title"],
+    );
+    assert_shape(
+        "JobLink",
+        &on_job["parent"]["links"][0],
+        &["entity_id", "kind", "title"],
+    );
     for command in [
         "\"link_sets\"",
         "\"link_set\"",
@@ -2162,6 +2211,7 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         "\"delete_link_set\"",
         "\"preview_link_set_rule\"",
         "\"hide_link_set_member\"",
+        "\"job_link_sets\"",
     ] {
         assert!(MIRROR.contains(command), "{command} is not invoked");
     }

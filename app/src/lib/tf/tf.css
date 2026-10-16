@@ -1943,3 +1943,14 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tdetail .tf-tacts .tf-dim { font-size: var(--t-sm); }
 /* prototype-6 draws the Tests bar flat inside the run page: static, no frame. */
 .tf-runbody > .tf-fbar { position: static; padding: 0; border: 0; background: none; }
+
+/* ---------- Also on this job (#867, R-4.4) and the drawer's set groups (R-6.2) ---------- */
+.tf-setsbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: var(--t-sm); }
+.tf-setchip {
+  display: inline-flex; gap: 6px; align-items: baseline; padding: 3px 9px;
+  border: 1px solid var(--rule); border-radius: 3px; background: var(--sheet); color: var(--ink); text-decoration: none;
+}
+.tf-setchip:hover { border-color: var(--ink-2); }
+.tf-setchip b { font-weight: 600; }
+.tf-setchip span { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-dbody h3 .tf-dedit { margin-left: auto; font-weight: 400; font-size: var(--t-xs); }

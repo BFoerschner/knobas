@@ -1099,6 +1099,8 @@ const CASES: Case[] = [
             search: () => new Promise(() => {}),
             launcherHome: () => new Promise(() => {}),
             jobReach: () => deferred([]),
+            jobLinkSets: () => deferred({ sets: [], parent: null }),
+            hideLinkSetMember: () => new Promise(() => {}),
             getAsset: () => new Promise(() => {}),
             credentialHealth: () => deferred([]),
             syncStatus: () => deferred([]),

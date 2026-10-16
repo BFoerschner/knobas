@@ -335,3 +335,23 @@ test("builds: a fixture run answers its log, tests, a test's history, artifacts,
   expect(h["download_run_file"]!({ runId, target: { kind: "folder", path: "logs" } })).toBe("/Users/mara/Downloads/logs.zip");
   expect(() => h["run_tests"]!({ runId: "teamcity:build:Nope-1" })).toThrow();
 });
+
+test("link sets on the job (#867): each set that applies with its first matching rule, hides marked, the parent's own links", () => {
+  const h = demoHandlers() as Calls;
+  type Read = {
+    sets: { id: string; via: { kind: string; value: string }; members: { entity_id: string; hidden: boolean }[] }[];
+    parent: { ticket: string; links: { entity_id: string }[] } | null;
+  };
+  const read = (entityId: string) => h["job_link_sets"]!({ entityId }) as Read;
+  const on231 = read("mock:PAY-231");
+  expect(on231.sets.map((set) => [set.id, set.via.kind, set.via.value])).toContainEqual(["staging", "manual", "mock:PAY-231"]);
+  expect(on231.parent).toBeNull();
+  h["hide_link_set_member"]!({ ticketId: "mock:PAY-231", memberId: "kuma:3", hidden: true });
+  const staging = read("mock:PAY-231").sets.find((set) => set.id === "staging")!;
+  expect(staging.members.find((m) => m.entity_id === "kuma:3")?.hidden).toBe(true);
+  h["hide_link_set_member"]!({ ticketId: "mock:PAY-231", memberId: "kuma:3", hidden: false });
+  const sub = read("mock:PAY-232");
+  expect(sub.parent?.ticket).toBe("mock:PAY-231");
+  expect(sub.parent?.links.length).toBeGreaterThan(0);
+  expect(read("mock:NOPE-1")).toEqual({ sets: [], parent: null });
+});

@@ -3395,3 +3395,34 @@ Ruled by the implementer (PR for #866).
 - **A log range starting past the end answers no lines instead of overflowing** (merge-manager,
   PR #1013): `from` arrives from the IPC as any `u64`, and `from + count` panicked in a debug
   build at `u64::MAX`. **Reversing:** n/a.
+## #867 — Link sets on the job (2026-10-16)
+
+- **One new read, `job_link_sets`, rather than a wider `job_reach`.** The spec says the reach
+  gains sets "without changing shape", and its rows keep only the first reason, so a set whose
+  every member the ticket already links, or whose members are all hidden, would draw no chip.
+  The new read answers each applying set with its reason and members (hides marked) and the
+  parent's own links. `link_sets_applying!` gains a `rule_applies` CTE that `set_applies` now
+  reads, so both reads match rules with one text. **Reversing:** medium (one command, one §10.8
+  entry, the mirror and the fake).
+- **A set's reason is the first of its rules that matches, in the set's order**: prototype-6's
+  `s.rules.find(...)`. **Reversing:** low (the `distinct on ... order by position` in `JOB_SETS`).
+- **The parent's group has no *Hide here*.** The tracer ruled that *Hide here* reaches set rows
+  only (`link_set_hidden` is per set member, R-7.5); prototype-6 draws the button on the parent's
+  group too. The group still lists the parent's own links, and its chip goes to the parent's job.
+  **Reversing:** medium (a hide that reaches the parent's arm of the reach).
+- ***N connected* counts every entity the drawer lists once**: the ticket's own links, plus the
+  set and parent rows not hidden here, which is prototype-6's `connCount`. **Reversing:** low
+  (`connectedCount`).
+- **After *Hide here* or *Show again* the job re-reads the sets, the reach and the five sections'
+  rows**, since a hidden member leaves them; the checkout line is not re-read. **Reversing:** low.
+- **A set's row takes its section from the member's kind** (a `pipeline` member is Builds, and
+  links to `#/builds/<id>`), and a member knobas has no entity for draws as plain text.
+  **Reversing:** low.
+- ***Apply a link set…* (the bar and the drawer) and *Save as a link set…* are #869's**, so the
+  bar ends at its chips. **Reversing:** n/a.
+- **Merge-manager (PR #1014): *Undo* writes to the ticket the hide wrote to.** The toast lives
+  6.5 s at module level and outlives a move to another job, and `showAgain` took the page's
+  current ticket, so an *Undo* pressed after following the parent chip un-hid the member on the
+  wrong ticket and left the original hidden. `hideHere` now passes its ticket to *Undo*, and
+  `rereadReach` drops a re-read for a job the page has left. Pinned by `Undo after moving to
+  another job…` in `TfJobTalk.test.svelte.ts`. **Reversing:** low.

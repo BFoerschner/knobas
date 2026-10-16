@@ -3259,3 +3259,51 @@ export function previewLinkSetRule(rule: LinkSetRule): Promise<RuleTicket[]> {
 export function hideLinkSetMember(ticketId: string, memberId: string, hidden: boolean): Promise<boolean> {
   return invoke<boolean>("hide_link_set_member", { ticketId, memberId, hidden });
 }
+
+/** One member of a set that applies to a job — `JobMember` (#867). */
+export interface JobMember {
+  /** The member's kind: the row's section. */
+  kind: LinkSetMemberKind;
+  entity_id: string;
+  /** The entity's own kind, what the row links by; `null` when knobas has none. */
+  entity_kind: string | null;
+  title: string | null;
+  /** Hidden on this ticket by *Hide here* (R-7.5). */
+  hidden: boolean;
+}
+
+/** One set that applies to a job — `JobSet` (R-4.4, R-6.2). */
+export interface JobSet {
+  id: string;
+  name: string;
+  /** The first of its rules that matches the ticket, in the set's order: the reason. */
+  via: LinkSetRuleRow;
+  members: JobMember[];
+}
+
+/** The far end of one of the parent's own links — `JobLink`. */
+export interface JobLink {
+  entity_id: string;
+  kind: string;
+  title: string | null;
+}
+
+/** The parent whose own links a sub-task shows (R-7.3) — `JobParent`. */
+export interface JobParent {
+  ticket: string;
+  title: string | null;
+  links: JobLink[];
+}
+
+/** What a job shows beside its own links — `JobLinkSets` (#867). */
+export interface JobLinkSets {
+  /** The sets that apply, by name. */
+  sets: JobSet[];
+  /** `null` with no parent, an epic for one, or R-7.3's switch off. */
+  parent: JobParent | null;
+}
+
+/** The link sets and the parent a ticket's job shows; an unknown id has neither. */
+export function jobLinkSets(entityId: string): Promise<JobLinkSets> {
+  return invoke<JobLinkSets>("job_link_sets", { entityId });
+}

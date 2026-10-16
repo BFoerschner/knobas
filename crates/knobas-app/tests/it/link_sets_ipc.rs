@@ -702,3 +702,183 @@ async fn a_this_job_list_holds_the_sets_members() {
         .collect();
     assert_eq!(ids, [page]);
 }
+
+/// Gives `ticket` an issue type, which the parent's arm of the reach reads.
+async fn typed(pool: &PgPool, ticket: &str, issuetype: &str) {
+    sqlx::query(
+        "update sync.item set payload = jsonb_set(payload, '{fields,issuetype}', $2)
+          where entity_id = $1",
+    )
+    .bind(ticket)
+    .bind(serde_json::json!({ "name": issuetype }))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// *Also on this job* (#867, R-4.4, R-6.2): every set that applies, by
+/// name, with the first of its rules that matches as the reason, its fixed
+/// members with whether each is hidden on this ticket; never a set whose
+/// rules match another ticket. Hiding a member leaves it in the set.
+#[tokio::test]
+async fn the_job_reads_each_set_that_applies_with_its_reason() {
+    let pool = pool().await;
+    let p = project();
+    let epic = issue(&pool, &p, 1, None, None).await;
+    let other_epic = issue(&pool, &p, 2, None, None).await;
+    let story = issue(&pool, &p, 3, Some(&epic), None).await;
+    let repo = thing(&pool, "repo", "payout-service").await;
+    let page = thing(&pool, "page", "Runbook").await;
+
+    let stack = link_sets::save(
+        &pool,
+        draft(
+            "Stack",
+            vec![member("repo", &repo), member("page", &page)],
+            vec![rule("manual", &other_epic), rule("epic", &epic)],
+        ),
+    )
+    .await
+    .unwrap();
+    link_sets::save(
+        &pool,
+        draft(
+            "Kit",
+            vec![member("page", &page)],
+            vec![rule("project", &format!("jira:{p}")), rule("epic", &epic)],
+        ),
+    )
+    .await
+    .unwrap();
+    link_sets::save(
+        &pool,
+        draft(
+            "Elsewhere",
+            vec![member("page", &page)],
+            vec![rule("epic", &other_epic)],
+        ),
+    )
+    .await
+    .unwrap();
+    link_sets::hide(&pool, &story, &repo, true).await.unwrap();
+
+    let read = link_sets::on_job(&pool, &story).await.unwrap();
+    let names: Vec<&str> = read.sets.iter().map(|set| set.name.as_str()).collect();
+    assert_eq!(names, ["Kit", "Stack"], "by name, and only what applies");
+    let kit = &read.sets[0];
+    assert_eq!(
+        (kit.via.kind.as_str(), kit.via.value.clone()),
+        ("project", format!("jira:{p}")),
+        "the first rule that matches, in the set's order"
+    );
+    let on_stack = &read.sets[1];
+    assert_eq!(on_stack.id, stack.set.id);
+    assert_eq!(
+        (on_stack.via.kind.as_str(), on_stack.via.value.as_str()),
+        ("epic", epic.as_str()),
+        "the manual rule names another ticket, so the epic's is the reason"
+    );
+    assert_eq!(
+        on_stack.via.title.as_deref(),
+        Some(format!("{p}-1").as_str())
+    );
+    let members: Vec<(&str, &str, Option<&str>, bool)> = on_stack
+        .members
+        .iter()
+        .map(|m| {
+            (
+                m.kind.as_str(),
+                m.entity_id.as_str(),
+                m.title.as_deref(),
+                m.hidden,
+            )
+        })
+        .collect();
+    assert_eq!(
+        members,
+        [
+            ("repo", repo.as_str(), Some("payout-service"), true),
+            ("page", page.as_str(), Some("Runbook"), false),
+        ]
+    );
+    assert_eq!(on_stack.members[0].entity_kind.as_deref(), Some("repo"));
+    assert_eq!(
+        link_sets::get(&pool, &stack.set.id)
+            .await
+            .unwrap()
+            .set
+            .members
+            .len(),
+        2,
+        "hiding never edits the set"
+    );
+
+    let on_epic = link_sets::on_job(&pool, &other_epic).await.unwrap();
+    let names: Vec<(&str, &str)> = on_epic
+        .sets
+        .iter()
+        .map(|set| (set.name.as_str(), set.via.kind.as_str()))
+        .collect();
+    assert_eq!(
+        names,
+        [("Kit", "project"), ("Stack", "manual")],
+        "the epic itself is not under itself: Elsewhere stays off"
+    );
+    assert!(
+        on_epic.sets[1].members.iter().all(|m| !m.hidden),
+        "a hide is per ticket"
+    );
+    assert!(
+        link_sets::on_job(&pool, "jira:NOPE-1")
+            .await
+            .unwrap()
+            .sets
+            .is_empty()
+    );
+}
+
+/// The parent's group (R-6.2, R-7.3): a sub-task reads its parent ticket and
+/// that ticket's own links, behind the global switch; an epic is never a
+/// parent here (its tickets get it through link sets).
+#[tokio::test]
+async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
+    let pool = pool().await;
+    let p = project();
+    let epic = issue(&pool, &p, 1, None, None).await;
+    typed(&pool, &epic, "Epic").await;
+    let story = issue(&pool, &p, 2, Some(&epic), None).await;
+    typed(&pool, &story, "Story").await;
+    let sub = issue(&pool, &p, 3, Some(&story), None).await;
+    let repo = thing(&pool, "repo", "psp-client").await;
+    link(&pool, &story, &repo).await;
+    link(&pool, &sub, &story).await;
+
+    let read = link_sets::on_job(&pool, &sub).await.unwrap();
+    let parent = read.parent.expect("the story is the sub-task's parent");
+    assert_eq!(parent.ticket, story);
+    assert_eq!(parent.title.as_deref(), Some(format!("{p}-2").as_str()));
+    let links: Vec<(&str, &str, Option<&str>)> = parent
+        .links
+        .iter()
+        .map(|l| (l.entity_id.as_str(), l.kind.as_str(), l.title.as_deref()))
+        .collect();
+    assert_eq!(
+        links,
+        [(repo.as_str(), "repo", Some("psp-client"))],
+        "the parent's own links, never the sub-task itself"
+    );
+    assert!(
+        link_sets::on_job(&pool, &story)
+            .await
+            .unwrap()
+            .parent
+            .is_none(),
+        "an epic is not a parent here"
+    );
+
+    // No other test in this file reads a parent, so the switch is this one's.
+    reach::set_parent_links(&pool, false).await.unwrap();
+    let off = link_sets::on_job(&pool, &sub).await;
+    reach::set_parent_links(&pool, true).await.unwrap();
+    assert!(off.unwrap().parent.is_none(), "the switch is off");
+}

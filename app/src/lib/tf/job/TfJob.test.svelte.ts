@@ -215,6 +215,8 @@ function ports(
     search: () => Promise.reject(new Error("not in this test")),
     launcherHome: () => Promise.reject(new Error("not in this test")),
     jobReach: () => Promise.resolve([]),
+    jobLinkSets: () => Promise.resolve({ sets: [], parent: null }),
+    hideLinkSetMember: (_ticket, _member, hidden) => Promise.resolve(hidden),
     getAsset: (id) => Promise.reject({ code: "not_found", message: `no asset ${id}`, source_id: null }),
     credentialHealth: () => Promise.resolve([]),
     syncStatus: () => Promise.resolve([]),

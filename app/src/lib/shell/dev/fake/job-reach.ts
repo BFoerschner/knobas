@@ -162,6 +162,12 @@ export function fakeReach(ticketId: string): Reached[] {
   return [...first, ...inherited];
 }
 
+/** The parent whose own links `ticketId` shows while R-7.3's switch is on, and those links (#867's drawer group). */
+export function fakeParentOwn(ticketId: string): { ticket: string; reached: Reached[] } | null {
+  const parent = PARENTS[ticketId];
+  return parent && parentLinks ? { ticket: parent, reached: ownReach(parent) } : null;
+}
+
 /** The parent's own links: its direct ones, never its sets' or its own parent's. */
 function ownReach(ticketId: string): Reached[] {
   return ticketId === "mock:PAY-231"
