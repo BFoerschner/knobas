@@ -203,7 +203,7 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     .unwrap();
     let key = format!(
         "D{}-77",
-        &uuid::Uuid::new_v4().simple().to_string()[..4]
+        uuid::Uuid::new_v4().simple().to_string()[..4]
             .to_uppercase()
             .replace(|c: char| c.is_ascii_digit(), "Q")
     );
