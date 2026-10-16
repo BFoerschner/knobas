@@ -562,6 +562,13 @@ opens it only through a Gitea source whose `clone_urls` lists
 what a real deployment whose CI clones over an internal hostname would. A
 finished fixture build that ran from any other root URL is run again under its
 number.
+A project whose finished build ran on a commit the Gitea now up has never held
+is deleted whole and made again (#964): a build keeps its commit, TeamCity's
+data outlives Gitea's, and a recreated, reseeded Gitea has other shas (the
+repository's first commit carries the seed's own date), so the build's
+*Revision* row would name a commit no sync can mirror. Re-running only the
+build does not do, since the VCS root keeps the old modifications and the new
+build lists the whole branch as its changes.
 The agent clones the repository and runs a command-line step, and the
 server reports the fixture's branch as the build's `branchName`. Nothing
 here fell back to a parameter-only build. #265's brief said "a VCS root per

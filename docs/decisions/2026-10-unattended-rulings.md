@@ -2573,3 +2573,13 @@ Implementer, one PR for both.
 - **`?fake-ipc` groups pull requests under `attention`** for a read of pull requests alone, as the
   real read does for the fixture's identity `mara`; other attention reads are as before.
   **Reversing:** low (`fakeGroups` in `fake/corpus.ts`).
+
+## #964 — the seeded Gitea commit TeamCity's build names
+
+- **A stale fixture build deletes its whole TeamCity project, not just the build.** The first
+  attempt (delete and re-run build 1187, as `ensure_current_build` does for the older-seed cases)
+  made the new build list the branch's four commits as its changes, because the VCS root keeps its
+  old modifications and the build is no longer "a configuration's first". Deleting the project
+  takes the roots with it, and step 1 makes everything again. Fires only when a finished build's
+  revision is not a commit of the Gitea now up. **Reversing:** low (drop
+  `drop_projects_built_from_another_gitea` from `testenv/seed-teamcity-builds.sh`).
