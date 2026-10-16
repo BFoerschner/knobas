@@ -2975,3 +2975,26 @@ Ruled by the implementer (PR for #844, #846, #847).
   low.
 - **The PR page's checkout panel** (R-8.22's last place, #841's screen, which landed while this
   was built) mounts `TfOpenIn` in place of its disabled *Open in…*. **Reversing:** low.
+
+Ruled by the merge-manager (PR #997).
+
+- **_Try it_ running an unsaved command fits ADR-0016 as worded.** The ADR's rule is "a program
+  knobas spawns is built from a command template the user set in settings, and its arguments come
+  only from what knobas found on the local disk or was told by hand". *Add an application* is the
+  settings surface for those templates (the ADR's Consequences: "Command templates are a settings
+  surface"), wherever it is opened from. The command *Try it* runs is the person's own words, typed
+  there a moment before. The ADR names who sets the program and where, against the two sources it
+  rejects (a URL scheme handler, a mirrored field). It does not say the template must be stored
+  first. The arguments go through the same `knobas_core::checkout::open::fill` as a saved entry:
+  the checkout this disk resolved, a file checked on disk, a number, and any other placeholder
+  refused by name. The unsaved path also adds no reach over the IPC: `set_checkout_applications`
+  followed by `open_checkout` already runs any command a caller sends. **Reversing:** low. *Try
+  it* saves the draft first and passes its id; `open_checkout` drops `command`.
+- **The desktop witness for the default editor stays open.** `just desktop-witness
+  open-in-editor` ran once on this PR's head, because the PR changes both things the driver
+  presses (`set_checkout_command` now writes the list, and `open_checkout` and `CheckoutPanel`'s
+  call to it). It refused on its precondition: Launch Services resolves `dev.knobas.desktop` to
+  `/Applications/knobas.app`. ADR-0016 makes moving that copy aside the runner's job and says a
+  refusal is no witness. The merge-manager did not move an installed application with nobody at
+  the Mac. The criterion goes to the TF3 milestone review. **Reversing:** run it with the
+  installed copy moved aside.
