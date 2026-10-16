@@ -142,7 +142,7 @@ function rowOf(words: string): Element {
 test("each row is a time, a sentence, its actions and its kind and job", async () => {
   await open({ job: "PAY-231" });
   expect(whats()).toEqual([
-    "Jonas asked for your review: Idempotent retry window",
+    "jonas asked for your review: Idempotent retry window",
     "Testenv / gitea is down: flows-stage",
     "This build failed: Tests failed: 3: Payout_IntegrationTests #1187",
     "Assigned to you: Payout dashboard latency",

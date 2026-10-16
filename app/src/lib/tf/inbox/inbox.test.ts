@@ -39,7 +39,16 @@ function entry(over: Partial<InboxItem>, actions: string[] = []): InboxEntry {
 
 describe("a row's sentence", () => {
   test("is the backend's reason, capitalised, then the item", () => {
-    expect(sentence(item({}))).toBe("Jonas asked for your review: Idempotent retry window");
+    expect(sentence(item({ category: "new_assignment", reason: "assigned to you", title: "Payout dashboard latency" }))).toBe(
+      "Assigned to you: Payout dashboard latency",
+    );
+  });
+
+  test("keeps a source's word as the source spells it", () => {
+    expect(sentence(item({}))).toBe("jonas asked for your review: Idempotent retry window");
+    expect(sentence(item({ category: "alert", reason: "knobas test estate / knobas-jira is down", title: "jira" }))).toBe(
+      "knobas test estate / knobas-jira is down",
+    );
   });
 
   test("is the reason alone when the reason already names the item", () => {
