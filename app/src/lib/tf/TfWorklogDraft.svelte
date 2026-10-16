@@ -55,7 +55,10 @@
     ports = { logWork: realLogWork, dayBlocks: realDayBlocks, listSources: realListSources },
   }: {
     draft: Draft;
-    /** Whether a stop opened it, which decides the buttons. */
+    /**
+     * Whether a stop opened it, which decides the buttons. The clock still
+     * runs under it until the answer stops it (#896).
+     */
     stopped: boolean;
     onoutcome: (outcome: DraftOutcome) => void;
     /**

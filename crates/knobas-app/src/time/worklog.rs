@@ -189,10 +189,12 @@ pub struct Draft {
     pub day: NaiveDate,
     /// The first block's start, which is what Jira is told the work began at.
     pub started_at: DateTime<Utc>,
-    /// The last block's end. **Not** `started_at + seconds`: it is the far
-    /// edge of the window, and the difference between the two is the gaps.
+    /// The last block's end, or now while the clock runs on this ticket.
+    /// **Not** `started_at + seconds`: it is the far edge of the window, and
+    /// the difference between the two is the gaps.
     pub ended_at: DateTime<Utc>,
-    /// The time that will be logged -- the blocks' durations added up.
+    /// The time that will be logged -- the blocks' durations added up, the
+    /// running stretch's up to now among them.
     pub seconds: i64,
     /// The blocks this draft is made of, oldest first. Closed blocks only: the
     /// running timer's stretch has no block yet, and is [`Self::running_since`].
@@ -372,7 +374,6 @@ fn worklog_of(row: &sqlx::postgres::PgRow) -> Result<Worklog, IpcError> {
 ///
 /// `pub(super)` for #283's *Log all*, which concatenates the same spans over a
 /// whole day rather than over one draft.
-#[derive(Clone)]
 pub(super) struct Span {
     pub id: i64,
     pub started_at: DateTime<Utc>,
@@ -712,6 +713,11 @@ fn source_of(entity_id: &str) -> Result<EntityRef, IpcError> {
 /// an error to apologise for, and neither is a stop on a ticket whose blocks
 /// were all logged an hour ago.
 ///
+/// **A running timer on the ticket counts** (#896): when it started inside
+/// the day, its stretch up to now joins the interval and the sum, and its
+/// start is [`Draft::running_since`]. The new shell asks before it stops the
+/// clock, so a running ticket always has a draft; the rooms UI asks after.
+///
 /// # Errors
 ///
 /// `invalid` for a target that is not an entity id or an offset that is not an
@@ -729,27 +735,28 @@ pub async fn draft(
     }
     let (from, to) = day_bounds(day, offset_minutes)?;
     let closed = unlogged(pool, entity_id, from, to).await?;
-    let open = match sqlx::query(OPEN_STRETCH)
+    let open: Option<(DateTime<Utc>, DateTime<Utc>)> = match sqlx::query(OPEN_STRETCH)
         .bind(entity_id)
         .bind(from)
         .bind(to)
         .fetch_optional(pool)
         .await?
     {
-        Some(row) => Some(Span {
-            id: 0,
-            started_at: row.try_get("started_at")?,
-            ended_at: row.try_get("ended_at")?,
-        }),
+        Some(row) => Some((row.try_get("started_at")?, row.try_get("ended_at")?)),
         None => None,
     };
-    let running_since = open.as_ref().map(|s| s.started_at);
-    // The open stretch is concatenated like any block, in start order: the
-    // sum then counts it and the window ends at now.
-    let mut spans = closed.clone();
-    spans.extend(open);
-    spans.sort_by_key(|s| s.started_at);
-    let Some((started_at, ended_at, seconds)) = concatenate(&spans) else {
+    // The open stretch joins the closed blocks as one more span: the window
+    // widens to cover it and the sum counts it.
+    let interval = match (concatenate(&closed), open) {
+        (closed, None) => closed,
+        (None, Some((from, to))) => Some((from, to, (to - from).num_seconds())),
+        (Some((started, ended, seconds)), Some((from, to))) => Some((
+            started.min(from),
+            ended.max(to),
+            seconds + (to - from).num_seconds(),
+        )),
+    };
+    let Some((started_at, ended_at, seconds)) = interval else {
         return Ok(None);
     };
 
@@ -764,7 +771,7 @@ pub async fn draft(
         ended_at,
         seconds,
         block_ids: closed.iter().map(|s| s.id).collect(),
-        running_since,
+        running_since: open.map(|(since, _)| since),
         comment: comment_of(&candidates),
         candidates,
     }))

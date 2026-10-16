@@ -624,7 +624,11 @@ async fn a_running_timer_on_the_ticket_is_drafted_up_to_now() {
         .await
         .expect("a running ticket is something to draft");
 
-    assert_eq!(opened.block_ids, vec![morning], "only closed blocks have ids");
+    assert_eq!(
+        opened.block_ids,
+        vec![morning],
+        "only closed blocks have ids"
+    );
     assert_eq!(opened.running_since, Some(at(14, 0)));
     assert_eq!(opened.started_at, at(9, 0));
     assert!(

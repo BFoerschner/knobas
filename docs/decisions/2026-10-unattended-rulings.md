@@ -3595,6 +3595,7 @@ Ruled by the merge-manager (PR #1018).
   were never analyzed. So the declared read per row stays. **Reversing:** low.
 
 - **Merge-manager (PR #1025): the key branch is redundant only where `sync.item_parent` already names the ticket.** A Jira ticket's own key is among the names it answers to as a parent, so the surviving mutant was right for a payload that carries its key. The fixture also titled each ticket with its key. The test now has a ticket with a summary title and one whose payload names no key; the mutant fails it. **Reversing:** n/a.
+
 ## #896 — the worklog draft counts the running timer: the implementer's forks
 
 This reverses #826's first two rulings, as #826 said it would ("a backend draft that counts the

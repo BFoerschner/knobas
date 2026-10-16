@@ -72,7 +72,7 @@ export interface DraftFlow {
   readonly open: Drafting | null;
   /** A draft is open, being read, or its answer is stopping the clock. */
   readonly busy: boolean;
-  /** Say why a start was refused while {@link busy}. */
+  /** Say why a start or stop was refused while {@link busy}. */
   refuse(): void;
   /** Stop pressed (`⌘T`, the chip) with a timer running. */
   stop(): void;
@@ -100,7 +100,7 @@ function dayOf(at: string): ReaderDay {
 export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   let open = $state.raw<Drafting | null>(null);
   /** Reads and stops still in flight for a draft. */
-  let reading = $state(0);
+  let inFlight = $state(0);
   /** Whether *Log* already stopped the clock under the open draft. */
   let halted = false;
 
@@ -135,7 +135,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   async function through(after: WaitingStart | null) {
     const running = ports.timer.current;
     if (running === null) return startWaiting(after);
-    reading += 1;
+    inFlight += 1;
     try {
       if (running.target.kind === "entity") {
         let draft: Draft | null = null;
@@ -155,7 +155,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
     } catch (error) {
       ports.complain(error);
     } finally {
-      reading -= 1;
+      inFlight -= 1;
     }
   }
 
@@ -164,7 +164,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       return open;
     },
     get busy() {
-      return open !== null || reading > 0;
+      return open !== null || inFlight > 0;
     },
     refuse() {
       ports.push({ text: "Answer the worklog draft first." });
@@ -193,7 +193,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       open = { draft, running: null, after: null };
     },
     async stopClock() {
-      if (open?.running == null || halted) return;
+      if (open === null || open.running === null || halted) return;
       await ports.timer.stop();
       halted = true;
     },
@@ -209,7 +209,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
         if (was.after !== null) ports.push({ text: `Not started on ${was.after.title}: the timer kept running.` });
         return;
       }
-      reading += 1;
+      inFlight += 1;
       void (was.running === null || stopped ? Promise.resolve() : ports.timer.stop())
         .then(() => {
           if (outcome === "later") {
@@ -221,7 +221,7 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
           startWaiting(was.after);
         })
         .catch(ports.complain)
-        .finally(() => (reading -= 1));
+        .finally(() => (inFlight -= 1));
     },
   };
 }
