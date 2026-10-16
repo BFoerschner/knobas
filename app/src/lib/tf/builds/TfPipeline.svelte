@@ -48,6 +48,7 @@
     barTip,
     branchesOf,
     byDay,
+    chipTone,
     defaultBranch,
     durbarWidth,
     historyFacts,
@@ -57,6 +58,7 @@
     keptRuns,
     longest,
     pipelineWord,
+    queuedRunText,
     resultWord,
     staleLine,
     startedHere,
@@ -237,7 +239,7 @@
         ...started,
       ];
       push({
-        text: `Queued: run ${pipeline.name}. ${summary}. ${stale?.fix ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync."}`,
+        text: queuedRunText(pipeline, summary, stale?.fix != null),
         action: { label: "Show queue", run: openWriteQueue },
       });
       return true;
@@ -311,12 +313,6 @@
         ),
   );
   const days = $derived(byDay(kept));
-
-  function chipTone(run: RunRow): string {
-    const tone = runTone(run);
-    if (tone === "run" || tone === "q") return "tf-info";
-    return tone === "ok" || tone === "err" || tone === "warn" ? `tf-${tone}` : "";
-  }
 
   // -- parameters tab --------------------------------------------------------
 

@@ -33,7 +33,7 @@
   import { commitHash, fileHash } from "../repo/repo";
   import { when } from "../tickets/tickets";
   import { duration, pipelineHash, runTone } from "./builds";
-  import { defaultBranch, jobBranchFor, resultWord, staleLine } from "./pipeline";
+  import { chipTone, defaultBranch, jobBranchFor, queuedRunText, resultWord, staleLine } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
@@ -51,6 +51,7 @@
     rerunRequest,
     runTabHash,
     runTabOf,
+    sectionOf,
     tookLine,
     type FirstFailure,
   } from "./run";
@@ -113,8 +114,7 @@
         if (mine !== token) return;
         view = answer;
         viewRead = true;
-        const tests = answer?.sections.find((s) => s.id === "tests");
-        if ((tests?.count ?? 0) > 0) readFailure(id, mine);
+        if ((sectionOf(answer, "tests")?.count ?? 0) > 0) readFailure(id, mine);
       },
       (cause: unknown) => {
         if (mine !== token) return;
@@ -148,7 +148,7 @@
   function readFailure(id: string, mine: number) {
     ports.view(id, "tests").then(
       (answer) => {
-        if (mine === token) failure = firstFailure(answer?.sections.find((s) => s.id === "tests") ?? null);
+        if (mine === token) failure = firstFailure(sectionOf(answer, "tests"));
       },
       () => {},
     );
@@ -186,22 +186,16 @@
   const artifacts = $derived(artifactsOf(view));
   const changes = $derived(changesOf(view));
   const parameters = $derived(parameterRows(view, settings));
-  const testsCount = $derived(view?.sections.find((s) => s.id === "tests")?.count ?? 0);
+  const testsCount = $derived(sectionOf(view, "tests")?.count ?? 0);
+  const context = $derived(run === null || held === null ? "" : contextLine(held, run, mainBranch));
   const failed = $derived(run !== null && runTone(run) === "err");
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources.map((s) => s.health), sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
 
-  function chipTone(r: RunRow): string {
-    const tone = runTone(r);
-    if (tone === "run" || tone === "q") return "tf-info";
-    return tone === "ok" || tone === "err" || tone === "warn" ? `tf-${tone}` : "";
-  }
-
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
   function chipWord(r: RunRow): string {
-    const tone = runTone(r);
-    return tone === "run" || tone === "q" ? resultWord(r) : (r.state?.text ?? "");
+    return r.finished === null ? resultWord(r) : (r.state?.text ?? "");
   }
 
   // -- the writes ---------------------------------------------------------------
@@ -211,7 +205,7 @@
     try {
       await ports.submitWrite(request.payload);
       push({
-        text: `Queued: run ${pipeline.name}. ${request.summary}. ${stale?.fix ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync."}`,
+        text: queuedRunText(pipeline, request.summary, stale?.fix != null),
         action: { label: "Show queue", run: openWriteQueue },
       });
     } catch (cause) {
@@ -327,9 +321,7 @@
                 <a class="tf-btn tf-sm tf-ghost" href={fileHash(repoId, failure.location.path)}>Open the test file</a>
               {/if}
             </div>
-            {#if held !== null && contextLine(held, run, mainBranch) !== ""}
-              <span class="tf-dim">{contextLine(held, run, mainBranch)}</span>
-            {/if}
+            {#if context !== ""}<span class="tf-dim">{context}</span>{/if}
           </div>
         {/if}
         {#if inFlight && now !== null}

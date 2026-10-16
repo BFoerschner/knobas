@@ -36,10 +36,14 @@ export function runTabHash(pipelineId: string, runId: string, tab: RunTab): stri
   return tab === "overview" ? base : `${base}/${tab}`;
 }
 
+/** The runs older than `run`, from runs newest first. */
+function olderThan(runs: readonly RunRow[], run: RunRow): readonly RunRow[] {
+  return runs.slice(runs.findIndex((r) => r.entity_id === run.entity_id) + 1);
+}
+
 /** The next older finished run on the same branch, from runs newest first. */
 export function previousOnBranch(runs: readonly RunRow[], run: RunRow): RunRow | null {
-  const at = runs.findIndex((r) => r.entity_id === run.entity_id);
-  return runs.slice(at + 1).find((r) => r.branch === run.branch && r.finished !== null) ?? null;
+  return olderThan(runs, run).find((r) => r.branch === run.branch && r.finished !== null) ?? null;
 }
 
 /** *Took*: *4 m 12 s, −16 s against #1185*; a run in flight is *still running*. */
@@ -70,10 +74,7 @@ export function contextLine(runs: readonly RunRow[], run: RunRow, mainBranch: st
   if (before !== null && was === "failed" && went(run) === "failed") parts.push(`Also failed in #${before.number} on this branch.`);
   else if (before !== null && was !== null) parts.push(`#${before.number} on this branch ${was}.`);
   if (mainBranch !== null && run.branch !== null && branchName(run.branch) !== mainBranch) {
-    const at = runs.findIndex((r) => r.entity_id === run.entity_id);
-    const main = runs
-      .slice(at + 1)
-      .find((r) => r.branch !== null && branchName(r.branch) === mainBranch && went(r) !== null);
+    const main = olderThan(runs, run).find((r) => r.branch !== null && branchName(r.branch) === mainBranch && went(r) !== null);
     if (main !== undefined) parts.push(`#${main.number} on ${mainBranch} ${went(main)}.`);
   }
   return parts.join(" ");
@@ -131,7 +132,8 @@ export function locationIn(details: string | null): { path: string; line: number
   return match === null ? null : { path: match[1]!, line: Number(match[2]) };
 }
 
-function section(view: SourceView | null, id: string): ViewSection | null {
+/** The view's section of that id. */
+export function sectionOf(view: SourceView | null, id: string): ViewSection | null {
   return view?.sections.find((s) => s.id === id) ?? null;
 }
 
@@ -141,7 +143,7 @@ function rowsOf(s: ViewSection | null): ViewRow[] {
 
 /** A fact of the view's *Overview*, by its label (`Triggered by`, `Agent`, `Now`). */
 export function factOf(view: SourceView | null, label: string): string | null {
-  for (const block of section(view, "overview")?.blocks ?? []) {
+  for (const block of sectionOf(view, "overview")?.blocks ?? []) {
     if (block.type !== "facts") continue;
     const fact = block.facts.find((f) => f.label === label);
     if (fact !== undefined) return fact.value;
@@ -151,13 +153,13 @@ export function factOf(view: SourceView | null, label: string): string | null {
 
 /** The commit the run built: the overview's first row carrying a sha, and its mirrored id. */
 export function commitOf(view: SourceView | null): { sha: string; entityId: string | null } | null {
-  const row = rowsOf(section(view, "overview")).find((r) => r.chip !== null);
+  const row = rowsOf(sectionOf(view, "overview")).find((r) => r.chip !== null);
   return row === undefined ? null : { sha: row.chip!, entityId: row.entity_id };
 }
 
 /** The pipeline a run belongs to: the one of `pipelines` a row of its overview carries. */
 export function pipelineOfRun(view: SourceView | null, pipelines: readonly string[]): string | null {
-  return rowsOf(section(view, "overview")).find((r) => r.entity_id !== null && pipelines.includes(r.entity_id))?.entity_id ?? null;
+  return rowsOf(sectionOf(view, "overview")).find((r) => r.entity_id !== null && pipelines.includes(r.entity_id))?.entity_id ?? null;
 }
 
 /** How many artifacts the Overview's panel lists. */
@@ -165,19 +167,19 @@ export const FIRST_ARTIFACTS = 4;
 
 /** The Artifacts panel: the first four, and how many there are. */
 export function artifactsOf(view: SourceView | null): { first: ViewRow[]; total: number } {
-  const s = section(view, "artifacts");
+  const s = sectionOf(view, "artifacts");
   const rows = rowsOf(s);
   return { first: rows.slice(0, FIRST_ARTIFACTS), total: s?.count ?? rows.length };
 }
 
 /** The commits in the run (*Changes*). */
 export function changesOf(view: SourceView | null): ViewRow[] {
-  return rowsOf(section(view, "changes"));
+  return rowsOf(sectionOf(view, "changes"));
 }
 
 /** What the run ran with, from its view's *Parameters*. */
 export function runValues(view: SourceView | null): StartValue[] {
-  return (section(view, "parameters")?.blocks ?? []).flatMap((block) =>
+  return (sectionOf(view, "parameters")?.blocks ?? []).flatMap((block) =>
     block.type === "settings" ? block.values.map((v) => ({ name: v.name, value: v.value, secret: v.secret })) : [],
   );
 }

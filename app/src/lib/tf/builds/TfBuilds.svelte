@@ -57,7 +57,6 @@
   import { onMount, tick } from "svelte";
 
   import {
-    entityView,
     getEntity,
     jobPipelines as readJobPipelines,
     pipelineRuns,
@@ -74,6 +73,7 @@
   import TfPipeline from "./TfPipeline.svelte";
   import TfRun from "./TfRun.svelte";
   import { pipelineOfRun } from "./run";
+  import { RUN_BRIDGE } from "./pipeline-ports";
   import {
     CHIPS,
     foldOpen,
@@ -152,9 +152,12 @@
   const kept = $derived(
     all === null ? [] : keptPipelines(scope === "job" ? onJob : all, filter.text, chips),
   );
-  const selected = $derived(
-    all === null ? null : head === "builds" ? pipelineOf(all, rest, onJob) : (all.find((p) => p.entity_id === rest[0]) ?? null),
-  );
+  /** The pipeline on the right: the one the list picks, or on a run's address the run's own. */
+  function selectedOf(list: PipelineRow[]): PipelineRow | null {
+    if (head === "builds") return pipelineOf(list, rest, onJob);
+    return list.find((p) => p.entity_id === rest[0]) ?? null;
+  }
+  const selected = $derived(all === null ? null : selectedOf(all));
 
   // `#/build/<run id>` (a job's or the inbox's row) names the run alone: its
   // pipeline is the one whose recent runs hold it, else the one its view names.
@@ -169,7 +172,7 @@
       return;
     }
     const ids = all.map((p) => p.entity_id);
-    void (ports.view ?? ((runId: string) => entityView(runId)))(id).then(
+    void (ports.view ?? RUN_BRIDGE.view)(id).then(
       (view) => {
         const found = pipelineOfRun(view, ids);
         if (found !== null && rest[0] === id) location.replace(runHash(found, id));

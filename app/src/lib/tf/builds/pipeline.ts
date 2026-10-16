@@ -305,3 +305,16 @@ export function staleLine(
   }
   return null;
 }
+
+/** A run's chip class: in flight is info, finished its declared tone. */
+export function chipTone(run: RunRow): string {
+  const tone = runTone(run);
+  if (tone === "run" || tone === "q") return "tf-info";
+  return tone === "ok" || tone === "err" || tone === "warn" ? `tf-${tone}` : "";
+}
+
+/** The toast for a run queued from a Builds page, as prototype-6's `startRun` words it. */
+export function queuedRunText(pipeline: Pick<PipelineRow, "name" | "source_name">, summary: string, signInFailing: boolean): string {
+  const tail = signInFailing ? `${pipeline.source_name} sign-in is failing, so it waits there.` : "Sends with the next sync.";
+  return `Queued: run ${pipeline.name}. ${summary}. ${tail}`;
+}

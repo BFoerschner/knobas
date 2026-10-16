@@ -3168,6 +3168,9 @@ Ruled by the implementer (PR for #863).
 - ***Log*, *Tests* and *Artifacts* tabs are drawn and say they are not built yet** (#854 to
   #856), as the conventions say for a later ticket's route. *Create ticket* (LOW) is not drawn.
   **Reversing:** n/a.
+- ***Stop* is `aria-disabled` with the title *Needs a new write*, not *Not built in the new shell
+  yet*.** R-9.9 gives the reason in those words: no `stop_run` write exists (LATER, R-9.12), so it
+  is not a later ticket's dialog. **Reversing:** low.
 - **`#/build/<run id>` alone (a job's or the inbox's row) moves to `#/build/<pipeline>/<run>`.**
   The pipeline is the one whose recent runs hold the run, else the one a row of the run's view
   names. With neither, the page says *No run at this address.* **Reversing:** low.
