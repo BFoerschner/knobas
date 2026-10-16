@@ -9,8 +9,9 @@
 //! ## The walk
 //!
 //! ADR-0025: a job shows its context's members, ADR-0008's rule unchanged,
-//! then the parent ticket's own links (and, from TF5, its link sets). So the
-//! walk is membership's, with each row's path kept for the reason label:
+//! then the members of every link set whose rule matches the ticket, then the
+//! parent ticket's own links. So the walk is membership's, with each row's
+//! path kept for the reason label:
 //!
 //! * **the start** -- the ticket itself, and when it anchors an unarchived
 //!   context, that context's explicit adds and, for an epic, its children (the
@@ -46,14 +47,26 @@
 //! `recorded_parent_key!` because that macro's second arm (`epic.key`) names
 //! an epic, which this read must not take.
 //!
+//! ## The link sets
+//!
+//! Since #866 a ticket also reaches the fixed members of every **link set**
+//! whose rule matches it, [`crate::link_sets_applying!`]: by hand, as a direct
+//! child of the rule's ticket (`parent`), anywhere under it (`epic`), or in its
+//! project, over the stored parent and project resolutions (ADR-0018,
+//! ADR-0019, ADR-0010). Each member is its own first step, one layer and no
+//! further: the walk never takes a hop from it and never descends what it
+//! holds, because a set is not a seed (ADR-0025). A member hidden on this
+//! ticket (`knobas.link_set_hidden`, R-7.5) is left out; hiding reaches only
+//! a set's rows, never the ticket's own links or its parent's.
+//!
 //! ## What each row says
 //!
 //! Each reached entity comes back once, with the **first step** of the path
 //! that brought it in -- what a row's reason label names ("via PR #142") --
 //! and the [`Origin`] of that path. An entity reached both ways keeps its own
 //! path: the job's own links come first (R-7.4, "duplicates show once, with
-//! the first origin"), and among its own paths the shortest wins. TF5's link
-//! sets join as a third origin without changing this shape.
+//! the first origin"), and among its own paths the shortest wins. Then a link
+//! set's row, and of two sets the one whose id sorts first, then the parent's.
 
 use serde::Serialize;
 use sqlx::PgPool;
@@ -74,10 +87,11 @@ pub const PARENT_LINKS_OFF: &str = "off";
 ///
 /// It expects a CTE `start(t)` before it, one row per ticket id to walk from,
 /// and defines the rest of a `with recursive` statement, ending in the CTE
-/// `reached(t, id, step, origin, rank)` with no trailing comma, so a caller
-/// appends its own `select`. Every row of `reached` is one path: `t` the
-/// ticket walked from, `id` what it reached, `step` the first step of the
-/// path, `origin` `own` or `parent`, `rank` lower for the path to keep.
+/// `reached(t, id, step, origin, rank, via)` with no trailing comma, so a
+/// caller appends its own `select`. Every row of `reached` is one path: `t`
+/// the ticket walked from, `id` what it reached, `step` the first step of the
+/// path, `origin` `own`, `link_set` or `parent`, `rank` lower for the path to
+/// keep, `via` the set's id (the parent's id for `parent`, null for `own`).
 ///
 /// Two callers: [`reach`] here, and `knobas-search`'s `reach:` key, which is
 /// the same walk as a filter -- one text, so the read and the filter cannot
@@ -156,10 +170,20 @@ macro_rules! reach_walk {
            and coalesce(pi.payload->'fields'->'issuetype'->>'name' not ilike 'epic', false)
            and pe.id <> s.t
     ),
-    reached(t, id, step, origin, rank) as (
-        select t, id, step, 'own', d from held where id <> t and step is not null
+    ",
+            $crate::link_sets_applying!(),
+            ",
+    reached(t, id, step, origin, rank, via) as (
+        select t, id, step, 'own', d, null::text from held where id <> t and step is not null
         union all
-        select p.t, o.id, p.p, 'parent', 1000
+        select a.t, m.entity_id, m.entity_id, 'link_set', 500, a.set_id
+          from set_applies a
+          join knobas.link_set_member m on m.set_id = a.set_id and m.entity_id is not null
+         where m.entity_id <> a.t
+           and not exists (select 1 from knobas.link_set_hidden h
+                            where h.ticket_id = a.t and h.member_id = m.entity_id)
+        union all
+        select p.t, o.id, p.p, 'parent', 1000, p.p
           from parent p
           join knobas.confirmed_link l on l.from_id = p.p or l.to_id = p.p
           join knobas.entity o
@@ -172,8 +196,8 @@ macro_rules! reach_walk {
 
 /// Where a reached entity's path came from.
 ///
-/// Tagged on `kind` so TF5's link sets join as one more arm
-/// (`{"kind": "link_set", ...}`) without changing the arms that exist.
+/// Tagged on `kind`; #866's link sets joined as the third arm without
+/// changing the two before it.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Origin {
@@ -183,6 +207,14 @@ pub enum Origin {
     Parent {
         /// The parent ticket's entity id.
         ticket: String,
+    },
+    /// A member of a link set whose rule matches the ticket (#866,
+    /// ADR-0025), labelled with the set's name.
+    LinkSet {
+        /// The set's id, its address: `#/sets/<set>`.
+        set: String,
+        /// The set's name, as the reader gave it.
+        name: String,
     },
 }
 
@@ -206,11 +238,12 @@ const REACH: &str = concat!(
     ",
     crate::reach_walk!(),
     "
-    select id, kind, step, origin from (
-        select distinct on (r.id) r.id, e.kind, r.step, r.origin
+    select id, kind, step, origin, via, set_name from (
+        select distinct on (r.id) r.id, e.kind, r.step, r.origin, r.via, ls.name as set_name
           from reached r
           join knobas.entity e on e.id = r.id
-         order by r.id, r.rank, r.step
+          left join knobas.link_set ls on r.origin = 'link_set' and ls.id = r.via
+         order by r.id, r.rank, r.via, r.step
     ) kept
     order by id"
 );
@@ -226,19 +259,23 @@ const REACH: &str = concat!(
 ///
 /// [`CoreError::Db`] if the query fails.
 pub async fn reach(pool: &PgPool, ticket_id: &str) -> Result<Vec<Reached>, CoreError> {
-    let rows: Vec<(String, String, String, String)> = sqlx::query_as(REACH)
+    type Row = (String, String, String, String, Option<String>, Option<String>);
+    let rows: Vec<Row> = sqlx::query_as(REACH)
         .bind(ticket_id)
         .fetch_all(pool)
         .await?;
     Ok(rows
         .into_iter()
-        .map(|(entity_id, kind, step, origin)| Reached {
-            origin: if origin == "parent" {
-                Origin::Parent {
+        .map(|(entity_id, kind, step, origin, via, set_name)| Reached {
+            origin: match origin.as_str() {
+                "parent" => Origin::Parent {
                     ticket: step.clone(),
-                }
-            } else {
-                Origin::Own
+                },
+                "link_set" => Origin::LinkSet {
+                    set: via.unwrap_or_default(),
+                    name: set_name.unwrap_or_default(),
+                },
+                _ => Origin::Own,
             },
             entity_id,
             kind,

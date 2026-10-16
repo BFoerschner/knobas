@@ -7,6 +7,7 @@ mod error;
 pub mod evidence;
 pub mod inbox;
 pub mod link;
+pub mod link_set;
 mod live;
 pub mod markdown;
 pub mod mini_board;

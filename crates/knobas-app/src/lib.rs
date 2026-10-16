@@ -33,6 +33,7 @@ pub mod conversation;
 pub mod docs;
 mod error;
 pub mod inbox;
+pub mod link_sets;
 pub mod logging;
 pub mod notes_export;
 pub mod notify;
@@ -554,6 +555,14 @@ pub fn run() {
             commands::assets::save_dep_view,
             commands::assets::delete_dep_view,
             commands::assets::set_dep_view_defaults,
+            // #866's link sets, appended at the foot: the list is append-only
+            // (§10.8).
+            commands::entity::link_sets,
+            commands::entity::link_set,
+            commands::entity::save_link_set,
+            commands::entity::delete_link_set,
+            commands::entity::preview_link_set_rule,
+            commands::entity::hide_link_set_member,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
