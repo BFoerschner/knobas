@@ -1372,11 +1372,13 @@ const MINI_BOARD_FIELDS: &[&str] = &["columns", "sources"];
 const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status", "total"];
 const MINI_BOARD_CARD_FIELDS: &[&str] = &[
     "assignee",
+    "comment_count",
     "entity_id",
     "issue_type",
     "key",
     "labels",
     "mine",
+    "parent_title",
     "path",
     "priority",
     "signals",
@@ -1411,8 +1413,10 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
                 assignee: None,
                 updated_at: None,
                 path: None,
+                parent_title: None,
                 mine: false,
                 labels: vec!["sepa".to_owned()],
+                comment_count: None,
                 signals: vec![knobas_core::signals::Signal {
                     kind: knobas_core::signals::SignalKind::Blocker,
                     text: "blocked by OPS-77".to_owned(),

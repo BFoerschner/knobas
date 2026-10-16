@@ -482,11 +482,28 @@ function boardCard(entry: (typeof CORPUS)[number]) {
     assignee,
     updated_at: entry.updated_at,
     path: text(entry.payload["epic"]),
+    parent_title: FAKE_EPIC_TITLES[text(entry.payload["epic"]) ?? ""] ?? null,
     mine: assignee !== null && assignee.toLowerCase() === FAKE_IDENTITY,
     labels: Array.isArray(entry.payload["labels"]) ? (entry.payload["labels"] as string[]) : [],
+    // The count a source declares (#894); this corpus keeps its comments
+    // flat, so the count is the list's length, and a ticket with no list has
+    // none declared (a miss, `null`).
+    comment_count: Array.isArray(entry.payload["comments"]) ? entry.payload["comments"].length : null,
     signals: fakeSignals(entry.entity_id),
   };
 }
+
+/**
+ * The epics' names (#894), prototype-6's `EPICS`. The real board reads the
+ * mirrored epic item's title; this corpus holds no epic items (they would
+ * stand on the board as cards of their own), so it keeps their names here.
+ * An epic not named here draws its key alone, the miss direction.
+ */
+const FAKE_EPIC_TITLES: Record<string, string> = {
+  "PAY-200": "Payout reliability",
+  "PAY-300": "PSP migration",
+  "PAY-150": "Finance reporting",
+};
 
 /**
  * The fixture's confirmed links for the signals (#815): PAY-231's pull

@@ -114,6 +114,8 @@ export interface KindPaths {
   sprint_state: ListPath[];
   /** A ticket's original estimate in seconds, a whole number (#816). */
   estimate: PayloadPath[];
+  /** How many comments a ticket has, a whole number (#894). */
+  comment_count: PayloadPath[];
   /** Which part of the Builds frame this kind is, or `null` (ADR-0022, #848). */
   frame: Frame | null;
   /** What a pipeline is called (#848). */

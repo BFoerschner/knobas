@@ -1918,10 +1918,14 @@ export interface MiniBoardCard {
   updated_at: string | null;
   /** Its declared parent chain as one line (its epic, for Jira), or `null`. */
   path: string | null;
+  /** The title of the mirrored item its direct parent names (the epic's name, #894), or `null`. */
+  parent_title: string | null;
   /** Whether `assignee` is one of the configured usernames, ignoring case. */
   mine: boolean;
   /** Its labels at the declared path, in the record's order; empty on a miss (#813). */
   labels: string[];
+  /** How many comments it has at the declared path (#894); `0` is an answer, `null` a miss. */
+  comment_count: number | null;
   /** The signals around it, in the order a card draws them (#815). */
   signals: Signal[];
 }

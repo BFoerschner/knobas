@@ -45,8 +45,10 @@ function card(key: string, title: string, extra: Partial<MiniBoardCard> = {}): M
     assignee: null,
     updated_at: null,
     path: null,
+    parent_title: null,
     mine: false,
     labels: [],
+    comment_count: null,
     signals: [],
     ...extra,
   };
@@ -62,6 +64,8 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
       issue_type: "Story",
       priority: "High",
       path: i === 0 ? "PAY-200" : null,
+      parent_title: i === 0 ? "Payout reliability" : null,
+      comment_count: i === 0 ? 3 : null,
       updated_at: `2026-08-${String(22 - i).padStart(2, "0")}T10:00:00Z`,
     }),
   })),
@@ -69,6 +73,9 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
     status: "In Progress",
     card: card("PAY-40", "Payout dashboard latency", {
       mine: true,
+      // An epic the mirror does not hold (#894), and a count of none.
+      path: "PAY-300",
+      comment_count: 0,
       assignee: "mara.lindqvist",
       signals: [
         { kind: "failing-build", text: "build failed", tone: "err" },
@@ -204,7 +211,7 @@ test("the first card is selected: yellow, and the preview shows it with Start wo
   expect(target.querySelectorAll(".tf-tcard.tf-card")).toHaveLength(1);
   expect(first.textContent).toContain("Story, High");
   expect(first.querySelector(".tf-av")!.textContent).toBe("ML");
-  expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200");
+  expect(first.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 
   expect(preview().querySelector("h2")!.textContent).toBe("Retry failed SEPA payouts");
   expect(preview().textContent).toContain("The description of jira:PAY-1.");
@@ -578,6 +585,31 @@ test("signals are drawn on the card and in the list's Signals column, each a ton
     ["tf-dot tf-err", "build failed"],
     ["tf-dot tf-info", "PR #142 open"],
   ]);
+});
+
+test("a card counts its comments above zero and names its epic, as the preview's Epic row does", async () => {
+  await open(harness());
+  const mine = target.querySelector('.tf-tcard[data-entity="jira:PAY-1"]')!;
+  expect(mine.querySelector(".tf-comments")!.textContent).toBe("3 comments");
+  const epicRow = () => [...preview().querySelectorAll("dt")].find((dt) => dt.textContent === "Epic")!;
+  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-200 Payout reliability");
+
+  // A count of none draws nothing, nor does a count that never answered,
+  // and an epic the mirror does not hold is its key alone (ADR-0007).
+  const other = target.querySelector<HTMLElement>('.tf-tcard[data-entity="jira:PAY-40"]')!;
+  expect(other.querySelector(".tf-comments")).toBeNull();
+  expect(target.querySelector('.tf-tcard[data-entity="jira:PAY-2"] .tf-comments')).toBeNull();
+  expect(other.querySelector(".tf-cep")!.textContent).toBe("PAY-300");
+  other.click();
+  await settle();
+  expect(epicRow().nextElementSibling!.textContent).toBe("PAY-300");
+});
+
+test("a view whose cards leave the comment count out draws none", async () => {
+  await open(harness([], [view("v", "No talk", "Mine", 0, { card_fields: ["type", "epic"] })]), null, "v");
+  const mine = target.querySelector('.tf-tcard[data-entity="jira:PAY-1"]')!;
+  expect(mine.querySelector(".tf-comments")).toBeNull();
+  expect(mine.querySelector(".tf-cep")!.textContent).toBe("PAY-200 Payout reliability");
 });
 
 // ---- ticket views (#812) ----

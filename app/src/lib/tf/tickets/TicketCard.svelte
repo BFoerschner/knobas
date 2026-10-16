@@ -2,8 +2,8 @@
   One ticket on the ticket board (#810, R-3.7): key, type and priority, the
   summary, the epic under it, its signals (#815) and the assignee's
   initials. The selected card is the yellow card, lifted off the board. A
-  double click opens the job (#813). The comment count waits for a declared
-  count (see the #810 rulings).
+  double click opens the job (#813). The epic is its key and name and the
+  comment count is drawn above zero only (#894).
 
   A ticket view says what its cards show (#812, R-3.16, *Cards show*):
   `fields` names them; without it the card shows what it always has.
@@ -13,7 +13,7 @@
   import type { CardField } from "../../ipc/search";
   import Marked from "../filter/Marked.svelte";
   import Signals from "./Signals.svelte";
-  import { initials } from "./tickets";
+  import { commentsLine, epicLine, initials } from "./tickets";
 
   let {
     card,
@@ -38,6 +38,8 @@
   const labels = $derived(fields?.includes("labels") ? card.labels : []);
 
   const kind = $derived([card.issue_type, card.priority].filter(Boolean).join(", "));
+  const epic = $derived(epicLine(card));
+  const comments = $derived(commentsLine(card.comment_count));
 </script>
 
 <button
@@ -52,10 +54,11 @@
   <span class="tf-k"><Marked text={card.key} {typed} /></span>
   {#if kind && shows("type")}<span class="tf-dim tf-tkind">{kind}</span>{/if}
   <span class="tf-s"><Marked text={card.title} {typed} /></span>
-  {#if card.path && shows("epic")}<span class="tf-cep">{card.path}</span>{/if}
+  {#if epic && shows("epic")}<span class="tf-cep">{epic}</span>{/if}
   <span class="tf-meta">
     {#if shows("signals")}<Signals signals={card.signals} />{/if}
     {#each labels as label (label)}<span class="tf-lab">{label}</span>{/each}
+    {#if comments && shows("comments")}<span class="tf-signal tf-dim tf-comments">{comments}</span>{/if}
     {#if shows("assignee")}
       <span class="tf-av" class:tf-me={card.mine} title={card.assignee ?? "Unassigned"}>{initials(card.assignee)}</span>
     {/if}

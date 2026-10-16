@@ -1396,6 +1396,7 @@ knobas-core	test/it	mini_board::a_sources_statuses_are_the_boards_offer_without_
 knobas-core	test/it	mini_board::a_ticket_with_no_readable_project_is_on_no_project_rooms_board
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_priority_carries_none
 knobas-core	test/it	mini_board::a_ticket_with_no_recognizable_status_lands_in_the_terminal_group
+knobas-core	test/it	mini_board::a_tickets_card_carries_its_comment_count_and_its_epics_name
 knobas-core	test/it	mini_board::a_tickets_card_carries_its_type_assignee_epic_and_whether_it_is_mine
 knobas-core	test/it	mini_board::a_tombstoned_ticket_is_off_the_board
 knobas-core	test/it	mini_board::an_unknown_or_empty_context_is_an_empty_board

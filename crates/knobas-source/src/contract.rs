@@ -707,7 +707,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         Flag,
         /// The array a list path opens.
         List,
-        /// A whole number: an estimate in seconds (#816).
+        /// A whole number: an estimate in seconds (#816), a comment count
+        /// (#894).
         Integer,
         /// An ISO 8601 instant, basic or extended: when a run started or
         /// finished (#848), as `parse_instant` reads one.
@@ -782,7 +783,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 19] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 20] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -795,6 +796,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::DEFAULT_BRANCH, &paths.default_branch, Wanted::Text),
             (field::ISSUE_TYPE, &paths.issue_type, Wanted::Text),
             (field::ESTIMATE, &paths.estimate, Wanted::Integer),
+            (field::COMMENT_COUNT, &paths.comment_count, Wanted::Integer),
             (field::NAME, &paths.name, Wanted::Text),
             (field::GROUP, &paths.group, Wanted::Text),
             (field::PIPELINE, &paths.pipeline, Wanted::Text),

@@ -3550,3 +3550,28 @@ Ruled by the merge-manager (PR #1018).
   owner; filed as #1020. A pipeline's dot is its newest run's declared state, its line the declared
   `group_path`; a page's line its declared project and parent chain; an asset's its `type_id` and
   environment, its dot the health rollup the Assets view draws. **Reversing:** low.
+
+## #894 — Ticket cards: the comment count and the epic's name (2026-10-16)
+
+- **The count is a `KindPaths` field at Jira's `fields.comment.total`**, not a count `map` writes
+  beside the record (the issue offers both). The record already carries it, `BASE_FIELDS` has
+  fetched `comment` since M1, and the sync's comment completion rewrites `total` to the comments
+  it holds, so the field says what the mirror holds. Read by the existing `declared_integer!`.
+  **Reversing:** medium (a §10.8 surface).
+- **The epic's name is found by address, then checked against the declaration.** The card's
+  direct parent (the last position of `declared_parent_names!`, its first name) is looked up as
+  the item at `<source_id>:<name>` of the parent's kind, and that item counts only if
+  `declared_names_as_parent!` says it answers to the name. One primary-key probe per kept card in
+  the same statement. The other way in, `sync.item_parent` (ADR-0019), needs the adapter-kind join
+  its readers make and a walk from name to item; for a Jira epic, whose name is its key and so its
+  address, the probe gives the same answer. A source whose parent names are not its keys draws
+  the key alone (a miss, ADR-0007). **Reversing:** low (one subquery in `mini_board::CARDS`).
+- **The field is `parent_title`, not `epic_title`.** The card's `path` is the declared parent
+  chain, which is an epic only for Jira; the name follows the declaration. **Reversing:** low.
+- **"1 comment", "N comments" otherwise.** Prototype-6 only ever draws plurals. **Reversing:**
+  low (`commentsLine`).
+- **Only the card and the preview draw the name.** The list's *Epic* column and the *Epic* lanes
+  still draw the key, as the issue names only the card and the preview. **Reversing:** low.
+- **The fake IPC keeps the epics' names in a table** (prototype-6's `EPICS`) rather than adding
+  epic items to its corpus, which would stand on the board as cards of their own. Its count is the
+  length of the corpus's flat `comments` list. **Reversing:** low.

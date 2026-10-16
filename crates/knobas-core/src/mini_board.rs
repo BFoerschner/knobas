@@ -158,6 +158,12 @@ macro_rules! priority_read {
 /// priority, the type, the assignee, the path line (#810), the labels and
 /// the signals (#813, #815) only for the rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
 /// bridge and a card per ticket in the webview.
+///
+/// The parent's title (#894) is one primary-key probe per kept card. The
+/// payload macros all read the alias `i`, so the probe rebinds `i` to the
+/// candidate parent item, and the lateral `par` carries the card's own
+/// `source_id` out beside the parent's kind and name, where the probe can
+/// still see it.
 const CARDS: &str = concat!(
     "with ",
     status_paths!("$4"),
@@ -193,9 +199,23 @@ const CARDS: &str = concat!(
     crate::path_line_read!("$4"),
     " as path, array(select l.value from ",
     crate::declared_list!("$4", "labels"),
-    " l) as labels, i.item_updated_at as updated_at, r.total
+    " l) as labels, ",
+    crate::declared_integer!("$4", "comment_count"),
+    " as comment_count, (select i.title from sync.item i
+         where par.name is not null
+           and i.entity_id = par.source_id || ':' || par.name
+           and i.source_id = par.source_id and i.kind = par.kind
+           and ",
+    crate::live_by_exclusion!("i"),
+    "
+           and par.name in (select n.name from ",
+    crate::declared_names_as_parent!("$4"),
+    " n)) as parent_title, i.item_updated_at as updated_at, r.total
        from ranked r
        join sync.item i on i.entity_id = r.entity_id
+       left join lateral (select pn.kind, pn.name, i.source_id from ",
+    crate::declared_parent_names!("$4"),
+    " pn order by pn.pos desc, pn.name_ord limit 1) par on true
       where $5::bigint is null or r.rn <= $5
       order by r.at desc, r.entity_id"
 );
@@ -310,6 +330,14 @@ pub struct MiniBoardCard {
     /// The ticket's declared parent chain as one line (its epic, for Jira):
     /// `knobas_core::path_line_read!`, the line every other row draws.
     pub path: Option<String>,
+    /// The title of the item its direct parent names (#894): the epic's
+    /// name beside [`Self::path`]'s key, `PAY-200 Payout reliability`. The
+    /// parent's last declared position, its first name; the mirrored live
+    /// item of the parent's kind at `<source>:<name>` in the same source,
+    /// and only if that item answers to the name as its declarations say.
+    /// `None` for a ticket with no parent, an epic the mirror does not hold,
+    /// and an item that does not answer to the name (ADR-0007).
+    pub parent_title: Option<String>,
     /// Whether [`Self::assignee`] is one of the configured usernames
     /// ([`Scope::identity`]), ignoring case. `false` when no identity was
     /// given ([`read`], [`read_capped`]); the `mini_board` command always
@@ -319,6 +347,10 @@ pub struct MiniBoardCard {
     /// in the record's order; empty on a miss. The Tickets view's *Label*
     /// lanes read the first (#813, R-3.5).
     pub labels: Vec<String>,
+    /// How many comments it has, at the declared `comment_count` path
+    /// (#894): a whole JSON number, `Some(0)` when the source said none, and
+    /// `None` on a miss. The card draws "N comments" above zero only.
+    pub comment_count: Option<i64>,
     /// The signals around it (#815, R-3.8), in the order a card draws them:
     /// [`crate::signals`]' reader, the one `has:` asks too.
     pub signals: Vec<crate::signals::Signal>,
@@ -345,6 +377,8 @@ struct CardRow {
     assignee: Option<String>,
     path: Option<String>,
     labels: Vec<String>,
+    comment_count: Option<i64>,
+    parent_title: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     total: i64,
 }
@@ -549,7 +583,9 @@ pub async fn read_scoped(
             assignee: row.assignee,
             updated_at: row.updated_at,
             path: row.path,
+            parent_title: row.parent_title,
             labels: row.labels,
+            comment_count: row.comment_count,
         });
     }
     columns.sort_by_key(|column| column_rank(column.status.as_deref()));

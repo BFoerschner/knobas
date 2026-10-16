@@ -7,7 +7,7 @@
 <script lang="ts">
   import type { MiniBoardCard } from "../../ipc/entity";
   import { jobHash } from "../route";
-  import { columnName, previewAction, when, type AroundLine } from "./tickets";
+  import { columnName, epicLine, previewAction, when, type AroundLine } from "./tickets";
 
   let {
     card,
@@ -28,6 +28,7 @@
   } = $props();
 
   const action = $derived(previewAction(card, status, timerOnIt));
+  const epic = $derived(epicLine(card));
 </script>
 
 <aside class="tf-preview" aria-label="Selected ticket">
@@ -42,8 +43,8 @@
     <dd>{card.assignee ?? "Unassigned"}</dd>
     <dt>Priority</dt>
     <dd>{card.priority ?? "None"}</dd>
-    {#if card.path}<dt>Epic</dt>
-      <dd>{card.path}</dd>{/if}
+    {#if epic}<dt>Epic</dt>
+      <dd>{epic}</dd>{/if}
     <dt>Updated</dt>
     <dd>{when(card.updated_at)}</dd>
   </dl>
