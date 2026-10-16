@@ -133,15 +133,21 @@
 
   $effect(() => {
     if (!ready) return;
+    // An answer that lands after the view is gone draws into nothing.
+    let live = true;
     ports
       .roomSuggestions([], null, REVIEW_LIMIT)
       .then((page) => {
+        if (!live) return;
         rows = page.rows;
         failure = null;
       })
       .catch((cause: unknown) => {
-        failure = ipcErrorMessage(cause);
+        if (live) failure = ipcErrorMessage(cause);
       });
+    return () => {
+      live = false;
+    };
   });
 
   function decide(verdict: Verdict) {

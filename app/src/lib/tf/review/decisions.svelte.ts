@@ -55,7 +55,14 @@ export interface Decisions {
 }
 
 export function createDecisions(
-  ports: DecisionPorts = { acceptSuggestion, dismissSuggestion, createLink },
+  // Wrapped, not referenced, so importing the shell touches no command until
+  // a decision is written (a suite that mocks `ipc/entity` without these
+  // still loads it), as `job/ports.ts` does.
+  ports: DecisionPorts = {
+    acceptSuggestion: (linkId) => acceptSuggestion(linkId),
+    dismissSuggestion: (linkId) => dismissSuggestion(linkId),
+    createLink: (fromId, toId, relation, note) => createLink(fromId, toId, relation, note),
+  },
   delay: number = UNDO_MS,
 ): Decisions {
   const state = $state<{ verdicts: Decided; entries: SuggestionEntry[] }>({ verdicts: {}, entries: [] });
