@@ -89,7 +89,8 @@ pub enum SectionRefusal {
     /// A macro, a panel, a layout, a mention, a page or ticket link: markup
     /// of the source's own that text cannot carry.
     Macro,
-    /// Bold, italics, links or a nested list, which the text box would flatten.
+    /// Bold, italics, links, a nested or a numbered list, which the text box
+    /// would flatten.
     Formatting,
 }
 

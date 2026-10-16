@@ -187,8 +187,11 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
             Some(SectionRefusal::Code)
         }
         n if n.starts_with("ac:") || n.starts_with("ri:") => Some(SectionRefusal::Macro),
-        "ul" | "ol" if in_item => Some(SectionRefusal::Formatting),
-        "p" | "ul" | "ol" | "li" | "br" => None,
+        // A numbered list would come back bulleted: the editor's text has
+        // only `- ` items, and `from_plain` writes them as `<ul>`.
+        "ol" => Some(SectionRefusal::Formatting),
+        "ul" if in_item => Some(SectionRefusal::Formatting),
+        "p" | "ul" | "li" | "br" => None,
         _ => Some(SectionRefusal::Formatting),
     };
     let item = in_item || name == "li";
@@ -272,6 +275,11 @@ fn plain_text(nodes: &[&Node]) -> String {
     fn line(node: &Node) -> String {
         match node {
             Node::Element { name, .. } if name == "br" => "\n".to_owned(),
+            // A paragraph ends its line, so two inside one list item read
+            // as two sentences and not as one run-together word.
+            Node::Element { name, children, .. } if name == "p" => {
+                children.iter().map(line).chain(["\n".to_owned()]).collect()
+            }
             Node::Element { children, .. } => children.iter().map(line).collect(),
             Node::Text(t) | Node::Cdata(t) => t.clone(),
         }
@@ -1508,7 +1516,9 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
             <h2>Bold</h2><p>a <strong>b</strong></p>\
             <h2>Mention</h2><p><ac:link><ri:user ri:username=\"mara\" /></ac:link></p>\
             <h2>Nested</h2><ul><li>a<ul><li>b</li></ul></li></ul>\
-            <h2>Empty</h2>";
+            <h2>Empty</h2>\
+            <h2>Numbered</h2><ol><li>a</li></ol>\
+            <h2>Item paragraphs</h2><ul><li><p>a</p><p>b</p></li></ul>";
         let got: Vec<(u32, Option<String>, Option<SectionRefusal>)> = sections(storage)
             .into_iter()
             .map(|s| (s.number, s.text, s.refusal))
@@ -1524,6 +1534,8 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (6, None, Some(SectionRefusal::Macro)),
                 (7, None, Some(SectionRefusal::Formatting)),
                 (8, Some(String::new()), None),
+                (9, None, Some(SectionRefusal::Formatting)),
+                (10, Some("- a b".to_owned()), None),
             ]
         );
     }
