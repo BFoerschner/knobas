@@ -30,12 +30,13 @@
 //! the checkout path (ADR-0021, #704), [`uncommitted`]'s read-only `diff`
 //! there (ADR-0026, #824), and [`clone`]'s `git clone` into a new folder under
 //! the clones root, whose URL is built from the source's address and a checked
-//! name and never from the mirror (ADR-0023, #823). [`open`] does start a
-//! process -- that is the whole of #501 -- and the rule it keeps is the other
-//! half of the ADR: the *program* is a template a person set in settings, and
-//! the only value substituted into it is the checkout [`view`] resolved off
-//! this disk. No field of the mirrored repo reaches it, which the
-//! one-`&Path` signature of `knobas_core::checkout::expand` is what enforces.
+//! name and never from the mirror (ADR-0023, #823). [`open`] starts the
+//! applications a person set (#501, #844), and the rule it keeps is the other
+//! half of the ADR: the *program* is a command a person set in settings, and
+//! the only values filled into it are the checkout [`view`] resolved off this
+//! disk and a file inside it. No field of the mirrored repo reaches it, which
+//! `knobas_core::checkout::open::Fill`, holding paths and a number and
+//! nothing else, is what enforces.
 
 use std::path::{Path, PathBuf};
 
@@ -43,12 +44,12 @@ use serde::Serialize;
 use sqlx::{PgPool, Row};
 
 use knobas_core::checkout;
-use knobas_core::checkout::OpenAction;
 use knobas_core::entity::EntityRef;
 
 use crate::IpcError;
 
 pub mod clone;
+pub mod open;
 pub mod uncommitted;
 pub mod working_tree;
 
@@ -58,6 +59,8 @@ use working_tree::TreeRead;
 // since #503, which put a second feature's string in the same table. They were
 // born here; what moved is three functions and no behaviour.
 use crate::settings::{read as read_setting, settable, write as write_setting};
+
+pub use open::{CheckoutSettings, OpenCommandView, Run, commands, set_applications, set_command, settings};
 
 /// The `knobas.setting` key holding the clones root.
 ///
@@ -236,7 +239,7 @@ pub async fn local_changes(
 ///
 /// What [`open`] asks, because an editor needs the path and not two seconds of
 /// `git status` on a large tree before it starts.
-async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
+pub(crate) async fn resolve(pool: &PgPool, entity_id: &str) -> Result<CheckoutView, IpcError> {
     let repo = repo_of(pool, entity_id).await?;
     let root = clones_root(pool).await?;
 
@@ -384,351 +387,9 @@ async fn repo_of(pool: &PgPool, entity_id: &str) -> Result<RepoOf, IpcError> {
     })
 }
 
-// -- the spawn half: what the buttons run (#501, ADR-0016) ------------------
-
-/// The `knobas.setting` key holding one action's command template.
-///
-/// One row per action under a shared prefix, in the store migration `0002`'s
-/// comment 6 keeps for "app-level state that has no other home" -- the clones
-/// root's reason exactly, and for the same reason no table: three strings
-/// somebody types once are not a relation.
-#[must_use]
-pub fn command_key(action: OpenAction) -> String {
-    format!("checkout.command.{}", action.id())
-}
-
-/// One button on the checkout panel, and one field in settings.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub struct OpenCommandView {
-    /// `vscode`, `jetbrains`, `terminal` -- the id `open_checkout` takes.
-    pub action: String,
-    /// What the button says.
-    ///
-    /// On the wire rather than in the component, which is why nothing here
-    /// pins `CheckoutPanel.svelte` against these three strings the way #499's
-    /// `FoundBy` is pinned: the panel draws one button per row of this list
-    /// and labels it from this field, so there is no second spelling to drift.
-    pub label: String,
-    /// The template this action would run: what somebody set, else this
-    /// platform's default. `None` is *not configured*, which is every action
-    /// off macOS until a template is set.
-    pub template: Option<String>,
-    /// Whether [`template`](Self::template) is the platform default rather
-    /// than a stored row -- so the settings field can say which it is drawing
-    /// and offer to go back to it.
-    pub is_default: bool,
-}
-
-/// Every action, with the command it would run on this machine.
-///
-/// # Errors
-///
-/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
-pub async fn commands(pool: &PgPool) -> Result<Vec<OpenCommandView>, IpcError> {
-    let mut out = Vec::with_capacity(checkout::OPEN_ACTIONS.len());
-    for action in checkout::OPEN_ACTIONS {
-        let stored = read_setting(pool, &command_key(action)).await?;
-        out.push(command_view(action, stored, action.default_template()));
-    }
-    Ok(out)
-}
-
-/// One row of [`commands`], given what is stored and what the platform starts
-/// with.
-///
-/// The platform's default is an **argument**, and that is why this is a
-/// function at all: `None` for it is *not configured*, which is the state
-/// every action is in off macOS, and the gate runs on a Mac. Written inline it
-/// would be a branch nothing anywhere could execute.
-fn command_view(
-    action: OpenAction,
-    stored: Option<String>,
-    platform_default: Option<&str>,
-) -> OpenCommandView {
-    let is_default = stored.is_none();
-    OpenCommandView {
-        action: action.id().to_owned(),
-        label: action.label().to_owned(),
-        template: stored.or_else(|| platform_default.map(str::to_owned)),
-        is_default,
-    }
-}
-
-/// The template to run, or the refusal a person reads instead.
-///
-/// The platform's default is an argument for [`command_view`]'s reason: with
-/// `None` for it and nothing stored there is no command, and the message that
-/// says so is the one spec #491 asks a non-macOS button to carry. On a Mac
-/// that state is unreachable through the database, so a test is the only
-/// thing that can reach it at all.
-fn template_or_refusal(
-    action: OpenAction,
-    stored: Option<String>,
-    platform_default: Option<&str>,
-) -> Result<String, IpcError> {
-    stored
-        .or_else(|| platform_default.map(str::to_owned))
-        .ok_or_else(|| {
-            IpcError::invalid(format!(
-                "{} is not configured on this platform: set a command for it in Settings",
-                action.label()
-            ))
-        })
-}
-
-/// Set one action's command template, or clear it back to the platform's.
-///
-/// The template is checked here, where somebody is typing it, rather than at
-/// the button: a refusal that arrives three days later at an editor that did
-/// not open is a refusal nobody can act on.
-///
-/// # Errors
-///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for an action that does not exist
-/// or a template that cannot be run;
-/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
-pub async fn set_command(
-    pool: &PgPool,
-    action: &str,
-    template: Option<&str>,
-) -> Result<(), IpcError> {
-    let action = open_action(action)?;
-    let template = settable(template);
-    if let Some(template) = template {
-        checkout::check_template(template)
-            .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
-    }
-    write_setting(pool, &command_key(action), template).await
-}
-
-/// Run one action's command at this entity's checkout.
-///
-/// # The only argument is the checkout path (ADR-0016)
-///
-/// The value substituted into the template comes from [`view`] -- the
-/// override a person typed, or a directory the scan found on this disk -- and
-/// `knobas_core::checkout::expand` takes one `&Path` and nothing else, so no
-/// field of the mirrored repo can reach a spawned process. That is the whole
-/// point of the feature having a settings surface at all: the *program* is
-/// what the person chose, and the *argument* is what knobas found.
-///
-/// # Errors
-///
-/// [`Invalid`](crate::IpcErrorCode::Invalid) for an unknown action, an address
-/// that is not a repo or a branch, an action with no template on this platform,
-/// a template that cannot be run, or a program that would not start;
-/// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold the
-/// entity, or it has no checkout on this machine;
-/// [`Internal`](crate::IpcErrorCode::Internal) for a query failure.
-pub async fn open(pool: &PgPool, entity_id: &str, action: &str) -> Result<(), IpcError> {
-    let action = open_action(action)?;
-    let checkout = resolve(pool, entity_id).await?;
-    let path = checkout.path.ok_or_else(|| {
-        IpcError::not_found(format!(
-            "{entity_id} has no checkout on this machine, so there is nothing to open"
-        ))
-    })?;
-    let stored = read_setting(pool, &command_key(action)).await?;
-    let template = template_or_refusal(action, stored, action.default_template())?;
-    let argv = checkout::expand(&template, Path::new(&path))
-        .map_err(|error| IpcError::invalid(format!("'{template}' cannot be run: {error}")))?;
-    spawn(&argv)
-        .map_err(|error| IpcError::invalid(format!("'{template}' could not be run: {error}")))
-}
-
-/// The action with this id, or a refusal naming what was asked for.
-fn open_action(action: &str) -> Result<OpenAction, IpcError> {
-    OpenAction::from_id(action).ok_or_else(|| {
-        let known: Vec<&str> = checkout::OPEN_ACTIONS.iter().map(|a| a.id()).collect();
-        IpcError::invalid(format!(
-            "'{action}' is not something knobas opens a checkout with; it has {}",
-            known.join(", ")
-        ))
-    })
-}
-
-/// Start `argv[0]` with the rest as its arguments, and do not wait for it.
-///
-/// **No shell.** The expansion answers an argument vector and this passes it
-/// straight to `exec`, so a checkout path holding a space, a `$` or a `;` is
-/// one argument and stays one, and a template cannot pipe or chain. `sh -c`
-/// would undo both properties in one line.
-///
-/// The three standard streams go to `/dev/null`. An editor that prints on
-/// startup would otherwise write into the app's own stdout, and a child that
-/// fills a pipe nobody reads blocks for ever.
-///
-/// The thread exists only to reap. A `Child` that is dropped without being
-/// waited on leaves a zombie for the life of the process, and an editor is
-/// exactly the kind of program that outlives the click that started it -- so
-/// the wait happens on a thread of its own rather than on tokio's blocking
-/// pool, where a terminal emulator left open all afternoon would sit on a
-/// worker the rest of the IPC surface needs.
-fn spawn(argv: &[String]) -> std::io::Result<()> {
-    // `expand` refuses an empty template, so a command word is always here;
-    // this is the shape that says so without an index that could panic.
-    let (program, arguments) = argv
-        .split_first()
-        .ok_or_else(|| std::io::Error::other("an expanded template has no command in it"))?;
-    let child = std::process::Command::new(program)
-        .args(arguments)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()?;
-    std::thread::spawn(move || {
-        let mut child = child;
-        let _ = child.wait();
-    });
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// The *not configured* state, which no Mac can reach through the database
-    /// -- macOS has a default for all three -- and which is what every button
-    /// off macOS is in. Reachable here because the platform's default is an
-    /// argument rather than a `cfg!`.
-    ///
-    /// **The citation ADR-0013 asks of a sanctioned substitute.** Its
-    /// 2026-09-07 consequence -- *"A fault the real instance cannot produce is
-    /// witnessed by a fake, and only that"* -- asks that *"The fake's doc
-    /// comment cites this line"*, and this test is that fake: the platform is
-    /// passed in, standing in for a machine the gate does not have. The rest
-    /// of that same line is why it is allowed here. *Awkward to reproduce* is
-    /// not *cannot produce*, and a Mac cannot be seeded, flagged or clocked
-    /// into reporting a non-macOS `std::env::consts::OS`, so no live run
-    /// reaches this arm -- unlike the locked screen of #500, which a person
-    /// unlocks. The seam is witnessed on its other arm by `checkout_ipc.rs`'s
-    /// `clearing_a_template_hands_this_platforms_default_back`. The
-    /// deputy's ruling of 2026-09-08 on #501, part 1.
-    #[test]
-    fn an_action_with_no_template_on_this_platform_is_not_configured() {
-        let view = command_view(OpenAction::JetBrains, None, None);
-        assert_eq!(view.template, None);
-        assert!(view.is_default, "nothing is stored, so nothing overrode it");
-
-        let error = template_or_refusal(OpenAction::JetBrains, None, None)
-            .expect_err("no template, nothing to run");
-        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
-        assert!(
-            error.message.contains("not configured"),
-            "{}",
-            error.message
-        );
-        assert!(
-            error.message.contains("Open in JetBrains"),
-            "{}",
-            error.message
-        );
-        assert!(error.message.contains("Settings"), "{}", error.message);
-    }
-
-    /// And the two states that do have a command: a stored template wins over
-    /// the platform's, and the platform's answers when nothing is stored.
-    #[test]
-    fn a_stored_template_wins_and_the_platforms_answers_when_nothing_is() {
-        let stored = command_view(
-            OpenAction::VsCode,
-            Some("code {path}".to_owned()),
-            Some("open -a X {path}"),
-        );
-        assert_eq!(stored.template.as_deref(), Some("code {path}"));
-        assert!(!stored.is_default);
-        assert_eq!(
-            template_or_refusal(
-                OpenAction::VsCode,
-                Some("code {path}".to_owned()),
-                Some("open -a X {path}")
-            )
-            .unwrap(),
-            "code {path}"
-        );
-
-        let fallback = command_view(OpenAction::VsCode, None, Some("open -a X {path}"));
-        assert_eq!(fallback.template.as_deref(), Some("open -a X {path}"));
-        assert!(fallback.is_default);
-    }
-
-    // -- the spawn half (#501) ---------------------------------------------
-
-    /// The settings keys are one string in two places -- here and in whatever
-    /// a person reads when they wonder where their template went -- and they
-    /// are the only thing standing between an upgrade and three forgotten
-    /// commands. Spelled out rather than derived from `command_key`, which is
-    /// the function under test.
-    #[test]
-    fn every_action_stores_its_template_under_its_own_key() {
-        let keys: Vec<String> = checkout::OPEN_ACTIONS
-            .into_iter()
-            .map(command_key)
-            .collect();
-        assert_eq!(
-            keys,
-            [
-                "checkout.command.vscode",
-                "checkout.command.jetbrains",
-                "checkout.command.terminal"
-            ]
-        );
-        // And under the clones root's own store, not beside it: a key that
-        // collided with `checkout.clones_root` would make one field eat the
-        // other.
-        assert!(!keys.contains(&CLONES_ROOT_KEY.to_owned()));
-    }
-
-    /// Exactly the keys the mirror declares -- a field added on one side only
-    /// is invisible to a walk over a hardcoded list.
-    #[test]
-    fn the_open_command_serialises_the_keys_the_mirror_declares() {
-        let json = serde_json::to_value(OpenCommandView {
-            action: "vscode".to_owned(),
-            label: "Open in VS Code".to_owned(),
-            template: None,
-            is_default: true,
-        })
-        .unwrap();
-        let mut keys: Vec<String> = json.as_object().unwrap().keys().cloned().collect();
-        keys.sort();
-        assert_eq!(keys, ["action", "is_default", "label", "template"]);
-        // The **interface's own body**, not the whole file: `entity.ts`
-        // declares `label:` and `template:` on other shapes too, so a
-        // whole-file substring would answer yes for a key `CheckoutCommand`
-        // had lost -- a check measuring the file where the claim is about one
-        // declaration.
-        let mirror = include_str!("../../../app/src/lib/ipc/entity.ts");
-        let body = mirror
-            .split_once("export interface CheckoutCommand {")
-            .expect("entity.ts declares CheckoutCommand")
-            .1
-            // `"\n}"` and not `'}'`: a doc comment inside the interface
-            // carries `{@link openCheckout}`, and splitting on the first
-            // brace would cut the body off above the first field.
-            .split_once("\n}")
-            .expect("the CheckoutCommand interface is closed")
-            .0;
-        for key in &keys {
-            assert!(
-                body.contains(&format!("{key}:")),
-                "OpenCommandView.{key} is missing from app/src/lib/ipc/entity.ts's CheckoutCommand"
-            );
-        }
-    }
-
-    /// An action nobody has is refused, and the refusal lists the ones there
-    /// are -- the message a person reading a log needs, and the one a renamed
-    /// id produces.
-    #[test]
-    fn an_action_that_does_not_exist_is_refused_by_name() {
-        let error = open_action("emacs").expect_err("emacs is not an action");
-        assert_eq!(error.code, crate::IpcErrorCode::Invalid);
-        assert!(error.message.contains("emacs"), "{}", error.message);
-        for action in checkout::OPEN_ACTIONS {
-            assert!(error.message.contains(action.id()), "{}", error.message);
-        }
-    }
 
     /// The setting key is one string in two files, and the migration is the
     /// one a reader looking for the clones root's storage will open.
