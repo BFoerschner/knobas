@@ -9,6 +9,8 @@ import type {
   LinkSetDetail,
   LinkSetDraft,
   LinkSetMemberKind,
+  LinkSetPattern,
+  LinkSetPatternPreview,
   LinkSetRow,
   LinkSetRule,
   PipelineRow,
@@ -23,6 +25,7 @@ import {
   listProjects,
   parentLinks,
   pipelines,
+  previewLinkSetPattern,
   previewLinkSetRule,
   saveLinkSet,
   setParentLinks,
@@ -35,6 +38,7 @@ export interface SetPorts {
   saveLinkSet: (draft: LinkSetDraft) => Promise<LinkSetDetail>;
   deleteLinkSet: (id: string) => Promise<void>;
   previewLinkSetRule: (rule: LinkSetRule) => Promise<RuleTicket[]>;
+  previewLinkSetPattern: (pattern: LinkSetPattern) => Promise<LinkSetPatternPreview>;
   parentLinks: () => Promise<boolean>;
   setParentLinks: (enabled: boolean) => Promise<boolean>;
   /** Every item of one kind the *Add…* picker offers. */
@@ -97,6 +101,7 @@ export const defaultPorts: SetPorts = {
   saveLinkSet: (draft) => saveLinkSet(draft),
   deleteLinkSet: (id) => deleteLinkSet(id),
   previewLinkSetRule: (rule) => previewLinkSetRule(rule),
+  previewLinkSetPattern: (pattern) => previewLinkSetPattern(pattern),
   parentLinks: () => parentLinks(),
   setParentLinks: (enabled) => setParentLinks(enabled),
   candidates: async (kind) => {

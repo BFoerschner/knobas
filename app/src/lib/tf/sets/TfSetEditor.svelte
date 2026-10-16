@@ -3,8 +3,10 @@
 
   - The name and the description, edited in place, and *Delete*.
   - One panel per kind (repositories, pipelines, pages, assets, monitors),
-    each with its members, *Remove* on each, and *Add…*
-    (`TfSetPicker.svelte`). *Add a pattern…* is #868's.
+    each with its patterns ("Pattern: … (N match now)", expanding to the
+    list) and its members (a dot and a line beside each name, #1008),
+    *Remove* on each, *Add…* (`TfSetPicker.svelte`), and for pipelines and
+    pages *Add a pattern…* (`TfSetPattern.svelte`, #868).
   - *Applies to*: one row per rule with a kind dropdown, a value dropdown, a
     live ticket count (`preview_link_set_rule`) and *Remove*, plus *Add a
     rule*.
@@ -28,7 +30,8 @@
   import { push } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
-  import { KIND_LABEL, MEMBER_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import { dotClass, itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
+  import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
 
   let {
@@ -51,6 +54,8 @@
   /** A rule being added or re-kinded, until its value is chosen. */
   let pending = $state<{ at: number; kind: LinkSetRuleKind } | null>(null);
   let picking = $state<LinkSetMemberKind | null>(null);
+  /** The kind whose *Add a pattern…* dialog is open. */
+  let patterning = $state<LinkSetMemberKind | null>(null);
   /** The saves asked for so far, in order (see `save`). */
   let saves: Promise<void> = Promise.resolve();
 
@@ -102,6 +107,7 @@
       name: detail.name,
       description: detail.description,
       members: detail.members.map(({ kind, entity_id }) => ({ kind, entity_id })),
+      patterns: detail.patterns.map(({ kind, query }) => ({ kind, query })),
       rules: detail.rules.map(({ kind, value }) => ({ kind, value })),
     };
   }
@@ -155,6 +161,11 @@
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     }
+  }
+
+  function addedPattern(kind: LinkSetMemberKind, query: string) {
+    patterning = null;
+    void save((draft) => draft.patterns.push({ kind, query }), `Added a pattern to ${set?.name ?? ""}`);
   }
 
   function added(kind: LinkSetMemberKind, picked: Candidate[]) {
@@ -271,17 +282,42 @@
     <div class="tf-set-panels">
       {#each MEMBER_KINDS as kind (kind)}
         {@const members = set.members.filter((member) => member.kind === kind)}
+        {@const patterns = set.patterns.map((pattern, at) => ({ ...pattern, at })).filter((pattern) => pattern.kind === kind)}
         <article class="tf-panel" aria-label={KIND_LABEL[kind]}>
           <header>
             <h3>{KIND_LABEL[kind]}</h3>
-            <span class="tf-dim">{members.length}</span>
-            <span class="tf-set-add"><button type="button" class="tf-btn tf-sm" onclick={() => (picking = kind)}>Add…</button></span>
+            <span class="tf-dim">{itemsOf({ members, patterns }).length}</span>
+            <span class="tf-set-add"
+              ><button type="button" class="tf-btn tf-sm" onclick={() => (picking = kind)}>Add…</button>{#if PATTERN_KINDS.includes(kind)}<button
+                  type="button"
+                  class="tf-btn tf-sm tf-ghost"
+                  onclick={() => (patterning = kind)}>Add a pattern…</button
+                >{/if}</span
+            >
           </header>
           <div class="tf-members">
+            {#each patterns as pattern (pattern.at)}
+              <div class="tf-member tf-pattern">
+                <details>
+                  <summary>Pattern: <code>{pattern.query}</code> <span class="tf-dim">({pattern.count} match now)</span></summary>
+                  <ul>
+                    {#each pattern.matches as row (row.entity_id)}<li>{row.title ?? keyOf(row.entity_id)}</li>{/each}
+                    {#if pattern.count > pattern.matches.length}<li class="tf-dim">and {pattern.count - pattern.matches.length} more</li>{/if}
+                  </ul>
+                </details>
+                <button
+                  type="button"
+                  class="tf-btn tf-sm tf-ghost tf-x"
+                  aria-label="Remove the pattern {pattern.query}"
+                  onclick={() => void save((draft) => draft.patterns.splice(pattern.at, 1))}>Remove</button
+                >
+              </div>
+            {/each}
             {#each members as member (member.entity_id)}
               <div class="tf-member">
+                <span class="tf-dot {dotClass(member.state)}"></span>
                 <span class:tf-mono={kind === "repo" || kind === "asset"}>{member.title ?? keyOf(member.entity_id)}</span>
-                {#if member.title === null}<span class="tf-dim">not synced</span>{/if}
+                {#if member.title === null}<span class="tf-dim">not synced</span>{:else if member.line}<span class="tf-dim tf-member-line">{member.line}</span>{/if}
                 <button
                   type="button"
                   class="tf-btn tf-sm tf-ghost tf-x"
@@ -291,7 +327,7 @@
                 >
               </div>
             {:else}
-              <div class="tf-member tf-dim">Nothing yet.</div>
+              {#if patterns.length === 0}<div class="tf-member tf-dim">Nothing yet.</div>{/if}
             {/each}
           </div>
         </article>
@@ -342,6 +378,16 @@
       read={() => ports.candidates(kind)}
       onadd={(picked) => added(kind, picked)}
       onclose={() => (picking = null)}
+    />
+  {/if}
+  {#if patterning !== null}
+    {@const kind = patterning}
+    <TfSetPattern
+      {kind}
+      setName={set.name}
+      preview={(query) => ports.previewLinkSetPattern({ kind, query })}
+      onadd={(query) => addedPattern(kind, query)}
+      onclose={() => (patterning = null)}
     />
   {/if}
 {/if}

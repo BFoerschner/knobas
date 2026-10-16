@@ -411,6 +411,7 @@ const TfDepsViewMenu = (await import("../tf/deps/TfDepsViewMenu.svelte")).defaul
 const TfSets = (await import("../tf/sets/TfSets.svelte")).default;
 const TfSetEditor = (await import("../tf/sets/TfSetEditor.svelte")).default;
 const TfSetPicker = (await import("../tf/sets/TfSetPicker.svelte")).default;
+const TfSetPattern = (await import("../tf/sets/TfSetPattern.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -726,6 +727,7 @@ function setPorts() {
     name: "Payout stack",
     description: "",
     members: [],
+    patterns: [],
     rules: [{ kind: "epic" as const, value: "jira:PAY-200", title: null }],
     tickets: 0,
     mine: 0,
@@ -737,6 +739,7 @@ function setPorts() {
     saveLinkSet: () => deferred(set),
     deleteLinkSet: () => deferred(undefined),
     previewLinkSetRule: () => deferred([]),
+    previewLinkSetPattern: () => deferred({ count: 0, matches: [], projects: [], refusal: null }),
     parentLinks: () => deferred(true),
     setParentLinks: () => deferred(true),
     candidates: () => deferred([]),
@@ -1546,6 +1549,23 @@ const CASES: Case[] = [
           setName: "Payout stack",
           have: new Set<string>(),
           read: () => deferred([{ entity_id: "confluence:1", name: "PSP error codes", sub: "" }]),
+          onadd: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** *Add a pattern…* (#868): its preview, answering late. */
+    name: "TfSetPattern",
+    source: "lib/tf/sets/TfSetPattern.svelte",
+    open: (target) => ({
+      app: mount(TfSetPattern, {
+        target,
+        props: {
+          kind: "page",
+          setName: "Payout stack",
+          preview: () => deferred({ count: 0, matches: [], projects: [{ source_id: "wiki", key: "OPS", name: "OPS" }], refusal: null }),
           onadd: () => {},
           onclose: () => {},
         },

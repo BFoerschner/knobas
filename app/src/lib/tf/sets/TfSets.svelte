@@ -85,7 +85,7 @@
     if (creating) return;
     creating = true;
     try {
-      const made = await ports.saveLinkSet({ id: null, name: "New link set", description: "", members: [], rules: [] });
+      const made = await ports.saveLinkSet({ id: null, name: "New link set", description: "", members: [], patterns: [], rules: [] });
       location.hash = `#/sets/${encodeURIComponent(made.id)}`;
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
