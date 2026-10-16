@@ -40,9 +40,11 @@ export function moreLine(column: MiniBoardColumn, drawn: number): string | null 
 }
 
 /**
- * A ticket's epic as the card and the preview draw it (#894): the path's key
- * and the epic's name, `PAY-200 Payout reliability`; the key alone when the
- * mirror holds no epic of that name, and `null` with no path.
+ * A ticket's epic as the card and the preview draw it (#894): the path line
+ * and the direct parent's name, `PAY-200 Payout reliability`. A Jira path
+ * is one segment, the epic's key; a deeper chain is followed by its last
+ * parent's name. The path alone when the mirror holds no parent of that
+ * name, and `null` with no path.
  */
 export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): string | null {
   if (card.path === null) return null;

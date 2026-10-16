@@ -158,6 +158,12 @@ macro_rules! priority_read {
 /// priority, the type, the assignee, the path line (#810), the labels and
 /// the signals (#813, #815) only for the rows kept: on a room of 15,000 tickets the uncapped board was 2 MB on the
 /// bridge and a card per ticket in the webview.
+///
+/// The parent's title (#894) is one primary-key probe per kept card. The
+/// payload macros all read the alias `i`, so the probe rebinds `i` to the
+/// candidate parent item, and the lateral `par` carries the card's own
+/// `source_id` out beside the parent's kind and name, where the probe can
+/// still see it.
 const CARDS: &str = concat!(
     "with ",
     status_paths!("$4"),
