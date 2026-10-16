@@ -514,7 +514,7 @@ witness-unit:
 # (`residue.test.svelte.ts`: a new component with an effect must be in it) and
 # the write-op count (`every_op_has_its_own_snake_case_identifier`: a new
 # `WriteOp` variant needs a probe in `every_write_op` and the count bumped) --
-# and svelte-check. Then it prints what it changed, so you commit exactly that.
+# clippy on the changed crates (#972) and svelte-check. Then it prints what it changed, so you commit exactly that.
 # It is not the gate; run `just check` once after it, as before.
 pre-gate:
     #!/usr/bin/env bash
@@ -537,6 +537,16 @@ pre-gate:
     just inventory-update
     just contract-index
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source --lib every_op_has_its_own_snake_case_identifier
+    # The gate's clippy, on the crates this branch changed (#972); the flags are
+    # the `clippy` and `clippy-libs` recipes' own.
+    pkgs=$(scripts/changed-crates.sh)
+    if [ -n "$pkgs" ]; then
+        echo "pre-gate: clippy on $pkgs"
+        just clippy $pkgs
+        just clippy-libs $pkgs
+    else
+        echo "pre-gate: no Rust changed, no clippy."
+    fi
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
     (cd app && npx vitest run src/lib/shell/a11y.test.ts)
     (cd app && npx svelte-check --tsconfig ./tsconfig.json)
@@ -581,8 +591,11 @@ inventory-rename +CRATES:
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
 
-clippy:
-    env -u RUSTUP_TOOLCHAIN cargo clippy --workspace --all-targets -- -D warnings
+# The gate's lint pass. PKGS narrows it to the given cargo package selection
+# (`just clippy -p knobas-core`; `pre-gate` passes the crates a branch changed,
+# #972); with none it lints the whole workspace. The one place the flags live.
+clippy *PKGS:
+    env -u RUSTUP_TOOLCHAIN cargo clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --all-targets -- -D warnings
 
 # The same lint pass over the libraries alone -- which is the only way to see
 # them the way something that merely *depends* on them does.
@@ -598,8 +611,8 @@ clippy:
 # Dropping `--all-targets` for `--lib` drops the dev-dependencies with it, so
 # each library is checked with the features a consumer actually gets. Almost
 # free after the pass above: same crates, same profile, a subset of the units.
-clippy-libs:
-    env -u RUSTUP_TOOLCHAIN cargo clippy --workspace --lib -- -D warnings
+clippy-libs *PKGS:
+    env -u RUSTUP_TOOLCHAIN cargo clippy {{ if PKGS == "" { "--workspace" } else { PKGS } }} --lib -- -D warnings
 
 # One embedded PostgreSQL for the whole run. Every test binary that uses
 # `knobas-db`'s shared test connector reaches it through `KNOBAS_TEST_DB_URL`
