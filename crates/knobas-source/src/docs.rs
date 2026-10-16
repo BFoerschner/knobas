@@ -52,6 +52,92 @@ pub struct DocContent {
     pub blocks: Vec<DocBlock>,
     /// The page's comments, oldest first.
     pub comments: Vec<DocComment>,
+    /// The page's sections in the order of its top-level headings, numbered
+    /// from 1 as the reader numbers them, each with whether knobas edits it
+    /// (#862, R-10.13).
+    #[serde(default)]
+    pub sections: Vec<DocSection>,
+    /// The versions the record names, newest first: at least the one it is
+    /// (R-10.15's *History*). Comparing them is out of scope.
+    #[serde(default)]
+    pub history: Vec<DocVersion>,
+}
+
+/// One section of a page body: a top-level heading and what follows it up to
+/// the next one (#862).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocSection {
+    /// 1 for the first top-level heading.
+    pub number: u32,
+    /// The section's body as the plain text the editor opens with (`- ` for
+    /// a list item, a blank line between paragraphs), `None` when it is
+    /// refused.
+    pub text: Option<String>,
+    /// Why knobas does not edit it, `None` when it does.
+    pub refusal: Option<SectionRefusal>,
+}
+
+/// Why a section is edited in the source and not in knobas (R-10.13): a text
+/// box round-trips plain text, and what it cannot hold would be lost.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SectionRefusal {
+    /// A table.
+    Table,
+    /// A code block.
+    Code,
+    /// A macro, a panel, a layout, a mention, a page or ticket link: markup
+    /// of the source's own that text cannot carry.
+    Macro,
+    /// Bold, italics, links or a nested list, which the text box would flatten.
+    Formatting,
+}
+
+/// One version of a page, as the record names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocVersion {
+    pub number: Option<u64>,
+    /// The account that made it.
+    pub by: Option<String>,
+    pub by_name: Option<String>,
+    /// When, RFC 3339, as the source wrote it.
+    pub at: Option<String>,
+    /// The version's message, where the editor left one.
+    pub message: Option<String>,
+}
+
+/// A section edit, made: the whole new body in the source's markup and the
+/// version it was made against (`WriteOp::UpdatePage`'s fields).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionEdit {
+    pub body: String,
+    pub base_version: i64,
+}
+
+/// Why a section edit was not made.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditRefused {
+    /// The section is one knobas does not edit.
+    Section(SectionRefusal),
+    /// The record has no such section, no body or no version.
+    Missing,
+}
+
+/// A docs source's writes in its own markup (#862, ADR-0022's `create_page`
+/// and `update_page` by section): plain functions, as [`DocProjection`] is.
+#[derive(Debug, Clone, Copy)]
+pub struct DocWrites {
+    /// Replace section `number`'s body of the mirrored record with `text`
+    /// (the editor's plain text), keeping everything else byte for byte.
+    pub edit_section: fn(
+        kind: &str,
+        payload: &serde_json::Value,
+        number: u32,
+        text: &str,
+    ) -> Result<SectionEdit, EditRefused>,
+    /// A new page's body from plain text: `## ` starts a section, `- ` a list
+    /// item, a blank line a paragraph.
+    pub body_from_text: fn(text: &str) -> String,
 }
 
 /// One comment on a page.

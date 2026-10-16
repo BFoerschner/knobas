@@ -233,7 +233,7 @@ mod tests {
         assert_eq!(ConfluenceCursor::parse("not json"), None);
         assert_eq!(ConfluenceCursor::parse(r#"{"v":99}"#), None);
         // A cursor from before #860's marks is a full sync, which re-indexes.
-        let mut old = serde_json::to_value(&good).unwrap();
+        let mut old: serde_json::Value = serde_json::from_str(&encoded).unwrap();
         old["v"] = serde_json::json!(1);
         assert_eq!(ConfluenceCursor::parse(&old.to_string()), None);
         // A TeamCity or Jira cursor handed to this adapter is not this

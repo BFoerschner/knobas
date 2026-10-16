@@ -7,7 +7,10 @@
 //! identity `@me` resolves to includes `mara`, the username the Confluence
 //! sources here are configured with.
 
-use knobas_app::commands::entity::{docs_page_inner, docs_search_inner, docs_tree_inner};
+use knobas_app::commands::entity::{
+    create_link_inner, docs_create_page_payload, docs_edit_section_payload,
+    docs_export_markdown_inner, docs_page_inner, docs_search_inner, docs_tree_inner,
+};
 use knobas_app::docs::DocsScope;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
 use knobas_source::docs::{DocBlock, Inline};
@@ -636,4 +639,304 @@ async fn the_space_the_grammar_and_the_empty_query() {
             .unwrap()
             .is_none()
     );
+}
+
+// -- the rail, the export and the writes (#861, #862) -------------------------
+
+/// A Jira source and a ticket in it with a status, for *Work it belongs to*.
+async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, String) {
+    let jira = format!("jira{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, 'jira', 'Jira', 'http://x', 'Pat', '{}')",
+    )
+    .bind(&jira)
+    .execute(pool)
+    .await
+    .unwrap();
+    let key = format!(
+        "W{}-1",
+        uuid::Uuid::new_v4().simple().to_string()[..5]
+            .to_uppercase()
+            .replace(|c: char| c.is_ascii_digit(), "Q")
+    );
+    let id = format!("{jira}:{key}");
+    item(
+        pool,
+        &id,
+        &jira,
+        "ticket",
+        title,
+        json!({"key": key, "fields": {"status": {"name": status}}}),
+    )
+    .await;
+    (id, key)
+}
+
+/// The rail: pages that link here (from the link lines written at sync, in
+/// the same source, never itself), the work it belongs to (chips and knobas
+/// links, with status), the history and the sections; and the writes the
+/// source takes.
+#[tokio::test]
+async fn a_page_reads_with_its_rail_and_sections() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let (chip, chip_key) = ticket(&pool, "Retry failed payouts", "In Progress").await;
+    let (linked, linked_key) = ticket(&pool, "Cap the budget", "Done").await;
+    let storage = format!(
+        "<h2>Text</h2><p>Plain.</p><h2>Refs</h2><p>See <ac:structured-macro ac:name=\"jira\">\
+         <ac:parameter ac:name=\"key\">{chip_key}</ac:parameter></ac:structured-macro></p>"
+    );
+    let target = page(&pool, &src, "1", "Retry budget", "ENG", &[], &storage).await;
+    create_link_inner(&pool, &target, &linked, Some("documents"), None)
+        .await
+        .unwrap();
+    let from = page(&pool, &src, "2", "Payout design", "ENG", &[], "").await;
+    indexed(
+        &pool,
+        &from,
+        &[
+            "Payout design".into(),
+            "See Retry budget.".into(),
+            link_line("ENG", "Retry budget"),
+        ],
+        "tomasz",
+        1,
+    )
+    .await;
+    // A link to a longer title that starts the same is not a link here.
+    let near = page(&pool, &src, "3", "Near miss", "ENG", &[], "").await;
+    indexed(
+        &pool,
+        &near,
+        &[
+            "Near miss".into(),
+            "Retry budget v2.".into(),
+            link_line("ENG", "Retry budget v2"),
+        ],
+        "tomasz",
+        1,
+    )
+    .await;
+    // The same title in another space is another page.
+    let other = page(&pool, &src, "4", "Elsewhere", "OPS", &[], "").await;
+    indexed(
+        &pool,
+        &other,
+        &[
+            "Elsewhere".into(),
+            "Retry budget.".into(),
+            link_line("OPS", "Retry budget"),
+        ],
+        "tomasz",
+        1,
+    )
+    .await;
+
+    let doc = docs_page_inner(&pool, &target).await.unwrap();
+    assert_eq!(
+        doc.backlinks
+            .iter()
+            .map(|b| b.entity_id.as_str())
+            .collect::<Vec<_>>(),
+        [from.as_str()]
+    );
+    assert_eq!(doc.backlinks[0].title, "Payout design");
+    let work: Vec<(&str, &str, Option<&str>, bool)> = doc
+        .work
+        .iter()
+        .map(|w| {
+            (
+                w.entity_id.as_str(),
+                w.key.as_str(),
+                w.status.as_deref(),
+                w.linked,
+            )
+        })
+        .collect();
+    assert_eq!(
+        work,
+        [
+            (chip.as_str(), chip_key.as_str(), Some("In Progress"), false),
+            (linked.as_str(), linked_key.as_str(), Some("Done"), true),
+        ]
+    );
+    assert_eq!(
+        doc.history.len(),
+        1,
+        "version 7 of a record that names no creator"
+    );
+    assert_eq!(doc.history[0].number, Some(7));
+    assert_eq!(doc.history[0].by_name.as_deref(), Some("Tomasz Wójcik"));
+    assert_eq!(doc.sections.len(), 2);
+    assert_eq!(doc.sections[0].text.as_deref(), Some("Plain."));
+    assert_eq!(
+        doc.sections[1].refusal,
+        Some(knobas_source::docs::SectionRefusal::Macro)
+    );
+    assert_eq!(doc.writes, ["comment", "update_page", "create_page"]);
+}
+
+/// *For you*: a page whose mention of the reader is in the inbox, with who
+/// mentioned them; a page that does not mention them is not.
+#[tokio::test]
+async fn for_you_is_the_pages_that_mention_the_reader() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let w = word();
+    let mentioning = page(
+        &pool,
+        &src,
+        "1",
+        &format!("Mentions {w}"),
+        "ENG",
+        &[],
+        "<p>Body</p>",
+    )
+    .await;
+    indexed(
+        &pool,
+        &mentioning,
+        &[
+            format!("Mentions {w}"),
+            "Body".into(),
+            comment_line(Some("Priya Nair")),
+            "Thanks @mara ".into(),
+        ],
+        "tomasz",
+        0,
+    )
+    .await;
+    let quiet = page(
+        &pool,
+        &src,
+        "2",
+        &format!("Quiet {w}"),
+        "ENG",
+        &[],
+        "<p>Body</p>",
+    )
+    .await;
+    indexed(
+        &pool,
+        &quiet,
+        &[format!("Quiet {w}"), "Body".into()],
+        "tomasz",
+        0,
+    )
+    .await;
+
+    let tree = docs_tree_inner(&pool).await.unwrap();
+    let mine: Vec<_> = tree
+        .for_you
+        .iter()
+        .filter(|f| f.entity_id == mentioning || f.entity_id == quiet)
+        .collect();
+    assert_eq!(mine.len(), 1, "{:?}", tree.for_you);
+    assert_eq!(mine[0].entity_id, mentioning);
+    assert_eq!(
+        mine[0].by_name.as_deref(),
+        Some("Priya Nair"),
+        "the comment that mentions"
+    );
+    assert_eq!(mine[0].space_key.as_deref(), Some("ENG"));
+}
+
+/// *Export as Markdown* writes one file named for the page through the one
+/// converter: the title, headings, chips as keys, macros as comments.
+#[tokio::test]
+async fn export_writes_the_page_as_markdown() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let id = page(
+        &pool,
+        &src,
+        "1",
+        "Retry budget",
+        "ENG",
+        &[],
+        "<h2>Cap</h2><p>Five <strong>at most</strong>, see <ac:link><ri:page ri:content-title=\"Payout design\" /></ac:link>.</p>\
+         <ac:structured-macro ac:name=\"roadmap\" />",
+    )
+    .await;
+    let folder =
+        std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
+    let done = docs_export_markdown_inner(&pool, &id, &folder)
+        .await
+        .unwrap();
+    assert_eq!(done.file, "retry-budget.md");
+    let text = std::fs::read_to_string(folder.join(&done.file)).unwrap();
+    std::fs::remove_dir_all(&folder).ok();
+    assert!(text.starts_with("# Retry budget\n"), "{text}");
+    assert!(text.contains("## Cap"), "{text}");
+    assert!(text.contains("**at most**"), "{text}");
+    assert!(text.contains("](payout-design.md)"), "{text}");
+    assert!(text.contains("<!-- macro: roadmap -->"), "{text}");
+}
+
+/// *Edit section* queues the page's whole new body against the version read,
+/// and refuses a section knobas does not edit and a page that moved on.
+#[tokio::test]
+async fn a_section_edit_is_the_whole_body_against_the_version_read() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let id = page(
+        &pool,
+        &src,
+        "1",
+        "Retry budget",
+        "ENG",
+        &[],
+        "<h2>Cap</h2><p>Five.</p><h2>Table</h2><table><tr><td>x</td></tr></table>",
+    )
+    .await;
+    let payload = docs_edit_section_payload(&pool, &id, 1, Some(7), "Six.\n- one")
+        .await
+        .unwrap();
+    assert_eq!(
+        payload,
+        json!({"UpdatePage": {
+            "entity": id,
+            "base_version": 7,
+            "body": "<h2>Cap</h2><p>Six.</p><ul><li>one</li></ul><h2>Table</h2><table><tr><td>x</td></tr></table>",
+        }})
+    );
+    let refused = docs_edit_section_payload(&pool, &id, 2, Some(7), "x")
+        .await
+        .unwrap_err();
+    assert!(refused.message.contains("table"), "{}", refused.message);
+    let moved = docs_edit_section_payload(&pool, &id, 1, Some(6), "x")
+        .await
+        .unwrap_err();
+    assert!(moved.message.contains("changed"), "{}", moved.message);
+}
+
+/// *New page* queues a `CreatePage` under the parent, in its space, with the
+/// plain text in storage format; a blank title is refused.
+#[tokio::test]
+async fn a_new_page_goes_under_its_parent_in_storage_format() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let parent = page(&pool, &src, "1", "Payments", "ENG", &[], "").await;
+    let new = knobas_app::docs::NewPage {
+        parent: parent.clone(),
+        title: " Retry runbook ".to_owned(),
+        text: "Intro\n\n## Steps\n- restart".to_owned(),
+    };
+    let (payload, source) = docs_create_page_payload(&pool, &new).await.unwrap();
+    assert_eq!(source, src);
+    assert_eq!(
+        payload,
+        json!({"CreatePage": {
+            "parent": parent,
+            "space": "ENG",
+            "title": "Retry runbook",
+            "body": "<p>Intro</p><h2>Steps</h2><ul><li>restart</li></ul>",
+        }})
+    );
+    let blank = knobas_app::docs::NewPage {
+        title: "  ".to_owned(),
+        ..new
+    };
+    assert!(docs_create_page_payload(&pool, &blank).await.is_err());
 }

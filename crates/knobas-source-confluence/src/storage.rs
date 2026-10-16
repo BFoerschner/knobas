@@ -394,6 +394,81 @@ pub(crate) fn from_text(text: &str) -> String {
     out
 }
 
+/// The Docs editor's plain text in, storage format out (#862): what a section
+/// edit and a new page are written in (R-10.13, R-10.16).
+///
+/// `## ` (one to six `#`) starts a heading, `- ` or `* ` a list item, a blank
+/// line a new paragraph, and a single newline inside one is a `<br/>`.
+/// Everything else is text, escaped as [`from_text`] escapes it: no other
+/// markup is read, so what a reader typed arrives as typed.
+#[must_use]
+pub(crate) fn from_plain(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 32);
+    let mut paragraph: Vec<&str> = Vec::new();
+    let mut items: Vec<&str> = Vec::new();
+    let flush = |out: &mut String, paragraph: &mut Vec<&str>, items: &mut Vec<&str>| {
+        if !paragraph.is_empty() {
+            out.push_str("<p>");
+            out.push_str(
+                &paragraph
+                    .iter()
+                    .map(|l| escape(l))
+                    .collect::<Vec<_>>()
+                    .join("<br/>"),
+            );
+            out.push_str("</p>");
+            paragraph.clear();
+        }
+        if !items.is_empty() {
+            out.push_str("<ul>");
+            for item in items.iter() {
+                out.push_str("<li>");
+                out.push_str(&escape(item));
+                out.push_str("</li>");
+            }
+            out.push_str("</ul>");
+            items.clear();
+        }
+    };
+    let text = text.replace("\r\n", "\n");
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            flush(&mut out, &mut paragraph, &mut items);
+            continue;
+        }
+        let hashes = trimmed.len() - trimmed.trim_start_matches('#').len();
+        if (1..=6).contains(&hashes)
+            && let Some(heading) = trimmed[hashes..].strip_prefix(' ')
+        {
+            flush(&mut out, &mut paragraph, &mut items);
+            out.push_str(&format!(
+                "<h{hashes}>{}</h{hashes}>",
+                escape(heading.trim())
+            ));
+            continue;
+        }
+        if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
+            if !paragraph.is_empty() {
+                let mut none = Vec::new();
+                flush(&mut out, &mut paragraph, &mut none);
+            }
+            items.push(item.trim());
+            continue;
+        }
+        if !items.is_empty() {
+            let mut none = Vec::new();
+            flush(&mut out, &mut none, &mut items);
+        }
+        paragraph.push(trimmed);
+    }
+    flush(&mut out, &mut paragraph, &mut items);
+    out
+}
+
 /// The three characters that are markup in character data, escaped in the one
 /// order that is not self-defeating.
 fn escape(raw: &str) -> String {
@@ -710,5 +785,16 @@ mod tests {
             Some(me()),
         );
         assert_eq!(text, "@knobas knobas?");
+    }
+
+    #[test]
+    fn plain_text_becomes_headings_lists_and_paragraphs() {
+        assert_eq!(
+            from_plain("Intro <b>\nsecond line\n\n## Steps\n- one & two\n* three\nAfter."),
+            "<p>Intro &lt;b&gt;<br/>second line</p><h2>Steps</h2>\
+             <ul><li>one &amp; two</li><li>three</li></ul><p>After.</p>"
+        );
+        assert_eq!(from_plain("  \n "), "");
+        assert_eq!(from_plain("#hashtag"), "<p>#hashtag</p>");
     }
 }

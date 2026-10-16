@@ -25,6 +25,9 @@ struct Adapter {
     build: fn(SourceInstance) -> Result<Box<dyn Source>, SourceError>,
     /// The Docs projection (#859, ADR-0022), for an adapter that emits pages.
     doc: Option<knobas_source::docs::DocProjection>,
+    /// The Docs writes in the source's markup (#862), for an adapter whose
+    /// pages knobas edits and creates.
+    doc_writes: Option<knobas_source::docs::DocWrites>,
 }
 
 /// The table. One row per adapter crate.
@@ -40,36 +43,42 @@ const ADAPTERS: &[Adapter] = &[
         template: knobas_source_mock::descriptor_template,
         build: knobas_source_mock::build,
         doc: None,
+        doc_writes: None,
     },
     Adapter {
         kind: "jira",
         template: knobas_source_jira::descriptor_template,
         build: knobas_source_jira::build,
         doc: None,
+        doc_writes: None,
     },
     Adapter {
         kind: "teamcity",
         template: knobas_source_teamcity::descriptor_template,
         build: knobas_source_teamcity::build,
         doc: None,
+        doc_writes: None,
     },
     Adapter {
         kind: "gitea",
         template: knobas_source_gitea::descriptor_template,
         build: knobas_source_gitea::build,
         doc: None,
+        doc_writes: None,
     },
     Adapter {
         kind: "confluence",
         template: knobas_source_confluence::descriptor_template,
         build: knobas_source_confluence::build,
         doc: Some(knobas_source_confluence::doc_content),
+        doc_writes: Some(knobas_source_confluence::DOC_WRITES),
     },
     Adapter {
         kind: "kuma",
         template: knobas_source_kuma::descriptor_template,
         build: knobas_source_kuma::build,
         doc: None,
+        doc_writes: None,
     },
 ];
 
@@ -101,6 +110,17 @@ impl Registry {
     #[must_use]
     pub fn doc_projection(&self, kind: &str) -> Option<knobas_source::docs::DocProjection> {
         ADAPTERS.iter().find(|a| a.kind == kind).and_then(|a| a.doc)
+    }
+
+    /// The Docs writes of an adapter kind (#862): a section edit and a new
+    /// page's body in its own markup. `None` for a kind knobas writes no
+    /// pages for.
+    #[must_use]
+    pub fn doc_writes(&self, kind: &str) -> Option<knobas_source::docs::DocWrites> {
+        ADAPTERS
+            .iter()
+            .find(|a| a.kind == kind)
+            .and_then(|a| a.doc_writes)
     }
 }
 

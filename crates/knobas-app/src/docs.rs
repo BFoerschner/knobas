@@ -36,6 +36,21 @@ pub struct DocsTree {
     /// The page the reader opened most recently (`visit_entity`), while it is
     /// still a live page; `#/docs` opens it.
     pub last_read: Option<String>,
+    /// *For you* (#860, R-10.2): the pages whose mention of the reader is in
+    /// the inbox now, newest first.
+    pub for_you: Vec<DocForYou>,
+}
+
+/// A page that needs the reader, and who asked.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocForYou {
+    pub entity_id: String,
+    pub title: String,
+    pub space_key: Option<String>,
+    /// The display name of who mentioned the reader: the newest comment that
+    /// does, else the page's editor when the body does. `None` where the
+    /// record does not say (a mention typed as a plain `@name`).
+    pub by_name: Option<String>,
 }
 
 /// One space and its pages.
@@ -90,6 +105,41 @@ pub struct DocPage {
     /// The identity `@me` resolves to, so the reader can say *You* for the
     /// editor and a comment's author.
     pub me: Vec<String>,
+    /// The page's sections, numbered as the anchors are, each with its text
+    /// or why knobas does not edit it (#862).
+    pub sections: Vec<knobas_source::docs::DocSection>,
+    /// The versions the record names, newest first (#861).
+    pub history: Vec<knobas_source::docs::DocVersion>,
+    /// The live pages of the same source whose body links to this one, by
+    /// title (#861, *Pages that link here*).
+    pub backlinks: Vec<DocBacklink>,
+    /// The tickets the page references or is linked to in knobas, with their
+    /// status now (#861, *Work it belongs to*).
+    pub work: Vec<DocWork>,
+    /// Which Docs writes this page's source takes: `comment`, `update_page`,
+    /// `create_page`, each where its adapter declares it and (for the two
+    /// page writes) writes the source's markup (#862).
+    pub writes: Vec<String>,
+}
+
+/// A page that links to the one being read.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocBacklink {
+    pub entity_id: String,
+    pub title: String,
+    pub space_key: Option<String>,
+}
+
+/// A ticket a page belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocWork {
+    pub entity_id: String,
+    /// The entity id past its namespace (`PAY-231`): the job's address.
+    pub key: String,
+    pub title: String,
+    pub status: Option<String>,
+    /// Whether a knobas link draws it (else the body references it).
+    pub linked: bool,
 }
 
 /// A space, named.
@@ -127,12 +177,17 @@ select a.entity_id from knobas.activity a
  order by a.at desc, a.id desc
  limit 1";
 
-/// The spaces with their trees, and the page read last.
+/// The spaces with their trees, the page read last and *For you*.
 ///
 /// # Errors
 ///
 /// `internal` for a query failure.
-pub async fn tree(pool: &PgPool, declarations: &Declarations) -> Result<DocsTree, IpcError> {
+pub async fn tree(
+    pool: &PgPool,
+    declarations: &Declarations,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    me: &[String],
+) -> Result<DocsTree, IpcError> {
     let rows = sqlx::query(PAGES)
         .bind(declarations.as_param())
         .fetch_all(pool)
@@ -186,7 +241,89 @@ pub async fn tree(pool: &PgPool, declarations: &Declarations) -> Result<DocsTree
         .bind(knobas_core::activity::VISITED)
         .fetch_optional(pool)
         .await?;
-    Ok(DocsTree { spaces, last_read })
+    let for_you = for_you(pool, declarations, project, me).await?;
+    Ok(DocsTree {
+        spaces,
+        last_read,
+        for_you,
+    })
+}
+
+/// The rows *For you* reads its pages from. `$1` the ids.
+const FOR_YOU_ROWS: &str = "\
+select i.entity_id, i.payload, s.kind as adapter_kind, p.key
+  from sync.live_item i
+  join knobas.source_config s on s.id = i.source_id
+  left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind
+ where i.entity_id = any($1)";
+
+/// *For you*: the inbox's mentions of the reader that are pages, as the
+/// inbox has them now (a mention marked done or snoozed there is not here),
+/// each with who mentioned the reader.
+async fn for_you(
+    pool: &PgPool,
+    declarations: &Declarations,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    me: &[String],
+) -> Result<Vec<DocForYou>, IpcError> {
+    use knobas_core::inbox::{Category, Shelf, items_from, rule};
+    let Some(mention) = rule(Category::Mention) else {
+        return Ok(Vec::new());
+    };
+    let items: Vec<_> = items_from(pool, mention, me, Utc::now(), Shelf::Stream, declarations)
+        .await
+        .map_err(IpcError::internal)?
+        .into_iter()
+        .filter(|item| item.kind.as_deref() == Some(PAGE_KIND))
+        .filter_map(|item| item.entity_id.map(|id| (id, item.title)))
+        .collect();
+    let ids: Vec<&String> = items.iter().map(|(id, _)| id).collect();
+    let rows: HashMap<String, sqlx::postgres::PgRow> = sqlx::query(FOR_YOU_ROWS)
+        .bind(&ids)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|r| (r.get::<String, _>("entity_id"), r))
+        .collect();
+    Ok(items
+        .into_iter()
+        .map(|(entity_id, title)| {
+            let row = rows.get(&entity_id);
+            let by_name = row.and_then(|row| {
+                let payload: serde_json::Value = row.get("payload");
+                let content = project(&row.get::<String, _>("adapter_kind"))?(PAGE_KIND, &payload)?;
+                mentioner(&content, me)
+            });
+            DocForYou {
+                space_key: row.and_then(|r| r.get("key")),
+                entity_id,
+                title,
+                by_name,
+            }
+        })
+        .collect())
+}
+
+/// Who mentioned one of `me` in a page: the newest comment that does, else
+/// the page's editor when the body does.
+fn mentioner(content: &knobas_source::docs::DocContent, me: &[String]) -> Option<String> {
+    let mentions = |blocks: &[DocBlock]| {
+        let mut blocks = blocks.to_vec();
+        knobas_source::docs::inlines_mut(&mut blocks)
+            .into_iter()
+            .any(|i| matches!(i, Inline::Mention { user: Some(user), .. } if me.contains(user)))
+    };
+    content
+        .comments
+        .iter()
+        .rev()
+        .find(|c| mentions(&c.blocks))
+        .and_then(|c| c.author_name.clone().or_else(|| c.author.clone()))
+        .or_else(|| {
+            mentions(&content.blocks)
+                .then(|| content.editor_name.clone())
+                .flatten()
+        })
 }
 
 /// Cut every parent loop: two pages that name each other (titles are matched,
@@ -259,6 +396,57 @@ const TICKETS: &str = concat!(
       order by i.entity_id"
 );
 
+/// The tickets a page is linked to in knobas (confirmed links, either
+/// direction), with their declared status. `$1` the page, `$2` declarations.
+const LINKED_TICKETS: &str = concat!(
+    "select i.entity_id, substr(i.entity_id, strpos(i.entity_id, ':') + 1) as key, i.title, ",
+    knobas_core::declared_string!("$2", "status_name"),
+    " as status from knobas.confirmed_link l \
+       join sync.live_item i on i.entity_id = case when l.from_id = $1 then l.to_id else l.from_id end \
+      where (l.from_id = $1 or l.to_id = $1) and i.kind = 'ticket' \
+      order by l.created_at, i.entity_id"
+);
+
+/// The live pages of one source whose `body_text` carries a link line to
+/// this page (`knobas_source::docs::indexed::link_line`, written at sync).
+/// The title's words narrow the scan through the full-text index first: a
+/// link line holds the title, so every page that links here matches them.
+/// `$1` source, `$2` the page, `$3` its title, `$4` its link line.
+const BACKLINKS: &str = "\
+select i.entity_id, i.title, p.key
+  from sync.live_item i
+  cross join (select phraseto_tsquery('english', $3) as q) t
+  left join sync.item_project p on p.entity_id = i.entity_id
+ where i.kind = 'page' and i.source_id = $1 and i.entity_id <> $2
+   and (numnode(t.q) = 0 or i.fts @@ t.q)
+   and strpos(i.body_text, $4) > 0
+ order by lower(i.title), i.entity_id
+ limit 50";
+
+async fn backlinks(
+    pool: &PgPool,
+    source_id: &str,
+    entity_id: &str,
+    space_key: &str,
+    title: &str,
+) -> Result<Vec<DocBacklink>, IpcError> {
+    let line = knobas_source::docs::indexed::link_line(space_key, title);
+    Ok(sqlx::query(BACKLINKS)
+        .bind(source_id)
+        .bind(entity_id)
+        .bind(title)
+        .bind(&line)
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|r| DocBacklink {
+            entity_id: r.get("entity_id"),
+            title: r.get("title"),
+            space_key: r.get("key"),
+        })
+        .collect())
+}
+
 /// One page, drawn.
 ///
 /// # Errors
@@ -270,6 +458,7 @@ pub async fn page(
     pool: &PgPool,
     declarations: &Declarations,
     project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    writes: impl Fn(&str) -> Vec<String>,
     me: &[String],
     entity_id: &str,
 ) -> Result<DocPage, IpcError> {
@@ -303,6 +492,8 @@ pub async fn page(
         labels: Vec::new(),
         blocks: Vec::new(),
         comments: Vec::new(),
+        sections: Vec::new(),
+        history: Vec::new(),
     });
 
     // Titles to resolve, per space: the chain in this page's space, and every
@@ -403,11 +594,63 @@ pub async fn page(
         })
         .collect();
 
+    let title: String = row.get("title");
+    let backlinks = match &here {
+        Some(key) => backlinks(pool, &source_id, &id, key, &title).await?,
+        None => Vec::new(),
+    };
+    let mut work: Vec<DocWork> = Vec::new();
+    for inline in every_inline(&mut content) {
+        if let Inline::Issue {
+            key,
+            entity_id: Some(ticket),
+            title: Some(summary),
+            status,
+        } = &*inline
+            && !work.iter().any(|w| w.entity_id == *ticket)
+        {
+            work.push(DocWork {
+                entity_id: ticket.clone(),
+                key: key.clone(),
+                title: summary.clone(),
+                status: status.clone(),
+                linked: false,
+            });
+        }
+    }
+    for r in sqlx::query(LINKED_TICKETS)
+        .bind(&id)
+        .bind(declarations.as_param())
+        .fetch_all(pool)
+        .await?
+    {
+        let ticket: String = r.get("entity_id");
+        match work.iter_mut().find(|w| w.entity_id == ticket) {
+            Some(known) => known.linked = true,
+            None => work.push(DocWork {
+                key: r.get("key"),
+                title: r.get("title"),
+                status: r.get("status"),
+                linked: true,
+                entity_id: ticket,
+            }),
+        }
+    }
+
     Ok(DocPage {
+        writes: if readable {
+            writes(&adapter_kind)
+        } else {
+            Vec::new()
+        },
+        sections: content.sections,
+        history: content.history,
+        backlinks,
+        work,
         entity_id: id,
         source_id,
         source_name: row.get("source_name"),
-        title: row.get("title"),
+        title,
         space,
         ancestors,
         editor: row.get("author"),
@@ -850,3 +1093,359 @@ mod search_tests {
         );
     }
 }
+
+/// Which Docs writes an adapter kind takes: `comment` where it declares it,
+/// `update_page` and `create_page` where it declares them **and** writes its
+/// own markup (`has_markup`, the registry's `doc_writes`).
+#[must_use]
+pub fn docs_writes(
+    templates: &[knobas_source::SourceDescriptor],
+    has_markup: bool,
+    kind: &str,
+) -> Vec<String> {
+    let Some(template) = templates.iter().find(|t| t.adapter_kind == kind) else {
+        return Vec::new();
+    };
+    ["comment", "update_page", "create_page"]
+        .into_iter()
+        .filter(|op| template.write_ops.iter().any(|w| w == op))
+        .filter(|op| *op == "comment" || has_markup)
+        .map(str::to_owned)
+        .collect()
+}
+
+// -- Export as Markdown (#861) ----------------------------------------------
+
+/// What *Export as Markdown* wrote.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DocExport {
+    /// The file's name, `page_file_name(title)`.
+    pub file: String,
+    /// The folder it is in, absolute.
+    pub folder: String,
+}
+
+/// A page as Markdown (R-10.17), through the one converter
+/// (`knobas_core::markdown`): its title as the heading, then its blocks.
+#[must_use]
+pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
+    use knobas_core::markdown as md;
+    let mut out = vec![md::DocBlock::Heading {
+        level: 1,
+        text: vec![md::Inline::Text {
+            text: title.to_owned(),
+        }],
+    }];
+    out.extend(blocks.iter().map(to_md_block));
+    md::to_markdown(&out)
+}
+
+fn to_md_block(block: &DocBlock) -> knobas_core::markdown::DocBlock {
+    use knobas_core::markdown as md;
+    use knobas_source::docs::PanelKind;
+    match block {
+        DocBlock::Heading { level, text } => md::DocBlock::Heading {
+            level: *level,
+            text: to_md_inlines(text),
+        },
+        DocBlock::Paragraph { text } => md::DocBlock::Paragraph {
+            text: to_md_inlines(text),
+        },
+        DocBlock::List { ordered, items } => md::DocBlock::List {
+            ordered: *ordered,
+            items: items
+                .iter()
+                .map(|item| item.iter().map(to_md_block).collect())
+                .collect(),
+        },
+        DocBlock::Code { code, language } => md::DocBlock::Code {
+            language: language.clone(),
+            text: code.clone(),
+        },
+        DocBlock::Table { rows } => {
+            let headed = rows
+                .first()
+                .is_some_and(|r| !r.is_empty() && r.iter().all(|c| c.header));
+            let cells = |row: &Vec<knobas_source::docs::TableCell>| {
+                row.iter().map(|c| to_md_inlines(&c.text)).collect()
+            };
+            md::DocBlock::Table {
+                header: if headed { cells(&rows[0]) } else { Vec::new() },
+                rows: rows.iter().skip(usize::from(headed)).map(cells).collect(),
+            }
+        }
+        DocBlock::Panel {
+            kind,
+            title,
+            blocks,
+        } => md::DocBlock::Panel {
+            kind: match kind {
+                PanelKind::Info => "info",
+                PanelKind::Note => "note",
+                PanelKind::Warning => "warning",
+                PanelKind::Tip => "tip",
+            }
+            .to_owned(),
+            title: title.clone(),
+            blocks: blocks.iter().map(to_md_block).collect(),
+        },
+        DocBlock::Placeholder { name } => md::DocBlock::Macro {
+            name: name.clone(),
+            summary: None,
+        },
+    }
+}
+
+fn to_md_inlines(text: &[Inline]) -> Vec<knobas_core::markdown::Inline> {
+    use knobas_core::markdown::Inline as Md;
+    text.iter()
+        .map(|inline| match inline {
+            Inline::Text {
+                text,
+                strong,
+                emphasis,
+                code,
+            } => {
+                if *code {
+                    return Md::Code { text: text.clone() };
+                }
+                let mut run = Md::Text { text: text.clone() };
+                if *emphasis {
+                    run = Md::Emphasis { text: vec![run] };
+                }
+                if *strong {
+                    run = Md::Strong { text: vec![run] };
+                }
+                run
+            }
+            Inline::Link { text, href } => Md::Link {
+                text: vec![Md::Text { text: text.clone() }],
+                url: href.clone(),
+            },
+            Inline::PageLink { title, .. } => Md::PageLink {
+                title: title.clone(),
+            },
+            Inline::Issue { key, .. } => Md::Text { text: key.clone() },
+            Inline::Mention { .. } => Md::Text {
+                text: mention_words(inline),
+            },
+            Inline::Break => Md::Text {
+                text: " ".to_owned(),
+            },
+        })
+        .collect()
+}
+
+/// `@` and the first word of the display name, else the account: how the
+/// reader writes a mention.
+fn mention_words(inline: &Inline) -> String {
+    let Inline::Mention { user, name, .. } = inline else {
+        return String::new();
+    };
+    let first = name
+        .as_deref()
+        .and_then(|n| n.split_whitespace().next())
+        .or(user.as_deref())
+        .unwrap_or("someone");
+    format!("@{first}")
+}
+
+/// Write one page as Markdown into `folder`.
+///
+/// # Errors
+///
+/// As [`page`]; `internal` if the file cannot be written.
+pub async fn export(
+    pool: &PgPool,
+    declarations: &Declarations,
+    project: impl Fn(&str) -> Option<knobas_source::docs::DocProjection>,
+    entity_id: &str,
+    folder: &std::path::Path,
+) -> Result<DocExport, IpcError> {
+    let page = page(pool, declarations, project, |_| Vec::new(), &[], entity_id).await?;
+    if !page.readable {
+        return Err(IpcError::invalid(format!(
+            "knobas cannot read the body of {}, so it has nothing to export",
+            page.title
+        )));
+    }
+    let file = knobas_core::markdown::page_file_name(&page.title);
+    std::fs::create_dir_all(folder).map_err(IpcError::internal)?;
+    std::fs::write(folder.join(&file), page_markdown(&page.title, &page.blocks))
+        .map_err(IpcError::internal)?;
+    Ok(DocExport {
+        file,
+        folder: folder.display().to_string(),
+    })
+}
+
+// -- Edit section and New page (#862) -----------------------------------------
+
+/// The page row a write is made from. `$1` the id.
+const WRITE_ROW: &str = "\
+select i.kind, i.source_id, i.payload, s.kind as adapter_kind
+  from sync.live_item i
+  join knobas.source_config s on s.id = i.source_id
+ where i.entity_id = $1";
+
+/// The `UpdatePage` a section edit queues (R-10.13): section `section` of the
+/// mirrored page, its body replaced by `text` in the source's markup, against
+/// the version the reader read (`version`). Refused when the mirror has moved
+/// past that version since, when the section is one knobas does not edit, or
+/// when the source writes no pages.
+///
+/// # Errors
+///
+/// `invalid` for each refusal above, `not_found` for a page the live mirror
+/// does not hold, `internal` for a query failure.
+pub async fn section_edit(
+    pool: &PgPool,
+    writes: impl Fn(&str) -> Option<knobas_source::docs::DocWrites>,
+    entity_id: &str,
+    section: u32,
+    version: Option<u64>,
+    text: &str,
+) -> Result<serde_json::Value, IpcError> {
+    use knobas_source::docs::{EditRefused, SectionRefusal};
+    let row = sqlx::query(WRITE_ROW)
+        .bind(entity_id)
+        .fetch_optional(pool)
+        .await?
+        .ok_or_else(|| IpcError::not_found(format!("{entity_id} is not in the mirror")))?;
+    let kind: String = row.get("kind");
+    let adapter_kind: String = row.get("adapter_kind");
+    let payload: serde_json::Value = row.get("payload");
+    let Some(doc) = writes(&adapter_kind) else {
+        return Err(IpcError::invalid(format!(
+            "knobas does not edit pages of a {adapter_kind} source"
+        )));
+    };
+    let edit = (doc.edit_section)(&kind, &payload, section, text).map_err(|refused| {
+        IpcError::invalid(match refused {
+            EditRefused::Section(SectionRefusal::Table) => "This section has a table; edit it in the source.",
+            EditRefused::Section(SectionRefusal::Code) => "This section has code; edit it in the source.",
+            EditRefused::Section(SectionRefusal::Macro) => "This section has a macro; edit it in the source.",
+            EditRefused::Section(SectionRefusal::Formatting) => {
+                "This section has formatting or links that a text edit would lose; edit it in the source."
+            }
+            EditRefused::Missing => "The page has no such section any more. Reopen it and try again.",
+        })
+    })?;
+    if version.is_some_and(|v| i64::try_from(v).ok() != Some(edit.base_version)) {
+        return Err(IpcError::invalid(
+            "The page changed since you opened it. Reopen it and edit the section again.",
+        ));
+    }
+    Ok(serde_json::json!({
+        "UpdatePage": {
+            "entity": entity_id,
+            "base_version": edit.base_version,
+            "body": edit.body,
+        }
+    }))
+}
+
+/// What *New page* asks for (R-10.16).
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct NewPage {
+    /// The page it goes under, a mirrored page of the space.
+    pub parent: String,
+    pub title: String,
+    /// The editor's plain text: `## ` a section, `- ` a list item.
+    pub text: String,
+}
+
+/// The `CreatePage` *New page* queues: under a mirrored page, in that page's
+/// space, its body the text in the source's markup.
+///
+/// # Errors
+///
+/// `invalid` for a blank title, a parent with no space, or a source that
+/// writes no pages; `not_found` for a parent the live mirror does not hold.
+pub async fn create_page(
+    pool: &PgPool,
+    writes: impl Fn(&str) -> Option<knobas_source::docs::DocWrites>,
+    new: &NewPage,
+) -> Result<(serde_json::Value, String), IpcError> {
+    let title = new.title.trim();
+    if title.is_empty() {
+        return Err(IpcError::invalid("A new page needs a title."));
+    }
+    let row = sqlx::query(concat!(
+        "select i.kind, i.source_id, s.kind as adapter_kind, p.key from sync.live_item i \
+           join knobas.source_config s on s.id = i.source_id \
+           left join sync.item_project p on p.entity_id = i.entity_id and p.adapter_kind = s.kind \
+          where i.entity_id = $1"
+    ))
+    .bind(&new.parent)
+    .fetch_optional(pool)
+    .await?
+    .ok_or_else(|| IpcError::not_found(format!("{} is not in the mirror", new.parent)))?;
+    let kind: String = row.get("kind");
+    if kind != PAGE_KIND {
+        return Err(IpcError::invalid(format!(
+            "{} is a {kind}, not a page",
+            new.parent
+        )));
+    }
+    let adapter_kind: String = row.get("adapter_kind");
+    let source_id: String = row.get("source_id");
+    let Some(space) = row.get::<Option<String>, _>("key") else {
+        return Err(IpcError::invalid(format!(
+            "knobas does not know which space {} is in",
+            new.parent
+        )));
+    };
+    let Some(doc) = writes(&adapter_kind) else {
+        return Err(IpcError::invalid(format!(
+            "knobas does not create pages in a {adapter_kind} source"
+        )));
+    };
+    Ok((
+        serde_json::json!({
+            "CreatePage": {
+                "parent": new.parent,
+                "space": space,
+                "title": title,
+                "body": (doc.body_from_text)(&new.text),
+            }
+        }),
+        source_id,
+    ))
+}
+
+/// Link a page a queued `CreatePage` made to a ticket, once the write has
+/// settled and the mirror holds the page (`knobas.write_queue.remote_id`).
+/// Nothing yet is not an error: the page is not there to link.
+///
+/// # Errors
+///
+/// `internal` if a read or the link write fails.
+pub async fn link_created_page(
+    pool: &PgPool,
+    write_id: i64,
+    ticket: &str,
+) -> Result<bool, IpcError> {
+    let found: Option<(String, Option<String>)> =
+        sqlx::query_as("select source_id, remote_id from knobas.write_queue where id = $1")
+            .bind(write_id)
+            .fetch_optional(pool)
+            .await?;
+    let Some((source_id, Some(remote))) = found else {
+        return Ok(false);
+    };
+    let page = format!("{source_id}:{remote}");
+    let mirrored: Option<String> = sqlx::query_scalar("select id from knobas.entity where id = $1")
+        .bind(&page)
+        .fetch_optional(pool)
+        .await?;
+    if mirrored.is_none() {
+        return Ok(false);
+    }
+    crate::protocol::draw_link(pool, &page, ticket, LINK_RELATION).await?;
+    Ok(true)
+}
+
+/// The relation *Link to <job>* and *Link it to <job>* draw from a page to a
+/// ticket: the page documents the work.
+pub const LINK_RELATION: &str = "documents";
