@@ -1593,7 +1593,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 @media (max-width: 900px) {
   .tf-cbody.tf-pr { grid-template-columns: minmax(0, 1fr); }
 }
-||||||| parent of c74ab07f (Open in…, Clone and Local changes in the new shell (#844, #846, #847))
 /* Open in… and Clone (#844, #846): prototype-6's `.appmenu`, `.phs`, `pre.log`. */
 .tf-openin { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .tf-menu.tf-appmenu { width: 300px; padding: 4px 0; }
