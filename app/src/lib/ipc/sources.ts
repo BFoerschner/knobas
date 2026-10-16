@@ -138,6 +138,10 @@ export interface KindPaths {
   trigger: TriggerPath[];
   /** Who started a run, as the source spells the account (#961). */
   started_by: PayloadPath[];
+  /** The language a repository is written in, in the source's word (#966). */
+  language: PayloadPath[];
+  /** The teams a repository belongs to, by name (#966). */
+  teams: ListPath[];
 }
 
 /** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961). */

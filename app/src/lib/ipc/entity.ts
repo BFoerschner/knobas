@@ -549,6 +549,24 @@ export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
   return invoke<JobPipeline[]>("job_pipelines", { entityId });
 }
 
+/** What Code draws beside one mirrored row — `knobas_app::commands::entity::CodeFacts` (#966). */
+export interface CodeFacts {
+  entity_id: string;
+  /** Its author as the source spells the account (a pull request's opener, a commit's or branch tip's author), or `null`. */
+  author: string | null;
+  /** Whether `author` is its source's configured username, as the attention read compares it (#712). */
+  mine: boolean;
+  /** A repository's declared language, or `null` on a miss. */
+  language: string | null;
+  /** A repository's declared teams, in the record's order; empty on a miss. */
+  teams: string[];
+}
+
+/** {@link CodeFacts} for each id the mirror holds live; the others are left out (#966). */
+export function codeFacts(entityIds: string[]): Promise<CodeFacts[]> {
+  return invoke<CodeFacts[]>("code_facts", { entityIds });
+}
+
 /**
  * Runs of a pipeline older than the run `before`, asked of the source: the
  * history beyond the mirror's window (#851), newest first, at most `limit`

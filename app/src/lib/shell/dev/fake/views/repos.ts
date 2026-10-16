@@ -17,7 +17,7 @@
  */
 import type { DiffFile, SourceView, TreeEntry, ViewAction, ViewRow } from "../../../../ipc/entity";
 import { lineDiff } from "../../../../tf/code/line-diff";
-import { CORPUS } from "../corpus";
+import { CODE_FACTS, CORPUS, FAKE_IDENTITY } from "../corpus";
 
 const RETRY_MAIN = `use std::time::Duration;
 
@@ -230,6 +230,18 @@ const PAYOUT_BRANCHES: {
   { name: "spike/sepa-instant", ahead: 2, behind: 9, pr: null, tip: ["9a1b2c3d4e5f", "Spike: SEPA Instant through the PSP sandbox", "mara", "2026-08-13T15:10:00Z"] },
   { name: "chore/bump-tokio", ahead: 0, behind: 6, pr: null, tip: ["5d77e1a2c3b4", "Bump tokio to 1.40", "jonas", "2026-08-17T10:15:00Z"] },
 ];
+
+// `code_facts` for the branches above and `main` (#986): the mirror holds every
+// branch, its author its tip's.
+CODE_FACTS.push((ids) =>
+  [
+    { name: "main", author: "jonas" },
+    ...PAYOUT_BRANCHES.map(({ name, tip }) => ({ name, author: tip[2] })),
+  ]
+    .map(({ name, author }) => ({ entity_id: `${PAYOUT}@refs/heads/${name}`, author }))
+    .filter(({ entity_id }) => ids.has(entity_id))
+    .map(({ entity_id, author }) => ({ entity_id, author, mine: author === FAKE_IDENTITY, language: null, teams: [] })),
+);
 
 const branchAction = (write_op: string, label: string, over: Partial<ViewAction> = {}): ViewAction => ({
   write_op,

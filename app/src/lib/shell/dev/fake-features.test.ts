@@ -283,6 +283,25 @@ test("builds: job_pipelines answers PAY-231's pipelines with their reasons, and 
   expect(h["job_pipelines"]!({ entityId: "jira:NOPE-1" })).toEqual([]);
 });
 
+test("code: code_facts answers a repository's team and language, and an author and whether it is mara's (#966)", () => {
+  const h = demoHandlers() as Calls;
+  const facts = h["code_facts"]!({
+    entityIds: [
+      "mock:tidewater/payout-service",
+      "mock:ledger#139",
+      "mock:fx-rates#88",
+      "mock:tidewater/payout-service@refs/heads/feature/csv-export",
+      "mock:nope",
+    ],
+  }) as { entity_id: string; author: string | null; mine: boolean; language: string | null; teams: string[] }[];
+  const of = (id: string) => facts.find((f) => f.entity_id === id);
+  expect(of("mock:tidewater/payout-service")).toMatchObject({ language: "Rust", teams: ["Payments"] });
+  expect(of("mock:ledger#139")).toMatchObject({ author: "mara", mine: true });
+  expect(of("mock:fx-rates#88")).toMatchObject({ author: "priya", mine: false });
+  expect(of("mock:tidewater/payout-service@refs/heads/feature/csv-export")).toMatchObject({ author: "jonas", mine: false });
+  expect(of("mock:nope")).toBeUndefined();
+});
+
 test("builds: a chained pipeline names its chain, and run_chain gives each step its run on the branch (#857)", () => {
   const h = demoHandlers() as Calls;
   const docker = "teamcity:buildType:Payout_Docker";

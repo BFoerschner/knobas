@@ -307,6 +307,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "group",
             "group_path",
             "issue_type",
+            "language",
             "name",
             "number",
             "pipeline",
@@ -327,6 +328,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "started_by",
             "state",
             "status_name",
+            "teams",
             "trigger",
         ],
     );

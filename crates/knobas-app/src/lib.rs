@@ -580,6 +580,9 @@ pub fn run() {
             // #867's job link sets read, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::job_link_sets,
+            // #966's facts Code draws beside a row, appended at the foot: the
+            // list is append-only (§10.8).
+            commands::entity::code_facts,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
