@@ -76,6 +76,24 @@ test("a merge deletes its branch only when the flag came back true (#708)", () =
   expect(merge()).toEqual({ MergePullRequest: { entity: "gitea:o/r#7", style: "squash", delete_branch: false } });
 });
 
+test("a squash carries the reader's message; any other style, or a blank one, keeps the source's (#843)", () => {
+  const merge = (style: string, message: string) => actionPayload(MERGE, "gitea:o/r#7", { style, message });
+  expect(merge("squash", "  Idempotent retry window (#142)\n\nRetries on 503. ")).toEqual({
+    MergePullRequest: {
+      entity: "gitea:o/r#7",
+      style: "squash",
+      delete_branch: false,
+      message: "Idempotent retry window (#142)\n\nRetries on 503.",
+    },
+  });
+  expect(merge("merge", "Idempotent retry window (#142)")).toEqual({
+    MergePullRequest: { entity: "gitea:o/r#7", style: "merge", delete_branch: false },
+  });
+  expect(merge("squash", "   ")).toEqual({
+    MergePullRequest: { entity: "gitea:o/r#7", style: "squash", delete_branch: false },
+  });
+});
+
 test("Update branch… is queued as UpdatePullRequestBranch with merge or rebase, and nothing else (#708)", () => {
   const update = action("update_pull_request_branch", "Update branch…");
   for (const style of ["merge", "rebase"] as const) {

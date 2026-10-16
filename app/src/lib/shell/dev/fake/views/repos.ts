@@ -194,6 +194,18 @@ function commitRow(entityId: string | null, sha: string, subject: string, author
 /** Prototype-6's `lineDiff` and `hunks`, shared with the commit dialog (#845). */
 const diffOf = (path: string, before: string, after: string): DiffFile => lineDiff(path, before, after);
 
+/**
+ * PR #142's change (#842), as prototype-6's `prFiles(142)`: the retry
+ * rewritten, its test and the design note added, against `main`.
+ */
+export function payoutPrFiles(): DiffFile[] {
+  return [
+    diffOf("src/sepa/retry.rs", RETRY_MAIN, RETRY_HEAD),
+    diffOf("tests/sepa_retry.rs", "", TEST_HEAD),
+    diffOf("docs/backoff.md", "", PAYOUT_FEATURE["docs/backoff.md"]!),
+  ];
+}
+
 /** A blob sha for a file's text: the same text, the same sha, as git's is. */
 function blobOf(text: string): string {
   let hash = 0x811c9dc5;

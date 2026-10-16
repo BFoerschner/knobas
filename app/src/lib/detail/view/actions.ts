@@ -137,11 +137,21 @@ const PAYLOADS: Record<
   ) => WriteOpPayload | null
 > = {
   // *Delete branch after merge* is a flag (#708); a Merge… drawn without it
-  // keeps the branch, as every merge did before.
-  merge_pull_request: (entity, values) =>
-    isMergeStyle(values.style)
-      ? { MergePullRequest: { entity, style: values.style, delete_branch: values.delete_branch === "true" } }
-      : null,
+  // keeps the branch, as every merge did before. A squash's message (#843)
+  // goes only with a squash; a blank one, or any other style, keeps the
+  // source's own.
+  merge_pull_request: (entity, values) => {
+    if (!isMergeStyle(values.style)) return null;
+    const message = values.style === "squash" ? filled(values.message) : null;
+    return {
+      MergePullRequest: {
+        entity,
+        style: values.style,
+        delete_branch: values.delete_branch === "true",
+        ...(message === null ? {} : { message }),
+      },
+    };
+  },
   // *Update branch…* (#708): the base merged in, or the head rebased onto it.
   update_pull_request_branch: (entity, values) =>
     isUpdateStyle(values.style) ? { UpdatePullRequestBranch: { entity, style: values.style } } : null,

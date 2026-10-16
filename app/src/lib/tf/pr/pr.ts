@@ -11,7 +11,7 @@
  * (`repo.ts`'s `branchStanding`); the sentences the source wrote are drawn as
  * it wrote them.
  */
-import type { SourceView, Tone, ViewRow, ViewSection } from "../../ipc/entity";
+import type { SourceView, Tone, ViewAction, ViewRow, ViewSection } from "../../ipc/entity";
 
 /** The page's tabs, in prototype-6's order; *Files changed* is #842's. */
 export const PR_TABS = [
@@ -125,23 +125,88 @@ export function checksLine(rows: readonly ViewRow[]): ReadyLine | null {
 }
 
 /**
- * *Ready to merge?* (R-8.16): whether the source says it can merge (its
- * *Mergeable*, which names the approvals still missing, the checks it
- * requires and a conflict), each reviewer's standing verdict, and the
- * checks. Nothing here decides mergeability: the source's `land.rs` does,
- * once, for this and for *Merge…*.
+ * *Ready to merge?* (R-8.16, #994): prototype-6's three lines, each with its
+ * dot: *Approvals: 1 of 2* and the conflicts line from the facts the source
+ * declares for them (Gitea's `land.rs`), and the checks between them. A
+ * conflict fact reads `none with <base>` or `conflicts with <base>`, drawn
+ * *No conflicts with main* or *Conflicts with main*.
+ *
+ * A source that declares neither is drawn its *Mergeable* sentence as
+ * written, then the checks. Nothing here decides mergeability: the source
+ * does, once, for this and for *Merge…*.
  */
 export function readyLines(view: SourceView | null): ReadyLine[] {
   const all = facts(view);
-  const lines: ReadyLine[] = [];
-  const mergeable = all.find((fact) => fact.label === "Mergeable");
-  if (mergeable) lines.push({ text: `Mergeable: ${mergeable.value}`, tone: mergeable.tone ?? "ok" });
-  const reviews = all.filter((fact) => fact.label === "Review");
-  for (const review of reviews) lines.push({ text: opening(review.value), tone: review.tone ?? "muted" });
-  if (reviews.length === 0) lines.push({ text: "No reviews yet", tone: "muted" });
+  const approvals = all.find((fact) => fact.label === "Approvals");
+  const conflicts = all.find((fact) => fact.label === "Conflicts");
   const checks = checksLine(headerOf(view).checks);
+  const lines: ReadyLine[] = [];
+  if (approvals === undefined && conflicts === undefined) {
+    const mergeable = all.find((fact) => fact.label === "Mergeable");
+    if (mergeable) lines.push({ text: `Mergeable: ${mergeable.value}`, tone: mergeable.tone ?? "ok" });
+    if (checks && lines.length > 0) lines.push(checks);
+    return lines;
+  }
+  if (approvals) lines.push({ text: `Approvals: ${approvals.value}`, tone: approvals.tone ?? "muted" });
   if (checks) lines.push(checks);
+  if (conflicts) {
+    const none = conflicts.value.startsWith("none ");
+    const text = none ? `No conflicts ${conflicts.value.slice("none ".length)}` : opening(conflicts.value);
+    lines.push({ text, tone: conflicts.tone ?? (none ? "ok" : "warn") });
+  }
   return lines;
+}
+
+/**
+ * Why *Merge…* cannot be taken now, one reason a line, as its source wrote
+ * them: Gitea's `land.rs` joins its reasons with `; ` into the one sentence
+ * the toolbar's tooltip shows (#843, R-8.19).
+ */
+export function mergeReasons(merge: ViewAction | null): string[] {
+  const sentence = merge?.disabled ?? "";
+  return sentence
+    .split("; ")
+    .map((reason) => reason.trim())
+    .filter((reason) => reason !== "");
+}
+
+/** The verdicts a review can carry, in prototype-6's order. */
+export type Verdict = "comment" | "approve" | "request_changes";
+
+/** One choice of *Submit review* (R-8.18): its verdict, its words, and the source's action that sends it. */
+export interface ReviewChoice {
+  verdict: Verdict;
+  label: string;
+  /** Prototype-6's one-line meaning. */
+  meaning: string;
+  /** The source's action for this verdict; `null` where it cannot be sent now (a comment with no line comments). */
+  action: ViewAction | null;
+}
+
+const CHOICES: { verdict: Verdict; label: string; meaning: string }[] = [
+  { verdict: "comment", label: "Comment", meaning: "Feedback without a verdict" },
+  { verdict: "approve", label: "Approve", meaning: "Counts toward the approvals {base} needs" },
+  { verdict: "request_changes", label: "Request changes", meaning: "Blocks the merge until you approve" },
+];
+
+/**
+ * The verdicts *Submit review* offers, from the source's `submit_review`
+ * actions (Gitea's `review.rs`): a verdict it does not offer is not drawn
+ * (one's own pull request takes no approval), and its comment-only review
+ * (`line_comments: requires`) is drawn without an action while no line
+ * comment waits, since the source would refuse it.
+ */
+export function reviewChoices(actions: readonly ViewAction[], pending: number, base: string | null = null): ReviewChoice[] {
+  const reviews = actions.filter((action) => action.write_op === "submit_review");
+  const choices: ReviewChoice[] = [];
+  for (const choice of CHOICES) {
+    const action = reviews.find((candidate) => candidate.values["verdict"] === choice.verdict);
+    if (action === undefined) continue;
+    const sendable = action.line_comments !== "requires" || pending > 0;
+    const meaning = choice.meaning.replace("{base}", base ?? "the base");
+    choices.push({ ...choice, meaning, action: sendable ? action : null });
+  }
+  return choices;
 }
 
 /** One thing said in *Conversation*: a comment, or a review with its verdict. */

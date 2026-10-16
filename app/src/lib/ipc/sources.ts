@@ -719,7 +719,15 @@ export type WriteOpPayload =
    * `delete_branch` deletes the head branch once merged (#708); absent reads
    * as `false`.
    */
-  | { MergePullRequest: { entity: string; style: MergeStyle; delete_branch: boolean } }
+  | {
+      MergePullRequest: {
+        entity: string;
+        style: MergeStyle;
+        delete_branch: boolean;
+        /** The commit message the reader wrote (#843): first line the title; absent or `null` keeps the source's default. */
+        message?: string | null;
+      };
+    }
   /**
    * Bring a pull request's head up to date with its base (#708). `entity` is
    * the **pull request**; `style` is `knobas_source::UpdateStyle`. Mirrors
