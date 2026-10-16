@@ -326,8 +326,8 @@
                   {#each segments(row, now.getTime()) as segment, at (at)}<i class="tf-seg-{segment}"></i>{/each}
                 </span>
               </td>
-              <td class="tf-mono">{responseText(row.response_time_ms)}</td>
-              <td class="tf-mono">{uptimeText(row)}</td>
+              <td class="tf-num">{responseText(row.response_time_ms)}</td>
+              <td class="tf-num">{uptimeText(row)}</td>
               <td>
                 {#each row.assets as asset (asset.id)}
                   <div><a class="tf-mono tf-mon-asset" href="#/asset/{encodeURIComponent(asset.id)}"><Marked text={asset.name} typed={filter.text} /></a>{" "}<span class="tf-dim tf-mon-type">{asset.type_label}</span></div>
