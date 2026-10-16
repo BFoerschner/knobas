@@ -193,12 +193,17 @@ async fn file(
     at: &str,
     path: &str,
 ) -> Result<Block, SourceError> {
-    // The bytes, and beside them the file's own entry: its blob sha at
-    // `at` (#883), and its size where a cut read cannot say.
-    let (raw, own) = tokio::try_join!(
-        source.client.raw_capped(owner, repo, path, at, BYTE_CAP),
-        source.client.file_entry_as::<Listed>(owner, repo, path, at),
-    )?;
+    // The file's own entry first: its blob sha at `at` (#883), and its size
+    // where a cut read cannot say. Then its bytes. Read in this order, a push
+    // between the two leaves an older blob beside newer text, and an edit
+    // made against it is held as moved (#822). The other order, or both at
+    // once, could draw a newer blob beside older text, and an edit of that
+    // text would land over the push unseen.
+    let own: Listed = source.client.file_entry_as(owner, repo, path, at).await?;
+    let raw = source
+        .client
+        .raw_capped(owner, repo, path, at, BYTE_CAP)
+        .await?;
     let binary = raw.bytes.iter().take(SNIFF).any(|b| *b == 0);
     let (text, truncated) = if binary {
         (String::new(), false)

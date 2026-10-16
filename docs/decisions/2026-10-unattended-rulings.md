@@ -2268,3 +2268,21 @@ Merge-manager, PR #946 for #848.
   base. **Reversing:** low.
 - **The field is `sha`, as Gitea and `file_on` in the live suite name it**, documented as the blob
   sha at the ref drawn. **Reversing:** medium, a §10.8 field rename.
+
+Merge-manager, PR #948 for #883.
+
+- **The file view reads `contents-ext`, and `contents` only when that route answers 404.** This
+  overrules the implementer's first ruling above. `contents` answers the file as base64 up to
+  Gitea's 10 MiB API blob limit and walks the history for the file's last commit. On a throwaway
+  1.27.3, a 10.1 MB file came back as 13.5 MB of JSON from `contents`, beside a raw read capped at
+  1 MB, so one file opened fetched it about 14 times over the cap. `contents-ext` answered the
+  same `sha` and `size` in 784 bytes. A 34 MB file, over the blob limit, cost 931 bytes either
+  way. A Gitea from before 1.24 has no `contents-ext` and answers 404, so the read falls back to
+  `contents` and costs what the implementer measured. The issue's "contents API" covers either
+  route. **Reversing:** low, one call in `view/files.rs`.
+- **The entry is read before the bytes, not beside them.** If a push lands between the two
+  reads, this order draws an older blob beside newer text, and an edit made against it is held as
+  moved (#822). Reading both at once, or the bytes first, could draw a newer blob beside older
+  text, and an edit of that text would land over the push unseen. The cost is one small round
+  trip of added wait per file opened. A mock cannot order two requests, so nothing witnesses the
+  order. **Reversing:** low.
