@@ -253,3 +253,20 @@ async fn only_a_mirrored_page_reads() {
     assert_eq!(docs_page_inner(&pool, &format!("{src}:404")).await.unwrap_err().code, NotFound);
     assert_eq!(docs_page_inner(&pool, "no colon").await.unwrap_err().code, Invalid);
 }
+
+/// Two pages that name each other as parent (a title reused after a move)
+/// would have no top; each is put at the top instead, so both are drawn and no
+/// walk of the tree loops.
+#[tokio::test]
+async fn a_parent_loop_is_cut_and_both_pages_sit_at_the_top() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let a = page(&pool, &src, "1", "Alpha", "OPS", &["Beta"], "").await;
+    let b = page(&pool, &src, "2", "Beta", "OPS", &["Alpha"], "").await;
+    let tree = docs_tree_inner(&pool).await.unwrap();
+    let space = tree.spaces.iter().find(|s| s.source_id == src).unwrap();
+    for id in [&a, &b] {
+        let node = space.pages.iter().find(|p| p.entity_id == *id).unwrap();
+        assert_eq!(node.parent, None, "{id} is cut loose from the loop");
+    }
+}

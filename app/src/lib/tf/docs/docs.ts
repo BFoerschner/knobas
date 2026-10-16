@@ -6,7 +6,8 @@
  * the page read last, `#/docs/space/<key>` that space's first page, and
  * `#/page/<id>[/<section>]` the page itself.
  */
-import type { DocBlock, DocInline, DocNode, DocPage, DocSpace, DocsTree } from "../../ipc/entity";
+import type { DocBlock, DocInline, DocNode, DocPage, DocSpace, DocsTree, PanelKind } from "../../ipc/entity";
+import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
 export type DocsPlace =
@@ -74,9 +75,12 @@ export function childrenOf(space: DocSpace, parent: string | null): DocNode[] {
 }
 
 /** Whether `entityId` is `node` or below it, so the fold holding it opens. */
-export function holds(space: DocSpace, node: DocNode, entityId: string): boolean {
+export function holds(space: DocSpace, node: DocNode, entityId: string, seen = new Set<string>()): boolean {
   if (node.entity_id === entityId) return true;
-  return childrenOf(space, node.entity_id).some((child) => holds(space, child, entityId));
+  // The backend breaks parent loops; a set here keeps a bad answer from recursing forever.
+  if (seen.has(node.entity_id)) return false;
+  seen.add(node.entity_id);
+  return childrenOf(space, node.entity_id).some((child) => holds(space, child, entityId, seen));
 }
 
 /** The words of a run of inlines. */
@@ -156,19 +160,32 @@ export function person(user: string | null, name: string | null, me: string[]): 
   return name ?? user ?? "Someone";
 }
 
-/** A ticket chip's status tone, as prototype-6 draws it: done is ok, to do plain, the rest info. */
-export function statusTone(status: string | null): "ok" | "info" | null {
-  if (status === null) return null;
-  const s = status.toLowerCase();
-  if (s === "done") return "ok";
-  if (s === "to do") return null;
-  return "info";
+/**
+ * A ticket chip's status tone: ok for the *Done* column's status, by the one
+ * rule the Tickets view already has (`isDone`), else plain. No other status
+ * word is read: the source names no tone for a status.
+ */
+export function statusTone(status: string | null): "ok" | null {
+  return isDone(status) ? "ok" : null;
+}
+
+/** The shell's tone each panel kind is drawn in (CONTEXT.md **Tone**). */
+const PANEL_TONE: Record<PanelKind, "info" | "warn" | "muted" | "ok"> = {
+  info: "info",
+  warning: "warn",
+  note: "muted",
+  tip: "ok",
+};
+
+/** The shell's tone a panel kind is drawn in. */
+export function panelTone(kind: PanelKind): "info" | "warn" | "muted" | "ok" {
+  return PANEL_TONE[kind];
 }
 
 /** A panel's label: its title, else its tone in the reader's words. */
 export function panelLabel(block: Extract<DocBlock, { type: "panel" }>): string {
   if (block.title) return block.title;
-  return { info: "Info", note: "Note", warning: "Warning", tip: "Tip" }[block.tone];
+  return { info: "Info", note: "Note", warning: "Warning", tip: "Tip" }[block.kind];
 }
 
 /** Whether a table's first row is all header cells, so it draws as `thead`. */

@@ -38,12 +38,12 @@ const PAGE: DocPage = {
   editor: "tomasz",
   editor_name: "Tomasz Wójcik",
   updated_at: "2026-07-02T09:00:00Z",
-  web_url: "http://wiki/pages/2",
+  web_url: "http://wiki.example/pages/2",
   readable: true,
   version: 31,
   labels: ["ops", "on-call"],
   blocks: [
-    { type: "panel", tone: "warning", title: null, blocks: [{ type: "paragraph", text: [text("Old topology, see "), { type: "issue", key: "OPS-77", entity_id: "jira:OPS-77", title: "On-call runbook outdated", status: "To Do" }] }] },
+    { type: "panel", kind: "warning", title: null, blocks: [{ type: "paragraph", text: [text("Old topology, see "), { type: "issue", key: "OPS-77", entity_id: "jira:OPS-77", title: "On-call runbook outdated", status: "To Do" }] }] },
     { type: "heading", level: 2, text: [text("Ledger")] },
     {
       type: "paragraph",
@@ -183,7 +183,7 @@ test("Copy copies the code, and the placeholder and Open in Confluence open the 
   [...target.querySelectorAll("button")].find((b) => b.textContent === "Open in Confluence")!.click();
   await settle();
   expect(io.openExternal).toHaveBeenCalledTimes(2);
-  expect(io.openExternal).toHaveBeenCalledWith("http://wiki/pages/2");
+  expect(io.openExternal).toHaveBeenCalledWith("http://wiki.example/pages/2");
 });
 
 test("comments are listed with their author, or say there are none", async () => {

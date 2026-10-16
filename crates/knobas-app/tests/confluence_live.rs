@@ -921,7 +921,7 @@ async fn an_edit_made_against_a_version_the_server_has_passed_is_refused_by_conf
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
-    use knobas_source::docs::{DocBlock, Inline, PanelTone};
+    use knobas_source::docs::{DocBlock, Inline, PanelKind};
 
     let env = env();
     let parent = env.page(PARENT);
@@ -1023,14 +1023,14 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         rest[1],
         &DocBlock::Code { code: "select 1 < 2;".into(), language: Some("sql".into()) }
     );
-    let tones: Vec<PanelTone> = rest
+    let tones: Vec<PanelKind> = rest
         .iter()
         .filter_map(|b| match b {
-            DocBlock::Panel { tone, .. } => Some(*tone),
+            DocBlock::Panel { kind, .. } => Some(*kind),
             _ => None,
         })
         .collect();
-    assert_eq!(tones, vec![PanelTone::Info, PanelTone::Warning, PanelTone::Note, PanelTone::Tip]);
+    assert_eq!(tones, vec![PanelKind::Info, PanelKind::Warning, PanelKind::Note, PanelKind::Tip]);
     let DocBlock::Table { rows } = rest[6] else {
         panic!("the table: {rest:#?}")
     };

@@ -48,7 +48,7 @@ test("a fold holds every page below it, so the one around the open page starts o
 
 test("the first heading opens section 1, as prototype-6 numbers them", () => {
   const blocks: DocBlock[] = [
-    { type: "panel", tone: "info", title: null, blocks: [] },
+    { type: "panel", kind: "info", title: null, blocks: [] },
     { type: "heading", level: 2, text: [] },
     { type: "paragraph", text: [] },
     { type: "heading", level: 3, text: [] },
@@ -74,9 +74,9 @@ test("a mention reads as the first name, else the account, else someone", () => 
   expect(mentionText({ type: "mention", user: null, name: null, me: false })).toBe("@someone");
 });
 
-test("a chip's status tone: done is ok, to do plain, the rest info", () => {
+test("a chip's status tone is ok on the Done status and plain otherwise", () => {
   expect(statusTone("Done")).toBe("ok");
   expect(statusTone("To Do")).toBeNull();
-  expect(statusTone("In Review")).toBe("info");
+  expect(statusTone("In Review")).toBeNull();
   expect(statusTone(null)).toBeNull();
 });

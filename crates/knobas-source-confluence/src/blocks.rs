@@ -37,7 +37,7 @@
 
 use std::collections::HashMap;
 
-use knobas_source::docs::{DocBlock, DocComment, DocContent, Inline, PanelTone, TableCell};
+use knobas_source::docs::{DocBlock, DocComment, DocContent, Inline, PanelKind, TableCell};
 use serde_json::Value;
 
 use crate::storage::{attr, decode_entities, split_tag, tag_name};
@@ -485,18 +485,18 @@ impl<'a> Blocks<'a> {
                 language: node.param("language"),
             }),
             "info" | "note" | "warning" | "tip" | "panel" => {
-                let tone = match name.as_str() {
-                    "info" => PanelTone::Info,
-                    "warning" => PanelTone::Warning,
-                    "tip" => PanelTone::Tip,
-                    _ => PanelTone::Note,
+                let kind = match name.as_str() {
+                    "info" => PanelKind::Info,
+                    "warning" => PanelKind::Warning,
+                    "tip" => PanelKind::Tip,
+                    _ => PanelKind::Note,
                 };
                 let blocks = node
                     .child("ac:rich-text-body")
                     .map(|body| self.sub(body.children()))
                     .unwrap_or_default();
                 self.block(DocBlock::Panel {
-                    tone,
+                    kind,
                     title: node.param("title"),
                     blocks,
                 });
@@ -909,23 +909,23 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     }
 
     #[test]
-    fn the_four_panels_and_the_generic_panel_map_to_tones() {
+    fn the_four_panels_and_the_generic_panel_map_to_kinds() {
         let panel = |name: &str| {
             format!(
                 r#"<ac:structured-macro ac:name="{name}" ac:schema-version="1"><ac:parameter ac:name="title">Heads up</ac:parameter><ac:rich-text-body><p>Old topology.</p></ac:rich-text-body></ac:structured-macro>"#
             )
         };
-        for (name, tone) in [
-            ("info", PanelTone::Info),
-            ("note", PanelTone::Note),
-            ("warning", PanelTone::Warning),
-            ("tip", PanelTone::Tip),
-            ("panel", PanelTone::Note),
+        for (name, kind) in [
+            ("info", PanelKind::Info),
+            ("note", PanelKind::Note),
+            ("warning", PanelKind::Warning),
+            ("tip", PanelKind::Tip),
+            ("panel", PanelKind::Note),
         ] {
             assert_eq!(
                 blocks(&panel(name)),
                 vec![DocBlock::Panel {
-                    tone,
+                    kind,
                     title: Some("Heads up".into()),
                     blocks: vec![para("Old topology.")],
                 }],

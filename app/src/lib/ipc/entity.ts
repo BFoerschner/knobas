@@ -2552,8 +2552,8 @@ export interface DocComment {
   blocks: DocBlock[];
 }
 
-/** Which panel a panel block is — `PanelTone`. */
-export type PanelTone = "info" | "note" | "warning" | "tip";
+/** Which panel a panel block is — `PanelKind`. */
+export type PanelKind = "info" | "note" | "warning" | "tip";
 
 /** One cell of a table block — `TableCell`. */
 export interface TableCell {
@@ -2568,7 +2568,7 @@ export type DocBlock =
   | { type: "list"; ordered: boolean; items: DocBlock[][] }
   | { type: "code"; code: string; language: string | null }
   | { type: "table"; rows: TableCell[][] }
-  | { type: "panel"; tone: PanelTone; title: string | null; blocks: DocBlock[] }
+  | { type: "panel"; kind: PanelKind; title: string | null; blocks: DocBlock[] }
   /** A part the reader does not draw, by the source's own name for it. */
   | { type: "placeholder"; name: string };
 

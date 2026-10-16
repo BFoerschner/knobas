@@ -98,6 +98,7 @@
   $effect(() => {
     const id = target;
     if (!ready || id === null) return;
+    pageError = null;
     let live = true;
     void io.docsPage(id).then(
       (answer) => {

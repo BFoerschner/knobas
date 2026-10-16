@@ -92,7 +92,7 @@ pub enum DocBlock {
     Table { rows: Vec<Vec<TableCell>> },
     /// An info, note, warning or tip panel, with the blocks inside it.
     Panel {
-        tone: PanelTone,
+        kind: PanelKind,
         title: Option<String>,
         blocks: Vec<DocBlock>,
     },
@@ -112,7 +112,7 @@ pub struct TableCell {
 /// Which panel a [`DocBlock::Panel`] is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum PanelTone {
+pub enum PanelKind {
     Info,
     Note,
     Warning,
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn blocks_cross_as_a_union_on_type() {
         let block = DocBlock::Panel {
-            tone: PanelTone::Warning,
+            kind: PanelKind::Warning,
             title: None,
             blocks: vec![DocBlock::Paragraph {
                 text: vec![
@@ -240,7 +240,7 @@ mod tests {
         };
         let wire = serde_json::to_value(&block).unwrap();
         assert_eq!(wire["type"], "panel");
-        assert_eq!(wire["tone"], "warning");
+        assert_eq!(wire["kind"], "warning");
         assert_eq!(wire["blocks"][0]["type"], "paragraph");
         assert_eq!(wire["blocks"][0]["text"][1]["type"], "issue");
         let back: DocBlock = serde_json::from_value(wire).unwrap();
@@ -266,7 +266,7 @@ mod tests {
                 }]],
             },
             DocBlock::Panel {
-                tone: PanelTone::Info,
+                kind: PanelKind::Info,
                 title: None,
                 blocks: vec![DocBlock::Heading {
                     level: 2,

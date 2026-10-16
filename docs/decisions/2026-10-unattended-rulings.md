@@ -2316,8 +2316,15 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
 - **The source's words are its configured display name**: *Open in Tidewater Confluence*, and
   the placeholder names it the same way, because R-10.18 lets only those two be source-specific
   and a Markdown wiki must not read "Confluence". **Reversing:** `source_name`.
-- **A ticket chip's tone follows prototype-6 on the status name** (done ok, to do plain, the rest
-  info); a key the mirror does not hold is a bare key, not a link. **Reversing:** `statusTone`.
+- **A ticket chip's status is ok on the *Done* status (the Tickets view's `isDone`) and plain
+  otherwise.** Prototype-6 also draws in-flight statuses in info, but that would read source words
+  the source never tied to a tone (design system, "Tones carry state"). A key the mirror does not
+  hold is a bare key, not a link. **Reversing:** `statusTone`.
+- **A panel has a *kind* (`PanelKind`: info, note, warning, tip), not a tone**: CONTEXT.md's
+  **Tone** is the shell's five, and the shell maps a kind onto one (note is muted, tip is ok).
+  **Reversing:** `panelTone`.
+- **A parent loop is cut**: every page on one sits at the top, so the tree has no cycle to
+  recurse through. **Reversing:** `break_loops`.
 - **Section anchors use prototype-6's numbering** (`#/page/<id>/<n>`, the first heading is 1) so
   #861's outline can link the same addresses. **Reversing:** `sectionNumbers`.
 - **Left to #860–#863, not drawn:** the search field and its hint line, *For you*, the right

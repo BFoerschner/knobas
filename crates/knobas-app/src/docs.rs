@@ -180,12 +180,44 @@ pub async fn tree(pool: &PgPool, declarations: &Declarations) -> Result<DocsTree
                 .and_then(|title| by_title.get(&title).cloned())
                 .filter(|id| *id != page.entity_id);
         }
+        break_loops(&mut space.pages);
     }
     let last_read = sqlx::query_scalar(LAST_READ)
         .bind(knobas_core::activity::VISITED)
         .fetch_optional(pool)
         .await?;
     Ok(DocsTree { spaces, last_read })
+}
+
+/// Cut every parent loop: two pages that name each other (titles are matched,
+/// and a title can be reused after a move) would otherwise have no top and
+/// would recurse in every walk of the tree. Each page on a loop is put at the
+/// top, so it is still drawn.
+fn break_loops(pages: &mut [DocNode]) {
+    let parent_of: HashMap<String, Option<String>> = pages
+        .iter()
+        .map(|p| (p.entity_id.clone(), p.parent.clone()))
+        .collect();
+    for page in pages.iter_mut() {
+        let mut seen = std::collections::HashSet::new();
+        let mut at = page.parent.clone();
+        while let Some(id) = at {
+            if id == page.entity_id || !seen.insert(id.clone()) {
+                page.parent = None;
+                break;
+            }
+            at = parent_of.get(&id).cloned().flatten();
+        }
+    }
+}
+
+/// Every inline of a page, body and comments, for the fill-in pass.
+fn every_inline(content: &mut knobas_source::docs::DocContent) -> Vec<&mut Inline> {
+    let mut inlines = knobas_source::docs::inlines_mut(&mut content.blocks);
+    for c in &mut content.comments {
+        inlines.extend(knobas_source::docs::inlines_mut(&mut c.blocks));
+    }
+    inlines
 }
 
 /// One page and what the reader needs around it. `$1` the id, `$2` the
@@ -283,10 +315,7 @@ pub async fn page(
     }
     let mut keys: BTreeSet<String> = BTreeSet::new();
     {
-        let mut inlines = knobas_source::docs::inlines_mut(&mut content.blocks);
-        for c in &mut content.comments {
-            inlines.extend(knobas_source::docs::inlines_mut(&mut c.blocks));
-        }
+        let inlines = every_inline(&mut content);
         for inline in &inlines {
             match &**inline {
                 Inline::PageLink { title, space, .. } => {
@@ -331,11 +360,7 @@ pub async fn page(
         }
     }
 
-    let mut inlines = knobas_source::docs::inlines_mut(&mut content.blocks);
-    for c in &mut content.comments {
-        inlines.extend(knobas_source::docs::inlines_mut(&mut c.blocks));
-    }
-    for inline in inlines {
+    for inline in every_inline(&mut content) {
         match inline {
             Inline::PageLink {
                 title,

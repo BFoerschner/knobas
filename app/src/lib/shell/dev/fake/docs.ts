@@ -287,9 +287,9 @@ function block(b: Proto): DocBlock {
       rows: b.table.map((row, r) => row.map((cell) => ({ header: r === 0, text: inl(cell) }))),
     };
   }
-  if ("info" in b) return { type: "panel", tone: "info", title: null, blocks: [para(b.info)] };
-  if ("warn" in b) return { type: "panel", tone: "warning", title: null, blocks: [para(b.warn)] };
-  if ("note" in b) return { type: "panel", tone: "note", title: null, blocks: [para(b.note)] };
+  if ("info" in b) return { type: "panel", kind: "info", title: null, blocks: [para(b.info)] };
+  if ("warn" in b) return { type: "panel", kind: "warning", title: null, blocks: [para(b.warn)] };
+  if ("note" in b) return { type: "panel", kind: "note", title: null, blocks: [para(b.note)] };
   return { type: "placeholder", name: b.macro };
 }
 

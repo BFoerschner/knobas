@@ -10,7 +10,7 @@
   import Self from "./TfDocBlocks.svelte";
   import TfDocInlines from "./TfDocInlines.svelte";
   import type { DocBlock } from "../../ipc/entity";
-  import { headed, pageHash, panelLabel, sectionNumbers } from "./docs";
+  import { headed, pageHash, panelLabel, panelTone, sectionNumbers } from "./docs";
 
   let {
     blocks,
@@ -79,13 +79,7 @@
       </tbody>
     </table>
   {:else if block.type === "panel"}
-    <div
-      class="tf-callout"
-      class:tf-info={block.tone === "info"}
-      class:tf-warn={block.tone === "warning"}
-      class:tf-note={block.tone === "note"}
-      class:tf-ok={block.tone === "tip"}
-    >
+    <div class="tf-callout tf-{panelTone(block.kind)}">
       <span class="tf-lbl">{panelLabel(block)}</span>
       <div><Self blocks={block.blocks} {entityId} {sourceName} {webUrl} {onopen} {oncopy} /></div>
     </div>

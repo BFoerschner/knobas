@@ -22,10 +22,10 @@
   #[serde(tag = "type", rename_all = "snake_case")]
   pub enum DocBlock { Heading { level: u8, text: Vec<Inline> }, Paragraph { text: Vec<Inline> },
       List { ordered: bool, items: Vec<Vec<DocBlock>> }, Code { code: String, language: Option<String> },
-      Table { rows: Vec<Vec<TableCell>> }, Panel { tone: PanelTone, title: Option<String>, blocks: Vec<DocBlock> },
+      Table { rows: Vec<Vec<TableCell>> }, Panel { kind: PanelKind, title: Option<String>, blocks: Vec<DocBlock> },
       Placeholder { name: String } }
   pub struct TableCell { header: bool, text: Vec<Inline> }
-  pub enum PanelTone { Info, Note, Warning, Tip }            // snake_case
+  pub enum PanelKind { Info, Note, Warning, Tip }            // snake_case
   #[serde(tag = "type", rename_all = "snake_case")]
   pub enum Inline { Text { text, strong, emphasis, code }, Link { text, href },
       PageLink { text, title, space: Option<String>, entity_id: Option<String> },
@@ -35,7 +35,7 @@
 
   The adapter fills `PageLink`'s title and space, `Issue`'s key and `Mention`'s user and name;
   knobas fills `entity_id`, `title`, `status` and `me` from the mirror when the reader is read
-  (`#[serde(default)]` on each). Adding a block, an inline, a tone or a field is a §10.8 entry, as
+  (`#[serde(default)]` on each). Adding a block, an inline, a panel kind or a field is a §10.8 entry, as
   for ADR-0020's `view::Block`.
 
   **Confluence's subset** (`knobas_source_confluence::blocks`): `h1`–`h6`, `p`, `ul`/`ol` (nested),

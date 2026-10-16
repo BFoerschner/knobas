@@ -1499,7 +1499,7 @@ fn the_notification_clicked_shape_matches_its_typescript_mirror() {
 #[test]
 fn the_docs_shapes_match_their_typescript_mirror() {
     use knobas_app::docs::{DocAncestor, DocNode, DocPage, DocSpace, DocSpaceRef, DocsTree};
-    use knobas_source::docs::{DocBlock, DocComment, Inline, PanelTone, TableCell};
+    use knobas_source::docs::{DocBlock, DocComment, Inline, PanelKind, TableCell};
 
     let tree = DocsTree {
         spaces: vec![DocSpace {
@@ -1589,14 +1589,14 @@ fn the_docs_shapes_match_their_typescript_mirror() {
     );
     assert_shape("TableCell", &wire["blocks"][0]["rows"][0][0], &["header", "text"]);
 
-    let tones: Vec<String> = [PanelTone::Info, PanelTone::Note, PanelTone::Warning, PanelTone::Tip]
+    let kinds: Vec<String> = [PanelKind::Info, PanelKind::Note, PanelKind::Warning, PanelKind::Tip]
         .iter()
         .map(|t| serde_json::to_value(t).unwrap().as_str().unwrap().to_owned())
         .collect();
     assert_same_members(
-        &tones.iter().map(String::as_str).collect::<Vec<_>>(),
-        declared_union(MIRROR, "PanelTone"),
-        "PanelTone in entity.ts must be exactly the Rust enum's spellings",
+        &kinds.iter().map(String::as_str).collect::<Vec<_>>(),
+        declared_union(MIRROR, "PanelKind"),
+        "PanelKind in entity.ts must be exactly the Rust enum's spellings",
     );
 
     // The two tagged unions: the `type` tags each declares, against what the
@@ -1622,7 +1622,7 @@ fn the_docs_shapes_match_their_typescript_mirror() {
         DocBlock::List { ordered: false, items: vec![] },
         DocBlock::Code { code: String::new(), language: None },
         DocBlock::Table { rows: vec![] },
-        DocBlock::Panel { tone: PanelTone::Info, title: None, blocks: vec![] },
+        DocBlock::Panel { kind: PanelKind::Info, title: None, blocks: vec![] },
         DocBlock::Placeholder { name: "roadmap".to_owned() },
     ];
     let rust: Vec<String> = blocks.iter().map(|b| tag(serde_json::to_value(b).unwrap())).collect();
