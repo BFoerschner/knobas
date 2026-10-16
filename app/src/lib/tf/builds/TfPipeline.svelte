@@ -311,6 +311,7 @@
           all,
           {
             text: filter.text,
+            // *My job's branches* is only offered with a job; a remembered one without reads as *All*.
             scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
             branch: filter.dropdowns["branch"] ?? null,

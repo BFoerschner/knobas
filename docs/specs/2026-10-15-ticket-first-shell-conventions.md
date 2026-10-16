@@ -132,3 +132,6 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   the source's URL opened in a browser (D8). (#854, #855, #856)
 - A run's steps are `run_log`'s steps; the run page reads the log once and hands that read to the
   Log tab (again for a run in flight). A step no read names is not drawn. (#1003)
+- How a run was started is said one way everywhere, `triggerLabel` over the row's declared
+  `trigger`, `started_by` and `revision`; *you* is the row's `started_by_me`, never a username the
+  frontend compares. (#961)

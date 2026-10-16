@@ -1471,11 +1471,8 @@ struct RawRun {
     finished: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     web_url: Option<String>,
-    #[serde(default)]
     trigger: Option<knobas_core::payload::Trigger>,
-    #[serde(default)]
     started_by: Option<String>,
-    #[serde(default)]
     revision: Option<String>,
 }
 
@@ -1591,9 +1588,9 @@ pub async fn pipeline_runs_inner(
                     finished: row.get("finished"),
                     updated_at: row.get("item_updated_at"),
                     web_url: row.get("web_url"),
-                    trigger: row
-                        .get::<Option<String>, _>("trig")
-                        .and_then(|word| serde_json::from_value(serde_json::Value::String(word)).ok()),
+                    trigger: row.get::<Option<String>, _>("trig").and_then(|word| {
+                        serde_json::from_value(serde_json::Value::String(word)).ok()
+                    }),
                     started_by: row.get("started_by"),
                     revision: row.get("revision"),
                 },
@@ -1645,7 +1642,9 @@ fn run_of_item(
     identity: &[String],
     item: &knobas_source::SyncItem,
 ) -> Option<RunRow> {
-    use knobas_core::payload::{Frame, resolve_list, resolve_state, resolve_string, resolve_trigger};
+    use knobas_core::payload::{
+        Frame, resolve_list, resolve_state, resolve_string, resolve_trigger,
+    };
     let paths = declarations.get(&item.entity.namespace, &item.kind)?;
     if paths.frame != Some(Frame::Run) {
         return None;

@@ -707,7 +707,10 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
     assert_eq!(failed.started_by.as_deref(), Some("older-run-starter"));
     assert!(!failed.started_by_me);
     assert_eq!(failed.revision.as_deref(), Some("91fe0c2b"));
-    assert_eq!((older[1].trigger, older[1].started_by.as_deref()), (None, None));
+    assert_eq!(
+        (older[1].trigger, older[1].started_by.as_deref()),
+        (None, None)
+    );
 
     let capped =
         older_pipeline_runs_inner(&pool, &no_secrets(), &Answering, &tests, &oldest, Some(1))
@@ -903,17 +906,33 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
     let cases = [
         (1, serde_json::json!({ "type": "vcs" })),
         (2, serde_json::json!({ "type": "schedule" })),
-        (3, serde_json::json!({ "type": "user", "user": { "username": me } })),
-        (4, serde_json::json!({ "type": "user", "user": { "username": "jonas" } })),
+        (
+            3,
+            serde_json::json!({ "type": "user", "user": { "username": me } }),
+        ),
+        (
+            4,
+            serde_json::json!({ "type": "user", "user": { "username": "jonas" } }),
+        ),
         (5, serde_json::json!({ "type": "buildType" })),
     ];
     for (id, triggered) in cases {
         let at = format!("2026-08-21T0{id}:00:00Z");
-        item(&pool, &format!("{tc}:build:{id}"), &tc, "build", &at, run(id, triggered)).await;
+        item(
+            &pool,
+            &format!("{tc}:build:{id}"),
+            &tc,
+            "build",
+            &at,
+            run(id, triggered),
+        )
+        .await;
     }
 
     let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
-    let seen: Vec<(Option<Trigger>, Option<&str>, bool, Option<&str>)> = runs
+    /// How a run was started, by whom, whether that is the reader, its commit.
+    type Started<'a> = (Option<Trigger>, Option<&'a str>, bool, Option<&'a str>);
+    let seen: Vec<Started> = runs
         .iter()
         .rev()
         .map(|r| {
@@ -930,7 +949,12 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
         [
             (Some(Trigger::Change), None, false, Some("a41f2c1")),
             (Some(Trigger::Schedule), None, false, Some("a41f2c2")),
-            (Some(Trigger::Person), Some(me.as_str()), true, Some("a41f2c3")),
+            (
+                Some(Trigger::Person),
+                Some(me.as_str()),
+                true,
+                Some("a41f2c3")
+            ),
             (Some(Trigger::Person), Some("jonas"), false, Some("a41f2c4")),
             (None, None, false, Some("a41f2c5")),
         ]
@@ -947,5 +971,8 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
         .iter()
         .map(|r| (r.trigger, r.started_by_me, r.revision.clone()))
         .collect();
-    assert_eq!(recent, from_runs, "the list reads a run as the pipeline does");
+    assert_eq!(
+        recent, from_runs,
+        "the list reads a run as the pipeline does"
+    );
 }

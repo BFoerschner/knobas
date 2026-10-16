@@ -1470,8 +1470,14 @@ mod tests {
             of(serde_json::json!({ "triggered": { "type": "user", "user": {} } })),
             Some(Trigger::Person)
         );
-        assert_eq!(of(serde_json::json!({ "triggered": { "type": "buildType" } })), None);
-        assert_eq!(of(serde_json::json!({ "triggered": { "type": true } })), None);
+        assert_eq!(
+            of(serde_json::json!({ "triggered": { "type": "buildType" } })),
+            None
+        );
+        assert_eq!(
+            of(serde_json::json!({ "triggered": { "type": true } })),
+            None
+        );
         assert_eq!(of(serde_json::json!({})), None);
         assert_eq!(serde_json::to_value(Trigger::Change).unwrap(), "change");
 

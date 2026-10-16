@@ -50,7 +50,8 @@
   `started_by_me` is `started_by` matched exactly against the configured usernames behind `@me`
   (`knobas_search::Vocabulary::identity`); `revision` is the first of the declared `revision`s
   (#710). Every command answering a `RunRow` fills them: `pipelines`, `pipeline_runs`,
-  `older_pipeline_runs` and `run_chain`. `KindPaths`, `Trigger`, `TriggerPath` and `TriggerValue`
+  `older_pipeline_runs` and `run_chain`, each of which now also reads the identity once per call
+  (the one source-config query `@me` already costs a search). `KindPaths`, `Trigger`, `TriggerPath` and `TriggerValue`
   are mirrored in `app/src/lib/ipc/sources.ts`, held by `sources_mirror.rs` and
   `entity_mirror.rs`, answered by the fake IPC (`fake/builds.ts`), witnessed by
   `tests/it/builds_ipc.rs` and, on the seeded TeamCity, by `live_teamcity_seeded.rs`'s

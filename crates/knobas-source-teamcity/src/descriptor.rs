@@ -413,18 +413,28 @@ mod tests {
         use knobas_core::payload::{Trigger, resolve_string, resolve_trigger};
         let declared = descriptor_template().payload_paths;
         let run = declared.iter().find(|p| p.kind == KIND_BUILD).unwrap();
-        let build = |triggered: serde_json::Value| serde_json::json!({ "id": 7, "triggered": triggered });
+        let build =
+            |triggered: serde_json::Value| serde_json::json!({ "id": 7, "triggered": triggered });
         let vcs = build(serde_json::json!({ "type": "vcs" }));
         assert_eq!(resolve_trigger(&vcs, &run.trigger), Some(Trigger::Change));
         assert_eq!(resolve_string(&vcs, &run.started_by), None);
         let user = build(serde_json::json!({ "type": "user", "user": { "username": "mara" } }));
         assert_eq!(resolve_trigger(&user, &run.trigger), Some(Trigger::Person));
-        assert_eq!(resolve_string(&user, &run.started_by).as_deref(), Some("mara"));
+        assert_eq!(
+            resolve_string(&user, &run.started_by).as_deref(),
+            Some("mara")
+        );
         let nightly = build(serde_json::json!({ "type": "schedule" }));
-        assert_eq!(resolve_trigger(&nightly, &run.trigger), Some(Trigger::Schedule));
+        assert_eq!(
+            resolve_trigger(&nightly, &run.trigger),
+            Some(Trigger::Schedule)
+        );
         let chained = build(serde_json::json!({ "type": "buildType" }));
         assert_eq!(resolve_trigger(&chained, &run.trigger), None);
-        let config = declared.iter().find(|p| p.kind == KIND_BUILD_CONFIG).unwrap();
+        let config = declared
+            .iter()
+            .find(|p| p.kind == KIND_BUILD_CONFIG)
+            .unwrap();
         assert!(config.trigger.is_empty() && config.started_by.is_empty());
     }
 

@@ -1797,11 +1797,19 @@ async fn the_seeded_records_fill_the_builds_frame() {
         build.payload["triggered"]
     );
     assert_eq!(trigger, Some(knobas_core::payload::Trigger::Person));
-    assert!(field(&run.started_by).is_some(), "a person names their account");
+    assert!(
+        field(&run.started_by).is_some(),
+        "a person names their account"
+    );
     for b in of_kind(&items, "build") {
         let how = knobas_core::payload::resolve_trigger(&b.payload, &run.trigger);
         let who = resolve_string(&b.payload, &run.started_by);
-        assert!(how.is_some(), "{} says how it was started: {}", b.entity, b.payload["triggered"]);
+        assert!(
+            how.is_some(),
+            "{} says how it was started: {}",
+            b.entity,
+            b.payload["triggered"]
+        );
         assert_eq!(
             how == Some(knobas_core::payload::Trigger::Person),
             who.is_some(),
