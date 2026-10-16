@@ -44,6 +44,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { AppStatus } from "./lib/ipc/app";
 import type {
+  EntityDetail,
   ActivityRow,
   ContextRow,
   EntityRow,
@@ -220,7 +221,20 @@ vi.mock("./lib/ipc/entity", () => ({
   },
   // No source view (#661): the panel is the mirror's, as before.
   entityView: () => Promise.resolve(null),
-  getEntity: () => Promise.resolve(null),
+  // The job page's other reads (#886): refused, so it draws the ticket and nothing more.
+  checkoutCommands: () => Promise.reject(new Error("no checkoutCommands in this test")),
+  createLink: () => Promise.reject(new Error("no createLink in this test")),
+  entityCheckout: () => Promise.reject(new Error("no entityCheckout in this test")),
+  entityThread: () => Promise.reject(new Error("no entityThread in this test")),
+  jobReach: () => Promise.reject(new Error("no jobReach in this test")),
+  openCheckout: () => Promise.reject(new Error("no openCheckout in this test")),
+  reachableTransitions: () => Promise.reject(new Error("no reachableTransitions in this test")),
+  roomSuggestions: () => Promise.reject(new Error("no roomSuggestions in this test")),
+  visitEntity: () => Promise.reject(new Error("no visitEntity in this test")),
+  getEntity: (entityId: string) =>
+    entityAnswer?.row.entity_id === entityId
+      ? Promise.resolve(entityAnswer)
+      : Promise.reject({ code: "not_found", message: "no such entity" }),
   recentActivity: () => Promise.resolve([]),
   // The detail slide-over reads the board for its status select (#179); an
   // empty board is what a room with nothing in it answers.
@@ -282,6 +296,8 @@ let timerStops = 0;
 let captureRecords: { context: string | null; foreground: string | null }[] = [];
 /** What `currentTimer` answers on bring-up — set by a test that needs one running. */
 let timerRunning: unknown = null;
+/** What `get_entity` answers for its own id (the job page's read, #886); others are `not_found`. */
+let entityAnswer: EntityDetail | null = null;
 /** The block `stopTimer` closes, which is what the worklog draft opens on (#280). */
 let timerClosed: unknown = null;
 /** Every `worklog_draft` the shell asked for, in order (#280). */
@@ -600,6 +616,7 @@ beforeEach(() => {
   projectRows = [];
   projectCalls = 0;
   timerStarts = [];
+  entityAnswer = null;
   timerRooms = [];
   timerStops = 0;
   captureRecords = [];
@@ -2343,6 +2360,77 @@ test("under the new shell, Log… on a day's block opens that ticket's draft for
     await until(() => target.querySelector(".tf .tf-dialog") !== null, "Log… never opened the new draft");
     expect(draftAsks.map((ask) => [ask.entityId, ask.day])).toEqual([["mock:PAY-231", "2026-09-03"]]);
     expect(target.querySelector(".tf .tf-dialog h2")?.textContent).toBe("Log time to PAY-231");
+  } finally {
+    Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
+  }
+});
+
+/**
+ * **The chip and ⌘T start on the job on screen** (#886, R-1.4): on
+ * `#/job/<key>` with nothing running, ⌘T starts a timer on that ticket instead
+ * of asking; on a page with no job it still asks.
+ */
+function ticketFirstStorage() {
+  const stored = new Map([["knobas.shell", "tickets"]]);
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    writable: true,
+    value: { getItem: (key: string) => stored.get(key) ?? null, setItem: () => {} },
+  });
+}
+
+test("under the new shell, ⌘T on a job page starts the timer on that job", async () => {
+  dbReady = true;
+  ticketFirstStorage();
+  entityAnswer = {
+    row: {
+      entity_id: "mock:PAY-231",
+      kind: "ticket",
+      source_id: "mock",
+      title: "Retry failed SEPA payouts",
+      updated_at: "2026-10-15T09:00:00Z",
+      synced_at: "2026-10-15T09:00:00Z",
+      path: null,
+      state: null,
+    },
+    source: { id: "mock", display_name: "Mock", adapter_kind: "mock", enabled: true },
+    kind_info: null,
+    body_text: "",
+    author: null,
+    payload: {},
+    web_url: null,
+    deleted_at: null,
+    links: [],
+    activity: [],
+    builds: [],
+    status: "In Progress",
+    issue_type: "Story",
+    priority: "High",
+    estimate_seconds: null,
+  };
+  location.hash = "#/job/mock:PAY-231";
+  try {
+    app = mount(App, { target, props: {} });
+    await until(() => target.textContent?.includes("Retry failed SEPA payouts") ?? false, "the job never drew");
+    pressTimerKey();
+    await until(() => timerStarts.length > 0, "⌘T never started a timer on the job");
+    expect(timerStarts).toEqual([{ kind: "entity", entity_id: "mock:PAY-231" }]);
+    expect(pickerTitle(), "the picker opened over a job on screen").toBeNull();
+  } finally {
+    Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
+  }
+});
+
+test("under the new shell, ⌘T on a page with no job opens the picker", async () => {
+  dbReady = true;
+  ticketFirstStorage();
+  location.hash = "#/time/2026-09-03";
+  try {
+    app = mount(App, { target, props: {} });
+    await until(() => target.querySelector(".tf") !== null, "the new shell never drew");
+    pressTimerKey();
+    await until(() => pickerTitle() !== null, "⌘T with no job on screen never asked");
+    expect(timerStarts).toEqual([]);
   } finally {
     Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
   }
