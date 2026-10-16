@@ -656,6 +656,11 @@ pub const ROUTE: Corpus = Corpus {
 /// answer is always the right one.
 pub const ALL: &[&Corpus] = &[&LIVE_ITEM, &NOTE, &ASSET, &ROUTE];
 
+/// [`ALL`] without [`NOTE`]: what the launcher searches while *Show notes and
+/// quick capture* is off (#940, R-13a.6). The note data and commands stay
+/// (D10); only the search leaves them out.
+pub const WITHOUT_NOTES: &[&Corpus] = &[&LIVE_ITEM, &ASSET, &ROUTE];
+
 #[cfg(test)]
 mod tests {
     use super::*;

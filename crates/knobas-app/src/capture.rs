@@ -287,7 +287,7 @@ pub async fn shortcut(pool: &PgPool, capture: &CaptureState) -> Result<ShortcutV
 }
 
 /// Whether *Show notes and quick capture* is on.
-async fn shown(pool: &PgPool) -> Result<bool, IpcError> {
+pub(crate) async fn shown(pool: &PgPool) -> Result<bool, IpcError> {
     Ok(settings::read(pool, SHOWN_KEY).await?.as_deref() == Some("true"))
 }
 

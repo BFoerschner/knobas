@@ -296,11 +296,17 @@ pub async fn filter_suggestions(
 ///
 /// `internal` if the declarations cannot be written.
 pub async fn searcher(pool: &PgPool) -> Result<knobas_search::Searcher, IpcError> {
+    // **Notes leave the search while *Show notes and quick capture* is off**
+    // (#940, R-13a.6, D10): the one primary-key read of `knobas.setting` that
+    // every command's searcher makes, so the launcher, the lists and the
+    // suggestions all agree. The notes stay in the database.
+    let notes_shown = crate::capture::shown(pool).await?;
     Ok(knobas_search::Searcher::declaring(
         pool.clone(),
         crate::sources::Registry::builtin().templates(),
     )
-    .await?)
+    .await?
+    .with_notes_shown(notes_shown))
 }
 
 /// [`search`], against a pool.

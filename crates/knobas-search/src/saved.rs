@@ -522,6 +522,7 @@ struct SavedCount {
 pub async fn summaries(
     pool: &PgPool,
     vocab: &Vocabulary,
+    corpora: &[&corpus::Corpus],
 ) -> Result<Vec<SmartListSummary>, SearchError> {
     let rows = all(pool).await?;
     if rows.is_empty() {
@@ -548,7 +549,7 @@ pub async fn summaries(
         .collect();
 
     let mut counted: HashMap<String, SavedCount> = HashMap::new();
-    if let Some(built) = sql::saved_summary_sql(corpus::ALL, &queries) {
+    if let Some(built) = sql::saved_summary_sql(corpora, &queries) {
         for row in sql::query_as_with::<SavedCount>(built)
             .fetch_all(pool)
             .await?
