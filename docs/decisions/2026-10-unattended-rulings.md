@@ -2873,3 +2873,54 @@ Implementer rulings, PR for issues #839, #840 and #845 (one bundle).
   name), each with a whole view, a diff and a toolbar; files carry a blob sha so *Edit* opens; the
   fixture's `submit_write` names the op it was handed rather than always a monitor's. The edit's
   diff is `tf/code/line-diff.ts`, which the fixture's commit diffs now share. **Reversing:** low.
+
+## #841 — Pull request page (2026-10-16)
+
+- **One read, three tabs.** `#/pr/<entity id>` (Overview), `/conversation`, `/diff` and `/commits`
+  are tabs of one page over the pull request's whole source view (`entity_view`, read once per
+  pull request); a tab only chooses what to draw. No new command. **Reversing:** low.
+- ***Ready to merge?* draws what the source declares.** The Gitea view has no *Approvals 1 of 2*
+  or *No conflicts* field: one *Mergeable* fact (`yes`, or `no: ` and the blocking phrases) and a
+  *Review* fact per reviewer. The panel draws *Mergeable: …* as written, each standing review
+  (opening word raised), and one checks line (*all checks passing*, else each check not ok by its
+  name and state, the loudest tone). It does not take the sentence apart or count approvals.
+  Follow-up #994 declares the facts prototype-6's three lines need. **Reversing:** low
+  (`readyLines` in `tf/pr/pr.ts`).
+- **Head into base is read off the *Branches* fact** (`head → base`, split at the arrow; a value
+  without one is the head alone), as `branchStanding` reads a branch's facts by label.
+  **Reversing:** low.
+- **The toolbar draws only what the view offers.** *Update branch* appears only when the source
+  offers *Update branch…* (the head is behind), *Close* or *Reopen* by the action's fixed state,
+  *Review…* only when the verdicts (*Approve…*, *Request changes…*) are offered, so never on the
+  reader's own pull request. Prototype-6 draws *Update branch* always. *Edit*, *Close* and
+  *Update branch* open `tf/pr/TfPrAction.svelte`, which draws the source's declared fields and
+  sentence and queues the payload `detail/view/actions.ts` builds (*Edit* sends only what
+  changed). Prototype-6's *Edit* is a toast. **Reversing:** low.
+- ***Review…* and *Merge…* are drawn, `aria-disabled`, with *Not built in the new shell yet*** (or,
+  for *Merge…*, the source's own disabled reason) as the title: their dialogs are #842 and #843.
+  *Submit review (N pending)* is #842's, since pending line comments are made on Files changed.
+  Files changed is an empty "not built yet" page. **Reversing:** those tickets replace them.
+- **A queued write is drawn at once:** a chip by the state (`edit queued`, `close queued`,
+  `reopen queued`, `update queued`) and a queued comment at the end of the conversation (*You*,
+  *queued*), module `$state` for the session; the comment's mark goes once the conversation holds
+  its words. Toasts say `Queued: <verb> PR #142. Sends with the next sync.` **Reversing:** low.
+- **A check opens its run through `resolve_url` on its link** (the mirror's match; never a fetch),
+  `#/build/<entity id>`; a link the mirror does not hold opens nothing. The house rule that limits
+  `resolveUrl` callers to pasted-text surfaces grows by `tf/pr/TfPr.svelte`, with the reason beside
+  it: no text is rewritten. **Reversing:** low.
+- **The description is drawn as plain text** (line breaks kept), not as Markdown: the new shell has
+  no Markdown renderer yet, and prototype-6 draws a plain paragraph. **Reversing:** low.
+- **The conversation names people by their source login,** *You* for the reader's configured
+  account; a review's verdict is a chip beside the time. Prototype-6 writes first names and has no
+  verdict chip. **Reversing:** low.
+- **Commits with a proposed link** are found in one `room_suggestions` read (unscoped), keyed by a
+  commit end's entity id; the chip opens `#/review/<link id>`. **Reversing:** low.
+- **Local checkout** shows when the repository (the pull request's declared parent, found by
+  `owner/name` among its source's repositories) has a clone: its path, *On this branch* (or *On
+  <branch>*) with its changed-file count or *clean*, *Open in…* (#844, drawn disabled) and *Local
+  changes*. **Reversing:** low.
+- **`?fake-ipc`:** `views/pulls.ts` draws PR #142 as prototype-6's (three checks linking the
+  corpus's runs, one approval of two, the job's three commits, Jonas's question and Mara's
+  answer) and every other corpus pull request as a plain one. A proposal on commit `a41f2c` joins
+  `suggestions.ts`, so the tray's count is eight. Divergences: the corpus title (*Idempotent retry
+  window*), Gitea's check states (`failure`, `pending`). **Reversing:** low.

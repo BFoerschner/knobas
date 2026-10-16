@@ -361,6 +361,7 @@ const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
+const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
@@ -1166,6 +1167,55 @@ const CASES: Case[] = [
       }),
     }),
   ),
+  // The pull request page (#841): its one view, the repository and its
+  // checkout, the proposals and each check's run, behind a ready database,
+  // answering late.
+  {
+    name: "TfPr",
+    source: "lib/tf/pr/TfPr.svelte",
+    open: (target) => ({
+      app: mount(TfPr, {
+        target,
+        props: {
+          ready: true,
+          rest: ["gitea:tidewater/payout-service#142"],
+          job: "PAY-231",
+          ports: {
+            getEntity: () =>
+              deferred({
+                row: { entity_id: "gitea:tidewater/payout-service#142", kind: "pr", source_id: "gitea", title: "Retry", path: "tidewater/payout-service" },
+                author: "mara",
+              } as never),
+            entityView: () =>
+              deferred({
+                sections: [
+                  {
+                    id: "overview",
+                    title: "Overview",
+                    count: null,
+                    deferred: false,
+                    blocks: [{ type: "entities", title: "Checks", rows: [{ entity_id: null, title: "Build", meta: null, tone: "ok", chip: "success", url: "https://ci.example.test/1" }] }],
+                  },
+                ],
+                actions: [],
+              } as never),
+            listEntities: () =>
+              deferred({
+                rows: [{ entity_id: "gitea:tidewater/payout-service", kind: "repo", source_id: "gitea", title: "tidewater/payout-service" }],
+                total: 1,
+                tally: null,
+                groups: null,
+              } as never),
+            entityCheckout: () => deferred({ path: null, tree: null } as never),
+            roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }),
+            resolveUrl: () => deferred(null),
+            listSources: () => deferred([]),
+            submitWrite: () => deferred({} as never),
+          },
+        },
+      }),
+    }),
+  },
   {
     /** Monitors (#864): the roster, the unwatched list, the sources and the jobs' reach, answering late. */
     name: "TfMonitors",

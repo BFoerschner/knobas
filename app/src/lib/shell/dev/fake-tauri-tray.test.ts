@@ -56,8 +56,9 @@ test("a room under ?fake-ipc draws proposals, not a red line, and answering one 
   installFakeTauri(demoHandlers());
   const { target, app } = render();
 
-  // Seven since #835 grew the fixture for the Proposed links view.
-  await heading(target, "7 waiting");
+  // Seven since #835 grew the fixture for the Proposed links view, eight
+  // since #841 proposed a link on PR #142's second commit.
+  await heading(target, "8 waiting");
   expect(target.querySelector(".fail")).toBeNull();
   const drawn = target.querySelectorAll(".row.sug").length;
   expect(drawn).toBeGreaterThan(2);
@@ -70,12 +71,12 @@ test("a room under ?fake-ipc draws proposals, not a red line, and answering one 
 
   const first = target.querySelector(".row.sug")!;
   (first.querySelector("button.pri") as HTMLButtonElement).click();
-  await heading(target, "6 waiting");
+  await heading(target, "7 waiting");
   expect(target.querySelector(".fail")).toBeNull();
 
   const next = target.querySelector(".row.sug")!;
   (next.querySelector("button.ghost") as HTMLButtonElement).click();
-  await heading(target, "5 waiting");
+  await heading(target, "6 waiting");
 
   unmount(app);
   target.remove();
