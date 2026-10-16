@@ -405,6 +405,12 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
+/* the rooms PublishTargetPicker inside a tf dialog: app.css strips bare fields, and --link is the rooms' dark-only blue */
+.tf-stg-pick { --link: var(--info); }
+.tf-stg-pick select, .tf-stg-pick input {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);
+  font-size: var(--t-md); width: min(420px, 100%);
+}
 
 /* ---------- dialogs: a sheet over a dimmed page, 8vh from the top ---------- */
 .tf-modal {

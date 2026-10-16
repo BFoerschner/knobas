@@ -2022,3 +2022,21 @@ exist; no command is added.
   by its entity id when the mirror lacks it. **Reversing:** low.
 - ***A source cannot sign in* is the `credential_expiry` category**, prototype-6's words for the
   rooms UI's "Credentials about to expire". **Reversing:** low.
+
+Merge-manager, PR #938 for #831.
+
+- **The restore dialog's per-file button restores without a second confirm.** The rooms UI asks
+  "Restore <file>?" first. Here the press is already two steps (*Restore from a file…*, then the
+  file's own button), the backend refuses any knobas that holds data (`TargetNotEmpty`, witnessed by
+  `a_restore_refuses_a_database_that_already_holds_knobas_data`), and the refusal keeps the dialog
+  open with the reason (`TfSettingsSections.test`). Into an empty knobas nothing is overwritten, so
+  no misclick destroys data. **Reversing:** low, a confirm row inside the dialog.
+- **Standup's `PublishTargetPicker` (rooms) stays inside a `TfDialog`.** The convention mounts
+  rooms-styled *dialogs* outside `.tf`; this is a component inside a tf dialog, and porting it would
+  copy the publish picker's search and its story-68 rules into a second place. `app.css` strips bare
+  `select` and `input` and the rooms `--link` is dark-only, so `.tf-stg-pick` now draws the fields
+  as `.tf-stg-in` and sets `--link` to `--info`. **Reversing:** low, port the picker when the
+  Standup page is redrawn.
+- **Monitoring's bounds are the rooms section's** (days 1–3650, ms 0–600 000), not one 1–1 000 000
+  for both: the backend clamps to these, and a warning threshold of 0 was settable in the rooms UI.
+  **Reversing:** low.

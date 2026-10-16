@@ -12,6 +12,12 @@
 
   let { ports }: { ports: Pick<SectionPorts, "monitoringSettings" | "setMonitoringSettings"> } = $props();
 
+  /** The bounds `knobas_sync::samples` clamps to, as the rooms `MonitoringSection` holds them. */
+  const BOUNDS: Record<keyof MonitoringSettings, readonly [number, number]> = {
+    sample_retention_days: [1, 3650],
+    response_time_warn_ms: [0, 600_000],
+  };
+
   let stored = $state<MonitoringSettings | null>(null);
 
   $effect(() => {
@@ -23,7 +29,8 @@
 
   async function save(field: keyof MonitoringSettings, input: HTMLInputElement) {
     if (stored === null) return;
-    const value = boundedNumber(input.value, 1, 1_000_000, stored[field]);
+    const [min, max] = BOUNDS[field];
+    const value = boundedNumber(input.value, min, max, stored[field]);
     if (value === stored[field]) {
       input.value = String(value);
       return;
@@ -45,7 +52,8 @@
       <input
         id="tf-mon-slow"
         type="number"
-        min="1"
+        min="0"
+        max="600000"
         class="tf-stg-in tf-stg-n90"
         value={stored.response_time_warn_ms}
         onchange={(event) => void save("response_time_warn_ms", event.currentTarget)}
@@ -60,6 +68,7 @@
         id="tf-mon-keep"
         type="number"
         min="1"
+        max="3650"
         class="tf-stg-in tf-stg-n70"
         value={stored.sample_retention_days}
         onchange={(event) => void save("sample_retention_days", event.currentTarget)}

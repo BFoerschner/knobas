@@ -318,6 +318,27 @@ test("Restore from a file… lists the backups and Import… the share exports, 
   expect(p.restoreBackup).toHaveBeenLastCalledWith("knobas-share-20261012-101500.knobas");
 });
 
+test("a restore into a knobas that holds data is refused: the dialog stays and says why", async () => {
+  const refusal = {
+    code: "conflict",
+    message: "the database already holds knobas data. Merge-restore is not built yet -- restore into an empty knobas instead",
+  };
+  const p = await open("backup", sectionPorts({ restoreBackup: vi.fn(() => Promise.reject(refusal)) }));
+  // Opening the dialog writes nothing; only a file's own button does.
+  button("Restore from a file…").click();
+  flushSync();
+  expect(p.restoreBackup).not.toHaveBeenCalled();
+  // The toast store is the app's one, so count only what this press adds.
+  const before = toasts.items.length;
+  button("Restore").click();
+  await settle();
+  expect(p.restoreBackup).toHaveBeenCalledOnce();
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(toasts.items.slice(before).map((toast) => [toast.tone, toast.text])).toEqual([
+    ["err", `Restore refused: ${refusal.message}`],
+  ]);
+});
+
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
