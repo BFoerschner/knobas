@@ -1077,3 +1077,150 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
 
     drop(state);
 }
+
+/// **The Docs search's sync-time marks against the real Confluence** (#860,
+/// #861): a page made through Confluence's own REST API, with a heading, a
+/// link to the seeded parent and a comment, syncs into a `body_text` whose
+/// section heading sits beside its words and whose page link is extracted.
+/// So the search's snippet names its section (and a comment's author), the
+/// parent reads the new page under *Pages that link here*, and the plain
+/// section reads as editable while the linking one is refused.
+///
+/// What Confluence normalises (the storage format it hands back, the comment's
+/// author record) is what the adapter read; the page is deleted again by
+/// [`Litter`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+    let word = format!(
+        "zq{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
+
+    let title = format!("Docs search marks {word} [{LITTER}]");
+    let storage = format!(
+        concat!(
+            r#"<p>Lead text.</p>"#,
+            r#"<h2>Backoff policy</h2>"#,
+            r#"<p>Retries stop after five {word} attempts. Then the batch is parked.</p>"#,
+            r#"<h2>See also</h2>"#,
+            r#"<p>The parent: <ac:link><ri:page ri:content-title="{parent}" /></ac:link>.</p>"#,
+        ),
+        word = word,
+        parent = parent.title,
+    );
+    let (status, made) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": env.space },
+                "ancestors": [{ "id": parent.id }],
+                "body": { "storage": { "value": storage, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the page: {made}");
+    let id = made["id"].as_str().expect("the new page's id").to_owned();
+    litter.created.push(id.clone());
+    let (status, commented) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "comment",
+                "container": { "id": id, "type": "page" },
+                "body": { "storage": { "value": format!("<p>Is {word} the right cap?</p>"), "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "commenting: {commented}");
+
+    let state = app("confluence_live_docs_search", &env).await;
+    sync_until(&state, &id, "the new page with its comment", |payload| {
+        payload["children"]["comment"]["results"]
+            .as_array()
+            .is_some_and(|c| !c.is_empty())
+    })
+    .await;
+
+    let entity = format!("{CONFLUENCE}:{id}");
+    let found = knobas_app::commands::entity::docs_search_inner(
+        &state.pool,
+        &format!("{word} attempts"),
+        None,
+    )
+    .await
+    .expect("the search runs")
+    .expect("words are a query");
+    let hit = found
+        .hits
+        .iter()
+        .find(|h| h.entity_id == entity)
+        .unwrap_or_else(|| panic!("the new page is a hit: {found:#?}"));
+    assert_eq!(
+        hit.snippet.section.as_deref(),
+        Some("Backoff policy"),
+        "the section heading was kept beside the indexed text at sync"
+    );
+    let snippet: String = hit.snippet.segments.iter().map(|s| s.text.as_str()).collect();
+    assert_eq!(snippet, format!("Retries stop after five {word} attempts."));
+    assert_eq!(hit.space.as_ref().map(|s| s.key.as_str()), Some(env.space.as_str()));
+
+    let found = knobas_app::commands::entity::docs_search_inner(
+        &state.pool,
+        &format!("{word} cap"),
+        None,
+    )
+    .await
+    .expect("the search runs")
+    .expect("words are a query");
+    let hit = found
+        .hits
+        .iter()
+        .find(|h| h.entity_id == entity)
+        .expect("the comment's words find the page");
+    assert!(
+        hit.snippet.comment_by.as_deref().is_some_and(|by| !by.is_empty()),
+        "the comment's author was kept beside its words: {:?}",
+        hit.snippet
+    );
+
+    // The link to the parent was extracted at sync: the parent reads the new
+    // page under *Pages that link here*.
+    let parent_page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &format!("{CONFLUENCE}:{}", parent.id),
+    )
+    .await
+    .expect("the parent reads");
+    assert!(
+        parent_page.backlinks.iter().any(|b| b.entity_id == entity),
+        "the new page links here: {:?}",
+        parent_page.backlinks
+    );
+
+    // The sections as Confluence normalised them: the plain one is editable,
+    // the one holding a page link is not.
+    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
+        .await
+        .expect("the page reads");
+    assert_eq!(page.sections.len(), 2, "{:?}", page.sections);
+    assert_eq!(page.sections[0].refusal, None);
+    assert_eq!(
+        page.sections[0].text.as_deref(),
+        Some(format!("Retries stop after five {word} attempts. Then the batch is parked.").as_str())
+    );
+    assert_eq!(
+        page.sections[1].refusal,
+        Some(knobas_source::docs::SectionRefusal::Macro)
+    );
+    assert!(page.writes.iter().any(|w| w == "update_page"));
+
+    drop(state);
+}
