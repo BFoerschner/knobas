@@ -143,6 +143,7 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             entity: target.clone(),
             name: "contract battery probe".into(),
             url: "http://127.0.0.1:1/contract-battery".into(),
+            kind: crate::MonitorKind::Http,
         },
         // A merge is the probe whose success could not be taken back: a merge
         // commit on somebody's base branch. The target is no pull request's

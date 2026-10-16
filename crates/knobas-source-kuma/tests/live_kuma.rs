@@ -885,6 +885,7 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
             entity: knobas_source::monitor_target("kuma"),
             name: CREATED.to_owned(),
             url: SCRATCH_URL.to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         })
         .await
         .expect("the account creates a monitor");
@@ -940,11 +941,13 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
             entity: created.entity.to_string(),
             name: "knobas-live-never".to_owned(),
             url: SCRATCH_URL.to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         },
         WriteOp::CreateMonitor {
             entity: knobas_source::monitor_target("kuma"),
             name: "knobas-live-never".to_owned(),
             url: "postgres://127.0.0.1:5432/knobas".to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         },
     ] {
         assert!(
@@ -961,4 +964,66 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
         "a refused create left a monitor behind: {:?}",
         after.iter().map(|i| i.title.as_str()).collect::<Vec<_>>()
     );
+}
+
+/// The TCP check and the ping a reader is offered for a database and a VM
+/// (#864): created through the same op, published with Kuma's own type and
+/// target. Both watch the canary's host, whose state is never asserted. A
+/// Docker check is refused by name: this environment's Kuma has no Docker
+/// host, and a Docker monitor with no host would be down for ever.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_tcp_check_and_a_ping_are_published_as_their_own_kinds() {
+    const TCP: &str = "knobas-live-created-tcp";
+    const PING: &str = "knobas-live-created-ping";
+    let env = env();
+    let source = env.writable();
+    let _tcp = Scratch::removing(TCP);
+    let _ping = Scratch::removing(PING);
+    kuma_monitor(&["delete", TCP]);
+    kuma_monitor(&["delete", PING]);
+
+    for (name, target, kind) in [
+        (TCP, "host.docker.internal:8299", knobas_source::MonitorKind::Tcp),
+        (PING, "host.docker.internal", knobas_source::MonitorKind::Ping),
+    ] {
+        source
+            .write(WriteOp::CreateMonitor {
+                entity: knobas_source::monitor_target("kuma"),
+                name: name.to_owned(),
+                url: target.to_owned(),
+                kind,
+            })
+            .await
+            .unwrap_or_else(|error| panic!("the account creates {name}: {error}"));
+    }
+
+    let items = until(source.as_ref(), "both checks are published", |items| {
+        [TCP, PING]
+            .iter()
+            .all(|name| items.iter().any(|item| item.title == *name))
+    })
+    .await;
+    let payload = |name: &str| {
+        items
+            .iter()
+            .find(|item| item.title == name)
+            .map(|item| item.payload.clone())
+            .expect("published")
+    };
+    let tcp = payload(TCP);
+    assert_eq!(tcp.get("type").and_then(|v| v.as_str()), Some("port"), "{tcp:?}");
+    let ping = payload(PING);
+    assert_eq!(ping.get("type").and_then(|v| v.as_str()), Some("ping"), "{ping:?}");
+
+    let refused = source
+        .write(WriteOp::CreateMonitor {
+            entity: knobas_source::monitor_target("kuma"),
+            name: "knobas-live-never".to_owned(),
+            url: "payout-worker".to_owned(),
+            kind: knobas_source::MonitorKind::Docker,
+        })
+        .await
+        .expect_err("no Docker host, no Docker check");
+    assert!(refused.to_string().contains("no Docker host"), "{refused}");
 }

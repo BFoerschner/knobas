@@ -5773,6 +5773,7 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
             entity: knobas_source::monitor_target("kuma"),
             name: "gitea".to_owned(),
             url: "http://gitea:3000/api/healthz".to_owned(),
+            kind: knobas_source::MonitorKind::Http,
         }
         .identifier()
     );

@@ -631,13 +631,14 @@ pub enum WriteOp {
     /// the Monitors tab's list of rows (`assets::monitor_roster`), and this is
     /// an address rather than a list.
     ///
-    /// **A URL and no type.** A monitor of a URL is an HTTP check, and that is
-    /// the whole of what a reader is offered: the pane's form is prefilled
-    /// from an asset's route or its hostname (spec #427, story 70). A
-    /// `monitor_type` field would be a string with one legal value that every
-    /// adapter would then have to vet, and the day knobas offers a ping or a
-    /// TCP check is the day this op grows the field that says which -- with a
-    /// vocabulary decided then rather than left open now.
+    /// **What it checks is `url`, spelled as its [`kind`](MonitorKind) reads
+    /// it** (#864). An HTTP check takes an http(s) URL, a TCP check `host:port`,
+    /// a ping a host, and a Docker check a container's name. Until #864 a
+    /// monitor of a URL was the only check there was (#453 said the day knobas
+    /// offers a ping or a TCP check is the day this op grows the field that
+    /// says which), so the field keeps its name: a queued row written then
+    /// still reads, and `kind` defaults to [`MonitorKind::Http`], which is what
+    /// that row meant.
     ///
     /// **`name` is what attaches it.** The new monitor reaches knobas the
     /// ordinary way, through the next poll, and what draws the `monitored-by`
@@ -650,6 +651,8 @@ pub enum WriteOp {
         entity: String,
         name: String,
         url: String,
+        #[serde(default)]
+        kind: MonitorKind,
     },
     /// Identifier `"merge_pull_request"`. Merge a pull request into its base
     /// (spec #660 story 10, issue #667). `entity` is the **pull request**.
@@ -949,6 +952,49 @@ pub enum ReviewSide {
 pub struct BuildParameter {
     pub name: String,
     pub value: String,
+}
+
+/// What kind of check a [`CreateMonitor`](WriteOp::CreateMonitor) asks for
+/// (#864, spec #808 story 154), in knobas' words rather than one server's:
+/// Uptime Kuma calls a TCP check `port`. Serialized as the lowercase word.
+///
+/// The four a reader is offered for an asset (R-11.4): HTTP for a route or a
+/// service, TCP for a database, Docker for a container, Ping for a VM. A
+/// closed set, so a payload naming a check no adapter makes fails to decode at
+/// `submit_write` rather than reaching a source.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MonitorKind {
+    /// An http(s) URL fetched and expected to answer 2xx.
+    #[default]
+    Http,
+    /// A TCP connection to `host:port`.
+    Tcp,
+    /// An ICMP ping to a host.
+    Ping,
+    /// A container, by name, asked of the monitoring source's Docker host.
+    Docker,
+}
+
+impl MonitorKind {
+    /// Every kind, in the order a form offers them.
+    pub const ALL: [MonitorKind; 4] = [
+        MonitorKind::Http,
+        MonitorKind::Tcp,
+        MonitorKind::Ping,
+        MonitorKind::Docker,
+    ];
+
+    /// The word on the wire.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            MonitorKind::Http => "http",
+            MonitorKind::Tcp => "tcp",
+            MonitorKind::Ping => "ping",
+            MonitorKind::Docker => "docker",
+        }
+    }
 }
 
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
@@ -1522,6 +1568,7 @@ mod tests {
                 entity: monitor_target("kuma"),
                 name: "gitea".into(),
                 url: "http://gitea:3000/api/healthz".into(),
+                kind: crate::MonitorKind::Http,
             },
             WriteOp::MergePullRequest {
                 entity: "gitea:tidewater/payout-service#142".into(),
@@ -1689,6 +1736,45 @@ mod tests {
                 "MergePullRequest": { "entity": "gitea:o/r#1", "style": "merge", "delete_branch": true }
             })
         );
+    }
+
+    /// A create queued before monitors had kinds (#864) has no `kind` in its
+    /// JSON; it still reads as the HTTP check it was. A kind crosses as its
+    /// lowercase word, and a word knobas has no check for does not decode.
+    #[test]
+    fn a_create_queued_before_kinds_reads_as_an_http_check() {
+        let old = serde_json::json!({
+            "CreateMonitor": { "entity": "kuma:monitors", "name": "gitea", "url": "http://gitea:3000/" }
+        });
+        let read = serde_json::from_value::<WriteOp>(old).unwrap();
+        assert!(
+            matches!(&read, WriteOp::CreateMonitor { kind: MonitorKind::Http, .. }),
+            "{read:?}"
+        );
+        let new = WriteOp::CreateMonitor {
+            entity: "kuma:monitors".into(),
+            name: "pg".into(),
+            url: "db.internal:5432".into(),
+            kind: MonitorKind::Tcp,
+        };
+        assert_eq!(
+            serde_json::to_value(&new).unwrap(),
+            serde_json::json!({
+                "CreateMonitor": {
+                    "entity": "kuma:monitors", "name": "pg", "url": "db.internal:5432", "kind": "tcp"
+                }
+            })
+        );
+        for (word, kind) in [
+            ("http", MonitorKind::Http),
+            ("tcp", MonitorKind::Tcp),
+            ("ping", MonitorKind::Ping),
+            ("docker", MonitorKind::Docker),
+        ] {
+            assert_eq!(serde_json::to_value(kind).unwrap(), serde_json::json!(word));
+            assert_eq!(kind.as_str(), word);
+        }
+        assert!(serde_json::from_value::<MonitorKind>(serde_json::json!("cert")).is_err());
     }
 
     /// An update's style crosses as `merge` or `rebase` and nothing else
