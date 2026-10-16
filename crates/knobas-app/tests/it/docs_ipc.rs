@@ -164,6 +164,8 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
 
     let doc = docs_page_inner(&pool, &handbook).await.unwrap();
     assert_eq!(doc.title, "On-call handbook");
+    assert_eq!(doc.source_name, "Confluence", "the configured name, for Open in …");
+    assert!(doc.me.contains(&"mara".to_owned()));
     assert_eq!(doc.space.as_ref().map(|s| (s.key.as_str(), s.name.as_deref())), Some(("OPS", Some("OPS space"))));
     assert_eq!(doc.ancestors.len(), 1);
     assert_eq!(doc.ancestors[0].title, "Ops home");

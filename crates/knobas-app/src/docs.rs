@@ -65,6 +65,9 @@ pub struct DocNode {
 pub struct DocPage {
     pub entity_id: String,
     pub source_id: String,
+    /// The source's configured name, falling back to its id: what *Open in …*
+    /// and the placeholder name (R-10.18 keeps those two source-specific).
+    pub source_name: String,
     pub title: String,
     pub space: Option<DocSpaceRef>,
     /// The parent chain, outermost first: each ancestor's title, and the
@@ -82,6 +85,9 @@ pub struct DocPage {
     pub labels: Vec<String>,
     pub blocks: Vec<DocBlock>,
     pub comments: Vec<DocComment>,
+    /// The identity `@me` resolves to, so the reader can say *You* for the
+    /// editor and a comment's author.
+    pub me: Vec<String>,
 }
 
 /// A space, named.
@@ -184,7 +190,8 @@ pub async fn tree(pool: &PgPool, declarations: &Declarations) -> Result<DocsTree
 /// declarations.
 const PAGE: &str = concat!(
     "select i.entity_id, i.source_id, i.kind, i.title, i.author, i.item_updated_at, \
-            i.web_url, i.payload, s.kind as adapter_kind, p.key, p.name, \
+            i.web_url, i.payload, s.kind as adapter_kind, \
+            coalesce(nullif(btrim(s.display_name), ''), s.id) as source_name, p.key, p.name, \
             coalesce((select jsonb_agg(f.name order by f.pos) from \
               (select distinct on (pn.pos) pn.pos, pn.name from ",
     knobas_core::declared_parent_names!("$2"),
@@ -369,6 +376,7 @@ pub async fn page(
     Ok(DocPage {
         entity_id: id,
         source_id,
+        source_name: row.get("source_name"),
         title: row.get("title"),
         space,
         ancestors,
@@ -380,5 +388,6 @@ pub async fn page(
         labels: content.labels,
         blocks: content.blocks,
         comments: content.comments,
+        me: me.to_vec(),
     })
 }
