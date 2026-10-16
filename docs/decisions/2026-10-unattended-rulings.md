@@ -2485,3 +2485,51 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
   `PAY-2311` still counts beside a mirrored `PAY-231`, a key of a project not synced does not.
   One statement over `knobas.entity`, made only when the text names another key. **Reversing:**
   low (drop `HELD_PROJECTS`).
+## #849 and #850 — Builds: project tree and pins, This job (2026-10-16)
+
+Implementer, one PR for both.
+
+- **"`under:` sees every level" is read as: a configuration at every depth of a configured project
+  is in scope, and its builds answer `under:<configuration>` as any build does.** A project is not a
+  parent (ADR-0018, `CONTEXT.md` **Parent** and **Project**: it cannot be opened), so no
+  `under:<project>` is added. The live witness creates `Payout › KnobasNested849 › Deeper` with one
+  configuration and asserts a source scoped to `Payout` syncs it with its whole path.
+  **Reversing:** medium; `under:<project>` would need ADR-0018 amended.
+- **The project path is written beside the configuration's record as `projectPath`** (from
+  `/app/rest/projects`, outermost first below `_Root`) and declared as a new list field,
+  `group_path`, rather than a joined string in `group` or a parent chain. A list keeps the levels a
+  tree needs; the record-side copy is ADR-0018's precedent (Gitea's repository, Jira's epic).
+  **Reversing:** medium; a frozen declaration.
+- **No cursor bump.** A mirror synced before this carries no path until a run re-emits the
+  configuration (a full sync, or a build of it moving); until then it is drawn under its `group`.
+  Bumping would rewrite a dozen cursor assertions for a one-time gap. **Reversing:** low.
+- **The tree is read at most once a run**, and only when a run lists configurations or a scoped run
+  has builds to place; an unscoped idle poll reads nothing new. A paged answer is refused, as
+  `/app/rest/buildTypes`'s is. **Reversing:** low.
+- **Pins are a setting, not a migration**: `knobas.setting` `builds.pins`, a JSON array of entity
+  ids, never checked against the mirror. **Reversing:** low.
+- **A fold the reader toggled stays as left for the session; otherwise it is open while something
+  narrows the list, or when it holds a failure or the selection.** prototype-6's order (`S.plOpen`
+  first). Only the reader's own toggle is remembered, not the one drawing the fold raises, so a fold
+  opened by a match closes again when the words are cleared. **Reversing:** low.
+- **Folds are ordered by name; a fold's own pipelines come before its subgroups**; a group holding
+  only one subgroup is one row (`Payments › Payouts`). **Reversing:** low.
+- **The indent is a class per level** (`tf-d1` … `tf-d8`, 14 px a level, deeper rows stay at 8),
+  because inline styles are refused. **Reversing:** low.
+- **Reasons** (`job_pipelines`): *your branch* when a run built a branch the job reaches (its
+  title) or a reached pull request's `head`, exactly or as `refs/heads/<name>`; *PR check* when a run
+  ran on a reached pull request's head commit, or the job reaches the run through the pull request;
+  otherwise *linked to KEY* (prototype-6's `jobReach` words), or *Parent KEY* for the parent's
+  links (the job sections' label). Each label once, in that order. **Reversing:** low.
+- **`job_pipelines` takes the ticket's entity id**; the page resolves the job's key the way the job
+  page does (`resolveTicket`). **Reversing:** low.
+- **With *This job* on, a bare `#/builds` selects the job's first failing pipeline, else its first.**
+  prototype-6 picks the job's failing configuration. **Reversing:** low.
+- ***This job* draws one *By project* header** over every source's pruned tree. **Reversing:** low.
+- ***Pin* / *Unpin* sits in the selected pipeline's header**, where prototype-6 has it; #851 owns
+  that header and keeps the button. **Reversing:** low.
+- **`knobas-mockd` answers `/app/rest/projects`** (the root and each configuration's project under
+  it), so the mockd-driven tests keep running; it certifies nothing (ADR-0013). **Reversing:** low.
+- **The *This job* screenshots** were taken through a throwaway page that loads the app in an iframe
+  at `#/job/PAY-231` and then moves it to `#/builds`, since a job is current only after one was
+  opened. Nothing in the app changed for it. **Reversing:** none needed.

@@ -137,6 +137,7 @@ knobas-app	lib/knobas_app	commands::entity::tests::every_statement_names_its_col
 knobas-app	lib/knobas_app	commands::entity::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::entity::tests::the_order_deserializes_as_the_frontend_spells_it
+knobas-app	lib/knobas_app	commands::entity::tests::the_pins_are_read_by_their_constant
 knobas-app	lib/knobas_app	commands::entity::tests::two_adapters_declaring_one_kind_do_not_fight
 knobas-app	lib/knobas_app	commands::search::tests::search_failures_keep_their_kind
 knobas-app	lib/knobas_app	commands::search::tests::the_filter_suggestions_shape_matches_its_typescript_mirror
@@ -488,6 +489,8 @@ knobas-app	test/it	backup_ipc::switching_the_saved_lists_part_off_leaves_the_lis
 knobas-app	test/it	backup_ipc::the_archive_list_is_ordered_by_date_and_not_by_the_share_prefix
 knobas-app	test/it	backup_ipc::the_archive_list_says_which_archives_are_share_exports
 knobas-app	test/it	backup_ipc::the_nightly_job_exports_once_and_then_leaves_it_alone
+knobas-app	test/it	builds_ipc::a_pin_is_kept_until_it_is_taken_back
+knobas-app	test/it	builds_ipc::a_pipeline_carries_its_chain_of_groups_outermost_first
 knobas-app	test/it	builds_ipc::a_pipelines_runs_come_newest_first_with_their_fields
 knobas-app	test/it	builds_ipc::a_run_joins_its_pipeline_by_id_within_its_source_only
 knobas-app	test/it	builds_ipc::pipelines_carry_their_name_group_and_last_twelve_runs
@@ -671,6 +674,7 @@ knobas-app	test/it	entity_mirror::the_inbox_categories_match_their_typescript_mi
 knobas-app	test/it	entity_mirror::the_inbox_entry_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_inbox_item_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_inbox_shelves_match_their_typescript_mirror
+knobas-app	test/it	entity_mirror::the_job_pipeline_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_kind_info_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_link_entry_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_link_row_shape_matches_its_typescript_mirror
@@ -742,6 +746,8 @@ knobas-app	test/it	job_ipc::a_missing_or_unreadable_estimate_is_none
 knobas-app	test/it	job_ipc::a_tickets_detail_carries_its_type_priority_and_estimate
 knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_reaches
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
+knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
+knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
 knobas-app	test/it	notes_export_ipc::every_note_is_one_markdown_file_with_its_refs_kept_as_text
 knobas-app	test/it	notes_export_ipc::no_notes_writes_an_empty_folder
 knobas-app	test/it	probe_snapshot::tests::a_change_to_the_pass_code_or_the_migrations_names_another_after_pass_snapshot
@@ -2860,6 +2866,10 @@ knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::nothing_but_a_fini
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_base_url_is_joined_the_way_a_user_pasted_it
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_key_is_the_id_and_the_title_is_the_number
 knobas-source-teamcity	lib/knobas_source_teamcity	map::tests::the_newest_of_the_three_dates_wins
+knobas-source-teamcity	lib/knobas_source_teamcity	projects::tests::a_configured_project_takes_in_its_subprojects_at_every_depth
+knobas-source-teamcity	lib/knobas_source_teamcity	projects::tests::a_cycle_ends_the_chain_rather_than_looping
+knobas-source-teamcity	lib/knobas_source_teamcity	projects::tests::a_path_runs_from_below_the_root_down_to_the_project_itself
+knobas-source-teamcity	lib/knobas_source_teamcity	projects::tests::the_chain_is_written_beside_the_record
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::a_build_types_listing_parses
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::a_builds_listing_parses_running_and_finished
 knobas-source-teamcity	lib/knobas_source_teamcity	rest::tests::a_state_filter_matches_the_records_the_server_would_return
@@ -2883,7 +2893,9 @@ knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_queued_af
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_failed_to_start_after_it_was_mirrored_as_queued_does_not_stay_queued
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_finishes_late_is_still_picked_up
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_build_that_finishes_mid_run_is_not_lost_between_the_two_queries
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_carries_its_project_path
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configuration_is_emitted_once_per_run
+knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_configured_project_takes_in_its_subprojects_at_every_depth
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_page_is_widened_until_the_server_stops_filling_it
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_sync_emits_every_configuration_and_its_builds
 knobas-source-teamcity	lib/knobas_source_teamcity	sync::tests::a_full_sync_mirrors_a_feature_branch_build_in_a_configuration
@@ -3006,6 +3018,7 @@ knobas-source-teamcity	test/live_teamcity	the_two_facet_dimensions_do_not_open_t
 knobas-source-teamcity	test/live_teamcity_seeded	a_build_configurations_web_url_is_composed_from_the_configured_base_url_and_answers_200
 knobas-source-teamcity	test/live_teamcity_seeded	a_build_queued_through_rest_moves_the_watermark_and_the_next_run_stands_still
 knobas-source-teamcity	test/live_teamcity_seeded	a_builds_web_url_is_composed_from_the_configured_base_url_and_answers_200
+knobas-source-teamcity	test/live_teamcity_seeded	a_configured_project_takes_in_its_nested_projects_and_writes_their_path
 knobas-source-teamcity	test/live_teamcity_seeded	a_run_with_an_override_is_built_on_its_branch_and_synced_next
 knobas-source-teamcity	test/live_teamcity_seeded	a_seeded_parameter_set_through_the_adapter_reads_back_in_the_next_view
 knobas-source-teamcity	test/live_teamcity_seeded	a_synced_build_carries_its_configuration_and_is_found_by_under_its_name_and_id
