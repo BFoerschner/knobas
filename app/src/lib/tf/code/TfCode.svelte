@@ -1,0 +1,382 @@
+<!--
+  Code (#837, R-8.1, R-8.2): `#/code` and `#/code/repos` draw *Repositories*,
+  `#/code/prs` *Pull requests*. One page, as prototype-6's `renderCode(tab)`:
+  the header with *New pull request*, the two tabs with their counts, the
+  tab's own filter bar, then its rows.
+
+  - **Repositories**: every mirrored repository, yours first (one of your pull
+    requests or one asking your review is in it), then by last push. Each row:
+    the name with the job's key when the job reaches it, its open pull
+    requests, the local checkout (`entity_checkout`: branch and where it
+    stands, or *not on this machine*) and the last push.
+  - **Pull requests**: the attention read (`list_entities`, order
+    `attention`, #712) groups the open ones as *Asking for your review*,
+    *Yours* and *Open, others*; the recency read adds *Merged or closed*.
+    Each row: the number, the title over its repository, the state chip, the
+    job it belongs to (`job/open-jobs.ts`) and when it last moved.
+
+  Every read is an existing command (`list_entities`, `entity_checkout`,
+  `list_sources`, `list_contexts`, `get_entity`, `job_reach`). Rows open
+  `#/repo/<entity id>` and `#/pr/<entity id>`.
+-->
+<script lang="ts" module>
+  import type { CheckoutView, EntityFilter, EntityPage } from "../../ipc/entity";
+  import type { OpenJobPorts } from "../job/open-jobs";
+
+  /** The reads this page makes, injectable so a test needs no bridge. */
+  export interface CodePorts extends OpenJobPorts {
+    listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
+    entityCheckout: (entityId: string) => Promise<CheckoutView>;
+    /** The sources, for the host the header names. */
+    listSources: () => Promise<{ id: string; base_url?: string | null }[]>;
+  }
+</script>
+
+<script lang="ts">
+  import { ipcErrorMessage } from "../../ipc";
+  import { entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
+  import { listSources } from "../../ipc/sources";
+  import FilterBar from "../filter/FilterBar.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
+  import type { FilterConfig, FilterScope } from "../filter/filter";
+  import Marked from "../filter/Marked.svelte";
+  import { itemHash, keyOf } from "../job/job";
+  import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
+  import { when } from "../tickets/tickets";
+  import {
+    checkoutLine,
+    compareHash,
+    GROUP_LABEL,
+    GROUP_ORDER,
+    headerLine,
+    openCount,
+    openPrsOf,
+    PR_FLAGS,
+    PR_STATES,
+    prLines,
+    REPO_FLAGS,
+    visiblePrs,
+    visibleRepos,
+    type PrGroup,
+    type PrLine,
+  } from "./code";
+
+  let {
+    ready,
+    rest,
+    job,
+    ports = {
+      listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
+      entityCheckout: (entityId) => entityCheckout(entityId),
+      listSources: () => listSources(),
+      listContexts: () => listContexts(),
+      getEntity: (entityId) => getEntity(entityId),
+      jobReach: (entityId) => jobReach(entityId),
+    },
+    now: fixedNow,
+  }: {
+    /** Whether the database answers yet: the reads wait for it. */
+    ready: boolean;
+    /** What follows `code` in the address: `repos`, `prs`, or nothing. */
+    rest: string[];
+    /** The job the reader was last in, as a ticket key. */
+    job: string | null;
+    ports?: CodePorts;
+    /** Injectable clock, for the time column and *Idle > 5 days*. */
+    now?: Date;
+  } = $props();
+
+  const now = $derived(fixedNow ?? new Date());
+  const tab = $derived<"repos" | "prs">(rest[0] === "prs" ? "prs" : "repos");
+
+  /** How many rows a read asks for: every repository and pull request the mirror holds. */
+  const LIMIT = 1000;
+  /** How many `entity_checkout` reads run at once: each may run `git status`. */
+  const CHECKOUT_LANES = 4;
+
+  const read = (kinds: string[], order: EntityFilter["order"], reach: string | null = null): EntityFilter => ({
+    sources: [],
+    kinds,
+    updated_within_days: null,
+    order,
+    context: null,
+    project: null,
+    include_deleted: false,
+    reach,
+  });
+
+  let repos = $state<EntityPage | null>(null);
+  let attention = $state<EntityPage | null>(null);
+  let everyPr = $state<EntityPage | null>(null);
+  let sources = $state<{ id: string; base_url?: string | null }[]>([]);
+  let failed = $state<string | null>(null);
+  let checkouts = $state<Record<string, CheckoutView>>({});
+  let jobs = $state<OpenJob[]>([]);
+  let branches = $state<EntityRow[]>([]);
+
+  $effect(() => {
+    if (!ready) return;
+    let live = true;
+    const fail = (error: unknown) => {
+      if (live) failed = ipcErrorMessage(error);
+    };
+    ports.listEntities(read(["repo"], "updated_desc"), LIMIT, 0).then((page) => {
+      if (!live) return;
+      repos = page;
+      void readCheckouts(page.rows.map((row) => row.entity_id), () => live);
+    }, fail);
+    ports.listEntities(read(["pr"], "attention"), LIMIT, 0).then((page) => {
+      if (live) attention = page;
+    }, fail);
+    ports.listEntities(read(["pr"], "updated_desc"), LIMIT, 0).then((page) => {
+      if (live) everyPr = page;
+    }, fail);
+    ports.listSources().then(
+      (rows) => {
+        if (live) sources = rows;
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+
+  $effect(() => {
+    if (!ready) return;
+    const current = job;
+    let live = true;
+    void readOpenJobs(ports, current).then(async (read_) => {
+      if (!live) return;
+      jobs = read_;
+      const own = read_[0];
+      if (current === null || own === undefined || keyOf(own.id) !== current) {
+        branches = [];
+        return;
+      }
+      const page = await ports.listEntities(read(["branch"], "updated_desc", own.id), 50, 0).catch(() => null);
+      if (live) branches = page?.rows ?? [];
+    });
+    return () => {
+      live = false;
+    };
+  });
+
+  /** Each repository's checkout, a few at a time; one that fails draws nothing. */
+  async function readCheckouts(ids: string[], alive: () => boolean) {
+    const queue = [...ids];
+    const lane = async () => {
+      for (let id = queue.shift(); id !== undefined && alive(); id = queue.shift()) {
+        try {
+          const view = await ports.entityCheckout(id);
+          if (alive()) checkouts[id] = view;
+        } catch {
+          // An unreadable checkout leaves the cell empty rather than claiming one.
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: CHECKOUT_LANES }, lane));
+  }
+
+  const index = $derived(jobIndex(jobs));
+  const held = $derived((entityId: string) => job !== null && index.holds(job, { entity_id: entityId }));
+  const lines = $derived(attention && everyPr ? prLines(attention, everyPr, now) : null);
+  const openCounts = $derived(openPrsOf(lines ?? []));
+  const compare = $derived(compareHash(branches, repos?.rows ?? []));
+
+  // -- the filter bars -------------------------------------------------------
+
+  const repoFilter = sessionFilter("code-repos");
+  const prFilter = sessionFilter("code-prs");
+  // Prototype-6 opens both tabs on *All*.
+  if (repoFilter.scope === null) repoFilter.scope = "all";
+  if (prFilter.scope === null) prFilter.scope = "all";
+
+  $effect(() => {
+    if (job !== null) return;
+    if (repoFilter.scope === "job") repoFilter.scope = "all";
+    if (prFilter.scope === "job") prFilter.scope = "all";
+  });
+
+  const scopes = $derived<FilterScope[]>([
+    ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
+    { id: "mine", label: "Mine", query: "" },
+    { id: "all", label: "All", query: "" },
+  ]);
+  const options = (values: readonly string[]) => values.map((value) => ({ value, label: value }));
+  const repoNames = $derived([...new Set((repos?.rows ?? []).map((row) => row.title))].sort());
+
+  const repoConfig = $derived<FilterConfig>({
+    id: "code-repos",
+    placeholder: repos === null ? "Filter repositories by name" : `Filter ${repos.total} repositories by name`,
+    noun: "repositories",
+    scopes,
+    chips: [{ key: "flag", label: "Flags", options: options(REPO_FLAGS) }],
+  });
+  const prConfig = $derived<FilterConfig>({
+    id: "code-prs",
+    placeholder: "Filter pull requests by title, repo or number",
+    noun: "pull requests",
+    scopes,
+    chips: [
+      { key: "state", label: "State", options: options(PR_STATES) },
+      { key: "flag", label: "Flags", options: options(PR_FLAGS) },
+    ],
+    dropdowns: [{ key: "repo", label: "Repo", options: options(repoNames) }],
+  });
+
+  const scopeOf = (value: string | null) => (value === "job" || value === "mine" ? value : "all");
+
+  const shownRepos = $derived(
+    repos === null
+      ? []
+      : visibleRepos(repos.rows, lines ?? [], checkouts, {
+          scope: scopeOf(repoFilter.scope),
+          held,
+          flags: repoFilter.chips["flag"] ?? [],
+          text: repoFilter.text,
+        }),
+  );
+  const shownPrs = $derived(
+    lines === null
+      ? []
+      : visiblePrs(lines, {
+          scope: scopeOf(prFilter.scope),
+          held,
+          states: prFilter.chips["state"] ?? [],
+          flags: prFilter.chips["flag"] ?? [],
+          repo: prFilter.dropdowns["repo"] ?? "",
+          text: prFilter.text,
+        }),
+  );
+
+  /** The pull requests by group, in draw order; open ones with no group come first, unheaded. */
+  const groups = $derived.by(() => {
+    const out: { group: PrGroup | null; lines: PrLine[] }[] = [];
+    const ungrouped = shownPrs.filter((line) => line.group === null);
+    if (ungrouped.length > 0) out.push({ group: null, lines: ungrouped });
+    for (const group of GROUP_ORDER) {
+      const kept = shownPrs.filter((line) => line.group === group);
+      if (kept.length > 0) out.push({ group, lines: kept });
+    }
+    return out;
+  });
+
+  const prTotal = $derived(lines?.length ?? null);
+  const filter = $derived(tab === "prs" ? prFilter : repoFilter);
+  const searchAll = () => {
+    filter.scope = "all";
+  };
+
+  function open(href: string) {
+    location.hash = href;
+  }
+</script>
+
+<header class="tf-fhead">
+  <div>
+    <h1>Code</h1>
+    <div class="tf-sub">
+      {repos === null ? "Repositories and pull requests, what asks for you first." : headerLine(repos.total, repos.rows, sources)}
+    </div>
+  </div>
+  <div class="tf-acts">
+    {#if compare !== null}
+      <a class="tf-btn" href={compare}>New pull request</a>
+    {:else}
+      <button
+        type="button"
+        class="tf-btn"
+        disabled
+        title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
+      >
+    {/if}
+  </div>
+</header>
+<nav class="tf-tabs" aria-label="Code">
+  <a href="#/code/repos" aria-current={tab === "repos" ? "page" : undefined}
+    >Repositories{#if repos !== null && repos.total > 0}{" "}<span class="tf-count">{repos.total}</span>{/if}</a
+  >
+  <a href="#/code/prs" aria-current={tab === "prs" ? "page" : undefined}
+    >Pull requests{#if prTotal !== null && prTotal > 0}{" "}<span class="tf-count">{prTotal}</span>{/if}</a
+  >
+</nav>
+{#if tab === "repos"}
+  <FilterBar
+    config={repoConfig}
+    filter={repoFilter}
+    shown={repos === null ? null : shownRepos.length}
+    total={repos?.total ?? null}
+  />
+{:else}
+  <FilterBar config={prConfig} filter={prFilter} shown={lines === null ? null : shownPrs.length} total={prTotal} />
+{/if}
+<div class="tf-cbody">
+  {#if failed !== null}
+    <p class="tf-cfail">{failed}</p>
+  {/if}
+  {#if tab === "repos"}
+    {#if shownRepos.length > 0}
+      <table class="tf-tbl">
+        <thead>
+          <tr><th>Repository</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th></tr>
+        </thead>
+        <tbody>
+          {#each shownRepos as row (row.entity_id)}
+            {@const count = openCount(openCounts, row)}
+            {@const local = checkoutLine(checkouts[row.entity_id])}
+            <tr class="tf-row" onclick={() => open(itemHash(row))}>
+              <td
+                ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
+                >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
+              >
+              <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
+              <td>{#if local === "not on this machine"}<span class="tf-dim">{local}</span>{:else}{local ?? ""}{/if}</td>
+              <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else if repos !== null}
+      {@render nothing()}
+    {/if}
+  {:else}
+    {#each groups as { group, lines: kept } (group ?? "open")}
+      {#if group !== null}
+        <h2 class="tf-cgroup-h">{GROUP_LABEL[group]} <span class="tf-count">{kept.length}</span></h2>
+      {/if}
+      <table class="tf-tbl tf-cprs">
+        <tbody>
+          {#each kept as { row, number, idle } (row.entity_id)}
+            {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
+            <tr class="tf-row" onclick={() => open(itemHash(row))}>
+              <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
+              <td
+                ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
+                  >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
+                    >{/if}{#if idle}{row.path ? ", " : ""}idle for more than 5 days{/if}</span
+                ></td
+              >
+              <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>
+              <td class="tf-mono tf-dim">{belongs ?? ""}</td>
+              <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
+            </tr>
+          {/each}
+        </tbody>
+      </table>
+    {:else}
+      {#if lines !== null}
+        {@render nothing()}
+      {/if}
+    {/each}
+  {/if}
+</div>
+
+{#snippet nothing()}
+  <div class="tf-empty">
+    Nothing matches.
+    {#if filter.scope === "job"}
+      <button type="button" class="tf-btn tf-sm" onclick={searchAll}>Search all of Code</button>
+    {/if}
+  </div>
+{/snippet}

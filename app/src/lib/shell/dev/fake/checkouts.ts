@@ -38,6 +38,9 @@ function seedClonesRoot(params: URLSearchParams): void {
 /** What the scan would find, per repo entity. */
 const FAKE_SCANNED: Record<string, string> = {
   "mock:tidewater/payout-service": "/Users/mara/src/payout-service",
+  // Code's *Local checkout* column (#837): two more clones, as prototype-6 has several.
+  "mock:tidewater/psp-client": "/Users/mara/src/psp-client",
+  "mock:tidewater/rust-common": "/Users/mara/src/rust-common",
 };
 
 const fakeOverrides: Record<string, string> = {};

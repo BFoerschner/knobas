@@ -169,8 +169,8 @@ test("New pull request opens the compare page for the job's branch in its reposi
 });
 
 test("the header names the one host the repositories come from", () => {
-  expect(headerLine(47, [repo("a")], [{ id: "gitea", base_url: "https://git.tidewater.internal/" }])).toBe(
-    "47 repositories on git.tidewater.internal, what asks for you first.",
+  expect(headerLine(47, [repo("a")], [{ id: "gitea", base_url: "https://git.example.com/" }])).toBe(
+    "47 repositories on git.example.com, what asks for you first.",
   );
   expect(headerLine(2, [repo("a"), { ...repo("b"), source_id: "gitea-eu" }], [])).toBe("2 repositories, what asks for you first.");
   expect(headerLine(1, [repo("a")], [{ id: "gitea", base_url: "not a url" }])).toBe("1 repository, what asks for you first.");

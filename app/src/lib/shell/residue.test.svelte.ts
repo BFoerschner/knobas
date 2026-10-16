@@ -355,6 +355,7 @@ const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
 const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
+const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
@@ -1012,6 +1013,50 @@ const CASES: Case[] = [
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),
             submitWrite: () => deferred({ id: 1 } as never),
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Code (#837): the filter bar's `/` on the window, the list reads, the
+     * checkouts and the jobs' reach reads behind a ready database, answering
+     * late.
+     */
+    name: "TfCode",
+    source: "lib/tf/code/TfCode.svelte",
+    open: (target) => ({
+      app: mount(TfCode, {
+        target,
+        props: {
+          ready: true,
+          rest: [],
+          job: "PAY-231",
+          ports: {
+            listEntities: () =>
+              deferred({
+                rows: [
+                  {
+                    entity_id: "gitea:tidewater/payout-service",
+                    kind: "repo",
+                    source_id: "gitea",
+                    title: "tidewater/payout-service",
+                    updated_at: null,
+                    synced_at: "2026-08-22T14:30:00Z",
+                    path: null,
+                    state: null,
+                  },
+                ],
+                total: 1,
+                tally: null,
+                groups: null,
+              }),
+            entityCheckout: () => deferred({ path: null } as never),
+            listSources: () => deferred([{ id: "jira" }]),
+            listContexts: () => deferred([]),
+            getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
+            jobReach: () => deferred([]),
           },
         },
       }),

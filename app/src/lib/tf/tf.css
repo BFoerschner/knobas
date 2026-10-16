@@ -1343,3 +1343,20 @@ a.tf-r:hover { background: var(--sheet-2); }
   .tf-ib time, .tf-ib .tf-acts, .tf-ib .tf-ctx, .tf-isnooze { grid-row: auto; grid-column: 1; }
   .tf-ib .tf-acts { justify-content: flex-start; }
 }
+
+/* ---------- Code (#837, R-8.1, R-8.2) ---------- */
+.tf-cbody { padding: 16px 22px 40px; }
+.tf-cbody .tf-tbl a { color: inherit; text-decoration: none; }
+.tf .tf-cgroup-h { font-size: var(--t-sm); font-weight: 600; margin: 18px 0 8px; display: flex; gap: 8px; align-items: center; }
+.tf .tf-cgroup-h:first-child { margin-top: 0; }
+/* One column grid for every group's table, so the groups line up. */
+.tf-cprs { table-layout: fixed; }
+.tf-cprs td:nth-child(1) { width: 80px; }
+.tf-cprs td:nth-child(3) { width: 110px; }
+.tf-cprs td:nth-child(4) { width: 100px; }
+.tf-cprs td:nth-child(5) { width: 150px; }
+.tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); }
+.tf-cfail { color: var(--err); font-size: var(--t-sm); }
+@media (max-width: 900px) {
+  .tf-cbody { padding-left: 16px; padding-right: 16px; overflow-x: auto; }
+}
