@@ -142,7 +142,8 @@ pub struct SourceDescriptor {
 // them are in `knobas-core`, which may not depend on the SPI. Re-exported so
 // an adapter needs one `use`.
 pub use knobas_core::payload::{
-    KindPaths, ListPath, ParentPath, PayloadPath, StateChip, StatePath, StateValue,
+    KindPaths, ListPath, ParentPath, PayloadPath, StateChip, StatePath, StateValue, Trigger,
+    TriggerPath, TriggerValue,
 };
 pub use knobas_core::tone::Tone;
 

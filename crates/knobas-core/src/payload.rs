@@ -336,6 +336,61 @@ pub struct KindPaths {
     /// is the run's duration.
     #[serde(default)]
     pub finished: Vec<PayloadPath>,
+    /// How a run was started (#961), mapped onto the shell's own words: a
+    /// change pushed, a schedule, or a person. A [`TriggerPath`] per
+    /// candidate, read as [`state`](Self::state) is: the value at `at`,
+    /// trimmed, matched exactly against the map, the first hit winning; a
+    /// value no map names is a miss. TeamCity's `triggered.type`, `vcs`,
+    /// `schedule` and `user`.
+    #[serde(default)]
+    pub trigger: Vec<TriggerPath>,
+    /// Who started a run, as the source spells the account (#961), so it can
+    /// be matched against the configured usernames as
+    /// [`assignee`](Self::assignee) is. TeamCity's `triggered.user.username`;
+    /// a run a change or a schedule started has none.
+    #[serde(default)]
+    pub started_by: Vec<PayloadPath>,
+}
+
+/// How a run was started, in the shell's words (#961).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Trigger {
+    /// A change pushed to what the pipeline builds: TeamCity's `vcs`.
+    Change,
+    /// A schedule: TeamCity's `schedule`.
+    Schedule,
+    /// A person, who [`KindPaths::started_by`] names: TeamCity's `user`.
+    Person,
+}
+
+/// Where a run's [`Trigger`] sits, and the source's words for each (#961).
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerPath {
+    /// Where the source's word is: a string.
+    pub at: PayloadPath,
+    /// The words this candidate reads, matched exactly after trimming.
+    #[serde(default)]
+    pub values: Vec<TriggerValue>,
+}
+
+/// One source word a [`TriggerPath`] reads, and the trigger it is.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TriggerValue {
+    /// The word as the source writes it (`vcs`).
+    pub value: String,
+    /// What the shell calls it.
+    pub trigger: Trigger,
+}
+
+impl TriggerValue {
+    /// `TriggerValue::of("vcs", Trigger::Change)`.
+    pub fn of(value: impl Into<String>, trigger: Trigger) -> Self {
+        TriggerValue {
+            value: value.into(),
+            trigger,
+        }
+    }
 }
 
 /// Which part of the Builds frame a kind is (ADR-0022, #848).
@@ -456,6 +511,8 @@ pub mod field {
     pub const BRANCH: &str = "branch";
     pub const STARTED: &str = "started";
     pub const FINISHED: &str = "finished";
+    pub const TRIGGER: &str = "trigger";
+    pub const STARTED_BY: &str = "started_by";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -490,6 +547,8 @@ pub mod field {
         BRANCH,
         STARTED,
         FINISHED,
+        TRIGGER,
+        STARTED_BY,
     ];
 }
 
@@ -725,6 +784,21 @@ pub fn resolve_state(payload: &serde_json::Value, candidates: &[StatePath]) -> O
             text: entry.text.clone().unwrap_or(text),
             tone: entry.tone,
         })
+    })
+}
+
+/// How a run was started (#961): the first candidate whose `at` leads to a
+/// string some entry of its map names, trimmed and matched exactly. Anything
+/// else is a miss, as [`resolve_state`] misses.
+#[must_use]
+pub fn resolve_trigger(payload: &serde_json::Value, candidates: &[TriggerPath]) -> Option<Trigger> {
+    candidates.iter().find_map(|candidate| {
+        let word = at(payload, &candidate.at)?.as_str()?.trim();
+        candidate
+            .values
+            .iter()
+            .find(|v| v.value == word)
+            .map(|v| v.trigger)
     })
 }
 
@@ -1016,6 +1090,32 @@ macro_rules! declared_state {
                 with ordinality as v(e, vord) \
              where s.val is not null and v.e->'value' = s.val \
                and jsonb_typeof(v.e->'tone') = 'string' \
+             order by s.ord, v.vord limit 1)"
+        )
+    };
+}
+
+/// SQL for "how this run was started": the [`Trigger`] word (`change`,
+/// `schedule`, `person`) or `null` (#961). The SQL side of
+/// [`resolve_trigger`]; `$decl` and the row alias `i` as for
+/// [`declared_state!`], whose shape this follows.
+#[macro_export]
+macro_rules! declared_trigger {
+    ($decl:literal) => {
+        concat!(
+            "(select v.e->>'trigger' \
+              from (select c.ord, c.vals, case jsonb_typeof(i.payload #> c.segs) \
+                      when 'string' then nullif(btrim(i.payload #>> c.segs), '') end as val \
+                    from (select ",
+            $crate::declared_segments!("t.p->'at'"),
+            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
+            $crate::declared_array!($decl, "trigger"),
+            ") with ordinality as t(p, ord)) c) s \
+              cross join lateral jsonb_array_elements(\
+                case when jsonb_typeof(s.vals) = 'array' then s.vals else '[]'::jsonb end) \
+                with ordinality as v(e, vord) \
+             where s.val is not null and v.e->>'value' = s.val \
+               and v.e->>'trigger' in ('change', 'schedule', 'person') \
              order by s.ord, v.vord limit 1)"
         )
     };
@@ -1342,6 +1442,48 @@ mod tests {
         let older: KindPaths =
             serde_json::from_value(serde_json::json!({ "kind": "build" })).unwrap();
         assert_eq!(older.frame, None);
+    }
+
+    /// A run's trigger is the source's word through its map (#961): a word
+    /// the map names reads as the shell's, trimmed; one it does not, a
+    /// non-string or a missing key is a miss, and the first candidate wins.
+    #[test]
+    fn a_trigger_reads_the_source_word_through_its_map() {
+        let teamcity = vec![TriggerPath {
+            at: PayloadPath::of(["triggered", "type"]),
+            values: vec![
+                TriggerValue::of("vcs", Trigger::Change),
+                TriggerValue::of("schedule", Trigger::Schedule),
+                TriggerValue::of("user", Trigger::Person),
+            ],
+        }];
+        let of = |v: serde_json::Value| resolve_trigger(&v, &teamcity);
+        assert_eq!(
+            of(serde_json::json!({ "triggered": { "type": " vcs " } })),
+            Some(Trigger::Change)
+        );
+        assert_eq!(
+            of(serde_json::json!({ "triggered": { "type": "schedule" } })),
+            Some(Trigger::Schedule)
+        );
+        assert_eq!(
+            of(serde_json::json!({ "triggered": { "type": "user", "user": {} } })),
+            Some(Trigger::Person)
+        );
+        assert_eq!(of(serde_json::json!({ "triggered": { "type": "buildType" } })), None);
+        assert_eq!(of(serde_json::json!({ "triggered": { "type": true } })), None);
+        assert_eq!(of(serde_json::json!({})), None);
+        assert_eq!(serde_json::to_value(Trigger::Change).unwrap(), "change");
+
+        let two = vec![
+            TriggerPath {
+                at: PayloadPath::of(["first"]),
+                values: vec![TriggerValue::of("x", Trigger::Schedule)],
+            },
+            teamcity[0].clone(),
+        ];
+        let both = serde_json::json!({ "first": "x", "triggered": { "type": "vcs" } });
+        assert_eq!(resolve_trigger(&both, &two), Some(Trigger::Schedule));
     }
 
     /// A declared time is ISO 8601 in either spelling (#848): TeamCity's
