@@ -2149,7 +2149,7 @@ export interface DigestLine {
 }
 
 /**
- * The standup's three lists — `knobas_app::standup::StandupDigest` (#288).
+ * The standup's four lists — `knobas_app::standup::StandupDigest` (#288, #932).
  *
  * `CONTEXT.md`'s **digest**, drawn from the mirror and the activity stream for
  * the configured usernames. Mine only: it describes the person the sources
@@ -2179,7 +2179,7 @@ export interface StandupDigest {
    */
   blockers: DigestLine[];
   /**
-   * The monitor incidents since the last working day (#932), newest first: one
+   * The monitor alerts since the last working day (#932), newest first: one
    * line per alert open at any point of the window, `kind` `"monitor"`, `verb`
    * `"down"` or `"warn"`, `reason` the duration (`was down 12 min`, `is still
    * down`) and `at` when it began. Not mine-only: a monitor has no owner.

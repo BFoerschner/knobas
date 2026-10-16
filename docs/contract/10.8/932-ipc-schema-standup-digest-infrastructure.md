@@ -8,7 +8,7 @@
   instant from the start of `yesterday_day`'s window (today's start when no such day was found) to
   the end of today's window, newest `opened_at` first, at most 200. `entity_id` is the monitor,
   `kind` is `"monitor"`, `title` its name, `source` the entity id's namespace, `verb` the alert's
-  state (`"down"` or `"warn"`), `at` when the incident began. `reason` is a duration with no clock
+  state (`"down"` or `"warn"`), `at` when the alert opened. `reason` is a duration with no clock
   reading: `was down 12 min`, `was slow 1 h 5 min`, or `is still down` while the alert is open. The
   clock is the reader's timezone, which only the webview holds, so the view draws `from 03:10` out
   of `at`.

@@ -1,11 +1,13 @@
-//! The standup digest: yesterday, today and blockers, every line traceable
-//! (issue #288, spec #272 story 58-63).
+//! The standup digest: yesterday, today, blockers and infrastructure, every
+//! line traceable (issue #288, spec #272 story 58-63; infrastructure #932).
 //!
 //! `CONTEXT.md`'s **digest**: *"the standup's generated three lists --
 //! yesterday, today, blockers -- drawn from the mirror and the activity stream
 //! for the configured usernames, every line linking to the item it came from.
 //! Yesterday is the newest day before today that has any of your activity, at
-//! most seven days back. Mine only."*
+//! most seven days back. Mine only."* The fourth list, *infrastructure*, is
+//! the glossary's amendment of 2026-10-17 (#932): monitor alerts, not mine
+//! only.
 //!
 //! # Derived, never stored
 //!
@@ -231,7 +233,7 @@ pub struct DigestLine {
     pub at: DateTime<Utc>,
 }
 
-/// The three lists, and which day the first of them is about.
+/// The four lists, and which day the first of them is about.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct StandupDigest {
     /// The day [`yesterday`](Self::yesterday) is really about, in the reader's
@@ -249,7 +251,7 @@ pub struct StandupDigest {
     pub today: Vec<DigestLine>,
     /// The user's items a source calls stuck or a link calls blocked.
     pub blockers: Vec<DigestLine>,
-    /// The monitor incidents since the last working day (#932, R-13.4): every
+    /// The monitor alerts since the last working day (#932, R-13.4): every
     /// [alert](knobas_sync::alerts) that was open at any point from the start
     /// of [`yesterday_day`](Self::yesterday_day) -- or of today, when no such
     /// day was found -- to the end of today, newest first.
@@ -799,9 +801,9 @@ async fn blockers(
     Ok(lines)
 }
 
-/// One incident, as the alert table keeps it.
+/// One alert, as its table keeps it, with its monitor's kind and name.
 #[derive(sqlx::FromRow)]
-struct IncidentRow {
+struct AlertRow {
     entity_id: String,
     kind: String,
     title: String,
@@ -813,7 +815,8 @@ struct IncidentRow {
 /// The alerts open at any instant of `[$1, $2)`: opened before the window
 /// ends, and either still open or closed at or after it begins. The join is
 /// for the monitor's name, which a tombstoned entity still carries.
-const INCIDENTS: &str = "select a.entity_id, e.kind, e.title, a.state, a.opened_at, a.closed_at
+const ALERTS_IN_WINDOW: &str =
+    "select a.entity_id, e.kind, e.title, a.state, a.opened_at, a.closed_at
        from knobas.monitor_alert a
        join knobas.entity e on e.id = a.entity_id
       where a.opened_at < $2
@@ -821,7 +824,7 @@ const INCIDENTS: &str = "select a.entity_id, e.kind, e.title, a.state, a.opened_
       order by a.opened_at desc, a.id desc
       limit $3";
 
-/// How long an incident lasted, as the reason words it: `12 min`, `1 h 5 min`.
+/// How long an alert stayed open, as the reason words it: `12 min`, `1 h 5 min`.
 /// Never under a minute, so a blip still reads as something that happened.
 fn lasted(span: Duration) -> String {
     let minutes = span.num_minutes().max(1);
@@ -834,17 +837,17 @@ fn lasted(span: Duration) -> String {
     }
 }
 
-/// The incident list: one line per alert that touched `[since, until)`.
+/// The Infrastructure list: one line per alert that touched `[since, until)`.
 ///
 /// The reason carries a duration and no clock reading, because the clock is
 /// the reader's timezone and this side does not hold it; [`DigestLine::at`] is
-/// when the incident began and the view draws that.
+/// when the alert opened and the view draws that.
 async fn infrastructure(
     pool: &PgPool,
     since: DateTime<Utc>,
     until: DateTime<Utc>,
 ) -> Result<Vec<DigestLine>, IpcError> {
-    let rows = sqlx::query_as::<_, IncidentRow>(INCIDENTS)
+    let rows = sqlx::query_as::<_, AlertRow>(ALERTS_IN_WINDOW)
         .bind(since)
         .bind(until)
         .bind(MOST_LINES)
@@ -879,7 +882,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_incident_reads_in_minutes_then_hours_and_is_never_under_a_minute() {
+    fn an_alert_reads_in_minutes_then_hours_and_is_never_under_a_minute() {
         assert_eq!(lasted(Duration::seconds(5)), "1 min");
         assert_eq!(lasted(Duration::minutes(12)), "12 min");
         assert_eq!(lasted(Duration::minutes(60)), "1 h");

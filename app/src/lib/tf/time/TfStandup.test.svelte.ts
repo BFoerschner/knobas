@@ -154,14 +154,14 @@ test("the digest draws each list, every line with an item a link into the new sh
   expect(text()).toContain("Nothing of yours is blocked.");
 });
 
-test("Infrastructure sits under Blockers, every incident a link to its monitor", async () => {
+test("Infrastructure sits under Blockers, every alert a link to its monitor", async () => {
   open();
   await settle();
   const headings = [...target.querySelectorAll(".tf-su-dig h4")].map((h) => h.textContent);
   expect(headings.slice(-2)).toEqual(["Blockers", "Infrastructure"]);
-  const incident = [...target.querySelectorAll(".tf-su-dig a")].at(-1)!;
-  expect(incident.getAttribute("href")).toBe("#/monitors");
-  expect(incident.textContent?.replace(/\s+/g, " ")).toBe("payout-api health check was down 12 min, from 03:10");
+  const alert = [...target.querySelectorAll(".tf-su-dig a")].at(-1)!;
+  expect(alert.getAttribute("href")).toBe("#/monitors");
+  expect(alert.textContent?.replace(/\s+/g, " ")).toBe("payout-api health check was down 12 min, from 03:10");
 });
 
 test("Copy as text copies the digest", async () => {

@@ -1248,15 +1248,16 @@ async fn alert(
     .expect("the alert row is written");
 }
 
-/// **The Infrastructure list** (#932, R-13.4): the incidents since the last
+/// **The Infrastructure list** (#932, R-13.4): the monitor alerts since the last
 /// working day, each line on its monitor, with how long it lasted.
 ///
 /// Friday is the last working day (one commit of mine there), so Friday 03:10
-/// to 03:22 is in; Thursday's incident ended before Friday began and is out; a
-/// still-open alert and one that opened today are in. The incident list is not
+/// to 03:22 is in; Thursday's alert closed before Friday began and is out; a
+/// still-open alert and one that opened today are in, and so are two that
+/// began before Friday and were open into it. The Infrastructure list is not
 /// mine-only: nobody's name is on a monitor.
 #[tokio::test]
-async fn infrastructure_lists_the_incidents_since_the_last_working_day() {
+async fn infrastructure_lists_the_alerts_since_the_last_working_day() {
     let h = harness("standup-infrastructure").await;
     let friday = 3;
     h.item(
@@ -1286,6 +1287,17 @@ async fn infrastructure_lists_the_incidents_since_the_last_working_day() {
     .await;
     alert(&h, "edge-proxy", "warn", days_before(2, 8, 0), None).await;
     alert(&h, "queue", "down", noon() - Duration::hours(2), None).await;
+    // Two that began before Friday and reach into it: one recovered at 00:30
+    // Friday, one still open since Wednesday. Both touched the window.
+    alert(
+        &h,
+        "vault",
+        "down",
+        days_before(friday + 1, 23, 30),
+        Some(days_before(friday, 0, 30)),
+    )
+    .await;
+    alert(&h, "cache", "warn", days_before(friday + 2, 9, 0), None).await;
 
     let digest = h.digest().await;
 
@@ -1307,6 +1319,8 @@ async fn infrastructure_lists_the_incidents_since_the_last_working_day() {
             ("queue", FORGE, "down", "is still down"),
             ("edge-proxy", FORGE, "warn", "is still slow"),
             ("payout-api", FORGE, "down", "was down 12 min"),
+            ("vault", FORGE, "down", "was down 1 h"),
+            ("cache", FORGE, "warn", "is still slow"),
         ]
     );
     assert_eq!(digest.infrastructure[2].kind.as_deref(), Some("monitor"));

@@ -14,7 +14,7 @@
  *
  * **Where this diverges from prototype-6 and the mock adapter:**
  *
- * - The *Infrastructure* list (#932) carries the incident's name and duration
+ * - The *Infrastructure* list (#932) carries the alert's monitor and duration
  *   ("payout-api health check was down 12 min, from 03:10"); prototype-6's
  *   "vm-pay-01 restarted at 03:12" is not drawn, since the mirror holds state
  *   changes and not restarts.

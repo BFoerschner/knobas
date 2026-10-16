@@ -84,7 +84,7 @@ vi.mock("../ipc/entity", () => ({
   // board.
   miniBoard: () => Promise.resolve({ columns: [], sources: [] }),
   // The standup digest (#288): its view is one of the addresses below, so the
-  // mock has to answer for it. Three empty lists -- this file is about which
+  // mock has to answer for it. Four empty lists -- this file is about which
   // surface an address reaches, not about what is on it.
   standupDigest: () =>
     Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),

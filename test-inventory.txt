@@ -246,7 +246,7 @@ knobas-app	lib/knobas_app	sources::write_queue::tests::an_op_the_source_does_not
 knobas-app	lib/knobas_app	sources::write_queue::tests::the_same_write_with_different_words_is_an_amendment
 knobas-app	lib/knobas_app	sources::write_queue::tests::the_targets_namespace_is_the_source_that_owes_the_write
 knobas-app	lib/knobas_app	standup::tests::a_lines_source_is_the_namespace_its_entity_id_carries
-knobas-app	lib/knobas_app	standup::tests::an_incident_reads_in_minutes_then_hours_and_is_never_under_a_minute
+knobas-app	lib/knobas_app	standup::tests::an_alert_reads_in_minutes_then_hours_and_is_never_under_a_minute
 knobas-app	lib/knobas_app	standup::tests::only_the_seven_days_before_the_digests_own_are_in_reach_of_yesterday
 knobas-app	lib/knobas_app	standup::tests::the_blocked_set_is_looked_up_at_the_key_kind_paths_serializes_it_under
 knobas-app	lib/knobas_app	standup::tests::the_blocker_statements_read_the_declaration_and_never_a_word_of_their_own
@@ -952,7 +952,7 @@ knobas-app	test/it	standup_ipc::a_week_of_silence_has_no_yesterday_and_the_seven
 knobas-app	test/it	standup_ipc::a_write_is_on_the_day_it_was_queued_and_not_the_day_it_was_sent
 knobas-app	test/it	standup_ipc::a_write_is_one_line_however_many_states_the_queue_narrates
 knobas-app	test/it	standup_ipc::blockers_come_from_the_declared_set_and_from_the_link_graph_and_nowhere_else
-knobas-app	test/it	standup_ipc::infrastructure_lists_the_incidents_since_the_last_working_day
+knobas-app	test/it	standup_ipc::infrastructure_lists_the_alerts_since_the_last_working_day
 knobas-app	test/it	standup_ipc::infrastructure_without_a_last_working_day_starts_at_todays_midnight
 knobas-app	test/it	standup_ipc::the_blocking_end_of_a_link_is_not_itself_a_blocker
 knobas-app	test/it	standup_ipc::the_mirror_half_carries_whatever_kind_the_source_gave_it
