@@ -167,8 +167,9 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
   return h;
 }
 
-async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null) {
-  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId } });
+/** Opens the page; the filter's typing pause is none unless a test asks for one. */
+async function open(h: Harness, timedTicket: string | null = null, viewId: string | null = null, typingPause = 0) {
+  page = mount(TicketsPage, { target, props: { ready: true, timedTicket, ports: h.ports, viewId, typingPause } });
   await settle();
 }
 
@@ -259,6 +260,37 @@ test("typing filters on the server, keeps focus and the caret, shows every match
   expect(document.activeElement).toBe(input);
   expect(input.selectionStart).toBe(2);
   expect(input.value).toBe("s epa");
+});
+
+test("keys typed inside the typing pause are one read of the whole word, and an older answer never lands", async () => {
+  const h = harness();
+  await open(h, null, null, 40);
+  const before = h.reads.length;
+  for (const char of "sepa") type(field(), char);
+  await settle();
+  expect(h.reads.length).toBe(before);
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await settle();
+  expect(h.reads.slice(before)).toEqual([{ perColumn: null, query: "sepa" }]);
+  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+
+  // A read already out when the next key is typed: its answer is not drawn.
+  let answer: (board: MiniBoard) => void = () => {};
+  const board = h.ports.board;
+  h.ports.board = (perColumn, query) => {
+    if (query !== "sepa x") return board(perColumn, query);
+    h.reads.push({ perColumn, query });
+    return new Promise((resolve) => (answer = resolve));
+  };
+  type(field(), " ");
+  type(field(), "x");
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  await settle();
+  expect(h.reads.at(-1)!.query).toBe("sepa x");
+  type(field(), "x");
+  answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [] });
+  await settle();
+  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
 });
 
 test("no match says so and offers to clear the filter", async () => {

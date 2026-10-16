@@ -3575,3 +3575,23 @@ Ruled by the merge-manager (PR #1018).
 - **The fake IPC keeps the epics' names in a table** (prototype-6's `EPICS`) rather than adding
   epic items to its corpus, which would stand on the board as cards of their own. Its count is the
   length of the corpus's flat `comments` list. **Reversing:** low.
+## #897 — Tickets filter: the typed read on large mirrors (2026-10-16)
+
+- **R-3.4 holds: a typed read stays uncapped.** The ticket offered a cap on typed columns and
+  noted that it departs from R-3.4's "every match". A ruling may not contradict the spec, so
+  this PR keeps every match and files the conflict as #1024 for the spec owner. After this PR,
+  one broad letter on 15,000 Jira-shaped tickets is still 811 ms and 4.0 MB in a debug build
+  (895 ms before). **Reversing:** #1024 is one argument in `capFor()` and a line in
+  `drawnCards`.
+- **The filter bar's changes wait 90 ms for the next key.** That is the launcher's pause
+  (`session.svelte.ts`). A word typed at speed is one read, not one per letter. Chips and
+  dropdowns go through the same `onchange`, so they wait too: 90 ms is below what a click
+  notices. An answer still out for older text is dropped at the keystroke. **Reversing:**
+  trivial (`typingPause`).
+- **The word predicate tests the key, then the title, then the assignee, then the epic,
+  each on its own.** On 5,000 tickets one broad letter went from 31 to 12 ms. Reading the
+  assignee through the `fp` CTE was tried and was 8 times slower. Without the one-row `pd`
+  join, the planner chose a nested loop over `sync.item` × `knobas.entity` on tables that
+  were never analyzed. So the declared read per row stays. **Reversing:** low.
+
+- **Merge-manager (PR #1025): the key branch is redundant only where `sync.item_parent` already names the ticket.** A Jira ticket's own key is among the names it answers to as a parent, so the surviving mutant was right for a payload that carries its key. The fixture also titled each ticket with its key. The test now has a ticket with a summary title and one whose payload names no key; the mutant fails it. **Reversing:** n/a.

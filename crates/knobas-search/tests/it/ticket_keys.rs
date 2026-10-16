@@ -735,3 +735,70 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
         "a query for another kind matches no ticket"
     );
 }
+
+/// The Tickets view's words with no key beside them (#897), which is what a
+/// keystroke on *All tickets* sends: the key, the title and the declared
+/// assignee are each a word of the row, and every word is still required.
+#[tokio::test]
+async fn words_alone_match_the_key_the_title_and_the_declared_assignee() {
+    let pool = pool().await;
+    let p = project();
+    let person: &'static str = Box::leak(format!("{}.nair", p.to_lowercase()).into_boxed_str());
+    let theirs = store(
+        &pool,
+        &p,
+        1,
+        Ticket {
+            assignee: Some(person),
+            ..BASE
+        },
+    )
+    .await;
+    let nobodys = store(&pool, &p, 2, BASE).await;
+    // A real ticket's title is its summary, not its key, so the key is a
+    // word of the row only through the key branch of the predicate (a
+    // Jira ticket answers as its own epic only when it is one).
+    sqlx::query("update sync.item set title = 'Rename the ledger' where entity_id = $1")
+        .bind(&nobodys)
+        .execute(&pool)
+        .await
+        .unwrap();
+    // A ticket whose payload names no key of its own: nothing in
+    // `sync.item_parent` answers for its key, so only the key branch does.
+    let bare = format!("jira:{p}-3");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'ticket','Bare')")
+        .bind(&bare)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1,'jira','ticket','Bare','Bare','{}'::jsonb, now())",
+    )
+    .bind(&bare)
+    .execute(&pool)
+    .await
+    .unwrap();
+    let searcher = searcher(&pool).await;
+    for (typed, expected) in [
+        (format!("{p}-3"), vec![bare.clone()]),
+        (person.to_uppercase(), vec![theirs.clone()]),
+        (format!("{person} {p}"), vec![theirs.clone()]),
+        (format!("{p}-2"), vec![nobodys.clone()]),
+        (
+            p.clone(),
+            vec![theirs.clone(), nobodys.clone(), bare.clone()],
+        ),
+        (format!("{p}-2 {person}"), Vec::new()),
+    ] {
+        assert_eq!(
+            searcher
+                .matching_ids(&typed, "ticket")
+                .await
+                .unwrap()
+                .map(sorted),
+            Some(sorted(expected)),
+            "{typed}"
+        );
+    }
+}

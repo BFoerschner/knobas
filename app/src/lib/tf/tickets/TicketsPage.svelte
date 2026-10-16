@@ -172,6 +172,7 @@
       deleteView: deleteTicketView,
     },
     viewId = null,
+    typingPause = 90,
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
@@ -180,6 +181,8 @@
     ports?: TicketsPorts;
     /** The ticket view `#/tickets/<id>` names, or `null` for *All tickets*. */
     viewId?: string | null;
+    /** How long, in ms, the filter waits for the next key before it reads: the launcher's 90. */
+    typingPause?: number;
   } = $props();
 
   // ---- the views ----
@@ -285,6 +288,9 @@
   let reading = 0;
   /** Bumped when another view opens, so a count read for the last one is dropped. */
   let epoch = 0;
+  /** The read a filter change waits to make until the keys pause. */
+  let pausing: ReturnType<typeof setTimeout> | undefined;
+  $effect(() => () => clearTimeout(pausing));
 
   const typing = $derived(filter.text.trim() !== "");
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
@@ -311,7 +317,21 @@
     return Math.max(COLUMN_CAP, ...wanted);
   }
 
+  /**
+   * A change in the filter bar (#897): the read waits until the keys pause
+   * for `typingPause`, so a word typed at speed is one read and not one a
+   * letter, and an answer still out for the text before it is never drawn.
+   * Every read made with words is uncapped (R-3.4), and on a large mirror a
+   * short prefix is the broadest of them.
+   */
+  function filterChanged() {
+    clearTimeout(pausing);
+    reading += 1;
+    pausing = setTimeout(read, typingPause);
+  }
+
   function read() {
+    clearTimeout(pausing);
     if (base === null) return;
     const query = toQuery(config, filter);
     const mine = ++reading;
@@ -653,7 +673,7 @@
       {/if}
     </div>
     {#if base !== null}
-      <FilterBar {config} {filter} {shown} {total} onchange={read} extra={lanesSwitch} after={saveButton} />
+      <FilterBar {config} {filter} {shown} {total} onchange={filterChanged} extra={lanesSwitch} after={saveButton} />
     {/if}
     {#snippet lanesSwitch()}
       <!-- prototype-6 offers lanes on the ticket board only. -->
