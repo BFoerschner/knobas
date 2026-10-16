@@ -73,3 +73,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - A pipeline's address is `#/builds/<entity id>`; the Builds view reads declared frame fields only
   (`pipelines`, `pipeline_runs`), and the source's word is its configured name, once, as the
   header line over its pipelines. (#848)
+- A tree's indent is a class per level (`tf-d1` … `tf-d8` in the pipeline list, 14 px a level),
+  never an inline style or a container padding, so a selected row spans the list. (#849)
+- Knobas-local per-pipeline state the reader sets (pins) is a `knobas.setting` row of entity ids,
+  read back on `pipelines`; *This job* on Builds is `job_pipelines` by the ticket's entity id. (#849,
+  #850)

@@ -4,13 +4,20 @@
   here names an adapter: the source's word is its configured name, drawn
   once, as the header line over its pipelines.
 
-  - **Left**, the pipeline list, flat (the project tree is #849, *This job*
-    #850): the filter field (`/` focuses it, `Esc` clears it through the
-    shell's ladder, which finds it by `data-filter`) and the *Failing* and
-    *Running* chips; then each pipeline by name, in err tone when its latest
-    run failed, the time of that run, and a strip of the last twelve runs
-    newest right. A hover gives its group and name. The selected one is
-    drawn inverted and kept in view.
+  - **Left**, the pipeline list: with a job current, *This job <key> / All*
+    (#850, *This job* by default); the filter field (`/` focuses it, `Esc`
+    clears it through the shell's ladder, which finds it by `data-filter`)
+    and the *Failing* and *Running* chips. *All* draws *Pinned* first
+    (knobas-local, #849), then each source's project tree as deep as it goes
+    (folds with their count and *N failing*, own pipelines before
+    subgroups, a chain of single children as one row, a fold open on a
+    failure, the selection or anything narrowing, else as the reader left
+    it). *This job* draws the same tree pruned to the job's pipelines, each
+    with its reasons, under "N of M pipelines are relevant to KEY". Each
+    pipeline by name, in err tone when its latest run failed, the time of
+    that run, and a strip of the last twelve runs newest right. A hover
+    gives its groups and name. The selected one is drawn inverted and kept
+    in view.
   - **Right**, the selected pipeline's runs as a plain list, newest first.
     The pipeline page (header, chart, day groups, filter bar) is #851.
 
@@ -19,19 +26,42 @@
   run page (#853), not built yet, and says so.
 -->
 <script lang="ts" module>
-  import type { PipelineRow, RunRow } from "../../ipc/entity";
+  import { SvelteMap } from "svelte/reactivity";
 
-  /** The reads this page makes, injectable so a test needs no bridge. */
+  import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
+
+  /** The reads and the write this page makes, injectable so a test needs no bridge. */
   export interface BuildsPorts {
     pipelines: () => Promise<PipelineRow[]>;
     runs: (pipelineId: string) => Promise<RunRow[]>;
+    /** Pin or unpin (#849); the bridge's when omitted. */
+    setPinned?: (pipelineId: string, pinned: boolean) => Promise<boolean>;
+    /** The job's pipelines and their reasons, by the job's key (#850); the bridge's when omitted. */
+    jobPipelines?: (job: string) => Promise<JobPipeline[]>;
+  }
+
+  /** The folds the reader opened or closed this session, by key (R-9.3). */
+  const remembered = new SvelteMap<string, boolean>();
+
+  /** Forget the folds: a new session, which is what each test is. */
+  export function forgetFolds(): void {
+    remembered.clear();
   }
 </script>
 
 <script lang="ts">
   import { onMount, tick } from "svelte";
 
-  import { pipelineRuns, pipelines as readPipelines } from "../../ipc/entity";
+  import {
+    getEntity,
+    jobPipelines as readJobPipelines,
+    pipelineRuns,
+    pipelines as readPipelines,
+    setPipelinePinned,
+    type PipelineReason,
+  } from "../../ipc/entity";
+  import { listSources } from "../../ipc/sources";
+  import { resolveTicket } from "../job/job";
   import { inTextField } from "../../shell/keys";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
@@ -39,15 +69,23 @@
   import {
     CHIPS,
     duration,
+    foldOpen,
+    groupsOf,
     isFailing,
     keptPipelines,
     latestTime,
     pipelineHash,
     pipelineOf,
+    pinnedOf,
+    reasonsById,
+    reasonsLine,
     runHash,
     runTone,
     shortTime,
     stripOf,
+    treeOf,
+    type Fold,
+    type Scope,
   } from "./builds";
 
   let {
@@ -82,17 +120,67 @@
     );
   });
 
-  const kept = $derived(all === null ? [] : keptPipelines(all, filter.text, chips));
-  const selected = $derived(all === null || head !== "builds" ? null : pipelineOf(all, rest));
-  /** The pipelines by source, in the list's order: one header line each. */
-  const bySource = $derived(
-    kept.reduce<{ source: string; rows: PipelineRow[] }[]>((groups, row) => {
-      const last = groups.at(-1);
-      if (last && last.source === row.source_name) last.rows.push(row);
-      else groups.push({ source: row.source_name, rows: [row] });
-      return groups;
-    }, []),
+  // *This job* (#850): on by default while a job is current.
+  const scope = $derived<Scope>(job !== null && (filter.scope ?? "job") === "job" ? "job" : "all");
+  let reasons = $state<Map<string, PipelineReason[]> | null>(null);
+  $effect(() => {
+    const key = job;
+    reasons = null;
+    if (!ready || key === null) return;
+    const read = ports.jobPipelines ?? jobPipelinesByKey;
+    read(key).then(
+      (rows) => {
+        if (job === key) reasons = reasonsById(rows);
+      },
+      // A job whose reasons cannot be read keeps nothing: *This job* says so
+      // through its empty state, and *All* still lists everything.
+      () => {
+        if (job === key) reasons = new Map();
+      },
+    );
+  });
+  /** The job's pipelines, before the words and chips narrow them. */
+  const onJob = $derived(
+    all === null || scope !== "job" || reasons === null ? [] : all.filter((p) => reasons!.has(p.entity_id)),
   );
+  const kept = $derived(
+    all === null ? [] : keptPipelines(scope === "job" ? onJob : all, filter.text, chips),
+  );
+  const selected = $derived(all === null || head !== "builds" ? null : pipelineOf(all, rest, onJob));
+  const pinned = $derived(scope === "job" ? [] : pinnedOf(kept));
+  const trees = $derived(treeOf(kept));
+  /** Whether anything narrows the list, which opens every fold. */
+  const narrowed = $derived(filter.text.trim() !== "" || chips.length > 0 || scope === "job");
+
+  /** The job's key resolved to its ticket, then its pipelines (#850). */
+  async function jobPipelinesByKey(key: string) {
+    const sources = await listSources();
+    const ticket = await resolveTicket(key, sources, getEntity);
+    return ticket === null ? [] : readJobPipelines(ticket.row.entity_id);
+  }
+
+  function setScope(next: Scope) {
+    filter.scope = next;
+  }
+
+  async function togglePin(pipeline: PipelineRow) {
+    const write = ports.setPinned ?? setPipelinePinned;
+    const now = await write(pipeline.entity_id, !pipeline.pinned);
+    if (all !== null) all = all.map((p) => (p.entity_id === pipeline.entity_id ? { ...p, pinned: now } : p));
+  }
+
+  /** A row's indent class: 14px a level, as prototype-6's, up to {@link DEEPEST}. */
+  const DEEPEST = 8;
+  function indent(depth: number): string {
+    return `tf-d${Math.min(depth, DEEPEST)}`;
+  }
+
+  function rememberFold(f: Fold, event: Event) {
+    const open = (event.currentTarget as HTMLDetailsElement).open;
+    // Only the reader's own toggle is remembered, not the one the open
+    // attribute raises when the fold is drawn.
+    if (open !== foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)) remembered.set(f.key, open);
+  }
 
   let runs = $state<RunRow[] | null>(null);
   let runsFailed = $state<string | null>(null);
@@ -173,9 +261,58 @@
   </nav>
 {/snippet}
 
+{#snippet item(pipeline: PipelineRow, depth: number)}
+  {@const strip = stripOf(pipeline)}
+  {@const why = scope === "job" ? reasonsLine(reasons?.get(pipeline.entity_id) ?? [], job ?? "") : ""}
+  <a
+    class={`tf-pi ${indent(depth)}`}
+    href={pipelineHash(pipeline.entity_id)}
+    aria-current={pipeline.entity_id === selected?.entity_id}
+    title={[...groupsOf(pipeline), pipeline.name].join(" › ")}
+  >
+    <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}><Marked text={pipeline.name} typed={filter.text} /></span>
+    <span class="tf-pi-when">{latestTime(pipeline)}</span>
+    <span
+      class="tf-strip"
+      role="img"
+      aria-label={strip.length > 0
+        ? `Last ${strip.length} runs, newest ${stateText(strip[strip.length - 1]!) || "without a state"}`
+        : "No runs"}
+    >
+      {#each strip as run (run.entity_id)}<i class={`tf-run-${runTone(run)}`}></i>{/each}
+    </span>
+    {#if why !== ""}<span class="tf-pi-why">{why}</span>{/if}
+  </a>
+{/snippet}
+
+{#snippet foldView(f: Fold, depth: number)}
+  <details
+    class="tf-pl-fold"
+    open={foldOpen(remembered.get(f.key), f, selected?.entity_id ?? null, narrowed)}
+    ontoggle={(event) => rememberFold(f, event)}
+  >
+    <summary class={indent(depth)}
+      >{f.name} <span class="tf-count">{f.count}</span>{#if f.failing > 0}<span class="tf-chip tf-err">{f.failing} failing</span
+        >{/if}</summary
+    >
+    <div class="tf-fold-in">
+      {#each f.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, depth + 1)}{/each}
+      {#each f.folds as kid (kid.key)}{@render foldView(kid, depth + 1)}{/each}
+    </div>
+  </details>
+{/snippet}
+
 <div class="tf-bv">
   <nav class="tf-pl" aria-label="Pipelines">
     <div class="tf-pl-top">
+      {#if job !== null}
+        <div class="tf-seg" role="group" aria-label="Scope">
+          <button type="button" aria-pressed={scope === "job"} onclick={() => setScope("job")}
+            >This job <span class="tf-jobk">{job}</span></button
+          >
+          <button type="button" aria-pressed={scope === "all"} onclick={() => setScope("all")}>All</button>
+        </div>
+      {/if}
       <label class="tf-fsearch">
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"
           ><circle cx="7" cy="7" r="5" /><path d="M11 11l3.5 3.5" /></svg
@@ -200,32 +337,27 @@
         <p class="tf-pl-note">Pipelines could not be read: {failed}</p>
       {:else if all !== null && all.length === 0}
         <p class="tf-pl-note">No pipelines yet. A CI source's pipelines show here once it has synced.</p>
-      {:else if all !== null && kept.length === 0}
-        <p class="tf-pl-note">No pipeline matches.</p>
+      {:else if all !== null && scope === "job" && reasons !== null}
+        <p class="tf-scope-note">
+          {kept.length} of {all.length} pipelines are relevant to <span class="tf-mono">{job}</span>.
+          <button type="button" class="tf-linkish" onclick={() => setScope("all")}>Show all</button>
+        </p>
       {/if}
-      {#each bySource as group (group.source)}
-        <h3>{group.source}</h3>
-        {#each group.rows as pipeline (pipeline.entity_id)}
-          {@const strip = stripOf(pipeline)}
-          <a
-            class="tf-pi"
-            href={pipelineHash(pipeline.entity_id)}
-            aria-current={pipeline.entity_id === selected?.entity_id}
-            title={pipeline.group !== null ? `${pipeline.group} › ${pipeline.name}` : pipeline.name}
-          >
-            <span class="tf-pi-nm" class:tf-bad={isFailing(pipeline)}><Marked text={pipeline.name} typed={filter.text} /></span>
-            <span class="tf-pi-when">{latestTime(pipeline)}</span>
-            <span
-              class="tf-strip"
-              role="img"
-              aria-label={strip.length > 0
-                ? `Last ${strip.length} runs, newest ${stateText(strip[strip.length - 1]!) || "without a state"}`
-                : "No runs"}
-            >
-              {#each strip as run (run.entity_id)}<i class={`tf-run-${runTone(run)}`}></i>{/each}
-            </span>
-          </a>
-        {/each}
+      {#if all !== null && all.length > 0 && kept.length === 0 && (scope === "all" || reasons !== null)}
+        <p class="tf-pl-note">
+          No pipeline matches.
+          {#if scope === "job"}<button type="button" class="tf-linkish" onclick={() => setScope("all")}>Search all pipelines</button>{/if}
+        </p>
+      {/if}
+      {#if pinned.length > 0}
+        <h3>Pinned</h3>
+        {#each pinned as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
+      {/if}
+      {#if scope === "job" && trees.length > 0}<h3>By project</h3>{/if}
+      {#each trees as tree (tree.sourceId)}
+        {#if scope === "all"}<h3>{tree.source}</h3>{/if}
+        {#each tree.pipelines as pipeline (pipeline.entity_id)}{@render item(pipeline, 0)}{/each}
+        {#each tree.folds as f (f.key)}{@render foldView(f, 0)}{/each}
       {/each}
     </div>
   </nav>
@@ -248,6 +380,9 @@
         <div>
           <h1>{selected.name}</h1>
           {#if selected.group !== null}<div class="tf-sub">In {selected.group}.</div>{/if}
+        </div>
+        <div class="tf-acts">
+          <button type="button" class="tf-btn tf-ghost" onclick={() => togglePin(selected!)}>{selected.pinned ? "Unpin" : "Pin"}</button>
         </div>
       </header>
       <div class="tf-runs">

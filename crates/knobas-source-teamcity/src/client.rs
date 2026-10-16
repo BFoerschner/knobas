@@ -13,8 +13,9 @@ use crate::http;
 use crate::rest::{
     ARTIFACT_FIELDS, BUILD_CHANGE_FIELDS, BUILD_CONFIG_VIEW_FIELDS, BUILD_FIELDS, BUILD_ID_FIELDS,
     BUILD_TYPE_FIELDS, BUILD_VIEW_FIELDS, Build, BuildRecord, BuildType, Changes, ConfigRecord,
-    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS, Property,
-    RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences, USER_FIELDS,
+    CurrentUser, FAILED_TEST_FIELDS, Files, ListEnvelope, Locator, PARAMETER_FIELDS,
+    PROJECT_FIELDS, Project, Property, RECENT_BUILD_FIELDS, SERVER_FIELDS, Server, TestOccurrences,
+    USER_FIELDS,
 };
 
 /// One record, kept both as parsed fields and as the JSON it arrived as --
@@ -63,6 +64,9 @@ pub(crate) trait Rest: Send + Sync {
     /// the endpoint but names nobody.
     async fn current_user(&self) -> Result<CurrentUser, SourceError>;
     async fn build_types(&self) -> Result<Page<BuildType>, SourceError>;
+    /// Every project on the server, with the one it sits in (#849): read once
+    /// a run, and only by a run that needs the tree.
+    async fn projects(&self) -> Result<Page<Project>, SourceError>;
     async fn builds(&self, locator: &Locator) -> Result<Page<Build>, SourceError>;
     /// Is there a build with this id on the server?
     ///
@@ -173,6 +177,11 @@ impl Rest for HttpRest {
 
     async fn build_types(&self) -> Result<Page<BuildType>, SourceError> {
         self.list("app/rest/buildTypes", &[("fields", BUILD_TYPE_FIELDS)])
+            .await
+    }
+
+    async fn projects(&self) -> Result<Page<Project>, SourceError> {
+        self.list("app/rest/projects", &[("fields", PROJECT_FIELDS)])
             .await
     }
 

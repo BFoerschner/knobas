@@ -4,9 +4,13 @@
  */
 import { expect, test } from "vitest";
 
-import type { PipelineRow, RunRow } from "../../ipc/entity";
+import type { PipelineReason, PipelineRow, RunRow } from "../../ipc/entity";
 import {
   duration,
+  foldOpen,
+  pinnedOf,
+  reasonsLine,
+  treeOf,
   isFailing,
   isRunning,
   keptPipelines,
@@ -40,6 +44,8 @@ function pipeline(name: string, recent: RunRow[], extra: Partial<PipelineRow> = 
     source_name: "TeamCity",
     name,
     group: "Payout",
+    path: [],
+    pinned: false,
     web_url: null,
     recent,
     ...extra,
@@ -123,4 +129,86 @@ test("a duration reads as prototype-6's: seconds under a minute, else minutes an
 
 test("a run's address carries its pipeline's entity id and its own", () => {
   expect(runHash("teamcity:buildType:A", "teamcity:build:7")).toBe("#/build/teamcity%3AbuildType%3AA/teamcity%3Abuild%3A7");
+});
+
+// -- the project tree and pins (#849), *This job* (#850) ----------------------
+
+function at(name: string, path: string[], failing = false, extra: Partial<PipelineRow> = {}): PipelineRow {
+  return pipeline(name, [run(failing ? { state: { text: "FAILURE", tone: "err" } } : {})], { path, ...extra });
+}
+
+test("the tree is as deep as the source's: a pipeline under its chain of groups, folds by name, own pipelines first", () => {
+  const [tree] = treeOf([
+    at("Payout_Build", ["Payments", "Payouts"]),
+    at("Payout_Deploy_Prod", ["Payments", "Payouts", "Deploy"], true),
+    at("Dbt_Test", ["Data"], true),
+    at("Ledger_Build", ["Payments", "Ledger"]),
+    at("Loose", [], false, { group: null }),
+  ]);
+  expect(tree!.source).toBe("TeamCity");
+  expect(tree!.pipelines.map((p) => p.name)).toEqual(["Loose"]);
+  expect(tree!.folds.map((f) => f.name)).toEqual(["Data", "Payments"]);
+  const payments = tree!.folds[1]!;
+  expect([payments.count, payments.failing]).toEqual([3, 1]);
+  expect(payments.pipelines).toEqual([]);
+  expect(payments.folds.map((f) => f.name)).toEqual(["Ledger", "Payouts"]);
+  const payouts = payments.folds[1]!;
+  expect(payouts.pipelines.map((p) => p.name)).toEqual(["Payout_Build"]);
+  expect(payouts.folds.map((f) => f.name)).toEqual(["Deploy"]);
+  expect(payouts.key).toBe("teamcity/Payments/Payouts");
+});
+
+test("a group holding only one subgroup is one row with it, as far as the chain of single children goes", () => {
+  const [tree] = treeOf([at("Deep", ["A", "B", "C"]), at("Beside", ["A", "B", "C", "D"])]);
+  expect(tree!.folds.map((f) => f.name)).toEqual(["A › B › C"]);
+  expect(tree!.folds[0]!.pipelines.map((p) => p.name)).toEqual(["Deep"]);
+  expect(tree!.folds[0]!.folds.map((f) => f.name)).toEqual(["D"]);
+});
+
+test("a pipeline with no declared chain sits under its group; one sources' tree each", () => {
+  const trees = treeOf([
+    at("Old", [], false, { group: "Payout" }),
+    at("Other", ["X"], false, { source_id: "tc2", source_name: "Second" }),
+  ]);
+  expect(trees.map((t) => t.source)).toEqual(["TeamCity", "Second"]);
+  expect(trees[0]!.folds.map((f) => f.name)).toEqual(["Payout"]);
+});
+
+test("a fold opens as the reader left it, else when something narrows, it holds a failure or the selection", () => {
+  const [tree] = treeOf([at("Fine", ["Calm"]), at("Bad", ["Loud"], true)]);
+  const [calm, loud] = [tree!.folds[0]!, tree!.folds[1]!];
+  expect(foldOpen(undefined, calm, null, false)).toBe(false);
+  expect(foldOpen(undefined, loud, null, false)).toBe(true);
+  expect(foldOpen(undefined, calm, "teamcity:buildType:Fine", false)).toBe(true);
+  expect(foldOpen(undefined, calm, null, true)).toBe(true);
+  expect(foldOpen(false, loud, null, true)).toBe(false);
+  expect(foldOpen(true, calm, null, false)).toBe(true);
+});
+
+test("the filter's words also find a pipeline by any group above it", () => {
+  const list = [at("Payout_Build", ["Payments", "Payouts"]), at("Dbt_Test", ["Data"])];
+  expect(keptPipelines(list, "payments", []).map((p) => p.name)).toEqual(["Payout_Build"]);
+});
+
+test("pinned pipelines, in the list's order", () => {
+  const list = [at("A", [], false, { pinned: true }), at("B", []), at("C", [], false, { pinned: true })];
+  expect(pinnedOf(list).map((p) => p.name)).toEqual(["A", "C"]);
+});
+
+test("a reason reads in prototype-6's words, each once", () => {
+  const reasons: PipelineReason[] = [
+    { kind: "branch", branch: "feature/PAY-231-sepa-retry" },
+    { kind: "branch", branch: "feature/PAY-231-temp" },
+    { kind: "pr_check", pr: "gitea:svc#142" },
+    { kind: "linked", step: "jira:PAY-230", origin: { kind: "parent", ticket: "jira:PAY-230" } },
+    { kind: "linked", step: "teamcity:buildType:X", origin: { kind: "own" } },
+  ];
+  expect(reasonsLine(reasons, "PAY-231")).toBe("your branch, PR check, Parent PAY-230, linked to PAY-231");
+});
+
+test("with This job on, a bare #/builds selects the job's failing pipeline, else its first", () => {
+  const list = [at("Elsewhere", [], true), at("Mine", []), at("MineBad", [], true)];
+  expect(pipelineOf(list, [], [list[1]!, list[2]!])?.name).toBe("MineBad");
+  expect(pipelineOf(list, [], [list[1]!])?.name).toBe("Mine");
+  expect(pipelineOf(list, [], [])?.name).toBe("Elsewhere");
 });

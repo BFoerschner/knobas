@@ -479,6 +479,10 @@ export interface PipelineRow {
   source_name: string;
   name: string;
   group: string | null;
+  /** The chain of groups it sits in, outermost first (#849); empty when none is declared. */
+  path: string[];
+  /** Whether the reader pinned it (#849), knobas-local. */
+  pinned: boolean;
   web_url: string | null;
   recent: RunRow[];
 }
@@ -494,6 +498,32 @@ export function pipelines(): Promise<PipelineRow[]> {
  */
 export function pipelineRuns(pipelineId: string, limit?: number): Promise<RunRow[]> {
   return invoke<RunRow[]>("pipeline_runs", { pipelineId, limit: limit ?? null });
+}
+
+/** Pin or unpin a pipeline (#849); answers whether it is now pinned. */
+export function setPipelinePinned(pipelineId: string, pinned: boolean): Promise<boolean> {
+  return invoke<boolean>("set_pipeline_pinned", { pipelineId, pinned });
+}
+
+/**
+ * Why a pipeline is on a job — `knobas_app::commands::entity::PipelineReason`
+ * (#850): a run on one of its branches, a run checking one of its pull
+ * requests, or a link the reach walked. Tagged on `kind`.
+ */
+export type PipelineReason =
+  | { kind: "branch"; branch: string }
+  | { kind: "pr_check"; pr: string }
+  | { kind: "linked"; step: string; origin: ReachOrigin };
+
+/** One pipeline on a job and every reason it is there (#850). */
+export interface JobPipeline {
+  pipeline_id: string;
+  reasons: PipelineReason[];
+}
+
+/** The pipelines on the job of a ticket, by entity id (#850). */
+export function jobPipelines(entityId: string): Promise<JobPipeline[]> {
+  return invoke<JobPipeline[]>("job_pipelines", { entityId });
 }
 
 /**

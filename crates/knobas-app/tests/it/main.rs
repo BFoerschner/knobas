@@ -36,6 +36,7 @@ mod estate_exit;
 mod inbox_ipc;
 mod ipc;
 mod job_ipc;
+mod job_pipelines_ipc;
 mod notes_export_ipc;
 mod probe_snapshot;
 mod project_census;

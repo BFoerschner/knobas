@@ -54,6 +54,9 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/app/rest/server", get(server))
         .route("/app/rest/users/current", get(current_user))
         .route("/app/rest/buildTypes", get(build_types))
+        // The project tree (#849): the root and each configuration's project
+        // straight under it, which is as deep as mockd's fixture goes.
+        .route("/app/rest/projects", get(projects))
         .route("/app/rest/builds", get(builds))
         .route("/app/rest/builds/{locator}", get(build_by_locator))
         // M2's write-back (issue #43): triggering a build and re-running one
@@ -516,6 +519,43 @@ async fn build_types(State(s): State<Arc<MockState>>, req: Request) -> Response 
         "buildType": types.iter().map(|t| build_type_json(t, &base)).collect::<Vec<_>>(),
     });
     match project(full, sel.as_ref()) {
+        Ok(v) => Json(v).into_response(),
+        Err(name) => unknown_field(&s, &req, &name),
+    }
+}
+
+async fn projects(State(s): State<Arc<MockState>>, req: Request) -> Response {
+    let q = query_map(&req);
+    let sel = match field_sel(&q, true) {
+        Ok(v) => v,
+        Err(m) => return unsupported(&s, &req, m),
+    };
+    if let Some(r) = fault(&s).await {
+        return r;
+    }
+    let mut seen = std::collections::BTreeMap::new();
+    for t in s.build_types() {
+        seen.entry(t.project_id.clone())
+            .or_insert(t.project_name.clone());
+    }
+    let project = std::iter::once(json!({
+        "id": "_Root", "name": "<Root project>", "parentProjectId": Value::Null,
+        "href": "/app/rest/projects/id:_Root",
+    }))
+    .chain(seen.into_iter().map(|(id, name)| {
+        json!({
+            "id": id, "name": name, "parentProjectId": "_Root",
+            "href": format!("/app/rest/projects/id:{id}"),
+        })
+    }))
+    .collect::<Vec<_>>();
+    let full = json!({
+        "count": project.len(),
+        "href": "/app/rest/projects",
+        "nextHref": Value::Null,
+        "project": project,
+    });
+    match self::project(full, sel.as_ref()) {
         Ok(v) => Json(v).into_response(),
         Err(name) => unknown_field(&s, &req, &name),
     }

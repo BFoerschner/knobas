@@ -822,6 +822,8 @@ const CASES: Case[] = [
                   source_name: "TeamCity",
                   name: "A",
                   group: null,
+                  path: [],
+                  pinned: false,
                   web_url: null,
                   recent: [],
                 },

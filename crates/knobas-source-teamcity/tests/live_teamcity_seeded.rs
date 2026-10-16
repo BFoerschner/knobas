@@ -2745,3 +2745,133 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
         "the server is back in the plain-seed state"
     );
 }
+
+/// The nested project [`a_configured_project_takes_in_its_nested_projects_and_writes_their_path`]
+/// makes under the seeded `Payout`, deleted again when the guard drops --
+/// passing or panicking alike, [`Queued`]'s way. Deleting the outer project
+/// deletes the one inside it and the configuration with them.
+struct NestedProject {
+    url: String,
+    token: String,
+}
+
+/// The outer project's id; the inner one is `<this>_Deeper`.
+const NESTED: &str = "KnobasNested849";
+
+impl NestedProject {
+    async fn delete(http: &reqwest::Client, url: &str, token: &str) -> Result<(), String> {
+        let at = format!("{url}/app/rest/projects/id:{NESTED}");
+        match http.delete(&at).bearer_auth(token).send().await {
+            Ok(r) if r.status().is_success() || r.status().as_u16() == 404 => Ok(()),
+            Ok(r) => Err(format!("DELETE {at} -> {}", r.status())),
+            Err(e) => Err(format!("DELETE {at}: {e}")),
+        }
+    }
+
+    /// Clear what a killed run left, then make `Payout › KnobasNested849 ›
+    /// Deeper` with one configuration in the innermost.
+    async fn new(seeded: &Seeded) -> NestedProject {
+        Self::delete(&seeded.http, &seeded.url, &seeded.token)
+            .await
+            .expect("a leftover nested project is cleared");
+        let post = |path: &str, body: serde_json::Value| {
+            seeded
+                .http
+                .post(format!("{}/{path}", seeded.url))
+                .bearer_auth(&seeded.token)
+                .header("Accept", "application/json")
+                .json(&body)
+                .send()
+        };
+        for (id, name, parent) in [
+            (NESTED.to_owned(), "KnobasNested849", "Payout".to_owned()),
+            (format!("{NESTED}_Deeper"), "Deeper", NESTED.to_owned()),
+        ] {
+            let r = post(
+                "app/rest/projects",
+                serde_json::json!({ "id": id, "name": name, "parentProject": { "id": parent } }),
+            )
+            .await
+            .expect("create a project");
+            assert!(
+                r.status().is_success(),
+                "create project {id}: {}",
+                r.status()
+            );
+        }
+        let r = post(
+            "app/rest/buildTypes",
+            serde_json::json!({
+                "id": format!("{NESTED}_Deeper_Probe"), "name": "Probe",
+                "project": { "id": format!("{NESTED}_Deeper") }
+            }),
+        )
+        .await
+        .expect("create a configuration");
+        assert!(r.status().is_success(), "create the probe: {}", r.status());
+        NestedProject {
+            url: seeded.url.clone(),
+            token: seeded.token.clone(),
+        }
+    }
+}
+
+impl Drop for NestedProject {
+    fn drop(&mut self) {
+        let (url, token) = (self.url.clone(), self.token.clone());
+        let outcome = std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the cleanup")
+                .block_on(async move { NestedProject::delete(&client(), &url, &token).await })
+        })
+        .join()
+        .expect("the cleanup thread");
+        if let Err(e) = outcome {
+            if std::thread::panicking() {
+                eprintln!("live suite cleanup: {e}");
+            } else {
+                panic!("live suite cleanup: {e}");
+            }
+        }
+    }
+}
+
+/// **The project tree** (#849, R-9.3): a source scoped to the seeded `Payout`
+/// takes in a configuration two projects further down, and every
+/// configuration carries its chain of projects, which the pipeline's declared
+/// `group_path` reads outermost first. `Ledger`, beside `Payout`, stays out.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_configured_project_takes_in_its_nested_projects_and_writes_their_path() {
+    let seeded = seeded();
+    let _nested = NestedProject::new(&seeded).await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({ "project_ids": ["Payout"] }))).await;
+    let declared = knobas_source_teamcity::descriptor_template().payload_paths;
+    let pipeline = declared
+        .iter()
+        .find(|paths| paths.kind == "build_config")
+        .expect("the configuration declares its paths");
+
+    let configs = of_kind(&items, "build_config");
+    let mut got: Vec<&str> = configs.iter().map(|i| i.entity.key.as_str()).collect();
+    got.sort_unstable();
+    assert_eq!(
+        got,
+        [
+            "buildType:KnobasNested849_Deeper_Probe",
+            "buildType:Payout_Build",
+            "buildType:Payout_IntegrationTests",
+        ],
+        "Payout's own and its nested project's, and none of Ledger's"
+    );
+    let path = |key: &str| {
+        let it = configs.iter().find(|i| i.entity.key == key).expect(key);
+        knobas_core::payload::resolve_list(&it.payload, &pipeline.group_path)
+    };
+    let deep = path("buildType:KnobasNested849_Deeper_Probe");
+    println!("SEEDED nested probe path: {deep:?}");
+    assert_eq!(deep, ["Payout", "KnobasNested849", "Deeper"]);
+    assert_eq!(path("buildType:Payout_Build"), ["Payout"]);
+}
