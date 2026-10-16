@@ -77,7 +77,7 @@
 //!
 //! ## The four exemptions
 //!
-//! All four read the base table on purpose, and all four say why in place:
+//! All five read the base table on purpose, and all five say why in place:
 //!
 //! * [`LINK`] -- `link::unlink` re-reads the row by id to tell "already gone"
 //!   from "never existed", a question about the row rather than about which
@@ -92,6 +92,12 @@
 //!   `confirmed_at is null` on the rows they found, because on tables never
 //!   analyzed the planner read the whole table off `link_proposed_idx` for a
 //!   lookup that went through the view.
+//! * [`EVIDENCE`] -- a proposal's evidence (#836) reads the proposal by id in
+//!   any state (an accepted one keeps its rule and reason as provenance),
+//!   accepted links the same rule found as support, and **dismissed**
+//!   proposals as counter-evidence. A dismissal is an unconfirmed tombstone,
+//!   which neither view holds, so the base table is the only place to read
+//!   it; each statement says which population it wants in its own `where`.
 //! * [`ATTACH`] -- the sync engine's monitor-name resolution (issue #453) asks
 //!   whether a pair already carries an **active row of any kind** before it
 //!   inserts one. That is `link_pair_active_idx`'s own question (`0011`:
@@ -129,6 +135,9 @@ const SUGGEST: &str = "knobas-core/src/suggest.rs";
 
 /// The suggestion tray's read, relative to `crates/`. See the header.
 const SUGGEST_TRAY: &str = "knobas-core/src/suggest/tray.rs";
+
+/// A proposal's evidence, relative to `crates/`. See the header.
+const EVIDENCE: &str = "knobas-core/src/evidence.rs";
 
 /// The sync engine's monitor-name resolution, relative to `crates/` -- the
 /// reader that asks `link_pair_active_idx`'s question rather than a
@@ -183,7 +192,7 @@ fn offends(relative: &str, source: &str) -> bool {
 /// A list rather than a chain of `!=`, now that there are four: growing it is
 /// allowed and is meant to be one line a reviewer sees, which is
 /// `write_choke_point.rs`' `HANDS_TO_THE_QUEUE` treatment.
-const EXEMPT: &[&str] = &[LINK, SUGGEST, SUGGEST_TRAY, ATTACH];
+const EXEMPT: &[&str] = &[LINK, SUGGEST, SUGGEST_TRAY, EVIDENCE, ATTACH];
 
 #[test]
 fn only_the_exempt_modules_read_the_base_table() {

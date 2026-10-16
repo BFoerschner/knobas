@@ -2474,3 +2474,8 @@ Ruled by the implementer (Björn, 2026-10-15: implementation-time forks are the 
 - **`knobas_core::evidence` is its own module, not `suggest::evidence`**, so the responsiveness
   probe's after-pass snapshot, keyed on `suggest.rs`'s bytes, is not rebuilt (as `tray.rs` was
   split out for). **Reversing:** low.
+- **`knobas-core/src/evidence.rs` joins `link_reads.rs`'s base-table exemptions.** A dismissed
+  proposal is an unconfirmed tombstone that neither `knobas.confirmed_link` nor
+  `knobas.proposed_link` holds, and the evidence counts dismissals against a proposal; each of its
+  statements names the population it wants in its own `where`. **Reversing:** low (drop the
+  dismissed count and read the views).
