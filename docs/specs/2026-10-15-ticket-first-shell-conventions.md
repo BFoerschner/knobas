@@ -10,7 +10,6 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Tokens live on the new shell's root, not on `:root`, and the shell has its own stylesheet. (Design system, "Getting it into the app")
 - Durations and clocks are Archivo with tabular figures, not mono; mono is for code values. Where the design system and prototype-6 differ, the design system decides. (#809, PR #885; reused by #816, PR #898)
 - A dialog of its own width passes `className` to `tf/settings/TfDialog.svelte` (the view editor's `tf-vw-dialog`), never a second dialog shell. (#814)
-- A form generated from an adapter's `config_schema` is `tf/settings/TfSchemaForm.svelte` (settings rows or a dialog grid) over `sources/schema-form`. A source's config is saved as the stored config read again at the press with only the reader's changes over it (`tf/settings/source-config.ts`), never a copy read when the page opened: the sync writes into it too. (#903, #904, #1021)
 - A selected card is `aria-current="true"` with the `tf-card` class, so the focus ring follows the design system's `--card-ink` rule. Not `aria-selected` on a button. (#810, PR #895)
 
 ## Mounting and the shell switch
@@ -60,6 +59,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   (`knobas_source::docs::indexed`); the shell never reads the payload for it. (#860, #861)
 - A Docs write in the source's markup (a section edit, a new page's body) is the adapter's
   (`DocWrites` in the registry); the shell sends plain text. (#862)
+- A form generated from an adapter's `config_schema` is `tf/settings/TfSchemaForm.svelte` (settings rows or a dialog grid) over `sources/schema-form`. A source's config is saved as the stored config read again at the press with only the reader's changes over it (`tf/settings/source-config.ts`), never a copy read when the page opened: the sync writes into it too. (#903, #904, #1021, PR #1033)
 - Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
 ## Copy and display

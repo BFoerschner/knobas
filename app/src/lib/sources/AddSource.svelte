@@ -36,6 +36,7 @@
   import Modal from "../shell/Modal.svelte";
   import SchemaForm from "./SchemaForm.svelte";
   import { connectionLine, connectionNote, failedReport } from "./connection";
+  import { AUTH_LABEL, DEFAULT_INTERVAL_SECS, fillFound, SOURCE_ID_PATTERN } from "./new-source";
   import { defaultValues, schemaFields, validate, type SchemaField } from "./schema-form";
 
   let {
@@ -48,17 +49,6 @@
 
   /** The breadcrumb, and the order the flow walks. */
   const STEPS = ["Type", "Connection", "Auth", "Test", "Schedule"] as const;
-
-  /** How an `AuthMethod` reads to a person. */
-  const AUTH_LABEL: Record<AuthMethod, string> = {
-    UserPassword: "Username and password",
-    Pat: "Personal access token",
-    ApiToken: "API token",
-    OAuth: "OAuth",
-  };
-
-  /** Contract §4.1. The id is the entity namespace and is immutable (P10). */
-  const ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
   /** The schedules the sources view can describe in one line. */
   const INTERVALS = [
@@ -106,7 +96,7 @@
   const accountHalfDone = $derived(
     halfDone({ username: accountUser, password: accountPassword }),
   );
-  let interval = $state(900);
+  let interval = $state(DEFAULT_INTERVAL_SECS);
   let enabled = $state(true);
 
   let configValues = $state<Record<string, unknown>>({});
@@ -152,7 +142,7 @@
 
   const idError = $derived.by(() => {
     if (id === "") return "An id is required.";
-    if (!ID_PATTERN.test(id)) {
+    if (!SOURCE_ID_PATTERN.test(id)) {
       return "Lower-case letters, digits and hyphens, starting with a letter — the id is the entity namespace and cannot be changed later.";
     }
     return null;
@@ -199,84 +189,6 @@
     }
   });
 
-  /**
-   * The config property an adapter puts its identity in, by convention.
-   *
-   * All three shipped adapters spell it `username` — and so must a fourth, or
-   * `@me`, *My items* and *Mine, untouched* have nothing to resolve against on
-   * that source. Keying on the property **name** is what keeps this dialog
-   * adapter-agnostic: it is a convention every adapter follows, not a table of
-   * what each one's config keys mean, and the schema descriptions state it
-   * where an adapter author will read it (#82).
-   */
-  const IDENTITY_FIELD = "username";
-
-  /**
-   * Put the account the source just reported into the identity field.
-   *
-   * `username` is the only source of the identity the three identity lists
-   * read, and author matching is case-sensitive by construction — so the
-   * account is written in the server's own spelling and never normalised.
-   * That is the whole advantage over retyping it: the dialog has just printed
-   * *"Connected as …"* on screen, and a reader copying it back by hand is one
-   * slip away from an identity that matches nothing.
-   *
-   * **Only when the field is empty.** A value already there was typed by
-   * somebody who meant it — a service account, or a login that is not the
-   * account the API reports — and a test run afterwards must not quietly
-   * replace it. The filled value lands in the generated form, visible and
-   * editable one *Back* away.
-   *
-   * An **absent** account is not a failure: a source whose API has no "who am
-   * I" endpoint is a working source (`ConnectionInfo::account` is optional by
-   * design), and nothing here assumes it is present. Nor is a missing
-   * `username` property — an adapter that declares none simply gets no fill.
-   */
-  function fillIdentity(account: string | null) {
-    if (account === null) return;
-    // The identity is the same shape of fact as anything else the source
-    // reports about itself, so it takes the same path rather than a second
-    // copy of it: find the field by key, require a text control (an adapter
-    // that typed `username` as, say, a number is not one this convention
-    // covers), and never overwrite what somebody typed.
-    fillDiscovered({ [IDENTITY_FIELD]: account });
-  }
-
-  /**
-   * Put the values the source *discovered about itself* into the fields they
-   * belong in.
-   *
-   * The one fill, which {@link fillIdentity} also goes through: the identity
-   * and a discovered id are the same shape of fact — a value the far end owns
-   * and the reader cannot know — so there is one rule and not two. Jira's Epic
-   * Link custom field id is minted per instance — three seeds of one script
-   * produced `customfield_10101`, `customfield_10109` and `customfield_10101`,
-   * and on one of them `customfield_10102` was *Epic Status* — so an id copied
-   * off another server does not fail, it silently syncs the wrong field
-   * (#297). A classic Jira project keeps epic membership nowhere else, so
-   * without this the Contexts view is simply empty and nothing says why.
-   *
-   * **Keyed on the property name, like the identity fill.** The report says
-   * which config key each value belongs in; this dialog holds no table of what
-   * an adapter's keys mean, so the next adapter that discovers something about
-   * itself needs no change here.
-   *
-   * **Only when the field is empty**, and only a text control — a value the
-   * reader typed was typed by somebody who meant it, and a *Test connection*
-   * afterwards must not quietly replace it. A key naming a property this
-   * adapter does not declare fills nothing.
-   */
-  function fillDiscovered(discovered: Record<string, string>) {
-    for (const [key, value] of Object.entries(discovered ?? {})) {
-      if (typeof value !== "string" || value === "") continue;
-      const field = configFields.fields.find((f) => f.key === key);
-      if (!field || field.control.kind !== "text") continue;
-      const current = configValues[key];
-      if (typeof current === "string" && current.trim() !== "") continue;
-      configValues[key] = value;
-    }
-  }
-
   async function test() {
     if (!chosen || !authKind) return;
     testing = true;
@@ -295,8 +207,9 @@
       // A refused credential reports no account worth keeping, and a source
       // that cannot be saved has no config to fill in either.
       if (report.ok) {
-        fillIdentity(report.account);
-        fillDiscovered(report.discovered);
+        // The identity (#82) and what the source discovered about itself
+        // (#297), each only into an empty text field: `fillFound`.
+        fillFound(configFields.fields, configValues, report.account, report.discovered);
       }
     } catch (cause) {
       report = failedReport(cause);

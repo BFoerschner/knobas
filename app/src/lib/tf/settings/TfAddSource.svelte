@@ -23,7 +23,8 @@
   import { defaultValues, validate } from "../../sources/schema-form";
   import type { Layers } from "../layers.svelte";
   import type { SettingsPorts } from "./ports";
-  import { fillFound, pageFields } from "./source-config";
+  import { AUTH_LABEL, DEFAULT_INTERVAL_SECS, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
+  import { pageFields } from "./source-config";
   import TfDialog from "./TfDialog.svelte";
   import TfSchemaForm from "./TfSchemaForm.svelte";
 
@@ -38,20 +39,6 @@
     onclose: () => void;
     onsaved: (source: SourceSummary) => void;
   } = $props();
-
-  /** How an `AuthMethod` reads, when an adapter offers more than one. */
-  const AUTH_LABEL: Record<AuthMethod, string> = {
-    UserPassword: "Username and password",
-    Pat: "Personal access token",
-    ApiToken: "API token",
-    OAuth: "OAuth",
-  };
-
-  /** Contract §4.1. The id is the entity namespace and is immutable (P10). */
-  const ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
-
-  /** A new source's schedule: the rooms dialog's default. */
-  const INTERVAL_SECS = 900;
 
   let adapters = $state<SourceDescriptor[] | null>(null);
   let adaptersError = $state<string | null>(null);
@@ -91,13 +78,13 @@
 
   const config = $derived(chosen === null ? { fields: [], error: null } : pageFields(chosen.config_schema, { keepUser: true }));
   const validated = $derived(validate(config.fields, configValues));
-  const half = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
+  const accountHalf = $derived(accountHalfDone({ username: accountUser, password: accountPassword }));
   const account = $derived(accountOf({ username: accountUser, password: accountPassword }));
   const secretWord = $derived(authKind === "UserPassword" ? "Password" : "Token");
 
   const idError = $derived.by(() => {
     if (id === "") return "An id is required.";
-    if (!ID_PATTERN.test(id)) return "Lower-case letters, digits and hyphens, starting with a letter.";
+    if (!SOURCE_ID_PATTERN.test(id)) return "Lower-case letters, digits and hyphens, starting with a letter.";
     return null;
   });
 
@@ -110,14 +97,14 @@
       authKind !== null &&
       baseUrl.trim() !== "" &&
       secret !== "" &&
-      !half &&
+      !accountHalf &&
       config.error === null &&
       Object.keys(validated.errors).length === 0,
   );
   const canAdd = $derived(ready && idError === null && report?.ok === true && tested === draft && !saving);
 
   /** What an adapter holds, as prototype-6 describes each one. */
-  function holds(adapter: SourceDescriptor): string {
+  function kindsHeld(adapter: SourceDescriptor): string {
     return adapter.entity_kinds.map((kind, index) => (index === 0 ? kind.plural : kind.plural.toLowerCase())).join(", ");
   }
 
@@ -126,7 +113,7 @@
     id = adapter.adapter_kind;
     displayName = adapter.name;
     // The config belongs to the adapter that declared it; nothing carries over.
-    configValues = defaultValues(pageFields(adapter.config_schema, { keepUser: true }).fields);
+    configValues = defaultValues(config.fields);
     authKind = adapter.auth_methods[0] ?? null;
     report = null;
     tested = null;
@@ -170,7 +157,7 @@
         auth_kind: authKind,
         config: validated.config,
         secret: { value: secret, account },
-        sync_interval_secs: INTERVAL_SECS,
+        sync_interval_secs: DEFAULT_INTERVAL_SECS,
         enabled: true,
       });
       secret = "";
@@ -195,7 +182,7 @@
         {#each adapters as adapter (adapter.id)}
           <label>
             <input type="radio" name="tf-add-adapter" checked={chosen?.id === adapter.id} onchange={() => choose(adapter)} />
-            <span>{adapter.name}<small>{holds(adapter)}</small></span>
+            <span>{adapter.name}<small>{kindsHeld(adapter)}</small></span>
           </label>
         {/each}
       </div>
@@ -237,7 +224,7 @@
       <p class="tf-dlg-note {idError ? 'tf-stg-errt' : ''}" id="tf-add-id-note">
         {idError ?? "Permanent: everything from this source is named with it."}
       </p>
-      {#if half}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
+      {#if accountHalf}<p class="tf-dlg-note tf-stg-errt">{ACCOUNT_INCOMPLETE}</p>{/if}
       {#if report !== null}
         {@const note = connectionNote(report)}
         <!-- Text: `error` is a line an upstream server wrote. -->

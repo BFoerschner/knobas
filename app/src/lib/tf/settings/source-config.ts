@@ -17,7 +17,7 @@
  * changed laid over it ({@link configChanges}, {@link withChanges}).
  */
 import { defaultValues, schemaFields, type SchemaField } from "../../sources/schema-form";
-import { IDENTITY_FIELD } from "./settings";
+import { IDENTITY_FIELD } from "../../sources/new-source";
 
 /**
  * An adapter's config fields, or why there are none (`schemaFields` throws for
@@ -36,7 +36,8 @@ export function pageFields(
   }
 }
 
-function record(config: unknown): Record<string, unknown> {
+/** A stored config as an object; anything else is an empty one. */
+function asObject(config: unknown): Record<string, unknown> {
   return typeof config === "object" && config !== null && !Array.isArray(config)
     ? (config as Record<string, unknown>)
     : {};
@@ -47,7 +48,7 @@ function record(config: unknown): Record<string, unknown> {
  * declared default where the config leaves it out.
  */
 export function formValues(fields: SchemaField[], config: unknown): Record<string, unknown> {
-  const stored = record(config);
+  const stored = asObject(config);
   const values = defaultValues(fields);
   for (const field of fields) {
     if (!(field.key in stored)) continue;
@@ -84,33 +85,9 @@ export function configChanges(
   return changes;
 }
 
-/**
- * Put what a passing *Test connection* found into the form (#903): the
- * account into the identity field (#82) and each `discovered` value into the
- * field of that key (#297), the rooms dialog's one rule. Only a text field,
- * and only an empty one: a value the reader typed was meant.
- */
-export function fillFound(
-  fields: SchemaField[],
-  values: Record<string, unknown>,
-  account: string | null,
-  discovered: Record<string, string> | null | undefined,
-): void {
-  const found: Record<string, string> = { ...(discovered ?? {}) };
-  if (account !== null && account !== "") found[IDENTITY_FIELD] = account;
-  for (const [key, value] of Object.entries(found)) {
-    if (typeof value !== "string" || value === "") continue;
-    const field = fields.find((candidate) => candidate.key === key);
-    if (!field || field.control.kind !== "text") continue;
-    const current = values[key];
-    if (typeof current === "string" && current.trim() !== "") continue;
-    values[key] = value;
-  }
-}
-
 /** The stored config with the reader's changes laid over it. */
 export function withChanges(stored: unknown, changes: Record<string, unknown>): Record<string, unknown> {
-  const next: Record<string, unknown> = { ...record(stored) };
+  const next: Record<string, unknown> = { ...asObject(stored) };
   for (const [key, value] of Object.entries(changes)) {
     if (value === undefined) delete next[key];
     else next[key] = value;

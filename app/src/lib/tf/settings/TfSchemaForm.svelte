@@ -89,7 +89,7 @@
     />
   {:else if field.control.kind === "number"}
     <input
-      class="{cls} tf-sf-num"
+      class="{cls} {layout === 'rows' ? 'tf-stg-n90' : ''}"
       type="number"
       id={controlId(field.key)}
       {disabled}
@@ -139,7 +139,7 @@
     <!-- Text: a `description` is a sentence the adapter author wrote. -->
     <small class="tf-sf-help" id={helpId(field.key)}>{field.help}</small>
   {/if}
-  {#if errors[field.key]}<small class="tf-sf-err" id={errorId(field.key)}>{errors[field.key]}</small>{/if}
+  {#if errors[field.key]}<small class="tf-sf-help tf-stg-errt" id={errorId(field.key)}>{errors[field.key]}</small>{/if}
 {/snippet}
 
 {#if layout === "rows"}

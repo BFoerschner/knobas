@@ -172,19 +172,21 @@
     const fields = config.fields;
     const stored = source.config;
     untrack(() => {
-      if (configDirty) return;
-      configValues = formValues(fields, stored);
-      configLoaded = validate(fields, configValues).config;
+      if (!configDirty) readForm(fields, stored);
     });
   });
+
+  /** Put a stored config in the form, as both what it shows and what it was read from. */
+  function readForm(fields: typeof config.fields, stored: unknown) {
+    configValues = formValues(fields, stored);
+    configLoaded = validate(fields, configValues).config;
+  }
 
   async function saveConfig() {
     if (!configDirty || !configValid || saving) return;
     const changes = { ...configChanged };
     const saved = await update(async () => ({ config: withChanges(await storedConfig(), changes) }), "Saved");
-    if (saved === null) return;
-    configValues = formValues(config.fields, saved.config);
-    configLoaded = validate(config.fields, configValues).config;
+    if (saved !== null) readForm(config.fields, saved.config);
   }
 
   // ---- Test connection: what is stored, never what is typed ----
