@@ -94,6 +94,23 @@ function branchView(o: { ahead: number; behind: number; pr?: string; actions: Vi
   };
 }
 
+/** A commit's whole view carries *New branch…* from it (#707), its whole sha the value. */
+const NEW_BRANCH = {
+  write_op: "create_branch",
+  label: "New branch…",
+  fields: [
+    { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null },
+    { name: "from_ref", label: "From", kind: { type: "choice", options: [{ value: "c90d11e4a7b2", label: "c90d11e4a7" }] }, value: null, required: true, placeholder: null },
+  ],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled: null,
+  with_settings: false,
+  values: {},
+  entity: REPO,
+} as unknown as ViewAction;
+
 const BRANCH_VIEWS: Record<string, SourceView> = {
   [FEATURE]: branchView({ ahead: 3, behind: 0, pr: `${REPO}#142`, actions: [action("create_branch"), action("delete_branch")] }),
   [SPIKE]: branchView({ ahead: 2, behind: 9, actions: [action("create_pull_request"), action("create_branch"), action("delete_branch")] }),
@@ -186,7 +203,7 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
           { type: "file", trail: [], path: "README.md", text: "# payout\nold line\n", language: null, size: 18, truncated: false, binary: false, url: null, sha: "blob-1" },
         ]);
       if (section === "commits") return one("commits", [{ type: "entities", title: null, rows: [] }]);
-      if (id === C1 && section === "diff") return one("diff", [DIFF], 1);
+      if (id === C1 && section === null) return { ...one("diff", [DIFF], 1), actions: [NEW_BRANCH] };
       throw { code: "invalid", message: `no section ${section} of ${id}` };
     },
     entityCheckout: async () => ({

@@ -2856,6 +2856,19 @@ Implementer rulings, PR for issues #839, #840 and #845 (one bundle).
   *new write* tag and its sentence, and the compare page "Reviewers are asked on Gitea after it
   opens." without the *LATER* tag, both prototype annotations; *Against main* names the default
   branch. **Reversing:** low.
+- ***New branch from here…* starts where the commit view's own *New branch…* starts:** the commit
+  page reads the commit's whole view (its diff and its toolbar) and takes `create_branch`'s
+  `from_ref` option, the whole sha as the value and the short one as the label (#707), disabled
+  with the source's reason on a mirror. The shell does not take the sha out of the id.
+  **Reversing:** low (`branchFrom`).
+- **The *Delete…* dialog is prototype-6's, not the source's generic one.** ADR-0020's #702
+  amendment has the source declare a generic action dialog's sentence and tone; this designed page
+  draws prototype-6's words from the branch's drawn standing (its ahead count, its open pull
+  request) and its tone (filled when nothing is lost, the error tone otherwise). Whether *Delete…*
+  is offered at all stays the source's toolbar answer. **Reversing:** draw the action's `confirm`
+  and `danger` instead (`TfRepoBranches.svelte`).
+- **A cut listing's note is told from a branch by its shape** (no id, no line, no *default* chip),
+  as `left_out` draws it, and drawn under the table as the source wrote it. **Reversing:** low.
 - **`?fake-ipc`:** `payout-service` has prototype-6's branches (the job's under the fixture's own
   name), each with a whole view, a diff and a toolbar; files carry a blob sha so *Edit* opens; the
   fixture's `submit_write` names the op it was handed rather than always a monitor's. The edit's

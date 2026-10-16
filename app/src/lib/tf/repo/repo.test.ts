@@ -14,7 +14,7 @@ import {
   commitPrefill,
   compareHash,
   editHash,
-  fullShaOf,
+  branchFrom,
   keyIn,
   newBranchName,
   proposal,
@@ -331,10 +331,25 @@ test("a new branch and a commit are prefilled from the job", () => {
   expect(commitPrefill(null, "README.md")).toEqual({ message: "update README.md", branch: "fix/README" });
 });
 
-test("the edit and compare addresses, and a commit's full sha", () => {
+test("the edit and compare addresses", () => {
   expect(editHash(REPO, "src/a b.rs")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/edit/src/a%20b.rs");
   expect(compareHash(REPO, "feature/x")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service/compare/feature%2Fx");
   expect(readRepoRoute([REPO, "edit", "src", "a b.rs"])).toMatchObject({ tab: "edit", path: "src/a b.rs" });
-  expect(fullShaOf(`${REPO}@c90d11e4a7b2f00d`)).toBe("c90d11e4a7b2f00d");
-  expect(fullShaOf(REPO)).toBeNull();
+});
+
+test("a branch from a commit starts where the commit's own New branch… starts, disabled where the source says", () => {
+  const newBranch = (disabled: string | null): ViewAction =>
+    ({
+      ...action("create_branch", disabled),
+      fields: [
+        { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null },
+        { name: "from_ref", label: "From", kind: { type: "choice", options: [{ value: "c90d11e4a7b2f00d", label: "c90d11e4a7" }] }, value: null, required: true, placeholder: null },
+      ],
+    }) as ViewAction;
+  expect(branchFrom({ sections: [], actions: [newBranch(null)] })).toEqual({ from: { value: "c90d11e4a7b2f00d", label: "c90d11e4a7" }, disabled: null });
+  expect(branchFrom({ sections: [], actions: [newBranch("A mirror: its branches come from upstream")] })?.disabled).toBe(
+    "A mirror: its branches come from upstream",
+  );
+  expect(branchFrom({ sections: [], actions: [] })).toBeNull();
+  expect(branchFrom(null)).toBeNull();
 });

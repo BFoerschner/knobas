@@ -312,7 +312,20 @@ export function repoView(entityId: string, sectionId: string | null): SourceView
   if (commit) {
     const [, , , , path, before, after] = commit;
     const diff = section("diff", "Diff", [{ type: "diff", files: [diffOf(path, before, after)], truncated: false, commentable: null, gone: [] }], 1);
-    return { sections: [diff], actions: [] } as SourceView;
+    // The whole view's toolbar (#707): a branch from this commit, its whole sha the value.
+    const from = { value: commit[0], label: commit[0].slice(0, 10) };
+    const actions =
+      sectionId === null
+        ? [
+            branchAction("create_branch", "New branch…", {
+              fields: [
+                { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: "feature/…" },
+                { name: "from_ref", label: "From", kind: { type: "choice", options: [from] }, value: null, required: true, placeholder: null },
+              ],
+            }),
+          ]
+        : [];
+    return { sections: [diff], actions } as SourceView;
   }
   const branchAt = entityId.indexOf("@refs/heads/");
   const repoId = branchAt === -1 ? entityId : entityId.slice(0, branchAt);

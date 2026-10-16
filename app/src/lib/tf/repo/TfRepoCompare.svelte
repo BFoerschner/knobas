@@ -19,12 +19,14 @@
   branch by name, and the change says when it will show.
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import type { DiffFile } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import TfDiff from "../code/TfDiff.svelte";
-  import { resolveTicket } from "../job/job";
+  import { itemHash, resolveTicket } from "../job/job";
+  import { toastQueued } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import {
     branchStanding,
@@ -88,10 +90,11 @@
   });
 
   // The form, proposed for each branch: from its ticket where it names one.
+  // Only a new branch proposes anew; nothing else may wipe what was typed.
   $effect(() => {
     const name = head ?? "";
     let live = true;
-    base = into;
+    base = untrack(() => into);
     ({ title, body } = proposal(name, null));
     const key = keyIn(name);
     if (key === null) return;
@@ -123,10 +126,7 @@
     const words = title.trim();
     try {
       await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } });
-      push({
-        text: `Queued: open PR ${words}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`open PR ${words}`);
       location.hash = repoHash(repoId, "prs");
     } catch (cause) {
       push({ text: `Could not queue the pull request: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -168,7 +168,7 @@
         {#if standing?.pr}
           <span class="tf-chip tf-info">PR {standing.pr.number ?? ""} is already open from this branch</span>
           {#if standing.pr.entityId !== null}
-            <a class="tf-btn" href="#/pr/{encodeURIComponent(standing.pr.entityId)}">Open PR {standing.pr.number ?? ""}</a>
+            <a class="tf-btn" href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}>Open PR {standing.pr.number ?? ""}</a>
           {/if}
         {:else}
           <button type="submit" class="tf-btn tf-primary" disabled={!ready}>Create pull request</button>

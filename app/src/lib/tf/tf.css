@@ -1543,10 +1543,9 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-rbranches td:first-child { width: 34%; }
 .tf-rbranches .tf-racts { text-align: right; }
 .tf-rbranches-note { margin: 8px 0 0; }
-.tf-btn.tf-danger { border-color: var(--err); }
+.tf-rdel footer .tf-danger { border-color: var(--err); }
 /* A banner inside a dialog's body: a rounded block, not a strip across a panel. */
 .tf-dialog .tf-dbanner { border: 0; border-radius: 4px; }
-.tf-dialog .tf-body > p { margin: 0; }
 .tf-compare { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 22px; align-items: start; }
 .tf-compare .tf-cform { padding: 14px; }
 .tf-compare .tf-formgrid textarea {
@@ -1556,8 +1555,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-compare .tf-ctop { align-self: start; padding-top: 6px; }
 .tf-compare .tf-cgo { display: flex; gap: 8px; margin-top: 12px; align-items: center; flex-wrap: wrap; }
 .tf .tf-compare .tf-cchanges { margin-top: 18px; }
-.tf-side { display: flex; flex-direction: column; gap: 14px; }
-.tf-side .tf-panel > header h3 { font-size: var(--t-md); }
+.tf-compare .tf-side { display: flex; flex-direction: column; gap: 14px; }
+.tf-compare .tf-side .tf-panel > header h3 { font-size: var(--t-md); }
 .tf-editor { display: grid; grid-template-columns: 48px 1fr; font: var(--t-sm)/1.6 var(--mono); }
 .tf-editor .tf-nums {
   color: var(--ink-2); text-align: right; padding: 8px 12px 8px 0; white-space: pre; user-select: none; background: var(--sheet-2);

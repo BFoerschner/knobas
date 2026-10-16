@@ -14,13 +14,12 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { lineDiff } from "../code/line-diff";
   import TfDiff from "../code/TfDiff.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markCommit, markMade } from "./queued.svelte";
+  import { markCommit, markMade, toastQueued } from "./queued.svelte";
+  import type { RepoPorts } from "./TfRepo.svelte";
   import { commitPrefill, compareHash, fileHash } from "./repo";
 
   let {
@@ -32,7 +31,7 @@
     baseSha,
     job,
     checkoutBranch,
-    submitWrite,
+    ports,
     onclose,
   }: {
     repoId: string;
@@ -47,7 +46,7 @@
     job: string | null;
     /** The branch the local checkout is on, `null` without one. */
     checkoutBranch: string | null;
-    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    ports: Pick<RepoPorts, "submitWrite">;
     onclose: () => void;
   } = $props();
 
@@ -68,16 +67,10 @@
     busy = true;
     const onto = target === "new" ? newBranch.trim() : null;
     try {
-      await submitWrite({
+      await ports.submitWrite({
         CommitFile: { repo: repoId, branch, new_branch: onto, path, content: after, message: message.trim(), base_sha: baseSha },
       });
-      push({
-        text:
-          onto === null
-            ? `Queued: commit ${path} to ${branch}. Sends with the next sync.`
-            : `Queued: commit ${path} to ${onto}, then open a PR. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(onto === null ? `commit ${path} to ${branch}` : `commit ${path} to ${onto}, then open a PR`);
       onclose();
       if (onto === null) {
         markCommit(repoId, branch, path, { message: message.trim(), base: baseSha });

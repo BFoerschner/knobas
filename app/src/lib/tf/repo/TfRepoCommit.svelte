@@ -1,19 +1,21 @@
 <!--
   One commit under the repository's *Commits* tab (#838, R-8.7), as
   prototype-6's `renderCommitView`: its short sha, message, author and time,
-  *New branch from here…* (#839: the page's *New branch…* dialog, starting at
-  this commit's whole sha) and *All commits*, then its diff file by file.
+  *New branch from here…* (#839: the page's *New branch…* dialog, starting
+  where the commit view's own *New branch…* starts, its whole sha) and *All
+  commits*, then its diff file by file.
 
   The header is the mirror's row (`get_entity`: title, author, `updated_at`);
-  the diff is the source's (`entity_view`, section `diff`), read live.
+  the diff and the toolbar are the source's whole view (`entity_view`), read
+  live.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { DiffFile, EntityDetail } from "../../ipc/entity";
+  import type { ChoiceOption, DiffFile, EntityDetail } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
   import { when } from "../tickets/tickets";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { fullShaOf, repoHash, shaOf } from "./repo";
+  import { branchFrom, repoHash, shaOf } from "./repo";
 
   let {
     ports,
@@ -27,11 +29,12 @@
     commitId: string;
     now: Date;
     /** Open *New branch…* starting at this commit: its whole sha the value, its short one the label. */
-    onNewBranch: (from: { value: string; label: string }) => void;
+    onNewBranch: (from: ChoiceOption) => void;
   } = $props();
 
   let detail = $state<EntityDetail | null>(null);
   let files = $state<DiffFile[] | null>(null);
+  let start = $state<ReturnType<typeof branchFrom>>(null);
   let failed = $state<string | null>(null);
 
   $effect(() => {
@@ -39,6 +42,7 @@
     let live = true;
     detail = null;
     files = null;
+    start = null;
     failed = null;
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
@@ -46,10 +50,12 @@
     ports.getEntity(id).then((answer) => {
       if (live) detail = answer;
     }, fail);
-    ports.entityView(id, "diff").then((view) => {
+    ports.entityView(id, null).then((view) => {
       if (!live) return;
-      const block = view?.sections[0]?.blocks.find((candidate) => candidate.type === "diff");
+      const diff = view?.sections.find((candidate) => candidate.id === "diff");
+      const block = diff?.blocks.find((candidate) => candidate.type === "diff");
       files = block?.type === "diff" ? block.files : [];
+      start = branchFrom(view);
     }, fail);
     return () => {
       live = false;
@@ -57,10 +63,9 @@
   });
 
   const sha = $derived(shaOf(commitId));
-  const full = $derived(fullShaOf(commitId));
 
   function branchHere() {
-    if (full !== null) onNewBranch({ value: full, label: sha ?? full });
+    if (start !== null && start.disabled === null) onNewBranch(start.from);
   }
 </script>
 
@@ -73,8 +78,13 @@
     >
   {/if}
   <span class="tf-acts">
-    {#if full !== null}
-      <button type="button" class="tf-btn tf-sm" onclick={branchHere}>New branch from here…</button>
+    {#if start !== null}
+      <button
+        type="button"
+        class="tf-btn tf-sm"
+        aria-disabled={start.disabled !== null ? "true" : undefined}
+        title={start.disabled ?? undefined}
+        onclick={branchHere}>New branch from here…</button>
     {/if}
     <a class="tf-btn tf-sm tf-ghost" href={repoHash(repoId, "commits")}>All commits</a>
   </span>

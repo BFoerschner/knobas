@@ -8,7 +8,7 @@
  * commit's diff, all read live, so a repository nobody cloned reads the same
  * as one on this disk. Section ids are the source's and never taken apart.
  */
-import type { CheckoutView, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
+import type { CheckoutView, ChoiceOption, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
 
@@ -220,10 +220,18 @@ export function compareHash(repoId: string, branch: string): string {
   return repoHash(repoId, "compare", encodeURIComponent(branch));
 }
 
-/** A commit's whole sha from its id's `@<sha>`: what a branch made from it starts at. */
-export function fullShaOf(commitId: string): string | null {
-  const found = /@([0-9a-f]{4,64})$/i.exec(commitId);
-  return found ? found[1]! : null;
+/**
+ * Where *New branch from here…* starts, from the commit's own view: its
+ * toolbar's *New branch…* (`create_branch`), whose `from_ref` the source fills
+ * with the commit's whole sha as the value and its short sha as the label
+ * (#707). `null` where the view offers none; `disabled` is the source's reason
+ * (a mirror) where it offers one it would refuse.
+ */
+export function branchFrom(view: SourceView | null): { from: ChoiceOption; disabled: string | null } | null {
+  const action = view?.actions.find((candidate) => candidate.write_op === "create_branch");
+  const field = action?.fields.find((candidate) => candidate.name === "from_ref");
+  const from = field?.kind.type === "choice" ? field.kind.options[0] : undefined;
+  return action && from ? { from, disabled: action.disabled } : null;
 }
 
 /**

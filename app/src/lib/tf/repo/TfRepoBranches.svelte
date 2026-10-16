@@ -20,13 +20,13 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { ViewRow } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { itemHash } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { isDeleteQueued, madeNotListed, markDeleted } from "./queued.svelte";
+  import { isDeleteQueued, madeNotListed, markDeleted, toastQueued } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
   import { branchStanding, compareHash, viewRows, visibleBranches, type BranchRow, type BranchStanding } from "./repo";
 
@@ -82,12 +82,11 @@
   /** A branch's row, or the note a cut listing ends on (no id, no line). */
   const isNote = (row: ViewRow) => row.entity_id === null && row.meta === null && row.chip !== "default";
 
+  /** Branches this session queued that the listing does not hold yet. */
+  const made = $derived(new Set(madeNotListed(repoId, (listed ?? []).map((row) => row.title))));
+
   const rows = $derived.by((): BranchRow[] => {
     const branches = (listed ?? []).filter((row) => !isNote(row));
-    const made = madeNotListed(
-      repoId,
-      branches.map((row) => row.title),
-    ).map((name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null }));
     return [
       ...branches.map(
         (row): BranchRow => ({
@@ -98,12 +97,11 @@
           standing: row.entity_id !== null ? (standings[row.entity_id] ?? null) : null,
         }),
       ),
-      ...made,
+      ...[...made].map((name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null })),
     ];
   });
-  const made = $derived(new Set(madeNotListed(repoId, (listed ?? []).map((row) => row.title))));
   const notes = $derived((listed ?? []).filter(isNote));
-  const defaultName = $derived(rows.find((row) => row.isDefault)?.name ?? "main");
+  const defaultName = $derived(rows.find((row) => row.isDefault)?.name ?? "the default branch");
 
   const filter = $derived(sessionFilter(`repo-branches:${repoId}`));
   const config = $derived<FilterConfig>({
@@ -130,10 +128,7 @@
     try {
       await ports.submitWrite({ DeleteBranch: { entity: row.entityId } });
       markDeleted(repoId, row.name);
-      push({
-        text: `Queued: delete branch ${row.name}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`delete branch ${row.name}`);
       deleting = null;
     } catch (cause) {
       push({ text: `Could not queue the delete: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -175,7 +170,7 @@
             >{#if standing?.merged}<span class="tf-chip tf-ok">merged</span>{:else}{against(standing)}{/if}</td
           >
           <td
-            >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href="#/pr/{encodeURIComponent(standing.pr.entityId)}"
+            >{#if standing?.pr}{#if standing.pr.entityId !== null}<a href={itemHash({ entity_id: standing.pr.entityId, kind: "pr" })}
                   >{standing.pr.number ?? ""}</a
                 >{:else}{standing.pr.number ?? ""}{/if}{#if standing.pr.state}{" "}<span class="tf-chip tf-{standing.pr.tone ?? 'info'}"
                   >{standing.pr.state}</span
@@ -207,7 +202,7 @@
 {#if deleting !== null && deleting.standing !== null}
   {@const standing = deleting.standing}
   {@const row = deleting}
-  <TfDialog title="Delete {row.name}?" onclose={() => (deleting = null)}>
+  <TfDialog title="Delete {row.name}?" onclose={() => (deleting = null)} className="tf-rdel">
     {#snippet body()}
       {#if standing.merged}
         <p>Every commit on this branch is in {defaultName}. Nothing is lost.</p>

@@ -18,6 +18,7 @@ import type {
   EntityRow,
   SourceView,
   TreeEntry,
+  ViewAction,
   ViewBlock,
   ViewRow,
 } from "../../ipc/entity";
@@ -57,6 +58,24 @@ const section = (id: string, blocks: ViewBlock[]): SourceView => ({
   sections: [{ id, title: id, count: null, deferred: false, blocks }],
   actions: [],
 });
+
+/** A commit's whole view carries *New branch…* from it (#707), its whole sha the value. */
+const withActions = (view: SourceView): SourceView => ({ ...view, actions: [NEW_BRANCH] });
+const NEW_BRANCH = {
+  write_op: "create_branch",
+  label: "New branch…",
+  fields: [
+    { name: "name", label: "Name", kind: { type: "text", suggestions: [] }, value: null, required: true, placeholder: null },
+    { name: "from_ref", label: "From", kind: { type: "choice", options: [{ value: "c90d11e4a7b2", label: "c90d11e4a7" }] }, value: null, required: true, placeholder: null },
+  ],
+  confirm: null,
+  primary: false,
+  danger: false,
+  disabled: null,
+  with_settings: false,
+  values: {},
+  entity: REPO,
+} as unknown as ViewAction;
 
 const entry = (name: string, kind: TreeEntry["kind"], at: string): TreeEntry => ({
   name,
@@ -161,8 +180,8 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
                 : [vrow(null, "Only on the feature", "7be0e40000", "mara · 1 day ago")],
           },
         ]);
-      if (id === C1 && sectionId === "diff")
-        return section("diff", [
+      if (id === C1 && sectionId === null)
+        return withActions(section("diff", [
           {
             type: "diff",
             truncated: false,
@@ -190,7 +209,7 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
               },
             ],
           },
-        ]);
+        ]));
       const tree = TREES[at];
       if (tree && sectionId !== null && tree[sectionId])
         return section(sectionId, [{ type: "tree", trail: [], entries: tree[sectionId]!, truncated: false, url: null }]);

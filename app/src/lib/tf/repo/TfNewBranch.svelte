@@ -11,11 +11,11 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import type { ChoiceOption } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
-  import { openWriteQueue } from "../../shell/write-queue.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { markMade } from "./queued.svelte";
+  import { markMade, toastQueued } from "./queued.svelte";
+  import type { RepoPorts } from "./TfRepo.svelte";
   import { newBranchName } from "./repo";
 
   let {
@@ -24,7 +24,7 @@
     branches,
     from = null,
     job,
-    submitWrite,
+    ports,
     onclose,
   }: {
     repoId: string;
@@ -33,9 +33,9 @@
     /** Every branch to start from, the default first. */
     branches: readonly string[];
     /** A commit to start from instead, offered first. */
-    from?: { value: string; label: string } | null;
+    from?: ChoiceOption | null;
     job: string | null;
-    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    ports: Pick<RepoPorts, "submitWrite">;
     onclose: () => void;
   } = $props();
 
@@ -51,12 +51,9 @@
     const branch = name.trim();
     busy = true;
     try {
-      await submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } });
+      await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } });
       markMade(repoId, branch);
-      push({
-        text: `Queued: create branch ${branch} in ${repoName}. Sends with the next sync.`,
-        action: { label: "Show queue", run: openWriteQueue },
-      });
+      toastQueued(`create branch ${branch} in ${repoName}`);
       onclose();
     } catch (cause) {
       push({ text: `Could not queue the branch: ${ipcErrorMessage(cause)}`, tone: "err" });

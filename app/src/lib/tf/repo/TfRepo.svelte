@@ -24,6 +24,7 @@
 <script lang="ts" module>
   import type {
     CheckoutView,
+    ChoiceOption,
     DiffRead,
     EntityDetail,
     EntityFilter,
@@ -246,7 +247,7 @@
   };
 
   /** *New branch…*'s dialog, open from the header or from a commit. */
-  let newBranch = $state<{ from: { value: string; label: string } | null } | null>(null);
+  let newBranch = $state<{ from: ChoiceOption | null } | null>(null);
 </script>
 
 <div class="tf-full">
@@ -351,7 +352,7 @@
     branches={(branches ?? []).map((option) => option.name)}
     from={newBranch.from}
     {job}
-    submitWrite={ports.submitWrite}
+    {ports}
     onclose={() => (newBranch = null)}
   />
 {/if}

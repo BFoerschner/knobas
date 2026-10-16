@@ -325,7 +325,7 @@
     baseSha={file.sha}
     {job}
     {checkoutBranch}
-    submitWrite={ports.submitWrite}
+    {ports}
     onclose={() => (committing = false)}
   />
 {/if}

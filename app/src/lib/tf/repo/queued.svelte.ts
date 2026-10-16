@@ -9,6 +9,14 @@
  * made branch once the listing has it, a commit once the file's blob moved.
  */
 
+import { push } from "../../shell/toasts.svelte";
+import { openWriteQueue } from "../../shell/write-queue.svelte";
+
+/** The toast a queued write raises: `Queued: <what>. Sends with the next sync.` with *Show queue*. */
+export function toastQueued(what: string): void {
+  push({ text: `Queued: ${what}. Sends with the next sync.`, action: { label: "Show queue", run: openWriteQueue } });
+}
+
 /** Per repository entity id: branches queued to be made, and to be deleted. */
 const made: Record<string, string[]> = $state({});
 const deleted: Record<string, string[]> = $state({});
