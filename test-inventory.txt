@@ -2106,6 +2106,7 @@ knobas-source	lib/knobas_source	instance::tests::accepts_the_ids_the_contract_na
 knobas-source	lib/knobas_source	instance::tests::debug_redacts_the_secret
 knobas-source	lib/knobas_source	instance::tests::rejects_everything_else
 knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
+knobas-source	lib/knobas_source	pipeline::tests::settings_without_the_later_fields_read_as_empty
 knobas-source	lib/knobas_source	tests::a_commit_file_crosses_in_its_own_shape
 knobas-source	lib/knobas_source	tests::a_create_queued_before_kinds_reads_as_an_http_check
 knobas-source	lib/knobas_source	tests::a_fault_from_a_response_carries_the_status_it_came_from
