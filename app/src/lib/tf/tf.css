@@ -1220,7 +1220,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-dp-foot { font-size: var(--t-sm); color: var(--ink-2); margin: 12px 0; }
 .tf-asset-tree { min-height: 0; flex: 1; display: flex; flex-direction: column; }
-||||||| parent of 673c5072 (View editor: + New view, Edit view, the form and the live preview (#814))
 /* ---------- the view editor (#814): the form on the left, the live preview on the right ---------- */
 .tf-vw-acts { padding: 4px 8px 2px; }
 .tf-vw-acts .tf-btn { width: 100%; justify-content: center; }
