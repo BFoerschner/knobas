@@ -22,9 +22,11 @@
   says which exist only by pushing `dockerHostList` during the login (2.5.3's `afterLogin`
   awaits it before the login's ack). The socket reads that push and the create takes the lowest
   id; an account with none is refused before `add` is sent, since a Docker monitor with no host
-  is created and then down for ever. Witnessed live by `a_tcp_check_and_a_ping_are_published_as_their_own_kinds`
-  (`just kuma-live`): TCP and ping published with Kuma's own types, Docker refused on the test
-  Kuma, which has no Docker host. The direction "a Docker host is chosen" is witnessed only at
+  is created and then down for ever. Witnessed live by
+  `a_tcp_check_is_published_as_a_port_monitor_and_docker_is_refused_without_a_host`
+  (`just kuma-live`): a TCP check published as Kuma's `port`, and Docker refused on the test
+  Kuma, which has no Docker host. The ping is witnessed at the unit seam only, to keep the
+  suite inside Kuma's twenty logins a minute. The direction "a Docker host is chosen" is witnessed only at
   the unit seam (`the_docker_hosts_come_out_of_the_pushed_list`); the test environment has no
   Docker host to choose.
 

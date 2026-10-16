@@ -2727,3 +2727,8 @@ Implementer, PR for #851.
   **Reversing:** low.
 - **The header names the source by its display name from `list_sources`.** Under `?fake-ipc` the
   sources fixture has no Uptime Kuma, so it reads "kuma". **Reversing:** low.
+- **`just kuma-live` waits 61 s between `live_kuma` and `kuma_write_live`.** Kuma allows twenty
+  logins per fixed minute window; with this ticket's live test the second binary's last test was
+  refused as `unauthorized` (30 s was not enough). The new live test makes three logins and
+  witnesses TCP and the Docker refusal; ping stays at the unit seam. **Reversing:** low (the
+  recipe line), but the budget comes back.
