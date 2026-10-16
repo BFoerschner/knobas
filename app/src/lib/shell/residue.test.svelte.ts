@@ -354,6 +354,7 @@ const TfCodeSection = (await import("../tf/job/TfCodeSection.svelte")).default;
 const TfConnections = (await import("../tf/job/TfConnections.svelte")).default;
 const TfStartWork = (await import("../tf/job/TfStartWork.svelte")).default;
 const TfReview = (await import("../tf/review/TfReview.svelte")).default;
+const TfInbox = (await import("../tf/inbox/TfInbox.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createHiddenLayers } = await import("../tf/deps/hidden.svelte");
 const { createLayers } = await import("../tf/layers.svelte");
@@ -975,6 +976,38 @@ const CASES: Case[] = [
           layers: createLayers(),
           ports: { roomSuggestions: () => deferred({ rows: [], total: 0, more: [] }) },
           ongo: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * The Inbox (#834): the filter bar's `/` on the window, the store's read
+     * and the jobs' reach reads behind a ready database, answering late.
+     */
+    name: "TfInbox",
+    source: "lib/tf/inbox/TfInbox.svelte",
+    open: (target) => ({
+      app: mount(TfInbox, {
+        target,
+        props: {
+          ready: true,
+          job: "PAY-231",
+          inbox: createInbox({
+            inboxItems: () => deferred([]),
+            inboxCount: () => deferred(0),
+            snoozeInboxItem: () => deferred(undefined),
+            completeInboxItem: () => deferred(undefined),
+            ackAlert: () => deferred(undefined),
+            listen: () => deferred(() => {}),
+          }),
+          ports: {
+            listContexts: () => deferred([]),
+            listSources: () => deferred([{ id: "jira" }]),
+            getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
+            jobReach: () => deferred([]),
+            submitWrite: () => deferred({ id: 1 } as never),
+          },
         },
       }),
     }),
