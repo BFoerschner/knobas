@@ -3312,3 +3312,15 @@ Ruled by the implementer (PR for #866).
   line.** The run page's tabs are a sibling's (#854 to #856) in flight; keeping the read out of
   `RunPorts` keeps this PR to that one line in `TfRun.svelte` and a `chain: []` in its test's
   settings fixture. **Reversing:** low.
+- **Merge-manager (#1011): a failed chain listing fails the whole `pipeline_settings` read, and
+  that stays.** Both chain listings go to the server and token the settings read already used, so
+  a failure there is the server failing, not a missing permission; swallowing it would draw a
+  pipeline as chainless with no word that the read went wrong. **Reversing:** low (map the
+  `chain_of` error to an empty chain in `TeamCitySource::pipeline_settings`).
+- **Merge-manager (#1011): `ChainProject` is built before its setup requests, not after.** A setup
+  that failed half-way used to leave `KnobasChain857` under `Payout` until the next run of the
+  chain test cleared it, so every later test in that run saw a fourth configuration. Re-ran the
+  `live_teamcity_seeded` suite on the fixed head. 21 of 22 passed, the chain test among them. The
+  one failure, `the_seeded_failed_builds_view_shows_its_failed_test_and_log_tail` (tab counts
+  stale since #852's seed change), does not involve this PR and is #1015 (`backlog`).
+  **Reversing:** low.
