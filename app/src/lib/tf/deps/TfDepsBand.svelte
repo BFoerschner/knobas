@@ -100,7 +100,7 @@
             {#each group.tiles as tile (tile.id)}
               {@const kind = kindOf(kinds, tile.kind)}
               {@const state = stateOf(tile)}
-              {@const line = lineOf(tile)}
+              {@const line = lineOf(tile, band.group === "environment")}
               {@const el = tileEl(tile.id)}
               {@const matched = hit(tile)}
               <div
@@ -115,6 +115,7 @@
               >
                 <a
                   class="tf-dp-open"
+                  data-testid="dp-{tile.name}"
                   href={hrefOf(tile)}
                   title="{kind.label}: {tile.name}{line ? `. ${line}` : ''}"
                   onclick={(event) => onopen(tile, event)}

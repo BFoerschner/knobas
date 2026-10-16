@@ -9,6 +9,7 @@ import { flushSync, mount, unmount } from "svelte";
 import { afterEach, expect, test } from "vitest";
 
 import type { Dependencies, DepItem, DepLayer, DepView, DepViews } from "../../ipc/assets";
+import { toasts } from "../../shell/toasts.svelte";
 import { createDepViewState } from "./views.svelte";
 import { settingsOf } from "./views";
 import TfDeps from "./TfDeps.svelte";
@@ -324,6 +325,7 @@ test("the layers panel refuses a taken name in place and says every view uses a 
   await settle();
   expect(panel.querySelector("[role='alert']")).toBeNull();
   expect([...target.querySelectorAll("section h3")].map((h) => h.textContent)).toContain("Hosts");
+  expect(toasts.items.map((t) => t.text)).toContain("Renamed Machines to Hosts. Every view uses it.");
 
   const network = panel.querySelector<HTMLSelectElement>("select[aria-label='Layer for Network']")!;
   network.value = "machines";

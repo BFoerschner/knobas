@@ -82,10 +82,13 @@ export function summaryOf(read: Dependencies, items: readonly DepItem[]): string
   return words.join(", ") + (ranked.length > 3 ? ", and more" : "");
 }
 
-/** What a tile's second line says: the state word, and the environment where one is set. */
-export function lineOf(item: DepItem): string {
+/**
+ * What a tile's second line says: the state word, and the environment where
+ * one is set, unless its layer already groups by environment.
+ */
+export function lineOf(item: DepItem, byEnvironment = false): string {
   const { word } = stateOf(item);
-  const env = item.environment !== null && item.environment !== "shared" ? item.environment : null;
+  const env = !byEnvironment && item.environment !== null && item.environment !== "shared" ? item.environment : null;
   return [word, env].filter(Boolean).join(", ");
 }
 

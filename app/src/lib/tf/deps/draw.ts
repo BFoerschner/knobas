@@ -191,6 +191,8 @@ export interface DrawnBand {
   id: string;
   name: string;
   kinds: readonly string[];
+  /** How the view groups this layer. */
+  group: DepGroup;
   summary: string;
   wrong: string;
   mix: Mix[];
@@ -268,6 +270,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
       id: layer.id,
       name: layer.name,
       kinds: layer.kinds,
+      group: shown.group,
       summary: summaryOf(read, items),
       wrong: wrongOf(items),
       mix: mixOf(items),

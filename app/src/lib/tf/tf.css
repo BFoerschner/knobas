@@ -1475,6 +1475,9 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-dp-ps p { font-size: var(--t-xs); }
 .tf-dp-ps label { font-size: var(--t-sm); display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 .tf-dp-lrow { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 4px 6px; align-items: center; padding: 6px 0; border-bottom: 1px dashed var(--rule-2); }
+.tf-dp-lrow input[type="text"], .tf-dp-panel select, .tf-dp-foldat, .tf-dp-ecols > div > select {
+  border: 1px solid var(--rule); border-radius: 4px; padding: 3px 6px; background: var(--paper); color: var(--ink); font: inherit;
+}
 .tf-dp-lrow input[type="text"] { min-width: 0; font-weight: 600; }
 .tf-dp-arrows { display: flex; }
 .tf-dp-arrows .tf-btn { padding: 0 5px; }
