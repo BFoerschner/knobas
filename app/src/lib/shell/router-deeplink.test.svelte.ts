@@ -87,7 +87,7 @@ vi.mock("../ipc/entity", () => ({
   // mock has to answer for it. Three empty lists -- this file is about which
   // surface an address reaches, not about what is on it.
   standupDigest: () =>
-    Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+    Promise.resolve({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
   // The standup protocol under the digest (#289). Its panel and the settings
   // section both import these at module level, so the mock has to define them
   // wherever the shell is mounted whole.

@@ -50,6 +50,17 @@ const DIGEST: StandupDigest = {
   yesterday: [line({}), line({ entity_id: "confluence:98401", kind: "page", title: "SEPA retry design", reason: "Backoff policy" })],
   today: [line({ entity_id: null, kind: null, title: "DB config", reason: "timer running" })],
   blockers: [],
+  infrastructure: [
+    line({
+      entity_id: "kuma:payout-api",
+      kind: "monitor",
+      title: "payout-api health check",
+      source: "kuma",
+      verb: "down",
+      reason: "was down 12 min",
+      at: "2026-08-20T03:10:00",
+    }),
+  ],
 };
 
 let target: HTMLDivElement;
@@ -138,9 +149,19 @@ test("the digest draws each list, every line with an item a link into the new sh
   await settle();
   expect(text()).toContain("Yesterday, Thursday 20");
   const links = [...target.querySelectorAll(".tf-su-dig a")].map((link) => link.getAttribute("href"));
-  expect(links).toEqual(["#/job/PAY-231", "#/page/confluence%3A98401"]);
+  expect(links).toEqual(["#/job/PAY-231", "#/page/confluence%3A98401", "#/monitors"]);
   expect(text()).toContain("DB config (timer running)");
   expect(text()).toContain("Nothing of yours is blocked.");
+});
+
+test("Infrastructure sits under Blockers, every incident a link to its monitor", async () => {
+  open();
+  await settle();
+  const headings = [...target.querySelectorAll(".tf-su-dig h4")].map((h) => h.textContent);
+  expect(headings.slice(-2)).toEqual(["Blockers", "Infrastructure"]);
+  const incident = [...target.querySelectorAll(".tf-su-dig a")].at(-1)!;
+  expect(incident.getAttribute("href")).toBe("#/monitors");
+  expect(incident.textContent?.replace(/\s+/g, " ")).toBe("payout-api health check was down 12 min, from 03:10");
 });
 
 test("Copy as text copies the digest", async () => {
@@ -149,6 +170,7 @@ test("Copy as text copies the digest", async () => {
   button("Copy as text").click();
   await settle();
   expect(calls.copied[0]).toContain("- PAY-231 Retry failed SEPA payouts: 4h 30m");
+  expect(calls.copied[0]).toContain("Infrastructure\n- payout-api health check was down 12 min, from 03:10");
 });
 
 test("the protocol draws who was there, their notes, and the action items, from the note's body", async () => {

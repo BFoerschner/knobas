@@ -125,6 +125,9 @@ test("the digest copies as text, one line each, with the lists' headings", () =>
     yesterday: [line({})],
     today: [line({ entity_id: null, kind: null, title: "DB config", reason: "timer running" })],
     blockers: [],
+    infrastructure: [
+      line({ entity_id: "kuma:payout-api", kind: "monitor", title: "payout-api", reason: "was down 12 min", at: "2026-08-20T03:10:00" }),
+    ],
   });
   expect(text).toBe(
     [
@@ -136,6 +139,9 @@ test("the digest copies as text, one line each, with the lists' headings", () =>
       "",
       "Blockers",
       "- None",
+      "",
+      "Infrastructure",
+      "- payout-api was down 12 min, from 03:10",
     ].join("\n"),
   );
 });

@@ -184,7 +184,7 @@ vi.mock("../ipc/entity", () => ({
   // the view through; this is here because the module-level import resolves
   // whether or not a prop overrides it.
   standupDigest: () =>
-    deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+    deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
   // The standup protocol under the digest (#289), deferred like the rest so
   // the view can be unmounted with its reads in flight.
   standupProtocol: () =>
@@ -1954,7 +1954,7 @@ const CASES: Case[] = [
         target,
         props: {
           ports: {
-            standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+            standupDigest: () => deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
             standupProtocol: () => deferred({ day: "2026-08-22", note_id: "note:p", page_title: "2026-08-22", publication: null }),
             getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
             standupPublishTarget: () => deferred(null),
@@ -2255,7 +2255,7 @@ const CASES: Case[] = [
           router: createRouter(),
           ports: {
             standupDigest: () =>
-              deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [] }),
+              deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
           },
         },
       }),

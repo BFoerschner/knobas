@@ -24,7 +24,7 @@
  */
 import type { DigestLine, StandupDigest } from "../../ipc/entity";
 import { actionItems, bullet, type ActionItem } from "../../standup/protocol";
-import { dayLabel } from "../../time/day";
+import { clockReading, dayLabel } from "../../time/day";
 import { itemHash, keyOf } from "../job/job";
 
 /** The protocol as the tab draws it. */
@@ -225,6 +225,20 @@ function textOf(line: DigestLine, yesterday: boolean): string {
 }
 
 /**
+ * Where an incident began, as the reader's clock reads it: `from 03:10`. The
+ * duration is the line's reason; the clock is here because only this side
+ * knows the reader's timezone.
+ */
+export function incidentSince(line: Pick<DigestLine, "at">): string {
+  return `from ${clockReading(line.at)}`;
+}
+
+/** An Infrastructure line as plain text: `payout-api was down 12 min, from 03:10`. */
+function incidentText(line: DigestLine): string {
+  return `${line.title} ${line.reason}, ${incidentSince(line)}`;
+}
+
+/**
  * An action item's words and its trailing `(Owner)`, which prototype-6 dims.
  * Only a last parenthesis counts; the words are the reader's.
  */
@@ -251,5 +265,10 @@ export function digestText(digest: StandupDigest): string {
     "",
     "Blockers",
     ...list(digest.blockers, false),
+    "",
+    "Infrastructure",
+    ...(digest.infrastructure.length === 0
+      ? ["- None"]
+      : digest.infrastructure.map((line) => `- ${incidentText(line)}`)),
   ].join("\n");
 }

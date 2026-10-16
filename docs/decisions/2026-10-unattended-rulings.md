@@ -3738,3 +3738,22 @@ Ruled by the implementer (one PR for the three).
 - **Jira's schema fixture transcribes `sprint_field` verbatim** (it was an unnamed absence since
   #889), and the `?fake-ipc` Jira source carries prototype-6's four projects and a recorded
   Sprint field id. **Reversing:** low.
+## #932 — Standup digest: the Infrastructure list (2026-10-17)
+
+- **The incidents are `knobas.monitor_alert` rows, not samples or a new table.** An alert is a
+  monitor's open-until-recovered down or warn spell (CONTEXT.md, Alert), which is what "was down 12
+  min" is. **Reversing:** one statement (`INCIDENTS`).
+- **"Since the last working day" is the start of `yesterday_day`'s window, else today's start.**
+  The digest's own yesterday rule already names the last working day; an alert open at any instant
+  from then to the end of today is listed, including one still open that began earlier.
+  **Reversing:** the `since` line in `digest`.
+- **Not mine-only.** A monitor has no owner in the mirror; the ticket says "monitor incidents".
+  **Reversing:** needs an ownership rule that does not exist.
+- **No restart lines.** Prototype-6's "vm-pay-01 restarted at 03:12" has no source: the mirror
+  records state changes only. The ticket's "incidents and restarts" is met by incidents.
+  **Reversing:** a producer for restarts, a separate ticket.
+- **The reason is a duration; the clock is drawn by the view from `at`** (`from 03:10`), because
+  the reader's timezone lives in the webview. Prototype-6's "03:10 to 03:22" loses its end
+  reading. **Reversing:** an `ended_at` on the line, a second schema change.
+- **`infrastructure` is required on the TypeScript `StandupDigest`**, so every fixture names it.
+  **Reversing:** low.

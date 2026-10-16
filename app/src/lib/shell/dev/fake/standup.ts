@@ -14,10 +14,10 @@
  *
  * **Where this diverges from prototype-6 and the mock adapter:**
  *
- * - The digest has no *Infrastructure* list: `StandupDigest` carries
- *   `yesterday`, `today` and `blockers` only. Prototype-6's "payout-api was
- *   down 12 min" paragraph needs a field that does not exist (listed in the
- *   PR, not invented here).
+ * - The *Infrastructure* list (#932) carries the incident's name and duration
+ *   ("payout-api health check was down 12 min, from 03:10"); prototype-6's
+ *   "vm-pay-01 restarted at 03:12" is not drawn, since the mirror holds state
+ *   changes and not restarts.
  * - Prototype-6 draws the protocol as an attendee list with notes per person
  *   and action items; `Protocol` is a note id, a page title and a
  *   `publication`. Those people and items are the note's body, seeded here
@@ -144,6 +144,12 @@ export function handlers(): Record<string, Handler> {
         ],
         blockers: [
           line("mock:PAY-228", "ticket", "Fix ledger drift", "blocked", "blocked by OPS-77 On-call runbook outdated", on(today.day, 8, 0)),
+        ],
+        // prototype-6: "payout-api health check was down 12 min, 03:10 to 03:22". The
+        // reason is the duration; the clock is drawn from `at`. Its restart half has
+        // no source: the mirror records a state change, not a restart.
+        infrastructure: [
+          line("mock:payout-api", "monitor", "payout-api health check", "down", "was down 12 min", on(when, 3, 10)),
         ],
       };
     },
