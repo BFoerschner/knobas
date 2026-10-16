@@ -297,7 +297,7 @@ test("the branch dropdown sets the branch for Files and for Commits", async () =
   await settle();
 
   expect(tree()).toEqual(["src/", "README.md", "NEW.md"]);
-  expect(text(target.querySelector(".tf-fileview header"))).toContain("1 lines, on feature/PAY-231-sepa-retry");
+  expect(text(target.querySelector(".tf-fileview header"))).toContain("1 line, on feature/PAY-231-sepa-retry");
   expect(viewReads.some(([id, s]) => id === FEATURE && s === "file:README.md")).toBe(true);
   unmount(view!);
   view = null;

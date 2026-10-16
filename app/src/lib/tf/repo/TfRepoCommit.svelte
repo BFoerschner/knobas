@@ -1,5 +1,5 @@
 <!--
-  One commit under the repository's *Commits* tab (#838, R-8.5), as
+  One commit under the repository's *Commits* tab (#838, R-8.7), as
   prototype-6's `renderCommitView`: its short sha, message, author and time,
   *New branch from here…* (the dialog is #839's, not built yet) and *All
   commits*, then its diff file by file.

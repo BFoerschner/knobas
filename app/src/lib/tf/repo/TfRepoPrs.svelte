@@ -1,5 +1,5 @@
 <!--
-  The repository page's *Pull requests* tab (#838, R-8.7): this repository's
+  The repository page's *Pull requests* tab (#838, R-8.10): this repository's
   pull requests with a filter, as prototype-6's `renderRepo(...,'prs')`. Each
   row: its number, its title, its state chip and the job it belongs to
   (`job/open-jobs.ts`). From the mirror (`list_entities`), every state, newest

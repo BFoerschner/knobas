@@ -1,5 +1,5 @@
 <!--
-  The repository page's *Commits* tab (#838, R-8.5): the filter, then each
+  The repository page's *Commits* tab (#838, R-8.7): the filter, then each
   commit's short sha, message and who and when, as prototype-6's
   `renderRepo(...,'commits')`.
 

@@ -2690,3 +2690,8 @@ Implementer, PR for #851.
   and three of the job branch's commits joined the corpus so their rows open. **Reversing:** low.
 - **A diff file cut by the source's cap ends on "Cut here: the rest of this file's change is at
   the source."** Prototype-6 has no cut diff; the words are knobas' own. **Reversing:** low.
+- **Merge-manager, PR #971: the *Mine* chip and the header's team and language go to #973.** R-8.7
+  asks for *Mine* and R-8.3 for team and language; neither has a declared field to read, so the
+  page ships without them and #973 (blocked by #966) adds them. **Reversing:** #973.
+- **Merge-manager, PR #971: a one-line file says "1 line, on <branch>",** not prototype-6's
+  unconditional "lines". **Reversing:** low (`TfRepoFiles.svelte`).

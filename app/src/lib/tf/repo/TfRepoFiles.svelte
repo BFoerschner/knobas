@@ -1,5 +1,5 @@
 <!--
-  The repository page's *Files* tab (#838, R-8.4): the tree on the left, the
+  The repository page's *Files* tab (#838, R-8.5): the tree on the left, the
   file on the right, as prototype-6's `.repo`.
 
   The tree is the source's, a directory at a time (`entity_view` with the
@@ -189,7 +189,7 @@
       <header>
         <span class="tf-p">{file.path}</span>
         <span class="tf-dim tf-small"
-          >{file.binary ? `${file.size} bytes` : `${lines.length} lines`}{branch !== null ? `, on ${branch}` : ""}</span
+          >{file.binary ? `${file.size} bytes` : `${lines.length} ${lines.length === 1 ? "line" : "lines"}`}{branch !== null ? `, on ${branch}` : ""}</span
         >
         <span class="tf-acts">
           <button type="button" class="tf-btn tf-sm" aria-disabled="true" title="Not built in the new shell yet">Edit</button>
