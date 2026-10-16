@@ -577,6 +577,119 @@ async fn stopping_the_timer_on_a_ticket_is_what_there_is_to_draft() {
     state.scheduler.shutdown().await;
 }
 
+/// The timer row, running on `entity_id` since `since` -- written by hand
+/// because `time::start` stamps `now()`, and the fixture's day is not today.
+async fn running(pool: &PgPool, entity_id: &str, since: chrono::DateTime<chrono::Utc>) {
+    sqlx::query("insert into knobas.timer (entity_id, started_at) values ($1, $2)")
+        .bind(entity_id)
+        .bind(since)
+        .execute(pool)
+        .await
+        .expect("the timer row is written");
+}
+
+/// **A draft opened over a running timer counts the open stretch up to now**
+/// (#896), so the new shell can open it before the clock stops.
+///
+/// The closed morning block is still the only block id; the open stretch is
+/// named by `running_since`, its end is the answer's `ended_at` (no earlier
+/// than the moment the draft was asked for), and the seconds are the morning
+/// plus that stretch. The activity line at 15:00 sits after every closed
+/// block and inside the open stretch only, so it is a candidate only if the
+/// candidates' window reaches the running clock.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_timer_on_the_ticket_is_drafted_up_to_now() {
+    let (state, _wrote) = app("worklog_ipc_running").await;
+    let morning = block(&state.pool, (9, 0), (10, 30)).await;
+    running(&state.pool, TICKET, at(14, 0)).await;
+    let ticket = knobas_core::entity::EntityRef::parse(TICKET).expect("an entity id");
+    let line = knobas_core::activity::record(
+        &state.pool,
+        "user",
+        "transitioned",
+        Some(&ticket),
+        json!({}),
+    )
+    .await
+    .expect("an activity line");
+    sqlx::query("update knobas.activity set at = $1 where id = $2")
+        .bind(at(15, 0))
+        .bind(line.id)
+        .execute(&state.pool)
+        .await
+        .expect("the line is moved into the open stretch");
+
+    let asked = chrono::Utc::now();
+    let opened = draft(&state)
+        .await
+        .expect("a running ticket is something to draft");
+
+    assert_eq!(
+        opened.block_ids,
+        vec![morning],
+        "only closed blocks have ids"
+    );
+    assert_eq!(opened.running_since, Some(at(14, 0)));
+    assert_eq!(opened.started_at, at(9, 0));
+    assert!(
+        opened.ended_at >= asked,
+        "the open stretch runs to now, not to its start: {}",
+        opened.ended_at
+    );
+    assert_eq!(
+        opened.seconds,
+        90 * 60 + (opened.ended_at - at(14, 0)).num_seconds(),
+        "the morning plus the open stretch, the gap between them left out"
+    );
+    assert!(
+        opened
+            .candidates
+            .iter()
+            .any(|c| c.id == format!("activity:{}", line.id)),
+        "the candidates cover the open stretch: {:?}",
+        opened.candidates
+    );
+
+    state.scheduler.shutdown().await;
+}
+
+/// The open stretch belongs to **the ticket and the day it started on**, as
+/// the block a stop would write does: a timer on another ticket adds nothing,
+/// a timer that started the day before adds nothing to this day, and a
+/// running timer with no closed block behind it is a draft on its own.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_running_timer_counts_only_on_its_own_ticket_and_day() {
+    let (state, _wrote) = app("worklog_ipc_running_elsewhere").await;
+    block(&state.pool, (9, 0), (10, 0)).await;
+
+    running(&state.pool, "jira:PAY-104", at(11, 0)).await;
+    let other = draft(&state).await.expect("the morning is still there");
+    assert_eq!(other.running_since, None, "the clock is on another ticket");
+    assert_eq!((other.seconds, other.ended_at), (3_600, at(10, 0)));
+    sqlx::query("delete from knobas.timer")
+        .execute(&state.pool)
+        .await
+        .expect("the timer row goes");
+
+    running(&state.pool, TICKET, at(9, 0) - chrono::Duration::days(1)).await;
+    let yesterday = draft(&state).await.expect("the morning is still there");
+    assert_eq!(
+        (yesterday.running_since, yesterday.seconds),
+        (None, 3_600),
+        "a stretch that started the day before is that day's"
+    );
+    let before = draft_on(&state, day().pred_opt().expect("a day before"))
+        .await
+        .expect("the day it started on drafts the open stretch alone");
+    assert_eq!(before.block_ids, Vec::<i64>::new());
+    assert_eq!(
+        before.running_since,
+        Some(at(9, 0) - chrono::Duration::days(1))
+    );
+
+    state.scheduler.shutdown().await;
+}
+
 /// **The draft closes on the queue's answer, not on Jira's** (#775).
 ///
 /// `log_in_background` -- what the `log_work` command calls -- answers with

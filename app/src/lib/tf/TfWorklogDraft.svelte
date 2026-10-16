@@ -12,10 +12,11 @@
   **Which buttons depends on what opened it.** After a stop: *Stop, log
   later*, *Keep running*, *Discard* and *Log*. Without one (the ad-hoc
   dialog's *Log to a ticket…*): *Discard* and *Log*, with nothing about a
-  clock. What each does to the clock is
-  `drafting.svelte.ts`'s; this answers with an outcome. `Esc` and the backdrop
-  are the quiet answer: a stop's draft leaves the clock stopped (*Stop, log
-  later*), any other is discarded.
+  clock. A stop's draft opens over the running clock (#896); what each button
+  does to it is `drafting.svelte.ts`'s, and this answers with an outcome,
+  except that *Log* awaits `onbeforelog` (the clock stopping) before it sends.
+  `Esc` and the backdrop are the quiet answer: a stop's draft stops the clock
+  (*Stop, log later*), any other is discarded.
 
   ADR-0012's sentence is here as it is in the rooms UI's draft, because this
   is where a person reaches for the one write whose duplicate costs money.
@@ -48,14 +49,23 @@
     draft,
     stopped,
     onoutcome,
+    onbeforelog = () => Promise.resolve(),
     onlogged,
     layers = sharedLayers,
     ports = { logWork: realLogWork, dayBlocks: realDayBlocks, listSources: realListSources },
   }: {
     draft: Draft;
-    /** Whether a stop opened it, which decides the buttons. */
+    /**
+     * Whether a stop opened it, which decides the buttons. The clock still
+     * runs under it until the answer stops it (#896).
+     */
     stopped: boolean;
     onoutcome: (outcome: DraftOutcome) => void;
+    /**
+     * *Log*'s first step, awaited before `log_work`: the shell stops the clock
+     * under the draft, so its stretch is a block the log can cover (#896).
+     */
+    onbeforelog?: () => Promise<void>;
     /** The copy that now exists; the toast is the shell's. */
     onlogged: (worklog: Worklog) => void;
     layers?: Layers;
@@ -81,15 +91,20 @@
   const namespace = (id: string) => id.slice(0, id.indexOf(":"));
   const sourceName = (id: string) => names[namespace(id)] ?? namespace(id);
 
-  /** `"from 2 blocks today: 09:40 to 11:50, and 13:58 to 14:32"`. */
+  /**
+   * `"from 2 blocks today: 09:40 to 11:50, and 13:58 to now"`: a running
+   * clock's stretch is one of the blocks, and it runs to now (#896).
+   */
   const intervals = $derived.by(() => {
-    const count = draft.block_ids.length;
+    const count = draft.block_ids.length + (draft.running_since === null ? 0 : 1);
     const when = draft.day === dayKey(new Date()) ? "today" : `on ${dayLabel(draft.day)}`;
     const head = `from ${count} ${count === 1 ? "block" : "blocks"} ${when}`;
-    if (blocks === null || blocks.length === 0) return head;
+    if (blocks === null) return head;
     const spans = blocks.map(
       ({ block }) => `${clockReading(block.started_at, draft.day)} to ${clockReading(block.ended_at, draft.day)}`,
     );
+    if (draft.running_since !== null) spans.push(`${clockReading(draft.running_since, draft.day)} to now`);
+    if (spans.length === 0) return head;
     const list = spans.length === 1 ? spans[0] : `${spans.slice(0, -1).join(", ")}, and ${spans.at(-1)}`;
     return `${head}: ${list}`;
   });
@@ -112,8 +127,9 @@
     if (sending) return;
     sending = true;
     failed = null;
-    void ports
-      .logWork(draft.entity_id, { day: draft.day, offsetMinutes: offsetMinutes() }, form.work)
+    // The clock first: `log_work` covers only closed blocks.
+    void onbeforelog()
+      .then(() => ports.logWork(draft.entity_id, { day: draft.day, offsetMinutes: offsetMinutes() }, form.work))
       .then(
         (worklog) => {
           // Outside the rejection handler on purpose: the worklog exists now,

@@ -2260,10 +2260,11 @@ test("with the setting unset the rooms UI draws, and no new shell", async () => 
 
 /**
  * **A stop in the new shell opens the new shell's draft** (#826): inside `.tf`,
- * so it reads the new tokens, and with the stop's buttons. *Keep running* puts
- * the clock back on the ticket.
+ * so it reads the new tokens, and with the stop's buttons. The draft opens
+ * over the running clock (#896), so the chip still reads it running behind
+ * the dialog, and *Keep running* closes it with nothing stopped or started.
  */
-test("under the new shell a stop opens the ticket-first draft, and Keep running restarts the clock", async () => {
+test("under the new shell a stop opens the ticket-first draft over the running clock, and Keep running leaves it alone", async () => {
   dbReady = true;
   const stored = new Map([["knobas.shell", "tickets"]]);
   Object.defineProperty(window, "localStorage", {
@@ -2288,7 +2289,8 @@ test("under the new shell a stop opens the ticket-first draft, and Keep running 
     started_at: "2026-09-03T09:00:00Z",
     ended_at: "2026-09-03T10:30:00Z",
     seconds: 90 * 60,
-    block_ids: [10],
+    block_ids: [],
+    running_since: "2026-09-03T09:00:00Z",
     candidates: [],
     comment: "",
   };
@@ -2298,13 +2300,16 @@ test("under the new shell a stop opens the ticket-first draft, and Keep running 
     pressTimerKey();
     await until(() => target.querySelector(".tf .tf-dialog") !== null, "the stop never opened the new draft");
     expect(target.querySelector(".tf .tf-dialog h2")?.textContent).toBe("Log time to PAY-231");
+    expect(timerStops, "the clock stopped before the reader answered").toBe(0);
+    expect(target.querySelector(".tf-timer:not(.tf-off)"), "the chip read No timer behind the draft").not.toBeNull();
     const keep = [...target.querySelectorAll<HTMLButtonElement>(".tf-dialog button")].find(
       (button) => button.textContent?.trim() === "Keep running",
     );
     keep!.click();
-    await until(() => timerStarts.length > 0, "Keep running never started the clock again");
-    expect(timerStarts).toEqual([ticket]);
-    expect(target.querySelector(".tf-dialog")).toBeNull();
+    await until(() => target.querySelector(".tf-dialog") === null, "Keep running never closed the draft");
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect([timerStops, timerStarts.length], "Keep running touched the clock").toEqual([0, 0]);
+    expect(target.querySelector(".tf-timer:not(.tf-off)")).not.toBeNull();
   } finally {
     Object.defineProperty(window, "localStorage", { configurable: true, writable: true, value: undefined });
   }
@@ -2345,6 +2350,7 @@ test("under the new shell, Log… on a day's block opens that ticket's draft for
     ended_at: "2026-09-03T08:30:00Z",
     seconds: 90 * 60,
     block_ids: [10],
+    running_since: null,
     candidates: [],
     comment: "",
   };

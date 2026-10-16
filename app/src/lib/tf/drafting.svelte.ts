@@ -1,29 +1,39 @@
 /**
  * What a stop opens in the ticket-first shell, and what the worklog draft's
- * buttons do to the clock (#826, R-13.1 to R-13.3).
+ * buttons do to the clock (#826, R-13.1 to R-13.3; #896).
  *
- * The draft is made of **closed** blocks (`worklog_draft` reads the day's
- * unlogged blocks), so the clock is stopped before the draft opens, as in the
- * rooms UI. The buttons then say what happens next:
+ * **The draft opens over the running clock**, as prototype-6 draws it:
+ * `worklog_draft` counts the running timer's stretch up to now (#896), so a
+ * stop on a ticket asks for the draft first and leaves the clock alone. The
+ * buttons then say what happens to it:
  *
- * - *Log <time> to <key>* logs it (through the write queue, in the dialog);
- * - *Stop, log later* leaves the clock stopped and the time in the day;
- * - *Keep running* starts the clock again on the ticket the stop took it off,
- *   so the next stop's draft covers both stretches (the draft concatenates the
- *   day's blocks);
- * - *Discard* closes the draft with nothing written and the clock stopped:
- *   after a stop the time stays in the day, unlogged, as with *Stop, log
- *   later* but without its toast.
+ * - *Log <time> to <key>* stops the clock first ({@link DraftFlow.stopClock}),
+ *   so the stretch is a block before `log_work` re-derives the day's blocks;
+ * - *Stop, log later* stops the clock and leaves the time in the day;
+ * - *Keep running* closes the draft and touches nothing: no time is lost;
+ * - *Discard* stops the clock and writes nothing: the stop the reader pressed
+ *   still happens, and the time stays in the day, unlogged, as with *Stop,
+ *   log later* but without its toast.
+ *
+ * A stop on something with no draft (a label, a page, a ticket whose source
+ * takes no worklogs) stops the clock at once and asks `ad_hoc_block` what the
+ * closed block calls for, as the rooms UI's `offerOn` does.
  *
  * **A switch waits for the answer** (R-13.2): starting on another ticket while
- * one runs stops the running one and opens its draft, and the new timer starts
- * only after *Log* or *Stop, log later*. *Keep running* keeps the old ticket
- * and drops the new start, saying so. A stop with nothing to draft starts the
- * new timer at once, so a switch never needs a dialog to finish.
+ * one runs opens the running one's draft, and the new timer starts only after
+ * *Log*, *Stop, log later* or *Discard* have stopped the old one. *Keep
+ * running* keeps the old ticket and drops the new start, saying so. A stop
+ * with nothing to draft starts the new timer at once, so a switch never needs
+ * a dialog to finish.
  *
- * **One draft at a time.** While a draft is open or being read the clock is
- * stopped, and a second start would run under the dialog and collide with
- * *Keep running*; the flow refuses it with a toast instead.
+ * **A draft no stop opened can count the running stretch too**: the Day tab's
+ * *Log…* on the ticket being timed, that day. Its *Log* stops the clock so
+ * `log_work` covers the stretch it counted, and starts it again on the same
+ * ticket once the draft is answered.
+ *
+ * **One draft at a time.** While a draft is open, being read, or its answer is
+ * stopping the clock, a second start or stop would collide with it; the flow
+ * refuses it with a toast instead.
  */
 import type { AdHocBlock, Block, Draft, ReaderDay, TimerTarget } from "../ipc/time";
 import type { Timer } from "../shell/timer.svelte";
@@ -43,8 +53,11 @@ export interface WaitingStart {
 /** The draft on screen, and what opened it. */
 export interface Drafting {
   draft: Draft;
-  /** The target a stop took the clock off, or `null` when no stop opened it. */
-  stopped: TimerTarget | null;
+  /**
+   * The target the clock runs on under the draft, when a stop opened it;
+   * `null` when no stop did (the ad-hoc dialog's *Log to a ticket…*).
+   */
+  running: TimerTarget | null;
   after: WaitingStart | null;
 }
 
@@ -62,16 +75,18 @@ export interface DraftFlowPorts {
 
 export interface DraftFlow {
   readonly open: Drafting | null;
-  /** A draft is open or being read; a start now would run under it. */
+  /** A draft is open, being read, or its answer is stopping the clock. */
   readonly busy: boolean;
-  /** Say why a start was refused while {@link busy}. */
+  /** Say why a start or stop was refused while {@link busy}. */
   refuse(): void;
-  /** A stop happened (`⌘T`, the chip): offer what its block calls for. */
-  stopped(closed: Block | null): void;
+  /** Stop pressed (`⌘T`, the chip) with a timer running. */
+  stop(): void;
   /** Start on `target`, through the running timer's draft when there is one. */
   switchTo(target: TimerTarget, title: string): Promise<void>;
   /** Show a draft no stop opened: the ad-hoc dialog's *Log to a ticket…*. */
   show(draft: Draft): void;
+  /** *Log*'s first step: stop the clock under the open draft, if it runs. */
+  stopClock(): Promise<void>;
   /** The reader's answer; closes the draft. */
   settle(outcome: DraftOutcome): void;
 }
@@ -82,10 +97,22 @@ function same(a: TimerTarget, b: TimerTarget): boolean {
     : b.kind === "label" && a.label === b.label;
 }
 
+function dayOf(at: string): ReaderDay {
+  const when = new Date(at);
+  return { day: localDay(when), offsetMinutes: offsetMinutes(when) };
+}
+
 export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   let open = $state.raw<Drafting | null>(null);
-  /** Stops whose draft is still being read. */
-  let reading = $state(0);
+  /** Reads and stops still in flight for a draft. */
+  let inFlight = $state(0);
+  /** Whether *Log* already stopped the clock under the open draft. */
+  let halted = false;
+  /**
+   * What *Log* stopped under a draft no stop opened, to be started again once
+   * the draft is answered: the reader never asked that clock to stop.
+   */
+  let resume: TimerTarget | null = null;
 
   const timing = (title: string) => ports.push({ text: `Timing ${title}.` });
 
@@ -97,32 +124,49 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       .catch(ports.complain);
   }
 
-  /**
-   * Ask the backend what the closed block calls for, as the rooms UI's
-   * `offerOn` does: `ad_hoc_block` first, whose `null` means *on a ticket*,
-   * then `worklog_draft`. Whatever happens, a waiting start is not lost.
-   */
-  function offer(closed: Block | null, after: WaitingStart | null) {
-    if (closed === null) return startWaiting(after);
-    const day = { day: localDay(new Date(closed.started_at)), offsetMinutes: offsetMinutes() };
-    reading += 1;
-    void ports
-      .adHocBlock(closed.id, day)
-      .then(async (adHoc) => {
-        if (adHoc) {
-          ports.onadhoc(closed, adHoc);
-          return startWaiting(after);
-        }
-        if (closed.target.kind !== "entity") return startWaiting(after);
-        const draft = await ports.worklogDraft(closed.target.entity_id, day);
-        if (draft === null) return startWaiting(after);
-        open = { draft, stopped: closed.target, after };
-      })
-      .catch((error: unknown) => {
+  /** What a closed block with no draft calls for: `ad_hoc_block`'s dialog, or nothing. */
+  async function offerAdHoc(closed: Block | null, after: WaitingStart | null) {
+    if (closed !== null) {
+      try {
+        const adHoc = await ports.adHocBlock(closed.id, dayOf(closed.started_at));
+        if (adHoc) ports.onadhoc(closed, adHoc);
+      } catch (error) {
         ports.complain(error);
-        startWaiting(after);
-      })
-      .finally(() => (reading -= 1));
+      }
+    }
+    startWaiting(after);
+  }
+
+  /**
+   * The running timer's draft, opened over the running clock; or, with none
+   * to open, the stop and the ad-hoc check. Whatever happens, a waiting start
+   * is not lost.
+   */
+  async function through(after: WaitingStart | null) {
+    const running = ports.timer.current;
+    if (running === null) return startWaiting(after);
+    inFlight += 1;
+    try {
+      if (running.target.kind === "entity") {
+        let draft: Draft | null = null;
+        try {
+          draft = await ports.worklogDraft(running.target.entity_id, dayOf(running.started_at));
+        } catch (error) {
+          // The stop still happens; the time stays in the day, unlogged.
+          ports.complain(error);
+        }
+        if (draft !== null) {
+          halted = false;
+          open = { draft, running: running.target, after };
+          return;
+        }
+      }
+      await offerAdHoc(await ports.timer.stop(), after);
+    } catch (error) {
+      ports.complain(error);
+    } finally {
+      inFlight -= 1;
+    }
   }
 
   return {
@@ -130,13 +174,14 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
       return open;
     },
     get busy() {
-      return open !== null || reading > 0;
+      return open !== null || inFlight > 0;
     },
     refuse() {
       ports.push({ text: "Answer the worklog draft first." });
     },
-    stopped(closed) {
-      offer(closed, null);
+    stop() {
+      if (this.busy) return this.refuse();
+      void through(null);
     },
     async switchTo(target, title) {
       if (this.busy) return this.refuse();
@@ -151,31 +196,66 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
         return;
       }
       if (same(running.target, target)) return timing(title);
-      try {
-        offer(await ports.timer.stop(), { target, title });
-      } catch (error) {
-        ports.complain(error);
-      }
+      await through({ target, title });
     },
     show(draft) {
-      open = { draft, stopped: null, after: null };
+      halted = false;
+      resume = null;
+      open = { draft, running: null, after: null };
+    },
+    async stopClock() {
+      if (open === null || halted) return;
+      if (open.running === null) {
+        // A draft no stop opened (the Day tab's *Log…*) still counts the
+        // running stretch when the clock is on its ticket and day. `log_work`
+        // logs the draft's seconds but covers only closed blocks, so the
+        // stretch must be a block first, or its time is logged now and offered
+        // again at the next stop. The clock starts again after the answer.
+        const current = ports.timer.current;
+        const on = open.draft.entity_id;
+        if (open.draft.running_since === null || current?.target.kind !== "entity" || current.target.entity_id !== on) {
+          return;
+        }
+        await ports.timer.stop();
+        resume = current.target;
+        halted = true;
+        return;
+      }
+      await ports.timer.stop();
+      halted = true;
     },
     settle(outcome) {
       const was = open;
+      const stopped = halted;
+      const restart = resume;
       open = null;
+      halted = false;
+      resume = null;
       if (was === null) return;
+      if (restart !== null) {
+        // Stopped only so the log could cover the stretch: put it back.
+        void ports.timer.start(restart).catch(ports.complain);
+        return;
+      }
       if (outcome === "keep") {
-        if (was.stopped !== null) void ports.timer.start(was.stopped).catch(ports.complain);
+        // A *Log* that failed after stopping the clock: put it back.
+        if (was.running !== null && stopped) void ports.timer.start(was.running).catch(ports.complain);
         if (was.after !== null) ports.push({ text: `Not started on ${was.after.title}: the timer kept running.` });
         return;
       }
-      if (outcome === "later") {
-        ports.push({
-          text: "Timer stopped. The time is kept in today's blocks, unlogged.",
-          action: { label: "Open the day", run: ports.onday },
-        });
-      }
-      startWaiting(was.after);
+      inFlight += 1;
+      void (was.running === null || stopped ? Promise.resolve() : ports.timer.stop())
+        .then(() => {
+          if (outcome === "later") {
+            ports.push({
+              text: "Timer stopped. The time is kept in today's blocks, unlogged.",
+              action: { label: "Open the day", run: ports.onday },
+            });
+          }
+          startWaiting(was.after);
+        })
+        .catch(ports.complain)
+        .finally(() => (inFlight -= 1));
     },
   };
 }

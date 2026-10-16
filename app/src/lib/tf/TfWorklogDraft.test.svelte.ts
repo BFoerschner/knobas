@@ -28,6 +28,7 @@ const DRAFT: Draft = {
   ended_at: "2026-09-03T12:32:00Z",
   seconds: 164 * 60,
   block_ids: [7, 8],
+  running_since: null,
   candidates: [
     candidate("item:gitea:c1", "mirror", "2026-09-03T08:02:00Z", "- commit a41f2c PAY-231 backoff jitter", "gitea:a41f2c"),
     candidate("write:97", "write", "2026-09-03T08:20:00Z", "- replied to Jonas on PR #142"),
@@ -68,20 +69,35 @@ const WORKLOG: Worklog = {
 let target: HTMLDivElement;
 let app: Record<string, unknown> | undefined;
 
-function render(opts: { stopped?: boolean; logWork?: () => Promise<Worklog>; layers?: Layers } = {}) {
+interface RenderOpts {
+  draft?: Draft;
+  stopped?: boolean;
+  logWork?: () => Promise<Worklog>;
+  onbeforelog?: () => Promise<void>;
+  layers?: Layers;
+}
+
+function render(opts: RenderOpts = {}) {
   const sent: ({ entityId: string } & ReaderDay & LoggedWork)[] = [];
   const outcomes: string[] = [];
+  /** `stop` and `log`, in the order the dialog asked for them. */
+  const order: string[] = [];
   const onlogged = vi.fn();
   app = mount(TfWorklogDraft, {
     target,
     props: {
-      draft: DRAFT,
+      draft: opts.draft ?? DRAFT,
       stopped: opts.stopped ?? true,
       layers: opts.layers ?? createLayers(),
       onoutcome: (outcome: string) => void outcomes.push(outcome),
+      onbeforelog: () => {
+        order.push("stop");
+        return (opts.onbeforelog ?? (() => Promise.resolve()))();
+      },
       onlogged,
       ports: {
         logWork: (entityId: string, when: ReaderDay, work: LoggedWork) => {
+          order.push("log");
           sent.push({ entityId, ...when, ...work });
           return (opts.logWork ?? (() => Promise.resolve(WORKLOG)))();
         },
@@ -95,7 +111,7 @@ function render(opts: { stopped?: boolean; logWork?: () => Promise<Worklog>; lay
     },
   });
   flushSync();
-  return { sent, outcomes, onlogged };
+  return { sent, outcomes, order, onlogged };
 }
 
 function button(name: string): HTMLButtonElement | undefined {
@@ -191,6 +207,35 @@ test("Log sends the work for the reader's day and answers logged", async () => {
   expect(onlogged).toHaveBeenCalledWith(WORKLOG);
 });
 
+test("Log stops the clock before it sends, so the running stretch is a block log_work can find", async () => {
+  const { order, outcomes } = render();
+  button("Log 2h 44m to PAY-231")!.click();
+  await vi.waitFor(() => expect(outcomes).toEqual(["logged"]));
+  expect(order).toEqual(["stop", "log"]);
+});
+
+test("a clock that will not stop is said, and nothing is sent", async () => {
+  const { order, outcomes } = render({ onbeforelog: () => Promise.reject(new Error("no timer to stop")) });
+  button("Log 2h 44m to PAY-231")!.click();
+  await vi.waitFor(() => expect(target.textContent).toContain("no timer to stop"));
+  expect(order).toEqual(["stop"]);
+  expect(outcomes).toEqual([]);
+  expect(button("Keep running")?.disabled).toBe(false);
+});
+
+test("over a running clock the open stretch is one of the blocks, and it runs to now", async () => {
+  // Block 7 (09:40 to 11:50 Berlin) closed, and the clock on since 13:58.
+  const draft: Draft = {
+    ...DRAFT,
+    ended_at: "2026-09-03T12:32:00Z",
+    block_ids: [7],
+    running_since: "2026-09-03T11:58:00Z",
+  };
+  render({ draft });
+  await vi.waitFor(() => expect(target.textContent).toContain("from 2 blocks on"));
+  expect(text()).toContain(": 09:40 to 11:50, and 13:58 to now");
+});
+
 test("a refused log is said, and the draft stays open", async () => {
   const { outcomes } = render({ logWork: () => Promise.reject(new Error("already logged")) });
   button("Log 2h 44m to PAY-231")!.click();
@@ -214,9 +259,12 @@ test("Esc closes it as a layer: a stop's draft leaves the clock stopped, any oth
 test("leaving while the log is in flight does nothing: the log answers for itself", async () => {
   let resolve: (worklog: Worklog) => void = () => {};
   const layers = createLayers();
-  const { outcomes } = render({ layers, logWork: () => new Promise((done) => (resolve = done)) });
+  const { outcomes, order } = render({ layers, logWork: () => new Promise((done) => (resolve = done)) });
   button("Log 2h 44m to PAY-231")!.click();
   flushSync();
+  layers.open[0]!.close();
+  expect(outcomes, "Esc while the clock was stopping said the time was unlogged").toEqual([]);
+  await vi.waitFor(() => expect(order).toEqual(["stop", "log"]));
   layers.open[0]!.close();
   expect(outcomes, "Esc during a send said the time was unlogged").toEqual([]);
   expect(button("Stop, log later")?.disabled).toBe(true);

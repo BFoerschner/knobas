@@ -522,17 +522,18 @@
    * reader can act on.
    */
   function toggleTimer() {
-    // The clock is stopped under an open draft; a start now would collide
-    // with *Keep running* (#826).
-    if (ticketFirst && drafts.busy) return drafts.refuse();
+    if (ticketFirst) {
+      // One draft at a time (#826): a press now would collide with its answer.
+      if (drafts.busy) return drafts.refuse();
+      // The draft opens over the running clock, which stops on its answer
+      // (#896).
+      if (timer.current) return drafts.stop();
+    }
     void timer
       .press()
       .then((pressed) => {
         if (pressed.did === "pick") pickerOpen = true;
-        if (pressed.did === "stopped") {
-          if (ticketFirst) drafts.stopped(pressed.closed);
-          else offerOn(pressed.closed);
-        }
+        if (pressed.did === "stopped") offerOn(pressed.closed);
       })
       .catch(complain);
   }
@@ -966,7 +967,8 @@
           {#key drafts.open}
             <TfWorklogDraft
               draft={drafts.open.draft}
-              stopped={drafts.open.stopped !== null}
+              stopped={drafts.open.running !== null}
+              onbeforelog={() => drafts.stopClock()}
               onoutcome={(outcome) => drafts.settle(outcome)}
               onlogged={onWorklogged}
             />

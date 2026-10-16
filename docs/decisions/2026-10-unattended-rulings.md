@@ -3595,3 +3595,46 @@ Ruled by the merge-manager (PR #1018).
   were never analyzed. So the declared read per row stays. **Reversing:** low.
 
 - **Merge-manager (PR #1025): the key branch is redundant only where `sync.item_parent` already names the ticket.** A Jira ticket's own key is among the names it answers to as a parent, so the surviving mutant was right for a payload that carries its key. The fixture also titled each ticket with its key. The test now has a ticket with a summary title and one whose payload names no key; the mutant fails it. **Reversing:** n/a.
+
+## #896 — the worklog draft counts the running timer: the implementer's forks
+
+This reverses #826's first two rulings, as #826 said it would ("a backend draft that counts the
+open block, then the stop moves into `settle`").
+
+- **The answer names the open stretch with `running_since`; `block_ids` stays the closed blocks.**
+  Without a field the dialog could not tell a draft over a running clock from one without, and
+  would read "from 0 blocks". Prototype-6 counts the stretch as a block and draws it "13:58 to
+  now", so the dialog does the same. A §10.8 entry records the changed shape. **Reversing:** low.
+- ***Discard* after a stop stops the clock**, with nothing written and no toast. The ticket names
+  only *Log* and *Stop, log later* as stopping the clock, against *Keep running*. Discard is "do
+  not log this", not "keep timing": the reader pressed stop, #826's ruling that the time stays in
+  the day is kept, and a switch's waiting timer cannot start until the old one stops.
+  **Reversing:** one line in `settle`.
+- **`Esc` and the backdrop still answer *Stop, log later*** on a stop's draft (#826's ruling).
+  Its reason ("the clock is already stopped") is gone, and prototype-6's backdrop is *Keep
+  running*, but the ticket does not ask for the change and the reader did press stop.
+  **Reversing:** one line in `TfWorklogDraft`'s `leave`.
+- **The logged minutes are the draft's, read at the stop press.** The seconds spent reading the
+  dialog fall into the block the *Log* stops, which the worklog then covers, but they are not added
+  to the minutes. The press is when the reader said they stopped. **Reversing:** low.
+- **A draft read that fails on a stop still stops the clock**, says why, and leaves the time in
+  the day, as the rooms UI does when its draft read fails after its stop. **Reversing:** low.
+- **A *Log* whose `log_work` fails after the clock stopped leaves the dialog open, and *Keep
+  running* then starts the clock again** on the same ticket, #826's restart, kept for this one
+  case. **Reversing:** low.
+- **The stop asks for the draft of the day the stretch started on, at that moment's offset**, the
+  day the block will belong to. **Reversing:** low.
+- **`?fake-ipc`'s `worklog_draft` counts `fake-timer`'s running stretch too**, so a stop under
+  the fixture opens the draft as the app does. **Reversing:** low.
+
+Ruled by the merge-manager (PR #1026).
+
+- **A draft no stop opened that counts the running stretch stops the clock on *Log*, then starts
+  it again on the same ticket.** The Day tab's *Log…* (#827) on the ticket being timed asks for
+  that day's draft, which now counts the stretch up to now. `log_work` logs the draft's seconds but
+  marks only closed blocks logged, so without the stop the stretch's time went to Jira now and came
+  back unlogged at the next stop: logged twice. The reader did not press stop, so the clock is
+  put back after the answer (any answer, a failed *Log* then *Discard* included). A draft whose
+  stretch is not on the running clock's ticket touches nothing. **Reversing:** low (the branch in
+  `stopClock` and the restart in `settle`); the alternative, a draft read that leaves the stretch
+  out, would need a `worklog_draft` argument and a §10.8 entry.

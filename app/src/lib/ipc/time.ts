@@ -292,8 +292,15 @@ export interface Draft {
   ended_at: string;
   /** The time about to be logged: the blocks' durations added up. */
   seconds: number;
-  /** The blocks this draft is made of, oldest first. */
+  /** The closed blocks this draft is made of, oldest first. */
   block_ids: number[];
+  /**
+   * RFC 3339, UTC — when the running timer started, if it runs on this ticket
+   * and started on this day (#896). Its stretch is counted up to the moment
+   * the draft was read: in {@link seconds}, and as {@link ended_at}. `null`
+   * when the clock is elsewhere or stopped.
+   */
+  running_since: string | null;
   candidates: Candidate[];
   /** The comment as generated from every candidate. Editable, down to empty. */
   comment: string;
