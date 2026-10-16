@@ -26,6 +26,11 @@
  * with nothing to draft starts the new timer at once, so a switch never needs
  * a dialog to finish.
  *
+ * **A draft no stop opened can count the running stretch too**: the Day tab's
+ * *Log…* on the ticket being timed, that day. Its *Log* stops the clock so
+ * `log_work` covers the stretch it counted, and starts it again on the same
+ * ticket once the draft is answered.
+ *
  * **One draft at a time.** While a draft is open, being read, or its answer is
  * stopping the clock, a second start or stop would collide with it; the flow
  * refuses it with a toast instead.
@@ -103,6 +108,11 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
   let inFlight = $state(0);
   /** Whether *Log* already stopped the clock under the open draft. */
   let halted = false;
+  /**
+   * What *Log* stopped under a draft no stop opened, to be started again once
+   * the draft is answered: the reader never asked that clock to stop.
+   */
+  let resume: TimerTarget | null = null;
 
   const timing = (title: string) => ports.push({ text: `Timing ${title}.` });
 
@@ -190,19 +200,43 @@ export function createDraftFlow(ports: DraftFlowPorts): DraftFlow {
     },
     show(draft) {
       halted = false;
+      resume = null;
       open = { draft, running: null, after: null };
     },
     async stopClock() {
-      if (open === null || open.running === null || halted) return;
+      if (open === null || halted) return;
+      if (open.running === null) {
+        // A draft no stop opened (the Day tab's *Log…*) still counts the
+        // running stretch when the clock is on its ticket and day. `log_work`
+        // logs the draft's seconds but covers only closed blocks, so the
+        // stretch must be a block first, or its time is logged now and offered
+        // again at the next stop. The clock starts again after the answer.
+        const current = ports.timer.current;
+        const on = open.draft.entity_id;
+        if (open.draft.running_since === null || current?.target.kind !== "entity" || current.target.entity_id !== on) {
+          return;
+        }
+        await ports.timer.stop();
+        resume = current.target;
+        halted = true;
+        return;
+      }
       await ports.timer.stop();
       halted = true;
     },
     settle(outcome) {
       const was = open;
       const stopped = halted;
+      const restart = resume;
       open = null;
       halted = false;
+      resume = null;
       if (was === null) return;
+      if (restart !== null) {
+        // Stopped only so the log could cover the stretch: put it back.
+        void ports.timer.start(restart).catch(ports.complain);
+        return;
+      }
       if (outcome === "keep") {
         // A *Log* that failed after stopping the clock: put it back.
         if (was.running !== null && stopped) void ports.timer.start(was.running).catch(ports.complain);

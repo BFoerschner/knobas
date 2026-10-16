@@ -3626,3 +3626,15 @@ open block, then the stop moves into `settle`").
   day the block will belong to. **Reversing:** low.
 - **`?fake-ipc`'s `worklog_draft` counts `fake-timer`'s running stretch too**, so a stop under
   the fixture opens the draft as the app does. **Reversing:** low.
+
+Ruled by the merge-manager (PR #1026).
+
+- **A draft no stop opened that counts the running stretch stops the clock on *Log*, then starts
+  it again on the same ticket.** The Day tab's *Log…* (#827) on the ticket being timed asks for
+  that day's draft, which now counts the stretch up to now. `log_work` logs the draft's seconds but
+  marks only closed blocks logged, so without the stop the stretch's time went to Jira now and came
+  back unlogged at the next stop: logged twice. The reader did not press stop, so the clock is
+  put back after the answer (any answer, a failed *Log* then *Discard* included). A draft whose
+  stretch is not on the running clock's ticket touches nothing. **Reversing:** low (the branch in
+  `stopClock` and the restart in `settle`); the alternative, a draft read that leaves the stretch
+  out, would need a `worklog_draft` argument and a §10.8 entry.

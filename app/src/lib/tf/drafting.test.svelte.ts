@@ -242,12 +242,36 @@ test("with nothing running, a start is a start", async () => {
 
 test("a draft shown without a stop is not marked as one, and Discard closes it with nothing stopped or started", async () => {
   const { flow, log } = rig();
-  flow.show(DRAFT);
+  flow.show({ ...DRAFT, running_since: null });
   expect(flow.open?.running).toBeNull();
   await flow.stopClock();
   flow.settle("discard");
   await settle();
   expect(flow.open).toBeNull();
+  expect(log).toEqual([]);
+});
+
+test("Log on a draft shown without a stop that counts the running stretch stops the clock first, then starts it again", async () => {
+  // The Day tab's *Log…* on the ticket being timed: `log_work` covers only
+  // closed blocks, so a stretch the draft counted but left running would be
+  // logged now and offered again at the next stop.
+  const { flow, log, running } = rig();
+  flow.show(DRAFT);
+  expect(flow.open?.running, "no stop opened it").toBeNull();
+  await flow.stopClock();
+  expect(log).toEqual(["stop"]);
+  flow.settle("logged");
+  await settle();
+  expect(log).toEqual(["stop", "start jira:PAY-231"]);
+  expect(running()?.target).toEqual(PAY);
+});
+
+test("a shown draft whose stretch is on another ticket's clock leaves that clock alone", async () => {
+  const { flow, log } = rig({ running: OPS });
+  flow.show(DRAFT);
+  await flow.stopClock();
+  flow.settle("logged");
+  await settle();
   expect(log).toEqual([]);
 });
 
