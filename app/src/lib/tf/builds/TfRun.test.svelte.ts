@@ -496,3 +496,18 @@ test("a click on a step opens the Log tab at that step, open and scrolled to", a
   // The failed step opens by itself; the first stays shut.
   expect(target.querySelector<HTMLDetailsElement>('details[data-s="0"]')!.open).toBe(false);
 });
+
+test("a run in flight is read again when the Log tab opens, and the bar follows the newer read", async () => {
+  const answers: RunLog[] = [
+    { ...STEPPED, steps: STEPPED.steps.slice(0, 2).map((s) => ({ ...s, tone: null })) },
+    { ...STEPPED, steps: STEPPED.steps.map((s) => ({ ...s, tone: null })) },
+  ];
+  let reads = 0;
+  const drawn = draw("teamcity:build:1188", undefined, { log: () => Promise.resolve(answers[Math.min(reads++, 1)]!) });
+  await settle();
+  expect(segments()).toHaveLength(2);
+  drawn.go("log");
+  await settle();
+  expect(reads).toBe(2);
+  expect(segments()).toHaveLength(3);
+});
