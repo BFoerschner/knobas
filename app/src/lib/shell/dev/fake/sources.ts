@@ -26,6 +26,12 @@ export const FIXTURE_SOURCES = [
   fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
+    // What its page edits (#904, #1021): prototype-6's four projects, and a
+    // Sprint field id the sync recorded beside an Epic Link id nobody set.
+    config: { username: "mara.oyelaran", projects: ["PAY", "OPS", "CUS", "TRK"], sprint_field: "customfield_10107" } as Record<
+      string,
+      unknown
+    >,
     health: {
       source_id: "jira",
       state: "ok",

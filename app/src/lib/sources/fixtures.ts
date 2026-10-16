@@ -47,6 +47,8 @@
  * `epic_link_field` was on this list until #297 and is now transcribed: it is
  * the one property *Test connection* fills from the report's `discovered` map,
  * so with it absent the fill had no shipped adapter to run against.
+ * `sprint_field` (#889) is transcribed for #1021: a Jira source's page shows
+ * the two field ids the sync records, and the page is drawn from this schema.
  *
  * - Jira: `page_size`, `rate_per_sec`, `rate_burst`, `connect_timeout_secs`,
  *   `request_timeout_secs`.
@@ -102,6 +104,13 @@ export const JIRA_SCHEMA = {
       title: "Epic Link field id",
       description:
         "Where a classic project keeps epic membership. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent.",
+    },
+    sprint_field: {
+      type: ["string", "null"],
+      default: null,
+      title: "Sprint field id",
+      description:
+        "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira. An id you type is kept. Leave it empty and no ticket is in a sprint as far as knobas knows.",
     },
   },
 } as const;

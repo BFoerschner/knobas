@@ -442,6 +442,14 @@ a.tf-r:hover { background: var(--sheet-2); }
 }
 .tf-stg-alert .tf-btn { margin-left: auto; }
 .tf-stg-note { font-size: var(--t-sm); color: var(--ink-2); margin-top: 10px; }
+/* the generated config form (#903, #904): TfSchemaForm, in rows on a source's page and a grid in a dialog */
+.tf-sf-c { flex-direction: column; align-items: stretch; gap: 3px; min-width: 0; display: flex; }
+.tf-sf-row .tf-stg-l { align-self: start; padding-top: 5px; }
+.tf-sf-grid { align-items: start; }
+.tf-sf-grid > label { padding-top: 5px; }
+.tf-sf-area { resize: vertical; min-height: 54px; line-height: 1.45; font: inherit; }
+.tf .tf-sf-mono { font-family: var(--mono); font-size: var(--t-sm); }
+.tf-sf-help { font-size: var(--t-xs); color: var(--ink-2); line-height: 1.4; }
 /* the other sections (#831): prototype-6's inline widths, .stg-checks and .stg-keys */
 .tf-stg-in.tf-stg-n70 { width: 70px; }
 .tf-stg-in.tf-stg-n90 { width: 90px; }

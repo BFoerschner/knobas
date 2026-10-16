@@ -418,6 +418,7 @@ const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
+const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
 const Flap = (await import("./Flap.svelte")).default;
@@ -583,6 +584,7 @@ function settingsPorts() {
     testSource: () => new Promise<never>(() => {}),
     syncNow: () => deferred(1),
     syncAll: () => deferred([]),
+    addSource: () => new Promise<never>(() => {}),
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
   };
 }
@@ -1638,6 +1640,17 @@ const CASES: Case[] = [
     name: "TfSourcePage",
     source: "lib/tf/settings/TfSourcePage.svelte",
     open: (target) => ({ app: mount(TfSourcePage, { target, props: sourcePageProps() }) }),
+  },
+  {
+    /** *Add a source* (#903): its adapters read lands after the unmount. */
+    name: "TfAddSource",
+    source: "lib/tf/settings/TfAddSource.svelte",
+    open: (target) => ({
+      app: mount(TfAddSource, {
+        target,
+        props: { ports: settingsPorts(), layers: createLayers(), onclose: () => {}, onsaved: () => {} },
+      }),
+    }),
   },
   // The other Settings sections (#831): reads only, each landing late.
   sectionCase("TfTimeSection", "time"),

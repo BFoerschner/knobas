@@ -59,6 +59,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   (`knobas_source::docs::indexed`); the shell never reads the payload for it. (#860, #861)
 - A Docs write in the source's markup (a section edit, a new page's body) is the adapter's
   (`DocWrites` in the registry); the shell sends plain text. (#862)
+- A form generated from an adapter's `config_schema` is `tf/settings/TfSchemaForm.svelte` (settings rows or a dialog grid) over `sources/schema-form`. A source's config is saved as the stored config read again at the press with only the reader's changes over it (`tf/settings/source-config.ts`), never a copy read when the page opened: the sync writes into it too. (#903, #904, #1021, PR #1033)
 - Anything exported as Markdown goes through the one converter, `knobas_core::markdown` (`DocBlock` to text); a link to another page is `page_file_name(title)`, the name the exporter writes. (#832)
 
 ## Copy and display

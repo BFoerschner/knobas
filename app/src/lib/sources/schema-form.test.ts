@@ -148,6 +148,7 @@ describe("defaultValues", () => {
       jql_filter: "",
       username: "",
       epic_link_field: "",
+      sprint_field: "",
     });
     expect(defaultValues(schemaFields(TEAMCITY_SCHEMA))).toEqual({
       project_ids: [],

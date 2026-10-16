@@ -8,6 +8,7 @@
  */
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import { ago } from "../../shell/time";
+import { IDENTITY_FIELD } from "../../sources/new-source";
 
 /** A section of Settings, in prototype-6's order (`STG`). */
 export type SettingsSection =
@@ -223,10 +224,10 @@ export function runRow(run: SyncRunRow, now: Date = new Date()): RunRow {
 
 /**
  * The config property a source keeps its user in, by the convention every
- * adapter follows (`AddSource.svelte`'s `IDENTITY_FIELD`): `username`. Keyed
- * on the name so this page holds no table of adapters.
+ * adapter follows (`sources/new-source.ts`): `username`. Keyed on the name so
+ * this page holds no table of adapters.
  */
-export const IDENTITY_FIELD = "username";
+export { IDENTITY_FIELD };
 
 /** Whether an adapter's config schema declares the identity field. */
 export function declaresUser(schema: unknown): boolean {
