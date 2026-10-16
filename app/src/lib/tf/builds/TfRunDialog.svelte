@@ -37,6 +37,7 @@
     valuesFrom,
     type ExtraRow,
     type RunRequest,
+    type StartValue,
   } from "./run-dialog";
 
   let {
@@ -72,7 +73,7 @@
 
   let presets = $state<RunPreset[]>([]);
   let repoBranches = $state<string[]>([]);
-  let runValues = $state<{ name: string; value: string; secret?: boolean }[]>([]);
+  let runValues = $state<StartValue[]>([]);
 
   onMount(() => {
     void ports.presets(pipeline.entity_id).then((rows) => (presets = rows), () => {});
@@ -111,7 +112,7 @@
       if (from?.branch) branch = from.branch;
       return;
     }
-    const preset = presets[Number(choice)];
+    const preset = presets.find((p) => `preset:${p.name}` === choice);
     if (preset === undefined) return;
     values = valuesFrom(fields, preset.parameters);
     if (preset.branch !== null) branch = preset.branch;
@@ -171,7 +172,6 @@
     onrun({
       payload,
       summary,
-      branch: shownBranch,
       preset:
         save && presetName.trim() !== ""
           ? { pipeline_id: pipeline.entity_id, name: presetName.trim(), branch: sent, parameters: overrides, ...options }
@@ -187,12 +187,12 @@
       <select id={`tf-run-start-${uid}`} value={start} onchange={(event) => pick(event.currentTarget.value)}>
         <option value="">Defaults</option>
         {#if from !== null}<option value="from">{fromLabel}</option>{/if}
-        {#each presets as preset, at (preset.name)}
-          <option value={String(at)}>Preset: {preset.name}</option>
+        {#each presets as preset (preset.name)}
+          <option value={`preset:${preset.name}`}>Preset: {preset.name}</option>
         {/each}
       </select>
       <label for={`tf-run-branch-${uid}`}>Branch</label>
-      <div class="tf-combo" class:tf-open={open}>
+      <div class="tf-combo">
         <input
           id={`tf-run-branch-${uid}`}
           type="text"

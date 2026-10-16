@@ -432,7 +432,7 @@ test("Run again… starts from that run's settings; a preset fills the form; Sav
   expect(field<HTMLSelectElement>("env").value).toBe("prod-dryrun");
   expect(field<HTMLInputElement>("deploy.token").value).toBe("");
 
-  choose(start, "0");
+  choose(start, "preset:Only staging");
   expect(field<HTMLInputElement>("Branch").value).toBe("release/1.9");
   expect(field<HTMLSelectElement>("env").value).toBe("staging");
   choose(start, "");

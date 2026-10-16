@@ -167,7 +167,5 @@ export function runPayload(
 export interface RunRequest {
   payload: WriteOpPayload;
   summary: string;
-  /** The branch in words, for the toast. */
-  branch: string;
   preset: RunPreset | null;
 }
