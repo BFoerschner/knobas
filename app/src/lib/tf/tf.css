@@ -1038,6 +1038,20 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-strip i.tf-run-run { background: var(--info); }
 .tf-strip i.tf-run-q { background: var(--rule); }
 .tf-strip i.tf-run-muted { background: var(--muted); }
+/* The project tree, pins and *This job* (#849, #850): prototype-6's .pl details and .scope-note. */
+.tf-pl-top .tf-seg { align-self: flex-start; }
+.tf-pl-fold > summary {
+  list-style: none; cursor: pointer; font-size: var(--t-sm); font-weight: 600; color: var(--ink-2);
+  padding: 6px 14px; display: flex; gap: 6px; align-items: center;
+}
+.tf-pl-fold > summary::-webkit-details-marker { display: none; }
+.tf-pl-fold > summary::before { content: "▸"; font-size: var(--t-2xs); width: 10px; }
+.tf-pl-fold[open] > summary::before { content: "▾"; }
+.tf-pl-fold > summary .tf-chip { font-size: var(--t-2xs); }
+.tf-fold-in { padding-left: 14px; }
+.tf-pi-why { grid-column: 1 / span 2; font-size: var(--t-xs); color: var(--ink-2); margin-top: 2px; }
+.tf-pi[aria-current="true"] .tf-pi-why { color: inherit; }
+.tf-scope-note { font-size: var(--t-sm); color: var(--ink-2); padding: 8px 14px 0; margin: 0; }
 .tf-bmain { overflow: auto; min-width: 0; }
 .tf-runs { padding: 0 22px 18px; }
 .tf-runs .tf-run-no { width: 150px; }

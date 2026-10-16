@@ -210,3 +210,26 @@ test("builds: 59 pipelines by name, each with at most twelve runs, and pipeline_
   expect(runs.length).toBeGreaterThan(12);
   expect(() => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
 });
+
+test("builds: every pipeline carries its project path, prototype-6's three are pinned, and a pin is kept (#849)", () => {
+  const h = demoHandlers() as Calls;
+  type Row = { entity_id: string; name: string; path: string[]; pinned: boolean };
+  const list = () => h["pipelines"]!({}) as Row[];
+  const deploy = list().find((p) => p.name === "Payout_Deploy_Prod")!;
+  expect(deploy.path).toEqual(["Payments", "Payouts", "Deploy"]);
+  expect(list().filter((p) => p.pinned).map((p) => p.name)).toEqual(["Payout_Build", "Payout_Deploy_Staging", "Payout_IntegrationTests"]);
+  expect(h["set_pipeline_pinned"]!({ pipelineId: deploy.entity_id, pinned: true })).toBe(true);
+  expect(list().find((p) => p.name === "Payout_Deploy_Prod")!.pinned).toBe(true);
+  expect(h["set_pipeline_pinned"]!({ pipelineId: deploy.entity_id, pinned: false })).toBe(false);
+});
+
+test("builds: job_pipelines answers PAY-231's pipelines with their reasons, and none for a ticket with none (#850)", () => {
+  const h = demoHandlers() as Calls;
+  const rows = h["job_pipelines"]!({ entityId: "jira:PAY-231" }) as { pipeline_id: string; reasons: { kind: string }[] }[];
+  const tests = rows.find((r) => r.pipeline_id === "teamcity:buildType:Payout_IntegrationTests")!;
+  expect(tests.reasons.map((r) => r.kind)).toEqual(["branch", "pr_check"]);
+  const psp = rows.find((r) => r.pipeline_id === "teamcity:buildType:PspClient_Build")!;
+  expect(psp.reasons.map((r) => r.kind)).toEqual(["pr_check"]);
+  expect(rows.some((r) => r.pipeline_id === "teamcity:buildType:Dbt_Test")).toBe(false);
+  expect(h["job_pipelines"]!({ entityId: "jira:NOPE-1" })).toEqual([]);
+});

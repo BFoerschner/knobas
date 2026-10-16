@@ -1,5 +1,6 @@
 /**
- * `?fake-ipc`: Builds (#848): `pipelines` and `pipeline_runs`, over
+ * `?fake-ipc`: Builds (#848, #849, #850): `pipelines`, `pipeline_runs`,
+ * `set_pipeline_pinned` and `job_pipelines`, over
  * prototype-6's 59 build configurations, so the list can be compared with
  * the prototype at `#/builds`.
  *
@@ -15,7 +16,7 @@
  * `queued`), which is what the adapter declares (#666), and not the
  * prototype's *passed*: the shell draws what the source says.
  */
-import type { PipelineRow, RunRow } from "../../../ipc/entity";
+import type { JobPipeline, PipelineReason, PipelineRow, RunRow } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 
 const SOURCE = "teamcity";
@@ -78,6 +79,31 @@ const CONFIGURATIONS: Record<string, string[]> = {
     "WarehouseSync_Build",
     "YardPlanner_Build",
   ],
+};
+
+/** prototype-6's `S.pins`: pinned until the session unpins them (#849). */
+const pins = new Set(["Payout_IntegrationTests", "Payout_Build", "Payout_Deploy_Staging"].map((c) => `${SOURCE}:buildType:${c}`));
+
+/**
+ * prototype-6's `realCfg[...].job`: the configurations each job's pull
+ * requests are checked by (#850), and the job's branches, from its `code`.
+ */
+const JOBS: Record<string, { checks: string[]; pr: string; branches: string[] }> = {
+  "PAY-231": {
+    checks: [
+      "Payout_Build",
+      "Payout_IntegrationTests",
+      "Payout_Lint",
+      "Payout_Docker",
+      "Payout_Deploy_Staging",
+      "PspClient_Build",
+      "PspClient_Release",
+    ],
+    pr: "gitea:tidewater/payout-service#142",
+    branches: ["feature/PAY-231-sepa-retry", "feature/PAY-231-temp-unavailable"],
+  },
+  "PAY-228": { checks: ["Ledger_Deploy_Staging"], pr: "gitea:tidewater/ledger-api#88", branches: [] },
+  "PAY-240": { checks: ["Dashboard_Build"], pr: "gitea:tidewater/payout-service#151", branches: [] },
 };
 
 type Latest = { no: number; st: "running" | "failed" | "success" | "queued"; branch: string; at: string; dur: number | null };
@@ -183,6 +209,8 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
         source_name: SOURCE_NAME,
         name: config,
         group: path.split("/").at(-1) ?? path,
+        path: path.split("/"),
+        pinned: pins.has(`${SOURCE}:buildType:${config}`),
         web_url: null,
         recent: (runs.get(config) ?? []).slice(0, 12),
       })),
@@ -190,9 +218,33 @@ export function fakePipelines(now: Date = new Date()): PipelineRow[] {
     .sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase()));
 }
 
+/** `job_pipelines`: *your branch* first, then *PR check*, as the read orders them. */
+export function fakeJobPipelines(entityId: string, now: Date = new Date()): JobPipeline[] {
+  const job = JOBS[entityId.slice(entityId.indexOf(":") + 1)];
+  if (job === undefined) return [];
+  const runs = history(now);
+  return fakePipelines(now)
+    .map((pipeline) => {
+      const config = pipeline.name;
+      const reasons: PipelineReason[] = [];
+      const built = new Set((runs.get(config) ?? []).map((run) => run.branch));
+      for (const branch of job.branches) if (built.has(branch)) reasons.push({ kind: "branch", branch });
+      if (job.checks.includes(config)) reasons.push({ kind: "pr_check", pr: job.pr });
+      return { pipeline_id: pipeline.entity_id, reasons };
+    })
+    .filter((row) => row.reasons.length > 0);
+}
+
 export function handlers(): Record<string, Handler> {
   return {
     pipelines: () => fakePipelines(),
+    set_pipeline_pinned: (args) => {
+      const id = String(args["pipelineId"] ?? "");
+      if (args["pinned"] === true) pins.add(id);
+      else pins.delete(id);
+      return pins.has(id);
+    },
+    job_pipelines: (args) => fakeJobPipelines(String(args["entityId"] ?? "")),
     pipeline_runs: (args) => {
       const id = String(args["pipelineId"] ?? "");
       const config = id.replace(`${SOURCE}:buildType:`, "");

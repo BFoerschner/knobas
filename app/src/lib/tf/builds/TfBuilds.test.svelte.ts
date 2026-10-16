@@ -6,9 +6,9 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { PipelineRow, RunRow } from "../../ipc/entity";
+import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import { forgetFilters } from "../filter/filter-state.svelte";
-import TfBuilds, { type BuildsPorts } from "./TfBuilds.svelte";
+import TfBuilds, { forgetFolds, type BuildsPorts } from "./TfBuilds.svelte";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -23,6 +23,7 @@ afterEach(() => {
   page = null;
   target.remove();
   forgetFilters();
+  forgetFolds();
 });
 
 async function settle() {
@@ -52,6 +53,8 @@ function pipeline(id: string, name: string, recent: RunRow[]): PipelineRow {
     source_name: "TeamCity",
     name,
     group: "Payout",
+    path: [],
+    pinned: false,
     web_url: null,
     recent,
   };
@@ -169,4 +172,146 @@ test("no pipelines says what would fill the list", async () => {
   });
   await settle();
   expect(target.querySelector(".tf-pl-note")?.textContent).toContain("No pipelines yet");
+});
+
+// -- the project tree and pins (#849), *This job* (#850) ----------------------
+
+const TREE: PipelineRow[] = [
+  { ...pipeline("Dbt_Test", "Dbt_Test", [run("teamcity:build:640", "err")]), path: ["Data"] },
+  { ...pipeline("Payout_Build", "Payout_Build", [run("teamcity:build:1188", "ok")]), path: ["Payments", "Payouts"], pinned: true },
+  {
+    ...pipeline("Payout_Deploy_Prod", "Payout_Deploy_Prod", [run("teamcity:build:77", "err")]),
+    path: ["Payments", "Payouts", "Deploy"],
+  },
+  { ...pipeline("Payout_Lint", "Payout_Lint", [run("teamcity:build:904", "ok")]), path: ["Payments", "Payouts"] },
+  { ...pipeline("Terraform_Plan", "Terraform_Plan", [run("teamcity:build:1402", "ok")]), path: ["Platform", "Infra"] },
+];
+
+function drawTree(
+  options: { job?: string | null; rest?: string[]; reasons?: JobPipeline[]; pins?: [string, boolean][] } = {},
+) {
+  let list = TREE.map((p) => ({ ...p }));
+  const ports: BuildsPorts = {
+    pipelines: () => Promise.resolve(list),
+    runs: (id) => Promise.resolve(list.find((p) => p.entity_id === id)?.recent ?? []),
+    setPinned: (id, pinned) => {
+      options.pins?.push([id, pinned]);
+      list = list.map((p) => (p.entity_id === id ? { ...p, pinned } : p));
+      return Promise.resolve(pinned);
+    },
+    jobPipelines: () => Promise.resolve(options.reasons ?? []),
+  };
+  page = mount(TfBuilds, {
+    target,
+    props: { ready: true, head: "builds", rest: options.rest ?? [], job: options.job ?? null, ports },
+  });
+}
+
+const summaries = () =>
+  [...target.querySelectorAll<HTMLElement>(".tf-pl-fold > summary")].map((s) =>
+    [s.firstChild?.textContent?.trim(), s.querySelector(".tf-count")?.textContent, s.querySelector(".tf-chip")?.textContent ?? ""].join("|"),
+  );
+const fold = (name: string) =>
+  [...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].find((d) => d.querySelector(":scope > summary")?.textContent?.startsWith(name))!;
+
+test("All: Pinned first, then the tree as deep as it goes, with counts, failures and single children as one row", async () => {
+  drawTree();
+  await settle();
+  const headers = [...target.querySelectorAll(".tf-pl h3")].map((h) => h.textContent);
+  expect(headers).toEqual(["Pinned", "TeamCity"]);
+  const pinned = target.querySelector(".tf-pl h3 + .tf-pi .tf-pi-nm")?.textContent;
+  expect(pinned).toBe("Payout_Build");
+  expect(summaries()).toEqual(["Data|1|1 failing", "Payments › Payouts|3|1 failing", "Deploy|1|1 failing", "Platform › Infra|1|"]);
+  // Own pipelines before the subgroup.
+  const payouts = fold("Payments › Payouts");
+  const inner = [...payouts.querySelectorAll(":scope > .tf-fold-in > *")].map((el) =>
+    el.classList.contains("tf-pi") ? el.querySelector(".tf-pi-nm")?.textContent : "fold",
+  );
+  expect(inner).toEqual(["Payout_Build", "Payout_Lint", "fold"]);
+  // Open on a failure (and the selection, the first failing one); closed otherwise.
+  expect(fold("Data").open).toBe(true);
+  expect(fold("Platform › Infra").open).toBe(false);
+  expect(target.querySelector<HTMLAnchorElement>('.tf-pi[title="Payments › Payouts › Deploy › Payout_Deploy_Prod"]')).not.toBeNull();
+});
+
+test("a fold the reader closes stays closed as the list redraws", async () => {
+  drawTree();
+  await settle();
+  const data = fold("Data");
+  data.open = false;
+  data.dispatchEvent(new Event("toggle"));
+  flushSync();
+  const field = target.querySelector<HTMLInputElement>("[data-filter]")!;
+  field.value = "dbt";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  field.value = "";
+  field.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(fold("Data").open).toBe(false);
+});
+
+test("Pin and Unpin on the selected pipeline write the pin and move it in and out of Pinned", async () => {
+  const pins: [string, boolean][] = [];
+  drawTree({ rest: ["teamcity:buildType:Payout_Lint"], pins });
+  await settle();
+  const button = () => [...target.querySelectorAll<HTMLButtonElement>(".tf-fhead button")].find((b) => /Pin|Unpin/.test(b.textContent ?? ""))!;
+  expect(button().textContent).toBe("Pin");
+  button().click();
+  await settle();
+  expect(pins).toEqual([["teamcity:buildType:Payout_Lint", true]]);
+  expect(button().textContent).toBe("Unpin");
+  const pinnedNames = () =>
+    [...target.querySelectorAll(".tf-pl-list > .tf-pi .tf-pi-nm")].map((n) => n.textContent);
+  expect(pinnedNames()).toEqual(["Payout_Build", "Payout_Lint"]);
+  button().click();
+  await settle();
+  expect(pinnedNames()).toEqual(["Payout_Build"]);
+});
+
+const ON_JOB: JobPipeline[] = [
+  {
+    pipeline_id: "teamcity:buildType:Payout_Build",
+    reasons: [
+      { kind: "branch", branch: "feature/PAY-231-sepa-retry" },
+      { kind: "pr_check", pr: "gitea:svc#142" },
+    ],
+  },
+  { pipeline_id: "teamcity:buildType:Payout_Deploy_Prod", reasons: [{ kind: "pr_check", pr: "gitea:svc#142" }] },
+];
+
+test("This job is on by default with a job: the tree pruned to its pipelines, each with its reasons", async () => {
+  drawTree({ job: "PAY-231", reasons: ON_JOB });
+  await settle();
+  const scope = [...target.querySelectorAll<HTMLButtonElement>(".tf-seg button")];
+  expect(scope.map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
+    ["This job PAY-231", "true"],
+    ["All", "false"],
+  ]);
+  expect(target.querySelector(".tf-scope-note")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "2 of 5 pipelines are relevant to PAY-231. Show all",
+  );
+  expect([...target.querySelectorAll(".tf-pl h3")].map((h) => h.textContent)).toEqual(["By project"]);
+  expect(names()).toEqual(["Payout_Build", "Payout_Deploy_Prod"]);
+  expect(rows()[0]!.querySelector(".tf-pi-why")?.textContent).toBe("your branch, PR check");
+  // Every fold is open while the job narrows the list.
+  expect([...target.querySelectorAll<HTMLDetailsElement>(".tf-pl-fold")].every((d) => d.open)).toBe(true);
+  // A bare #/builds opens on the job's failing pipeline.
+  expect(target.querySelector('.tf-pi[aria-current="true"] .tf-pi-nm')?.textContent).toBe("Payout_Deploy_Prod");
+
+  target.querySelector<HTMLButtonElement>(".tf-scope-note button")!.click();
+  flushSync();
+  expect(names()).toHaveLength(6);
+  expect(target.querySelector(".tf-scope-note")).toBeNull();
+  expect(target.querySelector(".tf-pi-why")).toBeNull();
+});
+
+test("a job with no pipelines says so and offers to search all of them", async () => {
+  drawTree({ job: "PAY-999", reasons: [] });
+  await settle();
+  const note = [...target.querySelectorAll(".tf-pl-note")].map((n) => n.textContent?.replace(/\s+/g, " ").trim());
+  expect(note).toEqual(["No pipeline matches. Search all pipelines"]);
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-pl-note button")][0]!.click();
+  flushSync();
+  expect(target.querySelectorAll(".tf-pl-fold").length).toBeGreaterThan(0);
 });
