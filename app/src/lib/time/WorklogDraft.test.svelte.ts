@@ -36,6 +36,7 @@ const DRAFT: Draft = {
   ended_at: "2026-09-03T14:00:00Z",
   seconds: 150 * 60,
   block_ids: [7, 8],
+  running_since: null,
   candidates: [
     candidate("item:jira:c1", "- Retry SEPA payouts"),
     candidate("activity:41", "- linked PAY-231"),

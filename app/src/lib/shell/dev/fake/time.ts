@@ -278,13 +278,32 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         at.setHours(YESTERDAY_ROW.hour, 0, 0, 0);
         const started_at = at.toISOString();
         const { seconds, comment } = YESTERDAY_ROW;
-        return { entity_id: entityId, day, started_at, ended_at: started_at, seconds, block_ids: [], candidates: [], comment };
+        return {
+          entity_id: entityId,
+          day,
+          started_at,
+          ended_at: started_at,
+          seconds,
+          block_ids: [],
+          running_since: null,
+          candidates: [],
+          comment,
+        };
       }
       const spans = unlogged(entityId);
-      if (spans.length === 0) return null;
-      const started_at = spans[0]!.started_at;
-      const ended_at = spans.at(-1)!.ended_at;
-      const seconds = spans.reduce(
+      // The running timer's stretch up to now, on its ticket and the day it started (#896).
+      const running_since =
+        running?.target.kind === "entity" &&
+        running.target.entity_id === entityId &&
+        dayKey(new Date(running.started_at)) === day
+          ? running.started_at
+          : null;
+      const all = [...spans, ...(running_since ? [{ started_at: running_since, ended_at: new Date().toISOString() }] : [])];
+      all.sort((a, b) => a.started_at.localeCompare(b.started_at));
+      if (all.length === 0) return null;
+      const started_at = all[0]!.started_at;
+      const ended_at = all.reduce((last, span) => (span.ended_at > last ? span.ended_at : last), all[0]!.ended_at);
+      const seconds = all.reduce(
         (sum, block) => sum + Math.round((Date.parse(block.ended_at) - Date.parse(block.started_at)) / 1000),
         0,
       );
@@ -296,6 +315,7 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         ended_at,
         seconds,
         block_ids: spans.map((block) => block.id),
+        running_since,
         candidates: seen,
         comment: seen.map((candidate) => candidate.bullet).join("\n"),
       };

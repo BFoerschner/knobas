@@ -1,15 +1,16 @@
 /**
  * What a stop opens in the ticket-first shell, and what each of the draft's
- * buttons does to the clock (#826, R-13.1 to R-13.3).
+ * buttons does to the clock (#826, R-13.1 to R-13.3; #896).
  *
- * The claims that matter are about **time not getting lost**: a switch to
- * another ticket must not start the new timer before the reader has said what
- * happens to the old one (R-13.2), and *Keep running* must put the clock back
- * on the ticket the stop took it off.
+ * The claims that matter are about **time not getting lost**: the draft opens
+ * over the running clock, so *Keep running* touches nothing; the clock stops
+ * only on *Log*, *Stop, log later* or *Discard*; and a switch to another
+ * ticket must not start the new timer before the reader has said what happens
+ * to the old one (R-13.2).
  */
 import { expect, test } from "vitest";
 
-import type { AdHocBlock, Block, Draft, RunningTimer, TimerTarget } from "../ipc/time";
+import type { AdHocBlock, Block, Draft, ReaderDay, RunningTimer, TimerTarget } from "../ipc/time";
 import type { ToastSpec } from "../shell/toasts.svelte";
 import { createDraftFlow, type DraftFlowPorts } from "./drafting.svelte";
 
@@ -34,19 +35,27 @@ const DRAFT: Draft = {
   started_at: "2026-09-03T09:00:00Z",
   ended_at: "2026-09-03T10:30:00Z",
   seconds: 90 * 60,
-  block_ids: [10],
+  block_ids: [],
+  running_since: "2026-09-03T09:00:00Z",
   candidates: [],
   comment: "",
 };
 
+interface Over {
+  draft?: Draft | null;
+  offer?: AdHocBlock | null;
+  running?: TimerTarget | null;
+  since?: string;
+}
+
 /** A clock and a backend that answer like the real ones, with a log of what was asked. */
-function rig(over: { draft?: Draft | null; offer?: AdHocBlock | null; running?: TimerTarget | null } = {}) {
+function rig(over: Over = {}) {
   const log: string[] = [];
+  const asked: ReaderDay[] = [];
   const toasts: ToastSpec[] = [];
+  const since = over.since ?? "2026-09-03T09:00:00Z";
   let running: RunningTimer | null =
-    over.running === null
-      ? null
-      : { target: over.running ?? PAY, started_at: "2026-09-03T09:00:00Z", last_heartbeat: "2026-09-03T09:00:00Z" };
+    over.running === null ? null : { target: over.running ?? PAY, started_at: since, last_heartbeat: since };
   const ports: DraftFlowPorts = {
     timer: {
       get current() {
@@ -68,8 +77,9 @@ function rig(over: { draft?: Draft | null; offer?: AdHocBlock | null; running?: 
       log.push(`ad-hoc ${id}`);
       return Promise.resolve(over.offer ?? null);
     },
-    worklogDraft: (entityId) => {
+    worklogDraft: (entityId, when) => {
       log.push(`draft ${entityId}`);
+      asked.push(when);
       return Promise.resolve(over.draft === undefined ? DRAFT : over.draft);
     },
     onadhoc: () => log.push("ad-hoc dialog"),
@@ -77,70 +87,124 @@ function rig(over: { draft?: Draft | null; offer?: AdHocBlock | null; running?: 
     complain: (error) => log.push(`complain ${String(error)}`),
     onday: () => log.push("open the day"),
   };
-  return { flow: createDraftFlow(ports), log, toasts, running: () => running };
+  return { flow: createDraftFlow(ports), log, asked, toasts, running: () => running };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+const starts = (log: string[]) => log.filter((line) => line.startsWith("start"));
 
-test("a stop on a ticket opens its draft, marked as opened by a stop", async () => {
-  const { flow } = rig();
-  flow.stopped(block(PAY));
+test("a stop on a ticket opens its draft with the clock still running", async () => {
+  const { flow, log, running } = rig();
+  flow.stop();
   await settle();
   expect(flow.open?.draft).toEqual(DRAFT);
-  expect(flow.open?.stopped).toEqual(PAY);
+  expect(flow.open?.running).toEqual(PAY);
+  expect(log).toEqual(["draft jira:PAY-231"]);
+  expect(running()?.target, "the chip reads the timer behind the draft").toEqual(PAY);
 });
 
-test("Keep running puts the clock back on the ticket the stop took it off", async () => {
-  const { flow, log, running } = rig({ running: null });
-  flow.stopped(block(PAY));
+test("the draft is asked for the day the running stretch started on", async () => {
+  const { flow, asked } = rig({ since: "2026-09-02T21:30:00Z" });
+  flow.stop();
+  await settle();
+  // The suite runs in Europe/Berlin: 21:30Z is 23:30 on the 2nd.
+  expect(asked.map((when) => when.day)).toEqual(["2026-09-02"]);
+});
+
+test("Keep running closes the draft and leaves the clock alone", async () => {
+  const { flow, log, running } = rig();
+  flow.stop();
   await settle();
   flow.settle("keep");
   await settle();
   expect(flow.open).toBeNull();
-  expect(log.at(-1)).toBe("start jira:PAY-231");
+  expect(log).toEqual(["draft jira:PAY-231"]);
   expect(running()?.target).toEqual(PAY);
 });
 
-test("Stop, log later leaves the clock stopped and says where the time is", async () => {
-  const { flow, log, toasts, running } = rig({ running: null });
-  flow.stopped(block(PAY));
+test("Stop, log later stops the clock and says where the time is", async () => {
+  const { flow, log, toasts, running } = rig();
+  flow.stop();
   await settle();
   flow.settle("later");
   await settle();
   expect(flow.open).toBeNull();
   expect(running()).toBeNull();
+  expect(log).toEqual(["draft jira:PAY-231", "stop"]);
   expect(toasts.map((toast) => toast.text)).toEqual(["Timer stopped. The time is kept in today's blocks, unlogged."]);
   expect(toasts[0]?.action?.label).toBe("Open the day");
   toasts[0]?.action?.run();
   expect(log.at(-1)).toBe("open the day");
 });
 
+test("Log stops the clock before anything is logged, and once", async () => {
+  const { flow, log, running } = rig();
+  flow.stop();
+  await settle();
+  await flow.stopClock();
+  expect(running(), "the block exists before log_work re-derives the day").toBeNull();
+  flow.settle("logged");
+  await settle();
+  expect(log).toEqual(["draft jira:PAY-231", "stop"]);
+});
+
+test("Keep running after a Log that failed puts the clock back on the ticket", async () => {
+  const { flow, log, running } = rig();
+  flow.stop();
+  await settle();
+  await flow.stopClock();
+  flow.settle("keep");
+  await settle();
+  expect(log.at(-1)).toBe("start jira:PAY-231");
+  expect(running()?.target).toEqual(PAY);
+});
+
+test("Discard after a stop stops the clock and writes nothing", async () => {
+  const { flow, log, toasts, running } = rig();
+  flow.stop();
+  await settle();
+  flow.settle("discard");
+  await settle();
+  expect(running()).toBeNull();
+  expect(log).toEqual(["draft jira:PAY-231", "stop"]);
+  expect(toasts).toEqual([]);
+});
+
+test("a stop with nothing to draft stops the clock and offers the ad-hoc dialog's check", async () => {
+  const { flow, log } = rig({ draft: null });
+  flow.stop();
+  await settle();
+  expect(flow.open).toBeNull();
+  expect(log).toEqual(["draft jira:PAY-231", "stop", "ad-hoc 10"]);
+});
+
 test("starting on another ticket while one runs opens the running one's draft first, and starts nothing yet", async () => {
   const { flow, log, running } = rig();
   await flow.switchTo(OPS, "OPS-12");
   await settle();
-  expect(log).toEqual(["stop", "ad-hoc 10", "draft jira:PAY-231"]);
+  expect(log).toEqual(["draft jira:PAY-231"]);
   expect(flow.open?.after?.target).toEqual(OPS);
-  expect(running(), "the new timer started before the reader answered the draft").toBeNull();
+  expect(running()?.target, "the new timer started before the reader answered the draft").toEqual(PAY);
 });
 
 test("logging the switch's draft starts the timer it was waiting on", async () => {
   const { flow, log, toasts } = rig();
   await flow.switchTo(OPS, "OPS-12");
   await settle();
+  await flow.stopClock();
   flow.settle("logged");
   await settle();
-  expect(log.at(-1)).toBe("start jira:OPS-12");
+  expect(log).toEqual(["draft jira:PAY-231", "stop", "start jira:OPS-12"]);
   expect(toasts.map((toast) => toast.text)).toContain("Timing OPS-12.");
 });
 
-test("Stop, log later on a switch starts the waiting timer too", async () => {
+test("Stop, log later on a switch stops the old timer, then starts the waiting one", async () => {
   const { flow, log } = rig();
   await flow.switchTo(OPS, "OPS-12");
   await settle();
   flow.settle("later");
   await settle();
-  expect(log.at(-1)).toBe("start jira:OPS-12");
+  expect(log).toEqual(["draft jira:PAY-231", "stop", "start jira:OPS-12"]);
 });
 
 test("Keep running on a switch keeps the old ticket and drops the new one, saying so", async () => {
@@ -149,7 +213,7 @@ test("Keep running on a switch keeps the old ticket and drops the new one, sayin
   await settle();
   flow.settle("keep");
   await settle();
-  expect(log.filter((line) => line.startsWith("start"))).toEqual(["start jira:PAY-231"]);
+  expect(starts(log)).toEqual([]);
   expect(running()?.target).toEqual(PAY);
   expect(toasts.map((toast) => toast.text)).toEqual(["Not started on OPS-12: the timer kept running."]);
 });
@@ -159,7 +223,7 @@ test("a switch away from something with no draft starts the new timer at once", 
   await flow.switchTo(OPS, "OPS-12");
   await settle();
   expect(flow.open).toBeNull();
-  expect(log.at(-1)).toBe("start jira:OPS-12");
+  expect(log).toEqual(["draft jira:PAY-231", "stop", "ad-hoc 10", "start jira:OPS-12"]);
 });
 
 test("a switch away from a label opens the ad-hoc dialog and starts the new timer", async () => {
@@ -167,8 +231,7 @@ test("a switch away from a label opens the ad-hoc dialog and starts the new time
   const { flow, log } = rig({ offer, running: { kind: "label", label: "DB config" } });
   await flow.switchTo(OPS, "OPS-12");
   await settle();
-  expect(log).toContain("ad-hoc dialog");
-  expect(log.at(-1)).toBe("start jira:OPS-12");
+  expect(log).toEqual(["stop", "ad-hoc 10", "ad-hoc dialog", "start jira:OPS-12"]);
 });
 
 test("with nothing running, a start is a start", async () => {
@@ -177,10 +240,11 @@ test("with nothing running, a start is a start", async () => {
   expect(log).toEqual(["start jira:OPS-12"]);
 });
 
-test("a draft shown without a stop is not marked as one, and Discard closes it with nothing started", async () => {
-  const { flow, log } = rig({ running: null });
+test("a draft shown without a stop is not marked as one, and Discard closes it with nothing stopped or started", async () => {
+  const { flow, log } = rig();
   flow.show(DRAFT);
-  expect(flow.open?.stopped).toBeNull();
+  expect(flow.open?.running).toBeNull();
+  await flow.stopClock();
   flow.settle("discard");
   await settle();
   expect(flow.open).toBeNull();
@@ -193,19 +257,22 @@ test("Discard on a switch's draft still starts the timer it was waiting on", asy
   await settle();
   flow.settle("discard");
   await settle();
-  expect(log.at(-1)).toBe("start jira:OPS-12");
+  expect(log).toEqual(["draft jira:PAY-231", "stop", "start jira:OPS-12"]);
 });
 
-test("a start while a draft is open or being read is refused, so it cannot run under the dialog", async () => {
+test("a start or stop while a draft is open or being read is refused, so it cannot run under the dialog", async () => {
   const { flow, log, toasts } = rig();
   await flow.switchTo(OPS, "OPS-12");
   expect(flow.busy, "the draft's read is in flight").toBe(true);
   await flow.switchTo(PAY, "PAY-231");
   await settle();
   expect(flow.open).not.toBeNull();
-  await flow.switchTo(PAY, "PAY-231");
-  expect(log.filter((line) => line.startsWith("start"))).toEqual([]);
+  flow.stop();
+  expect(starts(log)).toEqual([]);
+  expect(log).not.toContain("stop");
   expect(toasts.map((toast) => toast.text)).toEqual(["Answer the worklog draft first.", "Answer the worklog draft first."]);
   flow.settle("later");
+  expect(flow.busy, "the stop behind the answer is still in flight").toBe(true);
+  await settle();
   expect(flow.busy).toBe(false);
 });

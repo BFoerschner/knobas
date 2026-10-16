@@ -46,6 +46,7 @@ const DRAFT: Draft = {
   ended_at: BLOCK.ended_at,
   seconds: 90 * 60,
   block_ids: [BLOCK.id],
+  running_since: null,
   candidates: [],
   comment: "",
 };
