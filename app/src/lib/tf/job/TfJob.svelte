@@ -8,8 +8,6 @@
 
   The layout is the prototype's: the yellow card in a fixed 320px column, the
   work on the right with the tabs *Work*, *Map* and *Conversation*. Work holds
-  the Code section; the other four sections are #817's and the Map tab TF5's,
-  each an empty pane that names itself until then.
 
   **The conversation (#819)** is read once per job opened: `visit_entity`
   records this visit and answers the last one, `entity_thread` the thread. The
@@ -17,6 +15,12 @@
 
   **The Connections button (#820)** sits at the right of the tab bar, with the
   ticket's link count and its proposals, and opens the drawer (also `L`).
+  the five sections (#817): Code, Builds, Assets, Monitors and Pages, each read
+  through the job-reach read (`job_reach`, and `list_entities` scoped by it),
+  so a row from the parent carries its label. Above them, a blocked ticket's
+  red banner (#818, R-4.8), and on a To Do ticket of the reader's the *Start
+  work* stepper (R-4.9) in place of Code and Builds, as prototype-6 draws it.
+  The Map tab is TF5's, an empty pane that names itself until then.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -25,11 +29,15 @@
     CheckoutCommand,
     CheckoutView,
     EntityDetail,
+    EntityFilter,
+    EntityOrder,
     EntityRow,
     LinkEntry,
+    Reached,
     SuggestionEntry,
     Thread,
   } from "../../ipc/entity";
+  import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
   import { ipcErrorMessage } from "../../ipc";
   import { inTextField } from "../../shell/keys";
   import type { Timer } from "../../shell/timer.svelte";
@@ -40,13 +48,38 @@
   import type { Layers } from "../layers.svelte";
   import { PROPOSAL_LIMIT, linkedOn, proposalsFor } from "./connections";
   import { summary } from "./conversation";
-  import { CODE_KINDS, byAttention, isEntityId, keyOf, resolveTicket, weekReading, type WeekReading } from "./job";
+  import {
+    CODE_KINDS,
+    assetTone,
+    assetsRollup,
+    blockerEntries,
+    buildsRollup,
+    byAttention,
+    isEntityId,
+    isMine,
+    itemHash,
+    keyOf,
+    monitorsRollup,
+    offersStartWork,
+    originLabel,
+    pagesRollup,
+    resolveTicket,
+    staleBuilds,
+    weekReading,
+    type AssetLine,
+    type SectionRow,
+    type SourceFacts,
+    type WeekReading,
+  } from "./job";
   import { bridgePorts, type JobPorts } from "./ports";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfConnections from "./TfConnections.svelte";
   import TfConversation from "./TfConversation.svelte";
   import TfJobCard from "./TfJobCard.svelte";
   import TfLinkTo from "./TfLinkTo.svelte";
+  import TfSection from "./TfSection.svelte";
+  import TfStartWork from "./TfStartWork.svelte";
+  import { ago } from "../../shell/time";
 
   let {
     segment,
@@ -88,6 +121,17 @@
   let proposals = $state<SuggestionEntry[] | null>(null);
   let drawer = $state(false);
   let linking = $state(false);
+  /** The job-reach read, by entity id: the rows' labels. */
+  let reached = $state<Map<string, Reached>>(new Map());
+  let builds = $state<EntityRow[] | null>(null);
+  let pages = $state<EntityRow[] | null>(null);
+  let monitors = $state<EntityRow[] | null>(null);
+  let assets = $state<AssetLine[] | null>(null);
+  let sources = $state<SourceFacts[]>([]);
+  let health = $state<CredentialHealth[]>([]);
+  let sync = $state<SourceSyncStatus[]>([]);
+  /** Every repository, for *Start work*'s dropdown; `null` until asked. */
+  let repos = $state<{ entity_id: string; title: string }[] | null>(null);
 
   /** The read's generation, so an answer for a ticket left behind is dropped. */
   let token = 0;
@@ -108,6 +152,12 @@
     proposals = null;
     drawer = false;
     linking = false;
+    reached = new Map();
+    builds = null;
+    pages = null;
+    monitors = null;
+    assets = null;
+    repos = null;
     // Only the address re-opens a job: what `open` reads before its first
     // await (the ports) is not a reason to read again.
     untrack(() => void open(wanted, mine));
@@ -115,8 +165,10 @@
 
   async function open(wanted: string, mine: number) {
     try {
-      const sources = isEntityId(wanted) ? [] : await ports.listSources();
-      const found = await resolveTicket(wanted, sources, ports.getEntity);
+      const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
+      if (mine !== token) return;
+      sources = listed;
+      const found = await resolveTicket(wanted, isEntityId(wanted) ? [] : listed, ports.getEntity);
       if (mine !== token) return;
       detail = found;
       if (found === null) return;
@@ -124,12 +176,105 @@
       void readWorkflow(id, mine);
       void readWeek(id, mine);
       void readConversation(id, mine);
+      void readStale(mine);
+      // The reach starts from the ticket's context, so the context first.
       const context = await ports.promoteContext(id);
       if (mine !== token) return;
       void readProposals(context.id, id, mine);
-      await readCode(context.id, mine);
+      void readReach(id, mine);
+      void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
+        if (mine === token && rows) builds = rows;
+      });
+      void readRows(id, ["page"], "updated_desc", mine).then((rows) => {
+        if (mine === token && rows) pages = rows;
+      });
+      void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
+        if (mine === token && rows) monitors = rows;
+      });
+      if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
+      await readCode(id, mine);
     } catch (cause) {
       if (mine === token) failure = ipcErrorMessage(cause);
+    }
+  }
+
+  /** How many rows a section reads: a job reaches tens, not thousands. */
+  const SECTION_LIMIT = 200;
+  /** How many reached assets are read one by one for the Assets section. */
+  const ASSET_LIMIT = 50;
+
+  /** A read of `kinds`, scoped to what `id` reaches, or unscoped with `null`. */
+  function filterOf(id: string | null, kinds: string[], order: EntityOrder): EntityFilter {
+    return {
+      sources: [],
+      kinds,
+      updated_within_days: null,
+      order,
+      context: null,
+      project: null,
+      include_deleted: false,
+      reach: id,
+    };
+  }
+
+  /** One section's rows, through the reach; `[]` when the read fails. */
+  async function readRows(id: string, kinds: string[], order: EntityOrder, mine: number): Promise<EntityRow[] | null> {
+    try {
+      const page = await ports.listEntities(filterOf(id, kinds, order), SECTION_LIMIT, 0);
+      return mine === token ? page.rows : null;
+    } catch {
+      // A section that cannot be read draws as having nothing; the Work tab's
+      // line says when the reads themselves fail.
+      return mine === token ? [] : null;
+    }
+  }
+
+  /** The reach itself, for the labels, and the reached assets for their section. */
+  async function readReach(id: string, mine: number) {
+    let rows: Reached[] = [];
+    try {
+      rows = await ports.jobReach(id);
+    } catch {
+      // No labels, and an Assets section with nothing in it.
+    }
+    if (mine !== token) return;
+    reached = new Map(rows.map((row) => [row.entity_id, row]));
+    const ids = rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT);
+    const read = await Promise.allSettled(ids.map((row) => ports.getAsset(row.entity_id)));
+    if (mine !== token) return;
+    assets = read.flatMap((answer) =>
+      answer.status === "fulfilled"
+        ? [
+            {
+              id: answer.value.asset.id,
+              name: answer.value.asset.name,
+              type: answer.value.asset.type_label,
+              environment: answer.value.effective_environment?.value ?? null,
+              on: answer.value.held_by.at(-1)?.name ?? null,
+              tone: assetTone(answer.value.asset.health),
+            },
+          ]
+        : [],
+    );
+  }
+
+  /** What the Builds section's warning reads: every source's credential and last run. */
+  async function readStale(mine: number) {
+    const [credentials, runs] = await Promise.all([
+      ports.credentialHealth().catch(() => [] as CredentialHealth[]),
+      ports.syncStatus().catch(() => [] as SourceSyncStatus[]),
+    ]);
+    if (mine !== token) return;
+    health = credentials;
+    sync = runs;
+  }
+
+  async function readRepos(mine: number) {
+    try {
+      const page = await ports.listEntities(filterOf(null, ["repo"], "title_asc"), SECTION_LIMIT, 0);
+      if (mine === token) repos = page.rows.map((row) => ({ entity_id: row.entity_id, title: row.title }));
+    } catch {
+      if (mine === token) repos = [];
     }
   }
 
@@ -228,20 +373,8 @@
   /** How many branches and repositories are asked for a clone before giving up. */
   const CHECKOUT_TRIES = 3;
 
-  async function readCode(context: string, mine: number) {
-    const page = await ports.listEntities(
-      {
-        sources: [],
-        kinds: [...CODE_KINDS],
-        updated_within_days: null,
-        order: "updated_desc",
-        context,
-        project: null,
-        include_deleted: false,
-      },
-      CODE_LIMIT,
-      0,
-    );
+  async function readCode(id: string, mine: number) {
+    const page = await ports.listEntities(filterOf(id, [...CODE_KINDS], "updated_desc"), CODE_LIMIT, 0);
     if (mine !== token) return;
     code = page.rows;
     const sorted = byAttention(page.rows);
@@ -305,6 +438,52 @@
       token += 1;
     };
   });
+
+  /** A mirror row as a section draws it. */
+  function line(row: EntityRow): SectionRow {
+    return {
+      id: row.entity_id,
+      href: itemHash(row),
+      title: row.title,
+      mono: false,
+      repo: null,
+      // Where it sits in its source, then when it last changed: "ENG ›
+      // Payments, 2026-08-19", as prototype-6's page rows read.
+      sub: [row.path, row.updated_at ? ago(row.updated_at) : null].filter(Boolean).join(", "),
+      tone: row.state?.tone ?? null,
+      chip: row.state,
+      from: originLabel(reached.get(row.entity_id)),
+    };
+  }
+  const lines = (rows: EntityRow[] | null) => (rows === null ? null : byAttention(rows).map(line));
+
+  const TONE_RANK: Record<string, number> = { err: 0, warn: 1 };
+  const assetLines = $derived<SectionRow[] | null>(
+    assets === null
+      ? null
+      : [...assets]
+          .sort((a, b) => (TONE_RANK[a.tone ?? ""] ?? 2) - (TONE_RANK[b.tone ?? ""] ?? 2) || a.name.localeCompare(b.name))
+          .map((asset) => ({
+            id: asset.id,
+            href: itemHash({ entity_id: asset.id, kind: "asset" }),
+            title: asset.name,
+            mono: true,
+            repo: null,
+            sub: [asset.type, asset.environment, asset.on ? `on ${asset.on}` : null].filter(Boolean).join(", "),
+            tone: asset.tone,
+            chip: null,
+            from: originLabel(reached.get(asset.id)),
+          })),
+  );
+
+  const mine = $derived(detail ? isMine(detail, sources) : false);
+  const starting = $derived(detail ? offersStartWork(detail.status, mine) : false);
+  const blocked = $derived(detail ? blockerEntries(detail) : []);
+  const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
+  /** What *Start work* suggests: a repository the ticket already reaches. */
+  const suggestedRepo = $derived(
+    [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
+  );
 </script>
 
 {#if detail === undefined && failure === null}
@@ -358,8 +537,33 @@
           {#if failure !== null}
             <p class="tf-dim">Could not read what this job holds: {failure}</p>
           {/if}
+          {#each blocked as blocker (blocker.entityId)}
+            <div class="tf-blocked">
+              <strong>Blocked by {blocker.key} {blocker.title}</strong>
+              {#if blocker.note}<span>{blocker.note}</span>{/if}
+              <a class="tf-btn tf-sm" href="#/job/{encodeURIComponent(blocker.key)}">Open {blocker.key}</a>
+            </div>
+          {/each}
+          {#if starting}
+            <TfStartWork {detail} {repos} suggested={suggestedRepo} {timer} api={ports.startWork} {onstarttimer} />
+          {/if}
           <div class="tf-grid">
-            <TfCodeSection rows={code} {checkout} {checkoutOf} {commands} onopen={ports.openCheckout} {layers} />
+            {#if !starting}
+              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {commands} onopen={ports.openCheckout} {layers} />
+              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
+                {#snippet before()}
+                  {#each stale as warning (warning.sourceId)}
+                    <div class="tf-stale">
+                      {warning.text}
+                      <a href="#/settings/source/{encodeURIComponent(warning.sourceId)}">Re-enter password</a>
+                    </div>
+                  {/each}
+                {/snippet}
+              </TfSection>
+            {/if}
+            <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
+            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
+            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>
         {:else if current.id === "conversation"}
           <TfConversation

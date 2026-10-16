@@ -318,6 +318,52 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-minif svg { width: 12px; height: 12px; flex: none; }
 .tf-minif input { border: 0; background: none; outline: none; color: var(--ink); font-size: var(--t-sm); width: 100%; }
 .tf-minif:focus-within { outline: 2px solid var(--focus); }
+/* A row from the parent or a link set names it (R-4.6). */
+.tf-via {
+  display: inline-block; font-size: var(--t-2xs); font-weight: 600; padding: 0 5px; border-radius: 3px; margin-right: 4px;
+  background: var(--sheet-2); color: var(--ink-2); border: 1px solid var(--rule);
+}
+/* Builds' stale-data warning, with its fix (R-4.7). */
+.tf-stale {
+  margin: 0 12px 8px; padding: 6px 10px; border-radius: 4px; background: var(--warn-bg); color: var(--warn);
+  font-size: var(--t-xs); display: flex; gap: 8px; align-items: center;
+}
+.tf-stale a { margin-left: auto; color: inherit; font-weight: 600; }
+
+/* ---------- the blocked banner (R-4.8) ---------- */
+.tf-blocked {
+  background: var(--err-bg); color: var(--err); border-radius: 6px; padding: 10px 14px;
+  display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
+}
+.tf-blocked .tf-btn { margin-left: auto; }
+
+/* ---------- Start work (R-4.9) ---------- */
+.tf-swnote { margin: 0; }
+.tf-steps { background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; }
+.tf-step {
+  display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 2px 12px; padding: 12px 14px;
+  border-top: 1px solid var(--rule-2); align-items: center;
+}
+.tf-step:first-of-type { border-top: 0; }
+.tf-step .tf-num {
+  display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; border: 1.5px solid var(--rule);
+  font: 700 var(--t-xs) var(--mono); color: var(--ink-2);
+}
+.tf-step.tf-st-done .tf-num { background: var(--ok); border-color: var(--ok); color: var(--sheet); }
+.tf-step.tf-st-queued .tf-num { border-color: var(--warn); color: var(--warn); }
+.tf-step.tf-st-failed .tf-num { border-color: var(--err); color: var(--err); }
+.tf-step .tf-field { grid-column: 2; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tf-step input, .tf-step select {
+  font: var(--t-sm) var(--mono); border: 1px solid var(--rule); background: var(--paper); color: var(--ink);
+  padding: 4px 8px; border-radius: 4px; width: 100%; max-width: 400px;
+}
+.tf-step select { max-width: 260px; }
+.tf-step .tf-state { grid-row: 1 / span 2; grid-column: 3; font-size: var(--t-xs); }
+.tf-step .tf-swdetail { grid-column: 2; margin: 0; color: var(--ink-2); }
+.tf-steps footer {
+  display: flex; gap: 8px; padding: 12px 14px; border-top: 1px solid var(--rule); background: var(--sheet-2);
+  border-radius: 0 0 6px 6px; align-items: center; flex-wrap: wrap;
+}
 /* ---------- a red button ---------- */
 .tf-btn.tf-danger-t { color: var(--err); }
 .tf-btn.tf-primary.tf-danger { background: var(--err); border-color: var(--err); color: var(--sheet); }

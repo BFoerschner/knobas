@@ -174,6 +174,13 @@ pub struct EntityFilter {
     /// Whether to reach past `sync.live_item` for entities withdrawn upstream
     /// (§5a: links and notes may point at them).
     pub include_deleted: bool,
+    /// Only what this ticket reaches (#817): the job-reach read
+    /// (`knobas_core::reach`), resolved server-side per read as
+    /// [`Self::context`] is. `None` is unscoped. With a context as well, a
+    /// row must be in both. Absent on the wire reads as `None`, so a caller
+    /// written before #817 is unscoped as it was.
+    #[serde(default)]
+    pub reach: Option<String>,
 }
 
 /// The orderings a room reads in: the two plain ones, and since #680 the two
@@ -783,6 +790,22 @@ pub async fn list_entities_inner(
     let members = match filter.context.as_deref() {
         Some(ctx) => Some(knobas_core::context::member_ids(pool, ctx).await?),
         None => None,
+    };
+    // What a ticket reaches is a set of ids too (#817), and it narrows the
+    // same parameter: a job's sections read their rows through it.
+    let members = match filter.reach.as_deref() {
+        Some(ticket) => {
+            let reached: Vec<String> = knobas_core::reach::reach(pool, ticket)
+                .await?
+                .into_iter()
+                .map(|row| row.entity_id)
+                .collect();
+            Some(match members {
+                Some(held) => reached.into_iter().filter(|id| held.contains(id)).collect(),
+                None => reached,
+            })
+        }
+        None => members,
     };
 
     let rows = sqlx::query(statement(filter)?)
@@ -3358,6 +3381,7 @@ mod tests {
             project: None,
             order,
             include_deleted,
+            reach: None,
         };
         let chosen = |include_deleted, order| statement(&filter(include_deleted, order)).ok();
         assert_eq!(chosen(false, EntityOrder::UpdatedDesc), Some(LIVE_UPDATED));
@@ -3483,6 +3507,57 @@ pub async fn context_members(
 ) -> Result<Vec<String>, IpcError> {
     let pool = lifecycle.pool()?;
     Ok(knobas_core::context::member_ids(&pool, &ctx_id).await?)
+}
+
+/// What a ticket reaches (#817, R-2.8, R-2.9): each entity once, with the
+/// first step of its path and where the path came from -- the ticket's own
+/// links, or its parent's (R-7.3). `knobas_core::reach` is the walk; a job's
+/// sections read it once for their reason labels, and `list_entities`'
+/// `reach` scopes their rows by the same walk.
+///
+/// An id nothing answers to reaches nothing.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) while the
+/// database is still coming up, [`Internal`](crate::IpcErrorCode::Internal)
+/// for a query failure.
+#[tauri::command]
+pub async fn job_reach(
+    lifecycle: State<'_, Lifecycle>,
+    entity_id: String,
+) -> Result<Vec<knobas_core::reach::Reached>, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::reach::reach(&pool, &entity_id).await?)
+}
+
+/// Whether *Sub-tasks show their parent ticket's connections* is on (R-7.3).
+/// On until somebody switches it off.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+#[tauri::command]
+pub async fn parent_links(lifecycle: State<'_, Lifecycle>) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::reach::parent_links(&pool).await?)
+}
+
+/// Switch *Sub-tasks show their parent ticket's connections* (R-7.3), and
+/// answer what is now stored, as `set_passive_attribution` does.
+///
+/// # Errors
+///
+/// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if the write fails.
+#[tauri::command]
+pub async fn set_parent_links(
+    lifecycle: State<'_, Lifecycle>,
+    enabled: bool,
+) -> Result<bool, IpcError> {
+    let pool = lifecycle.pool()?;
+    Ok(knobas_core::reach::set_parent_links(&pool, enabled).await?)
 }
 
 /// One activity line per context mutation, on the context's own entity.

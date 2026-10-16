@@ -167,6 +167,10 @@ pub struct Parsed {
     /// mirror, asked after the parse, and the answer is reported in the
     /// spelling the reader typed.
     pub under: Vec<(String, String)>,
+    /// The `reach:` values (#817), lowercased, in the order typed: each a
+    /// ticket key or id whose job-reach read the row must be in. Typed only,
+    /// for `under:`'s reason.
+    pub reach: Vec<String>,
     /// What every source declares, carried over from the vocabulary for the
     /// same reason [`Self::identity`] is: [`merge`] hands it to the statement,
     /// which reads the parent each child declares.
@@ -199,6 +203,10 @@ pub struct EffectiveFilters {
     /// The `under:` values, lowercased, OR-ed: the item sits beneath a parent
     /// answering to one of them, or is that parent (ADR-0018).
     pub under: Vec<String>,
+    /// The `reach:` values (#817), lowercased, OR-ed: the row is something
+    /// one of these tickets reaches, by `knobas_core::reach_walk!` -- the
+    /// same walk the job-reach read makes.
+    pub reach: Vec<String>,
     /// The declarations every row's path line reads the parent through
     /// (#596). Carried whether or not [`Self::under`] is set, since every hit
     /// draws its path. The `under:` predicate read them too until #627; it
@@ -256,6 +264,12 @@ impl EffectiveFilters {
         !self.under.is_empty()
     }
 
+    /// Whether this query scoped by what a ticket reaches (#817).
+    #[must_use]
+    pub fn filters_by_reach(&self) -> bool {
+        !self.reach.is_empty()
+    }
+
     /// Whether anything is actually being filtered on.
     ///
     /// The engine's reason for asking: a query with neither text nor a filter
@@ -277,6 +291,7 @@ impl EffectiveFilters {
             && !self.mine
             && self.named_authors.is_empty()
             && self.under.is_empty()
+            && self.reach.is_empty()
             && self.fields.is_empty()
     }
 
@@ -376,6 +391,8 @@ pub fn merge(parsed: &Parsed, chips: &SearchFilters) -> EffectiveFilters {
             .iter()
             .map(|(_, value)| value.clone())
             .collect(),
+        // Typed only, like `under:`.
+        reach: parsed.reach.clone(),
         // Always: every row's path line reads the parent its kind declares
         // (#596), not only an `under:` predicate.
         declarations: parsed.declarations.clone(),
@@ -441,6 +458,7 @@ impl Parsed {
             list_id: None,
             identity: vocab.identity.clone(),
             under: Vec::new(),
+            reach: Vec::new(),
             declarations: vocab.declarations.clone(),
             fields: Vec::new(),
         }
@@ -674,6 +692,17 @@ fn apply_key_value(
             let value = unquote(value.trim()).trim().to_lowercase();
             if !value.is_empty() && !parsed.under.iter().any(|(_, seen)| *seen == value) {
                 parsed.under.push((token.to_owned(), value));
+            }
+        }
+        // What a ticket reaches (#817, R-2.9): the job-reach read as a
+        // filter. The value is a ticket key (`PAY-231`) or id
+        // (`jira:PAY-231`), matched ignoring case; repeated values OR. A key
+        // nothing answers to reaches nothing, which is a true empty result.
+        // A bare `reach:` is somebody mid-typing.
+        "reach" => {
+            let value = unquote(value.trim()).trim().to_lowercase();
+            if !value.is_empty() && !parsed.reach.contains(&value) {
+                parsed.reach.push(value);
             }
         }
         // The estate's own keys. They have no home before M4, and demoting
@@ -1256,6 +1285,11 @@ mod tests {
                 under: vec!["payout-service".to_owned()],
                 ..EffectiveFilters::default()
             },
+            // `reach:PAY-231` alone is "everything that job shows" (#817).
+            EffectiveFilters {
+                reach: vec!["pay-231".to_owned()],
+                ..EffectiveFilters::default()
+            },
         ];
         for filters in cases {
             assert!(!filters.is_empty(), "{filters:?}");
@@ -1294,6 +1328,26 @@ mod tests {
         assert!(typing.under.is_empty());
         assert!(typing.query.unknown_tokens.is_empty());
         assert!(typing.query.text.is_empty());
+    }
+
+    /// `reach:` (#817) is a typed filter like `under:`: lowercased, each
+    /// value once, a bare one neither a filter nor an unknown token, and no
+    /// chip to echo.
+    #[test]
+    fn reach_is_a_typed_filter_that_ignores_case() {
+        let v = fixture();
+        let p = parse("reach:PAY-231 retry REACH:jira:OPS-77 reach:pay-231", &v);
+        assert_eq!(p.query.text, "retry");
+        assert_eq!(p.reach, ["pay-231", "jira:ops-77"]);
+        assert!(p.query.unknown_tokens.is_empty());
+        let merged = merge(&p, &SearchFilters::default());
+        assert_eq!(merged.reach, ["pay-231", "jira:ops-77"]);
+        assert!(merged.filters_by_reach());
+        assert_eq!(merged.echo(), SearchFilters::default());
+
+        let typing = parse("reach:", &v);
+        assert!(typing.reach.is_empty());
+        assert!(typing.query.unknown_tokens.is_empty());
     }
 
     fn field(key: FieldKey, negated: bool, values: &[&str]) -> FieldFilter {

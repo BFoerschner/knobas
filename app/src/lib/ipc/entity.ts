@@ -122,6 +122,12 @@ export interface EntityFilter {
   project: string | null;
   /** Reach past the live-item view for entities withdrawn upstream (§5a). */
   include_deleted: boolean;
+  /**
+   * Only what this ticket (an entity id) reaches — the job-reach read, #817.
+   * Absent or `null` is unscoped; with {@link context} too, a row must be in
+   * both.
+   */
+  reach?: string | null;
 }
 
 /** One page of a room — `EntityPage`. */
@@ -1460,6 +1466,44 @@ export function promoteContext(entityId: string): Promise<ContextRow> {
  */
 export function contextMembers(ctxId: string): Promise<string[]> {
   return invoke<string[]>("context_members", { ctxId });
+}
+
+/**
+ * Where a reached entity's path came from — `knobas_core::reach::Origin`.
+ * Tagged on `kind`; TF5's link sets join as one more arm.
+ */
+export type ReachOrigin = { kind: "own" } | { kind: "parent"; ticket: string };
+
+/** One entity a ticket reaches — `knobas_core::reach::Reached` (#817). */
+export interface Reached {
+  entity_id: string;
+  /** What it is: `pr`, `build`, `asset`, `monitor`. */
+  kind: string;
+  /**
+   * The first step of the path that brought it in, an entity id: what the
+   * row's reason names. Equal to `entity_id` when it is itself the first step.
+   */
+  step: string;
+  origin: ReachOrigin;
+}
+
+/**
+ * What a ticket reaches — `job_reach` (#817, R-2.8): its context's walk,
+ * down only from a VM, proxy or host, plus its parent's own links behind
+ * {@link parentLinks}. An id nothing answers to reaches nothing.
+ */
+export function jobReach(entityId: string): Promise<Reached[]> {
+  return invoke<Reached[]>("job_reach", { entityId });
+}
+
+/** Whether *Sub-tasks show their parent ticket's connections* is on (R-7.3). */
+export function parentLinks(): Promise<boolean> {
+  return invoke<boolean>("parent_links");
+}
+
+/** Switch R-7.3's switch; answers what is now stored. */
+export function setParentLinks(enabled: boolean): Promise<boolean> {
+  return invoke<boolean>("set_parent_links", { enabled });
 }
 
 /** One ticket on the mini board — `MiniBoardCard` (#177). */

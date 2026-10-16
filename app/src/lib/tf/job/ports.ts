@@ -1,14 +1,17 @@
 /**
- * The reads and writes the job page (#816) calls, injectable so a test needs
- * no bridge. Every one is an existing command but the two conversation
- * reads #819 adds (`visit_entity`, `entity_thread`).
+ * The reads and writes the job page (#816, #817, #818, #819, #820) calls,
+ * injectable so a test needs no bridge. Every one is an existing command but
+ * the two conversation reads #819 adds (`visit_entity`, `entity_thread`) and
+ * `job_reach`, which #817 adds.
  */
+import { getAsset, type AssetDetail } from "../../ipc/assets";
 import {
   checkoutCommands,
   createLink,
   entityCheckout,
   entityThread,
   getEntity,
+  jobReach,
   listEntities,
   openCheckout,
   promoteContext,
@@ -26,14 +29,25 @@ import {
   type LinkRow,
   type SuggestionPage,
   type Thread,
+  type Reached,
 } from "../../ipc/entity";
 import { launcherHome, search } from "../../ipc/search";
 import type { SessionPorts } from "../../launcher/session.svelte";
-import { listSources, type QueuedWrite, type WriteOpPayload } from "../../ipc/sources";
+import {
+  credentialHealth,
+  listSources,
+  syncStatus,
+  type CredentialHealth,
+  type QueuedWrite,
+  type SourceSyncStatus,
+  type WriteOpPayload,
+} from "../../ipc/sources";
 import { weekTimesheet, type DayWindow, type Week } from "../../ipc/time";
+import { BRIDGE as startWorkBridge, type StartWorkApi } from "../../start-work/start-work.svelte";
+import type { SourceFacts } from "./job";
 
 export interface JobPorts {
-  listSources: () => Promise<{ id: string }[]>;
+  listSources: () => Promise<SourceFacts[]>;
   getEntity: (entityId: string) => Promise<EntityDetail>;
   promoteContext: (entityId: string) => Promise<ContextRow>;
   listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
@@ -52,6 +66,15 @@ export interface JobPorts {
   /** What *Link to…* searches with: the launcher's own reads. */
   search: SessionPorts["search"];
   launcherHome: SessionPorts["launcherHome"];
+  /** What the ticket reaches (#817). */
+  jobReach: (entityId: string) => Promise<Reached[]>;
+  /** One reached asset, for the Assets section. */
+  getAsset: (assetId: string) => Promise<AssetDetail>;
+  /** Every source's credential, for the Builds section's warning. */
+  credentialHealth: () => Promise<CredentialHealth[]>;
+  syncStatus: () => Promise<SourceSyncStatus[]>;
+  /** The start-work flow's five commands (#44), the job's stepper's (#818). */
+  startWork: StartWorkApi;
 }
 
 /**
@@ -77,4 +100,9 @@ export const bridgePorts: JobPorts = {
   roomSuggestions: (sources, ctx, limit) => roomSuggestions(sources, ctx, limit),
   search: (query) => search(query),
   launcherHome: () => launcherHome(),
+  jobReach: (entityId) => jobReach(entityId),
+  getAsset: (assetId) => getAsset(assetId),
+  credentialHealth: () => credentialHealth(),
+  syncStatus: () => syncStatus(),
+  startWork: startWorkBridge,
 };

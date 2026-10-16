@@ -62,6 +62,8 @@ function linkRow(from_id: string, to_id: string, relation: string, origin: LinkR
 const LINKS: LinkRow[] = [
   linkRow("mock:payout-service#142", "mock:PAY-231", "implements", "source", null),
   linkRow("mock:ENG-SEPA", "mock:PAY-231", "documents", "manual", null),
+  // PAY-228 is blocked by OPS-77 (#818), so its job draws the red banner.
+  linkRow("mock:OPS-77", "mock:PAY-228", "blocks", "source", "Staging verification needs the rotated credentials. Priya expects Tuesday."),
 ];
 
 /** One link's far end from `id`, resolved against the corpus. */

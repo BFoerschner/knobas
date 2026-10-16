@@ -15,6 +15,7 @@ mod mini_board;
 mod notes;
 mod payload_paths;
 mod projects;
+mod reach;
 mod similar_text_incremental;
 mod similar_text_perf;
 mod stores;

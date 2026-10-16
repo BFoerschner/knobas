@@ -729,16 +729,11 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     commands: ["share_export", "restore_backup"],
   },
   {
-    surface: "Start work, and the merge follow that closes it",
+    // The flow itself is answered since #818 (`fake/job-reach.ts`), so the
+    // job's stepper can be walked; the merge follow is not.
+    surface: "The merge follow that closes a started ticket",
     witnesses: ["crates/knobas-app/tests/it/start_work.rs"],
-    commands: [
-      "start_work_flow",
-      "start_work_run",
-      "start_work_retry",
-      "start_work_skip",
-      "start_work_amend",
-      "follow_merges",
-    ],
+    commands: ["follow_merges"],
   },
   {
     // `create_link` and `unlink` are answered since #921 (`fake/entity.ts`).

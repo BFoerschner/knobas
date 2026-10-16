@@ -150,3 +150,46 @@ test("settings preferences keep what they are told, and a clone answers cloning 
     expect((h["clone_repo"]!({ entityId: repo, stop: true }) as { status: string }).status).toBe("stopped");
   }
 });
+
+// -- the job's reach and Start work (#817, #818) ------------------------------
+
+test("job_reach labels a sub-task's parent links behind the switch, and list_entities scopes by the same table", () => {
+  const h = demoHandlers() as Calls;
+  const own = h["job_reach"]!({ entityId: "mock:PAY-231" }) as { entity_id: string; kind: string; origin: { kind: string } }[];
+  expect(own.some((row) => row.kind === "build")).toBe(true);
+  expect(own.every((row) => row.origin.kind === "own")).toBe(true);
+
+  const sub = h["job_reach"]!({ entityId: "mock:PAY-232" }) as { entity_id: string; origin: { kind: string; ticket?: string } }[];
+  expect(sub.length).toBeGreaterThan(0);
+  expect(sub.every((row) => row.origin.kind === "parent" && row.origin.ticket === "mock:PAY-231")).toBe(true);
+
+  const page = h["list_entities"]!({
+    filter: { sources: [], kinds: ["build"], order: "latest_per_parent", context: null, reach: "mock:PAY-231", include_deleted: false },
+    limit: 50,
+    offset: 0,
+  }) as { rows: { entity_id: string; state: { tone: string } | null }[] };
+  const builds = own.filter((row) => row.kind === "build").map((row) => row.entity_id).sort();
+  expect(page.rows.map((row) => row.entity_id).sort()).toEqual(builds);
+  expect(page.rows.some((row) => row.state?.tone === "err")).toBe(true);
+
+  expect(h["set_parent_links"]!({ enabled: false })).toBe(false);
+  expect(h["job_reach"]!({ entityId: "mock:PAY-232" })).toEqual([]);
+  expect(h["set_parent_links"]!({ enabled: true })).toBe(true);
+});
+
+test("the start-work flow proposes in the named repository, then runs to queued writes and a done link", () => {
+  const h = demoHandlers() as Calls;
+  expect(h["start_work_flow"]!({ entityId: "mock:PAY-236", repoId: null })).toEqual([]);
+  const proposed = h["start_work_flow"]!({ entityId: "mock:PAY-236", repoId: "mock:tidewater/payout-service" }) as {
+    step: string;
+    outcome: string;
+    payload: { CreateBranch?: { name: string; entity: string } };
+  }[];
+  expect(proposed.map((step) => step.outcome)).toEqual(["pending", "pending", "pending", "pending"]);
+  expect(proposed[0]!.payload.CreateBranch).toMatchObject({
+    entity: "mock:tidewater/payout-service",
+    name: "feature/PAY-236-payout-csv-export-for-finance",
+  });
+  const ran = h["start_work_run"]!({ entityId: "mock:PAY-236" }) as { outcome: string }[];
+  expect(ran.map((step) => step.outcome)).toEqual(["queued", "queued", "succeeded", "queued"]);
+});

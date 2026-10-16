@@ -16,7 +16,13 @@ const KIND_INFO = [
 
 /** The four sources the sources view draws. */
 export const FIXTURE_SOURCES = [
-  fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
+  {
+    ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
+    // Who the reader is in the mock source (#818): the assignee the corpus's
+    // tickets name, so a To Do ticket of Mara's offers *Start work* on its
+    // job, as `mini_board`'s `mine` already says of the same tickets.
+    config: { username: "mara" } as Record<string, unknown>,
+  },
   fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),

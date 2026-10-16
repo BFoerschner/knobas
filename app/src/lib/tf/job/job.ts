@@ -7,7 +7,17 @@
  * adapter's declarations (ADR-0007); the blocked chip reads the confirmed
  * links the detail already carries.
  */
-import type { EntityDetail, EntityRow, Tone } from "../../ipc/entity";
+import type { AssetStatus } from "../../ipc/assets";
+import type { EntityDetail, EntityRow, Reached, Tone } from "../../ipc/entity";
+import type { CredentialHealth, SourceSyncStatus } from "../../ipc/sources";
+
+/** What the job reads of a source; every field past the id may be missing. */
+export interface SourceFacts {
+  id: string;
+  display_name?: string;
+  config?: unknown;
+  kinds?: { id: string }[];
+}
 import type { Week } from "../../ipc/time";
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
@@ -64,6 +74,32 @@ export function blockers(detail: Pick<EntityDetail, "row" | "links">): string[] 
         entry.other.deleted_at === null,
     )
     .map((entry) => keyOf(entry.other.entity_id));
+}
+
+/** One ticket blocking this one, for the banner (R-4.8). */
+export interface Blocker {
+  entityId: string;
+  key: string;
+  title: string;
+  /** The link's note, where somebody wrote why. */
+  note: string | null;
+}
+
+/** {@link blockers}, with what the banner says about each. */
+export function blockerEntries(detail: Pick<EntityDetail, "row" | "links">): Blocker[] {
+  return detail.links
+    .filter(
+      (entry) =>
+        entry.link.relation === "blocks" &&
+        entry.link.to_id === detail.row.entity_id &&
+        entry.other.deleted_at === null,
+    )
+    .map((entry) => ({
+      entityId: entry.other.entity_id,
+      key: keyOf(entry.other.entity_id),
+      title: entry.other.title,
+      note: entry.link.note ?? null,
+    }));
 }
 
 /**
@@ -183,14 +219,231 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
       return `#/commit/${id}`;
     case "ticket":
       return `#/job/${encodeURIComponent(keyOf(row.entity_id))}`;
+    case "build":
+      return `#/build/${id}`;
+    case "page":
+      return `#/page/${id}`;
+    case "asset":
+      return `#/asset/${id}`;
+    case "monitor":
+      return "#/monitors";
     default:
       return "#/code";
   }
 }
 
-/** Whether `row` matches a section's filter text, ignoring case. */
-export function matches(row: EntityRow, text: string): boolean {
+// ---------------------------------------------------------------------------
+// The other four sections (#817, R-4.6, R-4.7) and the job header (#818).
+// ---------------------------------------------------------------------------
+
+/**
+ * The label a row from the parent carries (R-4.6, R-7.3): "Parent PAY-231".
+ * `null` for a row the ticket reaches itself. TF5's link sets add theirs.
+ */
+export function originLabel(reached: Pick<Reached, "origin"> | undefined): string | null {
+  if (reached?.origin.kind === "parent") return `Parent ${keyOf(reached.origin.ticket)}`;
+  return null;
+}
+
+/** How many rows carry `tone`. */
+function toned(rows: readonly { state: EntityRow["state"] }[], tone: Tone): number {
+  return rows.filter((row) => row.state?.tone === tone).length;
+}
+
+/** One coloured count of a rollup: "1 failing" beside a dot of its tone. */
+export interface Signal {
+  tone: Tone;
+  text: string;
+}
+
+/** A section's one-line rollup: the lead words and the counts beside it. */
+export interface Rollup {
+  lead: string;
+  signals: Signal[];
+}
+
+/**
+ * Builds' rollup, prototype-6's words: "7 configurations: 1 failing, 1
+ * running, 5 passing". A row is a configuration's latest run, so the count
+ * is of configurations. Failing is `err`, running `info`, passing `ok`.
+ */
+export function buildsRollup(rows: readonly EntityRow[]): Rollup {
+  const signals: Signal[] = [];
+  const add = (tone: Tone, word: string) => {
+    const n = toned(rows, tone);
+    if (n > 0) signals.push({ tone, text: `${n} ${word}` });
+  };
+  add("err", "failing");
+  add("info", "running");
+  add("ok", "passing");
+  return { lead: `${rows.length} ${rows.length === 1 ? "configuration" : "configurations"}:`, signals };
+}
+
+/** Monitors' rollup: "4 watched: 1 down, 3 fine". */
+export function monitorsRollup(rows: readonly EntityRow[]): Rollup {
+  const signals: Signal[] = [];
+  const add = (tone: Tone, word: string) => {
+    const n = toned(rows, tone);
+    if (n > 0) signals.push({ tone, text: `${n} ${word}` });
+  };
+  add("err", "down");
+  add("warn", "warning");
+  add("ok", "fine");
+  return { lead: `${rows.length} watched:`, signals };
+}
+
+/**
+ * The space a page sits in: the first part of its path line, which for a
+ * Confluence page starts at the space (#284). `null` with no path.
+ */
+export function spaceOf(row: Pick<EntityRow, "path">): string | null {
+  const first = row.path?.split(/ › | \/ /)[0]?.trim();
+  return first ? first : null;
+}
+
+/** Pages' rollup: "3 pages in ENG, OPS", and how many ask something of you. */
+export function pagesRollup(rows: readonly EntityRow[]): Rollup {
+  const spaces = [...new Set(rows.map(spaceOf).filter((space): space is string => space !== null))];
+  const noun = rows.length === 1 ? "page" : "pages";
+  const asking = toned(rows, "warn");
+  return {
+    lead: spaces.length > 0 ? `${rows.length} ${noun} in ${spaces.join(", ")}` : `${rows.length} ${noun}`,
+    signals: asking > 0 ? [{ tone: "warn", text: `${asking} ask something of you` }] : [],
+  };
+}
+
+/** The tone an asset's health draws in; `none` draws none. */
+export function assetTone(health: AssetStatus): Tone | null {
+  switch (health) {
+    case "down":
+      return "err";
+    case "warn":
+      return "warn";
+    case "up":
+      return "ok";
+    default:
+      return null;
+  }
+}
+
+/** One asset as the section draws it. */
+export interface AssetLine {
+  id: string;
+  name: string;
+  type: string;
+  environment: string | null;
+  /** What holds it, by name. */
+  on: string | null;
+  tone: Tone | null;
+}
+
+/** Assets' rollup: "5 assets in prod, stage", and how many have a problem. */
+export function assetsRollup(lines: readonly AssetLine[]): Rollup {
+  const envs = [...new Set(lines.map((line) => line.environment).filter((env): env is string => !!env))];
+  const noun = lines.length === 1 ? "asset" : "assets";
+  const bad = lines.filter((line) => line.tone === "err" || line.tone === "warn").length;
+  return {
+    lead: envs.length > 0 ? `${lines.length} ${noun} in ${envs.join(", ")}` : `${lines.length} ${noun}`,
+    signals: bad > 0 ? [{ tone: "err", text: `${bad} with a problem` }] : [],
+  };
+}
+
+/** A duration in prototype-6's words: "38 min", "2 h", "3 days". */
+export function age(iso: string, now: Date): string {
+  const minutes = Math.max(1, Math.round((now.getTime() - new Date(iso).getTime()) / 60_000));
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.round(minutes / 60);
+  if (hours < 48) return `${hours} h`;
+  return `${Math.round(hours / 24)} days`;
+}
+
+/** One stale-data warning on the Builds section (R-4.7). */
+export interface Staleness {
+  sourceId: string;
+  text: string;
+}
+
+/**
+ * The Builds section's warnings (R-4.7): every source that holds builds --
+ * one whose descriptor declares the `build` kind, or that a drawn row came
+ * from -- whose credential the reader has to fix. "TeamCity data is 38 min
+ * old: sign-in failing." The age is since the sign-in started failing, the
+ * moment the status bar dates the failure from. The fix is *Re-enter
+ * password*, on the source's settings page.
+ */
+export function staleBuilds(
+  sources: readonly SourceFacts[],
+  health: readonly CredentialHealth[],
+  sync: readonly SourceSyncStatus[],
+  rows: readonly EntityRow[],
+  now: Date,
+): Staleness[] {
+  const holders = sources.filter(
+    (source) => (source.kinds ?? []).some((kind) => kind.id === "build") || rows.some((row) => row.source_id === source.id),
+  );
+  const out: Staleness[] = [];
+  for (const source of holders) {
+    const state = health.find((row) => row.source_id === source.id);
+    if (state?.state !== "unauthorized" && state?.state !== "missing_secret") continue;
+    const run = sync.find((row) => row.source_id === source.id);
+    const since = run?.last_outcome === "unauthorized" ? run.last_finished_at : state.checked_at;
+    const name = source.display_name || source.id;
+    const why = state.state === "missing_secret" ? "no password stored" : "sign-in failing";
+    out.push({ sourceId: source.id, text: since ? `${name} data is ${age(since, now)} old: ${why}.` : `${name} data is stale: ${why}.` });
+  }
+  return out;
+}
+
+/** The username knobas knows the reader by in a source, or `null`. */
+function username(source: SourceFacts | undefined): string | null {
+  const config = source?.config as Record<string, unknown> | null | undefined;
+  const name = config?.["username"];
+  return typeof name === "string" && name.trim() !== "" ? name.trim() : null;
+}
+
+/**
+ * Whether the ticket is assigned to the reader: its assignee (a ticket's
+ * `author`, as the Jira adapter maps it) is the username its source is
+ * configured with -- the rule `mini_board`'s `mine` reads, on the same two
+ * values.
+ */
+export function isMine(
+  detail: Pick<EntityDetail, "author" | "row">,
+  sources: readonly SourceFacts[],
+): boolean {
+  const me = username(sources.find((source) => source.id === detail.row.source_id));
+  return me !== null && detail.author !== null && detail.author === me;
+}
+
+/**
+ * Whether the job offers *Start work* (R-4.9): a To Do ticket assigned to the
+ * reader, the same test the Tickets preview's button makes.
+ */
+export function offersStartWork(status: string | null, mine: boolean): boolean {
+  return mine && (status?.toLowerCase() ?? "") === "to do";
+}
+
+/** One row of a job section, whatever its kind. */
+export interface SectionRow {
+  id: string;
+  /** The item's full view (R-4.10). */
+  href: string;
+  title: string;
+  mono: boolean;
+  /** Where it sits: a repository, a space path. Drawn mono before `sub`. */
+  repo: string | null;
+  sub: string;
+  tone: Tone | null;
+  chip: { text: string; tone: Tone } | null;
+  /** The label of a row from the parent (or, from TF5, a link set). */
+  from: string | null;
+}
+
+/** Whether a section row matches the in-section filter, ignoring case. */
+export function rowMatches(row: SectionRow, text: string): boolean {
   const needle = text.trim().toLowerCase();
   if (needle === "") return true;
-  return [row.title, row.path ?? "", row.state?.text ?? ""].some((field) => field.toLowerCase().includes(needle));
+  return [row.title, row.repo ?? "", row.sub, row.from ?? "", row.chip?.text ?? ""].some((field) =>
+    field.toLowerCase().includes(needle),
+  );
 }

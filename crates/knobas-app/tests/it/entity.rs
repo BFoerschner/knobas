@@ -110,6 +110,7 @@ fn all() -> EntityFilter {
         project: None,
         order: EntityOrder::UpdatedDesc,
         include_deleted: false,
+        reach: None,
     }
 }
 
@@ -914,6 +915,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
                 sources: vec![source.clone()],
                 project: Some("PAY".to_owned()),
                 include_deleted: true,
+                reach: None,
                 order,
                 ..all()
             },

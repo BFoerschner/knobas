@@ -103,6 +103,17 @@ const JOB_PORTS: JobPorts = {
   roomSuggestions: () => Promise.resolve({ rows: [], total: 0, more: [] }),
   search: () => Promise.reject(new Error("not in this suite")),
   launcherHome: () => Promise.reject(new Error("not in this suite")),
+  jobReach: () => Promise.resolve([]),
+  getAsset: () => Promise.reject(new Error("not in this suite")),
+  credentialHealth: () => Promise.resolve([]),
+  syncStatus: () => Promise.resolve([]),
+  startWork: {
+    flow: () => Promise.resolve([]),
+    run: () => Promise.resolve([]),
+    retry: () => Promise.resolve([]),
+    skip: () => Promise.resolve([]),
+    amend: () => Promise.resolve([]),
+  },
 };
 
 function start(
