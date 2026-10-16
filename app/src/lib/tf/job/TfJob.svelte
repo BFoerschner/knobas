@@ -57,9 +57,9 @@
     connectedCount,
     hiddenOf,
     linkedOn,
-    originsOf,
+    groupsOf,
     proposalsFor,
-    type OriginRow,
+    type GroupRow,
   } from "./connections";
   import { summary } from "./conversation";
   import {
@@ -208,15 +208,7 @@
       if (mine !== token) return;
       void readProposals(context.id, id, mine);
       void readReach(id, mine);
-      void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
-        if (mine === token && rows) builds = rows;
-      });
-      void readRows(id, ["page"], "updated_desc", mine).then((rows) => {
-        if (mine === token && rows) pages = rows;
-      });
-      void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
-        if (mine === token && rows) monitors = rows;
-      });
+      readSections(id, mine);
       if (offersStartWork(found.status, isMine(found, listed))) void readRepos(mine);
       await readCode(id, mine);
     } catch (cause) {
@@ -303,6 +295,14 @@
     const mine = token;
     void readInherited(id, mine);
     void readReach(id, mine);
+    readSections(id, mine);
+    void readRows(id, [...CODE_KINDS], "updated_desc", mine).then((rows) => {
+      if (mine === token && rows) code = rows;
+    });
+  }
+
+  /** Builds, Pages and Monitors, each through the reach. */
+  function readSections(id: string, mine: number) {
     void readRows(id, ["build"], "latest_per_parent", mine).then((rows) => {
       if (mine === token && rows) builds = rows;
     });
@@ -312,13 +312,10 @@
     void readRows(id, ["monitor"], "updated_desc", mine).then((rows) => {
       if (mine === token && rows) monitors = rows;
     });
-    void readRows(id, [...CODE_KINDS], "updated_desc", mine).then((rows) => {
-      if (mine === token && rows) code = rows;
-    });
   }
 
   /** *Hide here* (R-7.5): one member off this ticket only, with *Undo*. The set is not touched. */
-  async function hideHere(row: OriginRow) {
+  async function hideHere(row: GroupRow) {
     if (!detail) return;
     const id = detail.row.entity_id;
     const key = keyOf(id);
@@ -533,7 +530,7 @@
   const current = $derived(TABS.find((candidate) => candidate.id === tab) ?? TABS[0]);
   const conversation = $derived(thread === null ? null : summary(thread, lastVisit));
   const connected = $derived(detail ? linkedOn(detail) : []);
-  const origins = $derived(originsOf(inherited));
+  const groups = $derived(groupsOf(inherited));
 
   onMount(() => {
     // `L` opens the drawer (R-4.3), outside a text field and with nothing open over the page.
@@ -638,7 +635,7 @@
         <button type="button" class="tf-conn" data-testid="job-connections" title="Connections (L)" onclick={() => (drawer = true)}>
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"
             ><path d="M6.5 9.5l3-3M7 4.5l1-1a2.8 2.8 0 0 1 4 4l-1 1M9 11.5l-1 1a2.8 2.8 0 0 1-4-4l1-1" /></svg
-          ><b>{connectedCount(connected, origins)}</b> connected{#if proposals !== null && proposals.length > 0},
+          ><b>{connectedCount(connected, groups)}</b> connected{#if proposals !== null && proposals.length > 0},
             <span class="tf-p">{proposals.length} proposed</span>{/if}
           <kbd>L</kbd>
         </button>
@@ -648,8 +645,8 @@
           <!-- R-4.4: hidden while the Conversation tab is open. -->
           <div class="tf-setsbar">
             <span class="tf-dim">Also on this job</span>
-            {#each origins as origin (origin.key)}
-              <a class="tf-setchip" href={origin.href}><b>{origin.label}</b> <span>{origin.via}</span></a>{" "}
+            {#each groups as group (group.key)}
+              <a class="tf-setchip" href={group.href}><b>{group.label}</b> <span>{group.via}</span></a>{" "}
             {:else}
               <span class="tf-dim">no link sets yet</span>
             {/each}
@@ -708,7 +705,7 @@
     <TfConnections
       jobKey={key}
       links={connected}
-      {origins}
+      {groups}
       hidden={hiddenOf(inherited)}
       alsoIn={(entityId) => alsoIn(inherited, entityId)}
       {proposals}

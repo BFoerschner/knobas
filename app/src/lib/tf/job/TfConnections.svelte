@@ -20,14 +20,14 @@
   import type { LinkEntry, SuggestionEntry } from "../../ipc/entity";
   import Marked from "../filter/Marked.svelte";
   import type { Layers } from "../layers.svelte";
-  import { filterLinks, filterRows, sectionOf, type Origin, type OriginRow } from "./connections";
+  import { filterLinks, filterRows, sectionOf, type HiddenRow, type JobGroup, type GroupRow } from "./connections";
   import { itemHash } from "./job";
 
   let {
     jobKey,
     links,
     proposals,
-    origins = [],
+    groups = [],
     hidden = [],
     alsoIn = () => [],
     layers,
@@ -43,9 +43,9 @@
     /** This ticket's proposals, `null` while the read is out. */
     proposals: SuggestionEntry[] | null;
     /** The link sets that apply, then the parent (#867): a group each. */
-    origins?: Origin[];
+    groups?: JobGroup[];
     /** A set's rows hidden on this ticket (R-7.5). */
-    hidden?: { id: string; title: string }[];
+    hidden?: HiddenRow[];
     /** The names of the sets that also hold a linked entity. */
     alsoIn?: (entityId: string) => string[];
     layers: Layers;
@@ -53,7 +53,7 @@
     onunlink: (entry: LinkEntry) => void;
     onlinkto: () => void;
     /** *Hide here* on a set's row. */
-    onhide?: (row: OriginRow) => void;
+    onhide?: (row: GroupRow) => void;
     onshow?: (id: string) => void;
   } = $props();
 
@@ -106,11 +106,11 @@
     {:else}
       <p class="tf-dnone">Nothing linked on the ticket itself.</p>
     {/each}
-    {#each origins as origin (origin.key)}
-      {@const rows = filterRows(origin.rows, text)}
+    {#each groups as group (group.key)}
+      {@const rows = filterRows(group.rows, text)}
       <h3>
-        From {origin.label}, {origin.via} <span class="tf-count">{rows.length}</span>
-        {#if origin.setId !== null}<a class="tf-linkish tf-dedit" href={origin.href} onclick={onclose}>Edit set</a>{/if}
+        From {group.label}, {group.via} <span class="tf-count">{rows.length}</span>
+        {#if group.setId !== null}<a class="tf-linkish tf-dedit" href={group.href} onclick={onclose}>Edit set</a>{/if}
       </h3>
       {#each rows as row (row.id)}
         <div class="tf-lk">
@@ -122,7 +122,7 @@
             {/if}
             <div class="tf-how">{row.section}</div>
           </div>
-          {#if origin.setId !== null}
+          {#if group.setId !== null}
             <button type="button" class="tf-x" onclick={() => onhide(row)} aria-label="Hide here: {row.title}">Hide here</button>
           {/if}
         </div>

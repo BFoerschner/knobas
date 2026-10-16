@@ -467,12 +467,12 @@ test("a ticket with nothing linked says so, and no proposals draw no box", async
 // ---- link sets on the job (#867, R-4.4, R-6.2, R-7.5) ----
 
 /**
- * Payout stack applies through the epic and holds the PR the ticket links
+ * Payout stack applies through the epic and holds the page the ticket links
  * too, a repo and a pipeline; the parent PAY-230 links one page. `hides` is
  * what `link_set_hidden` holds for PAY-231, and `jobLinkSets` reads it.
  */
 function setPorts(hides = new Set<string>(), writes: [string, string, boolean][] = []): JobPorts {
-  const member = (kind: "repo" | "pipeline", entity_id: string, entity_kind: string, title: string) => ({
+  const member = (kind: "repo" | "page" | "pipeline", entity_id: string, entity_kind: string, title: string) => ({
     kind,
     entity_id,
     entity_kind,
@@ -488,7 +488,7 @@ function setPorts(hides = new Set<string>(), writes: [string, string, boolean][]
             name: "Payout stack",
             via: { kind: "epic", value: "jira:PAY-200", title: "PAY-200" },
             members: [
-              { ...member("repo", PR.other.entity_id, "pr", PR.other.title) },
+              member("page", PAGE.other.entity_id, "page", PAGE.other.title),
               member("repo", "gitea:tidewater/payout-service", "repo", "payout-service"),
               member("pipeline", "teamcity:Payout_Build", "build_config", "Payout_Build"),
             ],
@@ -517,7 +517,7 @@ test("Also on this job names each set that applies with its reason, then the par
   const bar = target.querySelector(".tf-setsbar")!;
   expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections");
   expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/PAY-230"]);
-  // Two own links and three more from the set and the parent, the PR once.
+  // Two own links and three more from the set and the parent, the page once.
   expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
   if (job) unmount(job);
   open("conversation", { ports: setPorts() });
@@ -542,9 +542,9 @@ test("the drawer draws a group per set and the parent; a linked row says which s
   ]);
   expect(drawer.querySelector("h3 a")?.getAttribute("href")).toBe("#/sets/payout-stack");
   expect([...drawer.querySelectorAll(".tf-lk")].map((row) => squash(row))).toEqual([
-    "Idempotent retry window Code, also in Payout stack Unlink",
-    "SEPA payout retry design Pages Unlink",
-    "Idempotent retry window Code Hide here",
+    "Idempotent retry window Code Unlink",
+    "SEPA payout retry design Pages, also in Payout stack Unlink",
+    "SEPA payout retry design Pages Hide here",
     "payout-service Code Hide here",
     "Payout_Build Builds Hide here",
     "Payout runbook Pages",

@@ -66,7 +66,7 @@ export function viaLabel(rule: Pick<LinkSetRuleRow, "kind" | "value">): string {
 }
 
 /** One row of a set's or the parent's group. */
-export interface OriginRow {
+export interface GroupRow {
   /** The entity id: what *Hide here* and the link name. */
   id: string;
   title: string;
@@ -81,7 +81,7 @@ export interface OriginRow {
  * applies, or the parent (R-7.3). What *Also on this job* draws a chip for and
  * the drawer a group for.
  */
-export interface Origin {
+export interface JobGroup {
   /** `set:<id>` or `parent:<ticket>`, unique per job. */
   key: string;
   /** The set's name, or "Parent PAY-231". */
@@ -93,7 +93,7 @@ export interface Origin {
   /** The set's id; `null` for the parent, whose rows have no *Hide here*. */
   setId: string | null;
   /** The rows not hidden on this ticket. */
-  rows: OriginRow[];
+  rows: GroupRow[];
 }
 
 /**
@@ -113,9 +113,9 @@ function rowHash(id: string, kind: string | null, memberKind: string | null): st
 export const PARENT_VIA = "sub-tasks show their parent’s connections";
 
 /** The sets that apply, by name, then the parent: the chips and the groups, in order. */
-export function originsOf(read: JobLinkSets | null): Origin[] {
+export function groupsOf(read: JobLinkSets | null): JobGroup[] {
   if (read === null) return [];
-  const sets: Origin[] = read.sets.map((set) => ({
+  const sets: JobGroup[] = read.sets.map((set) => ({
     key: `set:${set.id}`,
     label: set.name,
     via: viaLabel(set.via),
@@ -150,8 +150,14 @@ export function originsOf(read: JobLinkSets | null): Origin[] {
   ];
 }
 
+/** A set's member hidden on this ticket: a *Hidden on KEY* row. */
+export interface HiddenRow {
+  id: string;
+  title: string;
+}
+
 /** A set's member hidden on this ticket, once however many sets hold it: *Hidden on KEY*. */
-export function hiddenOf(read: JobLinkSets | null): { id: string; title: string }[] {
+export function hiddenOf(read: JobLinkSets | null): HiddenRow[] {
   const out = new Map<string, string>();
   for (const set of read?.sets ?? []) {
     for (const member of set.members) {
@@ -167,11 +173,11 @@ export function alsoIn(read: JobLinkSets | null, entityId: string): string[] {
 }
 
 /** The group rows the drawer's filter keeps: every word in the title or the section. */
-export function filterRows(rows: readonly OriginRow[], text: string): OriginRow[] {
+export function filterRows(rows: readonly GroupRow[], text: string): GroupRow[] {
   return rows.filter((row) => matchesAll(`${row.title} ${row.section}`, text));
 }
 
 /** What the *Connections* button counts (R-4.3): every entity the drawer lists, once, hidden rows aside. */
-export function connectedCount(links: readonly LinkEntry[], origins: readonly Origin[]): number {
-  return new Set([...links.map((entry) => entry.other.entity_id), ...origins.flatMap((origin) => origin.rows.map((row) => row.id))]).size;
+export function connectedCount(links: readonly LinkEntry[], groups: readonly JobGroup[]): number {
+  return new Set([...links.map((entry) => entry.other.entity_id), ...groups.flatMap((group) => group.rows.map((row) => row.id))]).size;
 }
