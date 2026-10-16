@@ -45,6 +45,11 @@ export interface PrLine {
   idle: boolean;
 }
 
+/** Whether a group is *Mine*: asking your review, or yours. */
+function isMineGroup(group: PrGroup | null): boolean {
+  return group === "review" || group === "yours";
+}
+
 /** `#142` from `gitea:tidewater/payout-service#142`. */
 export function prNumber(entityId: string): string | null {
   const found = /#(\d+)$/.exec(entityId);
@@ -109,7 +114,7 @@ export function visiblePrs(lines: readonly PrLine[], filter: PrFilter): PrLine[]
   const states = filter.states.map((state) => state.toLowerCase());
   return lines.filter(({ row, group, number, idle }) => {
     if (filter.scope === "job" && !filter.held(row.entity_id)) return false;
-    if (filter.scope === "mine" && group !== "review" && group !== "yours") return false;
+    if (filter.scope === "mine" && !isMineGroup(group)) return false;
     if (states.length > 0 && !states.includes(row.state?.text.toLowerCase() ?? "")) return false;
     if (filter.flags.includes("Waiting on me") && group !== "review") return false;
     if (filter.flags.includes("Idle > 5 days") && !idle) return false;
@@ -124,18 +129,18 @@ export function visiblePrs(lines: readonly PrLine[], filter: PrFilter): PrLine[]
  * not be read there, *not on this machine* with no clone, and `null` while
  * `entity_checkout` has not answered.
  */
-export function checkoutLine(view: CheckoutView | undefined): string | null {
+export function checkoutLine(view: CheckoutView | undefined): { text: string; dim: boolean } | null {
   if (view === undefined) return null;
-  if (view.path === null) return "not on this machine";
+  if (view.path === null) return { text: "not on this machine", dim: true };
   const tree = view.tree;
-  if (tree === null || tree.status !== "read") return view.path;
+  if (tree === null || tree.status !== "read") return { text: view.path, dim: false };
   const changed = tree.changed + tree.untracked;
   const parts = [
     tree.ahead > 0 ? `${tree.ahead} ahead` : null,
     tree.behind > 0 ? `${tree.behind} behind` : null,
     changed > 0 ? `${changed} changed` : null,
   ].filter((part): part is string => part !== null);
-  return `${tree.branch ?? "detached"}, ${parts.length > 0 ? parts.join(", ") : "clean"}`;
+  return { text: `${tree.branch ?? "detached"}, ${parts.length > 0 ? parts.join(", ") : "clean"}`, dim: false };
 }
 
 /** A repository's key among pull requests: its source and its full name, which a pull request's parent path is. */
@@ -183,7 +188,7 @@ export function visibleRepos(
   const open = openPrsOf(lines);
   const mine = new Set(
     lines
-      .filter((line) => (line.group === "review" || line.group === "yours") && line.row.path !== null)
+      .filter((line) => isMineGroup(line.group) && line.row.path !== null)
       .map((line) => repoKey(line.row.source_id, line.row.path!)),
   );
   const isMine = (row: EntityRow) => mine.has(repoKey(row.source_id, row.title));

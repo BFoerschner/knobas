@@ -199,6 +199,6 @@ test("New pull request opens the compare page for the job's branch; with no job 
 
   await draw([], null);
   const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
-  expect(button?.hasAttribute("disabled")).toBe(true);
+  expect(button?.getAttribute("aria-disabled")).toBe("true");
   expect(target.querySelector(".tf-chip-job")).toBeNull();
 });

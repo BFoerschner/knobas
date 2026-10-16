@@ -201,7 +201,7 @@
 .tf-btn.tf-primary { background: var(--ink); color: var(--sheet); border-color: var(--ink); }
 .tf-btn.tf-ghost { border-color: transparent; background: none; }
 .tf-btn.tf-ghost:hover { background: var(--sheet-2); }
-.tf-btn[disabled] { opacity: .55; cursor: not-allowed; }
+.tf-btn[disabled], .tf-btn[aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
 
 /* ---------- chips, signals, small text ---------- */
 .tf-chip {
@@ -846,7 +846,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-who b { color: var(--ink); font-weight: 600; }
 .tf-msg.tf-new .tf-msg-body { border-color: var(--info); box-shadow: inset 3px 0 0 var(--info); }
 .tf-msg.tf-mention .tf-msg-body { box-shadow: inset 3px 0 0 var(--card-2); }
-.tf-chip.tf-chip-mention { background: var(--card); color: var(--card-ink); }
+.tf-chip.tf-chip-mention, .tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); }
 .tf-msg.tf-event { grid-template-columns: 28px 1fr; font-size: var(--t-sm); color: var(--ink-2); align-items: center; }
 .tf-at { font-weight: 600; color: var(--info); }
 .tf-fold {
@@ -1355,7 +1355,6 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-cprs td:nth-child(3) { width: 110px; }
 .tf-cprs td:nth-child(4) { width: 100px; }
 .tf-cprs td:nth-child(5) { width: 150px; }
-.tf-chip.tf-chip-job { background: var(--card); color: var(--card-ink); }
 .tf-cfail { color: var(--err); font-size: var(--t-sm); }
 @media (max-width: 900px) {
   .tf-cbody { padding-left: 16px; padding-right: 16px; overflow-x: auto; }

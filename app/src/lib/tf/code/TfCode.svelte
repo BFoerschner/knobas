@@ -94,7 +94,7 @@
   /** How many `entity_checkout` reads run at once: each may run `git status`. */
   const CHECKOUT_LANES = 4;
 
-  const read = (kinds: string[], order: EntityFilter["order"], reach: string | null = null): EntityFilter => ({
+  const filterOf = (kinds: string[], order: EntityFilter["order"], reach: string | null = null): EntityFilter => ({
     sources: [],
     kinds,
     updated_within_days: null,
@@ -117,18 +117,20 @@
   $effect(() => {
     if (!ready) return;
     let live = true;
+    failed = null;
+    checkouts = {};
     const fail = (error: unknown) => {
       if (live) failed = ipcErrorMessage(error);
     };
-    ports.listEntities(read(["repo"], "updated_desc"), LIMIT, 0).then((page) => {
+    ports.listEntities(filterOf(["repo"], "updated_desc"), LIMIT, 0).then((page) => {
       if (!live) return;
       repos = page;
       void readCheckouts(page.rows.map((row) => row.entity_id), () => live);
     }, fail);
-    ports.listEntities(read(["pr"], "attention"), LIMIT, 0).then((page) => {
+    ports.listEntities(filterOf(["pr"], "attention"), LIMIT, 0).then((page) => {
       if (live) attention = page;
     }, fail);
-    ports.listEntities(read(["pr"], "updated_desc"), LIMIT, 0).then((page) => {
+    ports.listEntities(filterOf(["pr"], "updated_desc"), LIMIT, 0).then((page) => {
       if (live) everyPr = page;
     }, fail);
     ports.listSources().then(
@@ -146,15 +148,15 @@
     if (!ready) return;
     const current = job;
     let live = true;
-    void readOpenJobs(ports, current).then(async (read_) => {
+    void readOpenJobs(ports, current).then(async (open) => {
       if (!live) return;
-      jobs = read_;
-      const own = read_[0];
+      jobs = open;
+      const own = open[0];
       if (current === null || own === undefined || keyOf(own.id) !== current) {
         branches = [];
         return;
       }
-      const page = await ports.listEntities(read(["branch"], "updated_desc", own.id), 50, 0).catch(() => null);
+      const page = await ports.listEntities(filterOf(["branch"], "updated_desc", own.id), 50, 0).catch(() => null);
       if (live) branches = page?.rows ?? [];
     });
     return () => {
@@ -268,7 +270,9 @@
     filter.scope = "all";
   };
 
-  function open(href: string) {
+  /** A row opens its item; a click on the link inside already did. */
+  function open(event: MouseEvent, href: string) {
+    if ((event.target as Element | null)?.closest("a")) return;
     location.hash = href;
   }
 </script>
@@ -284,10 +288,11 @@
     {#if compare !== null}
       <a class="tf-btn" href={compare}>New pull request</a>
     {:else}
+      <!-- Focusable, so the reason in its title reaches the keyboard too. -->
       <button
         type="button"
         class="tf-btn"
-        disabled
+        aria-disabled="true"
         title={job === null ? "Open a job to propose its branch" : `${job} has no branch yet`}>New pull request</button
       >
     {/if}
@@ -325,13 +330,13 @@
           {#each shownRepos as row (row.entity_id)}
             {@const count = openCount(openCounts, row)}
             {@const local = checkoutLine(checkouts[row.entity_id])}
-            <tr class="tf-row" onclick={() => open(itemHash(row))}>
+            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
               <td
                 ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
                 >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
               >
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
-              <td>{#if local === "not on this machine"}<span class="tf-dim">{local}</span>{:else}{local ?? ""}{/if}</td>
+              <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
             </tr>
           {/each}
@@ -349,7 +354,7 @@
         <tbody>
           {#each kept as { row, number, idle } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
-            <tr class="tf-row" onclick={() => open(itemHash(row))}>
+            <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
               <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
                 ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"

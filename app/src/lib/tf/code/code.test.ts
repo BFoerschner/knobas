@@ -130,13 +130,13 @@ function checkout(path: string | null, tree: Partial<Extract<NonNullable<Checkou
 
 test("a checkout reads as its branch and where it stands, or says it is not here", () => {
   expect(checkoutLine(undefined)).toBeNull();
-  expect(checkoutLine(checkout(null))).toBe("not on this machine");
-  expect(checkoutLine(checkout("/src/a"))).toBe("main, clean");
-  expect(checkoutLine(checkout("/src/a", { branch: "feature/PAY-231-sepa-retry", ahead: 3, changed: 1 }))).toBe(
+  expect(checkoutLine(checkout(null))).toEqual({ text: "not on this machine", dim: true });
+  expect(checkoutLine(checkout("/src/a"))?.text).toBe("main, clean");
+  expect(checkoutLine(checkout("/src/a", { branch: "feature/PAY-231-sepa-retry", ahead: 3, changed: 1 }))?.text).toBe(
     "feature/PAY-231-sepa-retry, 3 ahead, 1 changed",
   );
-  expect(checkoutLine(checkout("/src/a", { behind: 2, untracked: 1 }))).toBe("main, 2 behind, 1 changed");
-  expect(checkoutLine(checkout("/src/a", null))).toBe("/src/a");
+  expect(checkoutLine(checkout("/src/a", { behind: 2, untracked: 1 }))?.text).toBe("main, 2 behind, 1 changed");
+  expect(checkoutLine(checkout("/src/a", null))).toEqual({ text: "/src/a", dim: false });
 });
 
 test("a repository counts its open pull requests by its declared parent path", () => {

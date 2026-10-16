@@ -13,9 +13,6 @@ import { matchesAll } from "../filter/filter";
 import { itemHash } from "../job/job";
 import type { JobIndex } from "../job/open-jobs";
 
-// Which job a row belongs to is shared with Code (#837): `job/open-jobs.ts`.
-export { jobIndex, type JobIndex, type OpenJob } from "../job/open-jobs";
-
 /** The word each category reads as: the kind chips' and the second line's. */
 const KIND: Record<InboxCategory, string> = {
   review_request: "Review",
