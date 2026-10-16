@@ -5049,7 +5049,10 @@ async fn a_saved_source_without_field_ids_gets_them_at_its_next_sync_and_stores_
             after.config
         );
     }
-    assert_ne!(after.config["sprint_field"], after.config["epic_link_field"]);
+    assert_ne!(
+        after.config["sprint_field"],
+        after.config["epic_link_field"]
+    );
     assert_eq!(
         after.config["username"], env.user,
         "the rest of the config is kept"

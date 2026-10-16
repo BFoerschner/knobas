@@ -10,9 +10,7 @@ use knobas_source::{
 };
 use knobas_sync::config::{self, AuthKind, InsertConfig};
 use knobas_sync::run_log::{self, SyncOutcome, SyncTrigger};
-use knobas_sync::scheduler::{
-    AdapterRegistry, RunConnections, RunMode, SchedulerDeps, SyncEvents,
-};
+use knobas_sync::scheduler::{AdapterRegistry, RunConnections, RunMode, SchedulerDeps, SyncEvents};
 
 /// What the fake far end answers *Test connection* with.
 #[derive(Clone)]
@@ -231,7 +229,11 @@ async fn a_source_saved_without_the_field_ids_gets_them_at_its_next_sync() {
     let config = stored(&h).await;
     assert_eq!(config["epic_link_field"], "customfield_10101");
     assert_eq!(config["sprint_field"], "customfield_10104");
-    assert_eq!(config["projects"], serde_json::json!(["PAY"]), "the rest is kept");
+    assert_eq!(
+        config["projects"],
+        serde_json::json!(["PAY"]),
+        "the rest is kept"
+    );
     let last = h.built.lock().unwrap().last().cloned().unwrap();
     assert_eq!(
         last["sprint_field"], "customfield_10104",

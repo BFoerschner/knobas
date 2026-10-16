@@ -544,7 +544,10 @@ const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
 /// syncs as it did before, and the run reports the real failure itself.
 /// Recording the id is what makes the change visible: it is in the source's
 /// settings from then on.
-async fn fill_discovered(deps: &SchedulerDeps, cfg: config::SourceConfigRow) -> config::SourceConfigRow {
+async fn fill_discovered(
+    deps: &SchedulerDeps,
+    cfg: config::SourceConfigRow,
+) -> config::SourceConfigRow {
     let declared = deps
         .registry
         .descriptors()
