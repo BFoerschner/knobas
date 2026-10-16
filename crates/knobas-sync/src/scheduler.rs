@@ -533,6 +533,14 @@ async fn ending_of_record(
 /// reader should never have to type (#297 Epic Link, #811 Sprint).
 const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
 
+/// How long a sync waits for the field discovery before it goes on without it.
+///
+/// Discovery is three reads on a healthy instance. On one that is down, the
+/// first of them would spend the HTTP client's whole retry budget (45 s)
+/// before the sync itself spends another, so a failing run would take twice
+/// as long. Past this the run syncs as it would have, and asks again next time.
+const DISCOVERY_BUDGET: Duration = Duration::from_secs(10);
+
 /// A source saved before its adapter could discover a field id gets that id
 /// once, at its next sync (#889).
 ///
@@ -540,14 +548,18 @@ const DISCOVERABLE: [&str; 2] = ["epic_link_field", "sprint_field"];
 /// config leaves empty, so a source with nothing to find costs nothing, and an
 /// id the reader typed is never asked about, let alone replaced
 /// ([`config::fill_missing`] repeats that rule inside the one statement). The
-/// discovery is best-effort: a source that cannot be built or tested here
-/// syncs as it did before, and the run reports the real failure itself.
-/// Recording the id is what makes the change visible: it is in the source's
-/// settings from then on.
+/// discovery is best-effort: a source that fails or times out here
+/// ([`DISCOVERY_BUDGET`]) syncs as it did before, and the run reports the real
+/// failure itself. Recording the id is what makes the change visible: it is in
+/// the source's settings from then on.
+///
+/// Returns the row as stored when an id was recorded, and `None` when the
+/// config is unchanged, so the caller builds the adapter again only then.
 async fn fill_discovered(
     deps: &SchedulerDeps,
-    cfg: config::SourceConfigRow,
-) -> config::SourceConfigRow {
+    cfg: &config::SourceConfigRow,
+    source: &dyn Source,
+) -> Option<config::SourceConfigRow> {
     let declared = deps
         .registry
         .descriptors()
@@ -564,35 +576,43 @@ async fn fill_discovered(
         })
         .collect();
     if wanted.is_empty() {
-        return cfg;
+        return None;
     }
-    let Ok(source) = build_source(deps, &cfg).await else {
-        return cfg;
-    };
-    let found: std::collections::BTreeMap<String, String> = match source.test_connection().await {
-        Ok(info) => info
-            .discovered
-            .into_iter()
-            .filter(|(key, _)| wanted.contains(&key.as_str()))
-            .collect(),
-        Err(error) => {
-            tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
-            return cfg;
-        }
-    };
+    let found: std::collections::BTreeMap<String, String> =
+        match tokio::time::timeout(DISCOVERY_BUDGET, source.test_connection()).await {
+            Ok(Ok(info)) => info
+                .discovered
+                .into_iter()
+                .filter(|(key, _)| wanted.contains(&key.as_str()))
+                .collect(),
+            Ok(Err(error)) => {
+                tracing::debug!(source_id = %cfg.id, %error, "field discovery skipped");
+                return None;
+            }
+            Err(_) => {
+                tracing::debug!(source_id = %cfg.id, "field discovery timed out");
+                return None;
+            }
+        };
     if found.is_empty() {
-        return cfg;
+        return None;
     }
     match config::fill_missing(&deps.pool, &cfg.id, &found).await {
         Ok(Some(row)) => {
+            let recorded = found.iter().any(|(key, id)| {
+                row.config.get(key).and_then(serde_json::Value::as_str) == Some(id)
+            });
+            if !recorded {
+                return None;
+            }
             tracing::info!(source_id = %cfg.id, keys = ?found.keys().collect::<Vec<_>>(),
                 "recorded the field ids the source discovered");
-            row
+            Some(row)
         }
-        Ok(None) => cfg,
+        Ok(None) => None,
         Err(error) => {
             tracing::warn!(source_id = %cfg.id, %error, "recording discovered field ids failed");
-            cfg
+            None
         }
     }
 }
@@ -609,8 +629,22 @@ async fn attempt(
         .await
         .map_err(RunFailure::Db)?
         .ok_or(RunFailure::NotConfigured)?;
-    let cfg = fill_discovered(deps, cfg).await;
-    let source = build_source(deps, &cfg).await?;
+    let mut mode = mode;
+    let mut source = build_source(deps, &cfg).await?;
+    if let Some(filled) = fill_discovered(deps, &cfg, source.as_ref()).await {
+        source = build_source(deps, &filled).await?;
+        // A new field id widens what the adapter keeps of every ticket, and an
+        // incremental run re-fetches only what changed upstream, so a ticket
+        // nobody touched would keep `sprints: []` for ever. The run that
+        // records the id is therefore a backfill (CONTEXT.md), and is logged
+        // as one. A source with no stored position reads from the top anyway.
+        if mode == RunMode::Incremental && cfg.cursor.is_some() {
+            mode = RunMode::Backfill;
+            if let Err(error) = run_log::relabel_as_backfill(&deps.pool, run_id).await {
+                tracing::warn!(source_id, run_id, %error, "relabelling the run as a backfill failed");
+            }
+        }
+    }
 
     // §10.6(c): the run's transaction and advisory lock go on this, and it
     // belongs to nobody else. Opened *after* the refusals above, so a source

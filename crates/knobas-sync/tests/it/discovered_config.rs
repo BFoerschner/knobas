@@ -17,14 +17,20 @@ use knobas_sync::scheduler::{AdapterRegistry, RunConnections, RunMode, Scheduler
 enum Discovery {
     Fields(Vec<(&'static str, &'static str)>),
     Refused,
+    /// A far end that never answers.
+    Hangs,
 }
 
 /// Every config a sync-time adapter was built with, in order.
 type Built = Arc<Mutex<Vec<serde_json::Value>>>;
 
+/// Every position a sync was handed, in order.
+type Handed = Arc<Mutex<Vec<Option<Cursor>>>>;
+
 struct Fake {
     id: String,
     discovery: Discovery,
+    handed: Handed,
 }
 
 #[async_trait::async_trait]
@@ -65,6 +71,7 @@ impl Source for Fake {
     async fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
         match &self.discovery {
             Discovery::Refused => Err(SourceError::Unauthorized { status: Some(401) }),
+            Discovery::Hangs => std::future::pending().await,
             Discovery::Fields(found) => Ok(ConnectionInfo {
                 account: None,
                 server_version: None,
@@ -83,7 +90,8 @@ impl Source for Fake {
         cursor: Option<Cursor>,
         _sink: &mut (dyn Sink + Send),
     ) -> Result<Cursor, SourceError> {
-        Ok(cursor.unwrap_or_default())
+        self.handed.lock().unwrap().push(cursor.clone());
+        Ok(cursor.unwrap_or_else(|| "from-the-top".to_owned()))
     }
 
     async fn write(
@@ -101,6 +109,7 @@ impl Source for Fake {
 struct Registry {
     discovery: Discovery,
     built: Built,
+    handed: Handed,
 }
 
 impl AdapterRegistry for Registry {
@@ -109,6 +118,7 @@ impl AdapterRegistry for Registry {
             Fake {
                 id: "fieldy".to_owned(),
                 discovery: self.discovery.clone(),
+                handed: Arc::clone(&self.handed),
             }
             .descriptor(),
         ]
@@ -119,6 +129,7 @@ impl AdapterRegistry for Registry {
         Ok(Box::new(Fake {
             id: instance.id,
             discovery: self.discovery.clone(),
+            handed: Arc::clone(&self.handed),
         }))
     }
 }
@@ -142,6 +153,7 @@ impl SyncEvents for Quiet {
 struct Harness {
     deps: SchedulerDeps,
     built: Built,
+    handed: Handed,
     id: String,
 }
 
@@ -173,6 +185,7 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
         )
         .unwrap();
     let built: Built = Arc::default();
+    let handed: Handed = Arc::default();
     Harness {
         deps: SchedulerDeps {
             pool,
@@ -180,14 +193,36 @@ async fn harness(stored: serde_json::Value, discovery: Discovery) -> Harness {
             registry: Arc::new(Registry {
                 discovery,
                 built: Arc::clone(&built),
+                handed: Arc::clone(&handed),
             }),
             secrets: Arc::new(store),
             events: Arc::new(Quiet),
             timing: knobas_sync::scheduler::SchedulerTiming::default(),
         },
         built,
+        handed,
         id,
     }
+}
+
+/// Give the source a stored position, as every source saved before #811 has.
+async fn with_position(h: &Harness, cursor: &str) {
+    sqlx::query("update knobas.source_config set cursor = $1 where id = $2")
+        .bind(cursor)
+        .bind(&h.id)
+        .execute(&h.deps.pool)
+        .await
+        .unwrap();
+}
+
+async fn last_trigger(h: &Harness) -> String {
+    sqlx::query_scalar(
+        "select trigger from knobas.sync_run where source_id = $1 order by id desc limit 1",
+    )
+    .bind(&h.id)
+    .fetch_one(&h.deps.pool)
+    .await
+    .unwrap()
 }
 
 async fn sync_once(h: &Harness) -> SyncOutcome {
@@ -280,5 +315,56 @@ async fn fill_missing_does_not_overwrite_an_id_saved_after_the_read() {
 async fn a_refused_discovery_leaves_the_config_alone() {
     let h = harness(serde_json::json!({}), Discovery::Refused).await;
     let _ = sync_once(&h).await;
+    assert_eq!(stored(&h).await, serde_json::json!({}));
+}
+
+/// A source saved before #811 has a position and tickets mirrored with
+/// `sprints: []`. An incremental run from that position would re-fetch only
+/// what changed upstream, so the run that records the id reads from the top,
+/// and the log calls it a backfill.
+#[tokio::test]
+async fn the_run_that_records_an_id_on_a_source_with_a_position_is_a_backfill() {
+    let h = harness(
+        serde_json::json!({}),
+        Discovery::Fields(vec![("sprint_field", "customfield_10104")]),
+    )
+    .await;
+    with_position(&h, "pos-1").await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(*h.handed.lock().unwrap(), [None], "read from the top");
+    assert_eq!(last_trigger(&h).await, "backfill");
+
+    // The next run has nothing to record and resumes from where that one
+    // ended, as any incremental run does.
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(
+        *h.handed.lock().unwrap(),
+        [None, Some("from-the-top".to_owned())]
+    );
+    assert_eq!(last_trigger(&h).await, "manual");
+}
+
+#[tokio::test]
+async fn a_source_with_a_position_and_nothing_to_record_resumes_from_it() {
+    let h = harness(serde_json::json!({}), Discovery::Fields(Vec::new())).await;
+    with_position(&h, "pos-1").await;
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert_eq!(*h.handed.lock().unwrap(), [Some("pos-1".to_owned())]);
+    assert_eq!(last_trigger(&h).await, "manual");
+}
+
+/// A far end that does not answer the discovery costs the run its budget, not
+/// the run: the sync goes on without it.
+#[tokio::test]
+async fn a_discovery_that_never_answers_does_not_hold_the_sync() {
+    let h = harness(serde_json::json!({}), Discovery::Hangs).await;
+    let started = std::time::Instant::now();
+    assert_eq!(sync_once(&h).await, SyncOutcome::Ok);
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(30),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(h.handed.lock().unwrap().len(), 1, "the sync ran");
     assert_eq!(stored(&h).await, serde_json::json!({}));
 }
