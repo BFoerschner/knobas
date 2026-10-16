@@ -754,7 +754,7 @@ const CASES: Case[] = [
           target,
           props: {
             views,
-            layerCount: 9,
+            layerIds: ["work", "code"],
             ports: {
               saveDepView: () => deferred(null as never),
               deleteDepView: () => deferred(null as never),

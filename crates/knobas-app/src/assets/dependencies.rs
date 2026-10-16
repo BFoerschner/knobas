@@ -844,6 +844,14 @@ pub async fn save_view(
     view_of(&row)
 }
 
+/// Lock every view row for the rest of `tx`, and say how many there are.
+async fn lock_views(tx: &mut sqlx::Transaction<'_, sqlx::Postgres>) -> Result<usize, IpcError> {
+    let ids: Vec<String> = sqlx::query_scalar("select id from knobas.dep_view for update")
+        .fetch_all(&mut **tx)
+        .await?;
+    Ok(ids.len())
+}
+
 /// Delete a view. The last one stays: Dependencies always opens in a view.
 ///
 /// # Errors
@@ -851,9 +859,9 @@ pub async fn save_view(
 /// `conflict` for the last view, `not_found` for an id no view carries.
 pub async fn delete_view(pool: &PgPool, id: &str) -> Result<DepViews, IpcError> {
     let mut tx = pool.begin().await?;
-    let count: i64 = sqlx::query_scalar("select count(*) from knobas.dep_view")
-        .fetch_one(&mut *tx)
-        .await?;
+    // Lock every view first, so two deletes at once cannot both see two views
+    // and leave none.
+    let count = lock_views(&mut tx).await?;
     if !exists(&mut tx, VIEW_EXISTS, id).await? {
         return Err(IpcError::not_found(format!("No view {id}.")));
     }
@@ -879,6 +887,9 @@ pub async fn set_view_defaults(
     from_top: &str,
 ) -> Result<DepViews, IpcError> {
     let mut tx = pool.begin().await?;
+    // Lock every view first, so a second choice at once waits and then clears
+    // the flags this one set instead of tripping the partial unique indexes.
+    lock_views(&mut tx).await?;
     for id in [from_ticket, from_top] {
         if !exists(&mut tx, VIEW_EXISTS, id).await? {
             return Err(IpcError::not_found(format!("No view {id}.")));

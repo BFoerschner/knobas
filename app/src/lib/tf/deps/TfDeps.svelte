@@ -334,7 +334,7 @@
   {:else if read !== null && drawn !== null && views.draft !== null}
     {@const draft = views.draft}
     <div class="tf-dp-bar" role="toolbar" aria-label="Dependencies">
-      <TfDepsViewMenu bind:this={menu} {views} layerCount={read.layers.length} {ports} />
+      <TfDepsViewMenu bind:this={menu} {views} layerIds={read.layers.map((layer) => layer.id)} {ports} />
       {#if views.dirty}
         <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void menu?.saveChanges()}>Save view</button>
       {/if}

@@ -70,15 +70,16 @@ export function sameSettings(a: DepViewSettings, b: DepViewSettings): boolean {
  * What the view menu says under a view's name: which opening it is the
  * default for, else how many layers it shows.
  */
-export function viewBadge(views: DepViews, id: string, layerCount: number): string {
+export function viewBadge(views: DepViews, id: string, layerIds: readonly string[]): string {
   const badges = [
     views.opens_from_ticket === id ? "opens from a ticket" : "",
     views.opens_from_top === id ? "opens from the top bar" : "",
   ].filter(Boolean);
   if (badges.length > 0) return badges.join(", ");
   const view = views.views.find((v) => v.id === id);
-  const shown = view ? layerCount - Object.values(view.settings.layers).filter((layer) => layer.hidden).length : layerCount;
-  return `${shown} of ${layerCount} layers`;
+  // Count the layers there are: a view can still name a layer since removed.
+  const shown = layerIds.filter((layer) => view?.settings.layers[layer]?.hidden !== true).length;
+  return `${shown} of ${layerIds.length} layers`;
 }
 
 /** A free name for a new layer: *New layer*, then *New layer 2* and on. */

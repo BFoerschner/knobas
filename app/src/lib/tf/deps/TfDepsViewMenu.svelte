@@ -15,7 +15,7 @@
   import type { DepViewState } from "./views.svelte";
   import { viewBadge } from "./views";
 
-  let { views, layerCount, ports }: { views: DepViewState; layerCount: number; ports: ViewPorts } = $props();
+  let { views, layerIds, ports }: { views: DepViewState; layerIds: readonly string[]; ports: ViewPorts } = $props();
 
   let open = $state(false);
   let dialog = $state<"save" | "rename" | "defaults" | null>(null);
@@ -153,7 +153,7 @@
     <div class="tf-menu tf-appmenu tf-dp-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
       {#each saved.views as view (view.id)}
         <button type="button" role="menuitem" onclick={() => pick(() => views.open(view.id))}
-          ><b>{view.name}{current?.id === view.id ? " (on)" : ""}</b><span class="tf-dim">{viewBadge(saved, view.id, layerCount)}</span></button
+          ><b>{view.name}{current?.id === view.id ? " (on)" : ""}</b><span class="tf-dim">{viewBadge(saved, view.id, layerIds)}</span></button
         >
       {/each}
       <hr />
