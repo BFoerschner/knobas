@@ -44,6 +44,7 @@
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { dayKey } from "../../time/day";
   import { weekWindows } from "../../time/week";
+  import { sessionFilter } from "../filter/filter-state.svelte";
   import type { Layers } from "../layers.svelte";
   import { PROPOSAL_LIMIT, linkedOn, proposalsFor } from "./connections";
   import { summary } from "./conversation";
@@ -592,7 +593,7 @@
             {/if}
             <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
             <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
-            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
+            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>
         {:else if current.id === "conversation"}
           <TfConversation

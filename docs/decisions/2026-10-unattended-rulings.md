@@ -3037,3 +3037,31 @@ Implementer, PR for #852.
   the *LOW* tags are prototype annotations and are left out. **Reversing:** low.
 - **No way to remove a preset yet**: prototype-6 draws none, so it is a follow-up rather than
   invented UI. **Reversing:** n/a.
+
+## #863 — Docs This job (2026-10-16)
+
+Ruled by the implementer (PR for #863).
+
+- **A page from the parent is grouped under *Parent PAY-230*, the job sections' label
+  (`originLabel`).** Prototype-6's `jobReach` would call it "From the link set Parent PAY-230",
+  because it models the parent as a link set; the spec keeps the parent apart from link sets.
+  **Reversing:** low (`reachReason` in `tf/docs/docs.ts`).
+- **A page reached through another entity is grouped under *Via <title>*, the title of the
+  reach's first step from `get_entity`; a step that cannot be read groups under *Linked to
+  <key>*.** R-2.8 names "via PR #142" as a reason, and the read's `step` is there for it. The
+  title is the source's title, not prototype-6's node label ("PR #142"). **Reversing:** low.
+- **The empty *This job* list adds *Search all pages* after prototype-6's sentence.** R-2.5 and
+  story 19 ask for the one-click way out; prototype-6 has none on this list. **Reversing:** low.
+- **The search kept to the job's pages filters `docs_search`'s answer in the view, and the header
+  counts the hits it kept.** The acceptance criterion asks for no new query, and the reach is read
+  once. The backend answers at most 50 hits, so with more than 50 hits in all spaces the count can
+  fall short. **Reversing:** a `reach:` key on `docs_search`.
+- **The count in *This job PAY-231 N* is the reached pages the tree holds, drawn after the read
+  answered and only above zero.** The shell's count rule. **Reversing:** low.
+- **The job's *Open Docs view* turns *This job* on through `TfSection`'s new `onopen`, which writes
+  `sessionFilter("docs").scope`.** That is where the choice is kept for the session (R-2.6), so
+  coming back to Docs finds it. Code and Monitors are #1000. **Reversing:** low.
+- **The `?fake-ipc` Docs pages *SEPA payout retry design* and *Manual review queue* have fixed ids
+  (`confluence:sepa`, `confluence:manual-review`), and PAY-231's reach lists them.** These are
+  prototype-6's two PAY-231 pages. The reach's `mock:` page rows stay for the job's Pages section,
+  which reads `list_entities`. **Reversing:** low.

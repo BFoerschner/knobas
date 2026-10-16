@@ -231,14 +231,23 @@ interface FakePage {
   parentTitle: string | null;
 }
 
+/**
+ * The pages other modules name by id: the one read last, and PAY-231's two
+ * pages, which `job-reach.ts` lists in what the job reaches (#863).
+ */
+const NAMED: Record<string, string> = {
+  "SEPA payout retry design": "confluence:sepa",
+  "Manual review queue": "confluence:manual-review",
+};
+
 const PAGES: FakePage[] = [];
 let next = 65600;
 for (const [space, tops] of Object.entries(TREE)) {
   for (const [title, kids] of tops) {
-    const id = title === "SEPA payout retry design" ? "confluence:sepa" : `confluence:${next++}`;
+    const id = NAMED[title] ?? `confluence:${next++}`;
     PAGES.push({ id, title, space, parent: null, parentTitle: null });
     for (const kid of kids) {
-      const kidId = kid === "SEPA payout retry design" ? "confluence:sepa" : `confluence:${next++}`;
+      const kidId = NAMED[kid] ?? `confluence:${next++}`;
       PAGES.push({ id: kidId, title: kid, space, parent: id, parentTitle: title });
     }
   }

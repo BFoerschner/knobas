@@ -84,6 +84,8 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 ## Filter keys
 
 - A *This job* scope names the job's key after its label, in mono (`FilterScope.tag`), as prototype-6's `jobk`. (#835)
+- A job section's *Open … view* turns that view's *This job* on: `TfSection`'s `onopen` writes the view's `sessionFilter` scope before the link is followed, and the view reads it from there. (#863)
+- A view's *This job* reads `job_reach` once for the job's ticket and filters its own list, search answers included; a reason heading is the reach's origin: *Linked to <key>*, *Parent <key>*, or *Via <first step's title>*. (#863)
 - Filter keys on the new shell's search use the launcher's grammar, evaluated on the server; a negation is `-key:value` on the keys only, and a row whose field is absent fails the key and passes its negation. (#811, PR #890; #810, PR #895)
 
 ## Builds
