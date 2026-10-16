@@ -49,8 +49,9 @@ test("Link them is written once the undo window closes, not before", async () =>
   const decisions = createDecisions(p, 1000);
   decisions.decide(ENTRY, "yes", "related", () => {});
   expect(decisions.verdicts["link-1"]).toBe("yes");
+  await vi.advanceTimersByTimeAsync(999);
   expect(calls).toEqual([]);
-  await vi.advanceTimersByTimeAsync(1000);
+  await vi.advanceTimersByTimeAsync(1);
   expect(calls).toEqual(["accept link-1"]);
 });
 
