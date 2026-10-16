@@ -3262,3 +3262,53 @@ Ruled by the implementer (PR for #866).
 - **The fake IPC adds its sets to `job_reach` through a registry** (`SET_REACH`), recorded in the
   shell conventions. PAY-231's fixture reach now carries *Payments staging* and *Payout stack*
   rows. **Reversing:** low.
+
+## #857 Build chains (2026-10-16)
+
+- **The configuration's chain rides on `PipelineSettings.chain`; a run's chain is one new read,
+  `Source::run_chain` and the `run_chain` command.** The pipeline header already reads the
+  settings live, so a second command for its chain would be a second round trip for one line. A
+  run's chain needs the run, so it is its own read. Each step's run comes back as the `SyncItem`
+  the sync would make (`older_runs`' way) and is read through the run kind's declared paths.
+  **Reversing:** medium (a §10.8 field and command).
+- **The chain is every configuration joined to this one by snapshot dependencies, upstream and
+  downstream, in running order: a configuration after everything of the set it depends on, ties
+  in the server's order.** TeamCity's dependencies make a graph, and "Step 2 of the chain" needs a
+  line. This flattens a fan-out (two configurations waiting on one) rather than drawing it.
+  **Reversing:** low (`chain::order`).
+- **Each step's box shows the run from this run's own chain first: what it built on, itself, what
+  built on it, the newest of a configuration where there are several. A step with none there shows
+  its newest run on the run's branch, else *not run on this branch*.** prototype-6 shows each
+  step's newest run on the branch. The spec says "the dependency builds per build", and an earlier
+  step's newest run on the branch can be a newer build than the one this run actually used.
+  **Reversing:** low (`TeamCitySource::run_chain`).
+- **The chain's build listings widen the sync's facets (`canceled:any`, `failedToStart:any`,
+  `branch:default:any`) and `state:any`, not `defaultFilter:false`.** Personal builds stay out,
+  as they do everywhere else, and a step queued or running behind this run is shown as one. A
+  branch is matched by name in `$base64:` so its punctuation can't break the locator, and the
+  default branch as `default:true` (the seed's `queue_build` explains why `main` by name is
+  another branch). **Reversing:** low.
+- **Measured on the seeded server, 2026-10-16:** `snapshotDependency:(to:(id:X))` lists X's
+  dependencies, and `from:` lists what depends on X, for configurations and builds alike.
+  `includeInitial:true` adds X itself. The live test holds both directions.
+- **The live suite's chain is made by the test, under `Payout`, and deleted when it ends
+  (`ChainProject`, `NestedProject`'s way). The fixture and the seed are unchanged.** Three seeded
+  tests assert "the three configurations the seed derives from the fixture's `cfg`, and no other",
+  and `fixtures/tidewater/work.json` is a cross-stream contract. So testenv has no chain to look
+  at in `just dev`; follow-up #1010 (`backlog`) seeds one. **Reversing:** medium.
+- **A step is named by the source's name for its configuration (`Build`), the pipeline's declared
+  name.** prototype-6's names are the ids because its configurations have no other names.
+  **Reversing:** low.
+- **A box's result is *passed* for a run in the ok tone, else the run's result word as the
+  pipeline page says it: the source's state (`FAILURE`), *running* or *queued*.** prototype-6
+  writes *failed*; the pipeline page and the run's chip already use the source's word (#853).
+  **Reversing:** low (`chainBox`).
+- **The panel is drawn for a chain of two or more steps, and not at all while its read is out or
+  when it fails.** The panel adds to the Overview and has no state of its own to report; the run's
+  own read failing already shows a line. The heading's branch is mono like every branch on the
+  page, and a run with no branch reads *Chain on the default branch*. prototype-6's *NEW* tag is a
+  mockup marker and is not drawn. **Reversing:** low.
+- **The panel is its own component (`TfRunChain`) with its own read, mounted in `TfRun` by one
+  line.** The run page's tabs are a sibling's (#854 to #856) in flight; keeping the read out of
+  `RunPorts` keeps this PR to that one line in `TfRun.svelte` and a `chain: []` in its test's
+  settings fixture. **Reversing:** low.
