@@ -81,7 +81,12 @@ pub fn doc_content(kind: &str, payload: &Value) -> Option<DocContent> {
     let comments = payload
         .pointer("/children/comment/results")
         .and_then(Value::as_array)
-        .map(|comments| comments.iter().filter_map(|c| comment(c, &people)).collect())
+        .map(|comments| {
+            comments
+                .iter()
+                .filter_map(|c| comment(c, &people))
+                .collect()
+        })
         .unwrap_or_default();
     let editor_name = payload
         .pointer("/version/by/displayName")
@@ -218,7 +223,11 @@ fn parse(storage: &str) -> Vec<Node> {
     let mut stack: Vec<(String, String, Vec<Node>)> = vec![(String::new(), String::new(), vec![])];
     let mut rest = storage;
     let push = |stack: &mut Vec<(String, String, Vec<Node>)>, node: Node| {
-        stack.last_mut().expect("the document is never popped").2.push(node);
+        stack
+            .last_mut()
+            .expect("the document is never popped")
+            .2
+            .push(node);
     };
     let close = |stack: &mut Vec<(String, String, Vec<Node>)>| {
         let (name, tag, children) = stack.pop().expect("only called above the document");
@@ -531,13 +540,15 @@ fn block_words(block: &DocBlock) -> String {
             .map(block_words)
             .collect::<Vec<_>>()
             .join(" "),
-        DocBlock::Panel { blocks, .. } => blocks.iter().map(block_words).collect::<Vec<_>>().join(" "),
+        DocBlock::Panel { blocks, .. } => {
+            blocks.iter().map(block_words).collect::<Vec<_>>().join(" ")
+        }
         DocBlock::Paragraph { text } | DocBlock::Heading { text, .. } => text
             .iter()
             .map(|i| match i {
-                Inline::Text { text, .. } | Inline::Link { text, .. } | Inline::PageLink { text, .. } => {
-                    text.clone()
-                }
+                Inline::Text { text, .. }
+                | Inline::Link { text, .. }
+                | Inline::PageLink { text, .. } => text.clone(),
                 Inline::Issue { key, .. } => key.clone(),
                 _ => String::new(),
             })
@@ -624,13 +635,23 @@ impl<'a> Inlines<'a> {
                     ..marks
                 },
             ),
-            "code" => self.flow(children, Marks { code: true, ..marks }),
+            "code" => self.flow(
+                children,
+                Marks {
+                    code: true,
+                    ..marks
+                },
+            ),
             "br" => self.push(Inline::Break),
             "a" => {
                 let text = collapse(&node.text());
                 match node.attr("href").filter(|h| !h.trim().is_empty()) {
                     Some(href) => self.push(Inline::Link {
-                        text: if text.is_empty() { href.to_owned() } else { text },
+                        text: if text.is_empty() {
+                            href.to_owned()
+                        } else {
+                            text
+                        },
                         href: decode_entities(href),
                     }),
                     None => self.flow(children, marks),
@@ -822,7 +843,9 @@ mod tests {
     #[test]
     fn headings_paragraphs_and_marks() {
         assert_eq!(
-            blocks("<h2>Backoff policy</h2><p>Retry <strong>five</strong> times, <em>then</em> stop.</p>"),
+            blocks(
+                "<h2>Backoff policy</h2><p>Retry <strong>five</strong> times, <em>then</em> stop.</p>"
+            ),
             vec![
                 DocBlock::Heading {
                     level: 2,
@@ -853,7 +876,10 @@ mod tests {
 
     #[test]
     fn markup_in_text_stays_text() {
-        assert_eq!(blocks("<p>&lt;script&gt; &amp; co</p>"), vec![para("<script> & co")]);
+        assert_eq!(
+            blocks("<p>&lt;script&gt; &amp; co</p>"),
+            vec![para("<script> & co")]
+        );
     }
 
     #[test]
@@ -1086,7 +1112,9 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     #[test]
     fn images_and_task_lists_are_placeholders() {
         assert_eq!(
-            blocks(r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image><ac:task-list><ac:task><ac:task-body>x</ac:task-body></ac:task></ac:task-list>"#),
+            blocks(
+                r#"<ac:image><ri:attachment ri:filename="a.png" /></ac:image><ac:task-list><ac:task><ac:task-body>x</ac:task-body></ac:task></ac:task-list>"#
+            ),
             vec![
                 DocBlock::Placeholder {
                     name: "image".into()
@@ -1101,7 +1129,9 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
     #[test]
     fn layouts_are_transparent_and_broken_markup_still_reads() {
         assert_eq!(
-            blocks("<ac:layout><ac:layout-section><ac:layout-cell><p>One</p></ac:layout-cell></ac:layout-section></ac:layout><p>Two</em> and <b>three"),
+            blocks(
+                "<ac:layout><ac:layout-section><ac:layout-cell><p>One</p></ac:layout-cell></ac:layout-section></ac:layout><p>Two</em> and <b>three"
+            ),
             vec![
                 para("One"),
                 DocBlock::Paragraph {
@@ -1162,7 +1192,13 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
 
     #[test]
     fn another_kind_or_a_bodyless_record_projects_nothing() {
-        assert_eq!(doc_content("ticket", &json!({"body": {"storage": {"value": "<p>x</p>"}}})), None);
+        assert_eq!(
+            doc_content(
+                "ticket",
+                &json!({"body": {"storage": {"value": "<p>x</p>"}}})
+            ),
+            None
+        );
         assert_eq!(doc_content("page", &json!({"title": "no body"})), None);
     }
 }

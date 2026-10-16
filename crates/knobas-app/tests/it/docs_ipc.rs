@@ -31,7 +31,14 @@ async fn confluence(pool: &sqlx::PgPool) -> String {
     id
 }
 
-async fn item(pool: &sqlx::PgPool, id: &str, source: &str, kind: &str, title: &str, payload: Value) {
+async fn item(
+    pool: &sqlx::PgPool,
+    id: &str,
+    source: &str,
+    kind: &str,
+    title: &str,
+    payload: Value,
+) {
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
         .bind(id)
         .bind(kind)
@@ -72,9 +79,25 @@ fn page_payload(space: &str, ancestors: &[&str], storage: &str) -> Value {
     })
 }
 
-async fn page(pool: &sqlx::PgPool, source: &str, id: &str, title: &str, space: &str, ancestors: &[&str], storage: &str) -> String {
+async fn page(
+    pool: &sqlx::PgPool,
+    source: &str,
+    id: &str,
+    title: &str,
+    space: &str,
+    ancestors: &[&str],
+    storage: &str,
+) -> String {
     let entity = format!("{source}:{id}");
-    item(pool, &entity, source, "page", title, page_payload(space, ancestors, storage)).await;
+    item(
+        pool,
+        &entity,
+        source,
+        "page",
+        title,
+        page_payload(space, ancestors, storage),
+    )
+    .await;
     entity
 }
 
@@ -87,14 +110,25 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     let src = confluence(&pool).await;
     let home = page(&pool, &src, "1", "Ops home", "OPS", &[], "<p>Home</p>").await;
     let runbooks = page(&pool, &src, "2", "Runbooks", "OPS", &["Ops home"], "").await;
-    let restart = page(&pool, &src, "3", "Payout worker restart", "OPS", &["Ops home", "Runbooks"], "").await;
+    let restart = page(
+        &pool,
+        &src,
+        "3",
+        "Payout worker restart",
+        "OPS",
+        &["Ops home", "Runbooks"],
+        "",
+    )
+    .await;
     let orphan = page(&pool, &src, "4", "Orphan", "OPS", &["Not synced"], "").await;
     let other = page(&pool, &src, "5", "Eng home", "ENG", &[], "").await;
 
     let tree = docs_tree_inner(&pool).await.unwrap();
     let mine: Vec<_> = tree.spaces.iter().filter(|s| s.source_id == src).collect();
     assert_eq!(
-        mine.iter().map(|s| (s.key.as_str(), s.name.as_deref())).collect::<Vec<_>>(),
+        mine.iter()
+            .map(|s| (s.key.as_str(), s.name.as_deref()))
+            .collect::<Vec<_>>(),
         vec![("ENG", Some("ENG space")), ("OPS", Some("OPS space"))]
     );
     assert_eq!(mine[0].pages.len(), 1);
@@ -111,9 +145,17 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     assert_eq!(parent_of(&home), None);
     assert_eq!(parent_of(&runbooks), Some(home.clone()));
     assert_eq!(parent_of(&restart), Some(runbooks.clone()));
-    assert_eq!(parent_of(&orphan), None, "a parent the mirror does not hold is no parent");
     assert_eq!(
-        mine[1].pages.iter().map(|p| p.title.as_str()).collect::<Vec<_>>(),
+        parent_of(&orphan),
+        None,
+        "a parent the mirror does not hold is no parent"
+    );
+    assert_eq!(
+        mine[1]
+            .pages
+            .iter()
+            .map(|p| p.title.as_str())
+            .collect::<Vec<_>>(),
         vec!["Ops home", "Orphan", "Payout worker restart", "Runbooks"],
         "ordered by title"
     );
@@ -126,10 +168,19 @@ async fn the_page_read_last_is_the_newest_visit() {
     let src = confluence(&pool).await;
     let first = page(&pool, &src, "1", "First", "OPS", &[], "").await;
     let second = page(&pool, &src, "2", "Second", "OPS", &[], "").await;
-    knobas_app::conversation::visit(&pool, &first).await.unwrap();
-    knobas_app::conversation::visit(&pool, &second).await.unwrap();
-    assert_eq!(docs_tree_inner(&pool).await.unwrap().last_read, Some(second));
-    knobas_app::conversation::visit(&pool, &first).await.unwrap();
+    knobas_app::conversation::visit(&pool, &first)
+        .await
+        .unwrap();
+    knobas_app::conversation::visit(&pool, &second)
+        .await
+        .unwrap();
+    assert_eq!(
+        docs_tree_inner(&pool).await.unwrap().last_read,
+        Some(second)
+    );
+    knobas_app::conversation::visit(&pool, &first)
+        .await
+        .unwrap();
     assert_eq!(docs_tree_inner(&pool).await.unwrap().last_read, Some(first));
 }
 
@@ -150,23 +201,61 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     .execute(&pool)
     .await
     .unwrap();
-    let key = format!("D{}-77", &uuid::Uuid::new_v4().simple().to_string()[..4].to_uppercase().replace(|c: char| c.is_ascii_digit(), "Q"));
+    let key = format!(
+        "D{}-77",
+        &uuid::Uuid::new_v4().simple().to_string()[..4]
+            .to_uppercase()
+            .replace(|c: char| c.is_ascii_digit(), "Q")
+    );
     let ticket = format!("{jira}:{key}");
-    item(&pool, &ticket, &jira, "ticket", "On-call runbook outdated",
-        json!({"key": key, "fields": {"status": {"name": "In Progress"}}})).await;
+    item(
+        &pool,
+        &ticket,
+        &jira,
+        "ticket",
+        "On-call runbook outdated",
+        json!({"key": key, "fields": {"status": {"name": "In Progress"}}}),
+    )
+    .await;
 
     let home = page(&pool, &src, "1", "Ops home", "OPS", &[], "").await;
-    let runbook = page(&pool, &src, "2", "Ledger reconciliation runbook", "OPS", &["Ops home"], "").await;
+    let runbook = page(
+        &pool,
+        &src,
+        "2",
+        "Ledger reconciliation runbook",
+        "OPS",
+        &["Ops home"],
+        "",
+    )
+    .await;
     let storage = format!(
         r#"<h2>Ledger</h2><p>See <ac:link><ri:page ri:content-title="Ledger reconciliation runbook" /></ac:link> and <ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">{key}</ac:parameter></ac:structured-macro>, ask <ac:link><ri:user ri:username="mara" /></ac:link> or <ac:link><ri:user ri:userkey="k-tw" /></ac:link>.</p><ac:structured-macro ac:name="roadmap" />"#
     );
-    let handbook = page(&pool, &src, "3", "On-call handbook", "OPS", &["Ops home"], &storage).await;
+    let handbook = page(
+        &pool,
+        &src,
+        "3",
+        "On-call handbook",
+        "OPS",
+        &["Ops home"],
+        &storage,
+    )
+    .await;
 
     let doc = docs_page_inner(&pool, &handbook).await.unwrap();
     assert_eq!(doc.title, "On-call handbook");
-    assert_eq!(doc.source_name, "Confluence", "the configured name, for Open in …");
+    assert_eq!(
+        doc.source_name, "Confluence",
+        "the configured name, for Open in …"
+    );
     assert!(doc.me.contains(&"mara".to_owned()));
-    assert_eq!(doc.space.as_ref().map(|s| (s.key.as_str(), s.name.as_deref())), Some(("OPS", Some("OPS space"))));
+    assert_eq!(
+        doc.space
+            .as_ref()
+            .map(|s| (s.key.as_str(), s.name.as_deref())),
+        Some(("OPS", Some("OPS space")))
+    );
     assert_eq!(doc.ancestors.len(), 1);
     assert_eq!(doc.ancestors[0].title, "Ops home");
     assert_eq!(doc.ancestors[0].entity_id.as_deref(), Some(home.as_str()));
@@ -184,14 +273,27 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
         Inline::PageLink { entity_id, .. } => Some(entity_id.clone()),
         _ => None,
     });
-    assert_eq!(link, Some(Some(runbook)), "the page link names the mirrored page");
+    assert_eq!(
+        link,
+        Some(Some(runbook)),
+        "the page link names the mirrored page"
+    );
     let chip = text.iter().find_map(|i| match i {
-        Inline::Issue { entity_id, title, status, .. } => Some((entity_id.clone(), title.clone(), status.clone())),
+        Inline::Issue {
+            entity_id,
+            title,
+            status,
+            ..
+        } => Some((entity_id.clone(), title.clone(), status.clone())),
         _ => None,
     });
     assert_eq!(
         chip,
-        Some((Some(ticket), Some("On-call runbook outdated".to_owned()), Some("In Progress".to_owned()))),
+        Some((
+            Some(ticket),
+            Some("On-call runbook outdated".to_owned()),
+            Some("In Progress".to_owned())
+        )),
         "the chip carries the ticket's summary and status from the mirror"
     );
     let mentions: Vec<(Option<String>, bool)> = text
@@ -203,10 +305,18 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
         .collect();
     assert_eq!(
         mentions,
-        vec![(Some("mara".to_owned()), true), (Some("tomasz".to_owned()), false)],
+        vec![
+            (Some("mara".to_owned()), true),
+            (Some("tomasz".to_owned()), false)
+        ],
         "only the reader's own mention is marked"
     );
-    assert_eq!(doc.blocks[2], DocBlock::Placeholder { name: "roadmap".into() });
+    assert_eq!(
+        doc.blocks[2],
+        DocBlock::Placeholder {
+            name: "roadmap".into()
+        }
+    );
 
     assert_eq!(doc.comments.len(), 1);
     assert_eq!(doc.comments[0].author.as_deref(), Some("priya"));
@@ -214,7 +324,8 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
         panic!("a comment is a paragraph")
     };
     assert!(
-        text.iter().any(|i| matches!(i, Inline::Mention { me: true, .. })),
+        text.iter()
+            .any(|i| matches!(i, Inline::Mention { me: true, .. })),
         "a comment's mention of the reader is marked too"
     );
 }
@@ -232,9 +343,19 @@ async fn what_the_mirror_does_not_hold_stays_unresolved() {
         doc.blocks,
         vec![DocBlock::Paragraph {
             text: vec![
-                Inline::Issue { key: "NOPE-1".into(), entity_id: None, title: None, status: None },
+                Inline::Issue {
+                    key: "NOPE-1".into(),
+                    entity_id: None,
+                    title: None,
+                    status: None
+                },
                 Inline::text(" "),
-                Inline::PageLink { text: "Gone".into(), title: "Gone".into(), space: None, entity_id: None },
+                Inline::PageLink {
+                    text: "Gone".into(),
+                    title: "Gone".into(),
+                    space: None,
+                    entity_id: None
+                },
             ]
         }]
     );
@@ -249,9 +370,21 @@ async fn only_a_mirrored_page_reads() {
     let ticket = format!("{src}:T-1");
     item(&pool, &ticket, &src, "ticket", "Not a page", json!({})).await;
     use knobas_app::IpcErrorCode::{Invalid, NotFound};
-    assert_eq!(docs_page_inner(&pool, &ticket).await.unwrap_err().code, NotFound);
-    assert_eq!(docs_page_inner(&pool, &format!("{src}:404")).await.unwrap_err().code, NotFound);
-    assert_eq!(docs_page_inner(&pool, "no colon").await.unwrap_err().code, Invalid);
+    assert_eq!(
+        docs_page_inner(&pool, &ticket).await.unwrap_err().code,
+        NotFound
+    );
+    assert_eq!(
+        docs_page_inner(&pool, &format!("{src}:404"))
+            .await
+            .unwrap_err()
+            .code,
+        NotFound
+    );
+    assert_eq!(
+        docs_page_inner(&pool, "no colon").await.unwrap_err().code,
+        Invalid
+    );
 }
 
 /// Two pages that name each other as parent (a title reused after a move)

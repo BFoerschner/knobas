@@ -382,6 +382,7 @@ const DayReview = (await import("../time/DayReview.svelte")).default;
 const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
+const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
 const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
 const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
@@ -1306,6 +1307,49 @@ const CASES: Case[] = [
             getNote: () => deferred({ note: { id: "note:p", title: "", body_md: "", created_at: "", updated_at: "" }, refs: [], links: [] }),
             standupPublishTarget: () => deferred(null),
             follower: { follow: () => () => {} },
+          },
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Docs (#859): the tree read, then the page read and its visit, all
+     * `deferred`; a page that lands after the unmount must arm nothing.
+     */
+    name: "TfDocs",
+    source: "lib/tf/docs/TfDocs.svelte",
+    open: (target) => ({
+      app: mount(TfDocs, {
+        target,
+        props: {
+          ready: true,
+          rest: ["confluence:1"],
+          job: null,
+          ports: {
+            docsTree: () => deferred({ spaces: [], last_read: null }),
+            docsPage: () =>
+              deferred({
+                entity_id: "confluence:1",
+                source_id: "confluence",
+                source_name: "Confluence",
+                title: "Page",
+                space: null,
+                ancestors: [],
+                editor: null,
+                editor_name: null,
+                updated_at: null,
+                web_url: null,
+                readable: true,
+                version: null,
+                labels: [],
+                blocks: [],
+                comments: [],
+                me: [],
+              }),
+            visitEntity: () => deferred(null),
+            openExternal: async () => {},
+            copy: async () => {},
           },
         },
       }),

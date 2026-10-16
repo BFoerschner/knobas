@@ -284,12 +284,10 @@ pub async fn page(
     let source_id: String = row.get("source_id");
     let adapter_kind: String = row.get("adapter_kind");
     let payload: serde_json::Value = row.get("payload");
-    let space = row
-        .get::<Option<String>, _>("key")
-        .map(|key| DocSpaceRef {
-            key,
-            name: row.get("name"),
-        });
+    let space = row.get::<Option<String>, _>("key").map(|key| DocSpaceRef {
+        key,
+        name: row.get("name"),
+    });
     let chain: Vec<String> =
         serde_json::from_value(row.get::<serde_json::Value, _>("ancestors")).unwrap_or_default();
 

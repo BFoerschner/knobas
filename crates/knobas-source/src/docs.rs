@@ -76,8 +76,13 @@ pub struct DocComment {
 pub enum DocBlock {
     /// A section heading. `level` is 1 to 6 as the source wrote it; the
     /// reader draws every level as a section head.
-    Heading { level: u8, text: Vec<Inline> },
-    Paragraph { text: Vec<Inline> },
+    Heading {
+        level: u8,
+        text: Vec<Inline>,
+    },
+    Paragraph {
+        text: Vec<Inline>,
+    },
     /// A list. A nested list's items are drawn as a list inside their item.
     List {
         ordered: bool,
@@ -89,7 +94,9 @@ pub enum DocBlock {
         language: Option<String>,
     },
     /// A table, row by row; a header cell says so.
-    Table { rows: Vec<Vec<TableCell>> },
+    Table {
+        rows: Vec<Vec<TableCell>>,
+    },
     /// An info, note, warning or tip panel, with the blocks inside it.
     Panel {
         kind: PanelKind,
@@ -99,7 +106,9 @@ pub enum DocBlock {
     /// Something the source has that the reader does not draw: the source's
     /// own name for it (a Confluence macro's `ac:name`). Never dropped, so a
     /// page with a part knobas cannot draw says so (story 134).
-    Placeholder { name: String },
+    Placeholder {
+        name: String,
+    },
 }
 
 /// One cell of a [`DocBlock::Table`].
@@ -195,7 +204,9 @@ pub fn inlines_mut(blocks: &mut [DocBlock]) -> Vec<&mut Inline> {
 
 fn collect<'a>(block: &'a mut DocBlock, out: &mut Vec<&'a mut Inline>) {
     match block {
-        DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => out.extend(text.iter_mut()),
+        DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => {
+            out.extend(text.iter_mut())
+        }
         DocBlock::List { items, .. } => {
             for item in items {
                 for inner in item {
@@ -257,7 +268,9 @@ mod tests {
         let mut blocks = vec![
             DocBlock::List {
                 ordered: false,
-                items: vec![vec![DocBlock::Paragraph { text: vec![mention()] }]],
+                items: vec![vec![DocBlock::Paragraph {
+                    text: vec![mention()],
+                }]],
             },
             DocBlock::Table {
                 rows: vec![vec![TableCell {

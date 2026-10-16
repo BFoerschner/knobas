@@ -1516,7 +1516,11 @@ fn the_docs_shapes_match_their_typescript_mirror() {
     };
     let wire = serde_json::to_value(&tree).unwrap();
     assert_shape("DocsTree", &wire, &["last_read", "spaces"]);
-    assert_shape("DocSpace", &wire["spaces"][0], &["key", "name", "pages", "source_id"]);
+    assert_shape(
+        "DocSpace",
+        &wire["spaces"][0],
+        &["key", "name", "pages", "source_id"],
+    );
     assert_shape(
         "DocNode",
         &wire["spaces"][0]["pages"][0],
@@ -1581,18 +1585,37 @@ fn the_docs_shapes_match_their_typescript_mirror() {
         ],
     );
     assert_shape("DocSpaceRef", &wire["space"], &["key", "name"]);
-    assert_shape("DocAncestor", &wire["ancestors"][0], &["entity_id", "title"]);
+    assert_shape(
+        "DocAncestor",
+        &wire["ancestors"][0],
+        &["entity_id", "title"],
+    );
     assert_shape(
         "DocComment",
         &wire["comments"][0],
         &["at", "author", "author_name", "blocks"],
     );
-    assert_shape("TableCell", &wire["blocks"][0]["rows"][0][0], &["header", "text"]);
+    assert_shape(
+        "TableCell",
+        &wire["blocks"][0]["rows"][0][0],
+        &["header", "text"],
+    );
 
-    let kinds: Vec<String> = [PanelKind::Info, PanelKind::Note, PanelKind::Warning, PanelKind::Tip]
-        .iter()
-        .map(|t| serde_json::to_value(t).unwrap().as_str().unwrap().to_owned())
-        .collect();
+    let kinds: Vec<String> = [
+        PanelKind::Info,
+        PanelKind::Note,
+        PanelKind::Warning,
+        PanelKind::Tip,
+    ]
+    .iter()
+    .map(|t| {
+        serde_json::to_value(t)
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_owned()
+    })
+    .collect();
     assert_same_members(
         &kinds.iter().map(String::as_str).collect::<Vec<_>>(),
         declared_union(MIRROR, "PanelKind"),
@@ -1617,15 +1640,33 @@ fn the_docs_shapes_match_their_typescript_mirror() {
     let tag = |v: serde_json::Value| v["type"].as_str().unwrap().to_owned();
     let text = || vec![Inline::text("x")];
     let blocks = [
-        DocBlock::Heading { level: 2, text: text() },
+        DocBlock::Heading {
+            level: 2,
+            text: text(),
+        },
         DocBlock::Paragraph { text: text() },
-        DocBlock::List { ordered: false, items: vec![] },
-        DocBlock::Code { code: String::new(), language: None },
+        DocBlock::List {
+            ordered: false,
+            items: vec![],
+        },
+        DocBlock::Code {
+            code: String::new(),
+            language: None,
+        },
         DocBlock::Table { rows: vec![] },
-        DocBlock::Panel { kind: PanelKind::Info, title: None, blocks: vec![] },
-        DocBlock::Placeholder { name: "roadmap".to_owned() },
+        DocBlock::Panel {
+            kind: PanelKind::Info,
+            title: None,
+            blocks: vec![],
+        },
+        DocBlock::Placeholder {
+            name: "roadmap".to_owned(),
+        },
     ];
-    let rust: Vec<String> = blocks.iter().map(|b| tag(serde_json::to_value(b).unwrap())).collect();
+    let rust: Vec<String> = blocks
+        .iter()
+        .map(|b| tag(serde_json::to_value(b).unwrap()))
+        .collect();
     assert_same_members(
         &rust.iter().map(String::as_str).collect::<Vec<_>>(),
         tags("DocBlock"),
@@ -1633,13 +1674,33 @@ fn the_docs_shapes_match_their_typescript_mirror() {
     );
     let inlines = [
         Inline::text("x"),
-        Inline::Link { text: String::new(), href: String::new() },
-        Inline::PageLink { text: String::new(), title: String::new(), space: None, entity_id: None },
-        Inline::Issue { key: String::new(), entity_id: None, title: None, status: None },
-        Inline::Mention { user: None, name: None, me: false },
+        Inline::Link {
+            text: String::new(),
+            href: String::new(),
+        },
+        Inline::PageLink {
+            text: String::new(),
+            title: String::new(),
+            space: None,
+            entity_id: None,
+        },
+        Inline::Issue {
+            key: String::new(),
+            entity_id: None,
+            title: None,
+            status: None,
+        },
+        Inline::Mention {
+            user: None,
+            name: None,
+            me: false,
+        },
         Inline::Break,
     ];
-    let rust: Vec<String> = inlines.iter().map(|i| tag(serde_json::to_value(i).unwrap())).collect();
+    let rust: Vec<String> = inlines
+        .iter()
+        .map(|i| tag(serde_json::to_value(i).unwrap()))
+        .collect();
     assert_same_members(
         &rust.iter().map(String::as_str).collect::<Vec<_>>(),
         tags("DocInline"),

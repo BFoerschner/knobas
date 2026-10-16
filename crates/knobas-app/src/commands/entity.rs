@@ -4210,7 +4210,10 @@ pub async fn docs_page(
 /// # Errors
 ///
 /// As [`docs_page`].
-pub async fn docs_page_inner(pool: &PgPool, entity_id: &str) -> Result<crate::docs::DocPage, IpcError> {
+pub async fn docs_page_inner(
+    pool: &PgPool,
+    entity_id: &str,
+) -> Result<crate::docs::DocPage, IpcError> {
     crate::commands::search::searcher(pool).await?;
     let declarations = declared_paths(pool).await?;
     let me = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())

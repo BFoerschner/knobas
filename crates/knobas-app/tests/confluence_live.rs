@@ -927,9 +927,14 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     let parent = env.page(PARENT);
     let mut litter = Litter::default();
 
-    let (status, me) = env.call(reqwest::Method::GET, "rest/api/user/current", None).await;
+    let (status, me) = env
+        .call(reqwest::Method::GET, "rest/api/user/current", None)
+        .await;
     assert_eq!(status, 200, "who am I: {me}");
-    let my_key = me["userKey"].as_str().expect("the account has a user key").to_owned();
+    let my_key = me["userKey"]
+        .as_str()
+        .expect("the account has a user key")
+        .to_owned();
 
     let title = format!("Docs reader blocks [{LITTER}]");
     let storage = format!(
@@ -987,7 +992,10 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         .await
         .expect("the reader reads the page");
     assert!(page.readable);
-    assert_eq!(page.space.as_ref().map(|s| s.key.as_str()), Some(env.space.as_str()));
+    assert_eq!(
+        page.space.as_ref().map(|s| s.key.as_str()),
+        Some(env.space.as_str())
+    );
     assert_eq!(
         page.ancestors.last().map(|a| a.title.as_str()),
         Some(parent.title.as_str()),
@@ -1006,7 +1014,9 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         panic!("the first block is the paragraph: {:#?}", page.blocks)
     };
     assert!(
-        text.iter().any(|i| matches!(i, Inline::Mention { user: Some(u), me: true, .. } if *u == env.user)),
+        text.iter().any(
+            |i| matches!(i, Inline::Mention { user: Some(u), me: true, .. } if *u == env.user)
+        ),
         "the mention of the account resolves by key to it, and is mine: {text:?}"
     );
     assert!(
@@ -1014,14 +1024,18 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
         "the page link names the mirrored parent: {text:?}"
     );
     assert!(
-        text.iter().any(|i| matches!(i, Inline::Issue { key, .. } if key == "PAY-231")),
+        text.iter()
+            .any(|i| matches!(i, Inline::Issue { key, .. } if key == "PAY-231")),
         "the Jira macro is a ticket chip: {text:?}"
     );
     let rest: Vec<&DocBlock> = page.blocks.iter().skip(1).collect();
     assert!(matches!(rest[0], DocBlock::Heading { .. }), "{rest:#?}");
     assert_eq!(
         rest[1],
-        &DocBlock::Code { code: "select 1 < 2;".into(), language: Some("sql".into()) }
+        &DocBlock::Code {
+            code: "select 1 < 2;".into(),
+            language: Some("sql".into())
+        }
     );
     let tones: Vec<PanelKind> = rest
         .iter()
@@ -1030,12 +1044,24 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
             _ => None,
         })
         .collect();
-    assert_eq!(tones, vec![PanelKind::Info, PanelKind::Warning, PanelKind::Note, PanelKind::Tip]);
+    assert_eq!(
+        tones,
+        vec![
+            PanelKind::Info,
+            PanelKind::Warning,
+            PanelKind::Note,
+            PanelKind::Tip
+        ]
+    );
     let DocBlock::Table { rows } = rest[6] else {
         panic!("the table: {rest:#?}")
     };
     assert!(rows[0].iter().all(|c| c.header) && !rows[1][0].header);
-    assert_eq!(rest[7], &DocBlock::Placeholder { name: "toc".into() }, "the unknown macro is named");
+    assert_eq!(
+        rest[7],
+        &DocBlock::Placeholder { name: "toc".into() },
+        "the unknown macro is named"
+    );
 
     // The tree: the new page hangs under its parent.
     let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
