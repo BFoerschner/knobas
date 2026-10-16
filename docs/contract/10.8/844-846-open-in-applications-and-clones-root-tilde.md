@@ -45,7 +45,8 @@
   - `checkout_commands` and `set_checkout_command` keep their shapes and become a view over the
     list: one `OpenCommandView` per application (`action` its id, `label` "Open in <name>",
     `is_default` whether the command is the one shipped for that id), so the rooms UI's panel and
-    settings, and ADR-0016's desktop witness that drives them, run unchanged.
+    settings keep working (the panel now passes its action as `application`), and ADR-0016's
+    desktop witness that drives them runs with no change to its driver.
   - `set_clones_root` stores a leading `~` as `$HOME` (*Where should clones go?* offers `~/code`,
     and nothing knobas runs is a shell that would expand it).
 

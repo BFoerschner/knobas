@@ -15,7 +15,8 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { CheckoutView, DiffRead } from "../../ipc/entity";
   import TfDiff from "../code/TfDiff.svelte";
-  import { checkoutLine } from "../code/code";
+  import { treeStanding } from "../code/code";
+  import { repoName } from "../openin/openin";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { localFiles } from "./repo";
@@ -46,12 +47,11 @@
 
   const path = $derived(checkout?.path ?? null);
   const tree = $derived(checkout?.tree?.status === "read" ? checkout.tree : null);
-  const stands = $derived(checkoutLine(checkout));
   /** "3 ahead, 1 changed" without the branch, which the line names on its own. */
-  const where = $derived(stands !== null && tree !== null ? stands.text.slice(stands.text.indexOf(", ") + 2) : null);
+  const where = $derived(tree !== null ? treeStanding(tree) : null);
   const files = $derived(localFiles(read));
   const untracked = $derived(read?.status === "read" ? read.untracked : []);
-  const name = $derived(title.split("/").pop() ?? title);
+  const name = $derived(repoName(title));
 
   async function load() {
     if (path === null) return;

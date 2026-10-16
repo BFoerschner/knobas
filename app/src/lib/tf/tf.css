@@ -1596,7 +1596,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 ||||||| parent of c74ab07f (Open in…, Clone and Local changes in the new shell (#844, #846, #847))
 /* Open in… and Clone (#844, #846): prototype-6's `.appmenu`, `.phs`, `pre.log`. */
 .tf-openin { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.tf-menu.tf-appmenu { width: 300px; padding: 4px 0; border-radius: 6px; }
+.tf-menu.tf-appmenu { width: 300px; padding: 4px 0; }
 .tf-appmenu button { display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%; padding: 6px 12px; border-radius: 0; color: var(--ink); font-size: var(--t-sm); }
 .tf-appmenu button:focus-visible { background: var(--sheet-2); outline: none; }
 .tf-appmenu b { font-weight: 600; }
