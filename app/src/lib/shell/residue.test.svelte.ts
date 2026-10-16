@@ -178,6 +178,8 @@ vi.mock("../ipc/entity", () => ({
   createContext: () => Promise.reject(new Error("no context creation in this test")),
   promoteContext: () => Promise.reject(new Error("no promotion in this test")),
   listEntities: () => deferred(PAGE),
+  // What a ticket reaches (#817): the Tickets preview's default ports name it (#1030).
+  jobReach: () => deferred([]),
   // The standup digest (#288). The `ports` prop is what the case below drives
   // the view through; this is here because the module-level import resolves
   // whether or not a prop overrides it.
@@ -898,7 +900,8 @@ const CASES: Case[] = [
               }),
             detail: () => deferred({ body_text: "" }),
             contexts: () => deferred([]),
-            tally: () => deferred(null),
+            listEntities: () => deferred({ rows: [], total: 0, tally: null, groups: null }),
+            jobReach: () => deferred([]),
             suggestions: () => deferred({ fields: [], parents: [] }),
             views: () => deferred([]),
             saveView: () => new Promise(() => {}),

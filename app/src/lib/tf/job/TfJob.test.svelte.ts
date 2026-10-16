@@ -25,7 +25,9 @@ import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters, sessionFilter } from "../filter/filter-state.svelte";
 import { createLayers, type Layers } from "../layers.svelte";
 import { createApps } from "../openin/apps.svelte";
+import { aroundLines } from "../tickets/tickets";
 import type { JobPorts } from "./ports";
+import { reachTally } from "./sections";
 import TfJob from "./TfJob.svelte";
 
 let target: HTMLElement;
@@ -621,6 +623,39 @@ test("Monitors and Pages roll up in prototype-6's words", async () => {
   expect(section("monitors").querySelector(".tf-rows a")?.getAttribute("href")).toBe("#/monitors");
   expect(roll("pages")).toBe("1 page in ENG 1 ask something of you");
   expect(section("pages").querySelector("a.tf-open")?.textContent?.trim()).toBe("Open Docs view");
+});
+
+// #1030: the Tickets preview's *Around this ticket* counts from the same reads.
+test("Around this ticket counts the rows the job's sections draw, a parent's build among them", async () => {
+  const healthy = (id: string) =>
+    ({ asset: { id, name: id, type_label: "VM", health: "up" }, effective_environment: null, held_by: [] }) as unknown as AssetDetail;
+  const p = ports({
+    others: [B_OK, B_RUN, B_FAIL, MON_OK, MONITOR, PAGE],
+    jobReach: () =>
+      Promise.resolve([
+        own(PR_OPEN.entity_id, "pr"),
+        own(B_FAIL.entity_id, "build"),
+        { entity_id: B_OK.entity_id, kind: "build", step: PARENT, origin: { kind: "parent", ticket: PARENT } },
+        own("asset:vm", "asset"),
+        own("asset:db", "asset"),
+      ]),
+    getAsset: (id) => Promise.resolve(healthy(id)),
+  });
+  open("PAY-231", { ports: p });
+  await settle();
+  const drawn = (id: string) => section(id).querySelectorAll(".tf-rows a").length;
+  expect(["code", "builds", "pages", "monitors", "assets"].map(drawn)).toEqual([3, 3, 1, 2, 2]);
+  expect(calls.promote).toEqual([ID]);
+
+  expect(aroundLines(await reachTally(p, ID))).toEqual([
+    { section: "Code", count: "3 items", failing: null },
+    { section: "Builds", count: "3 builds", failing: "1 failing or down" },
+    { section: "Docs", count: "1 page", failing: null },
+    { section: "Monitors", count: "2 monitors", failing: "1 failing or down" },
+    { section: "Assets", count: "2 assets", failing: null },
+  ]);
+  // Counting promotes nothing: only the job's own open did.
+  expect(calls.promote).toEqual([ID]);
 });
 
 test("Open Docs view opens Docs with This job on (R-2.5); the other sections' links leave it", async () => {
