@@ -37,10 +37,15 @@ export function strengthOf(link: Pick<LinkRow, "rule_class">): Strength {
   return link.rule_class === "similarity" ? "weak" : "strong";
 }
 
-/** The dot's tone for a strength, as prototype-6 draws it. */
-export function toneOf(strength: Strength): "ok" | "info" | "warn" {
-  return strength === "strong" ? "ok" : strength === "indirect" ? "info" : "warn";
-}
+/** Each strength as the view draws it: its word and its dot's tone, as prototype-6 does. */
+export const STRENGTHS: Record<Strength, { label: string; tone: "ok" | "info" | "warn" }> = {
+  strong: { label: "Strong", tone: "ok" },
+  indirect: { label: "Indirect", tone: "info" },
+  weak: { label: "Weak", tone: "warn" },
+};
+
+/** How many proposals the view asks the tray for: every one a mirror holds in practice. */
+export const REVIEW_LIMIT = 500;
 
 /**
  * What an end is called on its card: a ticket by its key and title, a commit
@@ -102,21 +107,21 @@ export interface QueueFilter {
 
 /**
  * The queue: the proposals the filter keeps, newest first. A decided one
- * leaves unless *Decided* is on or it is the one open (`open`), so the
+ * leaves unless *Decided* is on or it is the one open (`addressed`), so the
  * reader still sees what they just judged.
  */
 export function queue(
   entries: readonly SuggestionEntry[],
   decided: Decided,
   filter: QueueFilter,
-  open: string | null,
+  addressed: string | null,
 ): SuggestionEntry[] {
   return entries
     .filter((entry) => {
       const id = entry.link.id;
       if (filter.scope === "job" && (filter.job === null || !onJob(entry, filter.job))) return false;
       if (filter.strengths.length > 0 && !filter.strengths.includes(strengthOf(entry.link))) return false;
-      if (!filter.decided && decided[id] !== undefined && id !== open) return false;
+      if (!filter.decided && decided[id] !== undefined && id !== addressed) return false;
       return matchesAll(`${endName(entry.from)} ${endName(entry.to)} ${entry.link.reason ?? ""}`, filter.text);
     })
     .sort((a, b) => b.link.created_at.localeCompare(a.link.created_at));

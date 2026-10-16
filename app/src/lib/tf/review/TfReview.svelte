@@ -38,10 +38,11 @@
     queue,
     relationLabel,
     relationOptions,
+    REVIEW_LIMIT,
     rowNote,
+    STRENGTHS,
     strengthOf,
     targetOf,
-    toneOf,
     type ReviewPorts,
     type Strength,
     type Verdict,
@@ -69,9 +70,6 @@
     ongo?: (hash: string) => void;
   } = $props();
 
-  /** Enough for every proposal a mirror holds in practice; the tray's own `total` says if not. */
-  const LIMIT = 500;
-
   let rows = $state<SuggestionEntry[] | null>(null);
   let failure = $state<string | null>(null);
   let relation = $state("related");
@@ -90,11 +88,7 @@
       {
         key: "st",
         label: "Strength",
-        options: [
-          { value: "strong", label: "Strong" },
-          { value: "indirect", label: "Indirect" },
-          { value: "weak", label: "Weak" },
-        ],
+        options: (Object.keys(STRENGTHS) as Strength[]).map((value) => ({ value, label: STRENGTHS[value].label })),
       },
       { key: "dec", label: "Show", options: [{ value: "decided", label: "Decided" }] },
     ],
@@ -140,7 +134,7 @@
   $effect(() => {
     if (!ready) return;
     ports
-      .roomSuggestions([], null, LIMIT)
+      .roomSuggestions([], null, REVIEW_LIMIT)
       .then((page) => {
         rows = page.rows;
         failure = null;
@@ -203,7 +197,7 @@
           aria-current={current !== null && entry.link.id === current.link.id ? "true" : undefined}
           class:tf-decided={verdict !== undefined}
         >
-          <span class="tf-dot tf-{toneOf(strengthOf(entry.link))}"></span>
+          <span class="tf-dot tf-{STRENGTHS[strengthOf(entry.link)].tone}"></span>
           <span><Marked text={endName(targetOf(entry).item)} typed={filter.text} /></span>
           <span class="tf-s">{rowNote(entry, verdict)}</span>
         </a>
@@ -247,7 +241,7 @@
         <div class="tf-pair">
           {@render card(current.from)}
           <div class="tf-bridge">
-            <span class="tf-strength tf-{strength}">{strength.charAt(0).toUpperCase() + strength.slice(1)}</span>
+            <span class="tf-strength tf-{strength}">{STRENGTHS[strength].label}</span>
             <select bind:value={relation} aria-label="Relation">
               {#each relationOptions(current.link.relation) as option (option.id)}
                 <option value={option.id}>{option.label}</option>
