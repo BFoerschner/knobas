@@ -1,9 +1,12 @@
 <!--
   The repository page's *Branches* tab (#839, R-8.8), prototype-6's
-  `renderRepo(...,'branches')`: the filter (text, *No PR*, *Merged*), then the
-  default branch marked *default* and every other branch with ahead and behind
-  it (or *merged*), its open pull request and when its tip was committed;
-  *Open PR* and *Delete…* where the source offers them.
+  `renderRepo(...,'branches')`: the filter (text, *Mine*, *No PR*, *Merged*),
+  then the default branch marked *default* and every other branch with ahead
+  and behind it (or *merged*), its open pull request, who committed its tip
+  (*By*) and when; *Open PR* and *Delete…* where the source offers them.
+
+  *By* and *Mine* are the tip's declared author (`code_facts`, #986), never
+  the listing's line.
 
   The list is the repository's own view (`entity_view`, section `branches`);
   each branch's standing is that branch's view (`view/branch.rs`: its compare
@@ -18,7 +21,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { ViewRow } from "../../ipc/entity";
+  import type { CodeFacts, ViewRow } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -34,7 +37,7 @@
     ports,
     repoId,
   }: {
-    ports: Pick<RepoPorts, "entityView" | "submitWrite">;
+    ports: Pick<RepoPorts, "entityView" | "submitWrite" | "codeFacts">;
     repoId: string;
   } = $props();
 
@@ -44,6 +47,7 @@
   let listed = $state<ViewRow[] | null>(null);
   let failed = $state<string | null>(null);
   let standings = $state<Record<string, BranchStanding>>({});
+  let facts = $state<Record<string, CodeFacts>>({});
 
   $effect(() => {
     const id = repoId;
@@ -51,10 +55,19 @@
     listed = null;
     failed = null;
     standings = {};
+    facts = {};
     ports.entityView(id, "branches").then(
       (view) => {
         if (!live) return;
         listed = viewRows(view?.sections[0]);
+        const every = listed.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
+        if (every.length > 0)
+          ports.codeFacts(every).then(
+            (answer) => {
+              if (live) facts = Object.fromEntries(answer.map((entry) => [entry.entity_id, entry]));
+            },
+            () => {},
+          );
         const ids = listed.filter((row) => row.entity_id !== null && row.chip !== "default").map((row) => row.entity_id!);
         let next = 0;
         const worker = async () => {
@@ -95,9 +108,13 @@
           isDefault: row.chip === "default",
           meta: row.meta,
           standing: row.entity_id !== null ? (standings[row.entity_id] ?? null) : null,
+          author: row.entity_id !== null ? (facts[row.entity_id]?.author ?? null) : null,
+          mine: row.entity_id !== null && facts[row.entity_id]?.mine === true,
         }),
       ),
-      ...[...made].map((name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null })),
+      ...[...made].map(
+        (name): BranchRow => ({ name, entityId: null, isDefault: false, meta: null, standing: null, author: null, mine: false }),
+      ),
     ];
   });
   const notes = $derived((listed ?? []).filter(isNote));
@@ -108,7 +125,7 @@
     id: `repo-branches:${repoId}`,
     placeholder: "Filter branches",
     noun: "branches",
-    chips: [{ key: "show", label: "Show", options: ["No PR", "Merged"].map((value) => ({ value, label: value })) }],
+    chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged"].map((value) => ({ value, label: value })) }],
   });
   const shown = $derived(visibleBranches(rows, filter.chips["show"] ?? [], filter.text));
 
@@ -154,7 +171,7 @@
 {:else if shown.length > 0}
   <table class="tf-tbl tf-rbranches">
     <thead>
-      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>Updated</th><th></th></tr>
+      <tr><th>Branch</th><th>Against {defaultName}</th><th>Pull request</th><th>By</th><th>Updated</th><th></th></tr>
     </thead>
     <tbody>
       {#each shown as row (row.name)}
@@ -176,6 +193,7 @@
                   >{standing.pr.state}</span
                 >{/if}{:else if standing !== null}<span class="tf-dim">none</span>{/if}</td
           >
+          <td>{row.author ?? ""}</td>
           <td class="tf-dim tf-nowrap">{row.meta ?? ""}</td>
           <td class="tf-nowrap tf-racts"
             >{#if standing !== null && !gone}{#if standing.canOpenPr}<a class="tf-btn tf-sm" href={compareHash(repoId, row.name)}

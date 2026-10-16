@@ -228,6 +228,18 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
       writes.push(payload);
       return { id: writes.length } as unknown as QueuedWrite;
     },
+    // Each branch tip's author (#986); release/1.9's is not declared.
+    codeFacts: async (ids) =>
+      (
+        [
+          [MAIN, "jonas"],
+          [FEATURE, "mara"],
+          [SPIKE, "mara"],
+          [CHORE, "jonas"],
+        ] as const
+      )
+        .filter(([id]) => ids.includes(id))
+        .map(([entity_id, author]) => ({ entity_id, author, mine: author === "mara", language: null, teams: [] })),
     ...over,
   };
 }
@@ -264,13 +276,20 @@ test("Branches lists main as default, then each branch with ahead and behind or 
   await draw([REPO, "branches"]);
   const rows = [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => [...tr.querySelectorAll("td")].map(text));
   expect(rows).toEqual([
-    ["main default", "", "", "5d77e1a2c3 · 1 day ago", ""],
-    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 open", "c90d11e4a7 · 3 hours ago", "Delete…"],
-    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "9a1b2c3d4e · 9 days ago", "Open PR Delete…"],
-    ["chore/bump-tokio", "merged", "none", "77aa00bb11 · 5 days ago", "Delete…"],
-    ["release/1.9", "1 ahead, 0 behind", "none", "1111111111 · 20 days ago", "Open PR Delete…"],
+    ["main default", "", "", "jonas", "5d77e1a2c3 · 1 day ago", ""],
+    ["feature/PAY-231-sepa-retry", "3 ahead, 0 behind", "#142 open", "mara", "c90d11e4a7 · 3 hours ago", "Delete…"],
+    ["spike/sepa-instant", "2 ahead, 9 behind", "none", "mara", "9a1b2c3d4e · 9 days ago", "Open PR Delete…"],
+    ["chore/bump-tokio", "merged", "none", "jonas", "77aa00bb11 · 5 days ago", "Delete…"],
+    ["release/1.9", "1 ahead, 0 behind", "none", "", "1111111111 · 20 days ago", "Open PR Delete…"],
   ]);
-  expect([...target.querySelectorAll(".tf-rbranches th")].map(text)).toEqual(["Branch", "Against main", "Pull request", "Updated", ""]);
+  expect([...target.querySelectorAll(".tf-rbranches th")].map(text)).toEqual([
+    "Branch",
+    "Against main",
+    "Pull request",
+    "By",
+    "Updated",
+    "",
+  ]);
   expect(rowOf("feature/").querySelector("a[href^='#/pr/']")!.getAttribute("href")).toBe("#/pr/gitea%3Atidewater%2Fpayout-service%23142");
   expect(button("Open PR", rowOf("spike/"))!.getAttribute("href")).toBe(
     "#/repo/gitea%3Atidewater%2Fpayout-service/compare/spike%2Fsepa-instant",
@@ -293,6 +312,16 @@ test("the Branches filter narrows by name, No PR and Merged", async () => {
   button("Merged", target)!.click();
   flushSync();
   expect(names()).toEqual(["chore/bump-tokio"]);
+});
+
+test("Show: Mine keeps the branches whose tip's declared author is mine (#986)", async () => {
+  await draw([REPO, "branches"]);
+  const names = () => [...target.querySelectorAll(".tf-rbranches tbody tr")].map((tr) => text(tr.querySelector("td")).split(" ")[0]);
+  const mine = button("Mine", target)!;
+  expect(mine.closest("[role=group]")?.getAttribute("aria-label")).toBe("Show");
+  mine.click();
+  flushSync();
+  expect(names()).toEqual(["feature/PAY-231-sepa-retry", "spike/sepa-instant"]);
 });
 
 test("Delete… on a branch with unmerged commits warns what is lost, the open PR, and that the checkout keeps its copy; it queues DeleteBranch", async () => {

@@ -24,6 +24,7 @@ import {
   commitHash,
   fileHash,
   fileLines,
+  headLine,
   pickDefaultFile,
   readRepoRoute,
   repoHash,
@@ -296,12 +297,13 @@ test("a branch's standing is read off its view: ahead and behind, its open pull 
 });
 
 test("the Branches filter keeps by name, by No PR and by Merged, the default branch only by name", () => {
+  const by = (author: string | null, mine = false) => ({ author, mine });
   const rows: BranchRow[] = [
-    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true, meta: null, standing: null },
-    { name: "feature/PAY-231-sepa-retry", entityId: BRANCH, isDefault: false, meta: null, standing: branchStanding(branchView({ pr: true })) },
-    { name: "spike/sepa-instant", entityId: "x", isDefault: false, meta: null, standing: branchStanding(branchView()) },
-    { name: "chore/bump-tokio", entityId: "y", isDefault: false, meta: null, standing: branchStanding(branchView({ ahead: "0" })) },
-    { name: "unread", entityId: null, isDefault: false, meta: null, standing: null },
+    { name: "main", entityId: `${REPO}@refs/heads/main`, isDefault: true, meta: null, standing: null, ...by("jonas") },
+    { name: "feature/PAY-231-sepa-retry", entityId: BRANCH, isDefault: false, meta: null, standing: branchStanding(branchView({ pr: true })), ...by("mara", true) },
+    { name: "spike/sepa-instant", entityId: "x", isDefault: false, meta: null, standing: branchStanding(branchView()), ...by("mara", true) },
+    { name: "chore/bump-tokio", entityId: "y", isDefault: false, meta: null, standing: branchStanding(branchView({ ahead: "0" })), ...by("jonas") },
+    { name: "unread", entityId: null, isDefault: false, meta: null, standing: null, ...by(null) },
   ];
   const names = (show: string[], text = "") => visibleBranches(rows, show, text).map((row) => row.name);
   expect(names([])).toEqual(["main", "feature/PAY-231-sepa-retry", "spike/sepa-instant", "chore/bump-tokio", "unread"]);
@@ -309,6 +311,28 @@ test("the Branches filter keeps by name, by No PR and by Merged, the default bra
   expect(names(["No PR"])).toEqual(["spike/sepa-instant", "chore/bump-tokio"]);
   expect(names(["Merged"])).toEqual(["chore/bump-tokio"]);
   expect(names(["No PR", "Merged"])).toEqual(["chore/bump-tokio"]);
+  // *Mine* is the declared author's (#986), never the listing's line.
+  expect(names(["Mine"])).toEqual(["feature/PAY-231-sepa-retry", "spike/sepa-instant"]);
+  expect(names(["Mine", "No PR"])).toEqual(["spike/sepa-instant"]);
+});
+
+test("Commits' Author: Mine keeps the rows whose declared author is mine, not the line's words (#973)", () => {
+  const rows = [
+    { entity_id: `${REPO}@c90d11`, title: "PAY-231: jitter", meta: "mara · 2 hours ago", tone: null, chip: "c90d11", url: null },
+    { entity_id: `${REPO}@a41f2c`, title: "Bump deps", meta: "mara · 3 days ago", tone: null, chip: "a41f2c", url: null },
+    { entity_id: null, title: "Unmirrored", meta: "mara · 4 days ago", tone: null, chip: "0b1c2d", url: null },
+  ];
+  const mine = new Set([`${REPO}@c90d11`]);
+  expect(visibleViewRows(rows, "", mine).map((r) => r.chip)).toEqual(["c90d11"]);
+  expect(visibleViewRows(rows, "", null)).toHaveLength(3);
+});
+
+test("the header reads team, language, then the last push, as prototype-6's repoHead (#973)", () => {
+  const now = new Date(2026, 7, 22, 14, 32);
+  const at = "2026-08-22T08:20:00Z";
+  expect(headLine({ teams: ["Payments"], language: "Rust" }, at, now)).toBe("Payments, Rust, last push today 10:20.");
+  expect(headLine({ teams: [], language: "Rust" }, at, now)).toBe("Rust, last push today 10:20.");
+  expect(headLine(undefined, at, now)).toBe("Last push today 10:20.");
 });
 
 test("a ticket key is found in a branch name; the pull request is proposed from its ticket", () => {

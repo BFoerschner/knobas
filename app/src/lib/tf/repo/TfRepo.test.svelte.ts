@@ -246,6 +246,12 @@ function ports(over: Partial<RepoPorts> = {}, cloned = true): RepoPorts {
     submitWrite: async () => {
       throw { code: "invalid", message: "no write in this suite" };
     },
+    // The repository's team and language, and C1's author: mara, the identity (#973).
+    codeFacts: async (ids) =>
+      [
+        { entity_id: REPO, author: "tidewater", mine: false, language: "Rust", teams: ["Payments"] },
+        { entity_id: C1, author: "mara", mine: true, language: null, teams: [] },
+      ].filter((facts) => ids.includes(facts.entity_id)),
     ...over,
   };
 }
@@ -271,7 +277,7 @@ test("the header names the repository, its last push and its checkout; the tabs 
 
   expect(text(target.querySelector("h1"))).toBe("tidewater/payout-service");
   expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe(
-    "Last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
+    "Payments, Rust, last push today 12:30. Cloned at /Users/mara/src/payout-service, main, 1 ahead, 1 changed.",
   );
   expect([...target.querySelectorAll(".tf-crumbs a.tf-crumb, .tf-crumbs strong")].map(text)).toEqual([
     "Code",
@@ -307,7 +313,8 @@ test("Files opens the README, marks the locally changed file M, and a changed fi
 });
 
 test("an uncloned repository reads its files through the source and says it is not on this machine", async () => {
-  await draw([REPO, "files", "src", "lib.rs"], ports({}, false));
+  // With nothing declared the header starts at the push (#973).
+  await draw([REPO, "files", "src", "lib.rs"], ports({ codeFacts: async () => [] }, false));
   expect(text(target.querySelector(".tf-fhead .tf-sub"))).toBe("Last push today 12:30. Not on this machine yet.");
   expect([...target.querySelectorAll(".tf-code .tf-l")].map(text)).toEqual(["1// src/lib.rs", "2fn main() {}"]);
   expect(target.querySelector(".tf-changed")).toBeNull();
@@ -348,6 +355,27 @@ test("Commits lists sha, message and who and when; the filter narrows; a mirrore
   field.dispatchEvent(new Event("input", { bubbles: true }));
   flushSync();
   expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual(["a41f2c0000Bump depsjonas · 2 days ago"]);
+});
+
+test("Commits' Author: Mine keeps the commits whose declared author is mine (#973)", async () => {
+  // The unmirrored row's line says mara too: Mine reads the declaration, not the line.
+  const stand = ports();
+  const read = stand.entityView;
+  stand.entityView = async (id, sectionId) => {
+    const answer = await read(id, sectionId);
+    if (sectionId !== "commits" || answer === null) return answer;
+    const block = answer.sections[0]!.blocks[0] as { rows: ViewRow[] };
+    block.rows.push(vrow(null, "Unmirrored", "0b1c2d0000", "mara · 4 days ago"));
+    return answer;
+  };
+  await draw([REPO, "commits"], stand);
+  const mine = [...target.querySelectorAll("button")].find((button) => text(button) === "Mine")!;
+  expect(mine.closest("[role=group]")?.getAttribute("aria-label")).toBe("Author");
+  mine.click();
+  flushSync();
+  expect([...target.querySelectorAll(".tf-cbody tbody tr")].map(text)).toEqual([
+    "c90d11a2b3PAY-231: jitter in backoffmara · 3 hours ago",
+  ]);
 });
 
 test("a commit draws its sha, message, author and time, its diff per file, and New branch from here", async () => {
