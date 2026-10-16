@@ -51,7 +51,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Writes and undo
 
-- A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's life and sent when the toast closes; the toast's *Undo* cancels it. (#835)
+- A write that no command can take back (a dismissal, an accepted proposal) is held for the toast's 6.5 s and then sent; the toast's *Undo* cancels it, and the toast on screen is the sign a write is still held. Quitting, closing or reloading the window inside those 6.5 s loses the decision: nothing is written, and the proposal is back next time. Moving to another view does not; the write still goes. (#835)
 
 ## Filter keys
 

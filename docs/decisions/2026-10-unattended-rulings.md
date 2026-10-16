@@ -2094,6 +2094,18 @@ Merge-manager, PR #938 for #831.
   `accept_suggestion` confirms the row as it stands and no command relabels a link, so the
   activity log shows *linked* and *dismissed* for that pair. Unchanged, it is `accept_suggestion`.
   **Reversing:** low; an optional relation on `accept_suggestion` would need a §10.8 entry.
+- **Merge-manager, PR #943: the held write stays, with no flush on close.** Neither the spec nor
+  an ADR says a decision must survive a close. Closing the last window exits the app and shuts the
+  database down (`RunEvent::ExitRequested`), and Cmd-Q goes straight to `Exit`, so a write fired
+  from `beforeunload` races that shutdown, and could land half a relation change. A route change
+  loses nothing (the timers are module-level). The toast is the visible held state. The
+  shell-conventions line now says what a close loses. **Reversing:** low; a reliable flush needs a
+  close-requested hook that awaits the writes.
+- **Merge-manager, PR #943: a changed relation's `create_link` treats `conflict` as drawn.** The
+  pair already linked under that relation is the state the write wants, so a retry after a failed
+  dismissal (link landed, proposal still waiting) dismisses instead of sticking on "already
+  linked". No duplicate is possible: the active-edge index is one per pair per relation.
+  **Reversing:** low.
 - **Strength comes from the rule class.** `exact_key` and `source_relation` read *Strong*,
   `similarity` reads *Weak*. No rule writes evidence through another link, so nothing reads
   *Indirect* yet; its chip is drawn as prototype-6 draws it and keeps nothing. **Reversing:** low.

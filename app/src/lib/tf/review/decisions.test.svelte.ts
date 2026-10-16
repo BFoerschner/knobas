@@ -90,6 +90,21 @@ test("a relation the reader changed is drawn as that link, and the proposal is d
   expect(calls).toEqual(["create gitea:9f2c1ab jira:PAY-231 implements", "dismiss link-1"]);
 });
 
+test("a changed relation already linked counts as drawn, so a retry after a failed dismissal converges", async () => {
+  const { calls, ports: p } = ports({
+    createLink: async () => {
+      throw { code: "conflict", message: "already linked", source_id: null };
+    },
+  });
+  const decisions = createDecisions(p, 1000);
+  const failures: string[] = [];
+  decisions.decide(ENTRY, "yes", "implements", (message) => failures.push(message));
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(calls).toEqual(["dismiss link-1"]);
+  expect(failures).toEqual([]);
+  expect(decisions.verdicts["link-1"]).toBe("yes");
+});
+
 test("a write that fails undoes the decision and says why", async () => {
   const { ports: p } = ports({
     acceptSuggestion: async () => {

@@ -14,13 +14,15 @@
  * the one proposed. A relation the reader changed is drawn by `create_link`
  * under that relation, and the proposal is then dismissed, because
  * `accept_suggestion` confirms the row as it stands and no command relabels a
- * link. *Not related* is `dismiss_suggestion`. *Decide later* writes nothing:
+ * link. The two are separate writes; a pair already linked under the chosen
+ * relation counts as drawn, so a retry after a failed dismissal converges.
+ * *Not related* is `dismiss_suggestion`. *Decide later* writes nothing:
  * the proposal waits in the mirror, and the session remembers the choice.
  *
  * Module-level, as `toasts.svelte.ts` is: decisions outlive the view, so
  * leaving it and coming back finds the queue as it was left.
  */
-import { ipcErrorMessage } from "../../ipc";
+import { ipcErrorMessage, isIpcError } from "../../ipc";
 import {
   acceptSuggestion,
   createLink,
@@ -72,7 +74,14 @@ export function createDecisions(
     const { link } = entry;
     if (verdict === "no") return ports.dismissSuggestion(link.id);
     if (relation === link.relation) return ports.acceptSuggestion(link.id);
-    await ports.createLink(link.from_id, link.to_id, relation);
+    // `conflict` is the pair already linked under that relation: the state this
+    // write wants. It is what a retry meets when the dismissal below failed
+    // after the link landed, so the retry finishes the job instead of sticking.
+    try {
+      await ports.createLink(link.from_id, link.to_id, relation);
+    } catch (cause) {
+      if (!isIpcError(cause) || cause.code !== "conflict") throw cause;
+    }
     await ports.dismissSuggestion(link.id);
   }
 
