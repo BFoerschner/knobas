@@ -101,7 +101,7 @@ export const JIRA_SCHEMA = {
       default: null,
       title: "Epic Link field id",
       description:
-        "Where a classic project keeps epic membership. Filled in by Test connection: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent.",
+        "Where a classic project keeps epic membership. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira, so one copied from another instance reads the wrong field rather than failing. Leave it empty for a next-gen project, whose epic membership is synced already via fields.parent.",
     },
   },
 } as const;
