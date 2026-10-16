@@ -1867,3 +1867,18 @@ a.tf-r:hover { background: var(--sheet-2); }
 @media (max-width: 900px) {
   .tf-cbody.tf-set { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* ---------- Builds, build chains (#857): prototype-6's .chainrow on the run's Overview ---------- */
+.tf-chain { grid-column: 1 / -1; }
+.tf-chainrow { display: flex; gap: 6px; align-items: stretch; padding: 0 12px 10px; flex-wrap: wrap; }
+.tf-chainrow .tf-link {
+  display: flex; flex-direction: column; padding: 6px 10px; border: 1px solid var(--rule); border-left-width: 4px;
+  border-radius: 4px; text-decoration: none; font-size: var(--t-xs); color: var(--ink);
+}
+.tf-chainrow .tf-link span { color: var(--ink-2); }
+.tf-chainrow .tf-link.tf-ok { border-left-color: var(--ok); }
+.tf-chainrow .tf-link.tf-err { border-left-color: var(--err); }
+.tf-chainrow .tf-link.tf-run { border-left-color: var(--info); }
+.tf-chainrow .tf-link[aria-current="page"] { background: var(--sheet-2); border-color: var(--ink); }
+.tf-chainrow .tf-arrow { align-self: center; color: var(--ink-2); }
+.tf-chain > .tf-dim { font-size: var(--t-xs); margin: 0; padding: 0 12px 12px; }

@@ -1,7 +1,7 @@
 /**
  * `?fake-ipc`: Builds (#848 to #853): `pipelines`, `pipeline_runs`,
  * `set_pipeline_pinned`, `job_pipelines`, `older_pipeline_runs`,
- * `pipeline_settings`, `run_presets` and `save_run_preset`, and a run's
+ * `pipeline_settings`, `run_chain`, `run_presets` and `save_run_preset`, and a run's
  * view for `entity_view` (`runView`), over
  * prototype-6's 59 build configurations, so the list can be compared with
  * the prototype at `#/builds`.
@@ -19,6 +19,7 @@
  * prototype's *passed*: the shell draws what the source says.
  */
 import type {
+  ChainStepRow,
   JobPipeline,
   ParameterSpec,
   PipelineReason,
@@ -510,7 +511,34 @@ export function fakeSettings(config: string): PipelineSettings {
     parameters: parameters(config),
     parameter_write_op: "set_parameter",
     parameter_specs: parameterSpecs(config),
+    chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${step}`, name: step })),
   };
+}
+
+/** prototype-6's `CHAINS` (#857): TeamCity snapshot dependencies, first step first. */
+const CHAINS = [
+  ["Payout_Build", "Payout_Docker", "Payout_Deploy_Staging", "Payout_Deploy_Prod"],
+  ["Ledger_Build", "Ledger_Tests", "Ledger_Deploy_Staging", "Ledger_Deploy_Prod"],
+];
+
+function chainOf(config: string): string[] {
+  return CHAINS.find((chain) => chain.includes(config)) ?? [];
+}
+
+/**
+ * `run_chain` (#857): each step's newest run on the run's branch, the run
+ * itself for its own step, as prototype-6's `chainPanel` reads `runs`.
+ */
+export function fakeRunChain(runId: string, now: Date = new Date()): ChainStepRow[] {
+  const runs = history(now);
+  const config = [...runs.keys()].find((c) => runs.get(c)!.some((r) => r.entity_id === runId));
+  if (config === undefined) return [];
+  const run = runs.get(config)!.find((r) => r.entity_id === runId)!;
+  return chainOf(config).map((step) => ({
+    pipeline_id: `${SOURCE}:buildType:${step}`,
+    name: step,
+    run: step === config ? run : ((runs.get(step) ?? []).find((r) => r.branch === run.branch) ?? null),
+  }));
 }
 
 /** The configuration an id names, or a `not_found` like the command's. */
@@ -536,6 +564,7 @@ export function handlers(): Record<string, Handler> {
       return at < 0 ? [] : all.slice(at + 1, at + 1 + limit);
     },
     pipeline_settings: (args) => fakeSettings(configOf(String(args["pipelineId"] ?? ""))),
+    run_chain: (args) => fakeRunChain(String(args["runId"] ?? "")),
     run_presets: (args) => presets.get(String(args["pipelineId"] ?? "")) ?? [],
     save_run_preset: (args) => {
       const preset = args["preset"] as RunPreset;

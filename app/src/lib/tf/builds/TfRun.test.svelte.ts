@@ -78,6 +78,7 @@ const SETTINGS: PipelineSettings = {
   ],
   parameter_write_op: "set_parameter",
   parameter_specs: [],
+  chain: [],
 };
 
 function viewOf(running: boolean): SourceView {

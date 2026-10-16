@@ -263,6 +263,21 @@ test("builds: job_pipelines answers PAY-231's pipelines with their reasons, and 
   expect(h["job_pipelines"]!({ entityId: "jira:NOPE-1" })).toEqual([]);
 });
 
+test("builds: a chained pipeline names its chain, and run_chain gives each step its run on the branch (#857)", () => {
+  const h = demoHandlers() as Calls;
+  const docker = "teamcity:buildType:Payout_Docker";
+  const settings = h["pipeline_settings"]!({ pipelineId: docker }) as { chain: { name: string }[] };
+  expect(settings.chain.map((s) => s.name)).toEqual(["Payout_Build", "Payout_Docker", "Payout_Deploy_Staging", "Payout_Deploy_Prod"]);
+  const lone = h["pipeline_settings"]!({ pipelineId: "teamcity:buildType:Payout_IntegrationTests" }) as { chain: unknown[] };
+  expect(lone.chain).toEqual([]);
+  const run = (h["pipeline_runs"]!({ pipelineId: docker, limit: null }) as { entity_id: string; branch: string }[])[0]!;
+  const chain = h["run_chain"]!({ runId: run.entity_id }) as { name: string; run: { entity_id: string; branch: string } | null }[];
+  expect(chain.map((s) => s.name)).toEqual(["Payout_Build", "Payout_Docker", "Payout_Deploy_Staging", "Payout_Deploy_Prod"]);
+  expect(chain[1]!.run!.entity_id).toBe(run.entity_id);
+  for (const step of chain) if (step.run !== null) expect(step.run.branch).toBe(run.branch);
+  expect(h["run_chain"]!({ runId: "teamcity:build:Nope-1" })).toEqual([]);
+});
+
 test("builds: older_pipeline_runs pages back from any run until the history ends; pipeline_settings answers every pipeline (#851)", () => {
   const h = demoHandlers() as Calls;
   const id = "teamcity:buildType:Payout_IntegrationTests";

@@ -33,6 +33,7 @@
   import Marked from "../filter/Marked.svelte";
   import type { FilterConfig } from "../filter/filter";
   import { duration, runHash, runTone, shortTime } from "./builds";
+  import { chainSentence } from "./chain";
   import { BRIDGE, type PipelinePorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunDialog from "./TfRunDialog.svelte";
@@ -206,6 +207,7 @@
   const project = $derived(pipeline.path.length > 0 ? pipeline.path.join(" › ") : (pipeline.group ?? ""));
   const repositories = $derived(settings?.repositories ?? []);
   const triggers = $derived(triggersSentence(settings));
+  const chain = $derived(chainSentence(settings?.chain ?? [], pipeline.entity_id));
   const health = $derived(sources.map((source) => source.health));
   const stale = $derived(staleLine(pipeline, health, sync));
   const jobBranch = $derived(all === null ? null : jobBranchFor(all, jobBranches));
@@ -355,7 +357,7 @@
         {#each repositories as repository, at (at)}{#if at > 0},{" "}{/if}{#if repository.entity_id !== null}<a
               class="tf-mono"
               href={`#/repo/${encodeURIComponent(repository.entity_id)}`}>{repository.name}</a
-            >{:else}<span class="tf-mono">{repository.name}</span>{/if}{/each}{/if}.{triggers !== "" ? ` ${triggers}` : ""}
+            >{:else}<span class="tf-mono">{repository.name}</span>{/if}{/each}{/if}.{triggers !== "" ? ` ${triggers}` : ""}{chain !== "" ? ` ${chain}` : ""}
     </div>
   </div>
   <div class="tf-acts">
