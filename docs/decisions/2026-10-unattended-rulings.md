@@ -2998,3 +2998,42 @@ Ruled by the merge-manager (PR #997).
   refusal is no witness. The merge-manager did not move an installed application with nobody at
   the Mac. The criterion goes to the TF3 milestone review. **Reversing:** run it with the
   installed copy moved aside.
+## #852 Run… dialog (2026-10-16)
+
+Implementer, PR for #852.
+
+- **Run presets are a table of their own (migration `0037`), not a `knobas.setting` row as the
+  pins are.** The ticket asks for a migration; a preset has fields and a typed name unique per
+  pipeline ignoring case and spaces, and a save of a name that exists replaces it, which is one
+  `on conflict` on a row and a read-modify-write on one JSON value. The conventions file's pins
+  line stays true for a set of ids. **Reversing:** medium (a migration and two commands).
+- **A preset keeps the overrides only, the branch (none for the default) and both run options.**
+  "Save these settings" covers what the form holds; a value left at its default is not frozen, so
+  a default changed at the source later is what the preset runs with. **Reversing:** low.
+- **Parameter specs ride on the live settings read** (`PipelineSettings.parameter_specs`, one per
+  parameter, same order), as #851 ruled for the rest of the configuration's settings (#947's first
+  bullet). A multiple select, a password and an unparsable spec are text; a checkbox is drawn as a
+  select of its two values, since prototype-6 draws only selects and text. **Reversing:** low for
+  the drawing, medium for the shape.
+- **The default branch, picked or typed by name, runs as no branch.** TeamCity reads an explicit
+  default branch's name as a branch that is not its default one (the adapter's `run_action`
+  note), so *main* in the field sends `branch: null`. **Reversing:** low (`runPayload`).
+- ***#N settings* reads the run's own source view, its *Parameters* section** (`entity_view`), the
+  way the repository page reads branches. A value the view hid (a password) is not filled in and
+  so not sent. **Reversing:** low (`readRunParameters`).
+- **The branch combobox offers the default, then the repository's branches (its view's
+  *Branches*, when the mirror holds the repository), then any a run built that the repository did
+  not list.** A repository the mirror does not hold offers the run branches alone; any typed name
+  is allowed. **Reversing:** low (`branchChoices`).
+- **The run options are witnessed by what they do, not read back.** TeamCity answers no
+  `triggeringOptions` on a read; the live case puts two plain builds on the queue and checks the
+  run stands ahead of the waiting one, and that the agent's log says "Clean build enabled".
+  **Reversing:** n/a.
+- ***Re-run* and *Run again with changes…* on a run's own page are #853's** (that ticket's header
+  lists both); this PR gives it the dialog, which takes the run it starts from. On the pipeline
+  page each finished run has *Run again…*, as prototype-6 draws it. **Reversing:** n/a.
+- **Copy departures from prototype-6:** *TeamCity options* and the sign-in line name the
+  configured source (*Tidewater TeamCity options* under `?fake-ipc`), as the page's *Open in* does;
+  the *LOW* tags are prototype annotations and are left out. **Reversing:** low.
+- **No way to remove a preset yet**: prototype-6 draws none, so it is a follow-up rather than
+  invented UI. **Reversing:** n/a.
