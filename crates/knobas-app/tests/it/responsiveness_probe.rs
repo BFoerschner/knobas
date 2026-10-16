@@ -207,16 +207,38 @@ impl Source for Synthetic {
                         "branchName": "main",
                     }),
                 ),
+                // A page carries a storage body of two sections, so the Docs
+                // reads (#860) project it as Confluence's would.
                 _ => (
                     format!("page:{i}"),
-                    serde_json::json!({"id": i, "title": rng.words(4), "space": {"key": "OPS"}}),
+                    serde_json::json!({
+                        "id": i,
+                        "title": rng.words(4),
+                        "space": {"key": "OPS"},
+                        "version": {"number": 3, "by": {"username": "mara", "displayName": "Mara Lindqvist"}},
+                        "body": {"storage": {"value": format!(
+                            "<p>{}</p><h2>{}</h2><p>{}</p><h2>{}</h2><p>{}</p>",
+                            rng.words(12), rng.words(2), rng.words(14), rng.words(2), rng.words(14)
+                        )}},
+                    }),
                 ),
+            };
+            let body_text = if self.kind == "page" {
+                // The marked text a docs source writes at sync (#860).
+                format!(
+                    "{}\n{}\n{}",
+                    rng.words(12),
+                    knobas_source::docs::indexed::section_line(&rng.words(2)),
+                    rng.words(28)
+                )
+            } else {
+                rng.words(40)
             };
             sink.item(SyncItem {
                 entity: knobas_core::entity::EntityRef::new(id, &entity_key),
                 kind: self.kind.into(),
                 title: rng.words(6),
-                body_text: rng.words(40),
+                body_text,
                 author: Some("mara".into()),
                 updated_at: Some(now - chrono::Duration::minutes(i as i64)),
                 payload,
@@ -599,6 +621,9 @@ async fn what_the_reader_waits_on() {
         ("pages", pages.to_string()),
         ("builds", builds.to_string()),
         ("synthetic", synthetic().to_string()),
+        // A page's body and marks (#860): a seed of the shape before them is
+        // another seed.
+        ("page_shape", "storage-and-marks".to_owned()),
         (
             "gitea",
             gitea_env
@@ -867,6 +892,43 @@ async fn what_the_reader_waits_on() {
                 },
             )
         })
+        .await;
+    }
+
+    // -- Docs (#859 to #862) -------------------------------------------------
+    time("open Docs", "docs_tree", runs, || {
+        knobas_app::commands::entity::docs_tree_inner(pool)
+    })
+    .await;
+    time("open Docs", "docs_page", runs, || {
+        knobas_app::commands::entity::docs_page_inner(pool, "wiki:page:42")
+    })
+    .await;
+    let ops = knobas_app::docs::DocsScope {
+        source_id: "wiki".into(),
+        key: "OPS".into(),
+    };
+    for raw in [
+        "p",
+        "pa",
+        "pay",
+        "payment",
+        "payment retry",
+        "\"payment retry\" -cron",
+    ] {
+        time(
+            "docs search keystroke",
+            &format!("docs_search {raw:?}"),
+            runs,
+            || knobas_app::commands::entity::docs_search_inner(pool, raw, None),
+        )
+        .await;
+        time(
+            "docs search keystroke",
+            &format!("docs_search {raw:?} in OPS"),
+            runs,
+            || knobas_app::commands::entity::docs_search_inner(pool, raw, Some(&ops)),
+        )
         .await;
     }
 
