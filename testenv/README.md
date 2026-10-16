@@ -1347,6 +1347,20 @@ What the numbers decided:
 - **`xargs -P` stays 6.** `test`'s run, interleaved: N=6 79, 77, 78 s (load 3.76, 3.93, 3.73); N=8 82, 82 s (3.93, 3.48); N=10 82, 85 s (3.54, 3.91). The pool is paced by one binary, and more at once only slow it. SysV segments peaked at 14 of 32 at every N.
 - **`check-front` runs the Vitest files a change can reach** (adopted, `just front-changed`): `svelte-check` (about 6 s) and `vite build` (1 s) stay whole; Vitest (32-34 s whole) runs `vitest related` over the changed `app/src` files plus every test that reads sources off disk (11 today, found by grep each run), and the whole suite when config, the setup file, or a deleted or renamed file is in the change. Measured against an edit shaped like a real frontend PR (a comment appended to each `app/src` file it touched), load under 4: shaped like #915 (15 files), old 39, 39 s, new 16, 16 s; like #899 (12 files), old 39, 38 s, new 17, 16 s. 18 of 169 test files ran each time. It stops covering a test that depends on a changed file neither by import nor by reading files; `just check` still runs every test.
 
+### Scratch databases from one template (#925)
+
+`knobas-app`'s `test/it` binary set the length of `test`'s run (#920). Run serially, its tests took 0.14-0.19 s each with the machine 75% idle: most of them ask for a `scratch_database` of their own, and each one was a `create database` plus all 36 migrations, mostly waiting on the disk. Under the gate's contention the same migrations were CPU inside Postgres, repeated several hundred times per run.
+
+`test_util` now migrates once per process, into `knobas_template_<nonce>`, and every scratch and per-file database is `create database ... template` of it, about 35 ms on the test server (`wal_log` and `file_copy` alike). Measured 2026-10-16 the same way as #920: warm worktree on 02cd1406, `just test` alone, cargo's default jobs, nothing else running, the 1-minute load under 4 at each start (in brackets). Run is `test`'s pool, in seconds.
+
+| | run 1 | run 2 | run 3 |
+|---|---|---|---|
+| before (per-test migrations) | 82 (n/a) | 80 (4.9) | 92 (13.6, not quiet) |
+| durability off on the gate server, no template | 76 (4.0) | 78 (3.4) | 81 (3.9) |
+| template (adopted) | 77 (3.6) | 75 (4.0) | 76 (3.8) |
+
+About 5 s off every `test` run. A serial `assets_ipc` test went from a 0.18 s to a 0.15 s median. Turning `fsync`, `synchronous_commit` and `full_page_writes` off on the gate server was within the noise, so it is not adopted. The order of the pool's start was ruled out by #920 already (heavy binaries first was slower). What is left is the binary itself: it still runs for most of the pool, 58-76 s, because its several hundred tests each do real work under twelve test threads.
+
 ## Signed dev build (macOS)
 
 Desktop notifications (M3.3, #290) need a `.app` bundle with a stable signed

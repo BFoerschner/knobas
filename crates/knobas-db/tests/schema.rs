@@ -1979,3 +1979,80 @@ async fn the_app_pool_carries_a_statement_timeout_that_a_migration_leaves_in_pla
         "the pool's connections keep their limit"
     );
 }
+
+/// **A scratch database is a copy of one migrated template** (#925). A test
+/// that needs a database of its own used to pay a `create database` plus every
+/// migration -- about 0.15 s, most of it waiting on the disk -- and hundreds of
+/// tests in `knobas-app`'s binary did. Now the migrations run once, into this
+/// process's template, and each scratch database is `create database ...
+/// template` of it.
+///
+/// Two scratch databases each hold every migration, a row written to one is
+/// not in the other, and the template they were copied from is on the server
+/// and is itself fully migrated.
+#[tokio::test]
+async fn scratch_databases_are_migrated_copies_of_one_template_and_stay_apart() {
+    let applied = |pool: sqlx::PgPool| async move {
+        sqlx::query_scalar::<_, i64>("select count(*) from _sqlx_migrations where success")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+    };
+    let one = knobas_db::test_util::scratch_database("template-one")
+        .await
+        .pool(2)
+        .await
+        .unwrap();
+    let two = knobas_db::test_util::scratch_database("template-two")
+        .await
+        .pool(2)
+        .await
+        .unwrap();
+
+    let migrations = i64::try_from(
+        std::fs::read_dir(concat!(env!("CARGO_MANIFEST_DIR"), "/migrations"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .path()
+                    .extension()
+                    .is_some_and(|e| e == "sql")
+            })
+            .count(),
+    )
+    .unwrap();
+    assert_eq!(
+        applied(one.clone()).await,
+        migrations,
+        "the first holds every migration"
+    );
+    assert_eq!(
+        applied(two.clone()).await,
+        migrations,
+        "the second holds every migration"
+    );
+
+    sqlx::query("create table knobas.only_in_one (x int)")
+        .execute(&one)
+        .await
+        .unwrap();
+    let in_two: Option<String> =
+        sqlx::query_scalar("select to_regclass('knobas.only_in_one')::text")
+            .fetch_one(&two)
+            .await
+            .unwrap();
+    assert_eq!(in_two, None, "a table made in one copy is not in the other");
+
+    let templates: Vec<String> = sqlx::query_scalar(
+        "select datname::text from pg_database where datname like 'knobas_template_%'",
+    )
+    .fetch_all(&one)
+    .await
+    .unwrap();
+    assert!(
+        !templates.is_empty(),
+        "the run keeps a migrated template on the server: {templates:?}"
+    );
+}

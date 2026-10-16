@@ -1507,6 +1507,7 @@ knobas-db	test/schema	fts_column_is_stored_not_virtual
 knobas-db	test/schema	live_item_hides_a_disabled_source_but_not_an_unconfigured_one
 knobas-db	test/schema	live_item_hides_what_a_source_deleted
 knobas-db	test/schema	one_unarchived_context_per_anchor
+knobas-db	test/schema	scratch_databases_are_migrated_copies_of_one_template_and_stay_apart
 knobas-db	test/schema	setting_stores_json_by_key
 knobas-db	test/schema	source_config_gains_config_and_credential_health
 knobas-db	test/schema	sync_run_logs_a_run_and_outlives_its_source
