@@ -125,6 +125,57 @@ async fn a_dismissed_offer_is_gone_and_the_next_reads_do_not_offer_it_again() {
     );
 }
 
+/// **A dismissal in flight while the day is read still holds.** The read
+/// reconciles the offers before it reads, and a reconciliation that decided
+/// what to offer before the dismissal committed wrote the row straight back.
+///
+/// The dismissal is held open in a transaction of the test's own (the
+/// statement `passive::dismiss` runs, written out, since the seam has no way
+/// to pause it), the read starts beside it, and the dismissal commits while
+/// the read waits. If the read has not reached the wait by the commit, the
+/// test passes for the plain reason that the dismissal came first: the race
+/// can only be missed, never invented.
+#[tokio::test]
+async fn a_dismissal_committing_beside_a_read_is_not_offered_back() {
+    let pool = scratch("day-dismiss-race").await;
+    time::passive::set_enabled(&pool, true).await.unwrap();
+    beats(&pool, Some(&on(TICKET)), at(9, 0), 21).await;
+    let morning = read(&pool).await.blocks[0].block.id;
+
+    let mut dismissing = pool.begin().await.expect("a transaction");
+    sqlx::query(
+        "with gone as (
+             delete from knobas.block where id = $1 and kind = 'passive'
+             returning started_at, ended_at
+         )
+         insert into knobas.passive_dismissal (started_at, ended_at)
+         select started_at, ended_at from gone",
+    )
+    .bind(morning)
+    .execute(&mut *dismissing)
+    .await
+    .expect("the dismissal, not yet committed");
+
+    let reader = tokio::spawn({
+        let pool = pool.clone();
+        async move { read(&pool).await }
+    });
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    dismissing.commit().await.expect("the dismissal commits");
+
+    let beside = reader.await.expect("the read finished");
+    assert_eq!(
+        offered(&beside),
+        Vec::<DateTime<Utc>>::new(),
+        "the read beside the dismissal offered the stretch back"
+    );
+    assert_eq!(
+        offered(&read(&pool).await),
+        Vec::<DateTime<Utc>>::new(),
+        "the dismissed stretch came back on the read after"
+    );
+}
+
 /// Only an offer can be dismissed. A block a person tracked is deleted, not
 /// dismissed, and a block that is not there says so.
 #[tokio::test]

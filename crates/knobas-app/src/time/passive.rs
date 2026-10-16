@@ -572,7 +572,22 @@ const OFFER: &str = "insert into knobas.block (started_at, ended_at, entity_id, 
                     entity_id = excluded.entity_id,
                     label = excluded.label";
 
+/// Hold the dismissals still while [`materialize`] reads them and writes the
+/// offers they decide (#900).
+///
+/// Without it a [`dismiss`] committing between the read of [`DISMISSED`] and
+/// the [`OFFER`] upsert is undone: the read missed it, so the upsert writes
+/// the dismissed row back and the read that ran beside the click offers it
+/// again. `share row exclusive` conflicts with the `row exclusive` lock
+/// [`DISMISS`] takes on the table, so a dismissal waits for a reconciliation
+/// in flight (and then deletes the row it wrote) or the reconciliation waits
+/// for it (and then reads it). It also conflicts with itself, so two
+/// reconciliations queue rather than deadlock on each other's
+/// [`DISMISSAL_GROWS`].
+const DISMISSALS_HELD: &str = "lock table knobas.passive_dismissal in share row exclusive mode";
+
 /// The starts of the stretches a person dismissed, inside the day (#900).
+/// Read inside the reconciliation's transaction, under [`DISMISSALS_HELD`].
 const DISMISSED: &str = "select started_at from knobas.passive_dismissal
       where started_at >= $1 and started_at < $2";
 
@@ -781,23 +796,27 @@ pub(super) async fn materialize(
         .map(|row| Ok((row.try_get("started_at")?, row.try_get("ended_at")?)))
         .collect::<Result<_, sqlx::Error>>()?;
 
-    let dismissed: Vec<DateTime<Utc>> = sqlx::query_scalar(DISMISSED)
-        .bind(from)
-        .bind(to)
-        .fetch_all(pool)
-        .await?;
-
-    let (turned_down, spans): (Vec<PassiveSpan>, Vec<PassiveSpan>) = derive(&observations)
+    let derived: Vec<PassiveSpan> = derive(&observations)
         .into_iter()
         .filter(|span| {
             !owned
                 .iter()
                 .any(|(began, ended)| span.started_at < *ended && span.ended_at > *began)
         })
+        .collect();
+
+    let mut tx = pool.begin().await?;
+    sqlx::query(DISMISSALS_HELD).execute(&mut *tx).await?;
+    let dismissed: Vec<DateTime<Utc>> = sqlx::query_scalar(DISMISSED)
+        .bind(from)
+        .bind(to)
+        .fetch_all(&mut *tx)
+        .await?;
+    let (turned_down, spans): (Vec<PassiveSpan>, Vec<PassiveSpan>) = derived
+        .into_iter()
         .partition(|span| dismissed.contains(&span.started_at));
 
     let starts: Vec<DateTime<Utc>> = spans.iter().map(|span| span.started_at).collect();
-    let mut tx = pool.begin().await?;
     for span in &turned_down {
         sqlx::query(DISMISSAL_GROWS)
             .bind(span.started_at)

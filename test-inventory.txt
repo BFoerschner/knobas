@@ -590,6 +590,7 @@ knobas-app	test/it	conversation_ipc::a_visit_answers_the_one_before_it
 knobas-app	test/it	conversation_ipc::a_visit_is_not_in_the_recent_activity
 knobas-app	test/it	conversation_ipc::a_visit_to_another_ticket_is_not_this_ones
 knobas-app	test/it	conversation_ipc::a_visit_to_nothing_is_refused_and_writes_nothing
+knobas-app	test/it	day_offers_ipc::a_dismissal_committing_beside_a_read_is_not_offered_back
 knobas-app	test/it	day_offers_ipc::a_dismissed_offer_is_gone_and_the_next_reads_do_not_offer_it_again
 knobas-app	test/it	day_offers_ipc::only_an_offered_block_can_be_dismissed
 knobas-app	test/it	day_offers_ipc::the_days_open_stretches_are_focused_time_no_block_covers
