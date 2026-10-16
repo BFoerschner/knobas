@@ -114,3 +114,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - Starting a run goes through the one Run… dialog (`tf/builds/TfRunDialog.svelte`), which hands
   the page a `RunRequest`; the page queues it and draws it *queued*. The default branch is sent as
   no branch. (#852)
+- A run's address is `#/build/<pipeline entity id>/<run entity id>`, and its tab is the next
+  segment (`log`, `tests`, `artifacts`, `changes`, `params`); Overview is the run's own address.
+  `#/build/<run entity id>` alone moves to the full address. The run page draws from the run's row
+  and its source view (`entity_view`), with no command of its own. (#853)

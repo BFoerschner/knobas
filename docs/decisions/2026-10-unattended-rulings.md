@@ -3126,3 +3126,48 @@ Ruled by the implementer (PR for #863).
   **Reversing:** low.
 - **The *Files* section is read each time the tab opens**, not cached with the whole view, so a
   return to the tab shows the diff as it is now. **Reversing:** low.
+## #853 Run page (2026-10-16)
+
+- **The run page reads `pipeline_runs` for the run and today's build view (`entity_view`) for
+  the rest, with no new command.** The ticket says "over today's build view reads plus the
+  declared run fields". The run row gives number, state, branch, start, finish and duration. The
+  view gives who started it, the agent, a running run's *Now*, the commit, the changes, the
+  top-level artifacts, the parameters and the failed tests. A run older than the latest hundred is
+  looked for in up to five older pages (`older_pipeline_runs`). **Reversing:** low.
+- **Facts are read by their labels (`Triggered by`, `Agent`, `Now`). The commit is the
+  overview's row that carries a sha.** That ties the shell to the TeamCity view's labels until
+  they are declared run fields: follow-up #1004 (`backlog`). **Reversing:** low.
+- **No steps bar.** No read carries a run's steps: the frame declares none, and step boundaries
+  are #854's whole-log read. Inventing them would break "no invented fields". Follow-up #1003
+  (`ready-for-agent`, blocked by #854) draws the bar. **Reversing:** n/a.
+- ***Re-run* queues `RunBuild` with the run's branch and every value it ran with that is not a
+  default** (undeclared ones included), not `RerunBuild`. TeamCity's `RerunBuild` queues the
+  configuration again with its defaults on its default branch (`write::rerun`), which is not
+  R-9.8's "same settings". A hidden value can't be sent again, so its default runs. *Re-run* waits
+  for the run's view. **Reversing:** low (`rerunRequest`).
+- **A run started from the run page is announced by the toast (*Queued: run X. Re-run of #N, same
+  settings.*) and is drawn *queued* on the pipeline page's next read**, as prototype-6's
+  `startRun` stays on the run page. The page draws no queued row of its own. **Reversing:** low.
+- **The first failure is the first err-toned row of the view's *Tests* section (a muted test is
+  not a failure), with the text after it as its details, drawn as the source wrote them.**
+  *Open the test file* is drawn only when the details name a path with a directory and a line
+  (`tests/sepa_retry.rs:14`) and the pipeline's repository is mirrored. A stack frame's bare
+  `B.java:31` is a class, not a path. With more than one failure the heading reads *3 tests
+  failed. The first: <name>*. prototype-6 draws only the one-test case. **Reversing:** low.
+- **The context line is about runs, not the test.** *Also failed in #N on this branch* when the
+  branch's previous finished run failed too, else *#N on this branch passed/failed*. Then, for a
+  run off the default branch, *#M on main passed/failed* for that branch's last finished run
+  before it. Whether the same test failed is per-test history, the Tests tab's (#855).
+  **Reversing:** low (`contextLine`).
+- **A running run says what it is doing in an info callout (the view's *Now*).** "When it was
+  last seen" is the warn line the pipeline page already draws (`staleLine`: *<source> data is N
+  old: sign-in failing*). The run page draws it under its header. **Reversing:** low.
+- ***Download* on the Overview's Artifacts opens the source's download URL**, today's behaviour,
+  until #856 streams it through knobas (D8). A folder row (TeamCity's top-level listing) has no
+  *Download*. **Reversing:** low.
+- ***Log*, *Tests* and *Artifacts* tabs are drawn and say they are not built yet** (#854 to
+  #856), as the conventions say for a later ticket's route. *Create ticket* (LOW) is not drawn.
+  **Reversing:** n/a.
+- **`#/build/<run id>` alone (a job's or the inbox's row) moves to `#/build/<pipeline>/<run>`.**
+  The pipeline is the one whose recent runs hold the run, else the one a row of the run's view
+  names. With neither, the page says *No run at this address.* **Reversing:** low.
