@@ -163,6 +163,8 @@ vi.mock("../ipc/entity", () => ({
   pipelineSettings: () => deferred(null),
   olderPipelineRuns: () => deferred([]),
   runChain: () => deferred([]),
+  // The run page's log read for its steps bar (#1003), answering late.
+  runLog: () => deferred(null),
   // The desktop notification send (#339): the notifier store imports it at
   // module level. Nothing here notifies, so it refuses.
   notify: () => Promise.reject(new Error("no notification in this test")),

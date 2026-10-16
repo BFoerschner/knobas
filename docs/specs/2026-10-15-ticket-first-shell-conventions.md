@@ -129,3 +129,5 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
   (`knobas_source::run`). A download from a source is one command (`download_run_file`) into a new
   file in the downloads folder, named by the adapter's suggestion cut to its last segment, never
   the source's URL opened in a browser (D8). (#854, #855, #856)
+- A run's steps are `run_log`'s steps; the run page reads the log once and hands that read to the
+  Log tab (again for a run in flight). A step no read names is not drawn. (#1003)

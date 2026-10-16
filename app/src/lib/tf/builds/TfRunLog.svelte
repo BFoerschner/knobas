@@ -10,6 +10,8 @@
   - The sticky toolbar: *Find in log* with "N of M" (`Enter` next,
     `Shift+Enter` previous), *Errors and warnings only*, *Wrap lines*,
     *Timestamps*, *Jump to the first error* on a failed run, *Download log*.
+  - A step the run page's steps bar asked for (`openStep`, #1003) opens and
+    scrolls into view once the log is read.
   - A fold holds its lines only while it is open, so 20,000 lines in
     closed steps cost their summaries.
 -->
@@ -38,6 +40,7 @@
     inFlight,
     failed,
     ports,
+    openStep = null,
   }: {
     runId: string;
     /** The run has not finished: its last step is running. */
@@ -45,6 +48,8 @@
     /** The run failed: *Jump to the first error* is offered. */
     failed: boolean;
     ports: Pick<RunPorts, "log" | "download">;
+    /** The step to open at, from a click on the steps bar; `seq` tells two clicks on one step apart. */
+    openStep?: { step: number; seq: number } | null;
   } = $props();
 
   let log = $state<RunLog | null>(null);
@@ -75,6 +80,16 @@
         if (mine === token) readFailed = ipcErrorMessage(cause);
       },
     );
+  });
+
+  /** The `seq` of the last step opened from the bar, so a click opens it once. */
+  let lastSeq = 0;
+  $effect(() => {
+    const wanted = openStep;
+    if (wanted === null || log === null || wanted.seq === lastSeq) return;
+    lastSeq = wanted.seq;
+    untrack(() => (toggled[wanted.step] = true));
+    void tick().then(() => viewer?.querySelector(`details[data-s="${wanted.step}"]`)?.scrollIntoView({ block: "start" }));
   });
 
   const blocks = $derived(log === null ? [] : logBlocks(log));
