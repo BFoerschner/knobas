@@ -241,9 +241,9 @@ test("with no job, the breadcrumb starts at the view's own name and Esc goes to 
 
 test("every route not built yet names itself", async () => {
   start();
-  await at("#/deps");
-  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Dependencies");
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("Dependencies is not built in the new shell yet.");
+  await at("#/monitors");
+  expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Monitors");
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("Monitors is not built in the new shell yet.");
   await at("#/ctx/all");
   expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/ctx/all in the new shell.");
 });

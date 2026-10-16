@@ -767,3 +767,73 @@ fn day(hour: u32, minute: u32) -> chrono::DateTime<chrono::Utc> {
         .with_ymd_and_hms(2026, 8, 24, hour, minute, 0)
         .unwrap()
 }
+
+/// Every layer and kind placement in `pool`, in a comparable order.
+async fn layers(pool: &PgPool) -> Vec<(String, String, Option<String>)> {
+    sqlx::query_as(
+        "select l.id, l.name, k.kind
+           from knobas.dep_layer l
+           left join knobas.dep_layer_kind k on k.layer_id = l.id
+          order by l.id, k.kind",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap()
+}
+
+/// The layers of Dependencies (`0036`, #871) are seeded on every machine and
+/// replaced, not merged, by a backup's: a restore must leave exactly the
+/// archive's scheme, with none of the target's seed mixed in. An archive that
+/// does not carry them (a share export, or a backup older than `0036`) leaves
+/// the target's own seed alone.
+#[tokio::test]
+async fn a_restore_replaces_the_seeded_layers_with_the_archives_and_keeps_them_otherwise() {
+    let source = knobas_db::test_util::scratch_database("layersource").await;
+    let from = source.pool(2).await.unwrap();
+
+    // The source's user has changed the scheme: a layer renamed, one added,
+    // a kind moved into it and one dropped into no layer.
+    for statement in [
+        "update knobas.dep_layer set name = 'Hosts' where id = 'machines'",
+        "insert into knobas.dep_layer (id, name, position) values ('edge', 'Edge', 9)",
+        "update knobas.dep_layer_kind set layer_id = 'edge' where kind = 'route'",
+        "delete from knobas.dep_layer_kind where kind = 'site'",
+    ] {
+        sqlx::query(statement).execute(&from).await.unwrap();
+    }
+    let changed = layers(&from).await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let archive = dir.path().join("layers.knobas");
+    backup::dump(&source, &archive).await.expect("a backup");
+
+    // A fresh machine holds the seed, which must not count as data.
+    let target = knobas_db::test_util::scratch_database("layertarget").await;
+    let into = target.pool(2).await.unwrap();
+    let seeded = layers(&into).await;
+    assert_ne!(seeded, changed, "the fixture has to differ from the seed");
+
+    backup::restore(&target, &archive)
+        .await
+        .expect("the seeded layers do not make a fresh machine occupied");
+    assert_eq!(
+        layers(&into).await,
+        changed,
+        "the restored layers are exactly the archive's, with no seed row left over"
+    );
+
+    // An archive without the layer tables leaves the target's seed in place.
+    let share = dir.path().join("no-layers.knobas");
+    backup::dump_tables(&source, &share, &["entity"])
+        .await
+        .expect("a share-shaped archive");
+    let other = knobas_db::test_util::scratch_database("layerkeep").await;
+    backup::restore(&other, &share)
+        .await
+        .expect("an archive without the layers restores");
+    assert_eq!(
+        layers(&other.pool(2).await.unwrap()).await,
+        seeded,
+        "an archive that carries no layers must not clear this machine's"
+    );
+}

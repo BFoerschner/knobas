@@ -488,6 +488,23 @@ pub async fn depends_on_this(
     assets::depends_on_this(&pool, &asset_id).await
 }
 
+/// What Dependencies draws from the top bar (#871): the shared layers, every
+/// kind a layer can hold, and every asset, route, repository, pipeline, open
+/// pull request and linked ticket with its health and the known relations.
+/// See [`assets::dependencies`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
+/// [`Internal`](crate::IpcErrorCode::Internal) if a read fails.
+#[tauri::command]
+pub async fn dependencies(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<assets::dependencies::Dependencies, IpcError> {
+    let pool = lifecycle.pool()?;
+    assets::dependencies::read(&pool).await
+}
+
 /// What importing `file` would do, having written nothing.
 ///
 /// The argument is the file's **text**, not a path: reading a file off the

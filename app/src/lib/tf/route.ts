@@ -80,6 +80,9 @@ const SECTION_OF: Record<string, Section> = {
   assets: "deps",
   asset: "deps",
   map: "deps",
+  // A route's address (#432) opens the asset tree at the asset exposing it,
+  // which is Dependencies' *Asset tree* (#871).
+  route: "deps",
   monitors: "monitors",
   sets: "sets",
   review: "review",

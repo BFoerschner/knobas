@@ -26,6 +26,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
 - A Code row opens `#/pr/<entity id>`, `#/repo/<entity id>`, `#/branch/<entity id>` or `#/commit/<entity id>`. The address carries the entity id, because a pull request's number is unique only inside its repository. `branch` and `commit` light the Code nav. (#816, PR #898)
 - A Builds row opens `#/build/<entity id>`, a Pages row `#/page/<entity id>`, an Assets row `#/asset/<asset id>`, a Monitors row `#/monitors`. (#817)
+- Under Dependencies, `#/deps` (and the retired `#/map`) draws Dependencies, and `#/assets`, `#/asset/<id>` and `#/route/<id>` draw the Asset tree, each matching on `head`. (#871)
 - Every job section is `tf/job/TfSection.svelte` reading `list_entities` with `reach: <ticket id>`; a row from the parent (or, from TF5, a link set) carries a `.tf-via` label naming it ("Parent PAY-231"). (#817)
 
 ## Data, fixtures and screenshots

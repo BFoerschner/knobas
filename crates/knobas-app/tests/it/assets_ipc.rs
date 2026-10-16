@@ -4717,6 +4717,7 @@ fn invoke_over(
             knobas_app::commands::assets::unmonitored_assets,
             knobas_app::commands::assets::depends_on_this,
             knobas_app::commands::assets::produce_estate_file,
+            knobas_app::commands::assets::dependencies,
         ])
         .build(tauri::test::mock_context(tauri::test::noop_assets()))
         .expect("mock app");
@@ -4769,6 +4770,7 @@ use tauri::Manager;
 #[test]
 fn every_asset_command_is_registered_and_its_arguments_decode() {
     for (cmd, args) in [
+        ("dependencies", serde_json::json!({})),
         ("asset_tree", serde_json::json!({})),
         (
             "asset_tree",

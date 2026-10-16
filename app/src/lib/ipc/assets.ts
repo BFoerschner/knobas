@@ -18,7 +18,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ActivityRow, LinkEntry } from "./entity";
+import type { ActivityRow, LinkEntry, Tone } from "./entity";
 
 /**
  * What a property value may be — `knobas_core::asset::PropertyKind`.
@@ -1249,4 +1249,71 @@ export interface UnmonitoredAsset {
  */
 export function unmonitoredAssets(): Promise<UnmonitoredAsset[]> {
   return invoke<UnmonitoredAsset[]>("unmonitored_assets");
+}
+
+// -- Dependencies (#871) ------------------------------------------------------
+
+/**
+ * One shared layer — `knobas_app::assets::dependencies::Layer`: its name and
+ * the kinds it holds, in order. The layers are the same in every view (D14).
+ */
+export interface DepLayer {
+  id: string;
+  name: string;
+  /** Dependencies' kinds: asset type ids, `ticket`, `pr`, `page`, `repo`, `pipeline`, `route`. */
+  kinds: string[];
+}
+
+/** One kind a layer can hold — `DepKind`: the built-in label and monogram (D15). */
+export interface DepKind {
+  id: string;
+  label: string;
+  monogram: string;
+}
+
+/** One tile — `DepItem`. */
+export interface DepItem {
+  /** The entity id: `asset:…`, `route:…`, `jira:PAY-231`. */
+  id: string;
+  /** One of the {@link DepKind} ids. */
+  kind: string;
+  name: string;
+  /** Broken, warning, in flight or fine; `null` where nothing says. */
+  health: Tone | null;
+  /** The source's own state word: a ticket's status, a PR's state, a pipeline's newest run. */
+  state: string | null;
+  /** How many monitors are attached; `0` draws an asset or route hatched. */
+  monitors: number;
+  /** The environment in force on an asset or route. */
+  environment: string | null;
+  /** The owner in force on an asset. */
+  owner: string | null;
+}
+
+/**
+ * One known relation — `DepRelation`: a confirmed link's relation, or
+ * `inside`, `exposes`, `lands-on`, `in-repository`.
+ */
+export interface DepRelation {
+  from: string;
+  to: string;
+  relation: string;
+}
+
+/** What Dependencies draws from the top bar — `Dependencies`. */
+export interface Dependencies {
+  layers: DepLayer[];
+  kinds: DepKind[];
+  items: DepItem[];
+  relations: DepRelation[];
+}
+
+/**
+ * The top-bar opening of Dependencies (R-11.10, R-11.23): the shared layers,
+ * every kind, and every asset, route, repository, pipeline, open pull request
+ * and linked ticket with its health and the known relations. One read; the
+ * bands, tiles and lines are drawn from it in the UI.
+ */
+export function dependencies(): Promise<Dependencies> {
+  return invoke<Dependencies>("dependencies");
 }
