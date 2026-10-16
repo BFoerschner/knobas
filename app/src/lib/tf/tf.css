@@ -919,3 +919,60 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-picklist button:first-child { border-top: 0; }
 .tf-picklist button:hover, .tf-picklist button[aria-selected="true"] { background: var(--sheet-2); }
 .tf-picked { display: flex; gap: 8px; align-items: center; }
+
+/* ---------- Proposed links (#835, R-6.3, R-6.4): the queue and the proposal ---------- */
+.tf-seg .tf-jobk { font-family: var(--mono); font-size: var(--t-xs); }
+.tf-rv { display: grid; grid-template-columns: 320px minmax(0, 1fr); min-height: 100%; }
+.tf-rvq { border-right: 1px solid var(--rule); background: var(--sheet); display: flex; flex-direction: column; min-height: 0; }
+.tf-rvq .tf-fbar { position: static; padding: 10px 12px; }
+.tf-rvq .tf-fsearch { max-width: none; flex-basis: 200px; }
+.tf-rvq .tf-fchips button { padding: 1px 9px; }
+.tf-ql { overflow: auto; flex: 1; }
+.tf-ql a {
+  display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 2px 8px; padding: 8px 12px;
+  border-bottom: 1px solid var(--rule-2); text-decoration: none; font-size: var(--t-sm); color: var(--ink);
+}
+.tf-ql a:hover { background: var(--sheet-2); }
+.tf-ql a[aria-current="true"] { background: var(--sheet-2); box-shadow: inset 3px 0 0 var(--ink); }
+.tf-ql a .tf-dot { margin-top: 5px; }
+.tf-ql a .tf-s { grid-column: 2; font-size: var(--t-xs); color: var(--ink-2); }
+.tf-ql a.tf-decided { opacity: .6; }
+.tf-review { padding: 22px; display: flex; flex-direction: column; gap: 16px; max-width: 980px; }
+.tf-review h1 { font-size: var(--t-3xl); font-weight: 700; font-variation-settings: "wdth" 85; }
+.tf-review .tf-start { align-self: flex-start; }
+.tf-review-top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tf-review-top a { text-decoration: underline; text-underline-offset: 2px; }
+.tf-pair { display: grid; grid-template-columns: minmax(0, 1fr) 190px minmax(0, 1fr); align-items: stretch; }
+.tf-pend {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 6px; min-width: 0;
+}
+.tf-pend .tf-kind { font-size: var(--t-xs); color: var(--ink-2); }
+.tf-pend .tf-name { font-size: var(--t-xl); font-weight: 600; line-height: 1.25; overflow-wrap: anywhere; }
+.tf-bridge { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 0 10px; position: relative; }
+.tf-bridge::before { content: ""; position: absolute; left: 0; right: 0; top: 50%; border-top: 2px dashed var(--rule); }
+.tf-bridge select {
+  position: relative; font-weight: 600; padding: 5px 8px; border-radius: 4px; border: 1px solid var(--ink-2);
+  background: var(--sheet); color: var(--ink);
+}
+.tf-strength { position: relative; background: var(--paper); padding: 0 6px; font-size: var(--t-sm); font-weight: 600; }
+.tf-strength.tf-strong { color: var(--ok); } .tf-strength.tf-indirect { color: var(--info); } .tf-strength.tf-weak { color: var(--warn); }
+.tf-evidence {
+  background: var(--sheet); border: 1px solid var(--rule); border-radius: 6px; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 10px;
+}
+.tf-evidence h2 { font-size: var(--t-lg); font-weight: 600; font-variation-settings: "wdth" 88; }
+.tf-evidence .tf-claim { font-size: var(--t-lg); }
+.tf-decide { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.tf-decide .tf-btn { padding: 9px 16px; font-size: var(--t-md); }
+.tf-decide .tf-yes { background: var(--ok); border-color: var(--ok); color: var(--sheet); font-weight: 600; }
+.tf-decide .tf-yes kbd { background: transparent; color: inherit; border-color: currentColor; }
+.tf-decide .tf-no { color: var(--err); border-color: var(--err); }
+.tf-decide .tf-hint { margin-left: auto; font-size: var(--t-sm); color: var(--ink-2); }
+@media (max-width: 900px) {
+  .tf-rv { grid-template-columns: minmax(0, 1fr); }
+  .tf-rvq { border-right: 0; border-bottom: 1px solid var(--rule); max-height: 260px; }
+  .tf-pair { grid-template-columns: minmax(0, 1fr); }
+  .tf-bridge { padding: 12px 0; }
+  .tf-bridge::before { display: none; }
+}

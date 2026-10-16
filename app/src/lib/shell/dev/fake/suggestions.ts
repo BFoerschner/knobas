@@ -27,6 +27,17 @@ const FAKE_SUGGESTIONS: LinkRow[] = [
     "the commit message mentions PAY-231", "2026-08-22T14:30:02Z"),
   proposal(3, "mock:ENG-SEPA", "mock:PAY-231", "similar_text", "similarity",
     "both mention 409, fail, idempotent, payout", "2026-08-22T14:30:01Z"),
+  // The Proposed links view (#835) wants a queue to compare with
+  // prototype-6's: more of the detector's own rules over the same corpus,
+  // every strength the shell draws, and targets past PAY-231.
+  proposal(4, "mock:tidewater/payout-service@refs/heads/feat/PAY-231-idempotent-retry", "mock:PAY-231",
+    "branch_name_key", "exact_key", "the branch name contains PAY-231", "2026-08-22T14:29:00Z"),
+  proposal(5, "mock:OPS-77", "mock:PAY-228", "source_recorded_relation", "source_relation",
+    "mock already records this link (blocks)", "2026-08-22T14:28:00Z", "blocks"),
+  proposal(6, "mock:PAY-231", "mock:PAY-232", "similar_text", "similarity",
+    "both mention metric, payout, retry, sepa", "2026-08-22T14:27:00Z"),
+  proposal(7, "mock:PAY-231", "mock:PAY-244", "similar_text", "similarity",
+    "both mention fail, payout, retry, window", "2026-08-22T14:26:00Z"),
 ];
 
 /** The proposals answered this session, by link id. Accepted or dismissed is
@@ -39,16 +50,19 @@ function proposal(
   from_id: string,
   to_id: string,
   rule: string,
-  rule_class: Exclude<LinkRow["rule_class"], "source_relation" | null>,
+  rule_class: Exclude<LinkRow["rule_class"], null>,
   reason: string,
   created_at: string,
+  relation = "related",
 ): LinkRow {
   return {
     id: `link:fake-${n}`,
     from_id,
     to_id,
-    relation: "related",
-    origin: "suggested",
+    relation,
+    // A relation the source records is written by the detector with the
+    // source's origin (`knobas_core::suggest::RULES`).
+    origin: rule_class === "source_relation" ? "source" : "suggested",
     note: null,
     created_by: "knobas",
     created_at,

@@ -7,6 +7,7 @@ import { expect, test } from "vitest";
 import { page as jobPage } from "./job/page";
 import { PAGES, pageFor } from "./pages";
 import { parseTfHash } from "./route";
+import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
 import { page as ticketsPage } from "./tickets/page";
 import { page as timePage } from "./time/page";
@@ -16,6 +17,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(jobPage);
   expect(PAGES).toContain(timePage);
   expect(PAGES).toContain(settingsPage);
+  expect(PAGES).toContain(reviewPage);
 });
 
 const ADDRESSES = [
@@ -29,6 +31,8 @@ const ADDRESSES = [
   ["#/time/2026-10-15", "time"],
   ["#/settings", "settings"],
   ["#/settings/source/teamcity", "settings"],
+  ["#/review", "review"],
+  ["#/review/link-1", "review"],
   ["#/builds", "shell"],
   ["#/nowhere", "shell"],
 ] as const;
@@ -40,6 +44,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [jobPage, "job"],
     [timePage, "time"],
     [settingsPage, "settings"],
+    [reviewPage, "review"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);
@@ -56,4 +61,10 @@ test("the job page hands TfJob the address's key and tab", () => {
   const route = parseTfHash("#/job/PAY-231/code");
   const props = jobPage.props({ route } as Parameters<typeof jobPage.props>[0]);
   expect(props).toMatchObject({ segment: "PAY-231", tab: "code" });
+});
+
+test("the review page hands TfReview the addressed proposal, or none", () => {
+  const props = (hash: string) => reviewPage.props({ route: parseTfHash(hash) } as Parameters<typeof reviewPage.props>[0]);
+  expect(props("#/review/link%3Afake-2")).toMatchObject({ sid: "link:fake-2" });
+  expect(props("#/review")).toMatchObject({ sid: null });
 });
