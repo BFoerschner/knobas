@@ -401,6 +401,9 @@ const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
 const { createDepViewState } = await import("../tf/deps/views.svelte");
 const TfDepsViewMenu = (await import("../tf/deps/TfDepsViewMenu.svelte")).default;
+const TfSets = (await import("../tf/sets/TfSets.svelte")).default;
+const TfSetEditor = (await import("../tf/sets/TfSetEditor.svelte")).default;
+const TfSetPicker = (await import("../tf/sets/TfSetPicker.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -707,6 +710,31 @@ interface Case {
   open(target: HTMLElement): { app: Record<string, unknown> };
   /** Drive it into the state where it has actually installed something. */
   exercise?(target: HTMLElement): void;
+}
+
+/** Link sets' ports (#866), every read answering late. */
+function setPorts() {
+  const set = {
+    id: "payout-stack",
+    name: "Payout stack",
+    description: "",
+    members: [],
+    rules: [{ kind: "epic" as const, value: "jira:PAY-200", title: null }],
+    tickets: 0,
+    mine: 0,
+    shows_on: [],
+  };
+  return {
+    linkSets: () => deferred([set]),
+    linkSet: () => deferred(set),
+    saveLinkSet: () => deferred(set),
+    deleteLinkSet: () => deferred(undefined),
+    previewLinkSetRule: () => deferred([]),
+    parentLinks: () => deferred(true),
+    setParentLinks: () => deferred(true),
+    candidates: () => deferred([]),
+    ruleChoices: () => deferred({ tickets: [], parents: [], projects: [] }),
+  };
 }
 
 const CASES: Case[] = [
@@ -1413,6 +1441,38 @@ const CASES: Case[] = [
             getEntity: () => deferred({ row: { entity_id: "jira:PAY-231", kind: "ticket" } } as never),
             jobReach: () => deferred([]),
           },
+        },
+      }),
+    }),
+  },
+  {
+    /** Link sets (#866): the list's two reads, answering late. */
+    name: "TfSets",
+    source: "lib/tf/sets/TfSets.svelte",
+    open: (target) => ({ app: mount(TfSets, { target, props: { ready: true, rest: [], ports: setPorts() } }) }),
+  },
+  {
+    /** The set editor (#866): the set, the rule choices and each rule's count, answering late. */
+    name: "TfSetEditor",
+    source: "lib/tf/sets/TfSetEditor.svelte",
+    open: (target) => ({
+      app: mount(TfSetEditor, { target, props: { ready: true, id: "payout-stack", ports: setPorts() } }),
+    }),
+  },
+  {
+    /** The *Add…* picker (#866): its one read, answering late. */
+    name: "TfSetPicker",
+    source: "lib/tf/sets/TfSetPicker.svelte",
+    open: (target) => ({
+      app: mount(TfSetPicker, {
+        target,
+        props: {
+          kind: "page",
+          setName: "Payout stack",
+          have: new Set<string>(),
+          read: () => deferred([{ entity_id: "confluence:1", name: "PSP error codes", sub: "" }]),
+          onadd: () => {},
+          onclose: () => {},
         },
       }),
     }),

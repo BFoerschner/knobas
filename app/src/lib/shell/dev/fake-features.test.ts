@@ -182,23 +182,27 @@ test("job_reach labels a sub-task's parent links behind the switch, and list_ent
   const h = demoHandlers() as Calls;
   const own = h["job_reach"]!({ entityId: "mock:PAY-231" }) as { entity_id: string; kind: string; origin: { kind: string } }[];
   expect(own.some((row) => row.kind === "build")).toBe(true);
-  expect(own.every((row) => row.origin.kind === "own")).toBe(true);
+  // Since #866 PAY-231's link sets (Payout stack by its epic, Payments staging by hand) join it.
+  expect(own.every((row) => row.origin.kind === "own" || row.origin.kind === "link_set")).toBe(true);
 
   const sub = h["job_reach"]!({ entityId: "mock:PAY-232" }) as { entity_id: string; origin: { kind: string; ticket?: string } }[];
   expect(sub.length).toBeGreaterThan(0);
-  expect(sub.every((row) => row.origin.kind === "parent" && row.origin.ticket === "mock:PAY-231")).toBe(true);
+  const inherited = sub.filter((row) => row.origin.kind !== "link_set");
+  expect(inherited.length).toBeGreaterThan(0);
+  expect(inherited.every((row) => row.origin.kind === "parent" && row.origin.ticket === "mock:PAY-231")).toBe(true);
 
   const page = h["list_entities"]!({
     filter: { sources: [], kinds: ["build"], order: "latest_per_parent", context: null, reach: "mock:PAY-231", include_deleted: false },
     limit: 50,
     offset: 0,
   }) as { rows: { entity_id: string; state: { tone: string } | null }[] };
-  const builds = own.filter((row) => row.kind === "build").map((row) => row.entity_id).sort();
+  const builds = own.filter((row) => row.kind === "build" && row.origin.kind === "own").map((row) => row.entity_id).sort();
   expect(page.rows.map((row) => row.entity_id).sort()).toEqual(builds);
   expect(page.rows.some((row) => row.state?.tone === "err")).toBe(true);
 
   expect(h["set_parent_links"]!({ enabled: false })).toBe(false);
-  expect(h["job_reach"]!({ entityId: "mock:PAY-232" })).toEqual([]);
+  const off = h["job_reach"]!({ entityId: "mock:PAY-232" }) as { origin: { kind: string } }[];
+  expect(off.every((row) => row.origin.kind === "link_set")).toBe(true);
   expect(h["set_parent_links"]!({ enabled: true })).toBe(true);
 });
 
@@ -277,4 +281,21 @@ test("builds: older_pipeline_runs pages back from any run until the history ends
   expect(settings.repositories[0]!.entity_id).toBe("mock:tidewater/payout-service");
   expect(settings.parameters.map((p) => p.name)).toEqual(["env", "test.filter", "log.level"]);
   expect(() => h["pipeline_settings"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
+});
+
+// -- link sets (#866) ---------------------------------------------------------
+
+test("link sets: the job's reach carries a set's members under its name, a save changes it and a hide takes one off", () => {
+  const h = demoHandlers() as Calls;
+  const sets = h["link_sets"]!({}) as { id: string; name: string; tickets: number }[];
+  expect(sets.map((set) => set.name)).toContain("Payments staging");
+  const reach = () => h["job_reach"]!({ entityId: "mock:PAY-240" }) as { entity_id: string; origin: { kind: string; name?: string } }[];
+  const staged = reach().find((row) => row.entity_id === "asset:knobas-jira");
+  expect(staged?.origin).toEqual({ kind: "link_set", set: "staging", name: "Payments staging" });
+  const detail = h["link_set"]!({ id: "staging" }) as { members: { kind: string; entity_id: string }[]; rules: unknown[] };
+  h["save_link_set"]!({ draft: { id: "staging", name: "Payments staging", description: "", members: detail.members.slice(1), rules: detail.rules } });
+  expect(reach().some((row) => row.entity_id === "asset:knobas-jira")).toBe(false);
+  h["hide_link_set_member"]!({ ticketId: "mock:PAY-240", memberId: "kuma:3", hidden: true });
+  expect(reach().some((row) => row.entity_id === "kuma:3")).toBe(false);
+  expect(reach().some((row) => row.entity_id === "asset:knobas-jira-db")).toBe(true);
 });

@@ -237,7 +237,8 @@ export function pinnedOf(list: readonly PipelineRow[]): PipelineRow[] {
 
 /**
  * What a reason says beside a pipeline on a job, in prototype-6's words:
- * *your branch*, *PR check*, *Parent PAY-230*, else *linked to PAY-231*.
+ * *your branch*, *PR check*, *Parent PAY-230*, a link set's name, else
+ * *linked to PAY-231*.
  */
 export function reasonLabel(reason: PipelineReason, job: string): string {
   switch (reason.kind) {
@@ -246,7 +247,10 @@ export function reasonLabel(reason: PipelineReason, job: string): string {
     case "pr_check":
       return "PR check";
     case "linked":
-      return reason.origin.kind === "parent" ? `Parent ${keyOf(reason.origin.ticket)}` : `linked to ${job}`;
+      if (reason.origin.kind === "parent") return `Parent ${keyOf(reason.origin.ticket)}`;
+      // A link set's pipeline carries the set's name (#866), as prototype-6's `from`.
+      if (reason.origin.kind === "link_set") return reason.origin.name;
+      return `linked to ${job}`;
   }
 }
 

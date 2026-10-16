@@ -16,6 +16,7 @@ import { page as prPage } from "./pr/page";
 import { page as repoPage } from "./repo/page";
 import { page as reviewPage } from "./review/page";
 import { page as settingsPage } from "./settings/page";
+import { page as setsPage } from "./sets/page";
 import { page as ticketsPage } from "./tickets/page";
 import { page as timePage } from "./time/page";
 
@@ -31,6 +32,7 @@ test("the glob finds every feature's page", () => {
   expect(PAGES).toContain(inboxPage);
   expect(PAGES).toContain(codePage);
   expect(PAGES).toContain(repoPage);
+  expect(PAGES).toContain(setsPage);
 });
 
 const ADDRESSES = [
@@ -62,6 +64,8 @@ const ADDRESSES = [
   ["#/asset/asset:vm-pay-01", "asset tree"],
   ["#/route/route:payouts", "asset tree"],
   ["#/inbox", "inbox"],
+  ["#/sets", "sets"],
+  ["#/sets/payout-stack", "sets"],
   ["#/nowhere", "shell"],
 ] as const;
 
@@ -80,6 +84,7 @@ test.each(ADDRESSES)("%s draws the %s page", (hash, expected) => {
     [codePage, "code"],
     [repoPage, "repo"],
     [prPage, "pr"],
+    [setsPage, "sets"],
   ]);
   const name = found === undefined ? "shell" : (names.get(found) ?? "other");
   expect(name).toBe(expected);

@@ -237,11 +237,12 @@ test("with no job, the breadcrumb starts at the view's own name and Esc goes to 
   expect(location.hash).toBe("#/tickets");
 });
 
-test("every route not built yet names itself", async () => {
+test("an address the new shell has no place for names itself", async () => {
   start();
+  // Link sets was the last section still drawn as "not built yet" (#866).
   await at("#/sets");
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("Link sets is not built in the new shell yet.");
+  expect(target.textContent).not.toContain("is not built in the new shell yet");
   await at("#/ctx/all");
   expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/ctx/all in the new shell.");
 });
