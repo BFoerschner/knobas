@@ -555,8 +555,7 @@
             found={hits}
             {current}
             scope={searchScope}
-            inSpace={!jobOn && shownSpace !== undefined}
-            inJob={jobOn}
+            kept={jobOn ? "job" : shownSpace !== undefined ? "space" : null}
             me={page?.me ?? []}
             onall={() => {
               if (jobOn) filter.scope = "all";

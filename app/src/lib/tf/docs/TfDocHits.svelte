@@ -18,8 +18,7 @@
     found,
     current,
     scope,
-    inSpace,
-    inJob = false,
+    kept,
     me,
     onall,
     onpick,
@@ -28,10 +27,11 @@
     current: string | null;
     /** The scope's words: *all spaces* or the space's name. */
     scope: string;
-    /** Whether the search is kept to one space, which offers *Search all spaces*. */
-    inSpace: boolean;
-    /** Whether the search is kept to the job's pages, which offers *Search all pages*. */
-    inJob?: boolean;
+    /**
+     * What the search is kept to: one space, which offers *Search all spaces*;
+     * the job's pages, which offers *Search all pages* (#863); or nothing.
+     */
+    kept: "space" | "job" | null;
     me: string[];
     /** Widen the search: to every space, or from the job's pages to all pages. */
     onall: () => void;
@@ -43,8 +43,8 @@
 </script>
 
 <div class="tf-dl-meta">
-  {hitsLine(found.total, scope, found.took_ms)}{#if inSpace}. <button type="button" class="tf-linkish" onclick={onall}
-      >Search all spaces</button>{:else if inJob}. <button type="button" class="tf-linkish" onclick={onall}
+  {hitsLine(found.total, scope, found.took_ms)}{#if kept === "space"}. <button type="button" class="tf-linkish" onclick={onall}
+      >Search all spaces</button>{:else if kept === "job"}. <button type="button" class="tf-linkish" onclick={onall}
       >Search all pages</button>{/if}
 </div>
 {#each found.hits as hit (hit.entity_id)}
@@ -58,7 +58,7 @@
     <span class="tf-t"
       ><TfMarked text={hit.title} {stems} /></span
     >
-    <span class="tf-pth">{!inSpace && hit.space ? `${hit.space.key} › ` : ""}{hit.path ?? "top level"}</span>
+    <span class="tf-pth">{kept !== "space" && hit.space ? `${hit.space.key} › ` : ""}{hit.path ?? "top level"}</span>
     <span class="tf-sn"
       >{#if label}<b>{label}</b>{" "}{/if}{#each hit.snippet.segments as seg, i (i)}{#if seg.hit}<mark>{seg.text}</mark
           >{:else}{seg.text}{/if}{/each}</span
@@ -67,7 +67,7 @@
   </a>
 {:else}
   <p class="tf-dl-note">
-    No page matches. Every word has to appear in the page or its comments.{#if inSpace}
+    No page matches. Every word has to appear in the page or its comments.{#if kept === "space"}
       <button type="button" class="tf-linkish" onclick={onall}>Search all spaces</button>{/if}
   </p>
 {/each}

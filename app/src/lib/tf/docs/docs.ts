@@ -20,7 +20,7 @@ import type {
   Reached,
   SectionRefusal,
 } from "../../ipc/entity";
-import { keyOf } from "../job/job";
+import { originLabel } from "../job/job";
 import { isDone } from "../tickets/tickets";
 
 /** Where a Docs address points. */
@@ -374,7 +374,8 @@ export interface JobPageGroup {
  * step, *Via <title>*, when `titles` has the step's title.
  */
 export function reachReason(reached: Reached, job: string, titles: ReadonlyMap<string, string>): string {
-  if (reached.origin.kind === "parent") return `Parent ${keyOf(reached.origin.ticket)}`;
+  const origin = originLabel(reached);
+  if (origin !== null) return origin;
   const step = reached.step === reached.entity_id ? undefined : titles.get(reached.step);
   return step === undefined ? `Linked to ${job}` : `Via ${step}`;
 }
