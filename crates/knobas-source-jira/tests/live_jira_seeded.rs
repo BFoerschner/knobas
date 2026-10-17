@@ -82,8 +82,10 @@
 //! One **sub-task**, filed under PAY-219 with [`LITTER_LABEL`] so that a
 //! `fields.parent` exists on this server at all -- the corpus has none -- and
 //! deleted again from [`SubTask`]'s `Drop`, which checks the issue answers 404
-//! and polls `/search` until it stops naming it (#643). It moves the `PAY` key
-//! counter, which nothing may assume stands still.
+//! and polls `/search` until it stops naming it (#643). A second one, filed and
+//! deleted the same way, is moved through the workflow 120 times so that a
+//! long status history exists (#1083). Each moves the `PAY` key counter, which
+//! nothing may assume stands still.
 //!
 //! What a *killed* run left behind is put back by the next one, and by this
 //! suite for **both** of them: [`Seeded::clear_leftovers`] restores the corpus
@@ -2100,6 +2102,176 @@ async fn a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it() {
         stored["fields"][&seeded.seed.epic_link_field],
         stored.get("epic").cloned().unwrap_or_default(),
         under(&items, "PAY-219")
+    );
+    drop(sub_task);
+}
+
+/// How many status moves [`a_long_history_comes_back_whole_from_search`]
+/// makes: past 100, the page size Jira's own paged resources default to and
+/// the cap Jira Cloud puts on a search's changelog (#1083).
+const LONG_HISTORY_MOVES: usize = 120;
+
+/// How many description edits it makes, and how long each new text is: the
+/// changelog item of a description edit carries the old and the new text
+/// whole, which is the payload growth #1083 asks about.
+const LONG_HISTORY_EDITS: usize = 3;
+const LONG_HISTORY_EDIT_CHARS: usize = 1_000;
+
+/// **A long status history comes back from `/search` whole** (#1083).
+///
+/// `expand=changelog` on `/search` (#929) answers a `changelog` object with
+/// `startAt`, `maxResults` and `total`, and nothing in the adapter or in the
+/// conversation's `HISTORIES` read notices a `total` larger than the
+/// histories that came back. Jira Cloud cuts a search's changelog at 100;
+/// [`each_issue_carries_its_status_history`] holds `total ==
+/// histories.len()` only on seeded issues with a handful of moves each.
+///
+/// So this files a sub-task under PAY-219 (the corpus stays as seeded; the
+/// sub-task is [`SubTask`]'s to delete), moves it through the workflow
+/// [`LONG_HISTORY_MOVES`] times and edits its description
+/// [`LONG_HISTORY_EDITS`] times, full-syncs through the adapter, and asserts
+/// the stored record holds every one of those histories, in order, with
+/// `total` saying the same. It also prints what the changelog adds to the
+/// stored payload, the seeded corpus's and this issue's, in `MEASURED` lines.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn a_long_history_comes_back_whole_from_search() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let sub_task = SubTask::file(&seeded, "PAY-219").await;
+    let key = sub_task.key().to_owned();
+
+    let (code, body) = seeded
+        .get(&format!("rest/api/2/issue/{key}?fields=status"))
+        .await;
+    assert_eq!(code, 200, "{key}: {body}");
+    let mut at = body["fields"]["status"]["name"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{key} stands in a status: {body}"))
+        .to_owned();
+    let mut statuses: Vec<String> = seeded
+        .seed
+        .issues
+        .iter()
+        .map(|i| i.status.clone())
+        .collect();
+    statuses.sort();
+    statuses.dedup();
+    assert!(statuses.len() >= 2, "the corpus stands in one status only: {statuses:?}");
+    let mut sent = Vec::with_capacity(LONG_HISTORY_MOVES);
+    for n in 0..LONG_HISTORY_MOVES {
+        let others: Vec<&String> = statuses.iter().filter(|s| **s != at).collect();
+        let to = others[n % others.len()].clone();
+        seeded.move_to(&key, &to).await;
+        sent.push((at.clone(), to.clone()));
+        at = to;
+    }
+    for n in 0..LONG_HISTORY_EDITS {
+        let text = char::from(b'a' + n as u8)
+            .to_string()
+            .repeat(LONG_HISTORY_EDIT_CHARS);
+        let (code, body) = seeded
+            .request(
+                reqwest::Method::PUT,
+                &format!("rest/api/2/issue/{key}"),
+                Some(serde_json::json!({ "fields": { "description": text } })),
+            )
+            .await;
+        assert_eq!(code, 204, "editing {key}'s description: {body}");
+    }
+    let expected = LONG_HISTORY_MOVES + LONG_HISTORY_EDITS;
+
+    // Moved is not yet searchable: the index catches up asynchronously, and
+    // until it has, the record's `updated` and changelog may be behind.
+    let source = seeded.source(serde_json::json!({}));
+    let deadline = tokio::time::Instant::now() + INDEX_BUDGET;
+    let items = loop {
+        let (items, _) = full(&*source).await;
+        let caught_up = items.iter().find(|i| i.entity.key == key).is_some_and(|i| {
+            i.payload["fields"]["status"]["name"].as_str() == Some(at.as_str())
+                && i.payload["changelog"]["total"].as_u64() == Some(expected as u64)
+        });
+        if caught_up {
+            break items;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "{key} was moved {LONG_HISTORY_MOVES} times and edited {LONG_HISTORY_EDITS} times, \
+             but no full sync within {INDEX_BUDGET:?} showed it in {at:?} with a changelog \
+             total of {expected}: {:?}",
+            items
+                .iter()
+                .find(|i| i.entity.key == key)
+                .map(|i| (&i.payload["fields"]["status"]["name"], &i.payload["changelog"]["total"]))
+        );
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    };
+
+    let stored = &item(&items, &key).payload;
+    let changelog = &stored["changelog"];
+    let histories = changelog["histories"]
+        .as_array()
+        .unwrap_or_else(|| panic!("{key}: no changelog.histories in the record"));
+    println!(
+        "SEEDED long history {key}: changelog startAt {} maxResults {} total {}, {} histories \
+         returned",
+        changelog["startAt"],
+        changelog["maxResults"],
+        changelog["total"],
+        histories.len()
+    );
+    assert_eq!(
+        histories.len(),
+        expected,
+        "/search returned {} of {key}'s {expected} histories (startAt {}, maxResults {}, \
+         total {}): a long history is cut short, and the conversation is missing moves",
+        histories.len(),
+        changelog["startAt"],
+        changelog["maxResults"],
+        changelog["total"]
+    );
+    let moves: Vec<(String, String)> = histories
+        .iter()
+        .flat_map(|h| h["items"].as_array().into_iter().flatten())
+        .filter(|i| i["field"] == "status")
+        .map(|i| {
+            (
+                i["fromString"].as_str().unwrap_or_default().to_owned(),
+                i["toString"].as_str().unwrap_or_default().to_owned(),
+            )
+        })
+        .collect();
+    assert_eq!(moves, sent, "{key}: every move, oldest first, as it was made");
+
+    let bytes = |v: &serde_json::Value| serde_json::to_vec(v).expect("JSON").len();
+    let corpus: Vec<&SyncItem> = items.iter().filter(|i| i.entity.key != key).collect();
+    let corpus_payload: usize = corpus.iter().map(|i| bytes(&i.payload)).sum();
+    let corpus_changelog: usize = corpus.iter().map(|i| bytes(&i.payload["changelog"])).sum();
+    let corpus_histories: usize = corpus
+        .iter()
+        .map(|i| i.payload["changelog"]["histories"].as_array().map_or(0, Vec::len))
+        .sum();
+    println!(
+        "MEASURED seeded corpus: {} issues, {corpus_histories} histories, stored payload \
+         {corpus_payload} B of which changelog {corpus_changelog} B ({:.1}%)",
+        corpus.len(),
+        100.0 * corpus_changelog as f64 / corpus_payload as f64
+    );
+    let is_edit = |h: &&serde_json::Value| h["items"][0]["field"] == "description";
+    let edits: Vec<&serde_json::Value> = histories.iter().filter(is_edit).collect();
+    let moves_only: Vec<&serde_json::Value> =
+        histories.iter().filter(|h| !is_edit(h)).collect();
+    println!(
+        "MEASURED {key}: stored payload {} B of which changelog {} B; {} status moves {} B \
+         ({} B each), {} description edits of {LONG_HISTORY_EDIT_CHARS} chars {} B ({} B each)",
+        bytes(stored),
+        bytes(changelog),
+        moves_only.len(),
+        moves_only.iter().map(|h| bytes(h)).sum::<usize>(),
+        moves_only.iter().map(|h| bytes(h)).sum::<usize>() / moves_only.len().max(1),
+        edits.len(),
+        edits.iter().map(|h| bytes(h)).sum::<usize>(),
+        edits.iter().map(|h| bytes(h)).sum::<usize>() / edits.len().max(1),
     );
     drop(sub_task);
 }
