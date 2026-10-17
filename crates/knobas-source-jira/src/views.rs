@@ -225,9 +225,13 @@ pub(crate) async fn read(
                     "the Jira board listing of {project} did not end within {MAX_PAGES} pages"
                 )));
             }
+            // A 404 is no boards on this project, not no boards at all: a
+            // Jira without Jira Software answers it on every project, and a
+            // project whose listing alone answers it must not take the other
+            // projects' boards with it, which would deliver them as gone.
             let listed = match api.boards(project, start_at, BOARD_PAGE).await {
                 Ok(listed) => listed,
-                Err(error) if error.status() == Some(404) => return Ok(Vec::new()),
+                Err(error) if error.status() == Some(404) => break,
                 Err(error) => return Err(error),
             };
             let returned = u32::try_from(listed.values.len()).unwrap_or(u32::MAX);
@@ -414,6 +418,8 @@ mod tests {
     struct Agile {
         boards: Vec<FakeBoard>,
         no_software: bool,
+        /// Projects whose board listing alone answers 404.
+        unlisted: Vec<&'static str>,
         forbidden: Vec<u64>,
         queries: Mutex<Vec<String>>,
     }
@@ -478,11 +484,11 @@ mod tests {
         }
         async fn boards(
             &self,
-            _project: &str,
+            project: &str,
             start_at: u32,
             max: u32,
         ) -> Result<BoardPage, SourceError> {
-            if self.no_software {
+            if self.no_software || self.unlisted.contains(&project) {
                 return Err(not_found());
             }
             let values: Vec<Value> = self
@@ -716,6 +722,41 @@ mod tests {
         let (items, cursor) = sync(&api, None).await;
         assert!(items.is_empty());
         assert!(!cursor.contains("views"), "{cursor}");
+    }
+
+    /// One project's listing answering 404 leaves the other projects' boards
+    /// in, rather than reading as a Jira without Jira Software and
+    /// delivering every board as gone.
+    #[tokio::test]
+    async fn a_project_whose_board_listing_answers_404_keeps_the_other_projects_boards() {
+        let mut api = seeded();
+        let (_, first) = sync(&api, None).await;
+        api.unlisted = vec!["OPS"];
+        let (items, second) = sync(&api, Some(first.clone())).await;
+        assert!(items.is_empty(), "{items:?}");
+        assert_eq!(second, first);
+    }
+
+    /// The upgrade: a cursor written before the views (no `views` field, the
+    /// shape a Jira without boards still writes) delivers every board once,
+    /// and none as gone.
+    #[tokio::test]
+    async fn a_cursor_from_before_the_views_delivers_every_board_once() {
+        let mut api = Agile {
+            no_software: true,
+            ..seeded()
+        };
+        let (_, old) = sync(&api, None).await;
+        assert!(!old.contains("views"), "{old}");
+        api.no_software = false;
+        let (items, next) = sync(&api, Some(old)).await;
+        let keys: Vec<(&str, bool)> = items
+            .iter()
+            .map(|i| (i.entity.key.as_str(), i.deleted))
+            .collect();
+        assert_eq!(keys, [("board-21", false), ("board-22", false)]);
+        let (again, _) = sync(&api, Some(next)).await;
+        assert!(again.is_empty(), "{again:?}");
     }
 
     #[tokio::test]

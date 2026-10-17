@@ -269,3 +269,30 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
     assert_eq!(refused.code, IpcErrorCode::Invalid);
     assert!(listed(&pool, &id).await.is_some());
 }
+
+/// A Jira source deleted with its mirror purged takes its views' items, and
+/// with them their `sync.jira_view` rows, but no sync of that source runs
+/// again to drop the ticket view rows. Those rows must not then be listed as
+/// views somebody made, whose empty text holds every ticket.
+#[tokio::test]
+async fn a_jira_view_whose_mirror_was_purged_is_not_listed() {
+    let pool = pool().await;
+    let (_, id, view) = seeded(&pool).await;
+    assert!(listed(&pool, &id).await.is_some());
+    // What `knobas_sync::config::delete`'s purge does, to this view's item
+    // alone: the shared database's other tests hold the rest of `jira`.
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&view)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&view)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        listed(&pool, &id).await.is_none(),
+        "a purged Jira view is not a view of every ticket"
+    );
+}

@@ -181,16 +181,19 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 ///
 /// `internal` if a read fails.
 pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
-    // A Jira view whose item is not live (its source is turned off) is not
-    // listed; it comes back with the source.
+    // A Jira view whose item is not live is not listed: its source is turned
+    // off, and it comes back with the source, or its source was deleted with
+    // the mirror purged, which leaves the entity tombstoned and no
+    // `sync.jira_view` row, and no later sync of that source to drop this one.
+    // Read off the entity rather than `sync.jira_view` for that second case.
     let rows = sqlx::query(concat!(
         "select ",
         fields!(),
         " from knobas.ticket_view t
-          where not exists (select 1 from sync.jira_view v
-                             where v.entity_id = t.jira_ref
+          where not exists (select 1 from knobas.entity e
+                             where e.id = t.jira_ref
                                and not exists (select 1 from sync.live_item i
-                                                where i.entity_id = v.entity_id))
+                                                where i.entity_id = e.id))
           order by position, id"
     ))
     .fetch_all(pool)

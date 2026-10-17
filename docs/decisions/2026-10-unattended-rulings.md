@@ -4360,3 +4360,12 @@ Ruled by the implementer (PR for #1019).
 - **The seed's Kanban board limit is set through `/rest/greenhopper/1.0/rapidviewconfig/columns`**
   (the board settings page's own call); the Agile REST has no write for it. The seed reads the
   result back through the Agile REST and fails if it is not there. **Reversing:** low.
+- **Merge review: a 404 on one project's board listing is no boards on that project**, not no
+  Jira Software. Before, it emptied every project's boards, and the next incremental run delivered
+  them all as gone. A Jira without Jira Software still answers 404 everywhere and brings no views.
+  **Reversing:** low.
+- **Merge review: `ticket_views` hides a view whose `jira_ref` names an entity that is not live**,
+  read off `knobas.entity` rather than `sync.jira_view`. A Jira source deleted with its mirror
+  purged takes `sync.jira_view` with the item and runs no sync to drop the ticket view row, which
+  was then listed as a view somebody made, with an empty text that holds every ticket. A
+  `jira_ref` that names no entity is listed as before. **Reversing:** low.
