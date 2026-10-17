@@ -479,6 +479,7 @@ knobas-app	test/it	backup::a_restored_backup_still_links_the_entities_a_later_sy
 knobas-app	test/it	backup_ipc::a_database_with_no_stored_schedule_is_nightly_by_default
 knobas-app	test/it	backup_ipc::a_directory_named_like_an_archive_is_neither_listed_nor_pruned
 knobas-app	test/it	backup_ipc::a_disabled_schedule_exports_nothing
+knobas-app	test/it	backup_ipc::a_dismissed_offer_crosses_the_time_part_still_dismissed
 knobas-app	test/it	backup_ipc::a_fresh_machine_restores_after_taking_its_own_first_backup
 knobas-app	test/it	backup_ipc::a_keychain_that_refuses_one_source_still_settles_the_others
 knobas-app	test/it	backup_ipc::a_misspelled_argument_is_refused_before_the_body_runs

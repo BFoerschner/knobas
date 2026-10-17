@@ -1119,7 +1119,13 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
         (
             "time",
             backup::ShareParts { time: true, ..none },
-            vec!["block", "heartbeat", "timer", "worklog"],
+            vec![
+                "block",
+                "heartbeat",
+                "passive_dismissal",
+                "timer",
+                "worklog",
+            ],
         ),
         (
             "sources",
@@ -1532,6 +1538,97 @@ async fn switching_notes_and_time_on_brings_the_notes_and_the_hours() {
     .await
     .expect("a block written after a restore must not collide with a restored id");
     assert_eq!(rows(there, "block").await, 2);
+}
+
+/// **A dismissed offer stays dismissed on the far machine** (#1028).
+///
+/// The time part carries the observations, and the day read re-derives its
+/// offers from them. Without `knobas.passive_dismissal` in the same part, the
+/// first read after the restore offers every stretch the sharer dismissed.
+/// So the witness is the day read, not a row count: dismiss the morning,
+/// export the time part, restore into an empty knobas, read the day there.
+#[tokio::test]
+async fn a_dismissed_offer_crosses_the_time_part_still_dismissed() {
+    use chrono::{Duration, TimeZone, Utc};
+    use knobas_app::time::{self, BlockKind, TimerTarget};
+
+    let midnight = Utc.with_ymd_and_hms(2026, 9, 3, 0, 0, 0).unwrap();
+    let day = |pool: sqlx::PgPool| async move {
+        time::day::list(&pool, midnight, midnight + Duration::days(1))
+            .await
+            .expect("the day is readable")
+    };
+    let offered = |record: &time::day::DayRecord| -> Vec<chrono::DateTime<Utc>> {
+        record
+            .blocks
+            .iter()
+            .filter(|entry| entry.block.kind == BlockKind::Passive)
+            .map(|entry| entry.block.started_at)
+            .collect()
+    };
+    let morning = midnight + Duration::hours(9);
+    let late = midnight + Duration::hours(11);
+    let ticket = TimerTarget::Entity {
+        entity_id: "jira:PAY-231".to_owned(),
+    };
+
+    let (sharer, sharer_dir) = service("sharedismissed").await;
+    time::passive::set_enabled(&sharer.pool, true)
+        .await
+        .expect("passive attribution on");
+    for start in [morning, late] {
+        for step in 0..21 {
+            time::passive::record_at(
+                &sharer.pool,
+                start + Duration::seconds(30) * step,
+                Some(&ticket),
+            )
+            .await
+            .expect("an observation in the past");
+        }
+    }
+    let here = day(sharer.pool.clone()).await;
+    assert_eq!(
+        offered(&here),
+        vec![morning, late],
+        "the fixture offers two stretches"
+    );
+    time::passive::dismiss(&sharer.pool, here.blocks[0].block.id)
+        .await
+        .expect("the morning offer is dismissed");
+    assert_eq!(offered(&day(sharer.pool.clone()).await), vec![late]);
+
+    let record = backup::share_export(
+        &sharer,
+        backup::ShareParts {
+            time: true,
+            ..backup::ShareParts::none()
+        },
+    )
+    .await
+    .expect("a share export of the time part");
+
+    let (colleague, colleague_dir) = service("sharedismissedtarget").await;
+    hand_over(&sharer_dir, &colleague_dir, &record.file);
+    backup::restore(&colleague, &record.file)
+        .await
+        .expect("the time part restores");
+    // The switch is `knobas.setting`, which no part carries: the colleague
+    // turns passive attribution on for themselves.
+    time::passive::set_enabled(&colleague.pool, true)
+        .await
+        .expect("passive attribution on, over there");
+
+    let there = day(colleague.pool.clone()).await;
+    assert_eq!(
+        offered(&there),
+        vec![late],
+        "the dismissed morning was offered again after the restore"
+    );
+    assert!(
+        there.open.iter().all(|stretch| stretch.started_at >= late),
+        "the dismissed morning came back as open time after the restore"
+    );
 }
 
 /// **A share export carries no secret, and a source restored from one says so.**
