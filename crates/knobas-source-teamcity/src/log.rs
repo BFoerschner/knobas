@@ -239,17 +239,30 @@ fn step_heading(message: &str) -> Option<(String, String)> {
 
 /// A heading's name without the runner TeamCity appends to a named step:
 /// `IntegrationTests (Command Line)` is `IntegrationTests`, the name its
-/// configuration gives it (#1016). Only the last parenthesis goes, so `Build
-/// (release) (Gradle)` keeps its words; an unnamed step's heading is the
-/// runner alone, with none.
+/// configuration gives it (#1016). Only the last parenthesis goes, matched
+/// to its opening one, so `Build (release) (Gradle)` keeps its words and
+/// `Compile (Visual Studio (sln))` loses the whole runner. An unnamed step's
+/// heading is the runner alone; one whose runner ends in a parenthesis
+/// (`Visual Studio (sln)`) loses it, which the record cannot tell apart.
 fn without_runner(name: &str) -> &str {
-    if !name.ends_with(')') {
-        return name;
+    let mut depth = 0usize;
+    for (at, c) in name.char_indices().rev() {
+        match c {
+            ')' => depth += 1,
+            '(' if depth > 0 => {
+                depth -= 1;
+                if depth == 0 {
+                    return match name[..at].strip_suffix(' ') {
+                        Some(kept) if !kept.is_empty() => kept,
+                        _ => name,
+                    };
+                }
+            }
+            _ if depth == 0 => return name,
+            _ => {}
+        }
     }
-    match name.rfind(" (") {
-        Some(open) if open > 0 => &name[..open],
-        _ => name,
-    }
+    name
 }
 
 /// A heading's name without the duration TeamCity may append: `cargo test
@@ -437,5 +450,16 @@ assertion `left == right` failed\n\
             "Build (release)"
         );
         assert_eq!(name("Step 3/3: Command Line"), "Command Line");
+        // A runner whose own name ends in a parenthesis goes whole.
+        assert_eq!(
+            name("Step 1/2: Compile (Visual Studio (sln)) (12s)"),
+            "Compile"
+        );
+        assert_eq!(
+            name("Step 2/2: Deploy (prod) (Command Line)"),
+            "Deploy (prod)"
+        );
+        // Unbalanced: no runner to take off.
+        assert_eq!(name("Step 1/1: odd)"), "odd)");
     }
 }

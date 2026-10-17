@@ -4003,3 +4003,14 @@ Implementer, one PR for both.
   (`--rule`, text `--ink-2`, prototype-6's `.wait`), with *<name>, not started* as its tip and
   accessible name. A click opens the Log tab and opens no fold, since the step has none.
   **Reversing:** low.
+- **Merge-manager (PR #1052): the runner is the last parenthesis matched to its opening one, not
+  the text after the last ` (`.** TeamCity has bundled runners whose display name ends in a
+  parenthesis (`Visual Studio (sln)`, `Inspections (IntelliJ IDEA)`), so a named step heads
+  `Compile (Visual Studio (sln))`, which the PR's `rfind(" (")` cut to `Compile (Visual Studio`.
+  Matching against the configured runner type was considered and not taken: the record carries the
+  type id (`VS.Solution`), not the display name the heading uses, and the log read does not fetch
+  the record. Known limit: an *unnamed* step on such a runner heads `Visual Studio (sln)` and is
+  named `Visual Studio` in the Log tab; such a pipeline's settings name no steps, so the bar is not
+  affected. The narrowed live slice was not re-run: the seeded heading `IntegrationTests (Command
+  Line)` parses to the same name under both versions, and the unit test holds that string.
+  **Reversing:** low (`without_runner` in `log.rs`).

@@ -25,8 +25,8 @@
   the runner's name, which the record does not carry.
 
   **`LogStep::name`** (#854) on TeamCity: the heading `Step N/M: <name> (<runner>)` is now the
-  step's `<name>` without the runner TeamCity appends to a named step (the last parenthesis, after
-  any duration). The seeded server heads its one step `IntegrationTests (Command Line)`; the step
+  step's `<name>` without the runner TeamCity appends to a named step (the last parenthesis matched
+  to its opening one, after any duration, so `Compile (Visual Studio (sln))` is `Compile`). The seeded server heads its one step `IntegrationTests (Command Line)`; the step
   is now `IntegrationTests`, the configured name. An unnamed step's heading is the runner alone
   and stays whole. The field's type and meaning are unchanged.
 

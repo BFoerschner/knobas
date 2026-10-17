@@ -158,8 +158,8 @@ pub struct PipelineTrigger {
 mod tests {
     use super::*;
 
-    /// An answer from before #852 and #857, with neither `parameter_specs`
-    /// nor `chain`, still reads: both come back empty.
+    /// An answer from before #852, #857 and #1016, with no `parameter_specs`,
+    /// `chain` or `steps`, still reads: all three come back empty.
     #[test]
     fn settings_without_the_later_fields_read_as_empty() {
         let old = serde_json::json!({
