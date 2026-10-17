@@ -12,7 +12,7 @@
   import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRule, LinkSetRuleKind, RuleTicket } from "../../ipc/entity";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { epicOf, offered, projectOf, savedDraft, savedName } from "../sets/apply";
+  import { epicAbove, epicOf, offered, projectOf, savedDraft, savedName } from "../sets/apply";
   import { KIND_LABEL } from "../sets/sets";
   import { keyOf } from "./job";
 
@@ -39,17 +39,23 @@
 
   // svelte-ignore state_referenced_locally
   // Read once: the dialog is opened for one ticket and closed before another.
-  const { key, epic, project, offers } = {
+  const { key, parent, project, offers } = {
     key: keyOf(ticket.entity_id),
-    epic: epicOf(ticket),
+    parent: epicOf(ticket),
     project: projectOf(ticket),
     offers: offered(links),
   };
+  // svelte-ignore state_referenced_locally
+  // The path line names only what the ticket's own payload declares, so a
+  // sub-task's is its story: the epic is walked up to (#1064). Until then the
+  // top of the line stands in, and *Save link set* waits for the walk.
+  const walk = epicAbove(ticket, ports.getEntity);
 
   // svelte-ignore state_referenced_locally
   let name = $state(savedName(ticket.title));
   let ticked = $state(new Set(offers.map((offer) => offer.entity_id)));
-  let applyTo = $state<LinkSetRuleKind>(epic ? "epic" : "manual");
+  let epic = $state<string | null>(parent);
+  let applyTo = $state<LinkSetRuleKind>(parent ? "epic" : "manual");
   let epicTitle = $state<string | null>(null);
   let epicCount = $state<number | null>(null);
   let subtasks = $state<number | null>(null);
@@ -62,16 +68,15 @@
       (rows) => live && (subtasks = rows.length),
       () => {},
     );
-    if (epic !== null) {
-      void ports.previewLinkSetRule({ kind: "epic", value: epic }).then(
+    void walk.then((top) => {
+      if (!live || top === null) return;
+      epic = top.entity_id;
+      if (top.title !== null && top.title !== keyOf(top.entity_id)) epicTitle = top.title;
+      void ports.previewLinkSetRule({ kind: "epic", value: top.entity_id }).then(
         (rows) => live && (epicCount = rows.length),
         () => {},
       );
-      void ports.getEntity(epic).then(
-        (detail) => live && detail.row.title !== keyOf(epic) && (epicTitle = detail.row.title),
-        () => {},
-      );
-    }
+    });
     return () => {
       live = false;
     };
@@ -97,6 +102,7 @@
     failure = null;
     const picked = offers.filter((offer) => ticked.has(offer.entity_id));
     try {
+      await walk;
       onsaved(await ports.saveLinkSet(savedDraft(name.trim() || "New link set", key, picked, rule())));
     } catch (error) {
       failure = ipcErrorMessage(error);

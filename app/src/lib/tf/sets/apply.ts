@@ -115,6 +115,38 @@ export function epicOf(row: Pick<EntityRow, "entity_id" | "source_id" | "path">)
   return top ? `${row.source_id}:${top}` : null;
 }
 
+/** A ticket as `epicAbove` reads it through `get_entity`. */
+type Rung = Pick<EntityRow, "entity_id" | "source_id" | "path">;
+
+/**
+ * The epic a ticket sits under, walked up through `get_entity` (#1064). A
+ * ticket's path line comes from its own payload only, so a Data Center
+ * sub-task's names just its story: read the top of the line, and while that
+ * ticket has a path line of its own, go to the top of that. Stops at a ticket
+ * with no parent, at one that cannot be read (keeping the last key, without a
+ * title), and before a ticket already visited. `null` with no parent at all.
+ */
+export async function epicAbove(
+  row: Rung,
+  getEntity: (entityId: string) => Promise<{ row: Rung & Pick<EntityRow, "title"> }>,
+): Promise<{ entity_id: string; title: string | null } | null> {
+  let id = epicOf(row);
+  if (id === null) return null;
+  const seen = new Set([row.entity_id, id]);
+  for (;;) {
+    let detail;
+    try {
+      detail = await getEntity(id);
+    } catch {
+      return { entity_id: id, title: null };
+    }
+    const up = epicOf(detail.row);
+    if (up === null || seen.has(up)) return { entity_id: id, title: detail.row.title };
+    seen.add(up);
+    id = up;
+  }
+}
+
 /** The project rule's value, `<source>:<key prefix>`; `null` for a key with no project part. */
 export function projectOf(row: Pick<EntityRow, "entity_id" | "source_id">): string | null {
   const key = row.entity_id.slice(row.entity_id.indexOf(":") + 1);

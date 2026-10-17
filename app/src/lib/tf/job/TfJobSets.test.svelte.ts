@@ -114,9 +114,11 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
     getEntity: (id) =>
       id === ID
         ? Promise.resolve(detail(ID, "Retry failed SEPA payouts", "PAY-200", LINKS))
-        : id === "jira:PAY-200"
-          ? Promise.resolve(detail(id, "Payout reliability", null))
-          : Promise.reject({ code: "not_found", message: "", source_id: null }),
+        : id === "jira:PAY-232"
+          ? Promise.resolve(detail(id, "Retry the SEPA batch", "PAY-231", LINKS))
+          : id === "jira:PAY-200"
+            ? Promise.resolve(detail(id, "Payout reliability", null))
+            : Promise.reject({ code: "not_found", message: "", source_id: null }),
     promoteContext: (id) => Promise.resolve({ id: "ctx:1", kind: "ticket", title: "", anchor_id: id, created_at: "", archived_at: null }),
     listEntities: () => Promise.resolve({ rows: [], total: 0, tally: null, groups: null }),
     reachableTransitions: () => Promise.resolve([]),
@@ -155,11 +157,11 @@ const sets: JobSetPorts = {
     ),
 };
 
-function open(applying: JobLinkSets["sets"] = []) {
+function open(applying: JobLinkSets["sets"] = [], segment = "PAY-231") {
   job = mount(TfJob, {
     target,
     props: {
-      segment: "PAY-231",
+      segment,
       tab: null,
       timer: { current: null, elapsed: null },
       layers: createLayers(),
@@ -274,6 +276,34 @@ test("Save as a link set… ticks the ticket's own items, offers the epic first 
   expect(document.querySelector("[aria-label='Connections']")).toBeNull();
   const toast = toasts.items.find((t) => t.text === "Saved SEPA payouts kit. Every ticket under epic PAY-200 now shows it.")!;
   expect(toast.action?.label).toBe("Open it");
+});
+
+test("Save as a link set… on a sub-task names the epic above its story, and saves the epic rule (#1064)", async () => {
+  open([], "PAY-232");
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
+  await settle();
+  expect(squash(dialog().querySelector("input[value='epic']")!.closest("label"))).toBe(
+    "Every ticket under epic PAY-200 Payout reliability6 tickets today, and new ones as they are created",
+  );
+  expect(dialog().querySelector<HTMLInputElement>("input[value='epic']")!.checked).toBe(true);
+  button(dialog(), "Save link set").click();
+  await settle();
+  expect(saved.at(-1)?.rules).toEqual([{ kind: "epic", value: "jira:PAY-200" }]);
+});
+
+test("Save link set pressed before the walk up ends still saves the epic, not the story (#1064)", async () => {
+  open([], "PAY-232");
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  button(document.querySelector(".tf-dacts")!, "Save as a link set…").click();
+  flushSync();
+  button(dialog(), "Save link set").click();
+  await settle();
+  expect(saved.at(-1)?.rules).toEqual([{ kind: "epic", value: "jira:PAY-200" }]);
 });
 
 test("Save as a link set… can apply it to the project", async () => {

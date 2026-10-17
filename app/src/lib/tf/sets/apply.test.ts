@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { LinkEnd, LinkSetRow } from "../../ipc/entity";
-import { applyToast, epicOf, offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
+import { applyToast, epicAbove, epicOf,offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
 
 const SET: LinkSetRow = {
   id: "payout-stack",
@@ -97,6 +97,47 @@ describe("where a saved set applies", () => {
     expect(epicOf({ entity_id: "jira:PAY-232", source_id: "jira", path: "PAY-200 › PAY-231" })).toBe("jira:PAY-200");
     expect(epicOf({ entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200" })).toBe("jira:PAY-200");
     expect(epicOf({ entity_id: "jira:PAY-200", source_id: "jira", path: null })).toBeNull();
+  });
+
+  /** A stand-in `get_entity` over `key → path line`, recording what it read. */
+  function chain(paths: Record<string, string | null>, read: string[] = []) {
+    return (id: string) => {
+      read.push(id);
+      const key = id.slice(id.indexOf(":") + 1);
+      if (!(key in paths)) return Promise.reject({ code: "not_found", message: "", source_id: null });
+      return Promise.resolve({ row: { entity_id: id, source_id: "jira", title: `${key} title`, path: paths[key] ?? null } });
+    };
+  }
+
+  test("a sub-task's epic is found by walking up through its story", async () => {
+    const read: string[] = [];
+    const get = chain({ "PAY-231": "PAY-200", "PAY-200": null }, read);
+    expect(await epicAbove({ entity_id: "jira:PAY-232", source_id: "jira", path: "PAY-231" }, get)).toEqual({
+      entity_id: "jira:PAY-200",
+      title: "PAY-200 title",
+    });
+    expect(read).toEqual(["jira:PAY-231", "jira:PAY-200"]);
+  });
+
+  test("a story under an epic and a ticket with no parent read as before", async () => {
+    const get = chain({ "PAY-200": null });
+    expect(await epicAbove({ entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200" }, get)).toEqual({
+      entity_id: "jira:PAY-200",
+      title: "PAY-200 title",
+    });
+    expect(await epicAbove({ entity_id: "jira:PAY-200", source_id: "jira", path: null }, get)).toBeNull();
+  });
+
+  test("an unreadable ancestor or a loop stops the walk where it is", async () => {
+    expect(await epicAbove({ entity_id: "jira:PAY-232", source_id: "jira", path: "PAY-231" }, chain({}))).toEqual({
+      entity_id: "jira:PAY-231",
+      title: null,
+    });
+    const loop = chain({ "PAY-1": "PAY-2", "PAY-2": "PAY-1" });
+    expect(await epicAbove({ entity_id: "jira:PAY-3", source_id: "jira", path: "PAY-1" }, loop)).toEqual({
+      entity_id: "jira:PAY-2",
+      title: "PAY-2 title",
+    });
   });
 
   test("the project is the key's prefix in the ticket's source", () => {
