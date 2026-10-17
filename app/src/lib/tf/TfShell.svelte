@@ -40,7 +40,7 @@
   import { listSources, syncStatus, type SourceSummary, type SourceSyncStatus } from "../ipc/sources";
   import { inbox as sharedInbox, type Inbox } from "../inbox/inbox.svelte";
   import { health as sharedHealth, type Health } from "../shell/health.svelte";
-  import { inTextField } from "../shell/keys";
+  import { historyStep, inTextField } from "../shell/keys";
   import type { Lifecycle } from "../shell/lifecycle.svelte";
   import { assetTargetId, targetReading } from "../shell/timer";
   import { timer as sharedTimer, type Timer } from "../shell/timer.svelte";
@@ -89,6 +89,7 @@
     onlog,
     timeRevision = 0,
     ontimechanged,
+    nav = { back: () => history.back(), forward: () => history.forward() },
   }: {
     lifecycle: Pick<Lifecycle, "ready">;
     /** Open the launcher. */
@@ -119,6 +120,8 @@
     /** Bumped by `App.svelte` when a draft or a dialog changed a day's blocks. */
     timeRevision?: number;
     ontimechanged?: () => void;
+    /** History's back and forward (#693, #1086); the window's when omitted. */
+    nav?: { back: () => void; forward: () => void };
   } = $props();
 
   let hash = $state(location.hash);
@@ -272,6 +275,13 @@
   }
 
   function onkeydown(event: KeyboardEvent) {
+    const travel = historyStep(event);
+    if (travel !== null) {
+      event.preventDefault();
+      if (travel === "back") nav.back();
+      else nav.forward();
+      return;
+    }
     const mod = event.metaKey || event.ctrlKey;
     if (mod && event.key.toLowerCase() === "k") {
       event.preventDefault();
@@ -322,13 +332,29 @@
     return () => html.removeAttribute("data-theme");
   });
 
+  /**
+   * The mouse's back (3) and forward (4) buttons (#693). Navigated on
+   * `mouseup`, the moment a browser does; every event of the press is
+   * `preventDefault`ed so the webview adds no navigation or selection of its own.
+   */
+  function onmouse(event: MouseEvent) {
+    if (event.button !== 3 && event.button !== 4) return;
+    event.preventDefault();
+    if (event.type !== "mouseup") return;
+    if (event.button === 3) nav.back();
+    else nav.forward();
+  }
+  const MOUSE = ["mousedown", "mouseup", "auxclick"] as const;
+
   onMount(() => {
     const onhash = () => (hash = location.hash);
     window.addEventListener("hashchange", onhash);
     window.addEventListener("keydown", onkeydown);
+    for (const type of MOUSE) window.addEventListener(type, onmouse);
     return () => {
       window.removeEventListener("hashchange", onhash);
       window.removeEventListener("keydown", onkeydown);
+      for (const type of MOUSE) window.removeEventListener(type, onmouse);
     };
   });
 </script>

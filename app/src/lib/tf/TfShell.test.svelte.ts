@@ -137,6 +137,7 @@ function start(
     onsearch?: () => void;
     monitorsDown?: number;
     onstarttimer?: (entityId: string, title: string) => void;
+    nav?: { back: () => void; forward: () => void };
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -173,6 +174,7 @@ function start(
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
       jobPorts: JOB_PORTS,
+      nav: over.nav ?? { back: () => {}, forward: () => {} },
     },
   });
   flushSync();
@@ -380,6 +382,50 @@ test("⌘K opens search and ⌘, opens Settings", async () => {
   press(",", { metaKey: true });
   await settle();
   expect(location.hash).toBe("#/settings");
+});
+
+test("⌘[ ⌘] ⌘← ⌘→ and the mouse's back and forward buttons step through history (#693, #1086)", () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  start({ nav });
+  expect(press("[", { metaKey: true }).defaultPrevented).toBe(true);
+  press("[", { ctrlKey: true });
+  press("ArrowLeft", { metaKey: true });
+  expect(nav.back).toHaveBeenCalledTimes(3);
+  press("]", { metaKey: true });
+  press("]", { ctrlKey: true });
+  press("ArrowRight", { metaKey: true });
+  expect(nav.forward).toHaveBeenCalledTimes(3);
+
+  for (const [button, called] of [
+    [3, nav.back],
+    [4, nav.forward],
+  ] as const) {
+    const down = new MouseEvent("mousedown", { button, bubbles: true, cancelable: true });
+    window.dispatchEvent(down);
+    expect(down.defaultPrevented, "the webview adds no navigation of its own").toBe(true);
+    expect(called).toHaveBeenCalledTimes(3);
+    window.dispatchEvent(new MouseEvent("mouseup", { button, bubbles: true, cancelable: true }));
+    expect(called).toHaveBeenCalledTimes(4);
+  }
+});
+
+test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and a key already answered alone", () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  start({ nav });
+  const field = filterField("PAY");
+  expect(press("ArrowLeft", { metaKey: true }).defaultPrevented, "⌘← is start of line in a field").toBe(false);
+  press("[", { metaKey: true });
+  field.blur();
+  press("ArrowLeft", { ctrlKey: true });
+  press("[", { ctrlKey: true, altKey: true });
+  press("[", { metaKey: true, shiftKey: true });
+  const answered = new KeyboardEvent("keydown", { key: "[", metaKey: true, bubbles: true, cancelable: true });
+  answered.preventDefault();
+  window.dispatchEvent(answered);
+  window.dispatchEvent(new MouseEvent("mouseup", { button: 0, bubbles: true }));
+  expect(nav.back).not.toHaveBeenCalled();
+  press("[", { metaKey: true, altKey: true });
+  expect(nav.back, "⌥ with ⌘ is a layout typing the bracket").toHaveBeenCalledOnce();
 });
 
 test("the status bar: sync ages, a 401 with Re-enter password, the queued writes", async () => {

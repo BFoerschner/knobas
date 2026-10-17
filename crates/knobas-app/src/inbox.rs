@@ -458,6 +458,26 @@ mod tests {
         assert!(offer(Category::CredentialExpiry, Some(&generous)).is_empty());
     }
 
+    /// The interface's copy of the window matches the backend's (#1086).
+    ///
+    /// The Inbox (`app/src/lib/tf/inbox/inbox.ts`, `expiryOf`) re-derives a
+    /// credential expiry's deadline as `occurred_at + WINDOW_DAYS`, because
+    /// the expiry date is not on the wire and `occurred_at` is defined as the
+    /// expiry minus the window (`knobas_core::inbox::credential_expiry`).
+    /// Nothing else holds the two numbers together: change one without the
+    /// other and the *After it expires* preset silently points at the wrong day.
+    #[test]
+    fn the_interfaces_window_matches_the_backends() {
+        const INBOX: &str = include_str!("../../../app/src/lib/tf/inbox/inbox.ts");
+        assert!(
+            INBOX.contains(&format!(
+                "export const WINDOW_DAYS = {};",
+                knobas_core::inbox::WINDOW_DAYS
+            )),
+            "the Inbox's WINDOW_DAYS no longer matches knobas_core::inbox::WINDOW_DAYS"
+        );
+    }
+
     /// Every category has a **toggle in the interface** (#290).
     ///
     /// The other half of Settings › Notifications' list

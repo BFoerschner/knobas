@@ -12,6 +12,11 @@
   (`PublishTargetPicker`): each note becomes a page under the one picked, one
   `create_page` each through the write queue (`move_notes_to_confluence`).
   The notes stay (D10).
+
+  *Change…* beside the shortcut (#1086) is the rooms UI's Capture section
+  in a dialog: one field, `set_capture_shortcut`, *Clear* to register
+  nothing. prototype-6 draws the keys alone; Settings is a port of today's
+  screens, and without it nothing in the app could set the shortcut.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -108,6 +113,36 @@
     }
   }
 
+  // ---- Change… the capture shortcut (#1086): the rooms UI's Capture section ----
+  let editing = $state(false);
+  let draft = $state("");
+  let saveError = $state<string | null>(null);
+  let saving = $state(false);
+
+  function openShortcut() {
+    draft = view?.accelerator ?? "";
+    saveError = null;
+    editing = true;
+  }
+
+  /**
+   * Store the shortcut, or clear it with `null`. The row draws what the
+   * answer says is stored: a combination the system refuses is stored too,
+   * and the row's line says why it is not registered.
+   */
+  async function saveShortcut(accelerator: string | null) {
+    saving = true;
+    saveError = null;
+    try {
+      view = await ports.setCaptureShortcut(accelerator === null ? null : accelerator.trim());
+      editing = false;
+    } catch (cause) {
+      saveError = ipcErrorMessage(cause);
+    } finally {
+      saving = false;
+    }
+  }
+
   const moveLabel = $derived(`Move ${noteCount(view?.note_count ?? 0)}`);
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
@@ -150,6 +185,7 @@
       {:else}
         {#each keyCaps(view.accelerator) as cap, index (index)}<kbd>{cap}</kbd>{/each}
       {/if}
+      <button class="tf-btn tf-ghost tf-sm" aria-label="Change capture shortcut" onclick={openShortcut}>Change…</button>
     </div>
   </div>
   <div class="tf-stg-row">
@@ -162,6 +198,41 @@
       >Move to Confluence…</button
     >
   </div>
+{/if}
+
+{#if editing}
+  <TfDialog title="Capture shortcut" onclose={() => (editing = false)} {layers}>
+    {#snippet body()}
+      <p class="tf-dsub">
+        Written the way <code>CmdOrCtrl+Shift+N</code> is: modifiers (<code>CmdOrCtrl</code>, <code>Shift</code>,
+        <code>Alt</code>, <code>Ctrl</code>) and one key, joined by <code>+</code>. Empty means knobas registers nothing.
+      </p>
+      <div class="tf-formgrid">
+        <label for="tf-capture-shortcut">Shortcut</label>
+        <input
+          id="tf-capture-shortcut"
+          type="text"
+          autocomplete="off"
+          aria-label="Capture shortcut"
+          placeholder="CmdOrCtrl+Shift+N"
+          bind:value={draft}
+          disabled={saving}
+        />
+      </div>
+      {#if saveError !== null}<p class="tf-fail">Could not save the shortcut: {saveError}</p>{/if}
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn" onclick={() => (editing = false)}>Cancel</button>
+      {#if view?.accelerator != null}
+        <button class="tf-btn tf-ghost" disabled={saving} onclick={() => void saveShortcut(null)}>Clear</button>
+      {/if}
+      <button
+        class="tf-btn tf-primary"
+        disabled={saving || draft.trim() === "" || draft.trim() === (view?.accelerator ?? "")}
+        onclick={() => void saveShortcut(draft)}>Save</button
+      >
+    {/snippet}
+  </TfDialog>
 {/if}
 
 {#if moving}

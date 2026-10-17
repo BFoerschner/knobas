@@ -4604,3 +4604,21 @@ Implementer:
   shell; adding a source is Settings › Sources). **Reversing:** low.
 - **No Rust change.** The backend passes the address through (`notify`, `capture:open-note`
   carries the note id); no IPC answer changed, so no §10.8 entry. **Reversing:** n/a.
+## #1086 — Rooms-UI capabilities the new shell lacked (2026-10-17)
+
+- **All three are ported; none is recorded as dropped.** Neither spec #808 nor the requirements
+  drop any of them: §14's table does not list history keys but strikes nothing, Settings is
+  "a port of today's screens" (spec, *Out of Scope*), and R-12.2's *Snooze* is BUILT
+  `inbox/actions.ts`. **Reversing:** low (each is a small, separate diff).
+- **History keys live in `TfShell`, with `historyStep` back in `shell/keys.ts`, and step
+  `window.history`**, not a router: the new shell reads `location.hash` directly. The rules are
+  #693's unchanged (not in a text field, ⌘ or Ctrl with the brackets, ⌘ alone with the arrows,
+  ⌥ with ⌘ only, a key already answered is left alone). Added to §14 and to Settings ›
+  Keyboard. **Reversing:** low.
+- **The capture shortcut is set in a *Change…* dialog beside the key caps**, not an inline field:
+  prototype-6 draws the row as key caps, and a dialog keeps that row as drawn. Same command,
+  same rules as the rooms Capture section (blank is not saveable; *Clear* sends `null`; a refused
+  combination is stored and the row says why). **Reversing:** low.
+- **`WINDOW_DAYS` and `expiryOf` live in `tf/inbox/inbox.ts`**, and the Rust pin
+  (`the_interfaces_window_matches_the_backends`) comes back pointed at that file. No IPC change,
+  so no §10.8 entry. **Reversing:** low.
