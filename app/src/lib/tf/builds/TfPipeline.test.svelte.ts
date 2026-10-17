@@ -10,6 +10,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 
 import type { PipelineRow, PipelineSettings, RunRow } from "../../ipc/entity";
 import type { QueuedWrite, SourceDescriptor, SourceSummary, WriteOpPayload } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { PipelinePorts } from "./pipeline-ports";
 import TfPipeline from "./TfPipeline.svelte";
@@ -159,6 +160,7 @@ function draw(
     openExternal: () => Promise.resolve(),
     presets: () => Promise.resolve([]),
     savePreset: (preset) => Promise.resolve(preset),
+    deletePreset: () => Promise.resolve(),
     repoBranches: () => Promise.resolve(["main", "feature/PAY-231-sepa-retry", "release/1.9"]),
     runParameters: () => Promise.resolve([]),
     ...overrides,
@@ -524,6 +526,80 @@ test("Run again… starts from that run's settings; a preset fills the form; Sav
       first_in_queue: true,
     },
   ]);
+});
+
+test("Remove preset shows for a picked preset only, removes it by pipeline and name, and Start from forgets it while the form keeps it", async () => {
+  const removed: unknown[] = [];
+  const preset = (name: string) => ({
+    pipeline_id: PIPELINE.entity_id,
+    name,
+    branch: null,
+    parameters: [],
+    clean_checkout: false,
+    first_in_queue: false,
+  });
+  draw(undefined, null, {
+    presets: () => Promise.resolve([preset("Only staging"), { ...preset("Traced"), parameters: [{ name: "env", value: "prod-dryrun" }] }]),
+    deletePreset: (pipelineId, name) => {
+      removed.push([pipelineId, name]);
+      return Promise.resolve();
+    },
+  });
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  expect(button("Remove preset")).toBeUndefined();
+  const start = field<HTMLSelectElement>("Start from");
+  choose(start, "preset:Traced");
+  expect(button("Remove preset")).toBeDefined();
+  button("Remove preset")!.click();
+  await settle();
+  expect(removed).toEqual([[PIPELINE.entity_id, "Traced"]]);
+  expect([...start.options].map((o) => o.textContent)).toEqual(["Defaults", "Preset: Only staging"]);
+  expect(start.value).toBe("");
+  expect(button("Remove preset")).toBeUndefined();
+  // The form keeps the removed preset's settings, so saving them brings it back.
+  expect(summary()).toBe("On main, with env=prod-dryrun");
+});
+
+test("Remove preset refused: an already-gone preset leaves quietly, any other refusal says it failed and keeps the preset", async () => {
+  toasts.items.length = 0;
+  const preset = (name: string) => ({
+    pipeline_id: PIPELINE.entity_id,
+    name,
+    branch: null,
+    parameters: [],
+    clean_checkout: false,
+    first_in_queue: false,
+  });
+  let held = [preset("Gone"), preset("Kept")];
+  draw(undefined, null, {
+    presets: () => Promise.resolve(held),
+    deletePreset: (_pipelineId, name) => {
+      if (name === "Gone") {
+        held = [preset("Kept")];
+        return Promise.reject({ code: "not_found", message: "the pipeline has no preset named \"Gone\"", source_id: null });
+      }
+      return Promise.reject({ code: "not_ready", message: "the database is starting", source_id: null });
+    },
+  });
+  await settle();
+  button("Run…")!.click();
+  await settle();
+  const start = field<HTMLSelectElement>("Start from");
+  choose(start, "preset:Gone");
+  button("Remove preset")!.click();
+  await settle();
+  expect([...start.options].map((o) => o.textContent)).toEqual(["Defaults", "Preset: Kept"]);
+  expect(start.value).toBe("");
+  expect(toasts.items).toEqual([]);
+
+  choose(start, "preset:Kept");
+  button("Remove preset")!.click();
+  await settle();
+  expect(toasts.items.map((toast) => toast.text)).toEqual(["Could not remove the preset: the database is starting"]);
+  expect([...start.options].map((o) => o.textContent)).toEqual(["Defaults", "Preset: Kept"]);
+  expect(start.value).toBe("preset:Kept");
 });
 
 test("Add a parameter sends a free name and value; a failing sign-in warns that the run waits in the queue", async () => {

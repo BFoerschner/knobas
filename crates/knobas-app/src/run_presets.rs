@@ -1,6 +1,7 @@
 //! Run… presets (#852, spec #808 *Builds*, R-9.7): the knobas-owned
 //! `knobas.run_preset` rows (migration `0037`) behind two commands on
-//! `commands::entity`, `run_presets` and `save_run_preset`.
+//! `commands::entity`, `run_presets`, `save_run_preset` and (#996)
+//! `delete_run_preset`.
 //!
 //! A preset is what a reader started a run with, kept under a name per
 //! pipeline: the branch, the parameter overrides, the two run options. It is
@@ -58,6 +59,36 @@ pub async fn list(pool: &PgPool, pipeline_id: &str) -> Result<Vec<RunPreset>, Ip
     .fetch_all(pool)
     .await?;
     rows.iter().map(row).collect()
+}
+
+/// Remove the preset of `pipeline_id` named `name`, matched as the save
+/// matches it: ignoring case and whitespace at either end. Other pipelines'
+/// presets of the same name stay.
+///
+/// # Errors
+///
+/// [`Invalid`](crate::IpcErrorCode::Invalid) for a pipeline that is not an
+/// entity id; [`NotFound`](crate::IpcErrorCode::NotFound) for a name the
+/// pipeline holds no preset of; [`Internal`](crate::IpcErrorCode::Internal) if
+/// the write fails.
+pub async fn delete(pool: &PgPool, pipeline_id: &str, name: &str) -> Result<(), IpcError> {
+    let entity = EntityRef::parse(pipeline_id).map_err(IpcError::invalid)?;
+    let removed = sqlx::query(
+        "delete from knobas.run_preset \
+         where pipeline_id = $1 and lower(btrim(name)) = lower(btrim($2))",
+    )
+    .bind(entity.to_string())
+    .bind(name.trim())
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if removed == 0 {
+        return Err(IpcError::not_found(format!(
+            "the pipeline has no preset named {:?}",
+            name.trim()
+        )));
+    }
+    Ok(())
 }
 
 /// Store `preset`, replacing the pipeline's preset of the same name, and

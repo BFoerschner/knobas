@@ -681,6 +681,11 @@ export function saveRunPreset(preset: RunPreset): Promise<RunPreset> {
   return invoke<RunPreset>("save_run_preset", { preset });
 }
 
+/** Remove a pipeline's Run… preset by name; `not_found` for a name it holds none of (#996). */
+export function deleteRunPreset(pipelineId: string, name: string): Promise<void> {
+  return invoke<void>("delete_run_preset", { pipelineId, name });
+}
+
 /** One pipeline's settings, read live; `null` for a source with no pipelines (#851). */
 export function pipelineSettings(pipelineId: string): Promise<PipelineSettings | null> {
   return invoke<PipelineSettings | null>("pipeline_settings", { pipelineId });

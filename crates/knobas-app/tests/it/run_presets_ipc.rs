@@ -5,7 +5,9 @@
 //! Each test names a pipeline of its own, so the presets it reads back are
 //! told apart from anything else in this database.
 
-use knobas_app::commands::entity::{run_presets_inner, save_run_preset_inner};
+use knobas_app::commands::entity::{
+    delete_run_preset_inner, run_presets_inner, save_run_preset_inner,
+};
 use knobas_app::run_presets::RunPreset;
 use knobas_source::BuildParameter;
 
@@ -132,4 +134,60 @@ async fn a_preset_that_could_never_run_is_refused() {
         save_run_preset_inner(&pool, blank).await.unwrap().branch,
         None
     );
+}
+
+/// Removing a preset (#996) drops that pipeline's preset of the name, ignoring
+/// case and whitespace at either end; the same name on another pipeline and the
+/// pipeline's other presets stay. A name it does not hold is `not_found`, and
+/// so is removing the same one twice; a non-id is `invalid`.
+#[tokio::test]
+async fn removing_a_preset_drops_that_pipelines_preset_alone() {
+    let pool = pool().await;
+    let (tests, other) = (pipeline(), pipeline());
+    for (pipeline_id, name) in [(&tests, "Nightly"), (&tests, "My run"), (&other, "Nightly")] {
+        save_run_preset_inner(&pool, preset(pipeline_id, name))
+            .await
+            .unwrap();
+    }
+
+    // Trimmed as the save trims, tabs and newlines included.
+    delete_run_preset_inner(&pool, &tests, "\t nightly \n")
+        .await
+        .unwrap();
+    assert_eq!(
+        run_presets_inner(&pool, &tests).await.unwrap(),
+        [preset(&tests, "My run")]
+    );
+    assert_eq!(
+        run_presets_inner(&pool, &other).await.unwrap(),
+        [preset(&other, "Nightly")],
+        "the other pipeline's Nightly stays"
+    );
+
+    for (why, id, name, code) in [
+        (
+            "again",
+            tests.as_str(),
+            "Nightly",
+            knobas_app::IpcErrorCode::NotFound,
+        ),
+        (
+            "unknown",
+            tests.as_str(),
+            "Never saved",
+            knobas_app::IpcErrorCode::NotFound,
+        ),
+        (
+            "not an id",
+            "Payout",
+            "x",
+            knobas_app::IpcErrorCode::Invalid,
+        ),
+    ] {
+        let error = delete_run_preset_inner(&pool, id, name)
+            .await
+            .expect_err(why);
+        assert_eq!(error.code, code, "{why}: {error:?}");
+    }
+    assert_eq!(run_presets_inner(&pool, &tests).await.unwrap().len(), 1);
 }

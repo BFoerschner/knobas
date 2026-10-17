@@ -16,6 +16,7 @@ import {
   runPresets,
   runTests,
   saveRunPreset,
+  deleteRunPreset,
   submitWrite,
   testHistory,
 } from "../../ipc/entity";
@@ -64,6 +65,8 @@ export interface PipelinePorts {
   presets: (pipelineId: string) => Promise<RunPreset[]>;
   /** Save one, replacing the pipeline's preset of that name (`save_run_preset`). */
   savePreset: (preset: RunPreset) => Promise<RunPreset>;
+  /** Remove one by name (`delete_run_preset`, #996). */
+  deletePreset: (pipelineId: string, name: string) => Promise<void>;
   /** The branch names of a mirrored repository, the default first (its view's *Branches*). */
   repoBranches: (repoId: string) => Promise<string[]>;
   /** The parameters a run ran with (its view's *Parameters*), for *#N settings*. */
@@ -126,6 +129,7 @@ export const BRIDGE: PipelinePorts = {
   openExternal: (url) => openExternal(url),
   presets: (pipelineId) => runPresets(pipelineId),
   savePreset: (preset) => saveRunPreset(preset),
+  deletePreset: (pipelineId, name) => deleteRunPreset(pipelineId, name),
   repoBranches: (repoId) => readRepoBranches(repoId),
   runParameters: (runId) => readRunParameters(runId),
 };

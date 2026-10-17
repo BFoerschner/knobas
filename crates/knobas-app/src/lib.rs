@@ -583,6 +583,9 @@ pub fn run() {
             // #966's facts Code draws beside a row, appended at the foot: the
             // list is append-only (§10.8).
             commands::entity::code_facts,
+            // #996's removal of a Run… preset, appended at the foot: the list
+            // is append-only (§10.8).
+            commands::entity::delete_run_preset,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")
