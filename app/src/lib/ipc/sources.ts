@@ -90,6 +90,8 @@ export interface KindPaths {
   merged: PayloadPath[];
   project_key: PayloadPath[];
   project_name: PayloadPath[];
+  /** The chain of projects the item sits in, outermost first (#1019). */
+  project_path: ProjectPath[];
   /** Status names this source considers blocked-like, in its own spelling. */
   blocked_statuses: string[];
   /** Where this item's parent is and what it answers to (ADR-0018). */
@@ -185,6 +187,17 @@ export interface StateValue {
   tone: Tone;
   /** What the chip says instead of the value (`merged` for `true`), or `null`. */
   text: string | null;
+}
+
+/**
+ * `knobas_core::payload::ProjectPath` — where an item's chain of projects is
+ * (an array of objects, outermost first), and each project's key and name
+ * inside its object (#1019).
+ */
+export interface ProjectPath {
+  at: PayloadPath;
+  key: PayloadPath[];
+  name: PayloadPath[];
 }
 
 /**

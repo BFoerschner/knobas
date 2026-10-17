@@ -4295,3 +4295,24 @@ Ruled by the implementer (PR for #1020).
 
 - **The walk up stops where it is, and never throws.** If an ancestor can't be read, the last key reached is used, with no title. A loop in the parent chain stops before any ticket it has already visited. The dialog then still offers an epic rule, and the old code took the top of the path line without reading anything. **Reversing:** one function, `epicAbove`.
 - ***Save link set* waits for the walk.** If the walk hasn't finished when someone clicks, the race saves the story's rule, which is the bug itself. **Reversing:** one `await` in `TfSaveSet.save()`.
+## #1019 — A pipeline pattern takes a project and its subprojects (2026-10-17)
+
+Ruled by the implementer (PR for #1019).
+
+- **The chain is projects, not parents.** The ticket allowed `sync.item_parent` or
+  `sync.item_project`. The glossary's **Parent** says a parent "is something you can open, so it
+  is not a project", and ADR-0018's title says the same, so a TeamCity project is not declared as
+  a configuration's parent and `under:Payments` still does not reach it; `project:Payments` does.
+  **Reversing:** high (a parent declaration and a project kind on TeamCity, against ADR-0018).
+- **A column, not extra rows.** `sync.item_project.path` holds the chain beside the item's one
+  row. Extra rows per ancestor would have put each configuration in every project above it for
+  the census, the project rooms and every reader of `key`. **Reversing:** a new migration.
+- **A new `ProjectPath` declaration, not `group_path`.** `group_path` is the Builds frame's
+  names; a project is matched by key or name, so the chain needs both. **Reversing:** medium.
+- **The launcher's `project:` takes the subtree too**, from the same stored column, so the
+  launcher and a pattern still read one query the same way. **Reversing:** one SQL term.
+- **A `project` rule (`<source>:<key>`) is unchanged**: it is a ticket rule over Jira projects,
+  which do not nest. **Reversing:** low.
+- **The dialog sorts nested projects by path** (`Payments`, then `Payments › Payouts`) and keeps
+  the label *Project*, not prototype-6's *TeamCity project*: the dialog is source-neutral and its
+  accessible name is tested. **Reversing:** one string.

@@ -117,7 +117,10 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// **A pipeline's chain of groups** (#849) is its `projectPath`, which the
 /// sync writes beside the record from `/app/rest/projects`
 /// (`crate::projects`): every project from below the root down to the
-/// configuration's own, by name.
+/// configuration's own, by name. The same chain, by `id` and `name`, is the
+/// configuration's `project_path` (#1019), so a project pattern or
+/// `project:` naming a parent project takes in its subprojects' configurations,
+/// as TeamCity's own project page and a configured `project_ids` entry do.
 ///
 /// **A build ran on its revisions** (#710): `revisions.revision[].version`,
 /// one full sha per VCS root, which is what the detail of a pull request, a
@@ -125,7 +128,8 @@ pub fn descriptor_template() -> SourceDescriptor {
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_core::payload::Frame;
     use knobas_source::{
-        KindPaths, ListPath, ParentPath, PayloadPath, Trigger, TriggerPath, TriggerValue,
+        KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, Trigger, TriggerPath,
+        TriggerValue,
     };
     vec![
         KindPaths {
@@ -163,6 +167,11 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             kind: KIND_BUILD_CONFIG.to_owned(),
             project_key: vec![PayloadPath::of(["projectId"])],
             project_name: vec![PayloadPath::of(["projectName"])],
+            project_path: vec![ProjectPath {
+                at: PayloadPath::of(["projectPath"]),
+                key: vec![PayloadPath::of(["id"])],
+                name: vec![PayloadPath::of(["name"])],
+            }],
             frame: Some(Frame::Pipeline),
             name: vec![PayloadPath::of(["name"])],
             group: vec![PayloadPath::of(["projectName"])],
@@ -385,6 +394,25 @@ mod tests {
             ["Payments", "Payouts", "Deploy"]
         );
         assert!(knobas_core::payload::resolve_list(&config, &pipeline.group_path).is_empty());
+        // The same chain is the configuration's projects (#1019), by id and
+        // name, so a parent project takes in its subprojects.
+        let chain: Vec<(String, Option<String>)> =
+            knobas_core::payload::resolve_project_path(&nested, &pipeline.project_path)
+                .into_iter()
+                .map(|p| (p.key, p.name))
+                .collect();
+        let named = |key: &str, name: &str| (key.to_owned(), Some(name.to_owned()));
+        assert_eq!(
+            chain,
+            [
+                named("Payments", "Payments"),
+                named("Payments_Payouts", "Payouts"),
+                named("Payments_Payouts_Deploy", "Deploy")
+            ]
+        );
+        assert!(
+            knobas_core::payload::resolve_project_path(&config, &pipeline.project_path).is_empty()
+        );
         assert_eq!(
             resolve_string(&config, &pipeline.pipeline),
             resolve_string(&build, &run.pipeline),

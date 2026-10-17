@@ -365,6 +365,129 @@ async fn the_editor_the_preview_the_job_and_the_launcher_agree() {
     );
 }
 
+/// A TeamCity configuration in a subproject: `chain` is the projects from
+/// below `_Root` down to its own, `(id, name)`, as the adapter writes
+/// `projectPath` (#849).
+async fn nested_pipeline(pool: &PgPool, chain: &[(String, String)], id: &str) -> String {
+    let (own_id, own_name) = chain.last().unwrap();
+    let path: Vec<_> = chain
+        .iter()
+        .map(|(id, name)| serde_json::json!({ "id": id, "name": name }))
+        .collect();
+    mirrored(
+        pool,
+        "tc",
+        "build_config",
+        id,
+        &format!("{own_name} / {id}"),
+        serde_json::json!({
+            "id": id, "name": id, "projectId": own_id, "projectName": own_name,
+            "projectPath": path,
+        }),
+    )
+    .await
+}
+
+/// #1019: a pipeline pattern naming a parent project takes the configurations
+/// of its subprojects ("Payout_* under TeamCity project Payments" in
+/// prototype-6), by the project's id or its name, on the job, in the editor's
+/// count, in the dialog's preview and in the launcher; and the dialog offers
+/// each project of the chain with its path.
+#[tokio::test]
+async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
+    let pool = pool().await;
+    let t = tag();
+    let top = (format!("Pay{t}"), format!("Payments{t}"));
+    let payouts = (format!("Pay{t}_Payouts"), "Payouts".to_owned());
+    let psp = (format!("Pay{t}_Psp"), "PSP client".to_owned());
+    let chain = |sub: &(String, String)| {
+        [
+            (top.0.clone(), top.1.clone()),
+            (sub.0.clone(), sub.1.clone()),
+        ]
+    };
+    let build = nested_pipeline(&pool, &chain(&payouts), &format!("{t}_Payout_Build")).await;
+    let client = nested_pipeline(&pool, &chain(&psp), &format!("{t}_Payout_Client")).await;
+    let _dashboard = nested_pipeline(&pool, &chain(&payouts), &format!("{t}_Dashboard")).await;
+    let _elsewhere = pipeline(&pool, &format!("Other{t}"), &format!("{t}_Payout_X")).await;
+
+    for parent in [&top.0, &top.1] {
+        let job = ticket(&pool).await;
+        let query = format!("project:\"{parent}\" name:*_payout_*");
+        let saved = link_sets::save(
+            &pool,
+            draft("Payments", vec![], vec![pattern("pipeline", &query)], &job),
+        )
+        .await
+        .unwrap();
+        let editor: BTreeSet<String> = saved.set.patterns[0]
+            .matches
+            .iter()
+            .map(|m| m.entity_id.clone())
+            .collect();
+        assert_eq!(editor, ids(&[&build, &client]), "{query}");
+        assert_eq!(saved.set.patterns[0].count, 2, "{query}");
+        assert_eq!(from_sets(&pool, &job).await, editor, "{query}");
+        let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", &query))
+            .await
+            .unwrap();
+        assert_eq!(preview.count, 2, "{query}");
+        let launcher: BTreeSet<String> = knobas_app::commands::search::searcher(&pool)
+            .await
+            .unwrap()
+            .search(knobas_search::SearchQuery {
+                raw: query.clone(),
+                limit: 200,
+                filters: knobas_search::SearchFilters::default(),
+            })
+            .await
+            .unwrap()
+            .groups
+            .iter()
+            .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+            .collect();
+        assert_eq!(launcher, editor, "{query}");
+    }
+
+    // A subproject still takes only its own.
+    let job = ticket(&pool).await;
+    let saved = link_sets::save(
+        &pool,
+        draft(
+            "Payouts",
+            vec![],
+            vec![pattern("pipeline", &format!("project:{} name:*_payout_*", payouts.0))],
+            &job,
+        ),
+    )
+    .await
+    .unwrap();
+    assert_eq!(saved.set.patterns[0].count, 1);
+    assert_eq!(from_sets(&pool, &job).await, ids(&[&build]));
+
+    // The dialog offers the parent, which no configuration sits in directly,
+    // and each subproject, each with its chain of names.
+    let preview = link_sets::preview_pattern(&pool, &pattern("pipeline", ""))
+        .await
+        .unwrap();
+    let offered = |key: &str| {
+        preview
+            .projects
+            .iter()
+            .find(|x| x.source_id == "tc" && x.key == key)
+            .map(|x| x.path.clone())
+    };
+    assert_eq!(offered(&top.0), Some(vec![top.1.clone()]));
+    assert_eq!(
+        offered(&payouts.0),
+        Some(vec![top.1.clone(), "Payouts".to_owned()])
+    );
+    assert_eq!(
+        offered(&psp.0),
+        Some(vec![top.1.clone(), "PSP client".to_owned()])
+    );
+}
+
 /// A pattern is stored only as a filter the grammar reads, for a kind that
 /// has patterns (R-7.7: builds and pages); the preview says why instead of
 /// failing.

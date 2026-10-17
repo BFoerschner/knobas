@@ -3290,6 +3290,11 @@ export interface LinkSetPatternProject {
   source_id: string;
   key: string;
   name: string | null;
+  /**
+   * The project's chain of names, outermost first and ending in its own
+   * (#1019: `["Payments", "Payouts"]`); empty where projects do not nest.
+   */
+  path: string[];
 }
 
 /** The pattern dialog's "Matches now: N" — `PatternPreview`. */

@@ -149,6 +149,39 @@ pub struct ParentPath {
     pub names: Vec<PayloadPath>,
 }
 
+/// Where the **chain of projects** an item sits in is, and what each project
+/// in it is keyed and called (#1019, ADR-0010).
+///
+/// A source whose projects nest (a TeamCity project and its subprojects)
+/// names the item's own project with [`KindPaths::project_key`] and
+/// [`KindPaths::project_name`]; this says where the whole chain is, so a
+/// project takes in everything under it. Not a parent: a project is a
+/// grouping, not something you open (ADR-0018).
+///
+/// * `at` leads to an **array of objects**, outermost first, ending in the
+///   item's own project. Anything else is a miss.
+/// * `key` and `name` are candidate paths inside each object, read as
+///   [`KindPaths::project_key`] is: the first non-blank string wins. A
+///   project with no readable key is left out of the chain.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProjectPath {
+    /// Where the array of project objects is.
+    pub at: PayloadPath,
+    /// Where a project's key sits inside its object.
+    #[serde(default)]
+    pub key: Vec<PayloadPath>,
+    /// Where a project's name sits inside its object.
+    #[serde(default)]
+    pub name: Vec<PayloadPath>,
+}
+
+/// One project of a declared chain ([`resolve_project_path`]).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChainProject {
+    pub key: String,
+    pub name: Option<String>,
+}
+
 /// What one adapter's records of one entity kind carry, and where.
 ///
 /// **Per kind**, because the answer is: a TeamCity *build* names its project
@@ -202,6 +235,12 @@ pub struct KindPaths {
     /// The project's display name, for the room's label.
     #[serde(default)]
     pub project_name: Vec<PayloadPath>,
+    /// The chain of projects the item sits in, outermost first, ending in its
+    /// own (#1019): what lets a project take in its subprojects. TeamCity's
+    /// `projectPath[]`, `id` and `name`. Empty for a source whose projects do
+    /// not nest, and a miss leaves the item in its own project only.
+    #[serde(default)]
+    pub project_path: Vec<ProjectPath>,
     /// The status names this source considers **blocked-like**, in its own
     /// spelling (`Blocked`, `Waiting for support`). Names, not a path: which
     /// statuses mean "stuck" is a property of the source's workflow, not of
@@ -518,6 +557,7 @@ pub mod field {
     pub const MERGED: &str = "merged";
     pub const PROJECT_KEY: &str = "project_key";
     pub const PROJECT_NAME: &str = "project_name";
+    pub const PROJECT_PATH: &str = "project_path";
     pub const PARENT: &str = "parent";
     pub const STATE: &str = "state";
     pub const HEAD: &str = "head";
@@ -558,6 +598,7 @@ pub mod field {
         MERGED,
         PROJECT_KEY,
         PROJECT_NAME,
+        PROJECT_PATH,
         PARENT,
         STATE,
         HEAD,
@@ -727,6 +768,85 @@ pub fn names_a_missing_key(payload: &serde_json::Value, path: &PayloadPath) -> b
         }
     }
     false
+}
+
+/// The chain of projects a record declares, outermost first: the first
+/// candidate whose non-empty `at` leads to an array, each object element of
+/// it with a readable key. Empty when nothing is declared or nothing reads.
+/// [`declared_project_path!`](crate::declared_project_path) is the same rule
+/// in SQL, which the migration that stores `sync.item_project.path` carries.
+#[must_use]
+pub fn resolve_project_path(
+    payload: &serde_json::Value,
+    candidates: &[ProjectPath],
+) -> Vec<ChainProject> {
+    let Some((candidate, elements)) = candidates.iter().find_map(|c| {
+        if c.at.segments().is_empty() {
+            return None;
+        }
+        at(payload, &c.at)?.as_array().map(|a| (c, a))
+    }) else {
+        return Vec::new();
+    };
+    elements
+        .iter()
+        .filter(|e| e.is_object())
+        .filter_map(|e| {
+            Some(ChainProject {
+                key: resolve_string(e, &candidate.key)?,
+                name: resolve_string(e, &candidate.name),
+            })
+        })
+        .collect()
+}
+
+/// SQL for "the chain of projects this record declares", as a jsonb array of
+/// `{key, name}` objects outermost first ([`resolve_project_path`]'s rule).
+/// `$decl` is the declarations; the row's alias must be `i`, as for
+/// [`declared_string!`]. Migration `0043` stores its expansion with `$decl` =
+/// `dd.decl`, and `knobas-app`'s `the_stored_resolver_is_the_macros_expansion`
+/// holds the two together.
+#[macro_export]
+macro_rules! declared_project_path {
+    ($decl:literal) => {
+        concat!(
+            "(select coalesce(jsonb_agg(jsonb_build_object('key', x.key, 'name', x.name) \
+             order by x.pos), '[]'::jsonb) from (select e.pos, ",
+            $crate::project_path_part!("w.keys"),
+            " as key, ",
+            $crate::project_path_part!("w.names"),
+            " as name from (select c.at_segs, c.keys, c.names from (select ",
+            $crate::declared_segments!("t.p->'at'"),
+            " as at_segs, t.p->'key' as keys, t.p->'name' as names, t.ord \
+             from jsonb_array_elements(",
+            $crate::declared_array!($decl, "project_path"),
+            ") with ordinality as t(p, ord)) c where cardinality(c.at_segs) > 0 \
+             and jsonb_typeof(i.payload #> c.at_segs) = 'array' order by c.ord limit 1) w \
+             cross join lateral jsonb_array_elements(i.payload #> w.at_segs) \
+             with ordinality as e(obj, pos) where jsonb_typeof(e.obj) = 'object') x \
+             where x.key is not null)"
+        )
+    };
+}
+
+/// One project's key or name inside a chain element `e.obj`, from the
+/// candidate paths at `$paths`. Part of [`declared_project_path!`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! project_path_part {
+    ($paths:literal) => {
+        concat!(
+            "(select nullif(btrim(e.obj #>> k.segs), '') from (select ",
+            $crate::declared_segments!("q.p"),
+            " as segs, q.ord from jsonb_array_elements(case when jsonb_typeof(",
+            $paths,
+            ") = 'array' then ",
+            $paths,
+            " else '[]'::jsonb end) with ordinality as q(p, ord)) k \
+             where jsonb_typeof(e.obj #> k.segs) = 'string' \
+             and nullif(btrim(e.obj #>> k.segs), '') is not null order by k.ord limit 1)"
+        )
+    };
 }
 
 /// The first candidate that lands on a usable string.

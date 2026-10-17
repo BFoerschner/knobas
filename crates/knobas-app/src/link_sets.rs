@@ -127,6 +127,10 @@ pub struct PatternProject {
     pub source_id: String,
     pub key: String,
     pub name: Option<String>,
+    /// The project's chain of names, outermost first and ending in its own
+    /// (#1019: `Payments`, `Payouts`); empty for a source whose projects do
+    /// not nest.
+    pub path: Vec<String>,
 }
 
 /// What the pattern dialog shows (R-7.7, "Matches now: N"): what the query
@@ -476,16 +480,35 @@ select h.id, e.title
 );
 
 /// The projects the live items of member kind `$1` sit in, by name, for the
-/// pattern dialog: `sync.item_project` with `under:`'s adapter check.
+/// pattern dialog: `sync.item_project` with `under:`'s adapter check. Every
+/// project of a stored chain (`path`, #1019) is offered too, with the names
+/// from the outermost down to it, so a parent project no item sits in
+/// directly can be picked; an item with no chain offers its own project with
+/// an empty path.
 const PATTERN_PROJECTS: &str = concat!(
-    "select distinct on (p.source_id, p.key) p.source_id, p.key, p.name
-  from sync.live_item i
-  join sync.item_project p on p.entity_id = i.entity_id
-  join knobas.source_config sc on sc.id = p.source_id and sc.kind = p.adapter_kind
- where ",
+    "with rows as (
+    select p.source_id, p.key, p.name, p.at, p.path
+      from sync.live_item i
+      join sync.item_project p on p.entity_id = i.entity_id
+      join knobas.source_config sc on sc.id = p.source_id and sc.kind = p.adapter_kind
+     where ",
     knobas_core::link_set_member_fits!("$1", "i.kind"),
     "
- order by p.source_id, p.key, (p.name is null), p.at desc nulls last"
+),
+offered as (
+    select r.source_id, r.key, r.name, r.at, '{}'::text[] as path
+      from rows r where jsonb_array_length(r.path) = 0
+    union all
+    select r.source_id, e.pr->>'key', e.pr->>'name', r.at,
+           array(select coalesce(u.pr->>'name', u.pr->>'key')
+                   from jsonb_array_elements(r.path) with ordinality as u(pr, n)
+                  where u.n <= e.n order by u.n)
+      from rows r
+     cross join lateral jsonb_array_elements(r.path) with ordinality as e(pr, n)
+)
+select distinct on (source_id, key) source_id, key, name, path
+  from offered
+ order by source_id, key, (name is null), at desc nulls last"
 );
 
 /// Why a pattern member cannot be saved, before its query is read, or
@@ -782,16 +805,19 @@ pub async fn preview_pattern(
     } else {
         ""
     };
-    let projects = sqlx::query_as::<_, (String, String, Option<String>)>(PATTERN_PROJECTS)
-        .bind(kind)
-        .fetch_all(pool)
-        .await?
-        .into_iter()
-        .map(|(source_id, key, name)| PatternProject {
-            source_id,
-            key,
-            name,
-        })
+    let projects = sqlx::query_as::<_, (String, String, Option<String>, Vec<String>)>(
+        PATTERN_PROJECTS,
+    )
+    .bind(kind)
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(|(source_id, key, name, path)| PatternProject {
+        source_id,
+        key,
+        name,
+        path,
+    })
         .collect();
     let read = match read {
         Ok(read) => read,

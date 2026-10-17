@@ -325,6 +325,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "priority",
             "project_key",
             "project_name",
+            "project_path",
             "reviewers",
             "revision",
             "started_by",

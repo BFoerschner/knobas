@@ -1002,6 +1002,10 @@ mod tests {
         // `sprint:current` asks for.
         "project_key",
         "project_name",
+        // `project:`'s stored chain (#1019): each project's key in
+        // `sync.item_project.path`, by key and by name.
+        "key",
+        "name",
         "status_name",
         "issue_type",
         "priority",
