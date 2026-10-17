@@ -22,6 +22,15 @@
 //! (`jira:board-21` → `jira-board-21`), so `#/tickets/<id>` is stable. A view
 //! somebody made that already holds that id is left alone, and the Jira view
 //! does not show: a name collision costs a view, never somebody's own.
+//!
+//! **Payload reads outside the adapter (ADR-0007).** The paths read are the
+//! Jira adapter's own `jira_view` payload (`crate::views` in
+//! `knobas-source-jira` writes it), read in these statements and nowhere
+//! else. **A miss is an empty answer, never a guess**: a payload whose
+//! `columns` is not an array has no columns (one per status on the board), one
+//! whose `keys` is not an array holds no tickets, a missing `sprint` is none
+//! and a missing `kind` is a board. Pinned by
+//! `tests/it/jira_views.rs`'s `a_view_whose_payload_says_nothing_holds_nothing`.
 
 use sqlx::{Postgres, Transaction};
 

@@ -2831,6 +2831,7 @@ knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_deleted_in_jira_
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_this_account_cannot_read_is_left_out
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_board_whose_keys_changed_is_delivered_again
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_jira_without_jira_software_brings_no_views_and_keeps_the_cursor_free_of_them
+knobas-source-jira	lib/knobas_source_jira	views::tests::a_keys_only_page_reads_jiras_null_fields
 knobas-source-jira	lib/knobas_source_jira	views::tests::a_views_query_is_the_filter_the_sub_filter_and_the_open_sprint_in_the_filters_order
 knobas-source-jira	lib/knobas_source_jira	views::tests::an_unchanged_board_is_not_delivered_again_and_the_position_stays_put
 knobas-source-jira	lib/knobas_source_jira	views::tests::each_board_arrives_as_a_view_with_jiras_columns_limits_sprint_and_keys_in_order
@@ -3376,6 +3377,7 @@ knobas-sync	test/it	flush_all_isolation::no_file_that_asserts_a_wait_reason_flus
 knobas-sync	test/it	flush_all_isolation::the_rule_actually_rejects_a_flush_beside_a_wait_reason
 knobas-sync	test/it	jira_views::a_board_deleted_in_jira_leaves_with_its_tickets_and_its_ticket_view
 knobas-sync	test/it	jira_views::a_jira_view_is_kept_with_its_tickets_in_jiras_order_and_shows_as_a_ticket_view
+knobas-sync	test/it	jira_views::a_view_whose_payload_says_nothing_holds_nothing
 knobas-sync	test/it	jira_views::name_and_columns_follow_jira_and_the_readers_settings_stay
 knobas-sync	test/it	progress::a_progress_message_reaches_every_sink_enrolled_after_one_that_panics
 knobas-sync	test/it	progress::a_refused_item_does_not_count_as_progress

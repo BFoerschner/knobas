@@ -104,6 +104,26 @@ pub(crate) trait JiraApi: Send + Sync {
     async fn filter(&self, _id: &str) -> Result<crate::views::Filter, SourceError> {
         Err(no_agile())
     }
+    /// `GET rest/api/2/search?fields=key`: one page of keys. Its own shape,
+    /// because Jira answers `"fields": null` on every issue of a keys-only
+    /// search (measured against Jira DC 10.3, #877), which the issue walk's
+    /// record does not accept. A fake answers through its [`search`](Self::search).
+    async fn search_keys(
+        &self,
+        jql: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<crate::views::KeysPage, SourceError> {
+        let page = self.search(jql, start_at, max_results, "key").await?;
+        Ok(crate::views::KeysPage {
+            total: page.total,
+            issues: page
+                .issues
+                .into_iter()
+                .map(|raw| crate::views::KeyOnly { key: raw.issue.key })
+                .collect(),
+        })
+    }
     /// `GET rest/api/2/status`: every status, for the names a board's
     /// columns hold by id.
     async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
@@ -227,6 +247,24 @@ impl JiraApi for crate::http::JiraHttp {
 
     async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
         self.get_json("rest/api/2/status", &[]).await
+    }
+
+    async fn search_keys(
+        &self,
+        jql: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<crate::views::KeysPage, SourceError> {
+        self.get_json(
+            "rest/api/2/search",
+            &[
+                ("jql", jql.to_owned()),
+                ("startAt", start_at.to_string()),
+                ("maxResults", max_results.to_string()),
+                ("fields", "key".to_owned()),
+            ],
+        )
+        .await
     }
 }
 

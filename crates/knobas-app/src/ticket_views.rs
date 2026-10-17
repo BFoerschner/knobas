@@ -485,13 +485,18 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
 /// `internal` if the delete fails.
 pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
     // A Jira view is Jira's: deleted here, the next sync would put it back.
-    let mut tx = pool.begin().await?;
-    if jira_view_row(&mut tx, id).await?.is_some() {
+    let jira: bool = sqlx::query_scalar(
+        "select exists (select 1 from knobas.ticket_view
+                         where id = $1 and jira_ref in (select entity_id from sync.jira_view))",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    if jira {
         return Err(IpcError::invalid(format!(
             "{id} is a Jira view: it comes from Jira at every sync and cannot be deleted here"
         )));
     }
-    tx.rollback().await?;
     let gone = sqlx::query("delete from knobas.ticket_view where id = $1")
         .bind(id)
         .execute(pool)

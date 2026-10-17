@@ -115,6 +115,21 @@ pub(crate) struct Filter {
     pub jql: String,
 }
 
+/// One page of a keys-only search (`fields=key`).
+#[derive(Debug, Clone, Default, Deserialize)]
+pub(crate) struct KeysPage {
+    #[serde(default)]
+    pub total: u32,
+    #[serde(default)]
+    pub issues: Vec<KeyOnly>,
+}
+
+/// An issue as a keys-only search names it; its `fields` is `null`.
+#[derive(Debug, Clone, Deserialize)]
+pub(crate) struct KeyOnly {
+    pub key: String,
+}
+
 /// One entry of `GET rest/api/2/status`.
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct Status {
@@ -328,9 +343,9 @@ async fn keys(
     let mut keys: Vec<String> = Vec::new();
     let mut start_at = 0;
     for _ in 0..MAX_PAGES {
-        let page = api.search(jql, start_at, cfg.page_size, "key").await?;
+        let page = api.search_keys(jql, start_at, cfg.page_size).await?;
         let returned = u32::try_from(page.issues.len()).unwrap_or(u32::MAX);
-        keys.extend(page.issues.into_iter().map(|raw| raw.issue.key));
+        keys.extend(page.issues.into_iter().map(|issue| issue.key));
         start_at += returned;
         if returned == 0 || start_at >= page.total {
             return Ok(keys);
@@ -545,6 +560,20 @@ mod tests {
                 "(project in (PAY, WEB)) AND (fixVersion is EMPTY) ORDER BY Rank ASC",
             ]
         );
+    }
+
+    /// What Jira DC 10.3 answered to `fields=key` on the seeded instance
+    /// (#877's first `jira-live`): `"fields": null` on every issue, which the
+    /// issue walk's record refuses.
+    #[test]
+    fn a_keys_only_page_reads_jiras_null_fields() {
+        let page: KeysPage = serde_json::from_str(
+            r#"{"expand":"names,schema","startAt":0,"maxResults":100,"total":1,
+                "issues":[{"expand":"operations","id":"10307","self":"x","key":"PAY-231","fields":null}]}"#,
+        )
+        .expect("a keys-only page");
+        assert_eq!(page.total, 1);
+        assert_eq!(page.issues[0].key, "PAY-231");
     }
 
     #[tokio::test]

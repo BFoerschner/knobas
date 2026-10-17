@@ -200,6 +200,29 @@ async fn name_and_columns_follow_jira_and_the_readers_settings_stay() {
     assert_eq!(members(&pool, "jira:board-22").await, [("jira:PAY-2".to_owned(), 1), ("jira:PAY-1".to_owned(), 2)]);
 }
 
+/// ADR-0007's failure direction: a payload that carries none of the paths
+/// read is a board with no columns, no sprint and no tickets -- a miss, never
+/// a guess.
+#[tokio::test]
+async fn a_view_whose_payload_says_nothing_holds_nothing() {
+    let pool = pool("jira_views_miss").await;
+    let (src, _) = source(vec![(
+        "board-9".into(),
+        "Odd board".into(),
+        json!({ "columns": "three", "keys": { "PAY-1": 1 }, "sprint": "Sprint 1" }),
+        false,
+    )]);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    let row = sqlx::query("select ref_kind, columns, sprint from sync.jira_view where entity_id = 'jira:board-9'")
+        .fetch_one(&pool)
+        .await
+        .expect("the view is kept");
+    assert_eq!(row.get::<String, _>("ref_kind"), "board");
+    assert_eq!(row.get::<Value, _>("columns"), json!([]));
+    assert_eq!(row.get::<Option<Value>, _>("sprint"), None);
+    assert!(members(&pool, "jira:board-9").await.is_empty());
+}
+
 #[tokio::test]
 async fn a_board_deleted_in_jira_leaves_with_its_tickets_and_its_ticket_view() {
     let pool = pool("jira_views_gone").await;

@@ -4321,3 +4321,42 @@ Ruled by the implementer (PR for #1019).
 
 - **A port, not a reuse.** `TfImport.svelte` copies `ImportDialog`'s behaviour into `TfDialog` rather than mounting the rooms UI's dialog, because #881 removes that one. **Reversing:** delete `TfImport` and mount `ImportDialog`, until #881 lands.
 - **The toast after an import is new copy.** Prototype-6 shows only the menu item's toast, and the rooms UI shows nothing after an import. It reads "Imported <estate>: 1 asset created, 1 property kept as you edited it" and lists only the counts that are not zero ("nothing changed" when all are). **Reversing:** one function, `importedLine`.
+
+## #877 — Jira views tracer (2026-10-17)
+
+- **A Jira view crosses the SPI as an item of a second Jira entity kind, `jira_view`**, and the
+  engine projects the live ones into `sync.jira_view` / `sync.jira_view_member` after the sweep
+  (`knobas_sync::jira_views`), the way `samples` and `attach` work off the mirror. The other
+  road, a new `Source` method the app calls after a sync, changes the SPI every adapter
+  implements. **Reversing:** medium (the projection's input moves; the tables stay).
+- **The adapter remembers what it delivered in the cursor** (`views: [{k, h}]`, omitted when
+  empty, still `v: 4`): an unchanged view is not emitted, so an idle poll stays idle (battery
+  clause 2), and a vanished one is emitted as deleted, which is what removes a board deleted in
+  Jira at the next *incremental* sync. **Reversing:** low.
+- **Boards come from `projects` only.** A source scoped by `jql_filter` alone names no project
+  and brings no boards; *Every board I can see* and the setting are #878's. **Reversing:** low.
+- **A 404 on the board listing is "no Jira Software", no views and no failure; a 403/404 on one
+  board leaves it out; anything else fails the run**, as the issue walk does, since a partial
+  answer would read as boards deleted. `knobas-mockd` answers `/rest/agile/` 404 without a
+  violation (deviation 17), being a Jira without Jira Software. **Reversing:** low.
+- **The display settings use the existing `save_ticket_view`**, which keeps a Jira view's name,
+  group, query, columns and `jira_ref` whatever the draft says; `delete_ticket_view` refuses a
+  Jira view. No new command: the spec's "one `update_view` could cover both kinds" is this.
+  **Reversing:** low.
+- **The board read is `mini_board` with an optional `jira_view`**, answering the view's own
+  columns by name (so the frontend draws them without regrouping) in Jira's order. A ticket
+  Jira returned that knobas does not mirror is not drawn; it stays in the member table for
+  #879's warn line. **Reversing:** low.
+- **A ticket view row's id for a Jira view is its entity id as a slug** (`jira-board-21`); a
+  view somebody made under that id first is left alone and the Jira view does not show.
+  **Reversing:** low.
+- **On a Jira view the list layout sorts by its headers like any view** (newest first unless set);
+  Jira's order is the board's. **Reversing:** low (an unsorted default for Jira views).
+- **Left to the blocked tickets, not drawn here:** the source line, sprint, *Open in Jira* and
+  the unsynced warning (#879), quick filters (#879; the endpoint is not read), favourite filters
+  and *Boards and filters* (#878), *Make an editable copy* (#880), *new* and *Hide from the
+  list*. *Save as a view* is not offered on a Jira view until #880 makes it the copy.
+  **Reversing:** n/a.
+- **The seed's Kanban board limit is set through `/rest/greenhopper/1.0/rapidviewconfig/columns`**
+  (the board settings page's own call); the Agile REST has no write for it. The seed reads the
+  result back through the Agile REST and fails if it is not there. **Reversing:** low.

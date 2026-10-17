@@ -160,9 +160,16 @@ impl JiraHttp {
     ) -> Result<T, SourceError> {
         let request = self.client.request(Method::GET, path).query(query);
         let response = self.client.send(request).await?;
-        response.json::<T>().await.map_err(|error| {
+        let body = response.text().await.map_err(|error| {
+            SourceError::protocol(format!("{path}: the answer's body broke off: {error}"))
+        })?;
+        // The body's start rides in the message: "did not answer with the
+        // shape" says nothing a person can act on without it (#877).
+        serde_json::from_str::<T>(&body).map_err(|error| {
+            let start: String = body.chars().take(300).collect();
             SourceError::protocol(format!(
-                "{path} did not answer with the shape the Jira REST v2 contract documents: {error}"
+                "{path} did not answer with the shape the Jira REST v2 contract documents: \
+                 {error}; it began {start:?}"
             ))
         })
     }
