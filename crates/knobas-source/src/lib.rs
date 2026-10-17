@@ -2016,9 +2016,10 @@ mod tests {
         assert_eq!(back.status(), Some(504));
         assert_eq!(back.to_string(), "unconfirmed: gateway timeout");
 
-        let older: SourceError =
-            serde_json::from_value(serde_json::json!({ "Unconfirmed": { "message": "timed out" } }))
-                .unwrap();
+        let older: SourceError = serde_json::from_value(
+            serde_json::json!({ "Unconfirmed": { "message": "timed out" } }),
+        )
+        .unwrap();
         assert!(
             matches!(&older, SourceError::Unconfirmed { status: None, message } if message == "timed out"),
             "{older:?}"

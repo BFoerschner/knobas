@@ -476,7 +476,13 @@ async fn a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer() {
         .await
         .expect_err("504");
     assert!(
-        matches!(error, SourceError::Unconfirmed { status: Some(504), .. }),
+        matches!(
+            error,
+            SourceError::Unconfirmed {
+                status: Some(504),
+                ..
+            }
+        ),
         "{error:?}"
     );
     assert_eq!(server.hits(), 1);
