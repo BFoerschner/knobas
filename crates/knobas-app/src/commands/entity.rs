@@ -3324,13 +3324,26 @@ pub async fn unlink<R: tauri::Runtime>(
 /// id, or if the source does not offer that op; `not_found` if the target
 /// names a source that is not configured;
 /// [`IpcErrorCode::NotReady`](crate::IpcErrorCode::NotReady) before bring-up.
+///
+/// **`link_to`** (#984, a ticket's entity id) asks for a link from what a
+/// `CreateBranch` or `CreatePullRequest` makes to that ticket, drawn once the
+/// write has been sent and the source re-read
+/// (`sources::write_queue::submit_linked_in_background`); `invalid` for any
+/// other op, `not_found` for a ticket the mirror does not hold. Absent, the
+/// command is what it was.
 #[tauri::command]
 pub async fn submit_write<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,
     payload: serde_json::Value,
+    link_to: Option<String>,
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::write_queue::submit_in_background(&state, payload).await
+    match link_to {
+        None => crate::sources::write_queue::submit_in_background(&state, payload).await,
+        Some(ticket) => {
+            crate::sources::write_queue::submit_linked_in_background(&state, payload, ticket).await
+        }
+    }
 }
 
 /// The statuses this ticket's workflow offers from where it stands **right

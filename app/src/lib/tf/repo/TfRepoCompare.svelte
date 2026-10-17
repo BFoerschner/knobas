@@ -6,8 +6,11 @@
     changes the address, so the page reads the other branch); *Title*
     prefilled `<key>: <summary>` and *Description* with the ticket's
     description ending `Closes <key>.` where the branch name holds a key the
-    mirror has (`proposal` in `repo.ts`). *Create pull request* queues
-    `CreatePullRequest` in the repository and lands on its pull requests.
+    mirror has (`proposal` in `repo.ts`), and then *Link the PR to <key> in
+    knobas* (#984), ticked: `submit_write` links the pull request to that
+    ticket once it has gone and a sync has brought it in. *Create pull
+    request* queues `CreatePullRequest` in the repository and lands on its
+    pull requests.
   - **A pull request already open** from the branch is the source's overview's
     row: the page says so and offers *Open PR #N* instead.
   - **What it changes**: the branch's own view, its deferred *Diff* (Gitea's
@@ -63,6 +66,9 @@
   let base = $state("");
   let title = $state("");
   let body = $state("");
+  /** The ticket the branch's key names, and that key: what *Link the PR to <key>* links to (#984). */
+  let ticket = $state<{ key: string; id: string } | null>(null);
+  let link = $state(true);
   let busy = $state(false);
 
   // The branch's view and its diff, read for each branch the address names.
@@ -96,14 +102,17 @@
     let live = true;
     base = untrack(() => into);
     ({ title, body } = proposal(name, null));
+    ticket = null;
+    link = true;
     const key = keyIn(name);
     if (key === null) return;
     void (async () => {
       try {
-        const ticket = await resolveTicket(key, await ports.listSources(), ports.getEntity);
-        if (!live || ticket === null) return;
-        const from: ProposedFrom = { key, summary: ticket.row.title, description: ticket.body_text ?? "" };
+        const found = await resolveTicket(key, await ports.listSources(), ports.getEntity);
+        if (!live || found === null) return;
+        const from: ProposedFrom = { key, summary: found.row.title, description: found.body_text ?? "" };
         ({ title, body } = proposal(name, from));
+        ticket = { key, id: found.row.entity_id };
       } catch {
         // No ticket to propose from: the branch's own name stands.
       }
@@ -125,7 +134,8 @@
     busy = true;
     const words = title.trim();
     try {
-      await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } });
+      const linkTo = ticket !== null && link ? ticket.id : undefined;
+      await ports.submitWrite({ CreatePullRequest: { entity: repoId, title: words, body, head, base } }, linkTo);
       toastQueued(`open PR ${words}`);
       location.hash = repoHash(repoId, "prs");
     } catch (cause) {
@@ -162,6 +172,9 @@
         <input id="tf-cmp-title" type="text" autocomplete="off" bind:value={title} />
         <label for="tf-cmp-body" class="tf-ctop">Description</label>
         <textarea id="tf-cmp-body" rows="5" bind:value={body}></textarea>
+        {#if ticket !== null}
+          <span></span><label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link the PR to {ticket.key} in knobas</label>
+        {/if}
         <span></span><span class="tf-dim tf-small">Reviewers are asked on Gitea after it opens.</span>
       </div>
       <div class="tf-cgo">

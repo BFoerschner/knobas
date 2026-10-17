@@ -85,17 +85,7 @@ impl Steps for Queue<'_> {
     }
 
     async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError> {
-        // Narrowed to the repository by an id prefix before the kind filter:
-        // `sync.item` has no index on either and the prefix is the selective
-        // half.
-        found(
-            &self.state.pool,
-            BRANCH_BY_NAME,
-            &like_prefix(repo),
-            KIND_BRANCH,
-            name,
-        )
-        .await
+        branch_named(&self.state.pool, repo, name).await
     }
 
     async fn pull_request(
@@ -179,6 +169,24 @@ impl Steps for OwnedQueue {
 const BRANCH_BY_NAME: &str = "select entity_id from sync.live_item
       where entity_id like $1 and kind = $2 and title = $3
       order by entity_id limit 1";
+
+/// The mirrored branch of `repo` named `name`, or `None`: the look-up behind
+/// [`Queue::branch`], and behind a new branch's link once it has arrived
+/// (#984, `sources::write_queue::link_on_arrival`).
+///
+/// # Errors
+///
+/// [`Internal`](crate::IpcErrorCode::Internal) if the read fails.
+pub async fn branch_named(
+    pool: &PgPool,
+    repo: &EntityRef,
+    name: &str,
+) -> Result<Option<String>, IpcError> {
+    // Narrowed to the repository by an id prefix before the kind filter:
+    // `sync.item` has no index on either and the prefix is the selective
+    // half.
+    found(pool, BRANCH_BY_NAME, &like_prefix(repo), KIND_BRANCH, name).await
+}
 
 /// Every pull request of a repository opened from head branch `$3`, each with
 /// what its own record says about whether it is still open.
