@@ -4578,3 +4578,29 @@ Merge-manager review (Spec axis):
   the source, live or not (the lock cannot reach through `sync.live_item`'s outer join); a purge
   during the run skips those rows and the scheduler's re-purge takes them when the run settles,
   as for every row a run holds. **Reversing:** low.
+## #1085 — Launcher rows, notification clicks and Open in knobas produce ticket-first addresses (2026-10-17)
+
+Implementer:
+
+- **A note opens Settings › Notes and capture (`#/settings/notes`).** Notes have no view while
+  they hide (D10); that section is the one place they are drawn (count, last note, export). The
+  capture window's *Open in knobas* and a launcher hit on a note both go there. **Reversing:**
+  low (one line in `tf/address.ts`).
+- **One rule, `tf/address.ts`' `entityAddress`, is `itemHash` plus `note` and `route`.** Its
+  addresses encode `:` as `%3A`, as `itemHash` always has; the shell decodes either spelling.
+  **Reversing:** low.
+- **A notification opens what the ticket-first inbox row opens (`opener`), except an alert**,
+  which keeps opening the asset tree at the affected asset (`#/asset/<id>`, spec #427 story 61)
+  rather than the row's `#/monitors`: both are ticket-first pages and the asset is the more
+  precise one. A credential expiry now opens its source's page instead of the inbox.
+  **Reversing:** low.
+- **Old addresses are mapped on arrival, in place (`history.replaceState`).** `#/ctx/*` →
+  Tickets, `#/sources` and `#/first-run` → Settings › Sources, `#/standup` → `#/time/standup`,
+  `#/start-work/<key>` → the job, `#/<kind>/<id>` → `entityAddress`; `#/entity/<id>` is read
+  with `get_entity` once the database answers, and an id the mirror does not know stays *Nothing
+  lives at …*. Notifications delivered before this change still land. **Reversing:** low.
+- **The launcher's `>` palette: *All work* became *Tickets* (`#/tickets`), *Sources* goes to
+  `#/settings/sources`, *First-run setup* is dropped** (the wizard has no address in the new
+  shell; adding a source is Settings › Sources). **Reversing:** low.
+- **No Rust change.** The backend passes the address through (`notify`, `capture:open-note`
+  carries the note id); no IPC answer changed, so no §10.8 entry. **Reversing:** n/a.

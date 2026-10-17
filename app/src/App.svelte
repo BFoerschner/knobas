@@ -22,6 +22,7 @@
   import { EVENTS, ipcErrorMessage } from "./lib/ipc";
   import { adHocBlock, worklogDraft, type AdHocBlock, type Block, type Worklog } from "./lib/ipc/time";
   import { recordCaptureContext } from "./lib/ipc/entity";
+  import { entityAddress } from "./lib/tf/address";
   import { HOME, homeIfBlank } from "./lib/tf/home";
   import { currentJob } from "./lib/tf/job/current.svelte";
   import TfShell from "./lib/tf/TfShell.svelte";
@@ -186,9 +187,11 @@
       stops.push(notifications.start());
       // The capture window's *Open in knobas* (#503). Not awaited: an awaited
       // listen here would push the lifecycle's own subscription past a
-      // teardown (measured 2026-09-08, `residue`).
+      // teardown (measured 2026-09-08, `residue`). A note has no view of its
+      // own while notes hide (D10), so it opens Settings › Notes and capture
+      // (#1085); the payload is the note's id.
       void listen<string>(EVENTS.captureOpenNote, (event) => {
-        navigate(`#/entity/${event.payload}`);
+        navigate(entityAddress("note", event.payload));
       }).then((off) => {
         if (disposed) off();
         else stops.push(off);

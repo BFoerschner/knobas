@@ -255,8 +255,24 @@ test("an address the new shell has no place for names itself", async () => {
   await at("#/sets");
   expect(target.querySelector(".tf-fhead h1")?.textContent).toBe("Link sets");
   expect(target.textContent).not.toContain("is not built in the new shell yet");
+  await at("#/nowhere");
+  expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/nowhere in the new shell.");
+});
+
+// #1085: a rooms-UI address lands where the new shell keeps that thing, in
+// place, so Back does not return to the dead address.
+test("a rooms-UI address is replaced by the ticket-first one", async () => {
+  start();
+  await at("#/tickets");
+  const depth = history.length;
   await at("#/ctx/all");
-  expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/ctx/all in the new shell.");
+  expect(location.hash).toBe("#/tickets");
+  await at("#/ticket/jira:PAY-231");
+  expect(location.hash).toBe("#/job/PAY-231");
+  await at("#/sources");
+  expect(location.hash).toBe("#/settings/sources");
+  expect(target.textContent).not.toContain("Nothing lives at");
+  expect(history.length - depth, "each old address was a step, its replacement was not").toBe(3);
 });
 
 // The theme is on `<html>`, where the tokens are since #881, so a dialog

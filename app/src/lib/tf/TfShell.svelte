@@ -57,6 +57,7 @@
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
+  import { entityAddress, legacyAddress } from "./address";
   import { isEntityId, keyOf, resolveTicket } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
   import TfPage from "./TfPage.svelte";
@@ -122,6 +123,37 @@
 
   let hash = $state(location.hash);
   const route = $derived(parseTfHash(hash));
+
+  /** Put `next` in place of the address the reader is on, without a step back to it. */
+  function replaceHash(next: string) {
+    history.replaceState(history.state, "", next);
+    window.dispatchEvent(new HashChangeEvent("hashchange"));
+  }
+
+  /**
+   * An address the rooms UI handed out (#1085) — a notification delivered
+   * before it, a bookmark — lands where the new shell keeps that thing.
+   * `#/entity/<id>` names no kind, so the entity is read first, once the
+   * database answers; an id the mirror does not know stays *Nothing lives at …*.
+   */
+  $effect(() => {
+    if (route.view !== "unknown") return;
+    const legacy = legacyAddress(route.hash);
+    if (legacy === null) return;
+    if ("go" in legacy) {
+      replaceHash(legacy.go);
+      return;
+    }
+    if (!lifecycle.ready) return;
+    const from = route.hash;
+    void jobPorts
+      .getEntity(legacy.resolve)
+      .then((detail) => {
+        if (location.hash === from) replaceHash(entityAddress(detail.row.kind, detail.row.entity_id));
+      })
+      // Not found, or not readable: the address stays, and the page says so.
+      .catch(() => {});
+  });
 
   /**
    * The job the reader was last in: the breadcrumb's chip and where `Esc`

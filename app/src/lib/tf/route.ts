@@ -98,9 +98,10 @@ const SECTION_OF: Record<string, Section> = {
  *   either of which may be absent.
  * - `full` is every other section: a full view, its first segment kept as
  *   `head` and whatever follows it as `rest` for the ticket that builds it.
- * - `unknown` is an address this shell has no place for. A launcher row still
- *   produces rooms-UI addresses (`#/ticket/jira:PAY-231`), and saying so
- *   beats drawing Tickets under an address that names something else.
+ * - `unknown` is an address this shell has no place for. The shell first asks
+ *   `address.ts` whether it is a rooms-UI address (`#/ticket/jira:PAY-231`,
+ *   #1085) and replaces it; otherwise saying so beats drawing Tickets under
+ *   an address that names something else.
  */
 export type TfRoute =
   | { view: "tickets"; rest: string[] }

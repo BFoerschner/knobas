@@ -5,9 +5,8 @@
  * (start a timer, comment, change status) and, "with an empty query, the app's
  * navigation menu". The first needs write-back (M2) and the timer (M3) and is
  * out of M1 entirely — reserving rows for it would be dead chrome. The second
- * is a list of addresses, and M1 has three.
+ * is a list of addresses: two since #1085.
  */
-import { hashFor } from "../shell/router.svelte";
 
 /** One row of the `>` palette. */
 export interface LauncherAction {
@@ -21,10 +20,11 @@ export interface LauncherAction {
 }
 
 /**
- * The addresses M1 actually has (`shell/router.svelte.ts`).
+ * The addresses the ticket-first shell has for these (`tf/route.ts`).
  *
- * **Two of the plan's four are deliberately absent, and both for the same
- * reason — they are not addresses.**
+ * **Two of the plan's four were deliberately absent from the start, and both
+ * for the same reason — they are not addresses.** (A third, *First-run
+ * setup*, went with the rooms UI in #1085.)
  *
  * *Diagnostics* has no route: interfaces §2.3 puts the sync log inside the
  * sources view, so `#/diagnostics` parses as `unknown` and would render "this
@@ -37,24 +37,22 @@ export interface LauncherAction {
  * exists so the shell can append what only the shell knows.
  */
 export function navigationActions(): LauncherAction[] {
+  // Ticket-first addresses since #1085. *All work* was the room over every
+  // source and is Tickets now; *First-run setup* went with the rooms UI (the
+  // wizard has no address in the new shell, and adding a source is Settings ›
+  // Sources, the row above it).
   return [
     {
-      id: "room-all",
-      label: "All work",
-      detail: "The room over every configured source",
-      hash: hashFor({ view: "room", ctx: "all", detail: null }),
+      id: "tickets",
+      label: "Tickets",
+      detail: "Every ticket from every configured source",
+      hash: "#/tickets",
     },
     {
       id: "sources",
       label: "Sources",
       detail: "Add, edit and sync the systems knobas reads",
-      hash: hashFor({ view: "sources" }),
-    },
-    {
-      id: "first-run",
-      label: "First-run setup",
-      detail: "The guided walk through connecting a source",
-      hash: hashFor({ view: "first-run" }),
+      hash: "#/settings/sources",
     },
   ];
 }
