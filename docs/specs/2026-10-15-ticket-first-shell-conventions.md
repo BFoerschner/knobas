@@ -21,7 +21,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 
 ## Routes and addresses
 
-- A route not built yet draws an empty page that says so (the Job page before #816; the Map and Conversation tabs "not built yet"). (#810, PR #895; #816, PR #898)
+- A route not built yet draws an empty page that says so (the Job page before #816; the Map and Conversation tabs "not built yet", until #874 and #819). (#810, PR #895; #816, PR #898)
 - The job's address is `#/job/<key>`; an ad-hoc context is `#/job/<ctx id>`. An address holding an entity id (`#/job/jira:PAY-231`) is read as one. (#810, PR #895; #816, PR #898)
 - A ticket view's address is `#/tickets/<id>`, the id a slug of its name made when it is first saved and kept through a rename; `#/tickets` is *All tickets*. (#812)
 - The Time view's addresses are `#/time` and `#/time/<date>` for the Day, and `#/time/week` and `#/time/week/<date>` for the Week containing that date. (#827; #828)
@@ -32,6 +32,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - The pull request page is `#/pr/<entity id>` (Overview) and `#/pr/<entity id>/<tab>` (`conversation`, `diff`, `commits`); the tab row is `PR_TABS` in `tf/pr/pr.ts`, and every tab draws from the pull request's one whole `entity_view`. (#841)
 - A Builds row opens `#/build/<entity id>`, a Pages row `#/page/<entity id>`, an Assets row `#/asset/<asset id>`, a Monitors row `#/monitors`. (#817)
 - Under Dependencies, `#/deps` (and the retired `#/map`) draws Dependencies, and `#/assets`, `#/asset/<id>` and `#/route/<id>` draw the Asset tree, each matching on `head`. (#871)
+- `#/deps/job/<key>` and the job's Map tab (`#/job/<key>/map`) draw Dependencies from that ticket: the `dependencies` read kept to what `job_reach` and `job_pipelines` answer (`deps/reach.ts`), in the view that opens from a ticket. While a job is open, *This job <key>* / *Everything* switches openings; on the Map tab *This job* stays on the tab. (#874)
 - Dependencies opens in a saved view (`dep_views`): the top bar's default, its draft held for the session in `tf/deps/views.svelte.ts`; the reader's gestures (Find, the trace, folds opened by hand) hold for the page. (#873)
 - Link sets' addresses are `#/sets` (the list) and `#/sets/<set id>` (its editor), the id a slug of the name the set was first saved under, kept through a rename, as a ticket view's. (#866)
 - Every job section is `tf/job/TfSection.svelte` reading `list_entities` with `reach: <ticket id>`; a row from the parent (or, from TF5, a link set) carries a `.tf-via` label naming it ("Parent PAY-231"). (#817) A row from a link set is labelled with the set's name, through `originLabel` (`tf/job/job.ts`). (#866)
