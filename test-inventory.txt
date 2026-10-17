@@ -2100,6 +2100,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_refusal_that_does_not
 knobas-source	lib/knobas_source	contract::tests::rejects_a_reviewer_entry_key_the_elements_do_not_carry
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_id_knobas_keeps_for_itself
 knobas-source	lib/knobas_source	contract::tests::rejects_a_source_with_no_workflow_that_answers_the_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_absent_from_runs_a_person_started
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_by_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_started_time_that_is_no_instant
 knobas-source	lib/knobas_source	contract::tests::rejects_a_state_at_that_leads_to_an_object
