@@ -85,6 +85,27 @@ macro_rules! project_key_read {
     };
 }
 
+/// SQL for "some project of the stored chain `$path` (`sync.item_project.path`,
+/// #1019) is one of `$values`, by key or name", ignoring case: `$values` is a
+/// lowercased `text[]`. A parent project takes in its subprojects this way,
+/// and both `project:` readers, a link-set pattern's and the launcher's, expand
+/// it, so they cannot disagree.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! project_chain_has {
+    ($path:literal, $values:literal) => {
+        concat!(
+            "exists (select 1 from jsonb_array_elements(",
+            $path,
+            ") up(pr) where lower(up.pr->>'key') = any(",
+            $values,
+            ") or lower(up.pr->>'name') = any(",
+            $values,
+            "))"
+        )
+    };
+}
+
 /// One project the live corpus shows.
 ///
 /// Flat, and carrying its source rather than being grouped under it: the

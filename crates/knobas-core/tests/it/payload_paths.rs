@@ -19,9 +19,9 @@
 //! nothing, a kind that declares nothing, a field that declares nothing.
 
 use knobas_core::payload::{
-    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, StateChip, StatePath, StateValue,
-    parent_path, resolve_flag, resolve_list, resolve_names_as_parent, resolve_parents,
-    resolve_state, resolve_string,
+    Declarations, KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
+    StateValue, parent_path, resolve_flag, resolve_list, resolve_names_as_parent, resolve_parents,
+    resolve_project_path, resolve_state, resolve_string,
 };
 use knobas_core::tone::Tone;
 use sqlx::{PgPool, Row};
@@ -1072,4 +1072,123 @@ async fn a_state_chip_misses_in_both_and_never_guesses() {
     )
     .await;
     assert_eq!((sql, rust), (None, None), "no declarations, no chip");
+}
+
+// -- the chain of projects (#1019) -------------------------------------------
+
+/// A project chain as both sides are compared: `(key, name)`, outermost first.
+type ProjectChain = Vec<(String, Option<String>)>;
+
+/// One item's chain through `declared_project_path!` and through
+/// `resolve_project_path`, under `declarations` for source `pc`, kind `cfg`.
+async fn project_chains(
+    pool: &PgPool,
+    declarations: &Declarations,
+    key: &str,
+    payload: serde_json::Value,
+) -> (ProjectChain, ProjectChain) {
+    const CHAIN: &str = concat!(
+        "select ",
+        knobas_core::declared_project_path!("$1"),
+        " from sync.live_item i where i.entity_id = $2"
+    );
+    item(pool, "pc", "cfg", key, &payload).await;
+    let sql: serde_json::Value = sqlx::query_scalar(CHAIN)
+        .bind(declarations.as_param())
+        .bind(format!("pc:{key}"))
+        .fetch_one(pool)
+        .await
+        .unwrap_or_else(|e| panic!("{key}'s project chain must resolve: {e}"));
+    let sql = sql
+        .as_array()
+        .expect("the chain is a jsonb array")
+        .iter()
+        .map(|p| {
+            (
+                p["key"].as_str().unwrap().to_owned(),
+                p["name"].as_str().map(str::to_owned),
+            )
+        })
+        .collect();
+    let rust = declarations
+        .get("pc", "cfg")
+        .map(|d| resolve_project_path(&payload, &d.project_path))
+        .unwrap_or_default()
+        .into_iter()
+        .map(|p| (p.key, p.name))
+        .collect();
+    (sql, rust)
+}
+
+/// Two candidates: the first leads to a string on these records, so the
+/// second wins; each project's key is `id`, else `key`.
+fn project_declarations() -> Declarations {
+    Declarations::empty().with(
+        "pc",
+        vec![KindPaths {
+            kind: "cfg".to_owned(),
+            project_path: vec![
+                ProjectPath {
+                    at: PayloadPath::of(["chain"]),
+                    key: vec![PayloadPath::of(["id"])],
+                    name: vec![],
+                },
+                ProjectPath {
+                    at: PayloadPath::of(["projectPath"]),
+                    key: vec![PayloadPath::of(["id"]), PayloadPath::of(["key"])],
+                    name: vec![PayloadPath::of(["name"])],
+                },
+            ],
+            ..KindPaths::default()
+        }],
+    )
+}
+
+#[tokio::test]
+async fn a_project_chain_resolves_the_same_in_sql_and_in_rust() {
+    let pool = scratch().await;
+    let (sql, rust) = project_chains(
+        &pool,
+        &project_declarations(),
+        "C1",
+        serde_json::json!({
+            "chain": "not an array",
+            "projectPath": [
+                { "id": "Pay", "name": "Payments" },
+                "not an object",
+                { "id": "  ", "name": "blank key is left out" },
+                { "key": "Pay_Out", "name": "  " },
+                { "id": "Pay_Out_Deploy", "name": " Deploy " }
+            ]
+        }),
+    )
+    .await;
+    let expected: ProjectChain = vec![
+        ("Pay".to_owned(), Some("Payments".to_owned())),
+        ("Pay_Out".to_owned(), None),
+        ("Pay_Out_Deploy".to_owned(), Some("Deploy".to_owned())),
+    ];
+    assert_eq!(sql, expected);
+    assert_eq!(rust, expected);
+}
+
+#[tokio::test]
+async fn a_project_chain_misses_in_both() {
+    let pool = scratch().await;
+    for (key, payload) in [
+        ("M1", serde_json::json!({ "projectPath": { "id": "Pay" } })),
+        ("M2", serde_json::json!({ "projectPath": "Pay" })),
+        ("M3", serde_json::json!({ "other": [] })),
+    ] {
+        let (sql, rust) = project_chains(&pool, &project_declarations(), key, payload).await;
+        assert_eq!((sql, rust), (vec![], vec![]), "{key}");
+    }
+    let (sql, rust) = project_chains(
+        &pool,
+        &Declarations::empty(),
+        "M4",
+        serde_json::json!({ "projectPath": [{ "id": "Pay" }] }),
+    )
+    .await;
+    assert_eq!((sql, rust), (vec![], vec![]), "no declarations, no chain");
 }

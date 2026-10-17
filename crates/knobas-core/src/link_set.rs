@@ -212,9 +212,12 @@ macro_rules! link_set_pattern_hits {
                             where ip.entity_id = i.entity_id
                               and (lower(ip.key) in (select jsonb_array_elements_text(p.pattern->'projects'))
                                    or lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'projects'))
-                                   or exists (select 1 from jsonb_array_elements(ip.path) up(pr)
-                                               where lower(up.pr->>'key') in (select jsonb_array_elements_text(p.pattern->'projects'))
-                                                  or lower(up.pr->>'name') in (select jsonb_array_elements_text(p.pattern->'projects'))))))
+                                   or ",
+            $crate::project_chain_has!(
+                "ip.path",
+                "array(select jsonb_array_elements_text(p.pattern->'projects'))"
+            ),
+            ")))
            and (jsonb_array_length(coalesce(p.pattern->'under', '[]')) = 0
                 or exists (select 1 from sync.item_parent ip
                              join knobas.source_config sc

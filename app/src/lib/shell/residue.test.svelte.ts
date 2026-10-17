@@ -1622,7 +1622,7 @@ const CASES: Case[] = [
         props: {
           kind: "page",
           setName: "Payout stack",
-          preview: () => deferred({ count: 0, matches: [], projects: [{ source_id: "wiki", key: "OPS", name: "OPS" }], refusal: null }),
+          preview: () => deferred({ count: 0, matches: [], projects: [{ source_id: "wiki", key: "OPS", name: "OPS", path: [] }], refusal: null }),
           onadd: () => {},
           onclose: () => {},
         },

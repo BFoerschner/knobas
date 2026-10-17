@@ -331,9 +331,9 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 field_of!("project_name"),
                 ") = any(fd.v) or exists (select 1 from sync.item_project ip \
                    join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind \
-                   cross join lateral jsonb_array_elements(ip.path) up(pr) \
-                   where ip.entity_id = i.entity_id \
-                     and (lower(up.pr->>'key') = any(fd.v) or lower(up.pr->>'name') = any(fd.v))))"
+                   where ip.entity_id = i.entity_id and ",
+                knobas_core::project_chain_has!("ip.path", "fd.v"),
+                "))"
             ),
         ),
         (

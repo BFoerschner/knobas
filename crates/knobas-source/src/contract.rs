@@ -965,7 +965,9 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // to nothing, and each key and name inside an element is a text path,
         // weighed in slots of their own so a resolving `at` excuses neither.
         for candidate in &paths.project_path {
-            let seen = evidence.entry((&item.kind, field::PROJECT_PATH)).or_default();
+            let seen = evidence
+                .entry((&item.kind, field::PROJECT_PATH))
+                .or_default();
             let found = at(&item.payload, &candidate.at);
             if let Some(value) = found {
                 assert!(

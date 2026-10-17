@@ -805,20 +805,19 @@ pub async fn preview_pattern(
     } else {
         ""
     };
-    let projects = sqlx::query_as::<_, (String, String, Option<String>, Vec<String>)>(
-        PATTERN_PROJECTS,
-    )
-    .bind(kind)
-    .fetch_all(pool)
-    .await?
-    .into_iter()
-    .map(|(source_id, key, name, path)| PatternProject {
-        source_id,
-        key,
-        name,
-        path,
-    })
-        .collect();
+    let projects =
+        sqlx::query_as::<_, (String, String, Option<String>, Vec<String>)>(PATTERN_PROJECTS)
+            .bind(kind)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .map(|(source_id, key, name, path)| PatternProject {
+                source_id,
+                key,
+                name,
+                path,
+            })
+            .collect();
     let read = match read {
         Ok(read) => read,
         Err(why) => {

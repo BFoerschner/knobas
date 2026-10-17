@@ -456,7 +456,10 @@ async fn a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects() {
         draft(
             "Payouts",
             vec![],
-            vec![pattern("pipeline", &format!("project:{} name:*_payout_*", payouts.0))],
+            vec![pattern(
+                "pipeline",
+                &format!("project:{} name:*_payout_*", payouts.0),
+            )],
             &job,
         ),
     )

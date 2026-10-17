@@ -38,7 +38,7 @@ The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
 **Project**:
-A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Scoping to one repo is what its [parent](#parent) relation is for. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
+A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Scoping to one repo is what its [parent](#parent) relation is for. Where a source's projects nest (TeamCity's `Payments › Payouts`), a project takes in its subprojects: `project:Payments` and a link-set pattern naming it match what sits anywhere beneath it (#1019). The chain stays projects, never parents. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
 _Avoid_: container, space (as a synonym for project; it stays as Confluence's own word, ADR-0010), workspace, board (ADR-0009)
 
 **Census**:

@@ -26,9 +26,10 @@
 //! corpus and the mini board narrows inside its statement -- so a declaration
 //! is bound as **one jsonb parameter** and resolved by
 //! [`declared_string!`](crate::declared_string), [`declared_flag!`],
-//! [`declared_list!`] and [`declared_state!`] rather than by pulling every
-//! payload into Rust. The Rust resolvers below ([`resolve_string`],
-//! [`resolve_flag`], [`resolve_list`], [`resolve_state`]) are
+//! [`declared_list!`], [`declared_state!`] and [`declared_project_path!`]
+//! rather than by pulling every payload into Rust. The Rust resolvers below
+//! ([`resolve_string`], [`resolve_flag`], [`resolve_list`], [`resolve_state`],
+//! [`resolve_project_path`]) are
 //! the same rule for callers that already hold the payload -- the contract
 //! battery is the one that matters, since it checks an adapter's declarations
 //! against its own corpus with no database in sight.

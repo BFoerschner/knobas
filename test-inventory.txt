@@ -1459,6 +1459,8 @@ knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_is_each_parents_first_name_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_reads_nothing_undeclared
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
+knobas-core	test/it	payload_paths::a_project_chain_misses_in_both
+knobas-core	test/it	payload_paths::a_project_chain_resolves_the_same_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_state_chip_misses_in_both_and_never_guesses
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both
