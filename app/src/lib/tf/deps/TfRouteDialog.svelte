@@ -119,7 +119,7 @@
   {#snippet body()}
     <div class="tf-formgrid">
       <label for="{uid}-url">Address</label>
-      <input id="{uid}-url" type="url" class="tf-mono" placeholder="https://payouts.tidewater.internal" autocomplete="off" bind:value={form.url} />
+      <input id="{uid}-url" type="url" class="tf-mono" placeholder="https://payouts.example" autocomplete="off" bind:value={form.url} />
       <label for="{uid}-name">Name</label>
       <input id="{uid}-name" type="text" placeholder="From the address, if left empty" autocomplete="off" bind:value={form.name} />
       {#if routeId !== null}

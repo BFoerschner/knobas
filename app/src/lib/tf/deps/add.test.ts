@@ -60,14 +60,14 @@ describe("usualLine", () => {
 
 describe("the address", () => {
   test("must carry a scheme", () => {
-    expect(hasScheme("https://payouts.tidewater.internal")).toBe(true);
+    expect(hasScheme("https://payouts.tidewater.test")).toBe(true);
     expect(hasScheme("tcp://db:5432")).toBe(true);
-    expect(hasScheme("payouts.tidewater.internal")).toBe(false);
+    expect(hasScheme("payouts.tidewater.test")).toBe(false);
     expect(hasScheme("https://")).toBe(false);
   });
 
   test("names the route when the name is left empty", () => {
-    expect(routeNameOf("https://payouts.tidewater.internal/health")).toBe("payouts.tidewater.internal");
+    expect(routeNameOf("https://payouts.tidewater.test/health")).toBe("payouts.tidewater.test");
     expect(routeNameOf("tcp://db:5432")).toBe("db:5432");
   });
 });

@@ -4245,3 +4245,7 @@ Ruled by the implementer (PR for #876).
 - **A fold by hand lets go of `Gestures.reveal`** (#1067 merge review): the reveal held the new
   item's layer and group open for the rest of the page, so folding them did nothing. Folding the
   layer or shutting the group now clears it. **Reversing:** low.
+- **The route address placeholder is `https://payouts.example`, not prototype-6's
+  `https://payouts.tidewater.internal`** (#1067 merge review): the house rule against runtime
+  network references (`house-rules.test.ts`) allows only reserved names, and `.internal` is not
+  one. **Reversing:** low, but it needs the house rule to allow `.internal` first.
