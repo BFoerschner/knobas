@@ -5,7 +5,8 @@
 use knobas_app::capture::SHOWN_KEY;
 use knobas_app::commands::entity::create_note_inner;
 use knobas_app::commands::search::{
-    create_smart_list_inner, filter_suggestions_inner, search_inner, smart_lists_inner,
+    create_smart_list_inner, filter_suggestions_inner, launcher_home_inner, search_inner,
+    smart_lists_inner,
 };
 use knobas_search::{SearchFilters, SearchQuery};
 
@@ -61,6 +62,10 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
         ids(&pool, "note:zephyrine").await.is_empty(),
         "a hidden note is behind the note: prefix"
     );
+    assert!(
+        !launcher_home_inner(&pool).await.expect("home").notes_shown,
+        "launcher_home says notes are shown while they are hidden (#1036)"
+    );
     let kinds = filter_suggestions_inner(&pool, "", false)
         .await
         .expect("suggestions")
@@ -80,6 +85,10 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
     assert!(
         ids(&pool, "note:zephyrine").await.contains(&id),
         "a shown note is behind the note: prefix"
+    );
+    assert!(
+        launcher_home_inner(&pool).await.expect("home").notes_shown,
+        "launcher_home says notes are hidden while they are shown (#1036)"
     );
     let kinds = filter_suggestions_inner(&pool, "", false)
         .await

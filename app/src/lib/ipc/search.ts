@@ -239,6 +239,11 @@ export interface LauncherHome {
    * other direction.
    */
   pending_writes: number;
+  /**
+   * *Show notes and quick capture* (#1036, R-13a.6). While `false` the
+   * launcher offers no `note:` syntax row and no Help entry for it.
+   */
+  notes_shown: boolean;
 }
 
 /** The launcher board: the lists, the newest items, and source health. */

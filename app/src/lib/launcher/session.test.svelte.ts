@@ -57,6 +57,7 @@ const EMPTY_HOME: LauncherHome = {
   recent: [],
   sources: [],
   pending_writes: 0,
+  notes_shown: true,
 };
 
 function ports(search: (q: SearchQuery) => Promise<SearchResponse>) {
@@ -226,6 +227,33 @@ test("the panel follows the backend's prefix, not the typed characters", async (
   flushSync();
   expect(session.mode).toBe("help");
   expect(session.rows.length).toBeGreaterThan(8);
+});
+
+/**
+ * #1036, R-13a.6: while *Show notes and quick capture* is off, `note:` finds
+ * nothing, so the `?` card must not offer it. Both directions: on keeps it.
+ */
+test("the ? card drops the note: row exactly while notes are hidden", async () => {
+  const help = async (notes_shown: boolean) => {
+    const session = new Session({
+      search: async (q) => {
+        const response = answer(q.raw, []);
+        response.interpreted.prefix = "help";
+        return response;
+      },
+      launcherHome: async () => ({ ...EMPTY_HOME, notes_shown }),
+    });
+    await session.loadHome();
+    session.set("?");
+    await vi.advanceTimersByTimeAsync(0);
+    flushSync();
+    return session.rows.flatMap((row) => (row.kind === "syntax" ? [row.entry.token] : []));
+  };
+
+  expect(await help(true)).toContain("note:");
+  const hidden = await help(false);
+  expect(hidden).not.toContain("note:");
+  expect(hidden).toContain("list:");
 });
 
 // -- a pasted link (#496) ----------------------------------------------------

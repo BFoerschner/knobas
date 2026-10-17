@@ -181,8 +181,17 @@ export class Session {
       response: this.response,
       home: this.home,
       actions: this.actions,
-      syntax: SYNTAX,
+      syntax: this.syntax,
     });
+  }
+
+  /**
+   * The `?` card's rows. `note:` is dropped while *Show notes and quick
+   * capture* is off (#1036, R-13a.6): the search finds no note then, so the
+   * card must not offer it. Until the board has answered the card is whole.
+   */
+  get syntax(): typeof SYNTAX {
+    return this.home?.notes_shown === false ? SYNTAX.filter((e) => e.prefix !== "note") : SYNTAX;
   }
 
   /** The row `Enter` opens, if there is one. */

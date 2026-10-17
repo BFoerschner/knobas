@@ -584,8 +584,10 @@ test("the fixture's launcher board draws the seven built-ins, with the estate's 
     recent: unknown[];
     sources: unknown[];
     pending_writes: number;
+    notes_shown: boolean;
   };
 
+  expect(board.notes_shown).toBe(false);
   expect(board.smart_lists.filter((list) => !list.saved).map((list) => list.id)).toEqual([
     "changed-today",
     "mine",

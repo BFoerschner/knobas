@@ -36,6 +36,11 @@ let fakeShortcutRefused = false;
 /** *Show notes and quick capture* (#832): off, unless `?fake-notes-shown`. */
 let fakeNotesShown = false;
 
+/** Whether the fake has *Show notes and quick capture* on; `launcher_home` answers it too (#1036). */
+export function fakeNotesAreShown(): boolean {
+  return fakeNotesShown;
+}
+
 function fakeShortcut() {
   return {
     accelerator: fakeShortcutStored,
