@@ -503,10 +503,14 @@ shell:
 # dead holder's lock is taken over, the wait ends in a refusal naming the
 # holder -- against a stub `docker` and a scratch lock path; and the Gitea
 # lock's (issue #724), the same mechanism, which Gitea sessions queue on.
+# And the `knobas-test-` guard (issue #803): the prefix the knobas-db test
+# reaper deletes may not name a temp dir in `scripts/` or `testenv/`.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
     scripts/append-only-merge-test.sh
+    scripts/test-prefix-guard-test.sh
+    scripts/test-prefix-guard.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh
