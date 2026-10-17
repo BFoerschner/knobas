@@ -322,8 +322,14 @@ function treeSection(files: Record<string, string>, id: string, ref: string) {
   const path = id.slice("file:".length);
   const text = files[path];
   if (text === undefined) throw { code: "not_found", message: `gitea: no file ${path} at ${ref}`, source_id: null };
+  // The file's own *Commit change…* (#985): `main` is protected, as prototype-6 has it.
+  const refusal =
+    ref === "main"
+      ? "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead"
+      : null;
   return section(id, "Files", [
     { type: "file", trail: [], path, text, language: null, size: text.length, truncated: false, binary: false, url: null, sha: blobOf(text) },
+    { type: "actions", actions: [branchAction("commit_file", "Commit change…", { entity: null, disabled: refusal })] },
   ]);
 }
 

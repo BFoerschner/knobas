@@ -4014,3 +4014,44 @@ Implementer, one PR for both.
   affected. The narrowed live slice was not re-run: the seeded heading `IntegrationTests (Command
   Line)` parses to the same name under both versions, and the unit test holds that string.
   **Reversing:** low (`without_runner` in `log.rs`).
+## #984 and #985 — Link to the job from New branch and Create pull request; Commit to a protected branch (2026-10-17)
+
+Implementer rulings, one PR for both issues.
+
+- **The link is made after the send, not stored.** `submit_write` takes an optional `link_to` (a
+  ticket id). With it, the write is queued and sent in the background as always, the source is
+  re-read, and the link is drawn against what the mirror then holds (`link_on_arrival`): #862's
+  *Link it to <job>* shape, so knobas has one answer to "link what a queued write makes". A write
+  that waits (its source down) and lands on a later tick is not linked; holding the intent across
+  that would take a stored link-on-arrival and a pass after every sync (a migration), for a case
+  the reader can mend with *Link…*. Follow-up #1050 (backlog). **Reversing:** moderate (a column or
+  table on the queue and a resolve after each sync).
+- **What the write made is found in the mirror, not read off a receipt.** Gitea's creates answer
+  no id, so the branch is looked up by its name in the repository and the pull request as the one
+  open on the head: start work's own look-ups (`branch_named`, `pull_request_on_head`), so a merged
+  or closed pull request on a reused head is never taken for this one. Only a write the queue
+  settled as *sent* is linked; refused, held, waiting and discarded ones link nothing.
+  **Reversing:** moderate (an adapter that mints the id in its receipt).
+- **The link is `related`, confirmed,** the relation the key in a branch's name or a pull request's
+  title proposes, so the proposal already in the Inbox is confirmed rather than left beside a
+  second edge. Start work's own pull-request link stays `implements`. **Reversing:** low
+  (`DEFAULT_RELATION` in `link_on_arrival`).
+- ***Link to <job>* shows whenever there is a job, ticked;** the job's key is resolved to its
+  ticket on *Create branch*, and a key the mirror does not hold keeps the dialog open and says so
+  rather than queueing a branch it cannot link. *Link the PR to <key> in knobas* shows only where the
+  branch's key names a ticket the mirror holds, as prototype-6 draws it only for a known ticket.
+  Both are refused server-side too (`arrival_linkable`). **Reversing:** low.
+- **Gitea declares the file's commit on the file section** (`Block::Actions`, `commit_file`), read
+  from `GET branches/{branch}` by #822's rule, disabled with one sentence shared by the flush and
+  the declaration (`PushGuard::refusal`): "<branch> is a protected branch that this account may not
+  push to: commit to a new branch and open a pull request instead". The flush's refusal now reads
+  `gitea: <owner>/<repo>: <sentence>`. **Reversing:** low.
+- **No declaration leaves *Commit to <branch>* offered.** A branch Gitea does not answer for, and a
+  source that declares nothing, draw the dialog as #845 shipped it, with the flush as the backstop:
+  telling the reader a reason knobas did not read would be worse than the queue's refusal.
+  **Reversing:** low (`commitRefusal`).
+- **The reason is drawn under *Commit to <branch>*** as the radio's description, where prototype-6
+  puts "main is protected; pick a new branch", in the source's words instead of the prototype's.
+  **Reversing:** low.
+- **`?fake-ipc`:** the fixture's `main` is protected, as prototype-6 has it, so its files' commits
+  open on a new branch. **Reversing:** low.

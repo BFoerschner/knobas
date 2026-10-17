@@ -6,13 +6,16 @@
   it from that commit (*New branch from here…*), its whole sha the value and
   its short sha the label, as the source's own commit view offers it.
 
-  The branch's id is the source's to mint, so the dialog makes no link and
-  opens nothing (#707's ruling): the Branches tab draws it queued.
+  The branch's id is the source's to mint (#707's ruling), so the dialog opens
+  nothing: the Branches tab draws it queued. With a job, *Link to <job>*
+  (#984), ticked, asks `submit_write` to link the branch to the job's ticket
+  once the write has gone and a sync has brought the branch in.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { resolveTicket } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
   import { markMade, toastQueued } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
@@ -35,23 +38,37 @@
     /** A commit to start from instead, offered first. */
     from?: ChoiceOption | null;
     job: string | null;
-    ports: Pick<RepoPorts, "submitWrite">;
+    ports: Pick<RepoPorts, "submitWrite" | "listSources" | "getEntity">;
     onclose: () => void;
   } = $props();
 
   // Prefilled once, when the dialog opens.
   let name = $state(newBranchName((() => job)()));
   let start = $state((() => from?.value ?? branches[0] ?? "")());
+  let link = $state(true);
   let busy = $state(false);
 
   const ready = $derived(name.trim() !== "" && !name.trim().endsWith("/") && start !== "" && !busy);
+
+  /** The ticket the job's key names in the mirror, the link's other end. */
+  async function jobTicket(key: string): Promise<string | null> {
+    const found = await resolveTicket(key, await ports.listSources(), ports.getEntity);
+    return found?.row.entity_id ?? null;
+  }
 
   async function create() {
     if (!ready) return;
     const branch = name.trim();
     busy = true;
     try {
-      await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } });
+      const linking = job !== null && link ? job : null;
+      const ticket = linking === null ? null : await jobTicket(linking);
+      if (linking !== null && ticket === null) {
+        push({ text: `${job} is not in the mirror, so the branch cannot be linked to it`, tone: "err" });
+        busy = false;
+        return;
+      }
+      await ports.submitWrite({ CreateBranch: { entity: repoId, name: branch, from_ref: start } }, ticket ?? undefined);
       markMade(repoId, branch);
       toastQueued(`create branch ${branch} in ${repoName}`);
       onclose();
@@ -79,6 +96,10 @@
         {#if from !== null}<option value={from.value}>{from.label}</option>{/if}
         {#each branches as branch (branch)}<option value={branch}>{branch}</option>{/each}
       </select>
+      {#if job !== null}
+        <span>Link to</span>
+        <label class="tf-ck"><input type="checkbox" bind:checked={link} /> {job} <span class="tf-dim">(in knobas)</span></label>
+      {/if}
     </form>
   {/snippet}
   {#snippet footer()}

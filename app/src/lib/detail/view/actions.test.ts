@@ -115,6 +115,10 @@ test("an action is offered only where the source declares its op and the shell c
   const unknown: ViewAction = { ...MERGE, write_op: "launch_rocket" };
   expect(offeredActions([MERGE, unknown], ["comment", "merge_pull_request", "launch_rocket"])).toEqual([MERGE]);
   expect(offeredActions([MERGE], ["comment", "approve"])).toEqual([]);
+  // A file's *Commit change…* (#985) is the new shell's dialog: this shell has
+  // no payload for it, so it draws no button that could not queue.
+  const commit: ViewAction = { ...MERGE, write_op: "commit_file", label: "Commit change…" };
+  expect(offeredActions([commit], ["commit_file"])).toEqual([]);
 });
 
 test("an action's name is its label without the dialog's ellipsis", () => {

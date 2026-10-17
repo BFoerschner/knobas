@@ -1219,9 +1219,15 @@ export function proposalEvidence(linkId: string): Promise<ProposalEvidence> {
  * bar should never have rendered, since it is drawn from that source's
  * `write_ops` — and `not_found` when the target names a source that is not
  * configured.
+ *
+ * `linkTo` (#984, a ticket's entity id) links the branch a `CreateBranch`
+ * makes, or the pull request a `CreatePullRequest` opens, to that ticket once
+ * the write has been sent and a sync has brought it in; it rejects with
+ * `invalid` on any other op and `not_found` for a ticket the mirror does not
+ * hold.
  */
-export function submitWrite(payload: WriteOpPayload): Promise<QueuedWrite> {
-  return invoke<QueuedWrite>("submit_write", { payload });
+export function submitWrite(payload: WriteOpPayload, linkTo?: string): Promise<QueuedWrite> {
+  return invoke<QueuedWrite>("submit_write", linkTo === undefined ? { payload } : { payload, linkTo });
 }
 
 /**

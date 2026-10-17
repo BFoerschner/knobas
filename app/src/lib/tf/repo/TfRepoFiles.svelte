@@ -24,13 +24,13 @@
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, ViewBlock } from "../../ipc/entity";
+  import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { queuedCommit } from "./queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { ancestors, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
+  import { ancestors, commitRefusal, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -74,6 +74,8 @@
   let treeFailed = $state<string | null>(null);
   const open = new SvelteSet<string>();
   let file = $state<FileBlock | null>(null);
+  /** Why the source refuses a commit straight onto the branch (#985), `null` where it takes one. */
+  let refusal = $state<string | null>(null);
   let fileFailed = $state<string | null>(null);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
@@ -88,9 +90,10 @@
     return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
   }
 
-  async function readSection(section: string, where = at): Promise<ViewBlock | undefined> {
+  /** The section `section` names, read at `where`: a directory's listing or a file and its actions. */
+  async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
     const view = await ports.entityView(where, section);
-    return view?.sections[0]?.blocks[0];
+    return view?.sections[0];
   }
 
   function readDir(dir: string, section: string) {
@@ -98,8 +101,9 @@
     asked.add(dir);
     const mine = generation;
     readSection(section).then(
-      (block) => {
+      (read) => {
         if (mine !== generation) return;
+        const block = read?.blocks[0];
         listings[dir] = block?.type === "tree" ? block.entries : [];
       },
       (error) => {
@@ -149,6 +153,7 @@
     const section = fileSection;
     const where = at;
     file = null;
+    refusal = null;
     fileFailed = null;
     if (section === null) return;
     if (section === MISSING) {
@@ -157,9 +162,11 @@
     }
     let live = true;
     readSection(section, where).then(
-      (block) => {
+      (read) => {
         if (!live) return;
+        const block = read?.blocks[0];
         file = block?.type === "file" ? block : null;
+        refusal = commitRefusal(read);
         draft = null;
       },
       (error) => {
@@ -328,6 +335,7 @@
     before={file.text}
     after={text}
     baseSha={file.sha}
+    {refusal}
     {job}
     {checkoutBranch}
     {ports}

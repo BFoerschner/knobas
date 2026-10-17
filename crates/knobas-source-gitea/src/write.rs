@@ -474,11 +474,27 @@ pub(crate) async fn edit_pull_request(
 /// What a commit reads of the branch it would land on: whether it is
 /// protected, and whether this token may push to it anyway.
 #[derive(serde::Deserialize)]
-struct PushGuard {
+pub(crate) struct PushGuard {
     #[serde(default)]
     protected: bool,
     #[serde(default = "pushable")]
     user_can_push: bool,
+}
+
+impl PushGuard {
+    /// Why a commit straight onto `branch` is refused, in the reader's
+    /// words, or `None` where it is taken: a protected branch this account
+    /// may not push to (#822). The flush refuses with this sentence, and the
+    /// file view declares its commit disabled with it (#985), so the two
+    /// cannot say different things.
+    pub(crate) fn refusal(&self, branch: &str) -> Option<String> {
+        (self.protected && !self.user_can_push).then(|| {
+            format!(
+                "{branch} is a protected branch that this account may not push to: commit to a \
+                 new branch and open a pull request instead"
+            )
+        })
+    }
 }
 
 /// An answer that does not say is not read as a refusal: Gitea's own 403 is
@@ -574,11 +590,9 @@ pub(crate) async fn commit_file(
         let guard = client
             .branch_as::<PushGuard>(owner, repo, commit.branch)
             .await?;
-        if guard.protected && !guard.user_can_push {
+        if let Some(refusal) = guard.refusal(commit.branch) {
             return Err(SourceError::protocol(format!(
-                "gitea: {:?} is a protected branch of {owner}/{repo} that this account may not \
-                 push to; commit to a new branch and open a pull request instead",
-                commit.branch
+                "gitea: {owner}/{repo}: {refusal}"
             )));
         }
     }

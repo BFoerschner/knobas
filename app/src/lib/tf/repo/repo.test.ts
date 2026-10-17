@@ -12,6 +12,7 @@ import {
   branchStanding,
   type BranchRow,
   commitPrefill,
+  commitRefusal,
   compareHash,
   editHash,
   branchFrom,
@@ -376,4 +377,24 @@ test("a branch from a commit starts where the commit's own New branch… starts,
   );
   expect(branchFrom({ sections: [], actions: [] })).toBeNull();
   expect(branchFrom(null)).toBeNull();
+});
+
+test("a commit onto the branch is refused where the file's section declares commit_file disabled, in its words (#985)", () => {
+  const reason = "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
+  const fileSection = (actions: ViewAction[] | null): ViewSection =>
+    ({
+      id: "file:README.md",
+      title: "Files",
+      count: null,
+      deferred: false,
+      blocks: [
+        { type: "file", trail: [], path: "README.md", text: "", language: null, size: 0, truncated: false, binary: false, url: null, sha: "a1" },
+        ...(actions === null ? [] : [{ type: "actions", actions }]),
+      ],
+    }) as unknown as ViewSection;
+  expect(commitRefusal(fileSection([action("commit_file", reason)]))).toBe(reason);
+  expect(commitRefusal(fileSection([action("commit_file")]))).toBeNull();
+  expect(commitRefusal(fileSection([action("delete_branch", "Protected branch")]))).toBeNull();
+  expect(commitRefusal(fileSection(null))).toBeNull();
+  expect(commitRefusal(undefined)).toBeNull();
 });

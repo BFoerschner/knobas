@@ -46,7 +46,8 @@
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
     setCheckoutOverride: (entityId: string, path: string | null) => Promise<CheckoutView>;
-    submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    /** `linkTo` (#984): a ticket the branch or pull request made is linked to once it arrives. */
+    submitWrite: (payload: WriteOpPayload, linkTo?: string) => Promise<QueuedWrite>;
     /** The header's team and language, and Commits' and Branches' authors (#966, #973, #986). */
     codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
   }
@@ -119,7 +120,7 @@
       listContexts: () => listContexts(),
       listSources: () => listSources(),
       jobReach: (entityId) => jobReach(entityId),
-      submitWrite: (payload) => submitWrite(payload),
+      submitWrite: (payload, linkTo) => submitWrite(payload, linkTo),
       codeFacts: (entityIds) => codeFacts(entityIds),
     },
     now: fixedNow,

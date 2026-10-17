@@ -15,10 +15,11 @@
 //! was cut and where the rest is (ADR-0020 rule 6). A file with a NUL byte in
 //! its first [`SNIFF`] bytes is binary (git's own test) and is drawn as its
 //! size and a link. Beside its bytes, a file's own `contents-ext` entry is read
-//! for its blob sha at the ref (#883), the base an edit of it commits against.
+//! for its blob sha at the ref (#883), the base an edit of it commits against,
+//! and its branch for whether a commit onto it is taken (#985).
 
 use knobas_source::SourceError;
-use knobas_source::view::{Block, Crumb, EntryKind, TreeEntry, ViewSection};
+use knobas_source::view::{Block, Crumb, EntryKind, TreeEntry, ViewAction, ViewSection};
 
 use super::rows::RepoRecord;
 use crate::map;
@@ -96,11 +97,15 @@ pub(super) async fn read(
     at: &str,
     id: &str,
 ) -> Result<ViewSection, SourceError> {
-    let block = match Place::parse(id) {
-        Some(Place::File(path)) => file(source, record, owner, repo, at, path).await?,
+    let blocks = match Place::parse(id) {
+        Some(Place::File(path)) => {
+            let mut blocks = vec![file(source, record, owner, repo, at, path).await?];
+            blocks.extend(commit(source, owner, repo, at).await);
+            blocks
+        }
         // `files:` with nothing after it is not the top's spelling.
         Some(Place::Dir(dir)) if id == FILES || !dir.is_empty() => {
-            directory(source, record, owner, repo, at, dir).await?
+            vec![directory(source, record, owner, repo, at, dir).await?]
         }
         _ => {
             return Err(SourceError::protocol(format!(
@@ -114,7 +119,34 @@ pub(super) async fn read(
         count: None,
         // Its own read is the read the deferral waited for (rule 3).
         deferred: false,
-        blocks: vec![block],
+        blocks,
+    })
+}
+
+/// A file's *Commit change…* (#985, R-8.6): whether a commit straight onto
+/// `branch` is taken, read from `GET branches/{branch}` by #822's own rule,
+/// and disabled with the sentence the flush would refuse it with
+/// ([`crate::write::PushGuard::refusal`]). A commit to a new branch is always
+/// taken, so the action speaks for the branch only. A branch Gitea does not
+/// answer for declares nothing: the flush is still the backstop, and the
+/// reader is not told a reason knobas did not read.
+///
+/// The shell's dialog builds the commit itself; the old shell has no payload
+/// for `commit_file` and so draws no button for it.
+async fn commit(source: &GiteaSource, owner: &str, repo: &str, branch: &str) -> Option<Block> {
+    let guard: crate::write::PushGuard = source
+        .client
+        .branch_as(owner, repo, branch)
+        .await
+        .inspect_err(|error| {
+            tracing::debug!(%error, branch, "gitea: no protection read for a file's commit");
+        })
+        .ok()?;
+    Some(Block::Actions {
+        actions: vec![ViewAction {
+            disabled: guard.refusal(branch),
+            ..ViewAction::new(crate::WRITE_OP_COMMIT_FILE, "Commit change…")
+        }],
     })
 }
 

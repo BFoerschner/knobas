@@ -144,6 +144,8 @@ const DIFF: ViewBlock = {
 let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
+/** Each write's `linkTo` (#984), `null` where none was asked for. */
+let links: (string | null)[];
 let reads: [string, string | null][];
 
 beforeEach(() => {
@@ -152,6 +154,7 @@ beforeEach(() => {
   forgetQueued();
   toasts.items = [];
   writes = [];
+  links = [];
   reads = [];
   location.hash = "";
   target = document.createElement("div");
@@ -224,8 +227,9 @@ function ports(over: Partial<RepoPorts> = {}): RepoPorts {
     listContexts: async () => [],
     listSources: async () => [{ id: "gitea" }] as never,
     jobReach: async () => [],
-    submitWrite: async (payload) => {
+    submitWrite: async (payload, linkTo) => {
       writes.push(payload);
+      links.push(linkTo ?? null);
       return { id: writes.length } as unknown as QueuedWrite;
     },
     // Each branch tip's author (#986); release/1.9's is not declared.
@@ -380,6 +384,51 @@ test("New branch… is prefilled from the job, offers every branch to start from
   expect(toasts.items.at(-1)!.text).toBe("Queued: create branch feature/PAY-231-backoff in tidewater/payout-service. Sends with the next sync.");
 });
 
+test("New branch… offers Link to <job>, ticked, and asks for the branch to be linked to the job's ticket (#984)", async () => {
+  await draw([REPO, "branches"], "PAY-231");
+  button("New branch…", target)!.click();
+  flushSync();
+  const box = dialog()!.querySelector<HTMLInputElement>("input[type=checkbox]")!;
+  expect(text(box.closest("label"))).toBe("PAY-231 (in knobas)");
+  expect(text(box.closest("label")!.previousElementSibling)).toBe("Link to");
+  expect(box.checked).toBe(true);
+  button("Create branch", dialog()!)!.click();
+  await settle();
+  expect(writes).toEqual([{ CreateBranch: { entity: REPO, name: "feature/PAY-231-", from_ref: "main" } }]);
+  expect(links).toEqual(["gitea:PAY-231"]);
+});
+
+test("New branch… unticked links nothing, and with no job offers no link", async () => {
+  await draw([REPO, "branches"], "PAY-231");
+  button("New branch…", target)!.click();
+  flushSync();
+  dialog()!.querySelector<HTMLInputElement>("input[type=checkbox]")!.click();
+  flushSync();
+  type(dialog()!.querySelector<HTMLInputElement>("input[type=text]")!, "feature/PAY-231-unlinked");
+  button("Create branch", dialog()!)!.click();
+  await settle();
+  expect(links).toEqual([null]);
+  unmount(view!);
+  view = null;
+
+  await draw([REPO, "branches"]);
+  button("New branch…", target)!.click();
+  flushSync();
+  expect(dialog()!.querySelector("input[type=checkbox]")).toBeNull();
+  expect(text(dialog())).not.toContain("Link to");
+});
+
+test("New branch… with a job the mirror does not hold queues nothing and says why", async () => {
+  await draw([REPO, "branches"], "PAY-999");
+  button("New branch…", target)!.click();
+  flushSync();
+  button("Create branch", dialog()!)!.click();
+  await settle();
+  expect(writes).toEqual([]);
+  expect(toasts.items.at(-1)!.text).toBe("PAY-999 is not in the mirror, so the branch cannot be linked to it");
+  expect(dialog()).not.toBeNull();
+});
+
 test("New branch… with no name sends nothing", async () => {
   await draw([REPO, "branches"]);
   button("New branch…", target)!.click();
@@ -455,6 +504,35 @@ test("From changes the address; a branch holding a key proposes its ticket's tit
   expect(text(target.querySelector(".tf-compare .tf-empty"))).toBe(
     "This branch is not on Gitea yet, or knobas has not synced it. What it changes shows here once it has.",
   );
+});
+
+test("a branch holding a key offers Link the PR to <key> in knobas, ticked; it asks for the pull request to be linked (#984)", async () => {
+  await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
+  const box = target.querySelector<HTMLInputElement>(".tf-compare input[type=checkbox]")!;
+  expect(text(box.closest("label"))).toBe("Link the PR to PAY-231 in knobas");
+  expect(box.checked).toBe(true);
+  button("Create pull request", target)!.click();
+  await settle();
+  expect(writes).toHaveLength(1);
+  expect(links).toEqual(["gitea:PAY-231"]);
+  unmount(view!);
+  view = null;
+
+  // Unticked, the pull request is not linked.
+  await draw(COMPARE("fix/PAY-231-README"), "PAY-231");
+  target.querySelector<HTMLInputElement>(".tf-compare input[type=checkbox]")!.click();
+  flushSync();
+  button("Create pull request", target)!.click();
+  await settle();
+  expect(links).toEqual(["gitea:PAY-231", null]);
+});
+
+test("a branch with no key in the mirror offers no link", async () => {
+  await draw(COMPARE("spike/sepa-instant"), "PAY-231");
+  expect(target.querySelector(".tf-compare input[type=checkbox]")).toBeNull();
+  button("Create pull request", target)!.click();
+  await settle();
+  expect(links).toEqual([null]);
 });
 
 // ---------------------------------------------------------------- Edit (#845)
@@ -587,4 +665,57 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
   const edit = button("Edit", target)!;
   expect(edit.getAttribute("aria-disabled")).toBe("true");
   expect(edit.title).toBe("The source did not say which version of the file this is, so a commit could not be checked against it");
+});
+
+const PROTECTED =
+  "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
+
+/** The file section declaring its own `commit_file`, disabled with `disabled` where given (#985). */
+function declaring(disabled: string | null): RepoPorts {
+  const stand = ports();
+  const read = stand.entityView;
+  stand.entityView = async (id, section) => {
+    const answer = await read(id, section);
+    if (section === "file:README.md") answer!.sections[0]!.blocks.push({ type: "actions", actions: [action("commit_file", disabled)] });
+    return answer;
+  };
+  return stand;
+}
+
+test("on a protected branch the commit dialog opens on a new branch, Commit to <branch> disabled with the source's reason (#985)", async () => {
+  await draw([REPO, "edit", "README.md"], "PAY-231", declaring(PROTECTED));
+  type(editor(), "# payout\nnew line\n");
+  button("Commit change…", target)!.click();
+  flushSync();
+  const [same, fresh] = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
+  expect(same!.disabled).toBe(true);
+  expect(same!.checked).toBe(false);
+  expect(fresh!.checked).toBe(true);
+  expect(text(same!.closest("label")!.querySelector("small"))).toBe(PROTECTED);
+  expect(text(document.getElementById(same!.getAttribute("aria-describedby")!))).toBe(PROTECTED);
+
+  button("Commit change", dialog()!)!.click();
+  await settle();
+  expect(writes).toEqual([
+    {
+      CommitFile: {
+        repo: REPO,
+        branch: "main",
+        new_branch: "fix/PAY-231-README",
+        path: "README.md",
+        content: "# payout\nnew line\n",
+        message: "PAY-231: update README.md",
+        base_sha: "blob-1",
+      },
+    },
+  ]);
+});
+
+test("a commit the source declares taken opens on Commit to <branch>, enabled (#985)", async () => {
+  await draw([REPO, "edit", "README.md"], null, declaring(null));
+  type(editor(), "changed\n");
+  button("Commit change…", target)!.click();
+  flushSync();
+  const [same] = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
+  expect([same!.disabled, same!.checked, same!.hasAttribute("aria-describedby")]).toEqual([false, true, false]);
 });

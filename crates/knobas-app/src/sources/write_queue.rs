@@ -97,6 +97,156 @@ pub async fn submit_in_background(
     Ok(queued)
 }
 
+/// [`submit_in_background`], and once the write has been sent and the source
+/// re-read, a link from what it made to `ticket` (#984: *Link to <job>* on
+/// *New branch…*, *Link the PR to <key>* on the compare page).
+///
+/// What a `CreateBranch` or `CreatePullRequest` makes has no id until the
+/// source mints one and a sync brings it in (#707), so the link waits for
+/// both, the way #862's new page does: [`send_in_background_then`], then
+/// [`link_on_arrival`]. A write that does not go on that send (refused,
+/// waiting, later discarded) links nothing.
+///
+/// # Errors
+///
+/// As [`arrival_linkable`], then as [`submit`], all of them before anything
+/// is sent.
+pub async fn submit_linked_in_background(
+    state: &crate::sources::SourcesState,
+    payload: serde_json::Value,
+    ticket: String,
+) -> Result<QueuedWrite, IpcError> {
+    arrival_linkable(&state.pool, &payload, &ticket).await?;
+    let (queued, source_id) = queue(state, payload).await?;
+    let write_id = queued.id;
+    send_in_background_then(
+        state,
+        source_id.clone(),
+        write_id,
+        source_id,
+        move |state| async move {
+            let linked = async {
+                let declarations =
+                    crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
+                        .await?;
+                link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
+            };
+            match linked.await {
+                Ok(Some(made)) => tracing::debug!(write_id, %made, %ticket, "linked on arrival"),
+                Ok(None) => tracing::info!(
+                    write_id,
+                    %ticket,
+                    "a queued write's branch or pull request was not there to link"
+                ),
+                Err(error) => tracing::warn!(write_id, %error, "a link on arrival failed"),
+            }
+        },
+    );
+    Ok(queued)
+}
+
+/// Whether `payload` may carry a link on arrival to `ticket` (#984): a
+/// `CreateBranch` or a `CreatePullRequest`, the two writes that make
+/// something a job reaches, and a ticket the mirror holds, since
+/// `create_link` refuses an end it does not hold.
+///
+/// # Errors
+///
+/// `invalid` for a payload that is not one of the two, or a ticket that is
+/// not an entity id; `not_found` for a ticket the mirror does not hold;
+/// `internal` if the read fails.
+pub async fn arrival_linkable(
+    pool: &sqlx::PgPool,
+    payload: &serde_json::Value,
+    ticket: &str,
+) -> Result<(), IpcError> {
+    let op: WriteOp = serde_json::from_value(payload.clone())
+        .map_err(|error| IpcError::invalid(format!("not a write operation: {error}")))?;
+    if !matches!(
+        op,
+        WriteOp::CreateBranch { .. } | WriteOp::CreatePullRequest { .. }
+    ) {
+        return Err(IpcError::invalid(format!(
+            "only a new branch or pull request is linked once it arrives, not {:?}",
+            op.identifier()
+        )));
+    }
+    knobas_core::entity::EntityRef::parse(ticket).map_err(IpcError::invalid)?;
+    let held: Option<String> = sqlx::query_scalar("select id from knobas.entity where id = $1")
+        .bind(ticket)
+        .fetch_optional(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    if held.is_none() {
+        return Err(IpcError::not_found(format!(
+            "{ticket} is not in the mirror, so nothing can be linked to it"
+        )));
+    }
+    Ok(())
+}
+
+/// Link what write `write_id` made to `ticket`, once it has: the branch a
+/// sent `CreateBranch` named, or the pull request open on a sent
+/// `CreatePullRequest`'s head, as the mirror holds them (#984). Answers the
+/// entity linked, or `None` where the write was not sent or what it made is
+/// not mirrored yet.
+///
+/// The look-ups are start work's own (`start_work::queue`): the branch by its
+/// name in the repository, the pull request open on the head (a merged or
+/// closed one there is not this write's). The link is the `related` one the
+/// key in a branch's name proposes (`branch_name_key`), so a proposal already
+/// raised is confirmed rather than doubled; one already drawn is drawn.
+///
+/// # Errors
+///
+/// `internal` if a read or the link write fails.
+pub async fn link_on_arrival(
+    pool: &sqlx::PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    write_id: i64,
+    ticket: &str,
+) -> Result<Option<String>, IpcError> {
+    let Some(write) = knobas_core::write_queue::get(pool, write_id).await? else {
+        return Ok(None);
+    };
+    if write.state != WriteState::Sent {
+        return Ok(None);
+    }
+    let op: WriteOp = serde_json::from_value(write.payload).map_err(IpcError::internal)?;
+    let repo_of =
+        |entity: &str| knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal);
+    let made = match &op {
+        WriteOp::CreateBranch { entity, name, .. } => {
+            crate::start_work::queue::branch_named(pool, &repo_of(entity)?, name).await?
+        }
+        WriteOp::CreatePullRequest { entity, head, .. } => {
+            match crate::start_work::queue::pull_request_on_head(
+                pool,
+                declarations,
+                &repo_of(entity)?,
+                head,
+            )
+            .await?
+            {
+                crate::start_work::PullRequestOnHead::Open(id) => Some(id),
+                _ => None,
+            }
+        }
+        _ => None,
+    };
+    let Some(made) = made else {
+        return Ok(None);
+    };
+    crate::protocol::draw_link(
+        pool,
+        &made,
+        ticket,
+        crate::commands::entity::DEFAULT_RELATION,
+    )
+    .await?;
+    Ok(Some(made))
+}
+
 /// [`flush`] spawned onto the runtime with a copy of the state: the send
 /// behind [`submit_in_background`]'s answer, and behind a worklog's (#775).
 pub(crate) fn send_in_background(state: &crate::sources::SourcesState, source_id: String, id: i64) {

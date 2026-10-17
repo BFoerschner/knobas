@@ -39,6 +39,7 @@ mod inbox_ipc;
 mod ipc;
 mod job_ipc;
 mod job_pipelines_ipc;
+mod link_on_arrival_ipc;
 mod link_set_patterns_ipc;
 mod link_sets_ipc;
 mod notes_export_ipc;

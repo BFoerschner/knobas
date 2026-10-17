@@ -800,6 +800,11 @@ knobas-app	test/it	job_ipc::list_entities_scoped_by_reach_keeps_what_the_ticket_
 knobas-app	test/it	job_ipc::opening_a_job_twice_promotes_its_ticket_once
 knobas-app	test/it	job_pipelines_ipc::a_pipeline_is_on_a_job_for_its_branch_its_pr_check_or_a_link
 knobas-app	test/it	job_pipelines_ipc::a_sub_task_shows_the_pipelines_its_parent_links
+knobas-app	test/it	link_on_arrival_ipc::a_new_branch_is_linked_to_the_job_once_it_is_mirrored
+knobas-app	test/it	link_on_arrival_ipc::a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head
+knobas-app	test/it	link_on_arrival_ipc::a_write_that_did_not_land_links_nothing
+knobas-app	test/it	link_on_arrival_ipc::only_a_new_branch_or_pull_request_is_linked_and_only_to_a_mirrored_job
+knobas-app	test/it	link_on_arrival_ipc::the_proposal_the_branch_name_raised_is_confirmed_not_doubled
 knobas-app	test/it	link_set_patterns_ipc::a_member_row_carries_its_line_and_its_dot
 knobas-app	test/it	link_set_patterns_ipc::a_page_pattern_is_a_space_and_a_parent_page
 knobas-app	test/it	link_set_patterns_ipc::a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit
@@ -2528,10 +2533,14 @@ knobas-source-gitea	test/it	view_files::a_binary_file_says_so_with_its_size
 knobas-source-gitea	test/it	view_files::a_branch_file_carries_the_blob_at_the_branch
 knobas-source-gitea	test/it	view_files::a_branch_reads_its_tree_at_the_branch
 knobas-source-gitea	test/it	view_files::a_cut_file_without_a_length_asks_gitea_its_size
+knobas-source-gitea	test/it	view_files::a_directory_declares_no_commit
 knobas-source-gitea	test/it	view_files::a_directory_over_the_entry_cap_is_cut_at_it
 knobas-source-gitea	test/it	view_files::a_file_is_read_raw_at_the_ref
+knobas-source-gitea	test/it	view_files::a_file_on_a_branch_the_account_may_push_to_declares_its_commit_enabled
+knobas-source-gitea	test/it	view_files::a_file_on_a_protected_branch_declares_its_commit_disabled_with_the_reason
 knobas-source-gitea	test/it	view_files::a_file_over_the_byte_cap_is_cut_at_a_line_within_it
 knobas-source-gitea	test/it	view_files::a_file_over_the_line_cap_is_cut_at_it
+knobas-source-gitea	test/it	view_files::a_file_whose_branch_does_not_answer_declares_no_commit
 knobas-source-gitea	test/it	view_files::a_gitea_without_contents_ext_draws_the_blob_from_contents
 knobas-source-gitea	test/it	view_files::a_markdown_file_is_hinted_as_markdown
 knobas-source-gitea	test/it	view_files::a_nested_directory_is_read_by_the_section_its_entry_names

@@ -3,7 +3,9 @@
   diff, a message prefilled with the job's key, and where it goes: *Commit to
   <branch>* or *Commit to a new branch and open a pull request* with the new
   branch's name. It warns when the local checkout is on the branch the commit
-  goes to, which this commit leaves one behind.
+  goes to, which this commit leaves one behind. Where the source declares the
+  file's commit disabled (#985: a protected branch), *Commit to <branch>* is
+  disabled with the source's reason under it, and the new branch is picked.
 
   *Commit change* queues `CommitFile` (#822) in the repository against the
   blob the file was read at (#883), so a file that moved since is held with
@@ -29,6 +31,7 @@
     before,
     after,
     baseSha,
+    refusal = null,
     job,
     checkoutBranch,
     ports,
@@ -43,6 +46,8 @@
     after: string;
     /** The blob the file was read at: the version the commit is made against. */
     baseSha: string;
+    /** Why the source refuses a commit straight onto `branch` (#985), `null` where it takes one. */
+    refusal?: string | null;
     job: string | null;
     /** The branch the local checkout is on, `null` without one. */
     checkoutBranch: string | null;
@@ -53,13 +58,17 @@
   // Prefilled once, when the dialog opens.
   const prefill = commitPrefill((() => job)(), (() => path)());
   let message = $state(prefill.message);
-  let target = $state<"same" | "new">("same");
+  // A branch the source refuses the commit on opens on the new branch, as
+  // prototype-6's `openCommitEdit` does for `main`.
+  let target = $state<"same" | "new">((() => (refusal === null ? "same" : "new"))());
   let newBranch = $state(prefill.branch);
   let busy = $state(false);
 
   const diff = $derived(lineDiff(path, before, after));
   const ready = $derived(
-    message.trim() !== "" && (target === "same" || (newBranch.trim() !== "" && newBranch.trim() !== branch)) && !busy,
+    message.trim() !== "" &&
+      (target === "same" ? refusal === null : newBranch.trim() !== "" && newBranch.trim() !== branch) &&
+      !busy,
   );
 
   async function commit() {
@@ -95,8 +104,19 @@
     </div>
     <div class="tf-radio" role="radiogroup" aria-label="Where the commit goes">
       <label>
-        <input type="radio" name="tf-cf-target" value="same" bind:group={target} />
-        <span>Commit to <span class="tf-mono">{branch}</span></span>
+        <input
+          type="radio"
+          name="tf-cf-target"
+          value="same"
+          bind:group={target}
+          disabled={refusal !== null}
+          aria-describedby={refusal === null ? undefined : "tf-cf-refusal"}
+        />
+        <span
+          >Commit to <span class="tf-mono">{branch}</span>{#if refusal !== null}<small id="tf-cf-refusal"
+              >{refusal}</small
+            >{/if}</span
+        >
       </label>
       <label>
         <input type="radio" name="tf-cf-target" value="new" bind:group={target} />
