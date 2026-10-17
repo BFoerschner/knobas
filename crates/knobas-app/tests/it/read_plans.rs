@@ -251,11 +251,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     .await;
     wrong.extend(shapes("launcher_recent", &plan));
 
-    // The Docs tree's pages (#981). Never analyzed, it was planned from
-    // `sync.item_project`, one row per item of every kind, with a probe into
-    // `knobas.entity` and `sync.item` per row and the page kind a filter on
-    // that probe: 211 ms on the probe's 22,000 items for 2,000 pages, the
-    // cost growing with the mirror. The pages are found by their kind now.
+    // The Docs tree's pages (#981): found by their kind, never by a probe per
+    // item of the mirror that filters the kind after (the timings are on
+    // `knobas_app::docs::PAGES`).
     let plan = explain(&pool, knobas_app::docs::planned_tree(), |q| {
         q.bind(declared.clone())
     })
@@ -380,7 +378,9 @@ fn kind_filtered_probes(node: &serde_json::Value) -> Vec<String> {
     );
     if is_probe
         && node["Relation Name"] == "item"
-        && node["Filter"].as_str().is_some_and(|f| f.contains("kind"))
+        && node["Filter"]
+            .as_str()
+            .is_some_and(|f| f.contains("(kind = "))
     {
         found.push(format!(
             "probes sync.item by {} and filters the kind after ({})",
