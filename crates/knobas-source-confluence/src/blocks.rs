@@ -303,7 +303,10 @@ fn spans(storage: &str) -> Vec<Span> {
                     .collect();
                 match inside
                     .iter()
-                    .filter_map(|n| panel_refusal(n).unwrap_or_else(|| refusal_of(n, false)))
+                    .filter_map(|n| {
+                        panel_refusal(n)
+                            .unwrap_or_else(|| refusal_of(n, false).or_else(|| reads_as_a_panel(n)))
+                    })
                     .min_by_key(|r| rank(*r))
                 {
                     Some(refusal) => Err(refusal),
@@ -413,6 +416,16 @@ fn panel_opening(line: &str) -> Option<(&'static str, &str)> {
         return None;
     }
     Some((name, after.trim()))
+}
+
+/// A block other than a panel whose text holds a line `> **Info**` refuses as
+/// formatting: the editor's text would write it back as a panel, so saving
+/// the section unchanged would turn the words into a macro.
+fn reads_as_a_panel(node: &Node) -> Option<SectionRefusal> {
+    plain_text(&[node])
+        .lines()
+        .any(|line| panel_opening(line).is_some())
+        .then_some(SectionRefusal::Formatting)
 }
 
 /// The editor's text in storage format: [`crate::storage::from_plain`]'s
@@ -1760,6 +1773,23 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
              <ac:rich-text-body></ac:rich-text-body></ac:structured-macro>\
              <p>&gt; Just a quote.<br/>&gt; **Info** not first</p>\
              <h2>B</h2><p>b</p>"
+        );
+    }
+
+    /// Words that spell a panel's opening line are not a panel in the page,
+    /// so the section refuses rather than save them back as one (#975).
+    #[test]
+    fn a_paragraph_spelled_like_a_panel_refuses_as_formatting() {
+        let storage = "<h2>A</h2><p>&gt; **Info** not a panel</p>\
+            <h2>B</h2><p>Lead.<br/><br/>&gt; **tip**</p>";
+        let got: Vec<Option<SectionRefusal>> =
+            sections(storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Formatting),
+                Some(SectionRefusal::Formatting),
+            ]
         );
     }
 
