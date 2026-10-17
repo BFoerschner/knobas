@@ -171,7 +171,6 @@ function start(
         listen: () => Promise.resolve(() => {}),
       },
       prefersDark: over.prefersDark ?? (() => false),
-      onrooms: () => {},
       onstarttimer: over.onstarttimer ?? (() => {}),
       jobPorts: JOB_PORTS,
     },
@@ -260,10 +259,12 @@ test("an address the new shell has no place for names itself", async () => {
   expect(target.querySelector(".tf-empty")?.textContent).toContain("Nothing lives at #/ctx/all in the new shell.");
 });
 
+// The theme is on `<html>`, where the tokens are since #881, so a dialog
+// mounted outside the shell follows it too.
 test("the theme follows the OS until the toggle overrides it, both ways", async () => {
   start({ prefersDark: () => true });
   await settle();
-  const root = target.querySelector(".tf")!;
+  const root = document.documentElement;
   expect(root.hasAttribute("data-theme"), "no override: the OS decides").toBe(false);
   const toggle = target.querySelector<HTMLButtonElement>('[aria-label="Toggle colour theme"]')!;
   toggle.click();
@@ -278,7 +279,7 @@ test("the top bar's toggle and Settings › Appearance are one setting", async (
   location.hash = "#/settings/appearance";
   start({ prefersDark: () => false });
   await settle();
-  const root = target.querySelector(".tf")!;
+  const root = document.documentElement;
   const choice = (label: string) =>
     [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Theme"] button')].find((b) => b.textContent === label)!;
   choice("Dark").click();
@@ -297,7 +298,18 @@ test("a light OS toggles to dark first", async () => {
   start({ prefersDark: () => false });
   target.querySelector<HTMLButtonElement>('[aria-label="Toggle colour theme"]')!.click();
   flushSync();
-  expect(target.querySelector(".tf")!.getAttribute("data-theme")).toBe("dark");
+  expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  expect(target.querySelector(".tf")!.hasAttribute("data-theme"), "the shell's own root carries no theme").toBe(false);
+});
+
+test("a forced theme leaves <html> with the shell", async () => {
+  start({ prefersDark: () => false });
+  target.querySelector<HTMLButtonElement>('[aria-label="Toggle colour theme"]')!.click();
+  flushSync();
+  expect(document.documentElement.getAttribute("data-theme")).toBe("dark");
+  unmount(shell!);
+  shell = null;
+  expect(document.documentElement.hasAttribute("data-theme")).toBe(false);
 });
 
 test("badges: inbox, failing builds in err tone, proposals; nothing drawn at zero", async () => {

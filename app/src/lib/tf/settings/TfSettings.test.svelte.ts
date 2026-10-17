@@ -220,7 +220,7 @@ async function settle() {
 async function open(rest: string[], p: SettingsPorts = ports(), health = createHealthStub()) {
   view = mount(TfSettings, {
     target,
-    props: { rest, job: null, ready: true, onrooms: () => {}, ports: p, health, layers: createLayers(), now: () => NOW },
+    props: { rest, job: null, ready: true,ports: p, health, layers: createLayers(), now: () => NOW },
   });
   await settle();
   return { p, health };
@@ -390,7 +390,7 @@ test("Add a source opens in the ticket-first look, and Esc closes it through the
   const layers = createLayers();
   view = mount(TfSettings, {
     target,
-    props: { rest: [], job: null, ready: true, onrooms: () => {}, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+    props: { rest: [], job: null, ready: true,ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
   button("+ Add a source").click();
@@ -592,23 +592,20 @@ test("a source's page shows its runs, and Checkouts draws its own section", asyn
   expect(target.querySelector(".tf-crumbs strong")?.textContent).toBe("TeamCity");
   unmount(view!);
 
-  const onrooms = vi.fn();
   view = mount(TfSettings, {
     target,
-    props: { rest: ["checkouts"], job: null, ready: true, onrooms, ports: ports(), health: createHealthStub(), layers: createLayers() },
+    props: { rest: ["checkouts"], job: null, ready: true, ports: ports(), health: createHealthStub(), layers: createLayers() },
   });
   await settle();
-  // Built since #844: its own section, and no offer of the rooms UI.
+  // Built since #844: its own section.
   expect(target.querySelector(".tf-stg-body h1")?.textContent).toBe("Checkouts and Open in…");
-  expect(target.querySelector(".tf-stg-body")?.textContent).not.toContain("not built in the new shell yet");
-  expect(onrooms).not.toHaveBeenCalled();
 });
 
 test("Esc closes a dialog through the shell's layer stack", async () => {
   const layers = createLayers();
   view = mount(TfSettings, {
     target,
-    props: { rest: ["source", "jira"], job: null, ready: true, onrooms: () => {}, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+    props: { rest: ["source", "jira"], job: null, ready: true,ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
   button("Remove…").click();

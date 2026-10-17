@@ -350,7 +350,7 @@ test("the dev harness is only reachable behind import.meta.env.DEV", () => {
  * export it stands in for, resolver included, and that is a fixture rather
  * than a caller.
  */
-test("only the launcher and the note editor resolve a pasted URL to an entity", () => {
+test("only the launcher resolves a pasted URL to an entity", () => {
   const callers = offenders(
     (text, file) =>
       !/\.test\.(svelte\.)?ts$/.test(file) &&
@@ -360,16 +360,14 @@ test("only the launcher and the note editor resolve a pasted URL to an entity", 
   );
 
   // `session.svelte.ts` is the launcher's own machinery and takes the resolver
-  // as an *optional* port; `Launcher.svelte` is what passes it one. The note
-  // editor builds a `Session` too, deliberately without one — a `[[` picker is
-  // a search, not a paste.
+  // as an *optional* port; `Launcher.svelte` is what passes it one. The rooms
+  // UI's note editor resolved one too, and went with it (#881).
   expect(
     callers,
     "a surface started resolving pasted URLs — every other text input has to leave one as text",
   ).toEqual([
     "lib/launcher/Launcher.svelte",
     "lib/launcher/session.svelte.ts",
-    "lib/notes/NoteView.svelte",
     // Not a pasted text (#841): a pull request's check links its run, and the
     // page opens the run the mirror holds at that link. No text is rewritten.
     "lib/tf/pr/TfPr.svelte",

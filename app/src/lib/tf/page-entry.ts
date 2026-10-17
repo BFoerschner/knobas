@@ -31,8 +31,6 @@ export interface TfPageContext {
   timedTicket: string | null;
   /** The Job tab's job (the last opened, else the timer's) with its entity id, or `null`. */
   navJob: { key: string; entityId: string } | null;
-  /** Switch back to the rooms UI. */
-  onrooms: () => void;
   timer: Pick<Timer, "current" | "elapsed">;
   layers: Layers;
   /** The colour theme the top bar toggles and Settings › Appearance sets. */

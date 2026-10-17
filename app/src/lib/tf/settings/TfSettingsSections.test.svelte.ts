@@ -147,7 +147,6 @@ async function open(
       rest: [section],
       job: null,
       ready: true,
-      onrooms: () => {},
       ports: sourcePorts,
       sectionPorts: p,
       layers: createLayers(),
@@ -398,7 +397,7 @@ test("no section reads before the database answers", async () => {
   const p = sectionPorts();
   view = mount(TfSettings, {
     target,
-    props: { rest: ["backup"], job: null, ready: false, onrooms: () => {}, ports: sourcePorts, sectionPorts: p, layers: createLayers() },
+    props: { rest: ["backup"], job: null, ready: false,ports: sourcePorts, sectionPorts: p, layers: createLayers() },
   });
   await settle();
   expect(p.backupStatus).not.toHaveBeenCalled();

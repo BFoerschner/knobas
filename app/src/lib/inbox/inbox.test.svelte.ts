@@ -1,13 +1,12 @@
 /**
- * The inbox as a reader sees it (issue #45).
+ * The inbox store (issue #45). The view that drew it went with the rooms UI
+ * (#881); the new shell's Inbox has its own tests (`tf/inbox`).
  *
- * What is asserted is what appears, what a press does, and — the one that has
- * to be pinned on this side of the bridge — that **the badge is the backend's
- * count and not the length of whatever list this window is holding**. The two
- * differ exactly when something is snoozed, which is the case the number
- * exists to get right.
+ * The one that has to be pinned on this side of the bridge: **the badge is the
+ * backend's count and not the length of whatever list this window is
+ * holding**. The two differ exactly when something is snoozed, which is the
+ * case the number exists to get right.
  */
-import { flushSync, mount, unmount } from "svelte";
 import { beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxEntry, InboxShelf } from "../ipc/entity";
@@ -91,12 +90,8 @@ vi.mock("../shell/open-external", () => ({
   openExternal: (url: string) => record(`open ${url}`, undefined),
 }));
 
-const { default: InboxView } = await import("./InboxView.svelte");
 const { createInbox, snoozePresets, subjectOf } = await import("./inbox.svelte");
 const { drawable, formFor } = await import("./actions");
-
-/** A Wednesday, so "next Monday" is five days out and not a special case. */
-const NOW = new Date("2026-08-26T12:00:00Z");
 
 function entry(over: Partial<InboxEntry["item"]> = {}, actions: string[] = []): InboxEntry {
   return {
@@ -117,22 +112,6 @@ function entry(over: Partial<InboxEntry["item"]> = {}, actions: string[] = []): 
   };
 }
 
-const router = {
-  route: { view: "inbox" as const, ctx: null as string | null },
-  ctx: "all",
-  hash: "",
-  go(hash: string) {
-    this.hash = hash;
-  },
-  replace() {},
-  back() {},
-  canGoBack: false,
-  canGoForward: false,
-  goBack() {},
-  goForward() {},
-  start: () => () => {},
-};
-
 beforeEach(() => {
   calls.length = 0;
   stream = [];
@@ -141,28 +120,7 @@ beforeEach(() => {
   reject = null;
   hold = null;
   followed.length = 0;
-  router.hash = "";
 });
-
-async function draw(inbox: ReturnType<typeof createInbox>) {
-  const target = document.createElement("div");
-  document.body.append(target);
-  const app = mount(InboxView, { target, props: { router, inbox, now: NOW } });
-  await Promise.resolve();
-  flushSync();
-  return {
-    target,
-    text: () => (target.textContent ?? "").replace(/\s+/g, " "),
-    button: (label: string) =>
-      [...target.querySelectorAll<HTMLButtonElement>("button")].find(
-        (button) => button.textContent?.trim() === label,
-      ),
-    stop: () => {
-      unmount(app);
-      target.remove();
-    },
-  };
-}
 
 // -- the count ---------------------------------------------------------------
 
@@ -237,140 +195,6 @@ test("the stream is not an answer until a read has succeeded", async () => {
   expect(inbox.answered).toBe(true);
 });
 
-// -- what the stream draws ---------------------------------------------------
-
-/** Story 7: which source, and what it is about, without opening it. */
-test("an item says where it came from and why it is here", async () => {
-  stream = [entry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.text()).toContain("Add payout CSV export");
-  expect(view.text()).toContain("jonas.becker asked for your review");
-  expect(view.text()).toContain("GI");
-  view.stop();
-});
-
-/**
- * Story 23: only the actions the backend offered are drawn. The entry below
- * offers `comment` alone — a source that cannot approve — and *Approve* must
- * not be on screen.
- */
-test("only the offered actions are drawn", async () => {
-  stream = [entry({}, ["comment"])];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.button("Comment")).toBeTruthy();
-  expect(view.button("Approve")).toBeFalsy();
-  view.stop();
-});
-
-/** Story 12: approving is one press, and it goes through `submit_write`. */
-test("approving an item submits the op the backend offered", async () => {
-  stream = [entry({}, ["approve", "comment"])];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Approve")!.click();
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
-
-  expect(
-    calls.some((call) =>
-      call.startsWith('write {"Approve":{"entity":"gitea:acme/payouts#144","body":""}}'),
-    ),
-    `no approve reached the write queue: ${calls.join(" | ")}`,
-  ).toBe(true);
-  view.stop();
-});
-
-/** Story 8: the inbox is a way in, not a dead end. */
-test("opening an item navigates to its entity, with the key encoded", async () => {
-  stream = [entry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Open")!.click();
-  flushSync();
-  // `#` truncates a fragment at the browser level, so it must be encoded and
-  // the namespace colon must not be.
-  expect(router.hash).toBe("#/entity/gitea:acme%2Fpayouts%23144");
-  view.stop();
-});
-
-/**
- * The one item with no entity behind it. *Open* is absent rather than pointing
- * somewhere wrong, and there is nothing to ask a source for — but it is still
- * a row, with snooze and done.
- */
-test("a credential expiry has no open and no write action, and is still a row", async () => {
-  stream = [
-    entry({
-      key: "credential_expiry:jira",
-      category: "credential_expiry",
-      source_id: "jira",
-      entity_id: null,
-      kind: null,
-      title: "Tidewater Jira",
-      reason: "the Tidewater Jira credential expires on Friday 4 Sep 2026",
-      web_url: null,
-    }),
-  ];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.text()).toContain("credential expires");
-  expect(view.button("Open")).toBeFalsy();
-  expect(view.button("In browser")).toBeFalsy();
-  expect(view.button("Snooze")).toBeTruthy();
-  expect(view.button("Done")).toBeTruthy();
-  view.stop();
-});
-
-/**
- * Story 15: a deferred item is dimmed and says when it comes back — it does
- * not vanish. An item that disappeared entirely would be indistinguishable
- * from one that was deleted, which is what snooze must never mean.
- */
-test("a snoozed item is on the shelf, not gone", async () => {
-  snoozed = [entry({ snoozed_until: "2026-08-28T09:00:00Z" })];
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.text()).toContain("Snoozed");
-  expect(view.text()).toContain("Add payout CSV export");
-  expect(view.target.querySelector(".inbox-item.dim")).toBeTruthy();
-  view.stop();
-});
-
-/** Story 16, through the interface. */
-test("done sends the item key the backend gave, never a composed one", async () => {
-  stream = [entry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Done")!.click();
-  await Promise.resolve();
-  flushSync();
-  expect(calls).toContain("complete review_request:gitea:acme/payouts#144");
-  view.stop();
-});
-
 // -- snooze presets ----------------------------------------------------------
 
 /**
@@ -442,163 +266,6 @@ test("an action this build cannot draw is skipped rather than shown", () => {
   ]);
 });
 
-/** The chip's promise: `#/inbox/ctx/<id>` opens already filtered (#47). */
-test("a context deep link opens the inbox pre-filtered", async () => {
-  stream = [
-    entry(),
-    entry({
-      key: "mention:jira:PAY-9",
-      category: "mention",
-      source_id: "jira",
-      entity_id: "jira:PAY-9",
-      kind: "ticket",
-      title: "Somewhere else entirely",
-    }),
-  ];
-  count = 2;
-
-  const { contexts } = await import("../shell/contexts.svelte");
-  const stopContexts = contexts.start();
-  await contexts.reseed();
-
-  const inbox = createInbox();
-  await inbox.refresh();
-  router.route = { view: "inbox", ctx: "ctx:pay" };
-  const view = await draw(inbox);
-  await vi.waitFor(() => {
-    flushSync();
-    expect(view.text()).not.toContain("Somewhere else entirely");
-  });
-  expect(view.text()).toContain("Add payout CSV export");
-
-  router.route = { view: "inbox", ctx: null };
-  view.stop();
-  stopContexts();
-});
-
-/**
- * The per-context filter (#47, spec §7's "3 here") is a lens over the one
- * stream: membership decides which rows stay, the header counts what is
- * shown, and clearing it is the whole inbox again.
- */
-test("the context filter keeps members, counts them as here, and clears whole", async () => {
-  stream = [
-    entry(),
-    entry({
-      key: "mention:jira:PAY-9",
-      category: "mention",
-      source_id: "jira",
-      entity_id: "jira:PAY-9",
-      kind: "ticket",
-      title: "Somewhere else entirely",
-    }),
-  ];
-  count = 2;
-
-  const { contexts } = await import("../shell/contexts.svelte");
-  // `reseed` drops its answer unless the store is live — the guard against a
-  // read landing after teardown — so the shared store is started as the
-  // shell would have.
-  const stopContexts = contexts.start();
-  await contexts.reseed();
-
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  const select = view.target.querySelector<HTMLSelectElement>("select.sel-inline");
-  expect(select, "the filter is offered once a context exists").not.toBeNull();
-
-  select!.value = "ctx:pay";
-  select!.dispatchEvent(new Event("change", { bubbles: true }));
-  await vi.waitFor(() => {
-    flushSync();
-    expect(view.text()).not.toContain("Somewhere else entirely");
-  });
-  expect(view.text()).toContain("Add payout CSV export");
-  expect(view.text()).toContain("1 here");
-
-  select!.value = "";
-  select!.dispatchEvent(new Event("change", { bubbles: true }));
-  flushSync();
-  expect(view.text()).toContain("Somewhere else entirely");
-
-  view.stop();
-  stopContexts();
-});
-
-// -- the alert (#446) --------------------------------------------------------
-
-/** One alert row, as the backend derives it: subject the monitor, way in the asset. */
-function alertEntry(): InboxEntry {
-  return entry({
-    key: "alert:kuma:7",
-    category: "alert",
-    source_id: "kuma",
-    entity_id: "asset:hel1",
-    kind: "asset",
-    title: "jira (tunnel)",
-    reason: "hel / hel1 is down",
-    web_url: null,
-  });
-}
-
-/**
- * Story 61: *"opening an alert from the inbox lands in the Tree at the
- * affected asset"* — `#/asset/<id>`, and **not** the `#/entity/<id>` room
- * detail every other category opens.
- *
- * The row also has to say which machine and which check, which is the two
- * fields the backend fills: the monitor's name as the title and the asset's
- * whole path in the reason.
- */
-test("an alert opens the Tree at the affected asset and names both", async () => {
-  stream = [alertEntry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.text()).toContain("jira (tunnel)");
-  expect(view.text()).toContain("hel / hel1 is down");
-  view.button("Open")!.click();
-  flushSync();
-  expect(router.hash).toBe("#/asset/asset:hel1");
-  view.stop();
-});
-
-/**
- * Story 62: *ack* is offered on an alert and on nothing else, and it sends the
- * **monitor** — the subject half of the item's own key — rather than a row id
- * this window would have to fetch.
- */
-test("acking an alert sends the monitor out of the item's key", async () => {
-  stream = [alertEntry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Ack")!.click();
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
-  expect(calls).toContain("ack kuma:7");
-  view.stop();
-});
-
-/** And no other category offers it: acking a mention would mean nothing. */
-test("only an alert offers ack", async () => {
-  stream = [entry()];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  expect(view.button("Ack")).toBeUndefined();
-  view.stop();
-});
-
 /**
  * The key's inverse, on the one part of it that is not obvious: a subject may
  * itself carry colons and slashes and hashes (`gitea:acme/payouts#144`), and
@@ -612,42 +279,6 @@ test("the subject of a key is everything after the first colon", () => {
   expect(subjectOf("alert:kuma:7")).toBe("kuma:7");
   expect(subjectOf("review_request:gitea:acme/payouts#144")).toBe("gitea:acme/payouts#144");
   expect(subjectOf("credential_expiry:jira")).toBe("jira");
-});
-
-// -- #746: an unread or failed inbox is not an empty one ----------------------
-
-test("an inbox that has not answered never says 'Nothing needs you'", async () => {
-  vi.useFakeTimers();
-  try {
-    const inbox = createInbox();
-    const view = await draw(inbox);
-    expect(view.text()).not.toContain("Nothing needs you");
-    await vi.advanceTimersByTimeAsync(400);
-    flushSync();
-    expect(view.text()).toContain("Reading the inbox");
-    expect(view.text()).not.toContain("Nothing needs you");
-    view.stop();
-  } finally {
-    vi.useRealTimers();
-  }
-});
-
-test("an inbox whose first read failed shows the reason, not 'Nothing needs you'", async () => {
-  reject = { code: "internal", message: "the database went away" };
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-  expect(view.text()).toContain("the database went away");
-  expect(view.text()).not.toContain("Nothing needs you");
-  view.stop();
-});
-
-test("an inbox that answered empty says 'Nothing needs you'", async () => {
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-  expect(view.text()).toContain("Nothing needs you");
-  view.stop();
 });
 
 /**
@@ -687,38 +318,6 @@ test("a burst of events during a read makes one more read, not one per event", a
 
 // -- answered at once (#775) ---------------------------------------------------
 
-test("done takes the row away at once, and the next row can be answered while it is written", async () => {
-  const second = entry({ key: "review_request:gitea:acme/payouts#145", title: "Second request" });
-  stream = [entry(), second];
-  count = 2;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  let release!: () => void;
-  hold = new Promise((resolve) => (release = resolve));
-  view.button("Done")!.click();
-  flushSync();
-  // Gone before the write answered, and the count with it.
-  expect(view.text()).not.toContain("Add payout CSV export");
-  expect(inbox.count).toBe(1);
-  // Nothing disabled while the first is written.
-  const next = view.button("Done")!;
-  expect(next.disabled).toBe(false);
-  next.click();
-  flushSync();
-  expect(calls).toContain("complete review_request:gitea:acme/payouts#145");
-  expect(view.text()).not.toContain("Second request");
-
-  stream = [];
-  count = 0;
-  release();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
-  expect(inbox.count).toBe(0);
-  view.stop();
-});
-
 test("a refused done puts the row back with the re-read and says why", async () => {
   stream = [entry()];
   count = 1;
@@ -743,33 +342,6 @@ test("a snooze moves the row to the shelf at once", async () => {
     ["review_request:gitea:acme/payouts#144", until.toISOString()],
   ]);
   expect(inbox.count).toBe(0);
-});
-
-test("a comment closes its box on the queue's answer, and a refusal can reopen it with the words", async () => {
-  stream = [entry({}, ["comment"])];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Comment")!.click();
-  flushSync();
-  const input = view.target.querySelector<HTMLInputElement>("input.inp")!;
-  input.value = "Looks right to me";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  view.button("Send")!.click();
-  await Promise.resolve();
-  await Promise.resolve();
-  flushSync();
-
-  expect(view.target.querySelector("input.inp")).toBeNull();
-  expect(followed.map((f) => f.following.name)).toEqual(["Comment"]);
-  // The queue later refuses it: *Edit and resend* opens the box again, typed.
-  followed[0]!.following.resend!();
-  flushSync();
-  expect(view.target.querySelector<HTMLInputElement>("input.inp")!.value).toBe("Looks right to me");
-  view.stop();
 });
 
 test("a re-read that lands while an answer is out does not draw the row back", async () => {
@@ -814,30 +386,4 @@ test("a re-read taken while an answer was out cannot draw the row back after the
   await early;
   expect(inbox.stream).toEqual([]);
   expect(inbox.count).toBe(0);
-});
-
-test("a double click on Send queues one comment", async () => {
-  stream = [entry({}, ["comment"])];
-  count = 1;
-  const inbox = createInbox();
-  await inbox.refresh();
-  const view = await draw(inbox);
-
-  view.button("Comment")!.click();
-  flushSync();
-  const input = view.target.querySelector<HTMLInputElement>("input.inp")!;
-  input.value = "Looks right to me";
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  flushSync();
-  let release!: () => void;
-  hold = new Promise((resolve) => (release = resolve));
-  const send = view.button("Send")!;
-  send.click();
-  send.click();
-  release();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  flushSync();
-  expect(calls.filter((c) => c.startsWith("write ")).length).toBe(1);
-  expect(followed.length).toBe(1);
-  view.stop();
 });

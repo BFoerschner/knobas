@@ -750,7 +750,7 @@ const UNANSWERED: { surface: string; witnesses: string[]; commands: string[] }[]
     witnesses: [
       "crates/knobas-app/tests/it/backup_ipc.rs",
       "crates/knobas-app/tests/share_exit.rs",
-      "app/src/lib/settings/BackupSection.test.svelte.ts",
+      "app/src/lib/tf/settings/TfSettingsSections.test.svelte.ts",
     ],
     commands: ["share_export", "restore_backup"],
   },
