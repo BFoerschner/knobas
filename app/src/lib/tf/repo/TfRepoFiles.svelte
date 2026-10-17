@@ -24,7 +24,7 @@
   import { SvelteSet } from "svelte/reactivity";
 
   import { ipcErrorMessage } from "../../ipc";
-  import type { CheckoutView, TreeEntry, ViewBlock } from "../../ipc/entity";
+  import type { CheckoutView, TreeEntry, ViewBlock, ViewSection } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { queuedCommit } from "./queued.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
@@ -90,9 +90,10 @@
     return listings[parentOf(full)]?.find((entry) => entry.name === nameOf(full));
   }
 
-  async function readSection(section: string, where = at): Promise<ViewBlock | undefined> {
+  /** The section `section` names, read at `where`: a directory's listing or a file and its actions. */
+  async function readSection(section: string, where = at): Promise<ViewSection | undefined> {
     const view = await ports.entityView(where, section);
-    return view?.sections[0]?.blocks[0];
+    return view?.sections[0];
   }
 
   function readDir(dir: string, section: string) {
@@ -100,8 +101,9 @@
     asked.add(dir);
     const mine = generation;
     readSection(section).then(
-      (block) => {
+      (read) => {
         if (mine !== generation) return;
+        const block = read?.blocks[0];
         listings[dir] = block?.type === "tree" ? block.entries : [];
       },
       (error) => {
@@ -159,12 +161,12 @@
       return;
     }
     let live = true;
-    ports.entityView(where, section).then(
-      (view) => {
+    readSection(section, where).then(
+      (read) => {
         if (!live) return;
-        const block = view?.sections[0]?.blocks[0];
+        const block = read?.blocks[0];
         file = block?.type === "file" ? block : null;
-        refusal = commitRefusal(view?.sections[0]);
+        refusal = commitRefusal(read);
         draft = null;
       },
       (error) => {

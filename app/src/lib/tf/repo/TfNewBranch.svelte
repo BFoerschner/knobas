@@ -15,10 +15,10 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { ChoiceOption } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import { resolveTicket } from "../job/job";
   import TfDialog from "../settings/TfDialog.svelte";
   import { markMade, toastQueued } from "./queued.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { resolveTicket } from "../job/job";
   import { newBranchName } from "./repo";
 
   let {
@@ -61,8 +61,9 @@
     const branch = name.trim();
     busy = true;
     try {
-      const ticket = job !== null && link ? await jobTicket(job) : null;
-      if (job !== null && link && ticket === null) {
+      const linking = job !== null && link ? job : null;
+      const ticket = linking === null ? null : await jobTicket(linking);
+      if (linking !== null && ticket === null) {
         push({ text: `${job} is not in the mirror, so the branch cannot be linked to it`, tone: "err" });
         busy = false;
         return;

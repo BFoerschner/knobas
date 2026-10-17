@@ -125,16 +125,13 @@ pub async fn submit_linked_in_background(
         write_id,
         source_id,
         move |state| async move {
-            let linked =
-                match crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
-                    .await
-                {
-                    Ok(declarations) => {
-                        link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
-                    }
-                    Err(error) => Err(error),
-                };
-            match linked {
+            let linked = async {
+                let declarations =
+                    crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
+                        .await?;
+                link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
+            };
+            match linked.await {
                 Ok(Some(made)) => tracing::debug!(write_id, %made, %ticket, "linked on arrival"),
                 Ok(None) => tracing::info!(
                     write_id,
