@@ -420,7 +420,12 @@ pub async fn start<R: tauri::Runtime>(
         connections: Arc::new(DbConnections(db.connector())),
         registry: Arc::clone(&registry),
         secrets: Arc::clone(&secrets),
-        events: Arc::new(TauriEvents::new(app.clone())),
+        // The owed links of #1050 resolved after every run (`ArrivalLinks`).
+        events: Arc::new(write_queue::ArrivalLinks::new(
+            TauriEvents::new(app.clone()),
+            db.pool().clone(),
+            Arc::clone(&registry),
+        )),
         timing: SchedulerTiming::default(),
     })
     .await?;
@@ -469,12 +474,17 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     connections: knobas_db::embedded::Connector,
     pool: PgPool,
 ) -> Result<Scheduler, sqlx::Error> {
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::builtin());
     Scheduler::start(SchedulerDeps {
         connections: Arc::new(DbConnections(connections)),
-        pool,
-        registry: Arc::new(Registry::builtin()),
+        pool: pool.clone(),
+        registry: Arc::clone(&registry),
         secrets: Arc::new(knobas_secrets::MemoryStore::new()),
-        events: Arc::new(TauriEvents::new(app.clone())),
+        events: Arc::new(write_queue::ArrivalLinks::new(
+            TauriEvents::new(app.clone()),
+            pool,
+            registry,
+        )),
         timing: SchedulerTiming::default(),
     })
     .await

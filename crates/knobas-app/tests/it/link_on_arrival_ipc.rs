@@ -10,7 +10,9 @@
 //! `just gitea-live`'s to witness (#707, #822).
 
 use knobas_app::IpcErrorCode;
-use knobas_app::sources::write_queue::{arrival_linkable, link_on_arrival};
+use knobas_app::sources::write_queue::{
+    ArrivalLinks, arrival_linkable, hold_arrival_link, link_arrivals, link_on_arrival,
+};
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::{Declarations, KindPaths, PayloadPath};
 use sqlx::PgPool;
@@ -309,6 +311,258 @@ async fn a_write_that_did_not_land_links_nothing() {
         );
     }
     assert!(reached(&pool).await.is_empty());
+}
+
+// -- the intent held with the write (#1050) ---------------------------------
+
+/// What `link_to` still says on write `id`.
+async fn owed(pool: &PgPool, id: i64) -> Option<String> {
+    sqlx::query_scalar("select link_to from knobas.write_queue where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .unwrap()
+}
+
+/// The issue's first criterion: a `CreateBranch` that waits (its source
+/// down), lands on a later tick, and is linked by the first sync that brings
+/// the branch in -- with no task alive from the send, since the intent is the
+/// row's. A link the reader then removes is not drawn again.
+#[tokio::test]
+async fn a_branch_that_lands_on_a_later_tick_is_linked_by_the_sync_that_brings_it_in() {
+    let pool = corpus("arrival_later_tick").await;
+    let id = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, id, TICKET).await.unwrap();
+    knobas_core::write_queue::wait(
+        &pool,
+        id,
+        knobas_core::write_queue::WaitReason::Unreachable,
+        Some("connection refused"),
+    )
+    .await
+    .unwrap();
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
+    assert!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap()
+            .is_empty(),
+        "a write still waiting links nothing, even with a same-named branch mirrored"
+    );
+    assert!(reached(&pool).await.is_empty());
+
+    // A later tick sends it; this sync brings nothing for it yet.
+    for statement in [
+        "delete from sync.item where entity_id = $1",
+        "delete from knobas.entity where id = $1",
+    ] {
+        sqlx::query(statement)
+            .bind(BRANCH)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
+    assert!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(owed(&pool, id).await.as_deref(), Some(TICKET), "still owed");
+
+    // The next sync brings the branch in.
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
+    assert!(
+        link_arrivals(&pool, &declarations(), "jira")
+            .await
+            .unwrap()
+            .is_empty(),
+        "another source's sync resolves nothing of gitea's"
+    );
+    assert_eq!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap(),
+        vec![BRANCH.to_owned()]
+    );
+    assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
+    assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
+
+    // The reader removes the link; the next sync leaves it removed.
+    sqlx::query("update knobas.link set deleted_at = now() where from_id = $1")
+        .bind(BRANCH)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(reached(&pool).await.is_empty());
+}
+
+/// The second criterion: a discarded or refused write links nothing, however
+/// many syncs bring a same-named branch in; a discard drops the intent. So
+/// does a job that has left the mirror, and a write sent so long ago that a
+/// branch of that name turning up now is not what it made.
+#[tokio::test]
+async fn a_discarded_refused_orphaned_or_stale_write_links_nothing() {
+    let pool = corpus("arrival_never").await;
+    let refused = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, refused, TICKET).await.unwrap();
+    knobas_core::write_queue::refuse(&pool, refused, "branch already exists")
+        .await
+        .unwrap();
+    let discarded = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, discarded, TICKET).await.unwrap();
+    knobas_core::write_queue::discard(&pool, discarded)
+        .await
+        .unwrap();
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
+    for _ in 0..2 {
+        assert!(
+            link_arrivals(&pool, &declarations(), "gitea")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+    assert!(reached(&pool).await.is_empty());
+    assert_eq!(owed(&pool, discarded).await, None, "a discard drops it");
+
+    // Sent, but the job is gone from the mirror: the intent is dropped and
+    // stays dropped if a ticket of that id comes back.
+    let gone = "jira:PAY-404";
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'gone')")
+        .bind(gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let orphan = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, orphan, gone).await.unwrap();
+    knobas_core::write_queue::sent(&pool, orphan, None)
+        .await
+        .unwrap();
+    sqlx::query("delete from knobas.entity where id = $1")
+        .bind(gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(owed(&pool, orphan).await, None);
+
+    // Sent eight days ago and never seen: dropped, not linked.
+    let stale = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, stale, TICKET).await.unwrap();
+    knobas_core::write_queue::sent(&pool, stale, None)
+        .await
+        .unwrap();
+    sqlx::query(
+        "update knobas.write_queue set settled_at = now() - interval '8 days' where id = $1",
+    )
+    .bind(stale)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        link_arrivals(&pool, &declarations(), "gitea")
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(reached(&pool).await.is_empty());
+    assert_eq!(owed(&pool, stale).await, None);
+}
+
+/// The wire: the scheduler's events, wrapped the way `sources::start` wraps
+/// them, resolve what is owed when a run of the source ends, and pass every
+/// event on. A run starting resolves nothing.
+#[tokio::test]
+async fn the_end_of_a_run_resolves_what_the_source_owes() {
+    use knobas_sync::scheduler::SyncEvents;
+
+    struct Told(std::sync::Arc<std::sync::Mutex<Vec<bool>>>);
+    impl SyncEvents for Told {
+        fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+            self.0.lock().unwrap().push(status.running);
+        }
+        fn source_health(&self, _health: knobas_sync::CredentialHealth) {}
+        fn activity_new(&self, _row: knobas_core::activity::ActivityRow) {}
+    }
+
+    let pool = corpus("arrival_run_end").await;
+    let told = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let events = ArrivalLinks::new(
+        Told(std::sync::Arc::clone(&told)),
+        pool.clone(),
+        std::sync::Arc::new(knobas_app::sources::Registry::builtin()),
+    );
+    let id = queued(&pool, new_branch()).await;
+    hold_arrival_link(&pool, id, TICKET).await.unwrap();
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
+
+    let started = knobas_sync::SourceSyncStatus::started("gitea", 1);
+    events.sync_state(started.clone());
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert!(
+        reached(&pool).await.is_empty(),
+        "a run starting links nothing"
+    );
+
+    events.sync_state(knobas_sync::SourceSyncStatus {
+        running: false,
+        ..started
+    });
+    tokio::time::timeout(std::time::Duration::from_secs(20), async {
+        while reached(&pool).await.is_empty() {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the run's end links the branch");
+    assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
+    assert_eq!(*told.lock().unwrap(), vec![true, false], "both passed on");
 }
 
 /// Refused before anything is queued: a write that makes nothing to link, a

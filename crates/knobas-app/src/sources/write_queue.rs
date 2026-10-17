@@ -103,9 +103,13 @@ pub async fn submit_in_background(
 ///
 /// What a `CreateBranch` or `CreatePullRequest` makes has no id until the
 /// source mints one and a sync brings it in (#707), so the link waits for
-/// both, the way #862's new page does: [`send_in_background_then`], then
-/// [`link_on_arrival`]. A write that does not go on that send (refused,
-/// waiting, later discarded) links nothing.
+/// both. Since #1050 the wait is the row's, not this task's: the ticket is
+/// held on the write ([`hold_arrival_link`]) and resolved by
+/// [`link_arrivals`] after the send's own re-read and after every later sync
+/// of the source ([`ArrivalLinks`]). So a write that waits (its source down,
+/// a held write released later) is linked when it lands on a later tick, a
+/// restart in between loses nothing, and a refused or discarded write links
+/// nothing.
 ///
 /// # Errors
 ///
@@ -118,31 +122,163 @@ pub async fn submit_linked_in_background(
 ) -> Result<QueuedWrite, IpcError> {
     arrival_linkable(&state.pool, &payload, &ticket).await?;
     let (queued, source_id) = queue(state, payload).await?;
-    let write_id = queued.id;
+    hold_arrival_link(&state.pool, queued.id, &ticket).await?;
+    let reread = source_id.clone();
     send_in_background_then(
         state,
         source_id.clone(),
-        write_id,
-        source_id,
+        queued.id,
+        reread,
         move |state| async move {
-            let linked = async {
-                let declarations =
-                    crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
-                        .await?;
-                link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
-            };
-            match linked.await {
-                Ok(Some(made)) => tracing::debug!(write_id, %made, %ticket, "linked on arrival"),
-                Ok(None) => tracing::info!(
-                    write_id,
-                    %ticket,
-                    "a queued write's branch or pull request was not there to link"
-                ),
-                Err(error) => tracing::warn!(write_id, %error, "a link on arrival failed"),
-            }
+            resolve_arrivals(&state.pool, state.registry.as_ref(), &source_id).await;
         },
     );
     Ok(queued)
+}
+
+/// Hold on write `write_id` the ticket what it makes is to be linked to once
+/// it arrives (#1050): `knobas.write_queue.link_to`, resolved by
+/// [`link_arrivals`].
+///
+/// # Errors
+///
+/// `internal` if the write fails.
+pub async fn hold_arrival_link(
+    pool: &sqlx::PgPool,
+    write_id: i64,
+    ticket: &str,
+) -> Result<(), IpcError> {
+    sqlx::query("update knobas.write_queue set link_to = $2 where id = $1")
+        .bind(write_id)
+        .bind(ticket)
+        .execute(pool)
+        .await
+        .map_err(IpcError::internal)?;
+    Ok(())
+}
+
+/// How long after a write was sent its link is still looked for. A branch of
+/// that name turning up later than this is not taken for what the write made.
+const ARRIVAL_PATIENCE: &str = "7 days";
+
+/// Resolve the links `source_id`'s sent writes still owe (#1050): each one
+/// whose branch or pull request the mirror now holds is linked to its ticket
+/// ([`link_on_arrival`]) and stops owing. Answers the entities linked.
+///
+/// A write that has not been sent keeps its intent: it may still land (a
+/// refused one the reader edits and sends included, whose link then follows
+/// the edited write). An intent is dropped, linking nothing, when the write is
+/// discarded, when its ticket has left the mirror, or when it was sent more
+/// than [`ARRIVAL_PATIENCE`] ago. Dropped once drawn, too, so a link the
+/// reader removes is not drawn again by the next sync.
+///
+/// # Errors
+///
+/// `internal` if a read or a write fails.
+pub async fn link_arrivals(
+    pool: &sqlx::PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    source_id: &str,
+) -> Result<Vec<String>, IpcError> {
+    sqlx::query(
+        "update knobas.write_queue w set link_to = null
+          where w.source_id = $1 and w.link_to is not null
+            and (w.state = 'discarded'
+                 or (w.state = 'sent' and w.settled_at < now() - $2::interval)
+                 or not exists (select 1 from knobas.entity e where e.id = w.link_to))",
+    )
+    .bind(source_id)
+    .bind(ARRIVAL_PATIENCE)
+    .execute(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let owed: Vec<(i64, String)> = sqlx::query_as(
+        "select id, link_to from knobas.write_queue
+          where source_id = $1 and link_to is not null and state = 'sent'
+          order by id",
+    )
+    .bind(source_id)
+    .fetch_all(pool)
+    .await
+    .map_err(IpcError::internal)?;
+    let mut linked = Vec::new();
+    for (write_id, ticket) in owed {
+        if let Some(made) = link_on_arrival(pool, declarations, write_id, &ticket).await? {
+            sqlx::query("update knobas.write_queue set link_to = null where id = $1")
+                .bind(write_id)
+                .execute(pool)
+                .await
+                .map_err(IpcError::internal)?;
+            linked.push(made);
+        }
+    }
+    Ok(linked)
+}
+
+/// [`link_arrivals`] with the source's declarations read first, best effort:
+/// logged, never raised, since nothing waits on it and the next sync tries
+/// again.
+async fn resolve_arrivals(
+    pool: &sqlx::PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    source_id: &str,
+) {
+    let linked = async {
+        let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
+        link_arrivals(pool, &declarations, source_id).await
+    };
+    match linked.await {
+        Ok(made) if !made.is_empty() => {
+            tracing::debug!(source = source_id, ?made, "linked on arrival");
+        }
+        Ok(_) => {}
+        Err(error) => tracing::warn!(source = source_id, %error, "a link on arrival failed"),
+    }
+}
+
+/// The scheduler's events, and after every run of a source ends, that
+/// source's owed links resolved ([`link_arrivals`], #1050). Wraps the events
+/// `sources::start` hands the scheduler, so a write that lands on any later
+/// tick is linked by the first sync that brings in what it made. Every event
+/// is passed on unchanged.
+pub struct ArrivalLinks<E> {
+    inner: E,
+    pool: sqlx::PgPool,
+    registry: std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+}
+
+impl<E> ArrivalLinks<E> {
+    pub fn new(
+        inner: E,
+        pool: sqlx::PgPool,
+        registry: std::sync::Arc<dyn knobas_sync::scheduler::AdapterRegistry>,
+    ) -> ArrivalLinks<E> {
+        ArrivalLinks {
+            inner,
+            pool,
+            registry,
+        }
+    }
+}
+
+impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents for ArrivalLinks<E> {
+    fn sync_state(&self, status: knobas_sync::SourceSyncStatus) {
+        if !status.running {
+            let pool = self.pool.clone();
+            let registry = std::sync::Arc::clone(&self.registry);
+            let source_id = status.source_id.clone();
+            tokio::spawn(async move {
+                resolve_arrivals(&pool, registry.as_ref(), &source_id).await;
+            });
+        }
+        self.inner.sync_state(status);
+    }
+    fn source_health(&self, health: knobas_sync::CredentialHealth) {
+        self.inner.source_health(health);
+    }
+    fn activity_new(&self, row: knobas_core::activity::ActivityRow) {
+        self.inner.activity_new(row);
+    }
 }
 
 /// Whether `payload` may carry a link on arrival to `ticket` (#984): a
