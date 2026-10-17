@@ -1,8 +1,8 @@
 /**
  * Settings › Notes and capture (#832), against stand-ins for its commands
- * and, for *Move to Confluence…* (#941), the page picker's reads. Whether the shortcut is registered is
- * `crates/knobas-app/tests/it/capture_ipc.rs`'s; here it is what the section
- * draws and what each control sends.
+ * and, for *Move to Confluence…* (#941), the page picker's reads. Whether
+ * the shortcut is registered is `crates/knobas-app/tests/it/capture_ipc.rs`'s;
+ * here it is what the section draws and what each control sends.
  */
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -148,6 +148,18 @@ async function settle() {
   flushSync();
 }
 
+/** In the open dialog: find *Notes archive*, pick it, and press *Move 37 notes*. */
+async function pickAndMove() {
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
+  find.value = "archive";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  button("Notes archive").click();
+  flushSync();
+  button("Move 37 notes").click();
+  await settle();
+}
+
 test("Move to Confluence… picks a page and queues the notes under it", async () => {
   const fake = stub();
   await render(fake.ports);
@@ -157,14 +169,7 @@ test("Move to Confluence… picks a page and queues the notes under it", async (
   expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Move notes to Confluence");
   expect(button("Move 37 notes").disabled).toBe(true);
 
-  const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
-  find.value = "archive";
-  find.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
-  button("Notes archive").click();
-  flushSync();
-  button("Move 37 notes").click();
-  await settle();
+  await pickAndMove();
 
   expect(fake.moved).toEqual(["wiki:98500"]);
   expect(target.querySelector('[role="dialog"]')).toBeNull();
@@ -178,14 +183,7 @@ test("a move the backend refuses keeps the dialog open and says why", async () =
 
   button("Move to Confluence…").click();
   await settle();
-  const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
-  find.value = "archive";
-  find.dispatchEvent(new Event("input", { bubbles: true }));
-  await settle();
-  button("Notes archive").click();
-  flushSync();
-  button("Move 37 notes").click();
-  await settle();
+  await pickAndMove();
 
   expect(target.querySelector('[role="dialog"]')).not.toBeNull();
   expect(toasts.items.at(-1)?.text).toBe("Could not move the notes: wiki:98500 is not in the mirror");

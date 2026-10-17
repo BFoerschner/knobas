@@ -92,6 +92,8 @@
     moving = true;
   }
 
+  const pageCount = (n: number) => (n === 1 ? "1 page" : `${n} pages`);
+
   async function move() {
     if (chosen === null) return;
     sending = true;
@@ -105,8 +107,6 @@
       sending = false;
     }
   }
-
-  const pageCount = (n: number) => (n === 1 ? "1 page" : `${n} pages`);
 
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
@@ -163,7 +163,7 @@
   </div>
 {/if}
 
-{#if moving && view !== null}
+{#if moving}
   <TfDialog title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
     {#snippet body()}
       <p class="tf-dsub">Each note becomes a page under the one you pick. Your notes stay in knobas.</p>
