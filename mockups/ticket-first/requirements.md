@@ -787,7 +787,7 @@ A cog in the top bar beside the theme toggle, and `⌘,`. *Sources* in the statu
 - **R-13a.3 Checkouts and Open in…:** the clones root, the git found, and the *Open in…* applications (R-8.21 to R-8.24) with *Make default* and *Edit applications…*.
 - **R-13a.4 Time:** passive blocks on or off, how long they are kept, the week's rules, where worklogs go.
 - **R-13a.5 Notifications**, **Standup** (publish target), **Monitoring** (slow-above threshold, sample retention): BUILT sections, redrawn.
-- **R-13a.6 Notes and capture (D10):** *Show notes and quick capture*, off; the shortcut, inactive while hidden; the count; *Export notes as Markdown*; *Move to Confluence…*.
+- **R-13a.6 Notes and capture (D10):** *Show notes and quick capture*, off; the shortcut, inactive while hidden, with *Change…* to set or clear it (BUILT `set_capture_shortcut`, kept from today's Capture section, #1086); the count; *Export notes as Markdown*; *Move to Confluence…*.
 - **R-13a.7 Backup and export:** last backup, schedule, how many to keep, *Back up now*, *Restore from a file…*; *Share with a colleague* with ticks (links, link sets, ticket views, contexts, assets and routes, sources without passwords, smart lists; notes and time off) and *Export…*, *Import…*.
 - **R-13a.8 Appearance** (theme: like the system, light, dark), **Keyboard** (the shortcuts of section 14, read-only), **Logs and database** (size, version, *Open the log folder*, *Re-index search*).
 
@@ -798,6 +798,7 @@ A cog in the top bar beside the theme toggle, and `⌘,`. *Sources* in the statu
 | `⌘K` | anywhere | Search everything |
 | `⌘T` | anywhere | Stop or start the timer |
 | `⌘,` | anywhere | Settings |
+| `⌘[` `⌘]` `⌘←` `⌘→`, the mouse's back and forward buttons | anywhere but a text field | Back and forward through the addresses (BUILT, #693; kept in the new shell, #1086) |
 | `/` | any list view | Focus the page filter |
 | `Esc` | anywhere | Unwinds one layer: dialog, drawer, filter text, filter focus, sub-tab, full view to job, job to tickets |
 | `j` `k` `↑` `↓` | tickets | Move the selection |

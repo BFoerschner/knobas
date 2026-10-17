@@ -373,13 +373,19 @@ test("a restore into a knobas that holds data is refused: the dialog stays and s
 test("Keyboard lists the fixed shortcuts", async () => {
   await open("keyboard");
   const rows = [...target.querySelectorAll(".tf-stg-keys tr")];
-  expect(rows).toHaveLength(10);
+  expect(rows).toHaveLength(11);
   expect([...rows[0]!.querySelectorAll("td")].map((td) => td.textContent?.trim())).toEqual([
     "⌘K",
     "Anywhere",
     "Search everything",
   ]);
-  expect([...rows[9]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
+  expect([...rows[3]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent), "history, #1086").toEqual([
+    "⌘[",
+    "⌘]",
+    "⌘←",
+    "⌘→",
+  ]);
+  expect([...rows[10]!.querySelectorAll("td:first-child kbd")].map((kbd) => kbd.textContent)).toEqual(["Enter", "Shift", "Enter"]);
 });
 
 test("Logs and database: size, items and version; the folder and the re-index", async () => {

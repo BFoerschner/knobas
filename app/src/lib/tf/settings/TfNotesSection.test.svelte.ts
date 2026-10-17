@@ -39,6 +39,8 @@ function stub(initial: Partial<CaptureShortcut> = {}) {
     ...initial,
   };
   const sent: boolean[] = [];
+  const shortcuts: (string | null)[] = [];
+  let refusal: string | null = null;
   const moved: string[] = [];
   let exported = 0;
   const ports: NotesPorts = {
@@ -80,12 +82,25 @@ function stub(initial: Partial<CaptureShortcut> = {}) {
       stored = { ...stored, shown };
       return Promise.resolve(stored);
     },
+    setCaptureShortcut: (accelerator) => {
+      shortcuts.push(accelerator);
+      stored = { ...stored, accelerator, refusal: stored.shown ? refusal : null };
+      refusal = null;
+      return Promise.resolve(stored);
+    },
     exportNotes: () => {
       exported += 1;
       return Promise.resolve({ count: 37, folder: "/Users/mara/Downloads/knobas-notes" });
     },
   };
-  return { ports, sent, moved, exported: () => exported };
+  return {
+    ports,
+    sent,
+    moved,
+    shortcuts,
+    exported: () => exported,
+    refuseNext: (why: string) => (refusal = why),
+  };
 }
 
 async function render(ports: NotesPorts) {
@@ -128,6 +143,65 @@ test("turning the switch on sends it and the shortcut works again", async () => 
 test("a shortcut the system refused says so while notes are shown", async () => {
   await render(stub({ shown: true, refusal: "taken by another application" }).ports);
   expect(text()).toContain("Not registered: taken by another application");
+});
+
+function shortcutField(): HTMLInputElement {
+  return target.querySelector<HTMLInputElement>('input[aria-label="Capture shortcut"]')!;
+}
+
+test("Change… sets the capture shortcut and the row draws what is stored (#1086)", async () => {
+  const fake = stub({ shown: true });
+  await render(fake.ports);
+
+  button("Change capture shortcut").click();
+  flushSync();
+  expect(shortcutField().value, "the field starts at what is stored").toBe("CmdOrCtrl+Alt+N");
+  expect(button("Save").disabled, "nothing changed yet").toBe(true);
+  shortcutField().value = " CmdOrCtrl+Shift+K ";
+  shortcutField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+
+  expect(fake.shortcuts).toEqual(["CmdOrCtrl+Shift+K"]);
+  expect(shortcutField(), "the dialog closes").toBeNull();
+  expect([...target.querySelectorAll("kbd")].map((k) => k.textContent)).toEqual(["⇧", "⌘", "K"]);
+});
+
+test("Clear sends no shortcut, and a refused combination is stored and says why", async () => {
+  const fake = stub({ shown: true });
+  await render(fake.ports);
+  button("Change capture shortcut").click();
+  flushSync();
+  button("Clear").click();
+  await settle();
+  expect(fake.shortcuts).toEqual([null]);
+  expect(text()).toContain("Not set");
+
+  fake.refuseNext("taken by another application");
+  button("Change capture shortcut").click();
+  flushSync();
+  shortcutField().value = "CmdOrCtrl+Space";
+  shortcutField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+  expect(text()).toContain("Not registered: taken by another application");
+});
+
+test("a write that fails keeps the dialog open and says why", async () => {
+  const fake = stub();
+  fake.ports.setCaptureShortcut = () => Promise.reject({ code: "storage", message: "disk full", source_id: null });
+  await render(fake.ports);
+  button("Change capture shortcut").click();
+  flushSync();
+  shortcutField().value = "CmdOrCtrl+Shift+K";
+  shortcutField().dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  button("Save").click();
+  await settle();
+  expect(shortcutField()).not.toBeNull();
+  expect(target.querySelector(".tf-dialog")?.textContent).toContain("disk full");
 });
 
 test("Export notes as Markdown says where the files went", async () => {

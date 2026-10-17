@@ -26,6 +26,24 @@ const KIND: Record<InboxCategory, string> = {
 /** The kind chips, in prototype-6's order. A credential expiry has none. */
 export const KIND_CHIPS = ["Review", "Mention", "Build", "Assignment", "Monitor"] as const;
 
+/**
+ * How many days before a credential expires its item arrives:
+ * `knobas_core::inbox::WINDOW_DAYS`, which a Rust test in
+ * `crates/knobas-app/src/inbox.rs` holds this line to.
+ */
+export const WINDOW_DAYS = 14;
+
+/**
+ * When a credential expiry's credential expires, for the *After it expires*
+ * snooze (#1086); `null` for every other item. The date is not on the wire:
+ * the backend dates the item at `secret_expires_at` minus [`WINDOW_DAYS`], so
+ * it is re-derived as `occurred_at` plus the same window.
+ */
+export function expiryOf(item: Pick<InboxItem, "category" | "occurred_at">): Date | null {
+  if (item.category !== "credential_expiry") return null;
+  return new Date(new Date(item.occurred_at).getTime() + WINDOW_DAYS * 86_400_000);
+}
+
 export function kindOf(category: InboxCategory): string {
   return KIND[category] ?? category;
 }

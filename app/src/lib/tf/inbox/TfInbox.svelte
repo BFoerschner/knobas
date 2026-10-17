@@ -37,6 +37,7 @@
   import type { SourceFacts } from "../job/job";
   import { jobIndex, readOpenJobs, type OpenJob } from "../job/open-jobs";
   import {
+    expiryOf,
     failed,
     KIND_CHIPS,
     kindOf,
@@ -228,7 +229,7 @@
         </div>
         {#if snoozing === item.key}
           <div class="tf-isnooze" role="group" aria-label="Snooze until">
-            {#each snoozePresets(now) as preset (preset.label)}
+            {#each snoozePresets(now, expiryOf(item)) as preset (preset.label)}
               <button type="button" class="tf-btn tf-sm" onclick={() => snooze(entry, preset.at)}>{preset.label}</button>
             {/each}
             <input

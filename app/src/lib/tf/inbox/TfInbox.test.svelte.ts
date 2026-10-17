@@ -73,8 +73,8 @@ async function settle() {
   flushSync();
 }
 
-function store(): Inbox {
-  let stream = STREAM.slice();
+function store(extra: InboxEntry[] = []): Inbox {
+  let stream = [...STREAM, ...extra];
   let snoozed = SNOOZED.slice();
   return createInbox({
     inboxItems: async (shelf) => (shelf === "snoozed" ? snoozed.slice() : stream.slice()),
@@ -105,7 +105,7 @@ function context(anchor: string): ContextRow {
   return { id: `ctx:${anchor}`, kind: "ticket", title: anchor, anchor_id: anchor, created_at: at(9, 0), archived_at: null };
 }
 
-async function open(over: { job?: string | null; contexts?: ContextRow[] } = {}) {
+async function open(over: { job?: string | null; contexts?: ContextRow[]; extra?: InboxEntry[] } = {}) {
   const ports = {
     listContexts: async () => over.contexts ?? [],
     listSources: async () => [{ id: "jira" }, { id: "gitea" }],
@@ -120,7 +120,7 @@ async function open(over: { job?: string | null; contexts?: ContextRow[] } = {})
       return { id: 7 } as unknown as QueuedWrite;
     },
   };
-  view = mount(TfInbox, { target, props: { ready: true, job: over.job ?? null, inbox: store(), ports, now: NOW } });
+  view = mount(TfInbox, { target, props: { ready: true, job: over.job ?? null, inbox: store(over.extra), ports, now: NOW } });
   await settle();
 }
 
@@ -233,6 +233,28 @@ test("Snooze offers the presets, and one moves the item to the snoozed line", as
   expect(text(target.querySelector(".tf-ishelf"))).toBe(
     "Snoozed: the Jira credential expires on Monday 7 Sep 2026 (back 2026-08-29), jonas asked for your review: Idempotent retry window (back 2026-08-24).",
   );
+});
+
+test("a credential expiry also offers After it expires, the day after the expiry the item is dated from (#1086)", async () => {
+  // The backend dates the item at the expiry minus WINDOW_DAYS (14): this one
+  // arrived on 22 Aug 08:00, so the credential expires on 5 Sep 08:00.
+  await open({
+    extra: [
+      entry({ key: "credential_expiry:tc", category: "credential_expiry", source_id: "tc", entity_id: null, kind: null,
+        title: "TeamCity", reason: "the TeamCity credential expires on Saturday 5 Sep 2026", occurred_at: at(8, 0) }),
+    ],
+  });
+  const review = rowOf("Idempotent");
+  button(review, "Snooze").click();
+  flushSync();
+  expect(text(review.querySelector(".tf-isnooze")), "a review has no expiry to hang it on").not.toContain("After it expires");
+
+  const row = rowOf("TeamCity credential");
+  button(row, "Snooze").click();
+  flushSync();
+  button(row, "After it expires").click();
+  await settle();
+  expect(calls).toEqual([`snooze credential_expiry:tc ${new Date(2026, 8, 6, 9, 0).toISOString()}`]);
 });
 
 test("an empty stream says so", async () => {
