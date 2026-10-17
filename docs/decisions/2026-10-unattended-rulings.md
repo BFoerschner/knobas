@@ -5202,3 +5202,24 @@ Implementer.
   `Steps` implementation serves the borrowed and the owned state, so the six forwarding methods
   go. The ticket's other half, the detail panel's queue watch, went with the rooms UI (#1087).
   **Reversing:** low.
+
+## #1138 — a Confluence reorder reaches the Docs tree on the next incremental run (2026-10-18)
+
+Implementer.
+
+- **Option 2's family, as one sweep per run; not a periodic full sync, not "accept it".** Measured
+  on DC 9.2: a move changes `extensions.position` on the siblings and nothing a bounded query can
+  see (no version, no `lastmodified`, nothing on the parent; the audit log is admin-only). A
+  per-parent child walk costs one request per parent; one scoped, body-less search costs one
+  request per 200 pages and reads every parent at once. The bound is one sync interval.
+  **Reversing:** low (drop the sweep; the cursor field is ignored by an older reader).
+- **The cursor records the places, and only whole-number ones.** The adapter cannot read the
+  mirror, so it needs its own memory of what it delivered to tell a moved page from an unmoved
+  one. Title-order pages (`"none"`) are left out so an unreordered space costs nothing.
+  Cost: about 12 bytes per placed page. **Reversing:** low.
+- **No cursor version bump.** A cursor without `positions` re-reads every placed page once
+  (all that can be stale), where a bump would re-read every page. **Reversing:** low (bump to 4).
+- **The sweep orders by `created`, not `lastmodified`.** It pages by offset, and an edit made
+  mid-sweep shifts rows in a `lastmodified` order; `created` never moves. **Reversing:** low.
+- **Moved pages are re-read by `id in (…)`, not one `content/{id}` each.** A reorder renumbers
+  every sibling, so they come in groups. **Reversing:** low.

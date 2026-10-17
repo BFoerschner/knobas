@@ -21,7 +21,11 @@
 //! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
 //!    currentUser() AND type in (page, comment)` over the same window, whose
 //!    results are resolved to the pages they are on and pushed too.
-//! 7. If nothing was pushed, hand back the cursor byte-identically. Otherwise
+//! 7. **The positions sweep** ([`SyncRun::positions_sweep`], incremental runs
+//!    only): every page's place among its siblings, compared with the places
+//!    the cursor records; the pages that moved are read again whole and
+//!    pushed (#1138). A reorder makes no new version, so step 4 never sees it.
+//! 8. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
 //!
 //! # Why the mention walk is a second query and not a wider first one
