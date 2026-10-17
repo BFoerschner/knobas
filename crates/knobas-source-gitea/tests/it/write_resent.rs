@@ -94,6 +94,46 @@ async fn a_branch_created_whose_answer_was_lost_is_delivered() {
     assert_eq!(posts(&server).await, 2, "the lost one and the refused repeat");
 }
 
+/// The queue's resend (ADR-0012), not the transport's: every attempt of the
+/// first flush lost its answer, so the write waited; the next flush meets
+/// Gitea's 409, and the branch is there at `main`'s commit.
+#[tokio::test]
+async fn a_branch_the_queue_resends_after_its_answers_were_lost_is_delivered() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path(format!("{REPO}/branches")))
+        .respond_with(ResponseTemplate::new(504))
+        .up_to_n_times(knobas_http::MAX_ATTEMPTS.into())
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    Mock::given(method("POST"))
+        .and(path(format!("{REPO}/branches")))
+        .respond_with(
+            ResponseTemplate::new(409)
+                .set_body_json(json!({ "message": "The branch already exists." })),
+        )
+        .with_priority(2)
+        .mount(&server)
+        .await;
+    holds(&server, "/branches/main", json!({ "name": "main", "commit": { "id": "c90d11aa" } }))
+        .await;
+    holds(
+        &server,
+        "/branches/feature%2FPAY-231-sepa-retry",
+        json!({ "name": "feature/PAY-231-sepa-retry", "commit": { "id": "c90d11aa" } }),
+    )
+    .await;
+
+    let gitea = source(&server);
+    let first = gitea.write(create_branch()).await.expect_err("no answer came back");
+    assert_eq!(first.status(), Some(504), "{first:?}");
+    gitea
+        .write(create_branch())
+        .await
+        .expect("the queue's resend finds the branch the first flush made");
+}
+
 /// A branch of that name at another commit is somebody else's: Gitea's 409
 /// stands.
 #[tokio::test]

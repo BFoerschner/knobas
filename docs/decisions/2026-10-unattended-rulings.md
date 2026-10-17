@@ -4920,3 +4920,26 @@ Merge-manager:
   favourite filters" ("your", as the rest of that sentence speaks), with a §10.8 entry for the
   wording. **Reversing:** move the create into `seed-atlassian-content.sh` and read its ids
   from `seed-state.json`; an hour.
+
+## #1129 — A guarded write whose repeat is refused after it landed is delivered (2026-10-17)
+
+- **The look-after-refusal lives in the adapter.** The transport's retry and the queue's resend
+  both end in the same `write::*` call, so one check there covers both. **Reversing:** low.
+- **A merge counts as this write's only when `merged_by` is this account.** The brief asked for
+  "the pull request merged". Merged by somebody else, the reader's merge did not happen, and the
+  existing *already merged* refusal is the truthful answer. Costs one `GET /user` on a 405.
+  **Reversing:** trivial (drop the login comparison).
+- **A pull request is matched on head, base and title**, in the first three pages of open pull
+  requests. Gitea allows one open pull request per pair, so the one it refused over is the one to
+  compare. The body is not compared: Gitea may normalise it. **Reversing:** trivial.
+- **A branch is matched on its tip equalling `from_ref`'s commit.** When the base branch moved
+  between the two attempts, the refusal stands. That is rare, and it is the old answer, never a
+  wrong delivery. **Reversing:** trivial.
+- **A page is matched on `base_version + 1` and the exact storage body.** A body Confluence rewrote
+  on the way in reads as another body and keeps the 409, so the check never claims an edit that
+  may not be ours. **Reversing:** trivial.
+- **The queue's projection hold is unchanged.** A queued `update_page` or merge whose target the
+  mirror saw move between the flushes (because the first attempt landed and a sync read it) is
+  held before the adapter is asked. *Send again* keeps the payload and reaches the check, which
+  then delivers it. Skipping hold detection for a write that waited would be the flag
+  `apply_anyway`'s doc rules out. **Reversing:** moderate.
