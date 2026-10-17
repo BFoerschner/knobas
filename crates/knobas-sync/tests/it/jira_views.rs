@@ -314,3 +314,101 @@ async fn a_board_deleted_in_jira_leaves_with_its_tickets_and_its_ticket_view() {
         "the other board stays"
     );
 }
+
+fn filter(id: &str, keys: &[&str]) -> Value {
+    json!({
+        "kind": "filter", "id": id, "type": null,
+        "jql": "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+        "sub_query": null, "query": "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+        "columns": [], "sprint": null, "keys": keys,
+    })
+}
+
+/// `(layout, hidden, is_new)` of a ticket view row.
+async fn flags(pool: &PgPool, id: &str) -> (String, bool, bool) {
+    let row = sqlx::query("select layout, hidden, is_new from knobas.ticket_view where id = $1")
+        .bind(id)
+        .fetch_one(pool)
+        .await
+        .expect("the ticket view row");
+    (row.get("layout"), row.get("hidden"), row.get("is_new"))
+}
+
+/// #878: a favourite filter is a Jira view under *Jira filters*, drawn as a
+/// list (Jira gives a filter no columns), its tickets in Jira's order.
+#[tokio::test]
+async fn a_favourite_filter_shows_as_a_list_under_jira_filters() {
+    let pool = pool("jira_views_filter").await;
+    let (src, _) = source(vec![(
+        "filter-10300".into(),
+        "PAY without a fix version".into(),
+        filter("10300", &["PAY-240", "PAY-231"]),
+        false,
+    )]);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    let ref_kind: String = sqlx::query_scalar(
+        "select ref_kind from sync.jira_view where entity_id = 'jira:filter-10300'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(ref_kind, "filter");
+    let (name, group, columns, _, jira_ref) = ticket_view(&pool, "jira-filter-10300")
+        .await
+        .expect("a ticket view for the filter");
+    assert_eq!(
+        (name.as_str(), group.as_str(), columns, jira_ref.as_deref()),
+        (
+            "PAY without a fix version",
+            "Jira filters",
+            json!([]),
+            Some("jira:filter-10300")
+        )
+    );
+    assert_eq!(flags(&pool, "jira-filter-10300").await.0, "list");
+    assert_eq!(
+        members(&pool, "jira:filter-10300").await,
+        [("jira:PAY-240".to_owned(), 1), ("jira:PAY-231".to_owned(), 2)]
+    );
+}
+
+/// #878, R-3.20 and R-3.25: the views a source's first sync brings are not
+/// *new*; one that turns up at a later sync is. Hiding is the reader's and
+/// no sync undoes it.
+#[tokio::test]
+async fn a_view_that_turns_up_after_the_first_sync_is_new_and_a_hidden_one_stays_hidden() {
+    let pool = pool("jira_views_new").await;
+    let (src, corpus) = source(vec![(
+        "board-21".into(),
+        "PAY sprint board".into(),
+        board(21, &["PAY-231"], three_columns()),
+        false,
+    )]);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(
+        flags(&pool, "jira-board-21").await,
+        ("board".into(), false, false)
+    );
+    sqlx::query("update knobas.ticket_view set hidden = true where id = 'jira-board-21'")
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    corpus.lock().unwrap().push((
+        "board-22".into(),
+        "PAY flow".into(),
+        board(22, &["PAY-240"], three_columns()),
+        false,
+    ));
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(
+        flags(&pool, "jira-board-22").await,
+        ("board".into(), false, true),
+        "a board new in Jira is marked new"
+    );
+    assert_eq!(
+        flags(&pool, "jira-board-21").await,
+        ("board".into(), true, false),
+        "hidden stays hidden, and an old board does not turn new"
+    );
+}

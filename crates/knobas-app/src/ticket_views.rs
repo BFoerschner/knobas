@@ -136,6 +136,24 @@ pub struct JiraSource {
     pub last_read: chrono::DateTime<chrono::Utc>,
     /// Where Jira shows it, or `None`.
     pub web_url: Option<String>,
+    /// *Hide from the list* (#878, R-3.25): it keeps syncing, and the views
+    /// pane draws it as one line at the bottom with *Show*.
+    pub hidden: bool,
+    /// Turned up after its source's first sync and not opened yet (#878,
+    /// R-3.20).
+    pub new: bool,
+    /// The tickets on it that knobas does not mirror, by project, most first
+    /// (#878, R-13a.2): a project the source does not sync, or a ticket not
+    /// synced yet.
+    pub unsynced: Vec<Unsynced>,
+}
+
+/// Tickets on a Jira view from one project that knobas does not mirror.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct Unsynced {
+    /// The project key, read off the ticket key (`WEB-5` → `WEB`).
+    pub project: String,
+    pub count: u64,
 }
 
 /// The columns a view is read from, in [`view_of`]'s terms; a macro so the
@@ -250,21 +268,34 @@ async fn jira_sources(
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
+    // `unsynced` reads the member's entity id, `<source>:<KEY>-<n>`: the
+    // project is what sits between the source's colon and the last hyphen.
     let rows = sqlx::query(
         "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
-                v.last_read, i.web_url,
+                v.last_read, i.web_url, tv.hidden, tv.is_new,
                 (select count(*) from sync.jira_view_member m
                    join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
-                  where m.view_id = v.entity_id) as n
+                  where m.view_id = v.entity_id) as n,
+                (select coalesce(jsonb_agg(jsonb_build_object('project', u.project, 'count', u.n)
+                                           order by u.n desc, u.project), '[]'::jsonb)
+                   from (select substring(m.entity_id from ':([^:]+)-[^-]*$') as project,
+                                count(*) as n
+                           from sync.jira_view_member m
+                          where m.view_id = v.entity_id
+                            and not exists (select 1 from sync.live_item l
+                                             where l.entity_id = m.entity_id
+                                               and l.kind = 'ticket')
+                          group by 1) u
+                  where u.project is not null) as unsynced
            from sync.jira_view v
            join sync.item i on i.entity_id = v.entity_id
+           join knobas.ticket_view tv on tv.jira_ref = v.entity_id
           where v.entity_id = any($1)",
     )
     .bind(&refs)
     .fetch_all(pool)
     .await?;
-    Ok(rows
-        .iter()
+    rows.iter()
         .map(|row| {
             let n: i64 = row.get("n");
             let source = JiraSource {
@@ -275,13 +306,78 @@ async fn jira_sources(
                 sprint: row.get("sprint"),
                 last_read: row.get("last_read"),
                 web_url: row.get("web_url"),
+                hidden: row.get("hidden"),
+                new: row.get("is_new"),
+                unsynced: serde_json::from_value(row.get("unsynced"))
+                    .map_err(IpcError::internal)?,
             };
-            (
+            Ok((
                 row.get("entity_id"),
                 (u64::try_from(n).unwrap_or(0), source),
-            )
+            ))
         })
-        .collect())
+        .collect()
+}
+
+/// The Jira view `id` names, or why not: `not_found` for no view, `invalid`
+/// for a view somebody made.
+async fn jira_view_id(pool: &PgPool, id: &str) -> Result<(), IpcError> {
+    let jira: Option<bool> = sqlx::query_scalar(
+        "select coalesce(jira_ref in (select entity_id from sync.jira_view), false)
+           from knobas.ticket_view where id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    match jira {
+        None => Err(IpcError::not_found(format!(
+            "no ticket view is called {id}"
+        ))),
+        Some(true) => Ok(()),
+        Some(false) => Err(IpcError::invalid(format!(
+            "{id} is not a Jira view: only a Jira view hides from the list; delete your own"
+        ))),
+    }
+}
+
+/// *Hide from the list* or *Show* a Jira view (#878, R-3.25). It keeps
+/// syncing either way.
+///
+/// # Errors
+///
+/// `not_found` for no view, `invalid` for a view somebody made, `internal`
+/// if the write fails.
+pub async fn hide(pool: &PgPool, id: &str, hidden: bool) -> Result<(), IpcError> {
+    jira_view_id(pool, id).await?;
+    sqlx::query("update knobas.ticket_view set hidden = $2 where id = $1")
+        .bind(id)
+        .bind(hidden)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// A view was opened: a Jira view that said *new* stops saying it (#878,
+/// R-3.20). Opening any other view, or one opened before, changes nothing.
+///
+/// # Errors
+///
+/// `not_found` for no view, `internal` if the write fails.
+pub async fn open(pool: &PgPool, id: &str) -> Result<(), IpcError> {
+    let found: Option<bool> = sqlx::query_scalar(
+        "with opened as (update knobas.ticket_view set is_new = false
+                          where id = $1 and is_new returning 1)
+         select true from knobas.ticket_view where id = $1",
+    )
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
+    if found.is_none() {
+        return Err(IpcError::not_found(format!(
+            "no ticket view is called {id}"
+        )));
+    }
+    Ok(())
 }
 
 /// The view `id` names if it is a Jira view (#877), as stored.

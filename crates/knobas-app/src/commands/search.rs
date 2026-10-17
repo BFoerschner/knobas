@@ -242,6 +242,33 @@ pub async fn delete_ticket_view(
     crate::ticket_views::delete(&lifecycle.pool()?, &id).await
 }
 
+/// *Hide from the list* (`hidden: true`) or *Show* a Jira view (#878,
+/// R-3.25); it keeps syncing either way.
+///
+/// # Errors
+///
+/// `not_found` if no view has that id, `invalid` for a view somebody made,
+/// `not_ready` before the database is up, `internal` if the write fails.
+#[tauri::command]
+pub async fn hide_jira_view(
+    lifecycle: State<'_, Lifecycle>,
+    id: String,
+    hidden: bool,
+) -> Result<(), IpcError> {
+    crate::ticket_views::hide(&lifecycle.pool()?, &id, hidden).await
+}
+
+/// A ticket view was opened: a Jira view stops saying *new* (#878, R-3.20).
+///
+/// # Errors
+///
+/// `not_found` if no view has that id, `not_ready` before the database is
+/// up, `internal` if the write fails.
+#[tauri::command]
+pub async fn open_jira_view(lifecycle: State<'_, Lifecycle>, id: String) -> Result<(), IpcError> {
+    crate::ticket_views::open(&lifecycle.pool()?, &id).await
+}
+
 /// The values the query box suggests after `kind:`, `source:` and `under:`
 /// (#601): the kinds with rows, the enabled sources, and the names the
 /// mirror's and the estate's parents answer to, each with its kind. Only
