@@ -19,7 +19,7 @@
   import { push } from "../../shell/toasts.svelte";
   import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
   import { publishableSources, type PublishableSource } from "../../standup/protocol";
-  import type { Layers } from "../layers.svelte";
+  import { layers as sharedLayers, type Layers } from "../layers.svelte";
   import { homePath, keyCaps, noteCount, notesLine } from "./notes";
   import { realNotesPorts, type NotesPorts } from "./notes-ports";
   import TfDialog from "./TfDialog.svelte";
@@ -27,7 +27,7 @@
   let {
     ports = realNotesPorts,
     now = () => new Date(),
-    layers,
+    layers = sharedLayers,
   }: {
     ports?: NotesPorts;
     now?: () => Date;
@@ -108,6 +108,7 @@
     }
   }
 
+  const moveLabel = $derived(`Move ${noteCount(view?.note_count ?? 0)}`);
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
     if (!shown) return "Inactive while notes are hidden.";
@@ -173,9 +174,7 @@
     {/snippet}
     {#snippet footer()}
       <button class="tf-btn" onclick={() => (moving = false)}>Cancel</button>
-      <button class="tf-btn tf-primary" disabled={sending || chosen === null} onclick={() => void move()}
-        >Move {noteCount(view?.note_count ?? 0)}</button
-      >
+      <button class="tf-btn tf-primary" disabled={sending || chosen === null} onclick={() => void move()}>{moveLabel}</button>
     {/snippet}
   </TfDialog>
 {/if}
