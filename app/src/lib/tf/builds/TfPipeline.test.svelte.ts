@@ -116,6 +116,7 @@ const SETTINGS: PipelineSettings = {
     { name: "deploy.token", label: null, hint: null, kind: { type: "text" } },
   ],
   chain: [],
+  steps: [],
 };
 
 const DESCRIPTOR = {

@@ -542,7 +542,20 @@ export function fakeSettings(config: string): PipelineSettings {
     parameter_write_op: "set_parameter",
     parameter_specs: parameterSpecs(config),
     chain: chainOf(config).map((step) => ({ pipeline: `${SOURCE}:buildType:${step}`, name: step })),
+    steps: stepNames(config),
   };
+}
+
+/**
+ * The steps a run of the configuration takes (#1016), from prototype-6's
+ * `stepsOf`: `Payout_Build`'s are its running run's five, of which 1188's log
+ * has reached three.
+ */
+function stepNames(config: string): string[] {
+  if (config === "Payout_IntegrationTests")
+    return ["Checkout", "Start PSP sandbox stub", "cargo build --tests", "cargo test --test sepa_retry", "Publish test report"];
+  if (config === "Payout_Build") return ["Checkout", "cargo build --release", "cargo test", "Build image", "Publish artifacts"];
+  return ["Checkout", "Build", "Test", "Publish"];
 }
 
 /** prototype-6's `CHAINS` (#857): TeamCity snapshot dependencies, first step first. */

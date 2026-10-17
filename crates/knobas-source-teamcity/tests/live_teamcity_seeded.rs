@@ -3320,6 +3320,49 @@ async fn a_configurations_settings_come_back_without_a_credential() {
     );
 }
 
+/// The steps a run takes (#1016, R-9.10) on the seeded server:
+/// `Payout_Build` names its five in order, the ones a running run's log has
+/// not reached yet; and a finished run's log heads its steps with the names
+/// the settings give, which is what lets the run page put the two together.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn a_pipelines_settings_name_the_steps_its_runs_log_heads() {
+    let seeded = seeded();
+    let source = seeded.source(serde_json::json!({}));
+    let settings_of = async |config: &str| {
+        source
+            .pipeline_settings(&format!("teamcity:buildType:{config}"))
+            .await
+            .expect("the settings read")
+            .expect("TeamCity keeps pipelines")
+    };
+    let build = settings_of("Payout_Build").await;
+    println!("SEEDED steps of Payout_Build: {:?}", build.steps);
+    assert_eq!(
+        build.steps,
+        ["step 1", "step 2", "cargo test", "step 4", "step 5"],
+        "the seed's five steps, the fixture's `cargo test` third"
+    );
+
+    let failed = seeded.fixture_build(1187);
+    let tests = settings_of(&failed.build_type).await;
+    let log = source
+        .run_log(
+            &format!("teamcity:build:{}", failed.real_id),
+            None,
+            knobas_source::run::LOG_LINES_MAX,
+        )
+        .await
+        .expect("the log reads")
+        .expect("TeamCity keeps runs");
+    let headed: Vec<&str> = log.steps.iter().map(|s| s.name.as_str()).collect();
+    println!(
+        "SEEDED steps of {}: settings {:?}, log {headed:?}",
+        failed.build_type, tests.steps
+    );
+    assert_eq!(headed, tests.steps, "the log heads each step by its name");
+}
+
 /// The chain [`a_chain_names_its_steps_and_each_runs_build_on_the_branch`]
 /// makes under the seeded `Payout`: `Build`, `Docker` waiting on it, `Deploy`
 /// waiting on `Docker`, each building payout-service with one `echo` step.

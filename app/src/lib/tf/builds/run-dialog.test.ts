@@ -47,6 +47,7 @@ const SETTINGS: PipelineSettings = {
     { name: "deploy.key", label: null, hint: null, kind: { type: "text" } },
   ] satisfies ParameterSpec[],
   chain: [],
+  steps: [],
 };
 
 describe("fieldsOf", () => {

@@ -730,7 +730,22 @@ pub(crate) fn pipeline_settings(
             .collect(),
         // The chain is a listing of its own; `TeamCitySource::pipeline_settings` fills it.
         chain: Vec::new(),
+        steps: step_names(record),
     }
+}
+
+/// The enabled steps' names, in order (#1016): a run's log numbers only the
+/// enabled ones. One unnamed step names none, because its log heading is the
+/// runner's name, which the record does not carry.
+fn step_names(record: &ConfigRecord) -> Vec<String> {
+    record
+        .steps
+        .step
+        .iter()
+        .filter(|step| !step.disabled)
+        .map(|step| nonblank(step.name.as_deref()).map(str::to_owned))
+        .collect::<Option<Vec<_>>>()
+        .unwrap_or_default()
 }
 
 /// A step or trigger that is switched off: said, quietly.
@@ -1541,6 +1556,36 @@ mod tests {
                 ("deploy.token", &ParameterKind::Text),
             ]
         );
+    }
+
+    /// The steps a run takes (#1016, R-9.10): the enabled ones by name, in
+    /// the configuration's order, which is the order a run's log numbers
+    /// them in. A step the source keeps unnamed names none of them: its log
+    /// heading is the runner's, which the record does not say.
+    #[test]
+    fn a_configurations_steps_are_named_in_order_without_the_disabled_ones() {
+        let record = |steps: serde_json::Value| -> ConfigRecord {
+            serde_json::from_value(serde_json::json!({
+                "id": "Payout_Build",
+                "steps": { "step": steps }
+            }))
+            .expect("a configuration record")
+        };
+        let named = pipeline_settings(&record(serde_json::json!([
+            { "id": "RUNNER_1", "name": "Checkout", "type": "simpleRunner" },
+            { "id": "RUNNER_2", "name": "Lint", "type": "simpleRunner", "disabled": true },
+            { "id": "RUNNER_3", "name": "cargo test", "type": "simpleRunner" },
+            { "id": "RUNNER_4", "name": "Publish", "type": "simpleRunner" }
+        ])));
+        assert_eq!(named.steps, ["Checkout", "cargo test", "Publish"]);
+
+        let one_unnamed = pipeline_settings(&record(serde_json::json!([
+            { "id": "RUNNER_1", "name": "Checkout", "type": "simpleRunner" },
+            { "id": "RUNNER_2", "name": " ", "type": "simpleRunner" }
+        ])));
+        assert!(one_unnamed.steps.is_empty(), "{:?}", one_unnamed.steps);
+
+        assert!(pipeline_settings(&record(serde_json::json!([]))).steps.is_empty());
     }
 
     #[test]

@@ -79,6 +79,37 @@ test("a running step has no duration yet: it says running, and takes the mean of
   expect(segments[1]!.width).toBeCloseTo(50, 1);
 });
 
+test("a running run's steps the log has not reached are drawn after the running one, not started, as wide as a running step", () => {
+  const running: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
+  const segments = stepSegments(running, true, ["Checkout", "cargo test", "Build image", "Publish"]);
+  expect(segments.map((s) => [s.index, s.name, s.state, s.tip])).toEqual([
+    [0, "Checkout", "ok", "Checkout, 12 s"],
+    [1, "cargo test", "run", "cargo test, running"],
+    [2, "Build image", "wait", "Build image, not started"],
+    [3, "Publish", "wait", "Publish, not started"],
+  ]);
+  // Each step without a duration takes the 12 s the one finished step took.
+  for (const s of segments) expect(s.width).toBeCloseTo(25, 1);
+  expect(segments[3]!.x).toBeCloseTo(75, 1);
+});
+
+test("the settings' steps are drawn only for a run in flight whose log heads its steps by the same names", () => {
+  const running: RunLog = { ...LOG, steps: [LOG.steps[0]!, { ...LOG.steps[1]!, tone: null, seconds: null }] };
+  const names = (log: RunLog | null, inFlight: boolean, steps: string[]) => stepSegments(log, inFlight, steps).map((s) => s.name);
+  // A finished run's log has every step it ran.
+  expect(names(LOG, false, ["Checkout", "cargo test", "Publish"])).toEqual(["Checkout", "cargo test"]);
+  // The pipeline changed since the run started: its log is not a head of the settings.
+  expect(names(running, true, ["Checkout", "Lint", "cargo test"])).toEqual(["Checkout", "cargo test"]);
+  expect(names(running, true, ["Checkout"])).toEqual(["Checkout", "cargo test"]);
+  // A source that names no steps ahead of time.
+  expect(names(running, true, [])).toEqual(["Checkout", "cargo test"]);
+  // A run in flight whose log has reached no step yet.
+  expect(names({ ...LOG, steps: [] }, true, ["Checkout", "cargo test"])).toEqual(["Checkout", "cargo test"]);
+  expect(stepSegments({ ...LOG, steps: [] }, true, ["Checkout"])[0]!.state).toBe("wait");
+  // No log read is no bar.
+  expect(names(null, true, ["Checkout"])).toEqual([]);
+});
+
 test("a step too short to see keeps a sliver, and a log without steps draws no bar", () => {
   const long: RunLog = { ...LOG, steps: [{ ...LOG.steps[0]!, seconds: 0 }, { ...LOG.steps[1]!, seconds: 3600 }] };
   const [short, rest] = stepSegments(long, false);

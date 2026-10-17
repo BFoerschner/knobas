@@ -942,6 +942,7 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
             pipeline: "teamcity:buildType:Payout_Build".to_owned(),
             name: "Build".to_owned(),
         }],
+        steps: vec!["Checkout".to_owned()],
     };
     let wire = serde_json::to_value(&settings).unwrap();
     // #857's chain.
@@ -955,6 +956,7 @@ fn the_pipeline_settings_shape_matches_its_typescript_mirror() {
             "parameter_write_op",
             "parameters",
             "repositories",
+            "steps",
             "triggers",
         ],
     );

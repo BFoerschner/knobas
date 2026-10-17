@@ -218,8 +218,8 @@ fn parse(line: &str) -> Parsed {
     }
 }
 
-/// `Step 2/5: cargo test (1m:02s)` opens step 2 named `cargo test`; the lines
-/// inside it start `[Step 2/5]`.
+/// `Step 2/5: cargo test (Command Line) (1m:02s)` opens step 2 named `cargo
+/// test`; the lines inside it start `[Step 2/5]`.
 fn step_heading(message: &str) -> Option<(String, String)> {
     let rest = message.strip_prefix("Step ")?;
     let (counter, name) = rest.split_once(": ")?;
@@ -233,8 +233,23 @@ fn step_heading(message: &str) -> Option<(String, String)> {
     }
     Some((
         format!("[Step {counter}]"),
-        without_duration(name).to_owned(),
+        without_runner(without_duration(name)).to_owned(),
     ))
+}
+
+/// A heading's name without the runner TeamCity appends to a named step:
+/// `IntegrationTests (Command Line)` is `IntegrationTests`, the name its
+/// configuration gives it (#1016). Only the last parenthesis goes, so `Build
+/// (release) (Gradle)` keeps its words; an unnamed step's heading is the
+/// runner alone, with none.
+fn without_runner(name: &str) -> &str {
+    if !name.ends_with(')') {
+        return name;
+    }
+    match name.rfind(" (") {
+        Some(open) if open > 0 => &name[..open],
+        _ => name,
+    }
 }
 
 /// A heading's name without the duration TeamCity may append: `cargo test
@@ -404,5 +419,23 @@ assertion `left == right` failed\n\
         );
         assert!(step_heading("Step x/2: no").is_none());
         assert!(step_heading("Stepping out").is_none());
+    }
+
+    /// TeamCity heads a named step `<name> (<runner>)`, as the seeded server
+    /// does (`IntegrationTests (Command Line)`), and an unnamed one by the
+    /// runner alone. The step is named as its configuration names it (#1016),
+    /// so the run page can tell which configured steps a run has not reached.
+    #[test]
+    fn a_heading_names_the_step_without_its_runner() {
+        let name = |heading: &str| step_heading(heading).unwrap().1;
+        assert_eq!(
+            name("Step 1/1: IntegrationTests (Command Line)"),
+            "IntegrationTests"
+        );
+        assert_eq!(
+            name("Step 2/3: Build (release) (Gradle) (1m:02s)"),
+            "Build (release)"
+        );
+        assert_eq!(name("Step 3/3: Command Line"), "Command Line");
     }
 }

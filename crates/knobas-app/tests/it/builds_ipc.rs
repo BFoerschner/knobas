@@ -527,6 +527,7 @@ impl knobas_source::Source for Answers {
             parameter_write_op: Some("set_parameter".to_owned()),
             parameter_specs: vec![],
             chain: vec![],
+            steps: vec!["Checkout".to_owned(), "cargo test".to_owned()],
         }))
     }
     async fn run_chain(
@@ -804,6 +805,8 @@ async fn settings_name_the_mirrored_repository_by_its_id() {
         .collect();
     assert_eq!(ids, [Some(repo.as_str()), None, None]);
     assert_eq!(settings.triggers[0].name, "VCS");
+    // #1016: the steps a run takes cross as the source named them.
+    assert_eq!(settings.steps, ["Checkout", "cargo test"]);
 
     let failed = pipeline_settings_inner(&pool, &no_secrets(), &Answering, &down)
         .await

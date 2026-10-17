@@ -54,6 +54,13 @@ pub struct PipelineSettings {
     /// pipeline in no chain, and absent from an older peer's answer.
     #[serde(default)]
     pub chain: Vec<ChainStep>,
+    /// The steps a run of the pipeline takes (#1016, R-9.10): the enabled
+    /// ones by name, in the order a run's log numbers them. The run page draws
+    /// the ones a running run's log has not reached yet as *not started*.
+    /// Empty where the source does not name every step ahead of time, and
+    /// absent from an older peer's answer.
+    #[serde(default)]
+    pub steps: Vec<String>,
 }
 
 /// One pipeline of a chain (#857).

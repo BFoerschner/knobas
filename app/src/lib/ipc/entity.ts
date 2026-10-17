@@ -609,6 +609,8 @@ export interface PipelineSettings {
   parameter_specs: ParameterSpec[];
   /** The chain the pipeline is a step of, itself included, in running order; empty for none (#857). */
   chain: ChainStep[];
+  /** The enabled steps a run takes, by name, in order; empty where the source does not name them ahead of time (#1016). */
+  steps: string[];
 }
 
 /** One pipeline of a chain — `knobas_source::pipeline::ChainStep` (#857). */

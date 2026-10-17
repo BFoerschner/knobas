@@ -243,7 +243,7 @@
   const inFlight = $derived(run !== null && run.finished === null);
   const stale = $derived(staleLine(pipeline, sources.map((s) => s.health), sync));
   const jobBranch = $derived(held === null ? null : jobBranchFor(held, jobBranches));
-  const segments = $derived(stepSegments(log, inFlight));
+  const segments = $derived(stepSegments(log, inFlight, settings?.steps ?? []));
 
   /** The header's chip: the run's own word, *running* or *queued* while in flight. */
   function chipWord(r: RunRow): string {
@@ -351,10 +351,10 @@
           <a
             href={runTabHash(pipelineId, runId, "log")}
             aria-label={segment.tip}
-            onclick={() => (openStep = { step: segment.index, seq: ++openSeq })}
+            onclick={() => (openStep = segment.state === "wait" ? null : { step: segment.index, seq: ++openSeq })}
           >
             <title>{segment.tip}</title>
-            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
+            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true" class:tf-sbwait={segment.state === "wait"}>
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
               <text x="10" y="19">{segment.name}</text>
