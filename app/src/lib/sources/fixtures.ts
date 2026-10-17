@@ -121,7 +121,7 @@ export const JIRA_SCHEMA = {
       default: "synced",
       title: "Boards",
       description:
-        "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards marked as favourites in Jira, every board you can see, or none. Read at every sync.",
+        "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards built on your favourite filters, every board you can see, or none. Read at every sync.",
       "x-knobas-section": "boards-and-filters",
     },
     favourite_filters: {

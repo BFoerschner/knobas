@@ -3033,6 +3033,129 @@ async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_take
     );
 }
 
+/// **The *Only boards built on my favourite filters* choice (#1096, #1136)**:
+/// with `boards: "favourites"`, a board whose saved filter is a favourite
+/// filter comes in as a Jira view, and the seeded boards, whose filters are
+/// not favourites, do not. The test makes its own favourite filter and board
+/// and takes both back before it asserts, so the shared fixture keeps no
+/// favourite-filter board (the seed's favourite filter has none).
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn only_the_boards_built_on_my_favourite_filters_come_in_when_the_choice_is_set() {
+    const PROBE: &str = "knobas live probe board on a favourite filter";
+    let seeded = seeded();
+    let sprint = seeded.seed.sprint();
+    let kanban = &seeded
+        .seed
+        .views
+        .as_ref()
+        .expect("seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)")
+        .kanban;
+    // A probe a killed run left behind: the board, then its filter.
+    let (_, listed) = seeded
+        .get(&format!("rest/agile/1.0/board?name={}", url_encode(PROBE)))
+        .await;
+    for board in listed["values"].as_array().into_iter().flatten() {
+        seeded
+            .request(
+                reqwest::Method::DELETE,
+                &format!("rest/agile/1.0/board/{}", board["id"]),
+                None,
+            )
+            .await;
+    }
+    let (_, favourites) = seeded.get("rest/api/2/filter/favourite").await;
+    for filter in favourites.as_array().into_iter().flatten() {
+        if filter["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with(PROBE))
+        {
+            seeded
+                .request(
+                    reqwest::Method::DELETE,
+                    &format!("rest/api/2/filter/{}", filter["id"].as_str().unwrap()),
+                    None,
+                )
+                .await;
+        }
+    }
+
+    let (status, filter) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/filter",
+            Some(serde_json::json!({ "name": format!("{PROBE} {}", uuid_like()), "jql": "project = PAY ORDER BY Rank ASC", "favourite": true })),
+        )
+        .await;
+    assert_eq!(status, 200, "{filter}");
+    assert_eq!(filter["favourite"], true, "{filter}");
+    let filter_id: u64 = filter["id"].as_str().unwrap().parse().unwrap();
+    let (status, board) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/agile/1.0/board",
+            Some(serde_json::json!({ "name": PROBE, "type": "kanban", "filterId": filter_id })),
+        )
+        .await;
+    let made = status == 200 || status == 201;
+    let items = if made {
+        let source = seeded.source(serde_json::json!({
+            "projects": ["PAY"], "boards": "favourites", "favourite_filters": false,
+        }));
+        full(&*source).await.0
+    } else {
+        Vec::new()
+    };
+    // Taken back before anything is asserted, so a failure leaves nothing.
+    let mut taken_back = Vec::new();
+    if made {
+        let (status, _) = seeded
+            .request(
+                reqwest::Method::DELETE,
+                &format!("rest/agile/1.0/board/{}", board["id"]),
+                None,
+            )
+            .await;
+        taken_back.push(status);
+    }
+    let (status_filter, _) = seeded
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/filter/{filter_id}"),
+            None,
+        )
+        .await;
+    taken_back.push(status_filter);
+    assert!(made, "{status} {board}");
+    assert!(
+        taken_back.iter().all(|s| (200..300).contains(s)),
+        "the probe board and filter were not taken back: {taken_back:?}"
+    );
+
+    let probe = format!("board-{}", board["id"]);
+    let views: Vec<&str> = items
+        .iter()
+        .filter(|i| i.kind == "jira_view")
+        .map(|i| i.entity.key.as_str())
+        .collect();
+    for seeded_board in [sprint.board_id, kanban.board_id] {
+        let key = format!("board-{seeded_board}");
+        assert!(
+            !views.contains(&key.as_str()),
+            "{key}'s filter is not a favourite, yet it came in: {views:?}"
+        );
+    }
+    assert_eq!(
+        views,
+        [probe.as_str()],
+        "exactly the board built on a favourite filter, and no filter view"
+    );
+    println!(
+        "SEEDED favourite boards: {probe} on favourite filter {filter_id} came in; boards {} and {} did not",
+        sprint.board_id, kanban.board_id
+    );
+}
+
 /// **Why a Jira view has no quick filters (#879, R-3.24, R-3.26)**: the
 /// ticket asked to check `rest/agile/1.0/board/{id}/quickfilter` against
 /// testenv's Data Center and to leave quick filters out if it is missing.

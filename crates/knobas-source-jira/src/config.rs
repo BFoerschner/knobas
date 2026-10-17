@@ -29,7 +29,7 @@ pub enum BoardScope {
     /// The boards on the projects this source syncs (the default, D17).
     #[default]
     Synced,
-    /// Only the boards marked as favourites in Jira: a board whose saved
+    /// Only the boards built on my favourite filters: a board whose saved
     /// filter is one of this account's favourite filters (see
     /// `crate::views`, ruling in #878's PR).
     Favourites,
