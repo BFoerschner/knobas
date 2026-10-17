@@ -44,7 +44,6 @@
     rest,
     job,
     ready,
-    onrooms,
     ports = realSettingsPorts,
     sectionPorts = realSectionPorts,
     theme = sharedTheme,
@@ -59,8 +58,6 @@
     job: string | null;
     /** Whether the database answers yet. */
     ready: boolean;
-    /** Switch back to the rooms UI, for the sections not built here yet. */
-    onrooms: () => void;
     ports?: SettingsPorts;
     /** The other sections' commands (#831). */
     sectionPorts?: SectionPorts;
@@ -227,12 +224,6 @@
         <TfCheckoutsSection {layers} />
       {:else if place.section === "notes"}
         <TfNotesSection {layers} />
-      {:else if place.section !== "sources"}
-        <header class="tf-stg-h"><h1>{sectionName}</h1></header>
-        <p class="tf-stg-p">{sectionName} is not built in the new shell yet. The rooms UI has every setting today.</p>
-        <div class="tf-stg-acts">
-          <button class="tf-btn tf-primary" onclick={onrooms}>Switch back to the rooms UI</button>
-        </div>
       {:else if error !== null && sources === null}
         <header class="tf-stg-h"><h1>Sources</h1></header>
         <p class="tf-stg-p tf-stg-errt">Could not read the sources: {error}</p>

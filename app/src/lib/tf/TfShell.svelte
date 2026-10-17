@@ -1,26 +1,25 @@
 <!--
   The ticket-first shell (#809): the frame every view of the redesign is drawn
-  in, mounted instead of the rooms UI when the setting says so
-  (`shell-choice.ts`).
+  in, and since the rooms UI went (#881) the only one.
 
   It owns the top bar, the status bar, the toasts, the theme, the keyboard and
   the address. Everything that is the whole app's rather than one shell's
   stays in `App.svelte` and reaches it as a callback: the launcher behind
   *Search* and `⌘K`, and the timer verb behind the chip and `⌘T`, which stops
-  into the worklog draft (#280) exactly as it does in the rooms UI.
+  into the worklog draft (#280).
 
-  **The tokens are on this element, not on `:root`** (design system, *Getting
-  it into the app*): `.tf` sets them, paints its own paper and fills the
-  window, and the rooms UI's `app.css` is untouched. The theme follows the OS
-  through `prefers-color-scheme`; the toggle overrides it for the session by
-  setting `data-theme` here, from the one theme setting Settings › Appearance
-  also writes (`theme.svelte.ts`, #831).
+  **The tokens are on `:root`** since the rooms UI went (#881): `.tf` paints
+  its own paper and fills the window. The theme follows the OS through
+  `prefers-color-scheme`; the toggle overrides it for the session by setting
+  `data-theme` on `<html>`, from the one theme setting Settings › Appearance
+  also writes (`theme.svelte.ts`, #831), so the dialogs mounted outside `.tf`
+  follow it too.
 
-  **Dialogs styled by the rooms UI are mounted outside `.tf`**, the write
-  queue and the Add-source dialog (#830) here and the launcher, the picker and the ad-hoc dialog in
-  `App.svelte`: inside it they would read this shell's `--ok`, `--muted`,
-  `--sans` and `--mono` instead of their own. Dialogs ported to this shell
-  arrive through `dialogs` and are drawn inside it: the worklog draft (#826).
+  **Dialogs not yet ported to this shell are mounted outside `.tf`**, the
+  write queue and the Add-source dialog (#830) here and the launcher, the
+  picker and the ad-hoc dialog in `App.svelte`; they draw with
+  `src/unported.css`. Dialogs ported to this shell arrive through `dialogs`
+  and are drawn inside it: the worklog draft (#826).
 -->
 <script lang="ts" module>
   import type { SourceSummary as Summary, SourceSyncStatus as SyncRow } from "../ipc/sources";
@@ -56,7 +55,6 @@
   import { escStep } from "./escape";
   import { layers as sharedLayers, type Layers } from "./layers.svelte";
   import { parseTfHash, sectionOf } from "./route";
-  import { switchShell } from "./shell-choice";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
   import { isEntityId, keyOf, resolveTicket } from "./job/job";
@@ -84,7 +82,6 @@
       listen: (event, handler) => tauriListen(event, handler),
     },
     prefersDark = () => window.matchMedia("(prefers-color-scheme: dark)").matches,
-    onrooms = () => switchShell("rooms"),
     onstarttimer = () => {},
     jobPorts = bridgePorts,
     dialogs,
@@ -107,7 +104,6 @@
     queue?: Queue;
     ports?: TfShellPorts;
     prefersDark?: () => boolean;
-    onrooms?: () => void;
     /** Start the timer on a ticket, stopping another into its draft first (#816). */
     onstarttimer?: (entityId: string, title: string) => void;
     /** The job page's reads (#816); the bridge's when omitted. */
@@ -285,6 +281,15 @@
     else if (step.do === "go") go(step.hash);
   }
 
+  // A forced theme is on `<html>`, where the tokens are, so everything in the
+  // window follows it; none is the OS deciding. Taken off when the shell goes.
+  $effect(() => {
+    const html = document.documentElement;
+    if (theme.choice === "system") html.removeAttribute("data-theme");
+    else html.setAttribute("data-theme", theme.choice);
+    return () => html.removeAttribute("data-theme");
+  });
+
   onMount(() => {
     const onhash = () => (hash = location.hash);
     window.addEventListener("hashchange", onhash);
@@ -296,7 +301,7 @@
   });
 </script>
 
-<div class="tf" data-theme={theme.choice === "system" ? undefined : theme.choice}>
+<div class="tf">
   <TfTopBar
     current={sectionOf(route)}
     job={navJob}
@@ -315,7 +320,6 @@
         job: lastJob,
         timedTicket,
         navJob: navJobId,
-        onrooms,
         timer,
         layers,
         theme,

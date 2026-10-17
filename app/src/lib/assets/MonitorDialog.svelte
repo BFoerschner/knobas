@@ -210,7 +210,7 @@
     margin-bottom: 4px;
   }
 
-  /* `.inp`, `.btn` and `.fail` are `app.css`' -- redeclaring them here is how
+  /* `.inp`, `.btn` and `.fail` are `unported.css`' -- redeclaring them here is how
      two dialogs come to look different. `RouteDialog` styles the same three
      things and no more. */
   .hint {

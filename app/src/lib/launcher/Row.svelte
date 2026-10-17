@@ -110,8 +110,8 @@
 <style>
   /*
     `.res` is the mockup's launcher row (round 3, lines 413-425). It is not in
-    `app.css` on purpose — the sheet's header records the launcher's selectors
-    as stream E's, shipping with the component.
+    `unported.css` on purpose — the launcher's selectors ship with the
+    component (stream E's, as the old `app.css` recorded).
 
     Four columns, not the mockup's six: its status and per-row action cells
     need write-back (M2), and a column reserved for a control that cannot work

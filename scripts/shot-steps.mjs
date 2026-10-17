@@ -1,6 +1,6 @@
 // One screenshot after steps, driven over the Chrome DevTools protocol (used by
 // scripts/shot.sh when a route carries steps; issue #989).
-// Usage: node scripts/shot-steps.mjs <port> <debug port> <profile> <size w,h> <shell> <theme> <file> <spec>
+// Usage: node scripts/shot-steps.mjs <port> <debug port> <profile> <size w,h> <theme> <file> <spec>
 //   spec: `#/job/PAY-231 > #/builds + click:Some button`
 //     ` > ` separates routes opened in turn inside one page (in-memory state
 //     survives, so a job opened first scopes the next route);
@@ -10,7 +10,7 @@
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
-const [port, debug, profile, size, shell, theme, file, spec, extra = ""] = process.argv.slice(2);
+const [port, debug, profile, size, theme, file, spec, extra = ""] = process.argv.slice(2);
 const [width, height] = size.split(",").map(Number);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const flags = ["--headless=new", "--disable-gpu", "--hide-scrollbars", `--user-data-dir=${profile}`, `--remote-debugging-port=${debug}`, `--window-size=${size}`];
@@ -50,7 +50,7 @@ try {
     return a.result?.result?.value;
   };
   await send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false });
-  const base = `http://localhost:${port}/?fake-ipc${shell ? `&shell=${shell}` : ""}${extra}`;
+  const base = `http://localhost:${port}/?fake-ipc${extra}`;
   const clickJs = (name) => {
     const byId = name.startsWith("testid=");
     const want = JSON.stringify(byId ? name.slice(7) : name);

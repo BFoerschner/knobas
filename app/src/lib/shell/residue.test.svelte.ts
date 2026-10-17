@@ -351,7 +351,6 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 const { trackResidue } = await import("./residue");
 const { createRouter } = await import("./router.svelte");
-const { builtinContexts } = await import("./contexts");
 
 const App = (await import("../../App.svelte")).default;
 const TfShell = (await import("../tf/TfShell.svelte")).default;
@@ -425,68 +424,25 @@ const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).defaul
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
-const ContextTabs = (await import("./ContextTabs.svelte")).default;
-const Flap = (await import("./Flap.svelte")).default;
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
-const ActionDialog = (await import("../detail/view/ActionDialog.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
-const TopStrip = (await import("./TopStrip.svelte")).default;
-const Room = (await import("./Room.svelte")).default;
-const SuggestionTray = (await import("./SuggestionTray.svelte")).default;
-const ShellFixture = (await import("./Shell.fixture.svelte")).default;
-const StatusBar = (await import("./StatusBar.svelte")).default;
-const Tile = (await import("./Tile.svelte")).default;
-const AssetsTile = (await import("./AssetsTile.svelte")).default;
-const Detail = (await import("../detail/Detail.svelte")).default;
-const SourceView = (await import("../detail/view/SourceView.svelte")).default;
-const LogBlock = (await import("../detail/view/LogBlock.svelte")).default;
-const SettingsBlock = (await import("../detail/view/SettingsBlock.svelte")).default;
 const Launcher = (await import("../launcher/Launcher.svelte")).default;
-const InboxView = (await import("../inbox/InboxView.svelte")).default;
-const NoteView = (await import("../notes/NoteView.svelte")).default;
 const QueryBox = (await import("../launcher/QueryBox.svelte")).default;
-const StartWork = (await import("../start-work/StartWork.svelte")).default;
-const DayReview = (await import("../time/DayReview.svelte")).default;
 const TfDay = (await import("../tf/time/TfDay.svelte")).default;
 const TfWeek = (await import("../tf/time/TfWeek.svelte")).default;
 const TfStandup = (await import("../tf/time/TfStandup.svelte")).default;
 const TfDocs = (await import("../tf/docs/TfDocs.svelte")).default;
 const TfDocBody = (await import("../tf/docs/TfDocBody.svelte")).default;
 const TfNewPage = (await import("../tf/docs/TfNewPage.svelte")).default;
-const WeekTimesheet = (await import("../time/WeekTimesheet.svelte")).default;
-const StandupView = (await import("../standup/StandupView.svelte")).default;
 const AssetsView = (await import("../assets/AssetsView.svelte")).default;
-const MonitorsView = (await import("../assets/MonitorsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
 const TfImport = (await import("../tf/deps/TfImport.svelte")).default;
-const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
-const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
-const Diagnostics = (await import("../sources/Diagnostics.svelte")).default;
 const FirstRun = (await import("../sources/FirstRun.svelte")).default;
-const ReenterSecret = (await import("../sources/ReenterSecret.svelte")).default;
-const SourcesView = (await import("../sources/SourcesView.svelte")).default;
-const BackupSection = (await import("../settings/BackupSection.svelte")).default;
-const CheckoutPanel = (await import("../detail/CheckoutPanel.svelte")).default;
-const CheckoutsSection = (await import("../settings/CheckoutsSection.svelte")).default;
-const CaptureSection = (await import("../settings/CaptureSection.svelte")).default;
-const PassiveSection = (await import("../settings/PassiveSection.svelte")).default;
-const MonitoringSection = (await import("../settings/MonitoringSection.svelte")).default;
-const NotificationsSection = (await import("../settings/NotificationsSection.svelte")).default;
-const { createNotifications } = await import("../inbox/notify.svelte");
-const { createHealth } = await import("./health.svelte");
 const { createInbox } = await import("../inbox/inbox.svelte");
 
-/**
- * A timer store the strip can draw, held on an **asset** (#437).
- *
- * A literal rather than `createTimer`: the strip reads the store and never
- * drives it, and the one thing this case has to be true of is that something
- * is running and that it is an asset — which is what makes the strip issue the
- * look-up whose teardown is under test.
- */
 /** The estate's browse, answering with nothing: this file tests teardowns. */
 const EMPTY_SEARCH = {
   interpreted: {
@@ -499,55 +455,6 @@ const EMPTY_SEARCH = {
   total: 0,
   took_ms: 1,
   coverage: [],
-};
-
-/** One asset, as `get_asset` answers for the strip's look-up. */
-const ASSET_DETAIL = {
-  asset: {
-    id: "asset:9f3c11de",
-    parent_id: null,
-    type_id: "vm",
-    type_label: "VM",
-    monogram: "VM",
-    name: "vm-db-01",
-    status: "none" as const,
-    environment: null,
-    owner: null,
-    has_children: false,
-    health: "none" as const,
-    inside: "none" as const,
-    problems_inside: 0,
-    linked_work: 0,
-  },
-  properties: [],
-  held_by: [],
-  holds: [],
-  exposes: [],
-  reachable_via: [],
-  history: [],
-  links: [],
-  effective_environment: null,
-  effective_owner: null,
-  monitors: [],
-  monitoring: [],
-  monitor_targets: [],
-};
-
-const ASSET_TIMER = {
-  current: {
-    target: { kind: "entity" as const, entity_id: "asset:9f3c11de" },
-    started_at: "2026-09-06T09:00:00Z",
-    last_heartbeat: "2026-09-06T09:00:00Z",
-  },
-  elapsed: "0:07",
-  foreground: null,
-  roomContext: null,
-  refresh: async () => {},
-  start: async () => {},
-  stop: async () => null,
-  switchTo: async () => null,
-  press: async () => ({ did: "pick" as const, closed: null }),
-  begin: () => () => {},
 };
 
 /**
@@ -646,7 +553,6 @@ function sectionCase(name: string, section: string): Case {
           rest: [section],
           job: null,
           ready: true,
-          onrooms: () => {},
           ports: settingsPorts(),
           sectionPorts: sectionPorts(),
           notifications: {
@@ -696,8 +602,6 @@ function sourcePageProps() {
     onremoved: () => {},
   };
 }
-
-const CONTEXTS = builtinContexts([{ id: "jira", label: "Tidewater Jira" }]);
 
 /** A lifecycle that is up, so the components that gate on it actually read. */
 function readyLifecycle() {
@@ -766,24 +670,14 @@ const CASES: Case[] = [
     /**
      * The root, and the reason this scan reaches outside `lib/`.
      *
-     * `App.svelte` installs the three longest-lived subscriptions in the
-     * window — the router's `hashchange`, the global key bindings and the
-     * `source:health` listener — and it was the one component the walk below
-     * could not see, because it is the only one that does not live in `lib/`.
+     * `App.svelte` installs the longest-lived subscriptions in the window —
+     * the `source:health` listener, the inbox, the timer and the capture
+     * window's channel — and it was the one component the walk below could
+     * not see, because it is the only one that does not live in `lib/`.
      */
     name: "App",
     source: "App.svelte",
     open: (target) => ({ app: mount(App, { target, props: {} }) }),
-  },
-  {
-    name: "ContextTabs",
-    source: "lib/shell/ContextTabs.svelte",
-    open: (target) => ({
-      app: mount(ContextTabs, { target, props: { router: createRouter(), contexts: CONTEXTS } }),
-    }),
-    // The window listener only exists while the popover is open, so a pass
-    // that never opened it would prove nothing about the teardown.
-    exercise: (target) => target.querySelector<HTMLButtonElement>(".ctx-name")?.click(),
   },
   {
     /** A ticket view's ⋯ menu (#812): its outside-click listener lives while it is open. */
@@ -835,13 +729,6 @@ const CASES: Case[] = [
           onclose: () => {},
         },
       }),
-    }),
-  },
-  {
-    name: "StatusBar",
-    source: "lib/shell/StatusBar.svelte",
-    open: (target) => ({
-      app: mount(StatusBar, { target, props: { lifecycle: readyLifecycle() } }),
     }),
   },
   {
@@ -1663,7 +1550,7 @@ const CASES: Case[] = [
     open: (target) => ({
       app: mount(TfSettings, {
         target,
-        props: { rest: [], job: null, ready: true, onrooms: () => {}, ports: settingsPorts(), layers: createLayers() },
+        props: { rest: [], job: null, ready: true, ports: settingsPorts(), layers: createLayers() },
       }),
     }),
   },
@@ -1744,236 +1631,6 @@ const CASES: Case[] = [
     exercise: (target) => {
       [...target.querySelectorAll("button")].find((el) => el.textContent?.trim() === "Remove…")?.click();
     },
-  },
-  {
-    name: "Tile",
-    source: "lib/shell/Tile.svelte",
-    open: (target) => ({
-      app: mount(Tile, {
-        target,
-        props: {
-          spec: { id: "tickets", label: "Tickets", kinds: ["ticket"], order: "updated_desc" as const },
-          sources: [],
-          miniBoardLayout: "columns" as const,
-          onopen: () => {},
-          onlayout: () => {},
-          onmaximise: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The room's Assets tile (#434). Its effect is the membership read, and it
-     * is handed a **stored** room's filter -- the only shape that issues one,
-     * so a case built on a derived room would install nothing and prove
-     * nothing.
-     */
-    name: "AssetsTile",
-    source: "lib/shell/AssetsTile.svelte",
-    open: (target) => ({
-      app: mount(AssetsTile, {
-        target,
-        props: {
-          filter: { sources: [], context: "ctx:pay", project: null },
-          ports: { contextAssets: () => deferred([]) },
-          onopen: () => {},
-          onmaximise: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The tray installs a `sync:state` listener beside its read, and it is the
-     * listener that would accumulate: the effect re-runs on every room switch.
-     */
-    name: "SuggestionTray",
-    source: "lib/shell/SuggestionTray.svelte",
-    open: (target) => ({
-      app: mount(SuggestionTray, { target, props: { sources: [], onopen: () => {} } }),
-    }),
-  },
-  {
-    /**
-     * The per-context filter (#47) fetches membership in an effect. It
-     * installs no listener and arms no timer today; the entry is what makes
-     * the next effect added here scanned from day one.
-     */
-    name: "InboxView",
-    source: "lib/inbox/InboxView.svelte",
-    open: (target) => ({
-      app: mount(InboxView, {
-        target,
-        props: {
-          router: createRouter(),
-          inbox: {
-            stream: [],
-            snoozed: [],
-            count: 0,
-            error: null,
-            busy: false,
-            answered: true,
-            ack: async () => {},
-            refreshCount: async () => {},
-            refresh: async () => {},
-            snooze: async () => {},
-            complete: async () => {},
-            start: () => () => {},
-          },
-        },
-      }),
-    }),
-  },
-  {
-    name: "Room",
-    source: "lib/shell/Room.svelte",
-    open: (target) => ({
-      app: mount(Room, { target, props: { router: createRouter(), contexts: CONTEXTS } }),
-    }),
-  },
-  {
-    name: "Detail",
-    source: "lib/detail/Detail.svelte",
-    open: (target) => ({
-      app: mount(Detail, {
-        target,
-        props: {
-          entityId: "mock:PAY-231",
-          kind: "ticket",
-          contextLabel: "All work",
-          onclose: () => {},
-          onnavigate: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * A source view's tabs (#661). Its effect is a deferred section's read,
-     * and the view opens on one, so the read is in flight from the first
-     * mount -- the window case 2 unmounts inside.
-     */
-    name: "SourceView",
-    source: "lib/detail/view/SourceView.svelte",
-    open: (target) => ({
-      app: mount(SourceView, {
-        target,
-        props: {
-          entityId: "mock:PAY-231",
-          view: { sections: [{ id: "log", title: "Log", count: null, deferred: true, blocks: [] }], actions: [] },
-          webUrl: null,
-          sourceName: "Mock",
-          writeOps: [],
-          onnavigate: () => {},
-          onopenurl: () => {},
-          onaction: () => Promise.resolve(false),
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * Its one effect reopens a row's editor for *Edit and resend* (#779);
-     * mounted asking for it, so the effect runs. It installs nothing.
-     */
-    name: "SettingsBlock",
-    source: "lib/detail/view/SettingsBlock.svelte",
-    open: (target) => ({
-      app: mount(SettingsBlock, {
-        target,
-        props: {
-          title: null,
-          values: [{ name: "env.X", value: "1", inherited: false, secret: false, editable: true, description: null }],
-          writable: true,
-          reopen: { name: "env.X", value: "2" },
-        },
-      }),
-    }),
-  },
-  {
-    /** Its one effect scrolls its box to the end (#665); it installs nothing. */
-    name: "LogBlock",
-    source: "lib/detail/view/LogBlock.svelte",
-    open: (target) => ({
-      app: mount(LogBlock, { target, props: { text: "line 1\nline 2", truncated: true } }),
-    }),
-  },
-  {
-    /**
-     * The note editor arms **two** timers: its own autosave, and the
-     * `Session` debounce behind `[[`. Both are armed by the same keystroke, so
-     * a pass that never typed would prove nothing about either teardown.
-     */
-    name: "NoteView",
-    source: "lib/notes/NoteView.svelte",
-    open: (target) => ({
-      app: mount(NoteView, {
-        target,
-        props: {
-          entityId: "note:7f2c",
-          contextLabel: "All work",
-          onclose: () => {},
-          onnavigate: () => {},
-        },
-      }),
-    }),
-    exercise: (target) => {
-      target.querySelectorAll<HTMLButtonElement>("button").forEach((button) => {
-        if (button.textContent?.trim() === "Edit") button.click();
-      });
-      flushSync();
-      const area = target.querySelector("textarea");
-      if (!area) return;
-      area.value = "off-by-one in [[pay";
-      area.setSelectionRange(area.value.length, area.value.length);
-      area.dispatchEvent(new Event("input", { bubbles: true }));
-    },
-  },
-  {
-    /**
-     * The stepper reads twice on open -- the ticket, and the flow -- and the
-     * second read is the one that matters here: it is armed by an effect keyed
-     * on the address, so a reader moving between two tickets re-runs it, and a
-     * pass that never unmounted mid-read would prove nothing about the
-     * teardown.
-     */
-    name: "StartWork",
-    source: "lib/start-work/StartWork.svelte",
-    open: (target) => ({
-      app: mount(StartWork, {
-        target,
-        props: {
-          entityId: "mock:PAY-231",
-          onnavigate: () => {},
-          onclose: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The day review (#279). Its effect is the day's read, keyed on the
-     * address, so a reader clicking through days re-runs it -- and the read is
-     * `deferred` here, which is this component's real case: leaving the view
-     * before `day_blocks` answers.
-     */
-    name: "DayReview",
-    source: "lib/time/DayReview.svelte",
-    open: (target) => ({
-      app: mount(DayReview, {
-        target,
-        props: {
-          router: createRouter(),
-          day: "2026-09-03",
-          ports: {
-            dayBlocks: () => deferred({ blocks: [], past_horizon: false, open: [] }),
-            updateBlock: () => Promise.reject(new Error("no edit in this test")),
-            deleteBlock: () => Promise.reject(new Error("no edit in this test")),
-          },
-        },
-      }),
-    }),
   },
   {
     /**
@@ -2144,29 +1801,6 @@ const CASES: Case[] = [
   },
   {
     /**
-     * The week timesheet (#283). Its effect is the week's read, keyed on the
-     * Monday of the address's day — `deferred` here, so the answer lands after
-     * the unmount, which is what a reader leaving the view before the week
-     * arrives does.
-     */
-    name: "WeekTimesheet",
-    source: "lib/time/WeekTimesheet.svelte",
-    open: (target) => ({
-      app: mount(WeekTimesheet, {
-        target,
-        props: {
-          day: "2026-08-26",
-          ports: {
-            weekTimesheet: () => deferred({ days: [], rows: [], past_horizon: [] }),
-            logAllPreview: () => Promise.reject(new Error("no plan in this test")),
-            logAll: () => Promise.reject(new Error("no write in this test")),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
      * The Assets view (#428). Two effects -- the pane's read, keyed on the
      * address, and the columns', keyed on the layout that read produces --
      * `deferred` here, so both land after the unmount, which is what a reader
@@ -2184,24 +1818,6 @@ const CASES: Case[] = [
             getAsset: () => Promise.reject(new Error("nothing is selected in this test")),
             assetTypes: () => deferred([]),
           },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The Monitors tab (#448). One effect -- the roster read -- and the whole
-     * tab is drawn from it, so a reader who opens `#/assets/monitors` and
-     * switches straight back to the Tree unmounts inside exactly that window.
-     */
-    name: "MonitorsView",
-    source: "lib/assets/MonitorsView.svelte",
-    open: (target) => ({
-      app: mount(MonitorsView, {
-        target,
-        props: {
-          router: createRouter(),
-          ports: { monitorRoster: () => deferred([]) },
         },
       }),
     }),
@@ -2341,131 +1957,6 @@ const CASES: Case[] = [
     }),
   },
   {
-    /**
-     * The standup digest (#288). Its effect is the digest's read, keyed on the
-     * day the clock says -- `deferred` here, so the three lists land after the
-     * unmount, which is what a reader glancing at the standup and moving on
-     * does.
-     */
-    name: "StandupView",
-    source: "lib/standup/StandupView.svelte",
-    open: (target) => ({
-      app: mount(StandupView, {
-        target,
-        props: {
-          router: createRouter(),
-          ports: {
-            standupDigest: () =>
-              deferred({ yesterday_day: null, yesterday: [], today: [], blockers: [], infrastructure: [] }),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The standup protocol under the digest (#289). Its effect is the
-     * get-or-create and the note read that follows it, keyed on the day --
-     * `deferred` here, so both land after the unmount, which is what a reader
-     * opening the standup and moving straight on does.
-     */
-    name: "ProtocolPanel",
-    source: "lib/standup/ProtocolPanel.svelte",
-    open: (target) => ({
-      app: mount(ProtocolPanel, {
-        target,
-        props: {
-          day: "2026-09-03",
-          router: createRouter(),
-          ports: {
-            standupProtocol: () =>
-              deferred({
-                day: "2026-09-03",
-                note_id: "note:1",
-                page_title: "2026-09-03",
-                publication: null,
-              }),
-            getNote: () => deferred(NOTE),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The publish target in settings (#289). Its effect is one read of three
-     * things at once, deferred so the whole `Promise.all` resolves after the
-     * unmount.
-     */
-    name: "StandupSection",
-    source: "lib/settings/StandupSection.svelte",
-    open: (target) => ({
-      app: mount(StandupSection, {
-        target,
-        props: {
-          ports: {
-            standupPublishTarget: () => deferred(null),
-            setStandupPublishTarget: () =>
-              deferred({ source_id: "wiki", parent: "wiki:98400" }),
-            listSources: () => deferred([]),
-            listAdapters: () => deferred([]),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    name: "Flap",
-    source: "lib/shell/Flap.svelte",
-    open: (target) => {
-      const props = $state({ value: "first" });
-      const app = mount(Flap, { target, props });
-      // A flap only arms its animation timers when the value moves.
-      return { app: { ...app, __props: props } as unknown as Record<string, unknown> };
-    },
-    exercise: () => {},
-  },
-  {
-    /**
-     * A view action's dialog (#702). Its effect waits a tick to put the
-     * reader on the first field, so an unmount inside that tick must leave
-     * nothing armed.
-     */
-    name: "ActionDialog",
-    source: "lib/detail/view/ActionDialog.svelte",
-    open: (target) => ({
-      app: mount(ActionDialog, {
-        target,
-        props: {
-          action: {
-            write_op: "merge_pull_request",
-            label: "Merge…",
-            fields: [
-              {
-                name: "style",
-                label: "Style",
-                kind: { type: "choice", options: [{ value: "merge", label: "Merge commit" }] },
-                value: null,
-                required: true,
-                placeholder: null,
-              },
-            ],
-            confirm: "Merge?",
-            primary: true,
-            danger: false,
-            disabled: null,
-            with_settings: false,
-            values: {},
-            entity: null,
-            line_comments: "none",
-          },
-          onsubmit: () => Promise.resolve(true),
-          onclose: () => {},
-        },
-      }),
-    }),
-  },
-  {
     name: "Modal",
     source: "lib/shell/Modal.svelte",
     open: (target) => ({ app: mount(ModalFixture, { target, props: { onclose: () => {} } }) }),
@@ -2490,38 +1981,6 @@ const CASES: Case[] = [
           // deferred for the reason the recents are: both land after the
           // unmount.
           estate: () => deferred(EMPTY_SEARCH),
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The top strip's asset look-up (#437). Its effect reads `get_asset` for
-     * an asset target so the slot can name it, and the read is `deferred` here
-     * — so the half this component actually has is "unmounted while the read
-     * is still in flight", which is a reader stopping the clock a moment after
-     * it started.
-     */
-    name: "TopStrip",
-    source: "lib/shell/TopStrip.svelte",
-    open: (target) => ({
-      app: mount(TopStrip, {
-        target,
-        props: {
-          router: createRouter(),
-          onsearch: () => {},
-          health: createHealth(),
-          inbox: createInbox({
-            inboxItems: () => Promise.resolve([]),
-            inboxCount: () => Promise.resolve(0),
-            snoozeInboxItem: () => Promise.resolve(),
-            completeInboxItem: () => Promise.resolve(),
-            ackAlert: () => Promise.resolve(),
-            listen: () => Promise.resolve(() => {}),
-          }),
-          timer: ASSET_TIMER,
-          ontimer: undefined,
-          asset: () => deferred(ASSET_DETAIL),
         },
       }),
     }),
@@ -2572,15 +2031,6 @@ const CASES: Case[] = [
     }),
   },
   {
-    name: "SourcesView",
-    source: "lib/sources/SourcesView.svelte",
-    // Its own store, not the shell's singleton: seeding the module-level one
-    // from a residue test would leak state into whatever runs next.
-    open: (target) => ({
-      app: mount(SourcesView, { target, props: { health: createHealth() } }),
-    }),
-  },
-  {
     name: "AddSource",
     source: "lib/sources/AddSource.svelte",
     open: (target) => ({
@@ -2588,180 +2038,9 @@ const CASES: Case[] = [
     }),
   },
   {
-    /**
-     * The checkout panel (#499). Its effect is the `entity_checkout` read, and
-     * the case that matters is closing the detail before it answers — so the
-     * answer lands after the unmount, through the module mock's `deferred`.
-     */
-    name: "CheckoutPanel",
-    source: "lib/detail/CheckoutPanel.svelte",
-    open: (target) => ({
-      app: mount(CheckoutPanel, {
-        target,
-        props: { entityId: "mock:tidewater/payout-service" },
-      }),
-    }),
-  },
-  {
-    /**
-     * The clones-root section (#499). The same shape the toggles below have:
-     * one settings read, unmounted before it answers.
-     */
-    name: "CheckoutsSection",
-    source: "lib/settings/CheckoutsSection.svelte",
-    open: (target) => ({
-      app: mount(CheckoutsSection, {
-        target,
-        props: {
-          ports: {
-            clonesRoot: () => deferred<string | null>("/Users/mara/src"),
-            setClonesRoot: () => Promise.reject(new Error("no settings write in this test")),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The capture-shortcut section (#503). The same shape: one settings read,
-     * unmounted before it answers.
-     */
-    name: "CaptureSection",
-    source: "lib/settings/CaptureSection.svelte",
-    open: (target) => ({
-      app: mount(CaptureSection, {
-        target,
-        props: {
-          ports: {
-            captureShortcut: () =>
-              deferred<CaptureShortcut>({
-                accelerator: "CmdOrCtrl+Shift+N",
-                refusal: null,
-                shown: true,
-                note_count: 0,
-                last_note_at: null,
-              }),
-            setCaptureShortcut: () =>
-              Promise.reject(new Error("no settings write in this test")),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The settings view itself has no effect of its own — it is a frame around
-     * its sections — so the sections are what is walked here.
-     */
-    name: "BackupSection",
-    source: "lib/settings/BackupSection.svelte",
-    open: (target) => ({ app: mount(BackupSection, { target, props: {} }) }),
-  },
-  {
-    /**
-     * The passive attribution toggle (#282). Its effect is the setting read,
-     * and the case that matters is leaving settings before it answers —
-     * `deferred`, so the answer lands after the unmount.
-     */
-    name: "PassiveSection",
-    source: "lib/settings/PassiveSection.svelte",
-    open: (target) => ({
-      app: mount(PassiveSection, {
-        target,
-        props: {
-          ports: {
-            passiveAttribution: () => deferred<boolean>(false),
-            setPassiveAttribution: () =>
-              Promise.reject(new Error("no settings write in this test")),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The monitoring settings section (#443). Its effect is the settings read,
-     * and the case that matters is the same one the toggle above has: leaving
-     * settings before the read answers, so the answer lands after the unmount.
-     */
-    name: "MonitoringSection",
-    source: "lib/settings/MonitoringSection.svelte",
-    open: (target) => ({
-      app: mount(MonitoringSection, {
-        target,
-        props: {
-          ports: {
-            monitoringSettings: () =>
-              deferred({ sample_retention_days: 90, response_time_warn_ms: 1500 }),
-            setMonitoringSettings: () =>
-              Promise.reject(new Error("no settings write in this test")),
-          },
-        },
-      }),
-    }),
-  },
-  {
-    /**
-     * The desktop-notification toggles (#290). Its effect is the setting read,
-     * the same shape as the section above -- and the store it reads through is
-     * a fresh one per mount, because the module-level `notifications` is the
-     * window's and a test that armed it would leave it armed for the next.
-     */
-    name: "NotificationsSection",
-    source: "lib/settings/NotificationsSection.svelte",
-    open: (target) => ({
-      app: mount(NotificationsSection, {
-        target,
-        props: {
-          store: createNotifications({
-            notificationKinds: () => deferred<never[]>([]),
-            setNotificationKinds: () =>
-              Promise.reject(new Error("no settings write in this test")),
-            isPermissionGranted: () => Promise.resolve(false),
-            requestPermission: () => Promise.resolve("granted"),
-            send: () => {},
-            onAction: () => Promise.resolve(() => {}),
-            focused: () => true,
-            navigate: () => {},
-          }),
-        },
-      }),
-    }),
-  },
-  {
-    name: "Diagnostics",
-    source: "lib/sources/Diagnostics.svelte",
-    open: (target) => ({ app: mount(Diagnostics, { target, props: {} }) }),
-  },
-  {
     name: "FirstRun",
     source: "lib/sources/FirstRun.svelte",
     open: (target) => ({ app: mount(FirstRun, { target, props: { onfinish: () => {} } }) }),
-  },
-  {
-    name: "ReenterSecret",
-    source: "lib/sources/ReenterSecret.svelte",
-    open: (target) => ({
-      app: mount(ReenterSecret, {
-        target,
-        props: {
-          sourceId: "mock",
-          displayName: "Mock",
-          onhealth: () => {},
-          oncancel: () => {},
-        },
-      }),
-    }),
-  },
-  {
-    name: "Shell",
-    source: "lib/shell/Shell.svelte",
-    open: (target) => ({
-      app: mount(ShellFixture, {
-        target,
-        props: { router: createRouter(), onsearch: () => {} },
-      }),
-    }),
   },
 ];
 

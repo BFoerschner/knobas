@@ -92,8 +92,8 @@ export function databaseWords(stats: Pick<DbStats, "db_bytes" | "item_count">): 
 
 /**
  * The Notifications switches, in prototype-6's words and in
- * `knobas_core::inbox::Category::ALL`'s order (the rooms section's list, which
- * `every_inbox_category_has_a_toggle_in_the_interface` pins).
+ * `knobas_core::inbox::Category::ALL`'s order, which
+ * `every_inbox_category_has_a_toggle_in_the_interface` pins (#881).
  */
 export const NOTIFY_KINDS: readonly { id: InboxCategory; label: string }[] = [
   { id: "review_request", label: "Review asked of you" },

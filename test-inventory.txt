@@ -74,7 +74,6 @@ knobas-app	lib/knobas_app	checkout::open::tests::the_open_command_serialises_the
 knobas-app	lib/knobas_app	checkout::open::tests::the_settings_serialise_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	checkout::tests::a_leading_tilde_is_the_home_directory
 knobas-app	lib/knobas_app	checkout::tests::found_by_serialises_as_the_mirror_declares
-knobas-app	lib/knobas_app	checkout::tests::the_kinds_with_a_checkout_are_the_ones_the_panel_is_mounted_for
 knobas-app	lib/knobas_app	checkout::tests::the_setting_key_is_the_one_the_migration_names
 knobas-app	lib/knobas_app	checkout::tests::the_view_serialises_the_keys_the_mirror_declares
 knobas-app	lib/knobas_app	checkout::uncommitted::tests::a_git_that_does_not_answer_is_abandoned_at_the_timeout
@@ -199,7 +198,6 @@ knobas-app	lib/knobas_app	inbox::tests::an_op_the_source_does_not_declare_is_not
 knobas-app	lib/knobas_app	inbox::tests::every_candidate_op_has_a_form_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::every_inbox_category_has_a_toggle_in_the_interface
 knobas-app	lib/knobas_app	inbox::tests::the_categories_with_no_write_op_offer_nothing_from_any_source
-knobas-app	lib/knobas_app	inbox::tests::the_interfaces_window_matches_the_backends
 knobas-app	lib/knobas_app	link_sets::tests::a_draft_is_refused_for_what_cannot_be_a_set
 knobas-app	lib/knobas_app	link_sets::tests::a_member_fits_its_kind
 knobas-app	lib/knobas_app	link_sets::tests::a_slug_is_an_address_whatever_the_name_was
@@ -277,7 +275,6 @@ knobas-app	lib/knobas_app	start_work::tests::only_a_delivered_write_succeeds_its
 knobas-app	lib/knobas_app	tests::only_events_emit_names_the_emitter
 knobas-app	lib/knobas_app	tests::the_event_names_match_their_typescript_mirror
 knobas-app	lib/knobas_app	tests::the_main_window_is_declared_visible_and_run_does_not_show_it
-knobas-app	lib/knobas_app	tests::the_window_may_not_be_narrower_than_the_stylesheet_floor
 knobas-app	lib/knobas_app	ticket_views::tests::a_slug_is_an_address_whatever_the_name_was
 knobas-app	lib/knobas_app	ticket_views::tests::any_text_saves_and_only_the_display_words_are_checked
 knobas-app	lib/knobas_app	ticket_views::tests::the_views_and_their_mirror_agree

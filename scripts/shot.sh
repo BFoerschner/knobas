@@ -12,9 +12,9 @@
 #          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…'.
 #          A step that finds nothing fails, naming it; the server is still stopped.
 # Env:   SHOT_SIZE=1440,900 (the design system's comparison size)
-#        SHOT_SHELL=tickets (empty for the rooms UI)
-#        SHOT_THEME=light|dark (Chrome's preferred colour scheme, which `.tf`
+#        SHOT_THEME=light|dark (Chrome's preferred colour scheme, which the app
 #          follows unless `data-theme` is set; unset leaves Chrome's default)
+#        (SHOT_SHELL is gone with the rooms UI, #881: there is one shell.)
 #
 # The dev server runs on 5300 + slot. A server already listening there (the
 # agent's own) is reused and left running; one this script started is stopped.
@@ -24,7 +24,7 @@
 set -euo pipefail
 [ $# -ge 3 ] || { echo "usage: $0 <slot> <out dir> <route>..." >&2; exit 2; }
 slot=$1 out=$2; shift 2
-port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; shell=${SHOT_SHELL-tickets} theme=${SHOT_THEME:-}
+port=$((5300 + slot)); size=${SHOT_SIZE:-1440,900}; theme=${SHOT_THEME:-}
 case $theme in ''|light|dark) ;; *) echo "shot: SHOT_THEME must be light or dark, got '$theme'" >&2; exit 2 ;; esac
 theme_flags=()
 # Blink's PreferredColorScheme enum is { kDark = 0, kLight = 1 }; --force-dark-mode and
@@ -49,12 +49,12 @@ for route in "$@"; do
   extra=; path=$route
   case $route in \?*'#'*) extra="&${route%%#*}"; extra=${extra/&\?/&}; path=${route#*#} ;; esac
   case $path in '#/'*) path=${path#'#/'} ;; '#'*|/*) path=${path#?} ;; esac
-  q="fake-ipc${shell:+&shell=$shell}$extra"
+  q="fake-ipc$extra"
   file="$out/$(printf '%s' "$path" | tr '/?&=' '____' | sed 's/^$/root/').png"
   case $route in
     *' > '*|*' + '*)
       file="$out/$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_' | cut -c1-120).png"
-      node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$shell" "$theme" "$file" "$route" "${extra:+&${extra#&}}" || exit 1
+      node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$route" "${extra:+&${extra#&}}" || exit 1
       [ -s "$file" ] || { echo "shot: no image for $route" >&2; exit 1; }
       echo "shot: $file  <- $route"
       continue ;;

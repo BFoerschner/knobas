@@ -1577,7 +1577,7 @@
     The estate's search (story 30), on a strip of its own between the room bar
     and the columns.
 
-    Not *in* the room bar: `app.css` gives that 40px and `overflow: hidden`,
+    Not *in* the room bar: `unported.css` gives that 40px and `overflow: hidden`,
     and the offers hang below the box — in there they were clipped to a
     sliver. A row of its own also keeps the box clear of the path it is about
     to open, since the offers overlay the columns and nothing else.
@@ -2565,7 +2565,7 @@
   }
 
   /* Three rows now: the room bar, the search strip, and the tree under both.
-     `app.css` gives `.view` two, and the strip is this view's own. */
+     `unported.css` gives `.view` two, and the strip is this view's own. */
   .view {
     grid-template-rows: auto auto 1fr;
   }

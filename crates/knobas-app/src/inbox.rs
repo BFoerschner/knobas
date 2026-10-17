@@ -458,30 +458,12 @@ mod tests {
         assert!(offer(Category::CredentialExpiry, Some(&generous)).is_empty());
     }
 
-    /// The interface's copy of the window matches the backend's.
-    ///
-    /// `InboxView.svelte` re-derives a credential expiry's deadline as
-    /// `occurred_at + WINDOW_DAYS`, because the expiry date is not on the wire
-    /// and `occurred_at` is defined as the expiry minus the window
-    /// (`knobas_core::inbox::credential_expiry`). Nothing else holds the two
-    /// numbers together: change one without the other and the *after the
-    /// credential expires* preset silently points at the wrong day.
-    #[test]
-    fn the_interfaces_window_matches_the_backends() {
-        const VIEW: &str = include_str!("../../../app/src/lib/inbox/InboxView.svelte");
-        assert!(
-            VIEW.contains(&format!(
-                "const WINDOW_DAYS = {};",
-                knobas_core::inbox::WINDOW_DAYS
-            )),
-            "InboxView's WINDOW_DAYS no longer matches knobas_core::inbox::WINDOW_DAYS"
-        );
-    }
-
     /// Every category has a **toggle in the interface** (#290).
     ///
-    /// The other half of `app/src/lib/settings/NotificationsSection.svelte`,
-    /// and the half that cannot be checked from TypeScript: `InboxCategory`
+    /// The other half of Settings › Notifications' list
+    /// (`app/src/lib/tf/settings/sections.ts`, `NOTIFY_KINDS`, since the
+    /// rooms UI's section went in #881), and the half that cannot be checked
+    /// from TypeScript: `InboxCategory`
     /// is a string union mirrored by hand, so a sixth category added here
     /// would compile on both sides and simply never appear as a switch --
     /// a demand nobody can ever be notified about, with nothing failing
@@ -489,8 +471,7 @@ mod tests {
     /// category is named is not.
     #[test]
     fn every_inbox_category_has_a_toggle_in_the_interface() {
-        const SECTION: &str =
-            include_str!("../../../app/src/lib/settings/NotificationsSection.svelte");
+        const SECTION: &str = include_str!("../../../app/src/lib/tf/settings/sections.ts");
         for category in Category::ALL {
             assert!(
                 SECTION.contains(&format!("id: \"{}\"", category.as_str())),

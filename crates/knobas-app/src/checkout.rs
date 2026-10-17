@@ -433,37 +433,6 @@ mod tests {
         );
     }
 
-    /// The kinds that have a checkout are one rule in two languages.
-    ///
-    /// `entity_checkout` refuses anything else **by name**, so a `Detail.svelte`
-    /// that mounted the panel on a fourth kind would draw a refusal at a reader
-    /// who opened an ordinary ticket, and one that dropped a kind would hide a
-    /// checkout that exists. The other two mirrors in this file are pinned
-    /// against `entity.ts` the same way; this one is pinned against the
-    /// component, because that is where the gate is written.
-    #[test]
-    fn the_kinds_with_a_checkout_are_the_ones_the_panel_is_mounted_for() {
-        let detail = include_str!("../../../app/src/lib/detail/Detail.svelte");
-        let gate = detail
-            .lines()
-            .find(|line| line.contains("const hasCheckout"))
-            .expect("Detail.svelte still gates the checkout panel on `hasCheckout`");
-        for kind in CHECKOUT_KINDS {
-            assert!(
-                gate.contains(&format!("\"{kind}\"")),
-                "{kind:?} has a checkout here and Detail.svelte does not mount the panel for it: \
-                 {gate}"
-            );
-        }
-        // And no more than those: a kind on the component's side alone is a
-        // panel that draws `entity_checkout`'s refusal.
-        assert_eq!(
-            gate.matches("shownKind ===").count(),
-            CHECKOUT_KINDS.len(),
-            "Detail.svelte gates on a different number of kinds than CHECKOUT_KINDS has: {gate}"
-        );
-    }
-
     /// The three states serialise as the words `app/src/lib/ipc/entity.ts`
     /// narrows on. A renamed variant is a panel that draws nothing.
     #[test]

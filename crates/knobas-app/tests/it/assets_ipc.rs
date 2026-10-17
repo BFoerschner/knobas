@@ -6003,8 +6003,8 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
 /// The tab's own copy of the two spellings, which is a **third** and the only
 /// one that fails quietly.
 ///
-/// `MonitorsView.svelte`'s `MONITOR_ACTIONS` is keyed by identifier and its
-/// `{#if MONITOR_ACTIONS[op]}` *skips* a key it does not know -- deliberately,
+/// `TfMonitors.svelte`'s action table (the rooms UI's `MonitorsView.svelte`
+/// until #881) is keyed by identifier and *skips* a key it does not know -- deliberately,
 /// so a backend that grows a third monitor op does not draw a nameless button.
 /// The cost of that design is that a renamed identifier is not an error on
 /// either side: `assets::PAUSE_MONITOR` and the mirror's `WriteOpPayload` would
@@ -6016,12 +6016,13 @@ fn the_pane_offers_the_create_the_spi_names_at_the_target_the_spi_spells() {
 /// read off the file the component ships.
 #[test]
 fn the_tabs_own_action_table_is_keyed_by_those_same_spellings() {
-    const MONITORS_VIEW: &str = include_str!("../../../../app/src/lib/assets/MonitorsView.svelte");
+    const MONITORS_VIEW: &str =
+        include_str!("../../../../app/src/lib/tf/monitors/TfMonitors.svelte");
 
     for op in [assets::PAUSE_MONITOR, assets::RESUME_MONITOR] {
         assert!(
             MONITORS_VIEW.contains(&format!("{op}: {{")),
-            "MonitorsView.svelte's MONITOR_ACTIONS has no {op:?} key, so the tab draws \
+            "TfMonitors.svelte's action table has no {op:?} key, so the view draws \
              no button for it -- and skips it in silence"
         );
     }

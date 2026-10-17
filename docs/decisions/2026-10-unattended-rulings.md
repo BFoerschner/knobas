@@ -4518,3 +4518,50 @@ Ruled by the merge-manager (PR #1082).
   the live test holds `total == histories.len()` only for the seeded issues, which have few
   entries. The check and the payload growth (every field's history rides along, description
   edits included) go to a `backlog` follow-up. **Reversing:** n/a.
+## #881 — Remove the rooms UI (2026-10-17)
+
+- **The components never ported keep the rules they draw with, in `src/unported.css`, on the
+  design system's palette.** The launcher, ⌘T picker, ad-hoc dialog, write queue, asset tree
+  (#871 kept it "until a ticket ports it") and its dialogs, the wizard, booting and the capture
+  window all draw with `app.css`'s global classes. Deleting the rules would unstyle them, and the
+  ticket is a removal, not a port. So every `app.css` rule whose classes only the rooms UI drew is
+  deleted, the rest move to `unported.css`, and its old token names (`--bg`, `--panel`, `--text`,
+  `--hair`, `--faint`, `--link`, …) are set to the design system's tokens. With the tokens on
+  `:root` the shared names (`--ok`, `--muted`, `--sans`, `--mono`) could not keep two values
+  anyway; one palette that follows the theme is the coherent answer, and `tf-css.test.ts` now
+  computes 4.5:1 for every text token on the three surfaces. **Reversing:** medium (port each
+  component to `tf.css`; or scope a dark Signal palette under a wrapper class on each survivor).
+- **A forced theme is `data-theme` on `<html>`**, set and removed by `TfShell`, because the tokens
+  are on `:root` and the dialogs mounted outside `.tf` must follow it. **Reversing:** low.
+- **The document reset (`*`, `html, body`, form controls, links, scrollbars) moves into `tf.css`**,
+  so nothing the new shell draws moves when `app.css` goes. The scrollbar thumb is `--rule` now.
+  **Reversing:** low.
+- **A blank address becomes `#/tickets` by `location.replace`** (no history entry); any other
+  address the window opens on is kept. **Reversing:** low.
+- **The rooms keyboard (`installKeys`) and the room foreground ladder (`roomForeground`) are
+  deleted, not kept as dead code.** History keys (#693) are not in the new shell; filed as #1086.
+  **Reversing:** low (git history).
+- **Rust tests that `include_str!` a deleted file are repointed where the new shell has the same
+  table or sentence** (Notifications' kinds, ADR-0012's sentence, the monitor action table) **and
+  deleted where it has none** (the `.app` width floor, `Detail.svelte`'s checkout gate, the inbox's
+  `WINDOW_DAYS`). **Reversing:** low.
+- **The desktop witness's pins on deleted components go; the two drivers that drive the rooms UI
+  are left for a port (#1084)**, because a driver can only be checked by a witness run.
+  **Reversing:** n/a.
+- **Rooms addresses still produced by the launcher, notification clicks and the capture window
+  are not translated here** (#1085): the ticket is the removal, and what a note opens is a D10
+  question. **Reversing:** n/a.
+
+Merge-manager review (Spec axis):
+
+- **The three Rust tests deleted without a replacement stay deleted.** The `.app` width floor:
+  the new shell sets no `min-width` floor and its nav scrolls (`overflow-x: auto`), so there is
+  no second number for `minWidth` to stay above. The checkout gate: the new shell has no panel
+  gate; `TfJob` asks `entity_checkout` only for `branch` and `repo` rows, catches a refusal and
+  shows nothing, and the Code section is tested end to end in `TfJob.test`; a pin on that filter
+  would pin markup spelling. `WINDOW_DAYS`: `TfInbox` calls `snoozePresets(now)` with no
+  deadline, so nothing re-derives the expiry (the *After it expires* preset is #1086).
+  **Reversing:** low.
+- **`context_members` belongs on the PR's list of commands nothing calls.** Its wrapper
+  `contextMembers` was called by the rooms `InboxView` and `Room` only. Added to the PR body;
+  nothing removed. **Reversing:** n/a.

@@ -922,7 +922,7 @@ test("the arrows and enter walk three levels, and the pane follows", async () =>
 
 /**
  * **The focused row is the selected one**, which is what makes the walk
- * visible: the global `:focus-visible` ring in `app.css` is drawn on whatever
+ * visible: the global `:focus-visible` ring in `unported.css` is drawn on whatever
  * has focus, and a walk that moved the selection without moving focus would
  * leave the ring on the row the reader started from.
  */

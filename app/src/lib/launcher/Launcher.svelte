@@ -885,7 +885,7 @@
 <style>
   /*
     `.search` — the launcher box (round 3, lines 363-377). `.scrim`, `.dlg` and
-    `kbd` are the shell's and live in `app.css`; everything the launcher adds
+    `kbd` are the shell's and live in `unported.css`; everything the launcher adds
     is here, which is what the stylesheet's header says should happen.
   */
   .search {
