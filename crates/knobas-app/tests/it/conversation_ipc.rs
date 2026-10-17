@@ -298,7 +298,10 @@ async fn a_status_change_made_in_jira_is_a_change_with_who_from_and_to() {
             "fields": { "comment": { "comments": [
                 comment("lena", "Lena Hoffmann", "2026-08-12T09:14:00.000+0200", "Finance asks."),
             ] } },
-            "changelog": { "startAt": 0, "maxResults": 3, "total": 3, "histories": [
+            "changelog": { "startAt": 0, "maxResults": 4, "total": 4, "histories": [
+                // A move to Done long before knobas queued its own: not that move.
+                history("priya", "Priya Nair", "2026-08-12T09:20:00.000+0200",
+                        serde_json::json!([status_item("Backlog", "Done")])),
                 history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
                         serde_json::json!([status_item("To Do", "In Progress")])),
                 history("priya", "Priya Nair", "2026-08-12T09:31:00.000+0200",
@@ -349,14 +352,15 @@ async fn a_status_change_made_in_jira_is_a_change_with_who_from_and_to() {
     assert_eq!(
         lines,
         [
+            (ChangeKind::Status, Some("Priya Nair"), Some("Backlog"), Some("Done"), false),
             (ChangeKind::Status, Some("Priya Nair"), Some("To Do"), Some("In Progress"), false),
             (ChangeKind::Status, None, None, Some("Done"), true),
             (ChangeKind::Status, Some("Mara Lindqvist"), Some("In Progress"), Some("In Review"), true),
         ],
         "oldest first; the knobas move to In Review is Jira's own line, the one to Done is not \
-         in the changelog yet"
+         in the changelog yet (its older move to Done is another move)"
     );
-    assert_eq!(read.changes[0].at, "2026-08-12T07:30:00Z".parse::<chrono::DateTime<chrono::Utc>>().unwrap());
+    assert_eq!(read.changes[1].at, "2026-08-12T07:30:00Z".parse::<chrono::DateTime<chrono::Utc>>().unwrap());
 }
 
 /// A Gitea pull request as the adapter stores it: Gitea's own record.
