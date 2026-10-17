@@ -100,6 +100,11 @@ impl Directory {
         }
     }
 
+    /// Who `key` is: this run's answer if it has one, else Confluence's. A
+    /// `404` is remembered as nobody; any other failure stops every later
+    /// lookup of the run (the module docs say why). A record that does not
+    /// carry `key` as its own `userKey` is nobody too, so a server answering
+    /// with someone else never names the wrong person.
     async fn lookup(&mut self, api: &(dyn ConfluenceApi + '_), key: &str) -> Option<Value> {
         if let Some(known) = self.known.get(key) {
             return known.clone();
@@ -108,8 +113,6 @@ impl Directory {
             return None;
         }
         let answer = match api.user_by_key(key).await {
-            // Only a record that says it is this key's: anything else would
-            // name the wrong person.
             Ok(user) if user.get("userKey").and_then(Value::as_str) == Some(key) => Some(user),
             Ok(_) => None,
             Err(e) if is_unknown(&e) => None,
@@ -123,6 +126,7 @@ impl Directory {
     }
 }
 
+/// Confluence's "no user with that key": a `404` from the user endpoint.
 fn is_unknown(e: &SourceError) -> bool {
     matches!(e, SourceError::Protocol { .. }) && e.status() == Some(404)
 }

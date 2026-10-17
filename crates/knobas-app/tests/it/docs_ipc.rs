@@ -167,7 +167,6 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     );
 }
 
-/// `#/docs` opens the page read last: the newest visit to a live page.
 /// #953: a parent's children are in the source's own order, the declared
 /// `position`, lowest first; a child the source gives no position follows,
 /// by title.
@@ -203,6 +202,7 @@ async fn children_are_in_the_sources_order_and_by_title_where_it_has_none() {
     assert_eq!(children, vec!["Zeta", "Alpha", "Beta", "Mid"]);
 }
 
+/// `#/docs` opens the page read last: the newest visit to a live page.
 #[tokio::test]
 async fn the_page_read_last_is_the_newest_visit() {
     let pool = pool().await;
