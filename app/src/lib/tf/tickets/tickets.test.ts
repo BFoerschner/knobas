@@ -1,10 +1,12 @@
 /** The Tickets view's rules (#810). */
 import { expect, test } from "vitest";
 
-import type { MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import {
   aroundLines,
+  boardLanes,
   drawnCards,
+  moreLanesLine,
   initials,
   laneTitle,
   moreLine,
@@ -184,4 +186,47 @@ test("list headers sort by their column, a second press turning the direction, m
     column: "key",
     direction: "ascending",
   });
+});
+
+test("a board read in lanes draws the server's lanes in its order, each with every column and its own counts (#939)", () => {
+  const board: MiniBoard = {
+    columns: [
+      { status: "To Do", cards: [ticket("PAY-1", {}), ticket("PAY-2", {})], total: 9 },
+      { status: "In Review", cards: [ticket("PAY-3", {})], total: 4 },
+    ],
+    sources: [],
+    lanes: [
+      {
+        key: "mara",
+        count: 7,
+        columns: [
+          { status: "To Do", ids: ["jira:PAY-2", "jira:PAY-1"], total: 5 },
+          { status: "In Review", ids: ["jira:PAY-3"], total: 2 },
+        ],
+      },
+      { key: "", count: 6, columns: [{ status: "To Do", ids: [], total: 4 }] },
+    ],
+    more_lanes: 3,
+  };
+  const lanes = boardLanes(board, "assignee", (columns) => columns);
+  expect(lanes.map((lane) => [lane.key, lane.title, lane.count])).toEqual([
+    ["mara", "mara", 7],
+    ["", "Unassigned", 6],
+  ]);
+  expect(lanes[0]!.columns.map((c) => [c.status, c.cards.map((card) => card.key), c.total])).toEqual([
+    ["To Do", ["PAY-2", "PAY-1"], 5],
+    ["In Review", ["PAY-3"], 2],
+  ]);
+  expect(lanes[1]!.columns.map((c) => [c.status, c.cards.length, c.total])).toEqual([
+    ["To Do", 0, 4],
+    ["In Review", 0, 0],
+  ]);
+  // Without lanes, one untitled band that is the board, counted whole.
+  expect(boardLanes(board, "none", (columns) => columns)).toEqual([
+    { key: null, title: "", count: 13, columns: board.columns },
+  ]);
+  expect(moreLanesLine(3)).toBe("Show 3 more lanes");
+  expect(moreLanesLine(1)).toBe("Show 1 more lane");
+  expect(moreLanesLine(25)).toBe("Show 10 more lanes");
+  expect(moreLanesLine(0)).toBeNull();
 });

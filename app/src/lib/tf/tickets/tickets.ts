@@ -3,7 +3,7 @@
  * draws, what a card's corner says, what the preview's button reads, and
  * what *Around this ticket* counts.
  */
-import type { EntityPage, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
+import type { EntityPage, MiniBoard, MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type { ListSort as StoredSort, ViewLanes, ViewSortColumn } from "../../ipc/search";
 import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 
@@ -17,6 +17,11 @@ export const DONE_CAP = 3;
  * but sends at most this many a column, *Done* too.
  */
 export const TYPED_CAP = 50;
+/**
+ * How many lanes a laned board reads at first, and how many more each
+ * *Show N more lanes* reads (#939): biggest first, the rest counted.
+ */
+export const LANES_AT_FIRST = 10;
 
 /** Whether a column is the *Done* one, however its source cases it. */
 export function isDone(status: string | null): boolean {
@@ -194,8 +199,14 @@ export interface Lane {
   columns: MiniBoardColumn[];
 }
 
-/** The value a card is laned by: its epic line, assignee, priority, type or first label; `""` for none. */
-function laneKey(card: MiniBoardCard, field: LaneField): string {
+/**
+ * The value a card is laned by: its epic line, assignee, priority, type or
+ * first label; `""` for none. `MiniBoardCard::lane` is the authority.
+ */
+export function laneOf(
+  card: Pick<MiniBoardCard, "path" | "assignee" | "priority" | "issue_type" | "labels">,
+  field: LaneField,
+): string {
   switch (field) {
     case "epic":
       return card.path ?? "";
@@ -232,11 +243,50 @@ export function laneTitle(field: LaneField, key: string): string {
 }
 
 /**
- * The board split into lanes (R-3.5): one per value of `field` the cards
- * show, each with every column of the board narrowed to its tickets and
- * counted, sorted by size, biggest first (ties in the order first met).
- * Over the cards the board read; a laned board reads them all (see
- * `TicketsPage`). No lanes is one untitled band holding the board as it is.
+ * A board read in lanes (#939) as the board draws it: one band per lane the
+ * server sent, in its order (biggest first), each with every column of the
+ * board, its cards looked up by id and its counts the lane's own, then
+ * gathered into the view's columns by `gather`. A board with no lanes is
+ * one untitled band holding the board as it is.
+ */
+export function boardLanes(
+  board: MiniBoard,
+  field: LaneField,
+  gather: (columns: MiniBoardColumn[]) => MiniBoardColumn[],
+): Lane[] {
+  if (field === "none") {
+    return [{ key: null, title: "", count: board.columns.reduce((all, c) => all + c.total, 0), columns: gather(board.columns) }];
+  }
+  const byId = new Map(board.columns.flatMap((column) => column.cards.map((card) => [card.entity_id, card] as const)));
+  return board.lanes.map((lane) => ({
+    key: lane.key,
+    title: laneTitle(field, lane.key),
+    count: lane.count,
+    columns: gather(
+      board.columns.map((column) => {
+        const cell = lane.columns.find((candidate) => candidate.status === column.status);
+        return {
+          status: column.status,
+          cards: (cell?.ids ?? []).flatMap((id) => byId.get(id) ?? []),
+          total: cell?.total ?? 0,
+        };
+      }),
+    ),
+  }));
+}
+
+/** What the line under a laned board says when lanes were not read, or `null`. */
+export function moreLanesLine(more: number): string | null {
+  if (more <= 0) return null;
+  return `Show ${Math.min(more, LANES_AT_FIRST)} more ${more === 1 ? "lane" : "lanes"}`;
+}
+
+/**
+ * The board split into lanes (R-3.5) over the cards it holds: one per value
+ * of `field` the cards show, each with every column of the board narrowed
+ * to its tickets and counted, sorted by size, biggest first (ties in the
+ * order first met). What the view editor's preview counts its lanes by; the
+ * Tickets board's lanes are the server's ({@link boardLanes}).
  */
 export function splitLanes(columns: MiniBoardColumn[], field: LaneField): Lane[] {
   if (field === "none") {
@@ -245,14 +295,14 @@ export function splitLanes(columns: MiniBoardColumn[], field: LaneField): Lane[]
   const keys: string[] = [];
   for (const column of columns) {
     for (const card of column.cards) {
-      const key = laneKey(card, field);
+      const key = laneOf(card, field);
       if (!keys.includes(key)) keys.push(key);
     }
   }
   return keys
     .map((key) => {
       const laned = columns.map((column) => {
-        const cards = column.cards.filter((card) => laneKey(card, field) === key);
+        const cards = column.cards.filter((card) => laneOf(card, field) === key);
         return { status: column.status, cards, total: cards.length };
       });
       return {

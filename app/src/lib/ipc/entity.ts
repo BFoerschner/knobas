@@ -2030,6 +2030,43 @@ export interface MiniBoard {
    * the fallback rather than the offer).
    */
   sources: SourceStatuses[];
+  /**
+   * The board in lanes (#939), biggest first, when it was read in lanes;
+   * empty otherwise. A lane names its cards by id; the cards are in
+   * `columns`, which still count every ticket.
+   */
+  lanes: MiniBoardLane[];
+  /** How many lanes there are past `lanes`, not sent. */
+  more_lanes: number;
+}
+
+/** What a board's lanes split by (R-3.5) — `LaneField`. */
+export type LaneField = "epic" | "assignee" | "priority" | "issuetype" | "label";
+
+/** One lane of a laned board — `MiniBoardLane` (#939). */
+export interface MiniBoardLane {
+  /** What its tickets share, in the source's words; `""` for none of it. */
+  key: string;
+  /** How many tickets stand in it. */
+  count: number;
+  /** Its statuses in the board's order, only those it has. */
+  columns: LaneColumn[];
+}
+
+/** One status of a lane — `LaneColumn` (#939). */
+export interface LaneColumn {
+  /** As `MiniBoardColumn.status`: `null` is the terminal group. */
+  status: string | null;
+  /** The kept cards' ids, newest first (or in the view's order), each in `MiniBoard.columns`. */
+  ids: string[];
+  /** How many of the lane's tickets stand in this status, kept or not. */
+  total: number;
+}
+
+/** A board read in lanes (#939): by what, and how many lanes to send. */
+export interface LanesAsked {
+  by: LaneField;
+  first: number;
 }
 
 /**
@@ -2058,12 +2095,17 @@ export interface MiniBoard {
  * tickets Jira put on it, in Jira's order, under the view's own columns —
  * each column's `status` is the column's name — and the room scope is not
  * read.
+ *
+ * `lanes` (#939, #1098) puts the board in lanes on the server: `perColumn`
+ * then caps each lane's column, and only the first `lanes.first` lanes are
+ * sent, biggest first (`MiniBoard.lanes`, `MiniBoard.more_lanes`).
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "sources" | "context" | "project">,
   perColumn?: number | null,
   query?: string | null,
   jiraView?: string | null,
+  lanes?: LanesAsked | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
@@ -2072,6 +2114,8 @@ export function miniBoard(
     perColumn: perColumn ?? null,
     query: query ?? null,
     jiraView: jiraView ?? null,
+    lanes: lanes?.by ?? null,
+    lanesFirst: lanes?.first ?? null,
   });
 }
 

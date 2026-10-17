@@ -10,6 +10,7 @@ import type {
   ContextRow,
   EntityFilter,
   EntityRow,
+  LanesAsked,
   MiniBoard,
   MiniBoardCard,
   Reached,
@@ -19,6 +20,7 @@ import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/searc
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
+import { laneOf } from "./tickets";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -109,7 +111,7 @@ const CORPUS: { status: string; card: MiniBoardCard }[] = [
 
 interface Harness {
   ports: TicketsPorts;
-  reads: { perColumn: number | null; query: string | null }[];
+  reads: { perColumn: number | null; query: string | null; lanes?: LanesAsked }[];
   /** The ticket views the views read answers with (#812); the writes change it. */
   views: TicketViewRow[];
   saved: TicketViewDraft[];
@@ -149,6 +151,34 @@ const AROUND_ROWS = [PR, BUILD_FAILED, BUILD_OK];
 
 function own(of: EntityRow): Reached {
   return { entity_id: of.entity_id, kind: of.kind, step: of.entity_id, origin: { kind: "own" } };
+}
+
+/**
+ * A whole board in lanes (#939), as `mini_board` answers: each lane's
+ * column capped at `perColumn`, lanes biggest first (ties by key here), the
+ * first `lanes.first` sent and the rest counted.
+ */
+function inLanes(whole: MiniBoard, lanes: LanesAsked, perColumn: number | null): MiniBoard {
+  const keys = [...new Set(whole.columns.flatMap((column) => column.cards.map((card) => laneOf(card, lanes.by))))];
+  const ranked = keys
+    .map((key) => {
+      const columns = whole.columns
+        .map((column) => {
+          const ids = column.cards.filter((card) => laneOf(card, lanes.by) === key).map((card) => card.entity_id);
+          return { status: column.status, ids: perColumn === null ? ids : ids.slice(0, perColumn), total: ids.length };
+        })
+        .filter((cell) => cell.total > 0);
+      return { key, count: columns.reduce((all, cell) => all + cell.total, 0), columns };
+    })
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  const sent = ranked.slice(0, lanes.first);
+  const kept = new Set(sent.flatMap((lane) => lane.columns.flatMap((cell) => cell.ids)));
+  return {
+    columns: whole.columns.map((column) => ({ ...column, cards: column.cards.filter((card) => kept.has(card.entity_id)) })),
+    sources: whole.sources,
+    lanes: sent,
+    more_lanes: ranked.length - sent.length,
+  };
 }
 
 /** Board reads answered over {@link CORPUS}, the query read as words that must all appear. */
@@ -201,8 +231,8 @@ function harness(
         if (row?.jira) row.jira = { ...row.jira, new: false };
         return Promise.resolve();
       },
-      board: (perColumn, query) => {
-        reads.push({ perColumn, query });
+      board: (perColumn, query, _jiraView, lanes) => {
+        reads.push(lanes ? { perColumn, query, lanes } : { perColumn, query });
         // Grammar keys narrow nothing here; the reads record them.
         const words = (query ?? "")
           .toLowerCase()
@@ -211,16 +241,17 @@ function harness(
         const kept = corpus.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
-        const board: MiniBoard = { columns: [], sources: [] };
+        const board: MiniBoard = { columns: [], sources: [], lanes: [], more_lanes: 0 };
         for (const status of ["To Do", "In Progress", "Done"]) {
           const cards = kept.filter((entry) => entry.status === status).map((entry) => entry.card);
           if (cards.length === 0) continue;
           board.columns.push({
             status,
-            cards: perColumn === null ? cards : cards.slice(0, perColumn),
+            cards: lanes || perColumn === null ? cards : cards.slice(0, perColumn),
             total: cards.length,
           });
         }
+        if (lanes) return Promise.resolve(inLanes(board, lanes, perColumn));
         return Promise.resolve(board);
       },
       detail: (id) => Promise.resolve({ body_text: `The description of ${id}.` }),
@@ -400,7 +431,7 @@ test("keys typed inside the typing pause are one read of the whole word, and an 
   await settle();
   expect(h.reads.at(-1)!.query).toBe("sepa x");
   type(field(), "x");
-  answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [] });
+  answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [], lanes: [], more_lanes: 0 });
   await settle();
   expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
 });
@@ -592,12 +623,13 @@ function press(key: string, init: KeyboardEventInit = {}) {
 const selectedKey = () =>
   target.querySelector('[aria-current="true"][data-entity]')?.getAttribute("data-entity")?.replace("jira:", "") ?? null;
 
-test("lanes split the board into bands by size, each with its columns and count, read whole", async () => {
+test("lanes split the board into bands by size, each with its columns and count, read in lanes", async () => {
   const h = harness();
   await open(h);
   chooseLanes("assignee");
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: null, query: null });
+  // Grouped and capped on the server (#939): eight a lane's column, ten lanes.
+  expect(h.reads.at(-1)).toEqual({ perColumn: 8, query: null, lanes: { by: "assignee", first: 10 } });
   const lanes = [...target.querySelectorAll(".tf-lane")].map((lane) => ({
     head: lane.querySelector("h2")!.textContent!.replace(/\s+/g, " ").trim(),
     columns: [...lane.querySelectorAll(".tf-col")].map((col) => ({
@@ -632,13 +664,40 @@ test("lanes split the board into bands by size, each with its columns and count,
       ],
     },
   ]);
-  // One lane's Show N more expands that lane's column only, with no read.
-  const reads = h.reads.length;
+  // One lane's Show N more reads that column's count and expands it only.
   target.querySelector<HTMLButtonElement>(".tf-lane .tf-more")!.click();
   await settle();
-  expect(h.reads.length).toBe(reads);
+  expect(h.reads.at(-1)).toEqual({ perColumn: 11, query: null, lanes: { by: "assignee", first: 10 } });
   expect(target.querySelectorAll(".tf-lane")[0]!.querySelectorAll(".tf-tcard").length).toBe(11);
   expect(target.querySelectorAll(".tf-lane")[1]!.querySelectorAll(".tf-tcard").length).toBe(3);
+  // Another field is another read of lanes.
+  chooseLanes("priority");
+  await settle();
+  expect(h.reads.at(-1)!.lanes).toEqual({ by: "priority", first: 10 });
+});
+
+test("a laned board draws its first ten lanes and Show N more lanes reads ten more (#939)", async () => {
+  const labelled = Array.from({ length: 12 }, (_, i) => ({
+    status: "To Do",
+    card: card(`PAY-${i + 1}`, `Ticket ${i + 1}`, {
+      labels: [`label-${String(i + 1).padStart(2, "0")}`],
+      updated_at: `2026-08-${String(22 - i).padStart(2, "0")}T10:00:00Z`,
+    }),
+  }));
+  const h = harness([], [], labelled);
+  await open(h);
+  chooseLanes("label");
+  await settle();
+  const heads = () => [...target.querySelectorAll(".tf-lane h2")].map((head) => head.textContent!.trim());
+  expect(heads()).toHaveLength(10);
+  expect(heads()[0]).toBe("label-01 1");
+  const more = [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Show 2 more lanes")!;
+  expect(more).toBeDefined();
+  more.click();
+  await settle();
+  expect(h.reads.at(-1)!.lanes).toEqual({ by: "label", first: 20 });
+  expect(heads()).toHaveLength(12);
+  expect([...target.querySelectorAll("button")].some((b) => b.textContent?.includes("more lanes"))).toBe(false);
 });
 
 test("j/k and the arrows move the selection through the visible cards in reading order across lanes", async () => {
@@ -1229,6 +1288,8 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
     // As `jira_view_board` answers: each Jira column by its name.
     return {
       sources: whole.sources,
+      lanes: [],
+      more_lanes: 0,
       columns: FLOW_COLUMNS.map((own) => {
         const held = whole.columns.filter((column) => own.statuses.includes(column.status ?? ""));
         return {

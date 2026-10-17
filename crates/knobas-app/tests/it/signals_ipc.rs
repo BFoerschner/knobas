@@ -289,6 +289,38 @@ async fn each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets()
     }
 }
 
+/// A red build linked to the ticket itself is one hop, and a ticket linked
+/// to that ticket reaches it in two: `has:failing-build` admits both, as
+/// their cards say (#939, whose `has:` starts from the red builds and walks
+/// back). A ticket three hops away carries none.
+#[tokio::test]
+async fn has_failing_build_finds_a_red_build_one_and_two_hops_back() {
+    let pool = pool().await;
+    let p = project();
+    let key = |n: u32| format!("{p}-{n}");
+    let (direct, beside, far) = (
+        ticket(&pool, &key(1)).await,
+        ticket(&pool, &key(2)).await,
+        ticket(&pool, &key(3)).await,
+    );
+    let red = format!("teamcity:{p}-b1");
+    build(&pool, &red, &format!("{p}-cfg"), "FAILURE", 5).await;
+    link(&pool, &red, &direct, "related", true).await;
+    link(&pool, &beside, &direct, "related", true).await;
+    link(&pool, &far, &beside, "related", true).await;
+
+    let expected = vec![key(1), key(2)];
+    let raw = format!("project:{p} has:failing-build");
+    assert_eq!(searched(&pool, &raw).await, expected, "{raw}");
+    let shown: Vec<String> = cards(&pool, &format!("project:{p}"))
+        .await
+        .into_iter()
+        .filter(|c| c.signals.iter().any(|s| s.kind.as_str() == "failing-build"))
+        .map(|c| c.key)
+        .collect();
+    assert_eq!(shown, expected);
+}
+
 /// What does **not** make a signal: a newer green run of the same
 /// configuration, a proposed link, a review asked of somebody else, a
 /// pull request that is merged, and a `blocks` link read from its other end.

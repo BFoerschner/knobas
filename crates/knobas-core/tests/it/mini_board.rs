@@ -1212,3 +1212,176 @@ async fn a_board_narrowed_to_matches_draws_and_counts_only_them() {
         "no match is an empty board, not the whole one"
     );
 }
+
+/// A ticket assigned to `who` (or nobody), in `status`, changed at `at`.
+async fn assigned(pool: &PgPool, key: &str, status: &str, who: Option<&str>, at: &str) {
+    let mut fields = serde_json::json!({ "status": { "name": status } });
+    if let Some(who) = who {
+        fields["assignee"] = serde_json::json!({ "name": who });
+    }
+    let id = item(
+        pool,
+        SOURCE,
+        "ticket",
+        key,
+        serde_json::json!({ "fields": fields }),
+    )
+    .await;
+    touched(pool, &id, at).await;
+}
+
+/// One lane as `(key, count, [(status, ids' keys, total)])`.
+type LaneShape = (String, u32, Vec<(Option<String>, Vec<String>, u32)>);
+
+fn lanes(board: &MiniBoard) -> Vec<LaneShape> {
+    board
+        .lanes
+        .iter()
+        .map(|lane| {
+            (
+                lane.key.clone(),
+                lane.count,
+                lane.columns
+                    .iter()
+                    .map(|cell| {
+                        let keys = cell
+                            .ids
+                            .iter()
+                            .map(|id| id.trim_start_matches("jira:").to_owned())
+                            .collect();
+                        (cell.status.clone(), keys, cell.total)
+                    })
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
+/// The fixture the lane tests share: Mara has three to do and one done,
+/// Omar one to do, and one ticket in progress is nobody's.
+async fn three_lanes(pool: &PgPool) {
+    for (key, status, who, at) in [
+        ("PAY-1", "To Do", Some("mara"), "2026-10-01T09:00:00Z"),
+        ("PAY-2", "To Do", Some("mara"), "2026-10-02T09:00:00Z"),
+        ("PAY-3", "To Do", Some("mara"), "2026-10-03T09:00:00Z"),
+        ("PAY-4", "Done", Some("mara"), "2026-10-04T09:00:00Z"),
+        ("PAY-5", "To Do", Some("omar"), "2026-10-05T09:00:00Z"),
+        ("PAY-6", "In Progress", None, "2026-10-06T09:00:00Z"),
+    ] {
+        assigned(pool, key, status, who, at).await;
+    }
+}
+
+fn by_assignee(first: Option<u32>) -> Option<mini_board::Lanes> {
+    Some(mini_board::Lanes {
+        by: mini_board::LaneField::Assignee,
+        first,
+    })
+}
+
+/// **A laned board is grouped and capped on the server** (#939, #1098):
+/// each lane x status cell keeps its newest `per_column` and counts them
+/// all, a lane counts its tickets, and lanes come biggest first, a tie
+/// going to the lane with the newer ticket. The board's own columns still
+/// count every ticket and hold the cards the lanes keep. Mara's to-do cell
+/// of three under a cap of two is what a cap per lane rather than per cell,
+/// or a count taken after the cut, would get wrong.
+#[tokio::test]
+async fn a_laned_board_caps_each_lanes_cell_and_counts_them_all() {
+    let pool = scratch().await;
+    three_lanes(&pool).await;
+
+    let board = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope {
+            lanes: by_assignee(None),
+            ..mini_board::Scope::default()
+        },
+        &ticket_declarations(),
+        Some(2),
+    )
+    .await
+    .unwrap();
+
+    let s = |status: &str| Some(status.to_owned());
+    let k = |keys: &[&str]| keys.iter().map(|key| (*key).to_owned()).collect::<Vec<_>>();
+    assert_eq!(
+        lanes(&board),
+        vec![
+            (
+                "mara".to_owned(),
+                4,
+                vec![
+                    (s("To Do"), k(&["PAY-3", "PAY-2"]), 3),
+                    (s("Done"), k(&["PAY-4"]), 1)
+                ]
+            ),
+            (String::new(), 1, vec![(s("In Progress"), k(&["PAY-6"]), 1)]),
+            ("omar".to_owned(), 1, vec![(s("To Do"), k(&["PAY-5"]), 1)]),
+        ]
+    );
+    assert_eq!(board.more_lanes, 0);
+    assert_eq!(
+        columns(&board),
+        vec![
+            (Some("To Do"), vec!["PAY-2", "PAY-3", "PAY-5"]),
+            (Some("In Progress"), vec!["PAY-6"]),
+            (Some("Done"), vec!["PAY-4"]),
+        ]
+    );
+    let totals: Vec<u32> = board.columns.iter().map(|column| column.total).collect();
+    assert_eq!(
+        totals,
+        vec![4, 1, 1],
+        "the board's columns count every ticket"
+    );
+}
+
+/// Only the first lanes carry cards (#939): a board laned by epic on a
+/// large mirror is hundreds of small lanes, which a cap per cell does not
+/// cut. The lanes past `first` are not sent; `more_lanes` says how many.
+#[tokio::test]
+async fn a_laned_board_sends_only_its_first_lanes_and_counts_the_rest() {
+    let pool = scratch().await;
+    three_lanes(&pool).await;
+
+    let board = mini_board::read_scoped(
+        &pool,
+        mini_board::Scope {
+            lanes: by_assignee(Some(1)),
+            ..mini_board::Scope::default()
+        },
+        &ticket_declarations(),
+        None,
+    )
+    .await
+    .unwrap();
+
+    let keys: Vec<(String, u32)> = lanes(&board)
+        .into_iter()
+        .map(|(key, count, _)| (key, count))
+        .collect();
+    assert_eq!(keys, vec![("mara".to_owned(), 4)]);
+    assert_eq!(board.more_lanes, 2);
+    assert_eq!(
+        columns(&board),
+        vec![
+            (Some("To Do"), vec!["PAY-1", "PAY-2", "PAY-3"]),
+            (Some("In Progress"), vec![]),
+            (Some("Done"), vec!["PAY-4"]),
+        ],
+        "every column stays, counted whole, with the first lanes' cards"
+    );
+}
+
+/// A board without lanes carries none.
+#[tokio::test]
+async fn a_board_without_lanes_carries_none() {
+    let pool = scratch().await;
+    three_lanes(&pool).await;
+    let board = mini_board::read_capped(&pool, None, &[], None, &ticket_declarations(), Some(2))
+        .await
+        .unwrap();
+    assert!(board.lanes.is_empty());
+    assert_eq!(board.more_lanes, 0);
+}

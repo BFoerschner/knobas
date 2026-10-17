@@ -1408,7 +1408,9 @@ fn the_context_kinds_match_their_typescript_mirror() {
     );
 }
 
-const MINI_BOARD_FIELDS: &[&str] = &["columns", "sources"];
+const MINI_BOARD_FIELDS: &[&str] = &["columns", "lanes", "more_lanes", "sources"];
+const MINI_BOARD_LANE_FIELDS: &[&str] = &["columns", "count", "key"];
+const LANE_COLUMN_FIELDS: &[&str] = &["ids", "status", "total"];
 const MINI_BOARD_COLUMN_FIELDS: &[&str] = &["cards", "status", "total"];
 const MINI_BOARD_CARD_FIELDS: &[&str] = &[
     "assignee",
@@ -1469,10 +1471,30 @@ fn the_mini_board_shapes_match_their_typescript_mirror() {
             source_id: "mock".to_owned(),
             statuses: vec!["In Progress".to_owned()],
         }],
+        lanes: vec![knobas_core::mini_board::MiniBoardLane {
+            key: String::new(),
+            count: 1,
+            columns: vec![knobas_core::mini_board::LaneColumn {
+                status: None,
+                ids: vec!["mock:PAY-231".to_owned()],
+                total: 1,
+            }],
+        }],
+        more_lanes: 0,
     };
     let wire = serde_json::to_value(&board).unwrap();
 
     assert_shape("MiniBoard", &wire, MINI_BOARD_FIELDS);
+    assert_shape("MiniBoardLane", &wire["lanes"][0], MINI_BOARD_LANE_FIELDS);
+    assert_shape(
+        "LaneColumn",
+        &wire["lanes"][0]["columns"][0],
+        LANE_COLUMN_FIELDS,
+    );
+    assert_eq!(
+        wire["lanes"][0]["columns"][0]["status"],
+        serde_json::Value::Null
+    );
     assert_shape(
         "MiniBoardColumn",
         &wire["columns"][0],
