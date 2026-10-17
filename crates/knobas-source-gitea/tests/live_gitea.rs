@@ -4888,3 +4888,157 @@ async fn the_file_view_draws_the_blob_a_commit_is_made_against() {
         "main is left as it was"
     );
 }
+
+/// A repository's language and teams (#966), through the descriptor's own
+/// declarations, on the real server's records.
+///
+/// The seeded repositories cannot witness either: their default branches
+/// hold no source file Gitea's language statistics count, and every seeded
+/// person reaches them through *Owners*, which holds every repository of the
+/// organization. So the test makes its own: an organization repository with
+/// one Rust file on `main`, added to one team of its own, and removes both
+/// at the end. A user's repository (the seeded mirror) is the other arm:
+/// Gitea answers 405 for its teams, which reads as none.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_repository_reads_its_language_and_its_own_teams_not_owners() {
+    let env = env();
+    let http = reqwest::Client::builder()
+        .timeout(live_env::REQUEST_BUDGET)
+        .build()
+        .expect("a client with a timeout");
+    let api = format!("{}/api/v1", env.url);
+    let (admin, password) = TESTENV_ADMIN;
+    let owner = env.owner.clone();
+    let scratch = "knobas-live-language";
+    let team_name = "knobas-live-team";
+    let full_name = format!("{owner}/{scratch}");
+
+    let remove = async || {
+        let _ = http
+            .delete(format!("{api}/repos/{full_name}"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await;
+        let teams: serde_json::Value = http
+            .get(format!("{api}/orgs/{owner}/teams"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await
+            .expect("GET the organization's teams")
+            .json()
+            .await
+            .expect("a team list");
+        for team in teams.as_array().into_iter().flatten() {
+            if team["name"] == team_name {
+                let _ = http
+                    .delete(format!("{api}/teams/{}", team["id"]))
+                    .basic_auth(admin, Some(password))
+                    .send()
+                    .await;
+            }
+        }
+    };
+    remove().await;
+
+    let status = |what: &str, response: reqwest::Response| {
+        assert!(response.status().is_success(), "{what}: {}", response.status());
+        response
+    };
+    status(
+        "create the repository",
+        http.post(format!("{api}/orgs/{owner}/repos"))
+            .basic_auth(admin, Some(password))
+            .json(&serde_json::json!({ "name": scratch, "auto_init": true, "default_branch": "main" }))
+            .send()
+            .await
+            .expect("POST /orgs/{owner}/repos"),
+    );
+    let team: serde_json::Value = status(
+        "create the team",
+        http.post(format!("{api}/orgs/{owner}/teams"))
+            .basic_auth(admin, Some(password))
+            .json(&serde_json::json!({
+                "name": team_name, "permission": "read", "units": ["repo.code"],
+                "includes_all_repositories": false
+            }))
+            .send()
+            .await
+            .expect("POST /orgs/{owner}/teams"),
+    )
+    .json()
+    .await
+    .expect("the team record");
+    status(
+        "add the repository to the team",
+        http.put(format!("{api}/teams/{}/repos/{full_name}", team["id"]))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await
+            .expect("PUT /teams/{id}/repos"),
+    );
+    // `fn main() {}\n`, so Gitea's statistics find Rust on the default branch.
+    status(
+        "push a Rust file",
+        http.post(format!("{api}/repos/{full_name}/contents/src/main.rs"))
+            .basic_auth(admin, Some(password))
+            .json(&serde_json::json!({
+                "branch": "main", "content": "Zm4gbWFpbigpIHt9Cg==", "message": "knobas live: a Rust file"
+            }))
+            .send()
+            .await
+            .expect("POST contents"),
+    );
+    // The statistics are worked out after the push, on Gitea's own queue.
+    let mut said = String::new();
+    for _ in 0..60 {
+        let record: serde_json::Value = http
+            .get(format!("{api}/repos/{full_name}"))
+            .basic_auth(admin, Some(password))
+            .send()
+            .await
+            .expect("GET the repository")
+            .json()
+            .await
+            .expect("a repository record");
+        said = record["language"].as_str().unwrap_or_default().to_owned();
+        if !said.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+    println!("LIVE Gitea's language for {full_name}: {said:?}");
+
+    let declared = knobas_source_gitea::descriptor_template()
+        .payload_paths
+        .into_iter()
+        .find(|paths| paths.kind == "repo")
+        .expect("a repository declares its paths");
+    let read = |items: &[SyncItem], name: &str| {
+        let repo = of_kind(items, "repo")
+            .into_iter()
+            .find(|item| item.title == name)
+            .unwrap_or_else(|| panic!("{name} is synced"))
+            .clone();
+        (
+            knobas_core::payload::resolve_string(&repo.payload, &declared.language),
+            knobas_core::payload::resolve_list(&repo.payload, &declared.teams),
+            repo.payload.get("teams").cloned(),
+        )
+    };
+    let (items, _) = full(&*env.source(serde_json::json!({ "repos": [full_name] }))).await;
+    let (language, teams, _) = read(&items, &full_name);
+    let mirror = format!("{admin}/ops-runbooks-mirror");
+    let (user_items, _) = full(&*env.source(serde_json::json!({ "repos": [mirror] }))).await;
+    let (_, _, user_teams) = read(&user_items, &mirror);
+    remove().await;
+
+    println!("LIVE declared language {language:?}, teams {teams:?}; the mirror's teams {user_teams:?}");
+    assert_eq!(language.as_deref(), Some("Rust"), "Gitea said {said:?}");
+    assert_eq!(teams, vec![team_name.to_owned()], "Owners holds every repository and is left out");
+    assert_eq!(
+        user_teams,
+        Some(serde_json::json!([])),
+        "a user's repository has no teams to have"
+    );
+}

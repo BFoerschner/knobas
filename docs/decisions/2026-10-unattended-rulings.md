@@ -3890,3 +3890,52 @@ Implementer, one PR for both.
   are fixed at 30 s, so a test that tells the two apart would run for over 30 s. The wiremock
   download and log tests and the `teamcity-live` download cases show that the switch still reads
   every target whole. **Reversing:** n/a.
+## #966, #973 and #986 — a repository's language and team, an author, and Mine on Commits and Branches (2026-10-17)
+
+- **A repository's team is Gitea's organization teams the repository was added to** (`GET
+  /repos/{owner}/{repo}/teams`), less any team that holds every repository of its organization
+  (*Owners*, `includes_all_repositories`). Not the owner: in prototype-6 and on testenv the owner is
+  the organization (`tidewater`) and the team is `Payments`. Not a knobas-local field: it would be a
+  second place to keep what Gitea already says. A list, since a repository may be in more than one
+  team; drawn joined by commas. **Reversing:** moderate (a different source of the `teams` the
+  adapter writes; the declaration and every reader stay).
+- **The teams are read only when the repository's record is written**, one request per changed
+  repository, and the repository's fingerprint stays Gitea's record's. A team change therefore
+  shows with the repository's next push or the next full sync. **Reversing:** low (read every run
+  and fold the teams into the fingerprint, at one request per repository per run).
+- **A user's repository (Gitea's 405) has no teams; a 403 or 404 on the teams is a miss and the
+  walk goes on.** A token without organization scope must not cost the repository its branches.
+  **Reversing:** low (`GiteaClient::repo_teams`).
+- **The author is the mirror's §4.1 `author`, not a new declaration.** Gitea's adapter already
+  fills it from a pull request's `user.login`, a commit's `author.login` (else
+  `commit.author.name`) and a branch tip's `commit.author.username`, the fields #973 and #986 name.
+  One field serves all three tickets, as #986 asks. **Reversing:** low.
+- ***Mine* is the attention read's comparison (#712)**: the author equals the row's own source's
+  configured `username`, trimmed, case as written. The rest of Code groups by that read, so a pull
+  request under *Yours* and one that is *Mine* agree. **Reversing:** low (`CODE_FACTS`).
+- **The facts are a command of their own, `code_facts`, not fields on `EntityRow`.** `EntityRow` is
+  one wire shape over two structs (`commands::search`'s pin) read by a dozen statements, and only
+  Code draws these four facts. Code asks once for the rows both lists hold; the repository page
+  asks for the repository, its branch rows and its commit rows. **Reversing:** moderate (four fields
+  on both `EntityRow`s and every statement that selects one).
+- **Commits' *Author: Mine* and Branches' *Show: Mine* keep only rows the mirror holds whose
+  declared author is mine.** A commit the mirror does not hold has no id and no declared author, so
+  the chip leaves it out even when the source's line names you: matching that line is reading the
+  source's words. **Reversing:** n/a (it is the ticket's criterion).
+- **A merged or closed pull request of yours is under *Yours*,** as prototype-6 groups `p.by===ME`,
+  and so is the repository holding it. **Reversing:** low (`prLines`).
+- **The author is drawn as the source spells the account (`mara`), not prototype-6's display name
+  (`Mara Lindqvist`)**, and *By* shows the default branch's tip author too, where prototype-6 leaves
+  `main`'s blank: no source declares a display name, and the default branch's author is declared
+  like any other. **Reversing:** low.
+- **The header reads `<teams>, <language>, last push …`** and drops what is not declared, starting
+  at *Last push* when nothing is. **Reversing:** low (`headLine`).
+- **`?fake-ipc`:** the repositories carry prototype-6's team and language in their payload under
+  `teams` and `language`; the repository view's branches answer `code_facts` through
+  `CODE_FACTS` in `fake/corpus.ts`, registered by `fake/views/repos.ts`. The default branch's
+  commits are not in the fixture's mirror, so *Author: Mine* on `main` keeps none of them.
+  **Reversing:** low.
+- **The seeded testenv repositories carry neither a team nor a language** (no source file on any
+  default branch, every person through *Owners*), so the by-eye check on testenv data cannot see
+  either. The live suite witnesses both on a repository it makes and removes; seeding them is a
+  follow-up. **Reversing:** n/a.
