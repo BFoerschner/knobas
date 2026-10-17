@@ -270,7 +270,12 @@ async fn a_status_move_knobas_sent_is_a_change_and_not_a_comment() {
 
 /// One entry of Jira's changelog as `/search` with `expand=changelog` writes
 /// it (WADL: *Change History*): who, when, and the fields it moved.
-fn history(name: &str, display: &str, created: &str, items: serde_json::Value) -> serde_json::Value {
+fn history(
+    name: &str,
+    display: &str,
+    created: &str,
+    items: serde_json::Value,
+) -> serde_json::Value {
     serde_json::json!({
         "id": uuid::Uuid::new_v4().to_string(),
         "author": { "name": name, "displayName": display, "active": true },
@@ -352,19 +357,72 @@ async fn a_status_change_made_in_jira_is_a_change_with_who_from_and_to() {
     assert_eq!(
         lines,
         [
-            (ChangeKind::Status, Some("Priya Nair"), Some("Backlog"), Some("Done"), false),
-            (ChangeKind::Status, Some("Priya Nair"), Some("To Do"), Some("In Progress"), false),
+            (
+                ChangeKind::Status,
+                Some("Priya Nair"),
+                Some("Backlog"),
+                Some("Done"),
+                false
+            ),
+            (
+                ChangeKind::Status,
+                Some("Priya Nair"),
+                Some("To Do"),
+                Some("In Progress"),
+                false
+            ),
             (ChangeKind::Status, None, None, Some("Done"), true),
-            (ChangeKind::Status, Some("Mara Lindqvist"), Some("In Progress"), Some("In Review"), true),
+            (
+                ChangeKind::Status,
+                Some("Mara Lindqvist"),
+                Some("In Progress"),
+                Some("In Review"),
+                true
+            ),
         ],
         "oldest first; the knobas move to In Review is Jira's own line, the one to Done is not \
          in the changelog yet (its older move to Done is another move)"
     );
-    assert_eq!(read.changes[1].at, "2026-08-12T07:30:00Z".parse::<chrono::DateTime<chrono::Utc>>().unwrap());
+    assert_eq!(
+        read.changes[1].at,
+        "2026-08-12T07:30:00Z"
+            .parse::<chrono::DateTime<chrono::Utc>>()
+            .unwrap()
+    );
+}
+
+/// **Failure direction of the changelog read** (ADR-0007): a changelog of
+/// another shape, and a status item with no new status or an entry with no
+/// time, are no line -- never an error and never a guess.
+#[tokio::test]
+async fn a_changelog_of_another_shape_reads_as_no_moves() {
+    let pool = pool().await;
+    for changelog in [
+        serde_json::json!("three"),
+        serde_json::json!({ "histories": { "status": "Done" } }),
+        serde_json::json!({ "histories": [
+            history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
+                    serde_json::json!([{ "field": "status", "fromString": "To Do" }])),
+            history("priya", "Priya Nair", "yesterday",
+                    serde_json::json!([status_item("To Do", "Done")])),
+            history("priya", "Priya Nair", "2026-08-12T09:30:00.000+0200",
+                    serde_json::json!({ "field": "status", "toString": "Done" })),
+        ] }),
+    ] {
+        let id = issue(&pool, serde_json::json!({ "changelog": changelog.clone() })).await;
+        let read = thread(&pool, &id).await.unwrap();
+        assert!(read.changes.is_empty(), "{changelog}");
+        assert!(read.comments.is_empty(), "{changelog}");
+    }
 }
 
 /// A Gitea pull request as the adapter stores it: Gitea's own record.
-async fn pull_request(pool: &sqlx::PgPool, number: u32, created: &str, merged: Option<&str>) -> String {
+async fn pull_request(
+    pool: &sqlx::PgPool,
+    number: u32,
+    created: &str,
+    merged: Option<&str>,
+) -> String {
     let id = format!("gitea:tidewater/payout-service-{}#{number}", &key()[4..]);
     sqlx::query("insert into knobas.entity (id, kind, title) values ($1,'pr',$1)")
         .bind(&id)
@@ -410,7 +468,13 @@ async fn confirmed(pool: &sqlx::PgPool, from: &str, to: &str) {
 async fn a_linked_pull_requests_opening_and_merge_are_lines() {
     let pool = pool().await;
     let ticket = issue(&pool, serde_json::json!({})).await;
-    let merged = pull_request(&pool, 57, "2026-08-12T09:00:00+02:00", Some("2026-08-13T15:00:00+02:00")).await;
+    let merged = pull_request(
+        &pool,
+        57,
+        "2026-08-12T09:00:00+02:00",
+        Some("2026-08-13T15:00:00+02:00"),
+    )
+    .await;
     let open = pull_request(&pool, 142, "2026-08-14T08:00:00Z", None).await;
     let stranger = pull_request(&pool, 9, "2026-08-11T08:00:00Z", None).await;
     confirmed(&pool, &ticket, &merged).await;
@@ -432,14 +496,36 @@ async fn a_linked_pull_requests_opening_and_merge_are_lines() {
     let lines: Vec<_> = read
         .changes
         .iter()
-        .map(|c| (c.at.to_rfc3339(), c.kind, c.number.as_deref(), c.repo.as_deref()))
+        .map(|c| {
+            (
+                c.at.to_rfc3339(),
+                c.kind,
+                c.number.as_deref(),
+                c.repo.as_deref(),
+            )
+        })
         .collect();
     assert_eq!(
         lines,
         [
-            ("2026-08-12T07:00:00+00:00".to_owned(), ChangeKind::Opened, Some("57"), Some("payout-service")),
-            ("2026-08-13T13:00:00+00:00".to_owned(), ChangeKind::Merged, Some("57"), Some("payout-service")),
-            ("2026-08-14T08:00:00+00:00".to_owned(), ChangeKind::Opened, Some("142"), Some("payout-service")),
+            (
+                "2026-08-12T07:00:00+00:00".to_owned(),
+                ChangeKind::Opened,
+                Some("57"),
+                Some("payout-service")
+            ),
+            (
+                "2026-08-13T13:00:00+00:00".to_owned(),
+                ChangeKind::Merged,
+                Some("57"),
+                Some("payout-service")
+            ),
+            (
+                "2026-08-14T08:00:00+00:00".to_owned(),
+                ChangeKind::Opened,
+                Some("142"),
+                Some("payout-service")
+            ),
         ]
     );
 }

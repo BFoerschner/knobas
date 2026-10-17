@@ -20,7 +20,8 @@
   else none. Each history item whose `field` is `status` is a `status` line: `at` the entry's
   `created`, `status` its `toString`, `from` its `fromString`, `by` the author's `displayName`
   else account, `mine` the account in the identity. An item with no time or no `toString` is no
-  line. Witnessed by `conversation_ipc.rs`'s
+  line; **failure direction: a drifted shape is no line**, pinned by
+  `a_changelog_of_another_shape_reads_as_no_moves`. Witnessed by `conversation_ipc.rs`'s
   `a_status_change_made_in_jira_is_a_change_with_who_from_and_to` and against the real product
   by `live_jira_seeded.rs`'s `each_issue_carries_its_status_history`.
 

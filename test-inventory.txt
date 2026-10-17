@@ -591,6 +591,7 @@ knobas-app	test/it	contexts_ipc::an_unknown_context_is_an_empty_page_not_the_cor
 knobas-app	test/it	contexts_ipc::promote_announces_once_however_often_it_is_pressed
 knobas-app	test/it	contexts_ipc::promoting_the_unsynced_is_not_found_and_a_bad_id_is_invalid
 knobas-app	test/it	contexts_ipc::the_tray_scopes_by_the_contexts_membership
+knobas-app	test/it	conversation_ipc::a_changelog_of_another_shape_reads_as_no_moves
 knobas-app	test/it	conversation_ipc::a_jira_thread_reads_its_comments_with_mine_and_mentions
 knobas-app	test/it	conversation_ipc::a_linked_pull_requests_opening_and_merge_are_lines
 knobas-app	test/it	conversation_ipc::a_payload_of_another_shape_reads_as_no_comments

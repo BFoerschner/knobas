@@ -200,8 +200,9 @@ const MOVES: &str = "select coalesce(settled_at, queued_at) as at, queued_at,
 /// the knobas-sent moves stand alone. [`moves_of`] reads each entry.
 ///
 /// Failure direction as [`COMMENTS`]': a drifted shape is no line, never a
-/// wrong one.
-const HISTORIES: &str = "select case when jsonb_typeof(payload #> '{changelog,histories}') = 'array'
+/// wrong one. Pinned by `a_changelog_of_another_shape_reads_as_no_moves`.
+const HISTORIES: &str =
+    "select case when jsonb_typeof(payload #> '{changelog,histories}') = 'array'
             then payload #> '{changelog,histories}' end as histories
   from sync.item
  where entity_id = $1";
@@ -401,7 +402,10 @@ pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> 
     {
         let number: Option<String> = row.get("num");
         let repo: Option<String> = row.get("repo");
-        for (kind, column) in [(ChangeKind::Opened, "opened"), (ChangeKind::Merged, "merged")] {
+        for (kind, column) in [
+            (ChangeKind::Opened, "opened"),
+            (ChangeKind::Merged, "merged"),
+        ] {
             let at = row
                 .get::<Option<String>, _>(column)
                 .as_deref()

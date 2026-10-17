@@ -148,11 +148,6 @@ fn no_agile() -> SourceError {
     }
 }
 
-/// The real endpoints. Every path and every parameter here is declared in
-/// `testenv/specs/jira-dc-rest.wadl`; `knobas-mockd` records anything else as a
-/// violation, which is what turns "the adapter invented an endpoint" into a red
-/// test in this crate's own suite rather than a surprise against a real Jira.
-///
 /// What a sync run's `/search` sends.
 ///
 /// `expand=changelog` (#929) puts each issue's status history in the record,
@@ -175,6 +170,11 @@ fn search_query(
     ]
 }
 
+/// The real endpoints. Every path and every parameter here is declared in
+/// `testenv/specs/jira-dc-rest.wadl`; `knobas-mockd` records anything else as a
+/// violation, which is what turns "the adapter invented an endpoint" into a red
+/// test in this crate's own suite rather than a surprise against a real Jira.
+///
 /// The issue key is interpolated into the path. Keys come from Jira's own
 /// responses (`PAY-231`) and are `[A-Z0-9_]+-\d+`, so no escaping is required;
 /// a key that is not one would 404 and be reported as
@@ -374,13 +374,6 @@ mod tests {
         jira.assert_no_violations();
     }
 
-    /// The sixth call's path and its (empty) parameter set, against the same
-    /// document the test above validates the other five against.
-    ///
-    /// Read off `knobas_mockd::allowlist` -- which `build.rs` generates from
-    /// the pinned `testenv/specs/jira-dc-rest.wadl` -- rather than over a
-    /// socket, because mockd has no handler for this path and would answer a
-    /// 501 that says nothing about whether the path is in the contract.
     /// A sync run's search asks for the changelog and for nothing else that
     /// `expand` can name (#929): the status history a ticket's conversation
     /// draws, never `renderedFields`' HTML.
@@ -394,6 +387,15 @@ mod tests {
             .collect();
         assert_eq!(expand, ["changelog"]);
     }
+
+    /// The sixth call's path and its (empty) parameter set, against the same
+    /// document `every_call_is_one_the_wadl_declares` validates the other five
+    /// against.
+    ///
+    /// Read off `knobas_mockd::allowlist` -- which `build.rs` generates from
+    /// the pinned `testenv/specs/jira-dc-rest.wadl` -- rather than over a
+    /// socket, because mockd has no handler for this path and would answer a
+    /// 501 that says nothing about whether the path is in the contract.
 
     #[test]
     fn the_field_table_is_a_path_the_wadl_declares() {
