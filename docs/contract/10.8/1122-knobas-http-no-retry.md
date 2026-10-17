@@ -13,10 +13,12 @@
   }
   ```
 
-  `send` and `send_streaming` make one attempt for such a request, through the limiter and under
-  `SEND_BUDGET` as before. Every failure comes back unretried: a timeout or a connect error, and a
-  `429`/`502`/`503`/`504` too, since a gateway's `502`/`504` can't say whether the source behind
-  it acted. Every request that does not call it keeps `MAX_ATTEMPTS`.
+  `send` and `send_streaming` send such a request once, through the limiter and under
+  `SEND_BUDGET` as before. Every failure of an attempt that reached the source comes back
+  unretried: a timeout, and a `429`/`502`/`503`/`504` too, since a gateway's `502`/`504` can't say
+  whether the source behind it acted. A connect error (`reqwest`'s `is_connect`: the connection
+  never opened, so no byte left this machine) is still retried, up to `MAX_ATTEMPTS`. Every
+  request that does not call it keeps `MAX_ATTEMPTS` for every transient failure.
 
   **Which writes opt out (the audit):**
 

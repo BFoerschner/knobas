@@ -4777,3 +4777,11 @@ Merge-manager:
 - **Gitea keeps the retry where Gitea refuses the repeat** (branch and pull request create: `409`;
   merge: `405`; file commit: `sha`). The cost: a create that landed and was retried reads as a
   refusal. **Reversing:** trivial (`post` → `post_once` at the call site).
+
+Merge-manager:
+
+- **A once-sent request is still retried after a connect error.** `reqwest`'s `is_connect` comes
+  from the connector, before any byte of the request is written, so that attempt provably did
+  nothing; failing the write on it would only push it to the queue's next tick. A connect
+  *timeout* under the whole-request deadline reads as a timeout and stays unretried, which errs
+  safe. **Reversing:** trivial (the `else` arm of `classify_transport` in `send_with`).

@@ -474,8 +474,7 @@ impl KumaSocket {
     /// an emit that was accepted and then went unanswered may have landed.
     ///
     /// The `400` proves only that *this* POST was dropped, which is why
-    /// [`Session::send`] makes one attempt and never resends a POST that may
-    /// have landed (#1122): the `400` can then only be the first POST's.
+    /// [`Session::send`] never resends a POST that may have landed (#1122): the `400` can then only be the first POST's.
     async fn emit_on(
         &self,
         logged_in: &mut LoggedIn,
@@ -547,7 +546,8 @@ impl Session<'_> {
     /// POST one packet. The body is the packet verbatim, which is what
     /// [`knobas_http::Request::text`] exists for.
     ///
-    /// **Sent once, never retried by the transport** (#1122). A POST that
+    /// **Sent once, never retried by the transport** (#1122), unless the
+    /// connection never opened. A POST that
     /// timed out may have delivered its packet, and a resent `add` is a second
     /// monitor. Worse, if Kuma reaped the session in between, the resend meets
     /// `400 Session ID unknown`, which [`KumaSocket::emit_on`] rightly reads

@@ -473,6 +473,59 @@ async fn a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer() {
     assert_eq!(server.hits(), 1);
 }
 
+/// A connect error is the one failure a write that opted out is still retried
+/// on: the connection never opened, so nothing reached the source (#1122
+/// review). The port refuses the first attempt and is listening by the second,
+/// [`BACKOFF_BASE`](knobas_http::retry::BACKOFF_BASE) later, which answers
+/// `201` and counts.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection() {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    // Bind and drop: the port is real and closed until the server takes it.
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    drop(listener);
+
+    // Built first: building a client can take longer than the server's delay,
+    // and the first attempt must meet the closed port.
+    let client = HttpClient::new(config(format!("http://127.0.0.1:{port}"))).expect("client");
+
+    let hits = Arc::new(AtomicUsize::new(0));
+    let counter = Arc::clone(&hits);
+    let server = tokio::spawn(async move {
+        // Well inside the first backoff (250 ms), well after the first attempt.
+        tokio::time::sleep(std::time::Duration::from_millis(120)).await;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("rebind");
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let mut buffer = [0u8; 2048];
+            let _ = socket.read(&mut buffer).await;
+            counter.fetch_add(1, Ordering::SeqCst);
+            let _ = socket
+                .write_all(
+                    b"HTTP/1.1 201 Created\r\ncontent-length: 0\r\nconnection: close\r\n\r\n",
+                )
+                .await;
+            let _ = socket.shutdown().await;
+        }
+    });
+
+    let sent = client
+        .send(
+            client
+                .request(Method::POST, "/rest/api/2/issue")
+                .json(&serde_json::json!({ "fields": { "summary": "once" } }))
+                .no_retry(),
+        )
+        .await;
+    server.abort();
+
+    assert!(sent.is_ok(), "{sent:?}");
+    assert_eq!(hits.load(Ordering::SeqCst), 1);
+}
+
 /// A server that accepts connections and never replies, counting them.
 struct SilentServer {
     port: u16,

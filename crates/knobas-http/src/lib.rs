@@ -383,16 +383,17 @@ impl HttpClient {
         deadline: Deadline,
     ) -> Result<reqwest::Response, SourceError> {
         let started = Instant::now();
-        // One attempt for a request that may not be repeated
-        // ([`Request::no_retry`]).
-        let attempts = if request.retry { MAX_ATTEMPTS } else { 1 };
+        // A request that may not be repeated ([`Request::no_retry`]) is
+        // retried only after a connect error: the connection never opened, so
+        // no byte of it reached the source.
+        let retry = request.retry;
         let mut request = request.inner;
 
-        for attempt in 1..=attempts {
+        for attempt in 1..=MAX_ATTEMPTS {
             // Cloned before sending, because sending consumes it. `None` for a
             // streaming body, which M1 never builds.
             let next = request.try_clone();
-            let last = attempt == attempts;
+            let last = attempt == MAX_ATTEMPTS;
 
             // Every attempt, not just the first: a retry that skips the
             // limiter is the burst this crate exists to prevent. Before the
@@ -410,10 +411,12 @@ impl HttpClient {
             // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
-                (
-                    classify::reqwest_error(&error),
-                    retry::error_is_transient(&error),
-                )
+                let transient = if retry {
+                    retry::error_is_transient(&error)
+                } else {
+                    error.is_connect()
+                };
+                (classify::reqwest_error(&error), transient)
             };
             let answered = match deadline {
                 Deadline::Whole => request
@@ -431,7 +434,7 @@ impl HttpClient {
                             SourceError::Unreachable(format!(
                                 "no response headers within {attempt_timeout:?}"
                             )),
-                            true,
+                            retry,
                         )),
                     }
                 }
@@ -443,7 +446,7 @@ impl HttpClient {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
                     let status = response.status();
-                    let transient = retry::status_is_transient(status.as_u16());
+                    let transient = retry && retry::status_is_transient(status.as_u16());
                     // Read before the body is consumed to build the message.
                     let asked_for = classify::parse_retry_after(response.headers());
                     // Bounded here too: a streamed send's response carries no
@@ -733,9 +736,10 @@ impl Request {
         }
     }
 
-    /// Send this request **once**: [`HttpClient::send`] makes one attempt and
-    /// returns its failure as it is, timeouts and busy answers included
-    /// (issue #1122).
+    /// Send this request **once**: [`HttpClient::send`] returns the failure of
+    /// the attempt that reached the source as it is, timeouts and busy answers
+    /// included (issue #1122). Only a connect error is retried as before: the
+    /// connection never opened, so nothing was sent.
     ///
     /// For a write that does something new each time it arrives -- a create,
     /// a comment, a queued run -- and has no precondition the source checks.
