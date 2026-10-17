@@ -561,6 +561,7 @@ pre-gate:
     fi
     (cd app && npx vitest run src/lib/shell/residue.test.svelte.ts)
     (cd app && npx vitest run src/lib/shell/a11y.test.ts)
+    (cd app && npx vitest run src/lib/shell/browser-globals.test.ts)
     (cd app && npx svelte-check --tsconfig ./tsconfig.json)
     echo
     if [ "$before" = "$(snapshot)" ]; then
