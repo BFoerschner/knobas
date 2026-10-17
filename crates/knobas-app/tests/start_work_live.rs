@@ -1764,7 +1764,10 @@ async fn blob_on(env: &Env, branch: &str, path: &str) -> (String, String) {
         .as_str()
         .unwrap_or_else(|| panic!("no sha for {path} at {branch}: {record}"))
         .to_owned();
-    let text = record["content"].as_str().unwrap_or_default().replace('\n', "");
+    let text = record["content"]
+        .as_str()
+        .unwrap_or_default()
+        .replace('\n', "");
     (sha, text)
 }
 
@@ -1834,7 +1837,10 @@ async fn a_commit_over_a_file_that_moved_is_held_with_both_versions_at_gitea() {
     .expect("the commit is queued");
     let row = settled(&state, queued.id).await;
     assert_eq!(row.state, WriteState::Held, "{row:?}");
-    assert_eq!(row.payload["CommitFile"]["content"], MINE, "the reader's half");
+    assert_eq!(
+        row.payload["CommitFile"]["content"], MINE,
+        "the reader's half"
+    );
     assert_eq!(row.payload["CommitFile"]["base_sha"], read_sha.as_str());
     let theirs = row.held_snapshot.clone().expect("the held side");
     assert_eq!(theirs["base"], their_sha.as_str(), "{theirs}");
