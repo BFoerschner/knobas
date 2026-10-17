@@ -7,7 +7,7 @@
     ticket*, the ad-hoc contexts (R-3.11);
   - **middle**, every synced ticket as a ticket board, one column per status
     in the source's words, eight cards then *Show N more*, *Done* three, and
-    every match while the filter has words (R-3.4), split into lanes by a
+    fifty while the filter has words (R-3.4, #1024), split into lanes by a
     field or not (R-3.5, #813); or as a list sorted by any header (R-3.6);
   - **right**, the selected ticket's preview (R-3.9).
 
@@ -141,6 +141,7 @@
   import {
     aroundLines,
     COLUMN_CAP,
+    TYPED_CAP,
     columnName,
     drawnCards,
     LANE_FIELDS,
@@ -345,25 +346,27 @@
     lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
   /**
-   * The per-column cap a read asks for: none while words filter (every match,
-   * R-3.4), the largest expanded column's count once one is expanded (every
-   * column's once the list is), else the eight a column draws.
+   * The per-column cap a read asks for: the eight a column draws, fifty while
+   * words filter (R-3.4, #1024), the largest expanded column's count once one
+   * is expanded (every column's once the list is), and none for lanes.
    */
   function capFor(): number | null {
-    if (typing || laned) return null;
-    if ((expanded.length === 0 && !listAll) || board === null) return COLUMN_CAP;
+    if (laned) return null;
+    const cap = typing ? TYPED_CAP : COLUMN_CAP;
+    if ((expanded.length === 0 && !listAll) || board === null) return cap;
     const wanted = (listAll ? board.columns : cols.filter((column) => isExpanded(column))).map(
       (column) => column.total,
     );
-    return Math.max(COLUMN_CAP, ...wanted);
+    return Math.max(cap, ...wanted);
   }
 
   /**
    * A change in the filter bar (#897): the read waits until the keys pause
    * for `typingPause`, so a word typed at speed is one read and not one a
    * letter, and an answer still out for the text before it is never drawn.
-   * Every read made with words is uncapped (R-3.4), and on a large mirror a
-   * short prefix is the broadest of them.
+   * A read made with words still filters and counts the whole mirror, so on
+   * a large one a short prefix is the broadest of them; it sends fifty cards
+   * a column at most (R-3.4, #1024).
    */
   function filterChanged() {
     clearTimeout(pausing);

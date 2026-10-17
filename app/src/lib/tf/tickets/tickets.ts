@@ -11,6 +11,12 @@ import { kindLabel, kindSingular, sectionOf } from "../../shell/kinds";
 export const COLUMN_CAP = 8;
 /** How many a *Done* column draws (R-3.4). */
 export const DONE_CAP = 3;
+/**
+ * How many a column reads and draws while the filter has words (R-3.4,
+ * #1024): the server still filters the whole mirror and counts every match,
+ * but sends at most this many a column, *Done* too.
+ */
+export const TYPED_CAP = 50;
 
 /** Whether a column is the *Done* one, however its source cases it. */
 export function isDone(status: string | null): boolean {
@@ -23,13 +29,12 @@ export function columnName(status: string | null): string {
 }
 
 /**
- * The cards a column draws (R-3.4): up to eight, three for *Done*, all of
- * them once expanded, and every match while the filter has words (the read
- * is uncapped then).
+ * The cards a column draws (R-3.4): up to eight, three for *Done*, fifty
+ * of either while the filter has words, and all of them once expanded.
  */
 export function drawnCards(column: MiniBoardColumn, expanded: boolean, typing: boolean): MiniBoardCard[] {
-  if (expanded || typing) return column.cards;
-  return column.cards.slice(0, isDone(column.status) ? DONE_CAP : COLUMN_CAP);
+  if (expanded) return column.cards;
+  return column.cards.slice(0, typing ? TYPED_CAP : isDone(column.status) ? DONE_CAP : COLUMN_CAP);
 }
 
 /** What the column's *Show N more* button says, or `null` when it draws every card. */
