@@ -188,6 +188,29 @@ test("a slower preview of an earlier file does not replace the newer one's", asy
   expect(toasts.items.at(-1)!.text).toMatch(/^Imported testenv:/);
 });
 
+test("a run still out when the chooser changes is dropped, so its file is never applied under the new producer", async () => {
+  held = new Promise<void>((resolve) => (release = resolve));
+  const ready: Produced = { state: "ready", file: "{hcloud}", new_servers: [], skipped: [] };
+  // A promise in the queue: the stand-in's `Promise.resolve` adopts it, so the run waits on `release`.
+  produced = [held.then(() => ready) as unknown as Produced];
+  await openImport();
+  const from = field("Import from");
+  from.value = "hcloud";
+  from.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  button("Read Hetzner Cloud", dialog()!).click();
+  await settle();
+  from.value = "docker";
+  from.dispatchEvent(new Event("change", { bubbles: true }));
+  flushSync();
+  release();
+  await settle();
+  await settle();
+  expect(calls.map(([name]) => name)).toEqual(["produce"]);
+  expect(dialog()!.textContent).not.toContain("Download");
+  expect(button("Import", dialog()!).disabled).toBe(true);
+});
+
 test("Cancel closes without a write", async () => {
   await openImport();
   await chooseFile('{"name":"testenv"}');

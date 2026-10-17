@@ -116,11 +116,15 @@
   /** One run of the chosen importer, then the preview of what it produced. */
   async function run() {
     if (busy) return;
+    // A changed chooser drops this run: its file would be applied under the other producer.
+    const mine = picks;
+    const from = producer;
     busy = true;
     failure = null;
     try {
       // `{ parent: null }` is the top of the estate; a bare `null` is *not asked yet*.
-      const answer = await ports.produceEstateFile(producer, token.trim() || null, landing === null ? null : { parent: landUnder });
+      const answer = await ports.produceEstateFile(from, token.trim() || null, landing === null ? null : { parent: landUnder });
+      if (mine !== picks) return;
       if (answer.state === "token_needed") {
         tokenWanted = true;
         return;
@@ -136,8 +140,11 @@
       skipped = answer.skipped;
       file = answer.file;
       offer(answer.file);
-      preview = await ports.previewEstateImport(answer.file, producer);
+      const answered = await ports.previewEstateImport(answer.file, from);
+      if (mine !== picks) return;
+      preview = answered;
     } catch (error) {
+      if (mine !== picks) return;
       failure = ipcErrorMessage(error);
       if (isIpcError(error) && error.code === "unauthorized") tokenWanted = true;
     } finally {
