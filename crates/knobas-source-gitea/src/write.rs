@@ -51,6 +51,12 @@ use crate::client::GiteaClient;
 /// `from_ref` names nothing -- both refusals, which the queue records with
 /// Gitea's own sentence instead of retrying forever.
 ///
+/// A 409 where `name` now points at the commit `from_ref` names is this
+/// write's own branch, met again by a repeat after the first attempt landed
+/// and its answer was lost (#1129): the transport's retry, or the queue's
+/// later resend. That is answered as delivered, as [`commit_file`] answers
+/// its own commit. A branch at any other commit keeps Gitea's refusal.
+///
 /// # Errors
 ///
 /// [`SourceError::Protocol`] for an owner or repository name that is not one
@@ -67,13 +73,60 @@ pub(crate) async fn create_branch(
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    client
+    match client
         .post(
             &path,
             &json!({ "new_branch_name": name, "old_ref_name": from_ref }),
         )
         .await
-        .map(|_| ())
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.status() == Some(409) => {
+            if branch_made_from(client, owner, repo, name, from_ref).await {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// A branch's tip, as `GET .../branches/{name}` answers it.
+#[derive(serde::Deserialize)]
+struct BranchTip {
+    commit: TipCommit,
+}
+
+#[derive(serde::Deserialize)]
+struct TipCommit {
+    id: String,
+}
+
+/// Whether branch `name` points at the commit `from_ref` names: `from_ref`
+/// itself where it is a commit id (or an abbreviation of the tip's), else the
+/// tip of the branch it names. Any read that fails is "no", which keeps the
+/// refusal: a tag, or a base that moved since, reads as somebody else's.
+async fn branch_made_from(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    name: &str,
+    from_ref: &str,
+) -> bool {
+    let Ok(made) = client.branch_as::<BranchTip>(owner, repo, name).await else {
+        return false;
+    };
+    let tip = made.commit.id.to_ascii_lowercase();
+    let wanted = from_ref.to_ascii_lowercase();
+    if wanted.len() >= 7 && wanted.chars().all(|c| c.is_ascii_hexdigit()) && tip.starts_with(&wanted)
+    {
+        return true;
+    }
+    client
+        .branch_as::<BranchTip>(owner, repo, from_ref)
+        .await
+        .is_ok_and(|base| base.commit.id.eq_ignore_ascii_case(&tip))
 }
 
 /// Open a pull request from `head` into `base`.
@@ -83,6 +136,11 @@ pub(crate) async fn create_branch(
 /// As [`create_branch`]. Gitea's own refusals -- an open pull request already
 /// exists for this pair, `head` and `base` are the same branch -- arrive as
 /// `Protocol` carrying what it said.
+///
+/// Gitea's 409 for the pair, where the open pull request for `head` into
+/// `base` carries this write's `title`, is this write's own, met again after
+/// its answer was lost (#1129): answered as delivered. One with another
+/// title keeps the refusal.
 pub(crate) async fn create_pull_request(
     client: &GiteaClient,
     owner: &str,
@@ -97,13 +155,75 @@ pub(crate) async fn create_pull_request(
         GiteaClient::path_segment(owner)?,
         GiteaClient::path_segment(repo)?
     );
-    client
+    match client
         .post(
             &path,
             &json!({ "title": title, "body": body, "head": head, "base": base }),
         )
         .await
-        .map(|_| ())
+    {
+        Ok(_) => Ok(()),
+        Err(error) if error.status() == Some(409) => {
+            if pull_opened(client, owner, repo, title, head, base).await {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// One open pull request, as far as [`pull_opened`] reads it.
+#[derive(serde::Deserialize)]
+struct OpenPull {
+    #[serde(default)]
+    title: String,
+    head: PullEnd,
+    base: PullEnd,
+}
+
+#[derive(serde::Deserialize)]
+struct PullEnd {
+    #[serde(default, rename = "ref")]
+    branch: String,
+    #[serde(default)]
+    label: String,
+}
+
+impl PullEnd {
+    fn is(&self, name: &str) -> bool {
+        self.branch == name || self.label == name
+    }
+}
+
+/// How many pages of open pull requests [`pull_opened`] reads: Gitea refuses a
+/// second one per pair, so the one it refused over is open, and recently
+/// updated, which is the listing's order.
+const OPEN_PULL_PAGES: u32 = 3;
+
+/// Whether an open pull request from `head` into `base` carries `title`. Any
+/// read that fails is "no", which keeps the refusal.
+async fn pull_opened(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    title: &str,
+    head: &str,
+    base: &str,
+) -> bool {
+    for page in 1..=OPEN_PULL_PAGES {
+        let Ok(pulls) = client.open_pulls_as::<OpenPull>(owner, repo, page).await else {
+            return false;
+        };
+        if let Some(pull) = pulls.iter().find(|p| p.head.is(head) && p.base.is(base)) {
+            return pull.title == title;
+        }
+        if pulls.len() < crate::client::PAGE_SIZE as usize {
+            return false;
+        }
+    }
+    false
 }
 
 /// Reply on a pull request's discussion.
@@ -202,10 +322,50 @@ pub(crate) async fn merge(
         body["MergeTitleField"] = json!(title.trim());
         body["MergeMessageField"] = json!(rest.trim());
     }
-    patiently(MERGE_PATIENCE, || async {
+    match patiently(MERGE_PATIENCE, || async {
         client.post(&path, &body).await.map(|_| ())
     })
     .await
+    {
+        Err(error)
+            if error.status() == Some(405)
+                && !still_checking(&error)
+                && merged_by_this_account(client, owner, repo, index).await =>
+        {
+            Ok(())
+        }
+        result => result,
+    }
+}
+
+/// A pull request's merge, as far as [`merged_by_this_account`] reads it.
+#[derive(serde::Deserialize)]
+struct MergedPull {
+    #[serde(default)]
+    merged: bool,
+    #[serde(default)]
+    merged_by: Option<crate::model::UserRef>,
+}
+
+/// Whether pull request `index` is merged, and by the account this token is:
+/// a 405 over that is this write's own merge, met again by a repeat after the
+/// first attempt landed and its answer was lost (#1129). Merged by anyone
+/// else, the refusal stands: the reader is told it was not theirs. Any read
+/// that fails is "no".
+async fn merged_by_this_account(client: &GiteaClient, owner: &str, repo: &str, index: u64) -> bool {
+    let Ok(pull) = client.pull(owner, repo, index).await else {
+        return false;
+    };
+    let Ok(pull) = serde_json::from_value::<MergedPull>(pull) else {
+        return false;
+    };
+    let Some(by) = pull.merged_by.and_then(|u| u.login).filter(|_| pull.merged) else {
+        return false;
+    };
+    client
+        .current_user()
+        .await
+        .is_ok_and(|me| me.login.is_some_and(|login| login.eq_ignore_ascii_case(&by)))
 }
 
 /// What [`merge`] is asked to do: the style, whether Gitea deletes the head

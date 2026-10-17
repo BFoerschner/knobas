@@ -644,11 +644,16 @@ async fn a_merge_gitea_refuses_arrives_as_a_refusal_with_its_sentence() {
             matches!(&error, SourceError::Protocol { message: m, .. } if m.contains(sentence)),
             "{error:?}"
         );
-        assert_eq!(
-            server.received_requests().await.unwrap().len(),
-            1,
-            "{sentence}: a refusal is not asked twice"
-        );
+        // Counted as merges: a 405 reads the pull request once, to see
+        // whether the merge is this write's own (#1129).
+        let merges = server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| r.method.as_str() == "POST")
+            .count();
+        assert_eq!(merges, 1, "{sentence}: a refusal is not asked twice");
     }
 }
 
