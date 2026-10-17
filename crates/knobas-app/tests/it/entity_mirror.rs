@@ -868,6 +868,26 @@ fn the_job_pipeline_shape_matches_its_typescript_mirror() {
     )));
 }
 
+/// `code_facts` (#966): what Code draws beside a row -- `ipc/entity.ts`'
+/// `CodeFacts`.
+#[test]
+fn the_code_facts_shape_matches_its_typescript_mirror() {
+    use knobas_app::commands::entity::CodeFacts;
+    let wire = serde_json::to_value(CodeFacts {
+        entity_id: "gitea:tidewater/payout-service".to_owned(),
+        author: Some("tidewater".to_owned()),
+        mine: false,
+        language: Some("Rust".to_owned()),
+        teams: vec!["Payments".to_owned()],
+    })
+    .unwrap();
+    assert_shape(
+        "CodeFacts",
+        &wire,
+        &["entity_id", "author", "mine", "language", "teams"],
+    );
+}
+
 /// #851's pipeline settings: every field on the wire, in both directions,
 /// through the repository and the trigger it nests.
 #[test]

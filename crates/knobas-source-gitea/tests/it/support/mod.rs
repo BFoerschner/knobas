@@ -48,6 +48,12 @@ enum Reads {
 pub struct State {
     /// Raw repository records, in listing order (sort=updated, order=desc).
     pub repos: Vec<Value>,
+    /// `owner/repo` -> what `GET /repos/{owner}/{repo}/teams` answers: a
+    /// status and its body (#966). Gitea 1.27.3, measured 2026-10-17: `200`
+    /// with the team records for an organization's repository, *Owners*
+    /// (`includes_all_repositories: true`) among them, and `405` for a
+    /// repository a user owns. A repository not named here answers 404.
+    pub teams: BTreeMap<String, (u16, Value)>,
     /// `owner/repo` -> branch records.
     pub branches: BTreeMap<String, Vec<Value>>,
     /// `owner/repo` -> pull-request records, most recently updated first.
@@ -137,6 +143,16 @@ pub fn repo(owner: &str, name: &str, updated: &str) -> Value {
     })
 }
 
+/// One team as `GET /repos/{owner}/{repo}/teams` lists it (Gitea 1.27.3).
+pub fn team(name: &str, includes_all_repositories: bool) -> Value {
+    json!({
+        "id": 1, "name": name, "description": "", "organization": null,
+        "includes_all_repositories": includes_all_repositories,
+        "permission": if includes_all_repositories { "owner" } else { "write" },
+        "units": ["repo.code", "repo.pulls"], "can_create_org_repo": includes_all_repositories
+    })
+}
+
 pub fn branch(name: &str, sha: &str, message: &str, timestamp: &str) -> Value {
     json!({
         "name": name, "protected": false,
@@ -215,6 +231,10 @@ impl State {
         let full = "tidewater/payout-service".to_owned();
         Self {
             repos: vec![repo("tidewater", "payout-service", "2026-08-22T11:42:00Z")],
+            teams: BTreeMap::from([(
+                full.clone(),
+                (200, json!([team("Owners", true), team("Payments", false)])),
+            )]),
             branches: BTreeMap::from([(
                 full.clone(),
                 vec![
@@ -554,6 +574,14 @@ impl Fake {
                 .respond_with(ok(repo.clone()))
                 .mount(&self.server)
                 .await;
+        }
+        for (full_name, (status, body)) in &state.teams {
+            authed(
+                Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/teams"))),
+            )
+            .respond_with(ResponseTemplate::new(*status).set_body_json(body.clone()))
+            .mount(&self.server)
+            .await;
         }
 
         for (full_name, branches) in &state.branches {

@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { CheckoutView, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
+import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, GroupTally, Reached } from "../../ipc/entity";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
@@ -56,6 +56,25 @@ const GROUPS: GroupTally[] = [
 const SETTLED = [pr(139, "Fix ledger drift on partial refunds", "merged", "tidewater/ledger-api")];
 const BRANCH = row(`gitea:${PAYOUT}@refs/heads/feature/PAY-231-sepa-retry`, "branch", "feature/PAY-231-sepa-retry", { path: PAYOUT });
 
+/** What `code_facts` answers (#966): teams and languages, authors, and mara's two pull requests. */
+const fact = (entity_id: string, over: Partial<CodeFacts>): CodeFacts => ({
+  entity_id,
+  author: null,
+  mine: false,
+  language: null,
+  teams: [],
+  ...over,
+});
+const FACTS: CodeFacts[] = [
+  fact("gitea:tidewater/payout-service", { teams: ["Payments"], language: "Rust" }),
+  fact("gitea:tidewater/ledger-api", { teams: ["Payments"], language: "Kotlin" }),
+  fact("gitea:tidewater/fx-rates", { teams: ["Platform"], language: "Go" }),
+  fact(`gitea:${PAYOUT}#144`, { author: "tom" }),
+  fact(`gitea:${PAYOUT}#142`, { author: "mara", mine: true }),
+  fact("gitea:tidewater/ledger-api#77", { author: "jonas" }),
+  fact("gitea:tidewater/ledger-api#139", { author: "mara", mine: true }),
+];
+
 function page(rows: EntityRow[], groups: GroupTally[] | null = null): EntityPage {
   return { rows, total: rows.length, tally: null, groups };
 }
@@ -102,6 +121,7 @@ function ports(over: Partial<CodePorts> = {}): CodePorts {
       return page([...OPEN, ...SETTLED]);
     },
     entityCheckout: async (id) => checkout(id.endsWith("payout-service") ? "/Users/mara/src/payout-service" : null),
+    codeFacts: async (ids) => FACTS.filter((facts) => ids.includes(facts.entity_id)),
     listSources: async () => [{ id: "gitea", base_url: "https://git.example.com" }, { id: "jira" }],
     listContexts: async () => [],
     getEntity: async (id) => {
@@ -141,30 +161,57 @@ test("#/code opens on Repositories: yours first, then by last push, with open PR
 
   const rows = [...target.querySelectorAll("tbody tr")];
   expect(rows.map(cells)).toEqual([
-    ["tidewater/payout-service PAY-231", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
+    // A repository holding a merged pull request of yours is yours too (#966).
+    ["tidewater/ledger-api", "Payments", "Kotlin", "1", "not on this machine", "yesterday 12:00", "Clone"],
+    ["tidewater/payout-service PAY-231", "Payments", "Rust", "2", "feature/PAY-231-sepa-retry, 3 ahead, 1 changed", "2026-08-20", "Open in… ▾"],
     // Not on this machine: *Clone* in its place, never a disabled button (R-8.22).
-    ["tidewater/fx-rates", "0", "not on this machine", "today 11:00", "Clone"],
-    ["tidewater/ledger-api", "1", "not on this machine", "yesterday 12:00", "Clone"],
+    ["tidewater/fx-rates", "Platform", "Go", "0", "not on this machine", "today 11:00", "Clone"],
   ]);
-  expect(rows[0]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
+  expect(rows[1]!.querySelector("a")!.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fpayout-service");
+  expect([...target.querySelectorAll("thead th")].map(text).slice(0, 3)).toEqual(["Repository", "Team", "Language"]);
+  expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
+    "Filter 3 repositories by name, team or language",
+  );
+});
+
+test("Repositories: the Team and Language dropdowns keep what the repositories declare (#966)", async () => {
+  await draw([]);
+  const select = (label: string) =>
+    [...target.querySelectorAll("select")].find((el) => el.getAttribute("aria-label") === label) as HTMLSelectElement;
+  const pick = (label: string, value: string) => {
+    const el = select(label);
+    el.value = value;
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    flushSync();
+  };
+  expect([...select("Team").options].map((option) => option.value)).toEqual(["", "Payments", "Platform"]);
+  pick("Team", "Platform");
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["tidewater/fx-rates"]);
+  pick("Team", "");
+  pick("Language", "Kotlin");
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["tidewater/ledger-api"]);
 });
 
 test("Pull requests are grouped in the attention read's order, then merged or closed, each with its job", async () => {
   await draw(["prs"]);
 
+  // Your merged pull request is under *Yours* (#966), so nothing is left
+  // under *Merged or closed*.
   expect([...target.querySelectorAll(".tf-cgroup-h")].map(text)).toEqual([
     "Asking for your review 1",
-    "Yours 1",
+    "Yours 2",
     "Open, others 1",
-    "Merged or closed 1",
   ]);
   const rows = [...target.querySelectorAll("tbody tr")].map(cells);
   expect(rows).toEqual([
-    ["#144", `Add payout CSV export${PAYOUT}`, "open", "", "today 10:20"],
-    ["#142", `SEPA retry with exponential backoff${PAYOUT}`, "open", "PAY-231", "today 10:20"],
-    ["#77", "Bump dependenciestidewater/ledger-api, idle for more than 5 days", "open", "", "2026-08-10"],
-    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api", "merged", "", "today 10:20"],
+    ["#144", `Add payout CSV export${PAYOUT}, tom`, "open", "", "today 10:20"],
+    ["#142", `SEPA retry with exponential backoff${PAYOUT}, mara`, "open", "PAY-231", "today 10:20"],
+    ["#139", "Fix ledger drift on partial refundstidewater/ledger-api, mara", "merged", "", "today 10:20"],
+    ["#77", "Bump dependenciestidewater/ledger-api, jonas, idle for more than 5 days", "open", "", "2026-08-10"],
   ]);
+  expect(target.querySelector("input")?.getAttribute("placeholder")).toBe(
+    "Filter pull requests by title, repo, author or number",
+  );
   const attention = reads.find((filter) => filter.order === "attention");
   expect(attention?.kinds).toEqual(["pr"]);
 });

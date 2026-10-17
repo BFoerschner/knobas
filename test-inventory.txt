@@ -571,6 +571,8 @@ knobas-app	test/it	clone_ipc::only_a_gitea_repository_is_cloned_and_only_with_a_
 knobas-app	test/it	clone_ipc::stopping_kills_git_and_removes_the_half_made_folder
 knobas-app	test/it	clone_ipc::the_app_clones_over_https_and_ssh_only
 knobas-app	test/it	clone_ipc::two_starts_at_once_start_one_clone
+knobas-app	test/it	code_facts_ipc::a_repository_reads_its_declared_language_and_teams
+knobas-app	test/it	code_facts_ipc::an_author_is_mine_when_it_is_the_sources_configured_username
 knobas-app	test/it	config_schema_mirror::a_fixture_that_is_gone_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_literal_that_is_not_as_const_stops_the_test
 knobas-app	test/it	config_schema_mirror::a_name_the_fixture_cannot_resolve_stops_the_test
@@ -706,6 +708,7 @@ knobas-app	test/it	entity_mirror::a_proposal_and_a_confirmed_link_are_the_same_s
 knobas-app	test/it	entity_mirror::the_action_item_ticket_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_activity_row_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_chain_step_row_shape_matches_its_typescript_mirror
+knobas-app	test/it	entity_mirror::the_code_facts_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_context_kinds_match_their_typescript_mirror
 knobas-app	test/it	entity_mirror::the_context_row_shape_matches_its_typescript_mirror
 knobas-app	test/it	entity_mirror::the_digest_line_shape_matches_its_typescript_mirror
@@ -2463,6 +2466,7 @@ knobas-source-gitea	test/it	sync::a_pull_request_whose_discussion_is_refused_is_
 knobas-source-gitea	test/it	sync::a_refusal_that_ends_a_full_sync_names_the_repository
 knobas-source-gitea	test/it	sync::a_refusal_under_a_listed_repository_is_not_read_as_deleted
 knobas-source-gitea	test/it	sync::a_refused_repository_keeps_its_position_on_either_selection_path
+knobas-source-gitea	test/it	sync::a_repository_carries_the_teams_it_was_added_to_and_not_owners
 knobas-source-gitea	test/it	sync::a_repository_edited_in_the_second_it_was_read_is_picked_up
 knobas-source-gitea	test/it	sync::a_repository_listing_that_would_exceed_the_cap_fails_the_run
 knobas-source-gitea	test/it	sync::a_repository_that_cannot_have_pull_requests_is_walked_without_asking_for_them
@@ -2475,6 +2479,7 @@ knobas-source-gitea	test/it	sync::a_sink_failure_stops_the_run_where_it_happened
 knobas-source-gitea	test/it	sync::a_vanished_branch_is_tombstoned
 knobas-source-gitea	test/it	sync::an_empty_repository_is_mirrored_on_a_full_sync
 knobas-source-gitea	test/it	sync::an_explicit_repository_list_is_fetched_directly
+knobas-source-gitea	test/it	sync::an_idle_run_does_not_ask_for_the_teams
 knobas-source-gitea	test/it	sync::an_idle_run_emits_nothing_and_returns_the_same_bytes
 knobas-source-gitea	test/it	sync::an_incremental_run_returns_only_the_pull_request_that_moved
 knobas-source-gitea	test/it	sync::an_owner_filter_drops_everything_else
@@ -2483,6 +2488,7 @@ knobas-source-gitea	test/it	sync::branch_listings_are_paged
 knobas-source-gitea	test/it	sync::commits_are_not_re_walked_while_the_branch_head_stands_still
 knobas-source-gitea	test/it	sync::discussion_can_be_left_out_of_the_index
 knobas-source-gitea	test/it	sync::every_repository_refusing_us_raises
+knobas-source-gitea	test/it	sync::teams_gitea_will_not_list_name_none_and_the_run_goes_on
 knobas-source-gitea	test/it	sync::the_commit_budget_bounds_the_mirror
 knobas-source-gitea	test/it	sync::the_owner_filter_ignores_case
 knobas-source-gitea	test/it	sync::the_position_after_one_change_is_itself_idle_stable
@@ -2638,6 +2644,7 @@ knobas-source-gitea	test/live_gitea	a_pull_request_is_commented_on_and_reviewed_
 knobas-source-gitea	test/live_gitea	a_pull_request_is_edited_closed_and_reopened_from_its_view
 knobas-source-gitea	test/live_gitea	a_pull_request_merged_the_moment_it_opens_lands_ten_times_in_ten
 knobas-source-gitea	test/live_gitea	a_pull_request_opened_through_the_api_appears_in_the_next_incremental_run
+knobas-source-gitea	test/live_gitea	a_repository_reads_its_language_and_its_own_teams_not_owners
 knobas-source-gitea	test/live_gitea	a_required_status_check_holds_the_merge_until_it_passes
 knobas-source-gitea	test/live_gitea	a_revoked_token_is_unauthorized
 knobas-source-gitea	test/live_gitea	a_seeded_branchs_view_reads_ahead_with_its_seeded_commits

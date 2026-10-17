@@ -8,6 +8,10 @@
   what that branch carries over the default one. A row's who and when is the
   source's own line (`author · age`), drawn as it came. A commit the mirror
   holds opens its diff; one it does not has no id to open and is drawn plain.
+
+  *Author: Mine* (#973) keeps the commits whose declared author is mine
+  (`code_facts`), never a reading of that line: a commit the mirror does not
+  hold has no declared author, so the chip leaves it out.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -26,7 +30,7 @@
     branch,
     defaultBranch,
   }: {
-    ports: Pick<RepoPorts, "entityView">;
+    ports: Pick<RepoPorts, "entityView" | "codeFacts">;
     repoId: string;
     /** The entity the commits are read at: the repository, or the branch picked. */
     at: string;
@@ -36,15 +40,28 @@
 
   let rows = $state<ViewRow[] | null>(null);
   let failed = $state<string | null>(null);
+  /** The commits whose declared author is mine. */
+  let mine = $state<ReadonlySet<string>>(new Set());
 
   $effect(() => {
     const where = at;
     let live = true;
     rows = null;
     failed = null;
+    mine = new Set();
     ports.entityView(where, "commits").then(
       (view) => {
-        if (live) rows = viewRows(view?.sections[0]);
+        if (!live) return;
+        const read = viewRows(view?.sections[0]);
+        rows = read;
+        const ids = read.flatMap((row) => (row.entity_id === null ? [] : [row.entity_id]));
+        if (ids.length === 0) return;
+        ports.codeFacts(ids).then(
+          (facts) => {
+            if (live) mine = new Set(facts.filter((entry) => entry.mine).map((entry) => entry.entity_id));
+          },
+          () => {},
+        );
       },
       (error) => {
         if (live) failed = ipcErrorMessage(error);
@@ -65,8 +82,11 @@
         : branch === defaultBranch || defaultBranch === null
           ? `commits on ${branch}`
           : `commits on ${branch} not in ${defaultBranch}`,
+    chips: [{ key: "who", label: "Author", options: [{ value: "Mine", label: "Mine" }] }],
   });
-  const shown = $derived(rows === null ? [] : visibleViewRows(rows, filter.text));
+  const shown = $derived(
+    rows === null ? [] : visibleViewRows(rows, filter.text, (filter.chips["who"] ?? []).includes("Mine") ? mine : null),
+  );
 
   /** A row opens its commit; a click on the link inside already did. */
   function open(event: MouseEvent, row: ViewRow) {

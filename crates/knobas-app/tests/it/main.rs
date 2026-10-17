@@ -22,6 +22,7 @@ mod builds_of_a_commit_perf;
 mod capture_ipc;
 mod checkout_ipc;
 mod clone_ipc;
+mod code_facts_ipc;
 mod config_schema_mirror;
 mod contexts_ipc;
 mod conversation_ipc;

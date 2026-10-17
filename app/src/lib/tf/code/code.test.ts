@@ -5,13 +5,15 @@
  */
 import { expect, test } from "vitest";
 
-import type { CheckoutView, EntityPage, EntityRow, GroupTally } from "../../ipc/entity";
+import type { CheckoutView, CodeFacts, EntityPage, EntityRow, GroupTally } from "../../ipc/entity";
 import {
   checkoutLine,
   compareHash,
+  factsById,
   headerLine,
   openPrsOf,
   prLines,
+  repoTeams,
   visiblePrs,
   visibleRepos,
   type PrFilter,
@@ -58,6 +60,51 @@ test("open pull requests group as the attention read groups them, then the settl
   ]);
 });
 
+function facts(entityId: string, over: Partial<CodeFacts>): CodeFacts {
+  return { entity_id: entityId, author: null, mine: false, language: null, teams: [], ...over };
+}
+
+test("a pull request carries its author, and a settled one of yours is under Yours (#966)", () => {
+  const id = (n: string) => `gitea:tidewater/payout-service#${n}`;
+  const known = factsById([
+    facts(id("142"), { author: "mara", mine: true }),
+    facts(id("139"), { author: "mara", mine: true }),
+    facts(id("57"), { author: "tom" }),
+  ]);
+  const lines = prLines(
+    page([pr("142", "open")], [{ group: "my_pull_requests", count: 1 }]),
+    page([pr("142", "open"), pr("139", "merged"), pr("57", "closed")]),
+    NOW,
+    known,
+  );
+  expect(lines.map((line) => [line.number, line.group, line.author])).toEqual([
+    ["#142", "yours", "mara"],
+    ["#139", "yours", "mara"],
+    ["#57", "settled", "tom"],
+  ]);
+});
+
+test("the pull request filter keeps by the repository's team and finds the author (#966)", () => {
+  const ledger = { ...pr("9", "open"), path: "tidewater/ledger-api" };
+  const repos = [repo("payout-service"), repo("ledger-api")];
+  const known = factsById([
+    facts("gitea:tidewater/payout-service", { teams: ["Payments"] }),
+    facts("gitea:tidewater/ledger-api", { teams: ["Ledger", "Payments"] }),
+    facts(ledger.entity_id, { author: "priya" }),
+  ]);
+  const lines = prLines(page([pr("1", "open"), ledger]), page([pr("1", "open"), ledger]), NOW, known);
+  const numbers = (filter: Partial<PrFilter>) =>
+    visiblePrs(
+      lines,
+      { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", text: "", ...filter },
+      repoTeams(repos, known),
+    ).map((line) => line.number);
+
+  expect(numbers({ team: "Ledger" })).toEqual(["#9"]);
+  expect(numbers({ team: "Payments" })).toEqual(["#1", "#9"]);
+  expect(numbers({ text: "priya" })).toEqual(["#9"]);
+});
+
 test("an open pull request untouched for more than five days is idle; a settled one never is", () => {
   const old = "2026-08-16T10:00:00Z";
   const lines = prLines(page([pr("1", "open", old), pr("2", "open")]), page([pr("1", "open", old), pr("2", "open"), pr("3", "merged", old)]), NOW);
@@ -85,7 +132,7 @@ test("the pull request filter keeps by scope, state, flags, repository and words
     NOW,
   );
   const numbers = (filter: Partial<PrFilter>) =>
-    visiblePrs(lines, { scope: "all", held: () => false, states: [], flags: [], repo: "", text: "", ...filter }).map(
+    visiblePrs(lines, { scope: "all", held: () => false, states: [], flags: [], repo: "", team: "", text: "", ...filter }, new Map()).map(
       (line) => line.number,
     );
 
@@ -148,10 +195,20 @@ test("the repository filter keeps by scope, flags and words; mine first, then la
   const rows = [repo("ledger-api", "2026-08-21T10:00:00Z"), repo("payout-service", "2026-08-19T10:00:00Z"), repo("fx-rates", "2026-08-22T10:00:00Z")];
   const lines = prLines(page([pr("1", "open")], [{ group: "my_pull_requests", count: 1 }]), page([pr("1", "open")]), NOW);
   const checkouts = { "gitea:tidewater/ledger-api": checkout("/src/ledger-api"), "gitea:tidewater/fx-rates": checkout(null) };
+  const known = factsById([
+    facts("gitea:tidewater/ledger-api", { teams: ["Payments"], language: "Kotlin" }),
+    facts("gitea:tidewater/fx-rates", { teams: ["Payments"], language: "Rust" }),
+  ]);
   const names = (filter: Partial<RepoFilter>) =>
-    visibleRepos(rows, lines, checkouts, { scope: "all", held: () => false, flags: [], text: "", ...filter }).map((row) => row.title);
+    visibleRepos(rows, lines, checkouts, known, { scope: "all", held: () => false, flags: [], team: "", language: "", text: "", ...filter }).map(
+      (row) => row.title,
+    );
 
   expect(names({})).toEqual(["tidewater/payout-service", "tidewater/fx-rates", "tidewater/ledger-api"]);
+  expect(names({ team: "Payments" })).toEqual(["tidewater/fx-rates", "tidewater/ledger-api"]);
+  expect(names({ language: "Kotlin" })).toEqual(["tidewater/ledger-api"]);
+  // The words reach the team and the language too (prototype-6's `r.n r.team r.lang`).
+  expect(names({ text: "kotlin" })).toEqual(["tidewater/ledger-api"]);
   expect(names({ scope: "mine" })).toEqual(["tidewater/payout-service"]);
   expect(names({ scope: "job", held: (id) => id.endsWith("fx-rates") })).toEqual(["tidewater/fx-rates"]);
   expect(names({ flags: ["Cloned here"] })).toEqual(["tidewater/ledger-api"]);

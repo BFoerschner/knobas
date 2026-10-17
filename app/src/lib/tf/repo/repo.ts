@@ -8,9 +8,36 @@
  * commit's diff, all read live, so a repository nobody cloned reads the same
  * as one on this disk. Section ids are the source's and never taken apart.
  */
-import type { CheckoutView, ChoiceOption, DiffFile, DiffRead, EntityRow, SourceView, TreeEntry, ViewRow, ViewSection } from "../../ipc/entity";
+import type {
+  CheckoutView,
+  ChoiceOption,
+  CodeFacts,
+  DiffFile,
+  DiffRead,
+  EntityRow,
+  SourceView,
+  TreeEntry,
+  ViewRow,
+  ViewSection,
+} from "../../ipc/entity";
 import { checkoutLine, prNumber } from "../code/code";
 import { matchesAll } from "../filter/filter";
+import { when } from "../tickets/tickets";
+
+/**
+ * The header's first line (R-8.3), prototype-6's `repoHead`: the declared
+ * teams and language (#973, `code_facts`), then the last push. What is not
+ * declared is left out rather than guessed.
+ */
+export function headLine(
+  facts: Pick<CodeFacts, "teams" | "language"> | undefined,
+  pushedAt: string | null,
+  now: Date,
+): string {
+  const lead = [...(facts?.teams ?? []), ...(facts?.language ? [facts.language] : [])];
+  const pushed = when(pushedAt, now);
+  return lead.length > 0 ? `${lead.join(", ")}, last push ${pushed}.` : `Last push ${pushed}.`;
+}
 
 /**
  * The page's tabs, in prototype-6's order. A later ticket that builds one
@@ -132,8 +159,17 @@ export function viewRows(section: ViewSection | null | undefined): ViewRow[] {
 }
 
 /** The rows that hold every word typed, across sha, title and meta. */
-export function visibleViewRows(rows: readonly ViewRow[], text: string): ViewRow[] {
-  return rows.filter((row) => matchesAll(`${row.chip ?? ""} ${row.title} ${row.meta ?? ""}`, text));
+export function visibleViewRows(
+  rows: readonly ViewRow[],
+  text: string,
+  /** Commits' *Author: Mine* (#973): the ids whose declared author is mine, or `null` with the chip off. */
+  mine: ReadonlySet<string> | null = null,
+): ViewRow[] {
+  return rows.filter(
+    (row) =>
+      (mine === null || (row.entity_id !== null && mine.has(row.entity_id))) &&
+      matchesAll(`${row.chip ?? ""} ${row.title} ${row.meta ?? ""}`, text),
+  );
 }
 
 /**
@@ -336,11 +372,16 @@ export interface BranchRow {
   meta: string | null;
   /** `null` until its view answers, and for a branch with no id to read at. */
   standing: BranchStanding | null;
+  /** Its tip's author as the source spells the account (`code_facts`, #986), or `null`. */
+  author: string | null;
+  /** Whether that author is mine. */
+  mine: boolean;
 }
 
 /** The rows the *Branches* filter keeps: every word typed in the name, and each chip set. */
 export function visibleBranches(rows: readonly BranchRow[], show: readonly string[], text: string): BranchRow[] {
   return rows.filter((row) => {
+    if (show.includes("Mine") && !row.mine) return false;
     if (show.includes("No PR") && (row.isDefault || row.standing === null || row.standing.pr !== null)) return false;
     if (show.includes("Merged") && !row.standing?.merged) return false;
     return matchesAll(row.name, text);

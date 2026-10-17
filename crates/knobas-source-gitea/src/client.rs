@@ -286,6 +286,34 @@ impl GiteaClient {
         .await
     }
 
+    /// `GET /repos/{owner}/{repo}/teams` -- the organization teams that hold
+    /// the repository (#966), read whole: Gitea does not page it.
+    ///
+    /// `Some(vec![])` where Gitea says the repository has no teams to have:
+    /// a user's repository answers `405 repo is not owned by an
+    /// organization` (1.27.3, measured 2026-10-17). `None` where it would not
+    /// say: a 403 (a token without organization scope) or a 404. Either costs
+    /// the teams and nothing more, so neither ends the walk; anything else
+    /// is the failure it is.
+    pub(crate) async fn repo_teams(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Option<Vec<Value>>, SourceError> {
+        let teams: Result<Option<Vec<Value>>, SourceError> = self
+            .get_json(
+                &format!("/repos/{}/{}/teams", segment(owner)?, segment(repo)?),
+                &[],
+            )
+            .await;
+        match teams {
+            Ok(teams) => Ok(Some(teams.unwrap_or_default())),
+            Err(error) if error.status() == Some(405) => Ok(Some(Vec::new())),
+            Err(error) if matches!(error.status(), Some(403 | 404)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
     pub(crate) async fn branches(
         &self,
         owner: &str,

@@ -4,7 +4,8 @@
   `#/repo/<id>/<tab>`, where `files/<path>` is Files with a file open and
   `commits/<commit entity id>` a commit's diff.
 
-  - **The header**: the repository's `owner/name`, its last push and its
+  - **The header**: the repository's `owner/name`, its declared teams and
+    language (`code_facts`, #973), its last push and its
     checkout (`entity_checkout`: where it is cloned and how it stands, or *Not
     on this machine yet*); the *Branch* dropdown, which sets the branch every
     tab reads at and is held per repository for the session; *New branch…*,
@@ -27,6 +28,7 @@
   import type {
     CheckoutView,
     ChoiceOption,
+    CodeFacts,
     DiffRead,
     EntityDetail,
     EntityFilter,
@@ -45,6 +47,8 @@
     entityCheckoutDiff: (entityId: string) => Promise<DiffRead>;
     setCheckoutOverride: (entityId: string, path: string | null) => Promise<CheckoutView>;
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
+    /** The header's team and language, and Commits' and Branches' authors (#966, #973, #986). */
+    codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
   }
 
   /**
@@ -62,6 +66,7 @@
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
   import {
+    codeFacts,
     entityCheckout,
     entityCheckoutDiff,
     entityView,
@@ -75,11 +80,11 @@
   } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { jobHash } from "../route";
-  import { when } from "../tickets/tickets";
   import {
     branchOptions,
     changedPaths,
     checkoutSentence,
+    headLine,
     litTab,
     readRepoRoute,
     repoHash,
@@ -115,6 +120,7 @@
       listSources: () => listSources(),
       jobReach: (entityId) => jobReach(entityId),
       submitWrite: (payload) => submitWrite(payload),
+      codeFacts: (entityIds) => codeFacts(entityIds),
     },
     now: fixedNow,
   }: {
@@ -143,6 +149,8 @@
   let checkout = $state<CheckoutView | undefined>(undefined);
   let local = $state<DiffRead | null>(null);
   let prs = $state<EntityRow[] | null>(null);
+  /** The repository's team and language (#973); `undefined` until `code_facts` answers. */
+  let facts = $state<CodeFacts | undefined>(undefined);
 
   $effect(() => {
     if (!ready || repoId === null) return;
@@ -154,6 +162,13 @@
     checkout = undefined;
     local = null;
     prs = null;
+    facts = undefined;
+    ports.codeFacts([id]).then(
+      (answer) => {
+        if (live) facts = answer.find((entry) => entry.entity_id === id);
+      },
+      () => {},
+    );
     ports.getEntity(id).then(
       (detail) => {
         if (!live) return;
@@ -301,7 +316,7 @@
       <div>
         <h1 class="tf-mono">{repo?.title ?? ""}</h1>
         <div class="tf-sub">
-          {#if repo !== null}Last push {when(repo.updated_at, now)}.{/if}
+          {#if repo !== null}{headLine(facts, repo.updated_at, now)}{/if}
           {#if sentence !== null && sentence.path !== null}
             Cloned at <span class="tf-mono">{sentence.path}</span>{#if sentence.state}, {sentence.state}{/if}.
           {:else if sentence !== null}

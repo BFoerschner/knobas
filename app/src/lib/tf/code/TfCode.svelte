@@ -12,21 +12,25 @@
   - **Pull requests**: the attention read (`list_entities`, order
     `attention`, #712) groups the open ones as *Asking for your review*,
     *Yours* and *Open, others*; the recency read adds *Merged or closed*.
-    Each row: the number, the title over its repository, the state chip, the
-    job it belongs to (`job/open-jobs.ts`) and when it last moved.
+    Each row: the number, the title over its repository and author, the state
+    chip, the job it belongs to (`job/open-jobs.ts`) and when it last moved.
+    A merged or closed pull request of yours is under *Yours*.
 
-  Every read is an existing command (`list_entities`, `entity_checkout`,
-  `list_sources`, `list_contexts`, `get_entity`, `job_reach`). Rows open
+  A repository's team and language and a pull request's author are
+  `code_facts` (#966), read once for every row the two lists hold. The other
+  reads are `list_entities`, `entity_checkout`, `list_sources`,
+  `list_contexts`, `get_entity` and `job_reach`. Rows open
   `#/repo/<entity id>` and `#/pr/<entity id>`.
 -->
 <script lang="ts" module>
-  import type { CheckoutView, EntityFilter, EntityPage } from "../../ipc/entity";
+  import type { CheckoutView, CodeFacts, EntityFilter, EntityPage } from "../../ipc/entity";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface CodePorts extends OpenJobPorts {
     listEntities: (filter: EntityFilter, limit: number, offset: number) => Promise<EntityPage>;
     entityCheckout: (entityId: string) => Promise<CheckoutView>;
+    codeFacts: (entityIds: string[]) => Promise<CodeFacts[]>;
     /** The sources, for the host the header names. */
     listSources: () => Promise<{ id: string; base_url?: string | null }[]>;
   }
@@ -34,7 +38,7 @@
 
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import { entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
+  import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
@@ -48,6 +52,7 @@
   import {
     checkoutLine,
     compareHash,
+    factsById,
     GROUP_LABEL,
     GROUP_ORDER,
     headerLine,
@@ -57,6 +62,8 @@
     PR_STATES,
     prLines,
     REPO_FLAGS,
+    repoChoices,
+    repoTeams,
     visiblePrs,
     visibleRepos,
     type PrGroup,
@@ -70,6 +77,7 @@
     ports = {
       listEntities: (filter, limit, offset) => listEntities(filter, limit, offset),
       entityCheckout: (entityId) => entityCheckout(entityId),
+      codeFacts: (entityIds) => codeFacts(entityIds),
       listSources: () => listSources(),
       listContexts: () => listContexts(),
       getEntity: (entityId) => getEntity(entityId),
@@ -115,6 +123,7 @@
   let checkouts = $state<Record<string, CheckoutView>>({});
   let jobs = $state<OpenJob[]>([]);
   let branches = $state<EntityRow[]>([]);
+  let facts = $state<CodeFacts[]>([]);
 
   $effect(() => {
     if (!ready) return;
@@ -166,6 +175,23 @@
     };
   });
 
+  // Team, language and author (#966), once both lists have answered. A failed
+  // read leaves the cells empty rather than failing the page.
+  $effect(() => {
+    if (repos === null || everyPr === null) return;
+    const ids = [...repos.rows, ...everyPr.rows].map((row) => row.entity_id);
+    let live = true;
+    ports.codeFacts(ids).then(
+      (answer) => {
+        if (live) facts = answer;
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  });
+
   // A clone that finished: its row reads its checkout again (R-8.25).
   let seenClones = clones.finished;
   $effect(() => {
@@ -193,7 +219,10 @@
 
   const index = $derived(jobIndex(jobs));
   const held = $derived((entityId: string) => job !== null && index.holds(job, { entity_id: entityId }));
-  const lines = $derived(attention && everyPr ? prLines(attention, everyPr, now) : null);
+  const known = $derived(factsById(facts));
+  const lines = $derived(attention && everyPr ? prLines(attention, everyPr, now, known) : null);
+  const teamsByRepo = $derived(repoTeams(repos?.rows ?? [], known));
+  const choices = $derived(repoChoices(repos?.rows ?? [], known));
   const openCounts = $derived(openPrsOf(lines ?? []));
   const compare = $derived(compareHash(branches, repos?.rows ?? []));
 
@@ -221,21 +250,31 @@
 
   const repoConfig = $derived<FilterConfig>({
     id: "code-repos",
-    placeholder: repos === null ? "Filter repositories by name" : `Filter ${repos.total} repositories by name`,
+    placeholder:
+      repos === null
+        ? "Filter repositories by name, team or language"
+        : `Filter ${repos.total} repositories by name, team or language`,
     noun: "repositories",
     scopes,
     chips: [{ key: "flag", label: "Flags", options: options(REPO_FLAGS) }],
+    dropdowns: [
+      { key: "team", label: "Team", options: options(choices.teams) },
+      { key: "lang", label: "Language", options: options(choices.languages) },
+    ],
   });
   const prConfig = $derived<FilterConfig>({
     id: "code-prs",
-    placeholder: "Filter pull requests by title, repo or number",
+    placeholder: "Filter pull requests by title, repo, author or number",
     noun: "pull requests",
     scopes,
     chips: [
       { key: "state", label: "State", options: options(PR_STATES) },
       { key: "flag", label: "Flags", options: options(PR_FLAGS) },
     ],
-    dropdowns: [{ key: "repo", label: "Repo", options: options(repoNames) }],
+    dropdowns: [
+      { key: "repo", label: "Repo", options: options(repoNames) },
+      { key: "team", label: "Team", options: options(choices.teams) },
+    ],
   });
 
   const scopeOf = (value: string | null) => (value === "job" || value === "mine" ? value : "all");
@@ -243,24 +282,31 @@
   const shownRepos = $derived(
     repos === null
       ? []
-      : visibleRepos(repos.rows, lines ?? [], checkouts, {
+      : visibleRepos(repos.rows, lines ?? [], checkouts, known, {
           scope: scopeOf(repoFilter.scope),
           held,
           flags: repoFilter.chips["flag"] ?? [],
+          team: repoFilter.dropdowns["team"] ?? "",
+          language: repoFilter.dropdowns["lang"] ?? "",
           text: repoFilter.text,
         }),
   );
   const shownPrs = $derived(
     lines === null
       ? []
-      : visiblePrs(lines, {
-          scope: scopeOf(prFilter.scope),
-          held,
-          states: prFilter.chips["state"] ?? [],
-          flags: prFilter.chips["flag"] ?? [],
-          repo: prFilter.dropdowns["repo"] ?? "",
-          text: prFilter.text,
-        }),
+      : visiblePrs(
+          lines,
+          {
+            scope: scopeOf(prFilter.scope),
+            held,
+            states: prFilter.chips["state"] ?? [],
+            flags: prFilter.chips["flag"] ?? [],
+            repo: prFilter.dropdowns["repo"] ?? "",
+            team: prFilter.dropdowns["team"] ?? "",
+            text: prFilter.text,
+          },
+          teamsByRepo,
+        ),
   );
 
   /** The pull requests by group, in draw order; open ones with no group come first, unheaded. */
@@ -335,17 +381,24 @@
     {#if shownRepos.length > 0}
       <table class="tf-tbl">
         <thead>
-          <tr><th>Repository</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th><th><span class="tf-sr">Open or clone</span></th></tr>
+          <tr
+            ><th>Repository</th><th>Team</th><th>Language</th><th>Open PRs</th><th>Local checkout</th><th>Last push</th><th
+              ><span class="tf-sr">Open or clone</span></th
+            ></tr
+          >
         </thead>
         <tbody>
           {#each shownRepos as row (row.entity_id)}
             {@const count = openCount(openCounts, row)}
             {@const local = checkoutLine(checkouts[row.entity_id])}
+            {@const fact = known.get(row.entity_id)}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
               <td
                 ><a class="tf-mono" href={itemHash(row)}><Marked text={row.title} typed={repoFilter.text} /></a
                 >{#if job !== null && held(row.entity_id)}{" "}<span class="tf-chip tf-chip-job">{job}</span>{/if}</td
               >
+              <td><Marked text={fact?.teams.join(", ") ?? ""} typed={repoFilter.text} /></td>
+              <td><Marked text={fact?.language ?? ""} typed={repoFilter.text} /></td>
               <td>{#if count > 0}{count}{:else}<span class="tf-dim">0</span>{/if}</td>
               <td class:tf-dim={local?.dim}>{local?.text ?? ""}</td>
               <td class="tf-dim tf-nowrap">{row.updated_at ? when(row.updated_at, now) : ""}</td>
@@ -364,14 +417,17 @@
       {/if}
       <table class="tf-tbl tf-cprs">
         <tbody>
-          {#each kept as { row, number, idle } (row.entity_id)}
+          {#each kept as { row, number, idle, author } (row.entity_id)}
             {@const belongs = index.jobOf({ entity_id: row.entity_id, kind: row.kind })}
             <tr class="tf-row" onclick={(event) => open(event, itemHash(row))}>
               <td class="tf-mono"><Marked text={number ?? ""} typed={prFilter.text} /></td>
               <td
                 ><a href={itemHash(row)}><Marked text={row.title} typed={prFilter.text} /></a><span class="tf-sub"
                   >{#if row.path}<span class="tf-mono"><Marked text={row.path} typed={prFilter.text} /></span
-                    >{/if}{#if idle}{row.path ? ", " : ""}idle for more than 5 days{/if}</span
+                    >{/if}{#if author}{row.path ? ", " : ""}<Marked text={author} typed={prFilter.text} />{/if}{#if idle}{row.path ||
+                    author
+                      ? ", "
+                      : ""}idle for more than 5 days{/if}</span
                 ></td
               >
               <td>{#if row.state}<span class="tf-chip tf-{row.state.tone}">{row.state.text}</span>{/if}</td>

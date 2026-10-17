@@ -3,6 +3,7 @@
  * one link graph, and the reads that list it (`list_entities`, the mini
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
+import type { CodeFacts } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { JOB_ROWS, fakeReach } from "./job-reach";
 
@@ -27,18 +28,18 @@ const FIXTURE_HOST = "http://127.0.0.1:5399";
 /** When the fixture claims it last synced. Fixed, so screenshots are stable. */
 export const SYNCED_AT = "2026-08-22T14:30:00Z";
 
-/** Code's repositories (#837): name and last push. */
-const CODE_REPOS: [name: string, updated: string][] = [
-  ["psp-client", "2026-08-21T13:20:00Z"],
-  ["refund-worker", "2026-08-22T07:05:00Z"],
-  ["fx-rates", "2026-08-19T09:40:00Z"],
-  ["payout-dashboard", "2026-08-20T15:10:00Z"],
-  ["settlement-reports", "2026-08-14T10:00:00Z"],
-  ["rust-common", "2026-08-21T08:30:00Z"],
-  ["api-contracts", "2026-08-18T16:45:00Z"],
-  ["booking-api", "2026-08-22T12:15:00Z"],
-  ["tracking-events", "2026-08-12T11:00:00Z"],
-  ["auth-gateway", "2026-08-17T14:20:00Z"],
+/** Code's repositories (#837): name, last push, and prototype-6's team and language (#966). */
+const CODE_REPOS: [name: string, updated: string, team: string, language: string][] = [
+  ["psp-client", "2026-08-21T13:20:00Z", "Payments", "Rust"],
+  ["refund-worker", "2026-08-22T07:05:00Z", "Payments", "Rust"],
+  ["fx-rates", "2026-08-19T09:40:00Z", "Payments", "Kotlin"],
+  ["payout-dashboard", "2026-08-20T15:10:00Z", "Payments", "TypeScript"],
+  ["settlement-reports", "2026-08-14T10:00:00Z", "Payments", "Python"],
+  ["rust-common", "2026-08-21T08:30:00Z", "Shared", "Rust"],
+  ["api-contracts", "2026-08-18T16:45:00Z", "Shared", "Protobuf"],
+  ["booking-api", "2026-08-22T12:15:00Z", "Booking", "Kotlin"],
+  ["tracking-events", "2026-08-12T11:00:00Z", "Tracking", "Go"],
+  ["auth-gateway", "2026-08-17T14:20:00Z", "Platform", "Go"],
 ];
 
 /** Code's pull requests (#837): repository, number, title, state, author, updated, reviewers asked. */
@@ -154,6 +155,8 @@ export const CORPUS: {
     ...row("mock:tidewater/payout-service", "repo", "tidewater/payout-service", "2026-08-22T10:30:00Z", "mara", {
       full_name: "tidewater/payout-service",
       description: "Payout scheduling and SEPA retries.",
+      teams: ["Payments"],
+      language: "Rust",
     }),
     // A forge-shaped URL rather than the fixture's default: it is what the
     // clone command is built from, and a person reading the panel should see
@@ -174,6 +177,8 @@ export const CORPUS: {
     ...row("mock:tidewater/ledger", "repo", "tidewater/ledger", "2026-08-18T12:00:00Z", "jonas", {
       full_name: "tidewater/ledger",
       description: "The ledger service.",
+      teams: ["Payments"],
+      language: "Kotlin",
     }),
     web_url: "https://gitea.example.com/tidewater/ledger",
   },
@@ -260,8 +265,12 @@ export const CORPUS: {
   // Code (#837): enough repositories and pull requests beside the two above
   // to compare *Repositories* and *Pull requests* with prototype-6, every
   // pull request with the chip and parent path Gitea declares.
-  ...CODE_REPOS.map(([name, updated]) => ({
-    ...row(`mock:tidewater/${name}`, "repo", `tidewater/${name}`, updated, null, { full_name: `tidewater/${name}` }),
+  ...CODE_REPOS.map(([name, updated, team, language]) => ({
+    ...row(`mock:tidewater/${name}`, "repo", `tidewater/${name}`, updated, null, {
+      full_name: `tidewater/${name}`,
+      teams: [team],
+      language,
+    }),
     web_url: `https://gitea.example.com/tidewater/${name}`,
   })),
   ...CODE_PRS.map(([repo, num, title, state, author, updated, reviewers]) =>
@@ -548,7 +557,7 @@ function fakeSignals(id: string) {
 }
 
 /** Who `@me` is in the fixture: the username the cards' `mine` matches. */
-const FAKE_IDENTITY = "mara";
+export const FAKE_IDENTITY = "mara";
 
 /**
  * `mini_board`'s `query` (#810), restated over the fixture: every word must
@@ -717,9 +726,41 @@ const FAKE_MEMBERS: Record<string, string[]> = {
   ],
 };
 
+/**
+ * `code_facts` (#966) over the fixture: the row's author and whether it is
+ * the fixture's identity, and a repository's `language` and `teams`, which
+ * ride in its payload under those names as the real declarations read them.
+ */
+function codeFacts(args: Record<string, unknown>): CodeFacts[] {
+  const ids = new Set((args["entityIds"] as string[] | undefined) ?? []);
+  const text = (value: unknown) => (typeof value === "string" && value.trim() !== "" ? value : null);
+  const extra = CODE_FACTS.flatMap((answer) => answer(ids));
+  const answered = new Set(extra.map((facts) => facts.entity_id));
+  const own = CORPUS.filter(
+    (entry) => ids.has(entry.entity_id) && !answered.has(entry.entity_id) && entry.deleted_at === null,
+  ).map((entry) => ({
+    entity_id: entry.entity_id,
+    author: entry.author,
+    mine: entry.author !== null && entry.author === FAKE_IDENTITY,
+    language: text(entry.payload["language"]),
+    teams: ((entry.payload["teams"] as unknown[] | undefined) ?? []).filter(
+      (team): team is string => text(team) !== null,
+    ),
+  }));
+  return [...own, ...extra];
+}
+
+/**
+ * What another feature adds to `code_facts` (#966): rows the mirror would
+ * hold that only that feature's fixture draws (the repository view's
+ * branches, `views/repos.ts`). Each is asked for the ids wanted.
+ */
+export const CODE_FACTS: ((ids: ReadonlySet<string>) => CodeFacts[])[] = [];
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
+    code_facts: (args) => codeFacts(args),
     list_entities: (args) => listEntities(args),
     mini_board: (args) => miniBoard(args),
     source_statuses: (args) => sourceStatuses(args),

@@ -232,9 +232,18 @@ pub fn descriptor_template() -> SourceDescriptor {
 
 /// Where a Gitea record keeps what knobas reads (#277, ADR-0007).
 ///
-/// A pull request's review facts, and every child kind's parent. A repository
-/// declares nothing, and a kind that declares nothing is a miss for every
-/// reader.
+/// A pull request's review facts, every child kind's parent, and a
+/// repository's language and teams. A kind that declares nothing is a miss
+/// for every reader.
+///
+/// * `language` is a repository's Gitea `language`: the main language of its
+///   default branch, as Gitea's own language statistics work it out, and
+///   `""` where it found none (#966).
+/// * `teams` are the organization teams a repository was added to, each a
+///   Gitea team record whose `name` is the team. Gitea's repository record
+///   names no team, so `map` writes them beside it from
+///   `/repos/{owner}/{repo}/teams`, less a team that holds every repository
+///   of its organization (#966).
 ///
 /// * `reviewers` is Gitea's `requested_reviewers`, each element a user object
 ///   whose `login` is the account -- the same spelling `author` is filled from
@@ -288,6 +297,15 @@ fn payload_paths() -> Vec<KindPaths> {
         }]
     };
     vec![
+        KindPaths {
+            kind: KIND_REPO.to_owned(),
+            language: vec![PayloadPath::of(["language"])],
+            teams: vec![ListPath {
+                at: PayloadPath::of(["teams"]),
+                entry: PayloadPath::of(["name"]),
+            }],
+            ..KindPaths::default()
+        },
         KindPaths {
             kind: KIND_BRANCH.to_owned(),
             parent: repo(&["repository"]),
