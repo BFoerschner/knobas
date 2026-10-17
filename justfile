@@ -1484,7 +1484,8 @@ gitea-live:
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
-      -- --ignored --nocapture --test-threads=1 --exact a_write_answers_on_queue_and_lands_behind_the_reader
+      -- --ignored --nocapture --test-threads=1 --exact a_write_answers_on_queue_and_lands_behind_the_reader \
+      a_commit_over_a_file_that_moved_is_held_with_both_versions_at_gitea
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test start_work_live \
       -- --ignored --nocapture --test-threads=1 --exact back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_the_second
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-app --test clone_live \
