@@ -133,7 +133,11 @@ async fn an_idle_run_does_not_ask_for_the_teams() {
     let source = source(fake.base_url(), serde_json::json!({}));
     let teams_asked = |paths: &[String]| paths.iter().filter(|p| p.ends_with("/teams")).count();
     let (_, cursor) = full(&*source).await;
-    assert_eq!(teams_asked(&fake.paths().await), 1, "the full sync reads them once");
+    assert_eq!(
+        teams_asked(&fake.paths().await),
+        1,
+        "the full sync reads them once"
+    );
 
     let (items, _) = again(&*source, &cursor).await;
     assert!(items.is_empty(), "idle run emitted {items:?}");

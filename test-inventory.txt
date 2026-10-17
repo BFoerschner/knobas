@@ -2479,6 +2479,7 @@ knobas-source-gitea	test/it	sync::a_sink_failure_stops_the_run_where_it_happened
 knobas-source-gitea	test/it	sync::a_vanished_branch_is_tombstoned
 knobas-source-gitea	test/it	sync::an_empty_repository_is_mirrored_on_a_full_sync
 knobas-source-gitea	test/it	sync::an_explicit_repository_list_is_fetched_directly
+knobas-source-gitea	test/it	sync::an_idle_run_does_not_ask_for_the_teams
 knobas-source-gitea	test/it	sync::an_idle_run_emits_nothing_and_returns_the_same_bytes
 knobas-source-gitea	test/it	sync::an_incremental_run_returns_only_the_pull_request_that_moved
 knobas-source-gitea	test/it	sync::an_owner_filter_drops_everything_else
