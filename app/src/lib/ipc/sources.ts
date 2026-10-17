@@ -160,8 +160,8 @@ export interface KindPaths {
   merged_at: PayloadPath[];
 }
 
-/** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961). */
-export type Trigger = "change" | "schedule" | "person";
+/** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961, #1146). */
+export type Trigger = "change" | "schedule" | "person" | "chain";
 
 /** `knobas_core::payload::TriggerPath` — where a run's trigger word is, and what each means (#961). */
 export interface TriggerPath {

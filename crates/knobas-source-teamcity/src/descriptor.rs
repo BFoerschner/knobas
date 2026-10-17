@@ -163,6 +163,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                     TriggerValue::of("vcs", Trigger::Change),
                     TriggerValue::of("schedule", Trigger::Schedule),
                     TriggerValue::of("user", Trigger::Person),
+                    TriggerValue::of("snapshotDependency", Trigger::Chain),
                 ],
             }],
             started_by: vec![PayloadPath::of(["triggered", "user", "username"])],
@@ -442,7 +443,8 @@ mod tests {
 
     /// How a build was started (#961), off `triggered` as `BUILD_FIELDS`
     /// asks for it: a VCS trigger is a change with nobody, a person names
-    /// their account, a schedule is a schedule, and a dependency is a miss.
+    /// their account, a schedule is a schedule, a step a chain queued is the
+    /// chain (#1146), and a finished dependency is a miss.
     #[test]
     fn a_build_says_how_it_was_started_and_by_whom() {
         use knobas_core::payload::{Trigger, resolve_string, resolve_trigger};
@@ -464,8 +466,10 @@ mod tests {
             resolve_trigger(&nightly, &run.trigger),
             Some(Trigger::Schedule)
         );
-        let chained = build(serde_json::json!({ "type": "buildType" }));
-        assert_eq!(resolve_trigger(&chained, &run.trigger), None);
+        let chained = build(serde_json::json!({ "type": "snapshotDependency" }));
+        assert_eq!(resolve_trigger(&chained, &run.trigger), Some(Trigger::Chain));
+        let finished_dependency = build(serde_json::json!({ "type": "buildType" }));
+        assert_eq!(resolve_trigger(&finished_dependency, &run.trigger), None);
         let config = declared
             .iter()
             .find(|p| p.kind == KIND_BUILD_CONFIG)

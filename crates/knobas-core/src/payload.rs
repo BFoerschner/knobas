@@ -458,6 +458,10 @@ pub enum Trigger {
     Schedule,
     /// A person, who [`KindPaths::started_by`] names: TeamCity's `user`.
     Person,
+    /// A step of a chain, queued because another step of it was (#1146):
+    /// TeamCity's `snapshotDependency`. [`KindPaths::started_by`] may still
+    /// name whoever queued the chain.
+    Chain,
 }
 
 /// Where a run's [`Trigger`] sits, and the source's words for each (#961).
@@ -1317,7 +1321,7 @@ macro_rules! state_of {
 }
 
 /// SQL for "how this run was started": the [`Trigger`] word (`change`,
-/// `schedule`, `person`) or `null` (#961). The SQL side of
+/// `schedule`, `person`, `chain`) or `null` (#961, #1146). The SQL side of
 /// [`resolve_trigger`]; `$decl` and the row alias `i` as for
 /// [`declared_state!`], whose shape this follows.
 #[macro_export]
@@ -1336,7 +1340,7 @@ macro_rules! declared_trigger {
                 case when jsonb_typeof(s.vals) = 'array' then s.vals else '[]'::jsonb end) \
                 with ordinality as v(e, vord) \
              where s.val is not null and v.e->>'value' = s.val \
-               and v.e->>'trigger' in ('change', 'schedule', 'person') \
+               and v.e->>'trigger' in ('change', 'schedule', 'person', 'chain') \
              order by s.ord, v.vord limit 1)"
         )
     };

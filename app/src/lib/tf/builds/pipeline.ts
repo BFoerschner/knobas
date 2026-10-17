@@ -161,14 +161,16 @@ export function shortSha(sha: string): string {
 /**
  * How a run was started, as the Runs table and the run page say it (#961):
  * *VCS change a41f2c* for a change, *Schedule*, the person's account, *you*
- * for the reader. A run whose trigger misses but names a person is that
- * person; one that names neither says nothing.
+ * for the reader; *Chain*, *Chain, by jonas* for a step a chain queued
+ * (#1146). A run whose trigger misses but names a person is that person; one
+ * that names neither says nothing.
  */
 export function triggerLabel(run: RunRow): string {
   if (run.trigger === "change") return run.revision !== null ? `VCS change ${shortSha(run.revision)}` : "VCS change";
   if (run.trigger === "schedule") return "Schedule";
-  if (run.started_by_me) return "you";
-  return run.started_by ?? "";
+  const who = run.started_by_me ? "you" : (run.started_by ?? "");
+  if (run.trigger === "chain") return who === "" ? "Chain" : `Chain, by ${who}`;
+  return who;
 }
 
 /** Where the Runs filter stands. */

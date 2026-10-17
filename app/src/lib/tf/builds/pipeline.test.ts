@@ -129,6 +129,12 @@ test("a trigger reads as prototype-6 says it: VCS change and the short sha, Sche
   expect(triggerLabel(run(7, "ok"))).toBe("");
 });
 
+test("a step a chain queued reads as the chain, and by whom where the run names a person (#1146)", () => {
+  expect(triggerLabel(run(1, "ok", { trigger: "chain" }))).toBe("Chain");
+  expect(triggerLabel(run(2, "ok", { trigger: "chain", started_by: "jonas" }))).toBe("Chain, by jonas");
+  expect(triggerLabel(run(3, "ok", { trigger: "chain", started_by: "mara", started_by_me: true }))).toBe("Chain, by you");
+});
+
 test("Started by me keeps the reader's runs; the words reach the commit and who or what started a run", () => {
   const runs = [
     run(1190, "ok", { trigger: "change", revision: "a41f2c0e9b8d" }),

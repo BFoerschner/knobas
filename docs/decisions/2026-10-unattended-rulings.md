@@ -5122,3 +5122,23 @@ Implementer, PR for #1144.
   unreadable and the shared sha links nothing. One budget for the call, not one per pipeline, so
   `run_chain` over several pipelines is bounded the same. **Reversing:** low (change or drop the
   constant).
+
+## #1146 — a build a chain queued declares the chain as its trigger (2026-10-18)
+
+Implementer.
+
+- **A fourth `Trigger`, `Chain` (`chain`), not a miss and not `Person`.** The issue asks whether
+  the vocabulary needs a dependency word. TeamCity writes `snapshotDependency` on a build queued
+  because a later step of its chain was (87 of 100 builds on the public instance, #106), so a
+  miss leaves most of a chain's runs with no trigger. `Person` would be wrong where a VCS trigger
+  on the last step queued the chain, which names no account. The word is *chain* because
+  prototype-6 and `CONTEXT.md` already call these *chains* (*Chain on main*, *Step 2 of the
+  chain*). **Reversing:** medium (enum variant, SQL list, TS mirror, fake, live pin).
+- **The trigger column reads *Chain*, *Chain, by jonas*, *Chain, by you*.** prototype-6 has no
+  wording for a chain-queued run; its *Schedule, nightly* is the model for a qualifier after a
+  comma. The account stays in the column because TeamCity names whoever queued the chain.
+  **Reversing:** low (`triggerLabel`).
+- **The contract battery's `started_by` excuse stays `Change` and `Schedule` only.** A chain
+  step was not excused while it resolved to no trigger, so leaving it out changes nothing the
+  battery judges today; widening the excuse is a separate change to a frozen check.
+  **Reversing:** low (one `matches!` arm).
