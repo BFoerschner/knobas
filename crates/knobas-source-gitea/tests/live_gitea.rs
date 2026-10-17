@@ -4765,9 +4765,10 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
             .blocks
             .iter()
             .find_map(|block| match block {
-                knobas_source::view::Block::Actions { actions } => {
-                    actions.iter().find(|a| a.write_op == "commit_file").cloned()
-                }
+                knobas_source::view::Block::Actions { actions } => actions
+                    .iter()
+                    .find(|a| a.write_op == "commit_file")
+                    .cloned(),
                 _ => None,
             })
             .expect("the file declares its commit")

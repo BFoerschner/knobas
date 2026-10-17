@@ -652,7 +652,13 @@ async fn a_file_whose_branch_does_not_answer_declares_no_commit() {
 #[tokio::test]
 async fn a_directory_declares_no_commit() {
     let server = gitea().await;
-    listing(&server, "", "main", json!([entry("a.rs", "a.rs", "file", 3)])).await;
+    listing(
+        &server,
+        "",
+        "main",
+        json!([entry("a.rs", "a.rs", "file", 3)]),
+    )
+    .await;
     branch_main(&server, true, false).await;
     let section = read(&server, ENTITY, "files").await;
     assert!(commit_action(&section).is_none());

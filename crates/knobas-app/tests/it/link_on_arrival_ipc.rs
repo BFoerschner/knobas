@@ -26,8 +26,22 @@ async fn corpus(name: &str) -> PgPool {
         .pool(4)
         .await
         .expect("a pool onto this test's own database");
-    item(&pool, TICKET, "ticket", "Retry failed SEPA payouts", serde_json::json!({})).await;
-    item(&pool, REPO, "repo", "tidewater/payout-service", serde_json::json!({})).await;
+    item(
+        &pool,
+        TICKET,
+        "ticket",
+        "Retry failed SEPA payouts",
+        serde_json::json!({}),
+    )
+    .await;
+    item(
+        &pool,
+        REPO,
+        "repo",
+        "tidewater/payout-service",
+        serde_json::json!({}),
+    )
+    .await;
     pool
 }
 
@@ -73,7 +87,13 @@ async fn queued(pool: &PgPool, payload: serde_json::Value) -> i64 {
     let op = payload
         .as_object()
         .and_then(|o| o.keys().next())
-        .map(|k| if k == "CreateBranch" { "create_branch" } else { "create_pull_request" })
+        .map(|k| {
+            if k == "CreateBranch" {
+                "create_branch"
+            } else {
+                "create_pull_request"
+            }
+        })
         .unwrap();
     knobas_core::write_queue::queue(
         pool,
@@ -128,20 +148,45 @@ async fn relations(pool: &PgPool, from: &str) -> Vec<(String, bool)> {
 async fn a_new_branch_is_linked_to_the_job_once_it_is_mirrored() {
     let pool = corpus("arrival_branch").await;
     let id = queued(&pool, new_branch()).await;
-    knobas_core::write_queue::sent(&pool, id, None).await.unwrap();
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
 
-    assert_eq!(link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap(), None);
-    assert!(reached(&pool).await.is_empty(), "nothing mirrored, nothing linked");
-
-    item(&pool, BRANCH, "branch", "feature/PAY-231-backoff", serde_json::json!({})).await;
     assert_eq!(
-        link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap().as_deref(),
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        reached(&pool).await.is_empty(),
+        "nothing mirrored, nothing linked"
+    );
+
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
         Some(BRANCH)
     );
     assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
-    assert_eq!(relations(&pool, BRANCH).await, vec![("related".to_owned(), true)]);
+    assert_eq!(
+        relations(&pool, BRANCH).await,
+        vec![("related".to_owned(), true)]
+    );
     // Twice is still one link.
-    link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap();
+    link_on_arrival(&pool, &declarations(), id, TICKET)
+        .await
+        .unwrap();
     assert_eq!(relations(&pool, BRANCH).await.len(), 1);
 }
 
@@ -151,7 +196,14 @@ async fn a_new_branch_is_linked_to_the_job_once_it_is_mirrored() {
 #[tokio::test]
 async fn the_proposal_the_branch_name_raised_is_confirmed_not_doubled() {
     let pool = corpus("arrival_proposal").await;
-    item(&pool, BRANCH, "branch", "feature/PAY-231-backoff", serde_json::json!({})).await;
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
     sqlx::query(
         "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at,
                                   rule, rule_class, reason)
@@ -164,10 +216,17 @@ async fn the_proposal_the_branch_name_raised_is_confirmed_not_doubled() {
     .await
     .unwrap();
     let id = queued(&pool, new_branch()).await;
-    knobas_core::write_queue::sent(&pool, id, None).await.unwrap();
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
 
-    link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap();
-    assert_eq!(relations(&pool, BRANCH).await, vec![("related".to_owned(), true)]);
+    link_on_arrival(&pool, &declarations(), id, TICKET)
+        .await
+        .unwrap();
+    assert_eq!(
+        relations(&pool, BRANCH).await,
+        vec![("related".to_owned(), true)]
+    );
     assert_eq!(reached(&pool).await, vec![BRANCH.to_owned()]);
 }
 
@@ -186,9 +245,19 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
     )
     .await;
     let id = queued(&pool, new_pull_request()).await;
-    knobas_core::write_queue::sent(&pool, id, None).await.unwrap();
-    assert_eq!(link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap(), None);
-    assert!(reached(&pool).await.is_empty(), "a merged pull request is not this one");
+    knobas_core::write_queue::sent(&pool, id, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap(),
+        None
+    );
+    assert!(
+        reached(&pool).await.is_empty(),
+        "a merged pull request is not this one"
+    );
 
     item(
         &pool,
@@ -199,7 +268,10 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
     )
     .await;
     assert_eq!(
-        link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap().as_deref(),
+        link_on_arrival(&pool, &declarations(), id, TICKET)
+            .await
+            .unwrap()
+            .as_deref(),
         Some(PR)
     );
     assert_eq!(reached(&pool).await, vec![PR.to_owned()]);
@@ -210,17 +282,28 @@ async fn a_new_pull_request_is_linked_once_it_is_mirrored_open_on_its_head() {
 #[tokio::test]
 async fn a_write_that_did_not_land_links_nothing() {
     let pool = corpus("arrival_refused").await;
-    item(&pool, BRANCH, "branch", "feature/PAY-231-backoff", serde_json::json!({})).await;
+    item(
+        &pool,
+        BRANCH,
+        "branch",
+        "feature/PAY-231-backoff",
+        serde_json::json!({}),
+    )
+    .await;
     let waiting = queued(&pool, new_branch()).await;
     let refused = queued(&pool, new_branch()).await;
     knobas_core::write_queue::refuse(&pool, refused, "branch already exists")
         .await
         .unwrap();
     let discarded = queued(&pool, new_branch()).await;
-    knobas_core::write_queue::discard(&pool, discarded).await.unwrap();
+    knobas_core::write_queue::discard(&pool, discarded)
+        .await
+        .unwrap();
     for id in [waiting, refused, discarded, 999_999] {
         assert_eq!(
-            link_on_arrival(&pool, &declarations(), id, TICKET).await.unwrap(),
+            link_on_arrival(&pool, &declarations(), id, TICKET)
+                .await
+                .unwrap(),
             None,
             "write {id}"
         );
@@ -233,15 +316,23 @@ async fn a_write_that_did_not_land_links_nothing() {
 #[tokio::test]
 async fn only_a_new_branch_or_pull_request_is_linked_and_only_to_a_mirrored_job() {
     let pool = corpus("arrival_check").await;
-    arrival_linkable(&pool, &new_branch(), TICKET).await.unwrap();
-    arrival_linkable(&pool, &new_pull_request(), TICKET).await.unwrap();
+    arrival_linkable(&pool, &new_branch(), TICKET)
+        .await
+        .unwrap();
+    arrival_linkable(&pool, &new_pull_request(), TICKET)
+        .await
+        .unwrap();
 
     let comment = serde_json::json!({ "Comment": { "entity": PR, "body": "hi" } });
     let refused = arrival_linkable(&pool, &comment, TICKET).await.unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Invalid, "{refused:?}");
-    let refused = arrival_linkable(&pool, &new_branch(), "PAY-231").await.unwrap_err();
+    let refused = arrival_linkable(&pool, &new_branch(), "PAY-231")
+        .await
+        .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::Invalid, "{refused:?}");
-    let refused = arrival_linkable(&pool, &new_branch(), "jira:PAY-999").await.unwrap_err();
+    let refused = arrival_linkable(&pool, &new_branch(), "jira:PAY-999")
+        .await
+        .unwrap_err();
     assert_eq!(refused.code, IpcErrorCode::NotFound, "{refused:?}");
     let count: i64 = sqlx::query_scalar("select count(*) from knobas.write_queue")
         .fetch_one(&pool)

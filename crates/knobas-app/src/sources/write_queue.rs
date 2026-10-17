@@ -125,17 +125,15 @@ pub async fn submit_linked_in_background(
         write_id,
         source_id,
         move |state| async move {
-            let linked = match crate::sources::paths::declared_paths(
-                &state.pool,
-                state.registry.as_ref(),
-            )
-            .await
-            {
-                Ok(declarations) => {
-                    link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
-                }
-                Err(error) => Err(error),
-            };
+            let linked =
+                match crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref())
+                    .await
+                {
+                    Ok(declarations) => {
+                        link_on_arrival(&state.pool, &declarations, write_id, &ticket).await
+                    }
+                    Err(error) => Err(error),
+                };
             match linked {
                 Ok(Some(made)) => tracing::debug!(write_id, %made, %ticket, "linked on arrival"),
                 Ok(None) => tracing::info!(
@@ -218,9 +216,8 @@ pub async fn link_on_arrival(
         return Ok(None);
     }
     let op: WriteOp = serde_json::from_value(write.payload).map_err(IpcError::internal)?;
-    let repo_of = |entity: &str| {
-        knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal)
-    };
+    let repo_of =
+        |entity: &str| knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal);
     let made = match &op {
         WriteOp::CreateBranch { entity, name, .. } => {
             crate::start_work::queue::branch_named(pool, &repo_of(entity)?, name).await?
