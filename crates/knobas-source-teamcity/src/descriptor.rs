@@ -467,7 +467,10 @@ mod tests {
             Some(Trigger::Schedule)
         );
         let chained = build(serde_json::json!({ "type": "snapshotDependency" }));
-        assert_eq!(resolve_trigger(&chained, &run.trigger), Some(Trigger::Chain));
+        assert_eq!(
+            resolve_trigger(&chained, &run.trigger),
+            Some(Trigger::Chain)
+        );
         let finished_dependency = build(serde_json::json!({ "type": "buildType" }));
         assert_eq!(resolve_trigger(&finished_dependency, &run.trigger), None);
         let config = declared

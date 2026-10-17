@@ -224,12 +224,12 @@ const READER = "mara";
 function startOf(config: string, no: number): Pick<RunRow, "trigger" | "started_by" | "started_by_me" | "revision"> {
   const revision = `${storyOf(config, no).commit}${"0".repeat(34)}`;
   const story = ["Payout_IntegrationTests-1187", "Payout_IntegrationTests-1186", "Payout_IntegrationTests-1185", "Payout_Build-1184"];
-  const readers = config === "Payout_Build" && no === 1188;
-  const pick = readers ? READER : story.includes(`${config}-${no}`) ? null : TRIGGERS[no % TRIGGERS.length]!;
+  const readersRun = config === "Payout_Build" && no === 1188;
+  const pick = readersRun ? READER : story.includes(`${config}-${no}`) ? null : TRIGGERS[no % TRIGGERS.length]!;
   if (pick === null) return { trigger: "change", started_by: null, started_by_me: false, revision };
   if (pick === "schedule") return { trigger: "schedule", started_by: null, started_by_me: false, revision };
   const chain = chainOf(config);
-  const chained = !readers && chain.length > 0 && chain.indexOf(config) < chain.length - 1;
+  const chained = !readersRun && chain.length > 0 && chain.indexOf(config) < chain.length - 1;
   return { trigger: chained ? "chain" : "person", started_by: pick, started_by_me: pick === READER, revision };
 }
 
