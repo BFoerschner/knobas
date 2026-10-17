@@ -29,7 +29,14 @@ import {
   type LinkSetRow,
   type PublishTarget,
 } from "../../ipc/entity";
-import { search, smartLists, ticketViews, type SmartListSummary, type TicketViewRow } from "../../ipc/search";
+import {
+  hideJiraView,
+  search,
+  smartLists,
+  ticketViews,
+  type SmartListSummary,
+  type TicketViewRow,
+} from "../../ipc/search";
 import { passiveAttribution, setPassiveAttribution } from "../../ipc/time";
 import {
   addSource,
@@ -74,6 +81,10 @@ export interface SettingsPorts {
   /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
+  /** Every ticket view (#812): a Jira source's page lists its Jira views (#878). */
+  ticketViews: () => Promise<TicketViewRow[]>;
+  /** *Hide* or *Show* a Jira view (#878). */
+  hideJiraView: (id: string, hidden: boolean) => Promise<void>;
 }
 
 /**
@@ -95,6 +106,8 @@ export const realSettingsPorts: SettingsPorts = {
   syncAll: () => syncAll(),
   addSource: (input) => addSource(input),
   listen: (event, handler) => tauriListen(event, handler),
+  ticketViews: () => ticketViews(),
+  hideJiraView: (id, hidden) => hideJiraView(id, hidden),
 };
 
 /**

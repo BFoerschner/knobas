@@ -1,0 +1,72 @@
+/**
+ * Sources › Jira › *Boards and filters* (#878, R-3.20, R-13a.2, D17): which
+ * Jira boards and whether the favourite filters come in as Jira views, and
+ * every Jira view the source keeps, with its tickets and *Hide* / *Show*.
+ *
+ * The setting is two keys of the adapter's own config, `boards` and
+ * `favourite_filters`, which its schema marks for this section
+ * (`x-knobas-section`), so the generated form leaves them out. Nothing here
+ * names an adapter: the section is drawn for any adapter that declares it.
+ */
+import type { JiraSource, TicketViewRow, UnsyncedTickets } from "../../ipc/search";
+
+/** The section's name in an adapter's schema. */
+export const BOARDS_SECTION = "boards-and-filters";
+
+export type BoardScope = "synced" | "favourites" | "all" | "none";
+
+/** The choices, in prototype-6's words and order. */
+export const BOARD_SCOPES: readonly (readonly [BoardScope, string])[] = [
+  ["synced", "Boards on the projects this source syncs"],
+  ["favourites", "Only boards I marked as favourites in Jira"],
+  ["all", "Every board I can see"],
+  ["none", "No boards"],
+];
+
+function field(config: unknown, key: string): unknown {
+  return typeof config === "object" && config !== null ? (config as Record<string, unknown>)[key] : undefined;
+}
+
+/** The stored choice; one the config leaves out, or does not know, is the default (D17). */
+export function boardScope(config: unknown): BoardScope {
+  const value = field(config, "boards");
+  return BOARD_SCOPES.some(([scope]) => scope === value) ? (value as BoardScope) : "synced";
+}
+
+/** Whether the favourite filters come in; on unless the config says `false`. */
+export function favouriteFilters(config: unknown): boolean {
+  return field(config, "favourite_filters") !== false;
+}
+
+/** A Jira view of the source `sourceId`, with what Jira says about it. */
+export type SourceView = TicketViewRow & { jira: JiraSource };
+
+/** The source's Jira views: the boards, then the filters, each in list order. */
+export function sourceViews(views: TicketViewRow[], sourceId: string): SourceView[] {
+  return views
+    .filter((view): view is SourceView => view.jira !== null && (view.jira_ref ?? "").startsWith(`${sourceId}:`))
+    .sort(
+      (a, b) =>
+        Number(a.jira.kind === "filter") - Number(b.jira.kind === "filter") ||
+        a.position - b.position ||
+        a.id.localeCompare(b.id),
+    );
+}
+
+/** *Scrum board*, *Kanban board*, *Board* or *Filter*. */
+export function viewType(jira: JiraSource): string {
+  if (jira.kind === "filter") return "Filter";
+  const type = jira.board_type ?? "";
+  return type === "" || type === "simple" ? "Board" : `${type[0]!.toUpperCase()}${type.slice(1)} board`;
+}
+
+/** *and 3 in WEB, not synced*, or `null` when knobas mirrors every ticket on it. */
+export function unsyncedWords(unsynced: UnsyncedTickets[]): string | null {
+  if (unsynced.length === 0) return null;
+  return `and ${unsynced.map((one) => `${one.count} in ${one.project}`).join(", ")}, not synced`;
+}
+
+/** *1 board*, *4 boards*. */
+export function counted(n: number, one: string, many: string): string {
+  return `${n} ${n === 1 ? one : many}`;
+}

@@ -49,6 +49,9 @@
  * so with it absent the fill had no shipped adapter to run against.
  * `sprint_field` (#889) is transcribed for #1021: a Jira source's page shows
  * the two field ids the sync records, and the page is drawn from this schema.
+ * `boards` and `favourite_filters` (#878) are transcribed because they carry
+ * `x-knobas-section`: the generated form leaves them out and the source page's
+ * *Boards and filters* draws them, which only this schema can witness.
  *
  * - Jira: `page_size`, `rate_per_sec`, `rate_burst`, `connect_timeout_secs`,
  *   `request_timeout_secs`.
@@ -111,6 +114,22 @@ export const JIRA_SCHEMA = {
       title: "Sprint field id",
       description:
         "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira. An id you type is kept. Leave it empty and no ticket is in a sprint as far as knobas knows.",
+    },
+    boards: {
+      type: "string",
+      enum: ["synced", "favourites", "all", "none"],
+      default: "synced",
+      title: "Boards",
+      description:
+        "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards marked as favourites in Jira, every board you can see, or none. Read at every sync.",
+      "x-knobas-section": "boards-and-filters",
+    },
+    favourite_filters: {
+      type: "boolean",
+      default: true,
+      title: "My favourite filters",
+      description: "Whether your favourite Jira filters come in as views in Tickets. Read at every sync.",
+      "x-knobas-section": "boards-and-filters",
     },
   },
 } as const;

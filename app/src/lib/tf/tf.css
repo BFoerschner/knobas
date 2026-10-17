@@ -1047,6 +1047,9 @@ a.tf-r:hover { background: var(--sheet-2); }
   padding: 1px 6px; border-radius: 3px; font-size: var(--t-xs); color: var(--ink-2);
 }
 .tf-vw-off .tf-vw-show:hover { background: var(--sheet-2); }
+/* Sources › Jira › Boards and filters (#878). */
+.tf-stg-boards { margin-top: 8px; }
+.tf-stg-boards .tf-stg-end { text-align: right; }
 .tf-lab { font-size: var(--t-2xs); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
 /* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */

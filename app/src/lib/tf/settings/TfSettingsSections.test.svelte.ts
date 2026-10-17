@@ -58,6 +58,8 @@ const sourcePorts: SettingsPorts = {
   syncAll: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("unused")),
   listen: () => Promise.resolve(() => {}),
+  ticketViews: () => Promise.resolve([]),
+  hideJiraView: () => Promise.resolve(),
 };
 
 function sectionPorts(over: Partial<SectionPorts> = {}) {
