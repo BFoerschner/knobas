@@ -1547,6 +1547,11 @@ mod tests {
             Some(vec![json!(MY_KEY), json!("k-mara")]),
             "the credential's own key is kept too, so the reader names it"
         );
+        assert_eq!(
+            items[0].payload["mentioned_users"][1],
+            json!({ "userKey": "k-mara", "username": "mara", "displayName": "Mara Lindqvist" }),
+            "only what names a mention is kept of the user record"
+        );
     }
 
     /// A key Confluence does not know is asked once, stays a miss and leaves

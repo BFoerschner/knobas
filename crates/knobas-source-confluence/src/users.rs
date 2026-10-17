@@ -39,8 +39,10 @@ use crate::model::{CurrentUser, RawContent};
 use crate::storage::{attr, split_tag, tag_name};
 
 /// The key a page's payload keeps the looked-up users at: an array of
-/// Confluence user records (`userKey`, `username`, `displayName`, …), ordered
-/// by key. Absent where the sync looked nobody up.
+/// `{userKey, username, displayName}`, ordered by key, and nothing more of
+/// Confluence's user record (its picture and links), because those three are
+/// all the reader names a mention with. Absent where the sync looked nobody
+/// up.
 pub(crate) const MENTIONED_USERS: &str = "mentioned_users";
 
 /// The run's answers to "who is this key", kept for the whole run.
@@ -104,7 +106,8 @@ impl Directory {
     /// `404` is remembered as nobody; any other failure stops every later
     /// lookup of the run (the module docs say why). A record that does not
     /// carry `key` as its own `userKey` is nobody too, so a server answering
-    /// with someone else never names the wrong person.
+    /// with someone else never names the wrong person. Only the three fields
+    /// [`MENTIONED_USERS`] keeps are kept.
     async fn lookup(&mut self, api: &(dyn ConfluenceApi + '_), key: &str) -> Option<Value> {
         if let Some(known) = self.known.get(key) {
             return known.clone();
@@ -113,7 +116,11 @@ impl Directory {
             return None;
         }
         let answer = match api.user_by_key(key).await {
-            Ok(user) if user.get("userKey").and_then(Value::as_str) == Some(key) => Some(user),
+            Ok(user) if user.get("userKey").and_then(Value::as_str) == Some(key) => Some(json!({
+                "userKey": key,
+                "username": user.get("username"),
+                "displayName": user.get("displayName"),
+            })),
             Ok(_) => None,
             Err(e) if is_unknown(&e) => None,
             Err(_) => {
