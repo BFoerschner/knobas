@@ -52,6 +52,7 @@
     RUN_TABS,
     artifactsOf,
     builtCommit,
+    repositoryOfCommit,
     changesOf,
     contextLine,
     failureHeading,
@@ -232,7 +233,13 @@
   const agent = $derived(run?.agent ?? null);
   const now = $derived(run?.current_step ?? null);
   const commit = $derived(run === null ? null : builtCommit(run));
-  const repoId = $derived(settings?.repositories.find((repo) => repo.entity_id !== null)?.entity_id ?? null);
+  const firstRepoId = $derived(settings?.repositories.find((repo) => repo.entity_id !== null)?.entity_id ?? null);
+  /** The repository the run's commit sits in; the pipeline's first mirrored one where the commit names none (#1154). */
+  const commitRepoId = $derived(repositoryOfCommit(commit?.entityId ?? null, settings?.repositories));
+  const repoId = $derived(commitRepoId ?? firstRepoId);
+  /** A change's own repository where its id names one, else the run's. */
+  const repoOfChange = (changeId: string | null): string | null =>
+    repositoryOfCommit(changeId, settings?.repositories) ?? repoId;
   const artifacts = $derived(artifactsOf(view));
   const changes = $derived(changesOf(view));
   const parameters = $derived(parameterRows(view, settings));
@@ -457,7 +464,7 @@
             {#each changes as change, i (i)}
               <tr>
                 <td class="tf-mono tf-nowrap"
-                  >{#if change.entity_id !== null && repoId !== null}<a href={commitHash(repoId, change.entity_id)}>{change.chip ?? ""}</a
+                  >{#if change.entity_id !== null && repoOfChange(change.entity_id) !== null}<a href={commitHash(repoOfChange(change.entity_id)!, change.entity_id)}>{change.chip ?? ""}</a
                     >{:else}{change.chip ?? ""}{/if}</td
                 >
                 <td>{change.title}</td>
