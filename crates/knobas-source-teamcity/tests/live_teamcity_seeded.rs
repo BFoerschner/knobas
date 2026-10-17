@@ -2783,15 +2783,142 @@ async fn a_run_with_an_override_is_built_on_its_branch_and_synced_next() {
     );
 }
 
+/// Every agent disabled for as long as the guard lives, so a build queued
+/// meanwhile stays queued whatever the machine's speed or the cases before
+/// it (#1042: a free agent took the "waiting" build before the run was
+/// queued). Built empty, before anything is queued, and told each agent it
+/// disabled the moment it did, so a failure half-way still restores them.
+/// Only agents that were enabled are touched, and only those are re-enabled
+/// -- passing or panicking alike, [`Queued`]'s way. Dropping the guard is
+/// how a test lets the agent work again.
+struct AgentsParked {
+    url: String,
+    token: String,
+    /// Ids of the agents this guard disabled.
+    disabled: Vec<String>,
+}
+
+impl AgentsParked {
+    fn new(seeded: &Seeded) -> AgentsParked {
+        AgentsParked {
+            url: seeded.url.clone(),
+            token: seeded.token.clone(),
+            disabled: Vec::new(),
+        }
+    }
+
+    async fn park(&mut self, seeded: &Seeded) {
+        let (status, body) = seeded
+            .get("app/rest/agents?locator=authorized:any&fields=agent(id,enabled)")
+            .await;
+        assert_eq!(status, 200, "{body}");
+        let agents: Vec<(String, bool)> = body["agent"]
+            .as_array()
+            .map(|rows| {
+                rows.iter()
+                    .map(|row| {
+                        let id = row["id"]
+                            .as_i64()
+                            .map(|n| n.to_string())
+                            .or_else(|| row["id"].as_str().map(str::to_owned))
+                            .unwrap_or_default();
+                        (id, row["enabled"].as_bool().unwrap_or(true))
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
+        assert!(!agents.is_empty(), "the server lists an agent: {body}");
+        for (id, enabled) in agents {
+            if !enabled {
+                continue;
+            }
+            // Recorded first: a failed request may still have landed.
+            self.disabled.push(id.clone());
+            let response = seeded
+                .http
+                .put(format!("{}/app/rest/agents/id:{id}/enabled", seeded.url))
+                .header("Content-Type", "text/plain")
+                .header("Accept", "text/plain")
+                .bearer_auth(&seeded.token)
+                .body("false")
+                .send()
+                .await
+                .unwrap_or_else(|e| panic!("disable agent {id}: {e}"));
+            assert!(
+                response.status().is_success(),
+                "disable agent {id} -> {}",
+                response.status()
+            );
+        }
+    }
+}
+
+impl Drop for AgentsParked {
+    fn drop(&mut self) {
+        if self.disabled.is_empty() {
+            return;
+        }
+        let (url, token, ids) = (self.url.clone(), self.token.clone(), self.disabled.clone());
+        let (done, waiting) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let failures = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime for the restore")
+                .block_on(async move {
+                    let http = client();
+                    let mut failures = Vec::new();
+                    for id in ids {
+                        let at = format!("{url}/app/rest/agents/id:{id}/enabled");
+                        match http
+                            .put(&at)
+                            .header("Content-Type", "text/plain")
+                            .header("Accept", "text/plain")
+                            .bearer_auth(&token)
+                            .body("true")
+                            .send()
+                            .await
+                        {
+                            Ok(r) if r.status().is_success() => {}
+                            Ok(r) => failures.push(format!("PUT {at} -> {}", r.status())),
+                            Err(e) => failures.push(format!("PUT {at}: {e}")),
+                        }
+                    }
+                    failures
+                });
+            let _ = done.send(failures);
+        });
+        let failures = match waiting.recv_timeout(CLEANUP_BUDGET) {
+            Ok(failures) => failures,
+            Err(e) => vec![format!("the re-enabling did not finish: {e}")],
+        };
+        if failures.is_empty() {
+            return;
+        }
+        let report = format!(
+            "the live suite did not re-enable the agents it disabled, so no later build will \
+             run (enable them under Agents in TeamCity, or re-seed): {}",
+            failures.join("; ")
+        );
+        if std::thread::panicking() {
+            eprintln!("live suite restore: {report}");
+        } else {
+            panic!("{report}");
+        }
+    }
+}
+
 /// The run options (#852, R-9.7) against the real server. TeamCity takes
 /// `triggeringOptions` on the queue and answers none of it back on a read
 /// (measured on the seeded 2026.1.3 server, 2026-10-16: `fields=
 /// triggeringOptions(..)` answers the build without it), so each option is
 /// witnessed by what it does:
 ///
-/// * **first in the queue**: two plain builds go on the queue first, so the
-///   one agent is busy and one waits; the adapter's run with `first_in_queue`
-///   then stands ahead of the waiting one in `/app/rest/buildQueue`;
+/// * **first in the queue**: the agent is disabled (#1042: a free one took
+///   the earlier builds before the run was queued), two plain builds go on
+///   the queue and both stay there; the adapter's run with `first_in_queue`
+///   then stands ahead of them in `/app/rest/buildQueue`. The agent is
+///   enabled again before the run is waited for;
 /// * **clean checkout**: the finished run's log says the checkout was clean.
 ///
 /// Every build is deleted again by its [`Queued`] guard.
@@ -2802,7 +2929,9 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
 
     const BRANCH: &str = "feature/PAY-231-sepa-retry";
     let seeded = seeded();
-    // All three guards before anything is queued: each clears leftovers.
+    // The guard before anything else, so a failure anywhere re-enables the
+    // agents; then all three build guards before anything is queued.
+    let mut parked = AgentsParked::new(&seeded);
     let mut busy = Queued::new(&seeded).await;
     let mut waiting = Queued::new(&seeded).await;
     let mut ours = Queued::new(&seeded).await;
@@ -2810,8 +2939,25 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
     let entity = format!("teamcity:buildType:{config}");
     let source = seeded.scoped_to(&[config.as_str()]);
 
-    busy.queue(&seeded, &config, BRANCH).await;
+    parked.park(&seeded).await;
+    let busy_id = id_of(&busy.queue(&seeded, &config, BRANCH).await);
     let waiting_id = id_of(&waiting.queue(&seeded, &config, BRANCH).await);
+    let queued_now = |order: &[i64]| order.contains(&busy_id) && order.contains(&waiting_id);
+    let (status, queue) = seeded
+        .get(&format!(
+            "app/rest/buildQueue?locator=buildType:(id:{config})&fields=build(id)"
+        ))
+        .await;
+    assert_eq!(status, 200, "{queue}");
+    let before: Vec<i64> = queue["build"]
+        .as_array()
+        .map(|rows| rows.iter().map(id_of).collect())
+        .unwrap_or_default();
+    assert!(
+        queued_now(&before),
+        "precondition broken: both plain builds ({busy_id}, {waiting_id}) must be waiting on \
+         the queue before the run is queued, with the agents disabled; the queue reads {before:?}"
+    );
     // An override, so TeamCity's queue optimisation cannot fold the run into
     // the waiting build as its duplicate (a run equal to a queued one replaces
     // it: measured, 2026-10-16, with the clean checkout mutated away).
@@ -2856,6 +3002,8 @@ async fn a_run_with_a_clean_checkout_first_in_the_queue_reaches_teamcity_as_its_
         "first in the queue stands ahead of the build that waited: {order:?}"
     );
 
+    // The agent works again before the run is waited for.
+    drop(parked);
     let record = ours.wait_finished(&seeded).await;
     println!("SEEDED run with options: {record}");
     let log = seeded
