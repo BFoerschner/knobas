@@ -221,6 +221,10 @@ impl ShareParts {
             push("block");
             push("worklog");
             push("heartbeat");
+            // The stretches a person dismissed (#900): the day read re-derives
+            // its offers from the heartbeats above, so observations without
+            // their dismissals offer every dismissed stretch again (#1028).
+            push("passive_dismissal");
         }
         if self.sources {
             push("source_config");
@@ -332,7 +336,13 @@ mod tests {
                     time: true,
                     ..ShareParts::none()
                 },
-                vec!["timer", "block", "worklog", "heartbeat"],
+                vec![
+                    "timer",
+                    "block",
+                    "worklog",
+                    "heartbeat",
+                    "passive_dismissal",
+                ],
             ),
             (
                 ShareParts {
