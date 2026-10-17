@@ -9,6 +9,8 @@
 #            'A > B'                    open A, then B in the same page (state survives)
 #            'R + click:New branch…'    click the button/link/tab/menu item named so
 #            'R + click:testid=x'       or the element with data-testid x; then capture
+#          (an item with a dim description matches on its leading label: click:Import…;
+#          a query may lead a step route: '?fake-clone-percent=40#/repo/x/files + click:Clone')
 #          e.g. '#/job/PAY-231 > #/builds', '#/repo/x/branches + click:New branch…'.
 #          A step that finds nothing fails, naming it; the server is still stopped.
 # Env:   SHOT_SIZE=1440,900 (the design system's comparison size)
@@ -54,7 +56,10 @@ for route in "$@"; do
   case $route in
     *' > '*|*' + '*)
       file="$out/$(printf '%s' "$route" | sed 's/#\/\{0,1\}//g; s/ [>+] /--/g; s/click://g' | tr -c 'A-Za-z0-9._-\n' '_' | cut -c1-120).png"
-      node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$route" "${extra:+&${extra#&}}" || exit 1
+      # the query went into `extra`; the steps script gets the route after the first `#`
+      steps=$route
+      case $route in \?*'#'*) steps=${route#*#} ;; esac
+      node "$root/scripts/shot-steps.mjs" "$port" $((9400 + slot)) "$profile" "$size" "$theme" "$file" "$steps" "${extra:+&${extra#&}}" || exit 1
       [ -s "$file" ] || { echo "shot: no image for $route" >&2; exit 1; }
       echo "shot: $file  <- $route"
       continue ;;
