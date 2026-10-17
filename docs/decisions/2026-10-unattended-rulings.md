@@ -4672,3 +4672,24 @@ Implementer:
 - **Job → its pull request → back is three runs**, by the glossary's order (the detail beats the
   job). Not fragmentation: it is what was in front. No IPC change, so no §10.8 entry.
   **Reversing:** n/a.
+
+Merge-manager:
+
+- **Three runs stands, and the worklog is not split.** `passive::derive` truncates the job's visit
+  at the PR's first beat. On `main` the PR page sent no foreground, which truncates it the same
+  way, so the Day tab already showed job / open / job; #1102 turns the middle `open` row into an
+  offered PR row (under the 2-minute floor it stays `open`). `worklog::draft` sums all of the
+  day's manual blocks on a ticket into one draft, so Björn logs one worklog. The cost is clicks,
+  three *Add* actions. Rolling the PR into the job in the shell ("reached through the job")
+  would contradict the glossary's order and need the last job remembered after `TfJob` unmounts,
+  so the fix belongs in the offer: #1108. **Reversing:** low.
+- **`#/branch/<id>` and `#/commit/<id>` are nothing.** No page draws them; `TfPage` shows "Code
+  is not built in the new shell yet", which is not a detail on screen. `foreground.test.ts` pins
+  them to `pageFor`, so the test fails once a page is built and the head has to be added.
+  **Reversing:** trivial.
+- **A deep link to a missing entity still names its id.** The address is all the foreground
+  reads, and the backend records any well-formed id (no foreign key on `knobas.heartbeat`). A
+  page left open past the 2-minute floor offers a block on an id with no title, and the reader
+  dismisses it; a capture's `captured-from` link can be withdrawn. Nothing reaches a source.
+  Checking existence would need an async read or a page-reported state, the approach the
+  implementer's first ruling turned down. **Reversing:** medium (a page reports "missing").
