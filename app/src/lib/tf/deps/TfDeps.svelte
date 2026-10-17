@@ -13,8 +13,15 @@
   chips, *Problems and what they touch* and *Layers…* (`TfDepsLayers.svelte`).
 
   The reader's gestures (Find, the trace, folds opened by hand) hold for the
-  page; the view's draft holds for the session (`views.svelte.ts`). *Add ▾*
-  and the route dialog are #876's.
+  page; the view's draft holds for the session (`views.svelte.ts`).
+
+  **Adding (#876, R-11.20, R-11.21)**: *+ Add* on each layer that holds assets
+  or routes, and *Add ▾* (Asset, Route, Import…, and *Link to <key>…* from a
+  ticket) open *New asset* (`TfNewAsset.svelte`), the route dialog
+  (`TfRouteDialog.svelte`) or *Link to…*. What was added or saved is read
+  again, drawn open (`Gestures.reveal`), scrolled to and flashed once; the
+  toast after a new asset offers *Edit it*. A route tile opens the route
+  dialog, with *Delete…*.
 
   **From a ticket (#874, R-11.10)**: with `ticket` set (the job's Map tab,
   `#/job/<key>/map`, or `#/deps/job/<key>`) the same read is kept to what the
@@ -23,13 +30,18 @@
   open, switch between *This job <key>* and *Everything* (`#/deps`).
 -->
 <script lang="ts">
-  import { untrack } from "svelte";
+  import { tick, untrack } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
   import {
     assetTypes,
+    createAsset,
     createDepLayer,
+    createRoute,
     deleteAsset,
+    deleteRoute,
+    editRoute,
+    getRoute,
     deleteDepLayer,
     deleteDepView,
     dependencies,
@@ -55,9 +67,16 @@
     jobReach,
     submitWrite,
     type JobPipeline,
+    type LinkRow,
     type Reached,
   } from "../../ipc/entity";
+  import { launcherHome, search } from "../../ipc/search";
   import { listSources } from "../../ipc/sources";
+  import type { SessionPorts } from "../../launcher/session.svelte";
+  import TfLinkTo from "../job/TfLinkTo.svelte";
+  import { layers } from "../layers.svelte";
+  import TfNewAsset from "./TfNewAsset.svelte";
+  import TfRouteDialog from "./TfRouteDialog.svelte";
   import { isEntityId, resolveTicket } from "../job/job";
   import { reachedPart } from "./reach";
   import { push } from "../../shell/toasts.svelte";
@@ -65,8 +84,8 @@
   import { prefill } from "../monitors/monitors";
   import TfCreateMonitor from "../monitors/TfCreateMonitor.svelte";
   import { isAsset, nameIsCode } from "./deps";
-  import { drawOf, graphOf, hitsLine, matcher, nextTile, touches, UNNAMED_LAYER, type Gestures } from "./draw";
-  import type { EditorPorts, LayerPorts, ViewPorts } from "./ports";
+  import { drawOf, graphOf, hitsLine, matcher, nextTile, tileEl, touches, UNNAMED_LAYER, type Gestures } from "./draw";
+  import type { AddPorts, EditorPorts, LayerPorts, ViewPorts } from "./ports";
   import TfAssetEditor from "./TfAssetEditor.svelte";
   import TfDepsBand from "./TfDepsBand.svelte";
   import TfDepsLayers from "./TfDepsLayers.svelte";
@@ -84,7 +103,9 @@
     jobPipelines: (entityId: string) => Promise<JobPipeline[]>;
   } & ViewPorts &
     LayerPorts &
-    EditorPorts;
+    EditorPorts &
+    AddPorts &
+    Pick<SessionPorts, "search" | "launcherHome">;
 
   async function ticketIdOf(key: string): Promise<string | null> {
     const sources = isEntityId(key) ? [] : await listSources();
@@ -112,6 +133,13 @@
     deleteAsset,
     createLink,
     submitWrite,
+    createAsset: (typeId, name, parentId) => createAsset(typeId, name, parentId),
+    getRoute,
+    createRoute: (assetId, name, url, targetId, visibility) => createRoute(assetId, name, url, targetId, visibility),
+    editRoute,
+    deleteRoute,
+    search: (query) => search(query),
+    launcherHome: () => launcherHome(),
   };
 
   let {
@@ -199,6 +227,7 @@
       shut = new Set();
       more = new Set();
       fold = new Map();
+      reveal = null;
       void load(key, known, mine);
     });
   });
@@ -214,11 +243,24 @@
   let editing = $state<string | null>(null);
   let creating = $state.raw<AssetDetail | null>(null);
   let menu = $state<TfDepsViewMenu | null>(null);
+  /** *New asset*, from a layer's *+ Add* or from *Add ▾* (`layer` `null`). */
+  let adding = $state.raw<{ layer: DepLayer | null } | null>(null);
+  /** The route dialog: a new route (`id` `null`) or the one being edited. */
+  let routing = $state.raw<{ id: string | null } | null>(null);
+  let linking = $state(false);
+  let addMenu = $state(false);
+  let addButton = $state<HTMLButtonElement | null>(null);
+  let addMenuEl = $state<HTMLDivElement | null>(null);
+  /** What was just added or saved: drawn open (`reveal`), scrolled to and flashed once. */
+  let reveal = $state<string | null>(null);
+  let flash = $state<string | null>(null);
+  /** The ticket the map opens from, once its entity id is known: what *Link it to* links. */
+  const scoped = $derived(ticket !== null && reach !== null && reach.key === ticket ? { key: ticket, id: reach.id } : null);
 
   const add = (set: ReadonlySet<string>, key: string) => new Set([...set, key]);
   const drop = (set: ReadonlySet<string>, key: string) => new Set([...set].filter((k) => k !== key));
 
-  const gestures = $derived<Gestures>({ query, trace, open: opened, shut, more, fold });
+  const gestures = $derived<Gestures>({ query, trace, open: opened, shut, more, fold, reveal });
   const graph = $derived(read === null ? null : graphOf(read));
   const drawn = $derived(read !== null && graph !== null && views.draft !== null ? drawOf(read, views.draft, gestures, graph) : null);
   const hit = $derived(read === null ? () => false : matcher(read, query));
@@ -239,10 +281,73 @@
   }
 
   function openItem(item: DepItem, event?: MouseEvent) {
+    if (item.kind === "route") {
+      event?.preventDefault();
+      routing = { id: item.id };
+      return;
+    }
     if (!isAsset(item.kind)) return;
     event?.preventDefault();
     editing = item.id;
   }
+
+  /** *+ Add* on a layer: a layer of routes alone opens the route dialog (prototype-6's `dpCreate`). */
+  function addTo(layerId: string | null) {
+    const layer = layerId === null ? null : (read?.layers.find((l) => l.id === layerId) ?? null);
+    if (layer !== null && layer.kinds.length === 1 && layer.kinds[0] === "route") routing = { id: null };
+    else adding = { layer };
+  }
+
+  function pickAdd(run: () => void) {
+    addMenu = false;
+    run();
+  }
+
+  $effect(() => {
+    if (!addMenu) return;
+    void tick().then(() => addMenuEl?.querySelector<HTMLElement>("button")?.focus());
+    const away = (event: MouseEvent) => {
+      if (event.target instanceof Node && (addMenuEl?.contains(event.target) || addButton?.contains(event.target))) return;
+      addMenu = false;
+    };
+    window.addEventListener("mousedown", away);
+    return () => window.removeEventListener("mousedown", away);
+  });
+
+  function addMenuKey(event: KeyboardEvent) {
+    if (event.key !== "Escape") return;
+    event.preventDefault();
+    event.stopPropagation();
+    addMenu = false;
+    addButton?.focus();
+  }
+
+  /** Created or saved: read again, then draw it open, scroll to it and flash it once. */
+  function landed(id: string, text: string, edit: boolean, unlinked: string | null) {
+    const action = edit ? { action: { label: "Edit it", run: () => void (editing = id) } } : {};
+    if (unlinked !== null && scoped !== null) push({ text: `${text}, but it is not linked to ${scoped.key}: ${unlinked}`, tone: "err", ...action });
+    else push({ text, ...action });
+    trace = null;
+    void reload().then(() => {
+      reveal = id;
+      flash = id;
+    });
+  }
+
+  // The flashed tile, once drawn: scrolled to the middle and focused; the flash ends on its own.
+  let flashed: string | null = null;
+  $effect(() => {
+    const id = flash;
+    if (id === null || id === flashed || drawn === null || drawn.where.get(id) !== tileEl(id)) return;
+    flashed = id;
+    const tile = bandsEl?.querySelector<HTMLElement>(`.tf-dp-t[data-id="${CSS.escape(id)}"]`);
+    tile?.scrollIntoView?.({ block: "center" });
+    tile?.querySelector<HTMLElement>(".tf-dp-open")?.focus();
+    setTimeout(() => {
+      if (flash === id) flash = null;
+      flashed = null;
+    }, 1600);
+  });
 
   function startTrace(item: DepItem) {
     trace = trace === item.id ? null : item.id;
@@ -388,9 +493,16 @@
     void reload();
   }
 
+  /** Read the estate again, and from a ticket what it reaches, since a link may have changed it. */
   async function reload() {
     try {
-      whole = await ports.dependencies();
+      const key = ticket;
+      const [estate, again] = await Promise.all([
+        ports.dependencies(),
+        key === null ? Promise.resolve(null) : readReach(key, reach?.id ?? ticketId),
+      ]);
+      whole = estate;
+      if (again !== null) reach = again;
     } catch (error) {
       push({ text: `The estate could not be read again: ${ipcErrorMessage(error)}`, tone: "err" });
     }
@@ -469,7 +581,35 @@
       >
       <span class="tf-dp-gap"></span>
       <button type="button" class="tf-btn tf-sm" class:tf-primary={panel} aria-pressed={panel} onclick={() => (panel = !panel)}>Layers…</button>
-      <button type="button" class="tf-btn tf-sm" aria-disabled="true" title="Not built in the new shell yet">Add ▾</button>
+      <span class="tf-dp-vmenu tf-dp-addmenu">
+        <button
+          type="button"
+          class="tf-btn tf-sm"
+          aria-haspopup="menu"
+          aria-expanded={addMenu}
+          bind:this={addButton}
+          onclick={() => (addMenu = !addMenu)}>Add ▾</button
+        >
+        {#if addMenu}
+          <div class="tf-menu tf-appmenu tf-dp-menu" role="menu" tabindex="-1" bind:this={addMenuEl} onkeydown={addMenuKey}>
+            <button type="button" role="menuitem" onclick={() => pickAdd(() => addTo(null))}
+              ><b>Asset</b><span class="tf-dim">a name, a type and where it sits; the rest in its editor</span></button
+            >
+            <button type="button" role="menuitem" onclick={() => pickAdd(() => (routing = { id: null }))}
+              ><b>Route</b><span class="tf-dim">an address, the asset that exposes it, and where it lands</span></button
+            >
+            <button type="button" role="menuitem" aria-disabled="true" title="Not built in the new shell yet"
+              ><b>Import…</b><span class="tf-dim">estate file, hcloud, Docker host, with a preview</span></button
+            >
+            {#if scoped !== null}
+              <hr />
+              <button type="button" role="menuitem" onclick={() => pickAdd(() => (linking = true))}
+                ><b>Link to {scoped.key}…</b><span class="tf-dim">an asset, repository, pipeline or page that already exists</span></button
+              >
+            {/if}
+          </div>
+        {/if}
+      </span>
     </div>
     {#if traced !== null}
       <div class="tf-dp-trail">
@@ -503,18 +643,26 @@
             {hit}
             {lit}
             {hover}
-            onfold={(layer, folded) => (fold = new Map([...fold, [layer, folded]]))}
+            onfold={(layer, folded) => {
+              // A fold by hand lets go of what was just added, which would hold its layer open.
+              reveal = null;
+              fold = new Map([...fold, [layer, folded]]);
+            }}
             onopengroup={(key) => {
               opened = add(opened, key);
               shut = drop(shut, key);
             }}
             onshutgroup={(key) => {
+              reveal = null;
               shut = add(shut, key);
               opened = drop(opened, key);
             }}
             onmore={(key) => (more = add(more, key))}
             onopen={openItem}
             ontrace={startTrace}
+            {flash}
+            onadd={addTo}
+            onlink={scoped !== null ? () => (linking = true) : null}
           />
         {/each}
         {#if drawn.hidden.length > 0 || drawn.unplaced.count > 0}
@@ -546,10 +694,55 @@
   {/if}
 </div>
 
+{#if adding !== null && whole !== null}
+  <TfNewAsset
+    read={whole}
+    layer={adding.layer}
+    parent={traced !== null && isAsset(traced.kind) ? traced.id : null}
+    ticket={scoped}
+    {ports}
+    onclose={() => (adding = null)}
+    oncreated={(made) => {
+      adding = null;
+      landed(made.id, `Created ${made.name}`, true, made.unlinked);
+    }}
+  />
+{/if}
+{#if routing !== null && whole !== null}
+  <TfRouteDialog
+    read={whole}
+    routeId={routing.id}
+    ticket={scoped}
+    {ports}
+    onclose={() => (routing = null)}
+    onsaved={(done) => {
+      routing = null;
+      landed(done.id, `${done.created ? "Created" : "Saved"} ${done.name}`, false, done.unlinked);
+    }}
+    ondeleted={(name) => {
+      routing = null;
+      deleted(name);
+    }}
+  />
+{/if}
+{#if linking && scoped !== null}
+  <TfLinkTo
+    jobKey={scoped.key}
+    entityId={scoped.id}
+    ports={{ search: ports.search, launcherHome: ports.launcherHome, createLink: (a, b, r, n) => ports.createLink(a, b, r, n) as Promise<LinkRow> }}
+    {layers}
+    onclose={() => (linking = false)}
+    onlinked={() => {
+      linking = false;
+      push({ text: "Linked in knobas" });
+      void reload();
+    }}
+  />
+{/if}
 {#if editing !== null && read !== null}
   <TfAssetEditor
     assetId={editing}
-    {read}
+    read={whole ?? read}
     {ports}
     onclose={() => (editing = null)}
     onsaved={saved}

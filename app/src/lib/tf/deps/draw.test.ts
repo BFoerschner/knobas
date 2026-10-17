@@ -124,6 +124,23 @@ describe("folding a large estate (R-11.17)", () => {
   });
 });
 
+describe("a new tile is drawn where it can flash (#876, R-11.20)", () => {
+  test("opens its folded layer, its chip and its 'more', and draws no other tile of the group", () => {
+    const settings = settingsOf({ services: { group: "owner" }, machines: { folded: true } });
+    // s1012 is team-12's, past the cap of its group: in a chip without the reveal.
+    expect(drawOf(BIG, settings, NO_GESTURES).where.get("s1012")).not.toBe(tileEl("s1012"));
+    const shown = drawOf(BIG, settings, gestures({ reveal: "s1012" }));
+    expect(shown.where.get("s1012")).toBe(tileEl("s1012"));
+    const team = shown.bands.find((band) => band.id === "services")!.open.find((group) => group.name === "team-12")!;
+    expect(team.tiles.length).toBeLessThan(team.count);
+    expect(shown.hits).toBe(0);
+
+    const vm = drawOf(BIG, settings, gestures({ reveal: "vm7" }));
+    expect(vm.bands.find((band) => band.id === "machines")!.folded).toBe(false);
+    expect(vm.where.get("vm7")).toBe(tileEl("vm7"));
+  });
+});
+
 describe("Find (R-11.18)", () => {
   test("opens the folds that hold a match and counts the matches", () => {
     const settings = settingsOf({ services: { group: "owner" }, machines: { folded: true } });
