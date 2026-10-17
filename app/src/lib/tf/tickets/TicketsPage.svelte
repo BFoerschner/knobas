@@ -68,6 +68,10 @@
     views: () => Promise<TicketViewRow[]>;
     saveView: (draft: TicketViewDraft) => Promise<TicketView>;
     deleteView: (id: string) => Promise<void>;
+    /** *Hide from the list* or *Show* a Jira view (#878). */
+    hideView: (id: string, hidden: boolean) => Promise<void>;
+    /** A Jira view was opened: it stops saying *new* (#878). */
+    openView: (id: string) => Promise<void>;
   }
 
   /** One view's session: the switches over what it was saved with, and the expanded columns. */
@@ -110,7 +114,14 @@
     type MiniBoardCard,
     type MiniBoardColumn,
   } from "../../ipc/entity";
-  import { deleteTicketView, filterSuggestions, saveTicketView, ticketViews } from "../../ipc/search";
+  import {
+    deleteTicketView,
+    filterSuggestions,
+    hideJiraView,
+    openJiraView,
+    saveTicketView,
+    ticketViews,
+  } from "../../ipc/search";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
@@ -150,6 +161,7 @@
     draftRestore,
     drawnJiraColumns,
     groupViews,
+    hiddenViews,
     JIRA_GROUPS,
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
@@ -172,6 +184,8 @@
       views: ticketViews,
       saveView: saveTicketView,
       deleteView: deleteTicketView,
+      hideView: hideJiraView,
+      openView: openJiraView,
     },
     viewId = null,
     typingPause = 90,
@@ -221,6 +235,9 @@
    */
   const view = $derived(viewId === null ? null : (views?.find((row) => row.id === viewId) ?? undefined));
   const groups = $derived(groupViews(views ?? [], find));
+  /** The Jira views hidden from the list (#878): one line at the bottom, each with *Show* when unfolded. */
+  const hidden = $derived(hiddenViews(views ?? []));
+  let showHidden = $state(false);
   const groupNames = $derived([
     ...new Set([...OWN_GROUPS, ...(views ?? []).map((row) => row.group)]),
   ]);
@@ -465,6 +482,35 @@
     });
   }
 
+  /** *Hide from the list* (`true`, with *Undo*) or *Show* (`false`) a Jira view (#878, R-3.25). */
+  async function setHidden(row: TicketViewRow, hide: boolean) {
+    try {
+      await ports.hideView(row.id, hide);
+    } catch (error) {
+      push({ text: `${row.name} was not ${hide ? "hidden" : "shown"}: ${messageOf(error)}`, tone: "err" });
+      return;
+    }
+    loadViews();
+    if (!hide) return;
+    if (viewId === row.id) location.hash = "#/tickets";
+    push({ text: `Hid ${row.name}`, action: { label: "Undo", run: () => void setHidden(row, false) } });
+  }
+
+  // A Jira view marked *new* stops saying so once it is opened (#878, R-3.20):
+  // asked once per view per visit, so an answer that still says *new* cannot loop.
+  const openedNew = new Set<string>();
+  $effect(() => {
+    const opened = view;
+    if (!opened || opened.jira?.new !== true || openedNew.has(opened.id)) return;
+    openedNew.add(opened.id);
+    untrack(() => {
+      ports
+        .openView(opened.id)
+        .then(loadViews)
+        .catch(() => {});
+    });
+  });
+
   // ---- what is drawn, and the selection ----
   /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
   const bands = $derived(
@@ -643,7 +689,9 @@
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
               ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
-              >{#if row.count !== null && row.count > 0}{" "}<span class="tf-count">{row.count}</span>{/if}</a
+              >{#if row.jira?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
+                  class="tf-count">{row.count}</span
+                >{/if}</a
             >
             <ViewMenu
               name={row.name}
@@ -651,12 +699,32 @@
               onedit={() => editView(row)}
               onduplicate={() => copyView(row)}
               ondelete={() => remove(row)}
+              onhide={() => void setHidden(row, true)}
             />
           </div>
         {/each}
       {/each}
       {#if find.trim() !== "" && groups.length === 0}
         <p class="tf-dim tf-vw-none">No view matches.</p>
+      {/if}
+      {#if hidden.length > 0}
+        <button type="button" class="tf-vw-hidden" aria-expanded={showHidden} onclick={() => (showHidden = !showHidden)}
+          >{hidden.length} hidden</button
+        >
+        {#if showHidden}
+          {#each hidden as row (row.id)}
+            <div class="tf-vw-row tf-vw-off">
+              <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}>{row.name}</a>
+              <button
+                type="button"
+                class="tf-vw-show"
+                aria-label="Show {row.name} again"
+                title="Show it again"
+                onclick={() => void setHidden(row, false)}>Show</button
+              >
+            </div>
+          {/each}
+        {/if}
       {/if}
       {#if adhoc.length > 0}
         <h2>Not a ticket</h2>
@@ -697,6 +765,7 @@
           onedit={() => editView(view)}
           onduplicate={() => copyView(view)}
           ondelete={() => remove(view)}
+          onhide={() => void setHidden(view, true)}
         />
       {/if}
     </div>

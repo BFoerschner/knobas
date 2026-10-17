@@ -1035,6 +1035,18 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-vw-warn { color: var(--warn); }
 .tf-vw-from { font-size: var(--t-sm); margin: 0 0 10px; padding: 8px 10px; border-left: 3px solid var(--info); background: var(--sheet); line-height: 1.5; }
 .tf-vw-from code { font-size: var(--t-xs); color: var(--ink); background: var(--sheet-2); padding: 0 4px; border-radius: 3px; font-variant-ligatures: none; }
+/* Jira views (#878): *new* until opened, the hidden views' line, a hidden row with *Show*. */
+.tf-vw-new { font-size: var(--t-2xs); font-weight: 700; color: var(--info); margin-left: 2px; }
+.tf-vw-hidden {
+  border: 0; background: none; color: var(--ink-2); cursor: pointer; padding: 8px 8px 2px; font-size: var(--t-xs);
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.tf-vw-off a { color: var(--ink-2); }
+.tf-vw-off .tf-vw-show {
+  position: absolute; right: 3px; top: 50%; transform: translateY(-50%); border: 0; background: none; cursor: pointer;
+  padding: 1px 6px; border-radius: 3px; font-size: var(--t-xs); color: var(--ink-2);
+}
+.tf-vw-off .tf-vw-show:hover { background: var(--sheet-2); }
 .tf-lab { font-size: var(--t-2xs); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
 /* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */

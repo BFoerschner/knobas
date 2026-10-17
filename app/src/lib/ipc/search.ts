@@ -430,6 +430,28 @@ export interface JiraSource {
   last_read: string;
   /** Where Jira shows it, or `null`. */
   web_url: string | null;
+  /** *Hide from the list* (#878, R-3.25): it keeps syncing. */
+  hidden: boolean;
+  /** Turned up after its source's first sync and not opened yet (#878, R-3.20). */
+  new: boolean;
+  /** The tickets on it knobas does not mirror, by project, most first (#878). */
+  unsynced: UnsyncedTickets[];
+}
+
+/** Tickets on a Jira view from one project knobas does not mirror — `ticket_views::Unsynced`. */
+export interface UnsyncedTickets {
+  project: string;
+  count: number;
+}
+
+/** *Hide from the list* (`true`) or *Show* (`false`) a Jira view (#878). */
+export function hideJiraView(id: string, hidden: boolean): Promise<void> {
+  return invoke<void>("hide_jira_view", { id, hidden });
+}
+
+/** A view was opened: a Jira view stops saying *new* (#878). */
+export function openJiraView(id: string): Promise<void> {
+  return invoke<void>("open_jira_view", { id });
 }
 
 /** What `save_ticket_view` takes — `ticket_views::TicketViewDraft`. */

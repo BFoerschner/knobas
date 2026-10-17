@@ -62,6 +62,7 @@ export interface ViewGroup {
  */
 export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
   const found = views
+    .filter((view) => view.jira?.hidden !== true)
     .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.jira?.jql ?? view.query}`, find))
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
   const typed = [...new Set(found.map((view) => view.group))].filter(
@@ -86,6 +87,16 @@ export function viewColumns(board: MiniBoardColumn[], own: ViewColumn[]): MiniBo
     if (held.length > 1) cards.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
     return { status: column.name, cards, total: held.reduce((all, status) => all + status.total, 0) };
   });
+}
+
+/**
+ * The Jira views hidden from the list (#878, R-3.25), in list order: one line
+ * at the bottom of the views pane, each with *Show*. They keep syncing.
+ */
+export function hiddenViews(views: TicketViewRow[]): TicketViewRow[] {
+  return views
+    .filter((view) => view.jira?.hidden === true)
+    .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
 }
 
 /** A view's *At most* for a column it named, or `null`. */

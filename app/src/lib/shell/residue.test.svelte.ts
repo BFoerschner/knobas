@@ -915,6 +915,8 @@ const CASES: Case[] = [
             views: () => deferred([]),
             saveView: () => new Promise(() => {}),
             deleteView: () => new Promise(() => {}),
+            hideView: () => new Promise(() => {}),
+            openView: () => new Promise(() => {}),
           },
         },
       }),
