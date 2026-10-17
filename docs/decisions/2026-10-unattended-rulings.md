@@ -5038,3 +5038,8 @@ Merge-manager, PR #1145.
 - **A plain `docker compose up` starts the proxy.** It already starts Kuma, which depends on
   the proxy, so the proxy runs only where Kuma does. This is documented in `testenv/README.md`
   and not put behind a profile. **Reversing:** low (a profile on both).
+- **`docker-proxy` goes in `estate_file.rs`'s `NOT_ASSETS`, not into `testenv/estate.json`.**
+  The gate's `every_compose_service_the_notebook_runs_is_recorded` failed on the new service.
+  The proxy is Kuma's plumbing: no route, no monitor, reachable from Kuma alone. Recording it
+  as an asset moved the estate's pinned count (16 to 17) in 22 tests across five files, which
+  was tried and backed out. **Reversing:** medium (add the asset and update those counts).
