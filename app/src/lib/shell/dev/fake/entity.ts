@@ -95,8 +95,11 @@ function getEntity(args: Record<string, unknown>) {
   if (!entry) {
     throw { code: "not_found", message: `${id} is not in the mirror`, source_id: null };
   }
+  const row = mirrorRow(entry);
   return {
-    row: mirrorRow(entry),
+    // A ticket's path is its parent chain, as Jira declares it: the flat
+    // `epic` here, so *Save as a link set…* (#869) offers the epic.
+    row: entry.kind === "ticket" && row.path === null ? { ...row, path: fakeText(entry.payload["epic"]) } : row,
     source: { id: "mock", display_name: "Tidewater (mock)", adapter_kind: "mock", enabled: true },
     // Null, where the real command now resolves the adapter's KindInfo from
     // the registry. Harmless divergence: the fallback path draws the same

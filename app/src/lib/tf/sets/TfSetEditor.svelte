@@ -29,6 +29,7 @@
   } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { keyOf } from "../job/job";
+  import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
   import { dotClass, itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
   import TfSetPattern from "./TfSetPattern.svelte";
@@ -100,17 +101,6 @@
       );
     }
   });
-
-  function draftOf(detail: LinkSetDetail): LinkSetDraft {
-    return {
-      id: detail.id,
-      name: detail.name,
-      description: detail.description,
-      members: detail.members.map(({ kind, entity_id }) => ({ kind, entity_id })),
-      patterns: detail.patterns.map(({ kind, query }) => ({ kind, query })),
-      rules: detail.rules.map(({ kind, value }) => ({ kind, value })),
-    };
-  }
 
   /**
    * Save the set as `change` leaves it, and draw what the save answered.

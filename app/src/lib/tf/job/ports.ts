@@ -13,7 +13,10 @@ import {
   hideLinkSetMember,
   jobLinkSets,
   jobReach,
+  linkSets,
   listEntities,
+  previewLinkSetRule,
+  saveLinkSet,
   promoteContext,
   reachableTransitions,
   roomSuggestions,
@@ -44,6 +47,7 @@ import {
 } from "../../ipc/sources";
 import { weekTimesheet, type DayWindow, type Week } from "../../ipc/time";
 import { BRIDGE as startWorkBridge, type StartWorkApi } from "../../start-work/start-work.svelte";
+import type { SetPorts } from "../sets/ports";
 import type { SourceFacts } from "./job";
 
 export interface JobPorts {
@@ -78,6 +82,19 @@ export interface JobPorts {
   /** The start-work flow's five commands (#44), the job's stepper's (#818). */
   startWork: StartWorkApi;
 }
+
+/**
+ * What *Apply a link set…* and *Save as a link set…* call (#869): existing
+ * Link sets commands, no new ones. Apart from `JobPorts` so the job's other
+ * suites need not stand them in.
+ */
+export type JobSetPorts = Pick<SetPorts, "linkSets" | "saveLinkSet" | "previewLinkSetRule">;
+
+export const bridgeSetPorts: JobSetPorts = {
+  linkSets: () => linkSets(),
+  saveLinkSet: (draft) => saveLinkSet(draft),
+  previewLinkSetRule: (rule) => previewLinkSetRule(rule),
+};
 
 /**
  * The bridge's. Each read is wrapped rather than referenced, so importing the
