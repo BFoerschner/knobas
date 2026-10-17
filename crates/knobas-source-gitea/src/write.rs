@@ -119,7 +119,9 @@ async fn branch_made_from(
     };
     let tip = made.commit.id.to_ascii_lowercase();
     let wanted = from_ref.to_ascii_lowercase();
-    if wanted.len() >= 7 && wanted.chars().all(|c| c.is_ascii_hexdigit()) && tip.starts_with(&wanted)
+    if wanted.len() >= 7
+        && wanted.chars().all(|c| c.is_ascii_hexdigit())
+        && tip.starts_with(&wanted)
     {
         return true;
     }
@@ -362,10 +364,10 @@ async fn merged_by_this_account(client: &GiteaClient, owner: &str, repo: &str, i
     let Some(by) = pull.merged_by.and_then(|u| u.login).filter(|_| pull.merged) else {
         return false;
     };
-    client
-        .current_user()
-        .await
-        .is_ok_and(|me| me.login.is_some_and(|login| login.eq_ignore_ascii_case(&by)))
+    client.current_user().await.is_ok_and(|me| {
+        me.login
+            .is_some_and(|login| login.eq_ignore_ascii_case(&by))
+    })
 }
 
 /// What [`merge`] is asked to do: the style, whether Gitea deletes the head

@@ -140,7 +140,10 @@ pub(crate) async fn update_page(
         .await;
     match sent {
         Ok(_) => Ok(()),
-        Err(error) if error.status() == Some(409) && holds_this_edit(http, &path, base_version + 1, body).await => {
+        Err(error)
+            if error.status() == Some(409)
+                && holds_this_edit(http, &path, base_version + 1, body).await =>
+        {
             Ok(())
         }
         Err(error) => Err(error),
@@ -344,8 +347,7 @@ mod tests {
     }
 
     const CURRENT: &str = r#"{"id":"98","type":"page","title":"Runbook"}"#;
-    const CONFLICT: &str =
-        r#"{"statusCode":409,"message":"Version must be incremented on update. Current version is: 8"}"#;
+    const CONFLICT: &str = r#"{"statusCode":409,"message":"Version must be incremented on update. Current version is: 8"}"#;
 
     /// #1129: the first `PUT` lands (the page goes to version 8) and its
     /// answer is lost to a gateway's `504`; the transport's repeat carries the
@@ -353,7 +355,8 @@ mod tests {
     /// version 8 with this write's body, so it is this write, delivered.
     #[tokio::test]
     async fn a_page_update_whose_answer_was_lost_is_delivered() {
-        let landed = r#"{"id":"98","version":{"number":8},"body":{"storage":{"value":"<p>new</p>"}}}"#;
+        let landed =
+            r#"{"id":"98","version":{"number":8},"body":{"storage":{"value":"<p>new</p>"}}}"#;
         let (http, seen) = scripted(vec![
             (200, CURRENT),
             (504, ""),
@@ -363,7 +366,12 @@ mod tests {
         super::update_page(&http, "98", 7, "<p>new</p>")
             .await
             .expect("the page holds this write's version");
-        let puts = seen.lock().unwrap().iter().filter(|l| l.starts_with("PUT")).count();
+        let puts = seen
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|l| l.starts_with("PUT"))
+            .count();
         assert_eq!(puts, 2, "the lost one and the refused repeat");
     }
 
@@ -371,7 +379,8 @@ mod tests {
     /// stands.
     #[tokio::test]
     async fn a_page_at_the_next_version_with_another_body_is_still_refused() {
-        let theirs = r#"{"id":"98","version":{"number":8},"body":{"storage":{"value":"<p>theirs</p>"}}}"#;
+        let theirs =
+            r#"{"id":"98","version":{"number":8},"body":{"storage":{"value":"<p>theirs</p>"}}}"#;
         let (http, _) = scripted(vec![
             (200, CURRENT),
             (504, ""),

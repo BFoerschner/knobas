@@ -78,8 +78,12 @@ fn create_branch() -> WriteOp {
 #[tokio::test]
 async fn a_branch_created_whose_answer_was_lost_is_delivered() {
     let server = lands_then_refuses("/branches", 409, "The branch already exists.").await;
-    holds(&server, "/branches/main", json!({ "name": "main", "commit": { "id": "c90d11aa" } }))
-        .await;
+    holds(
+        &server,
+        "/branches/main",
+        json!({ "name": "main", "commit": { "id": "c90d11aa" } }),
+    )
+    .await;
     holds(
         &server,
         "/branches/feature%2FPAY-231-sepa-retry",
@@ -91,7 +95,11 @@ async fn a_branch_created_whose_answer_was_lost_is_delivered() {
         .write(create_branch())
         .await
         .expect("the branch this write made is there");
-    assert_eq!(posts(&server).await, 2, "the lost one and the refused repeat");
+    assert_eq!(
+        posts(&server).await,
+        2,
+        "the lost one and the refused repeat"
+    );
 }
 
 /// The queue's resend (ADR-0012), not the transport's: every attempt of the
@@ -116,8 +124,12 @@ async fn a_branch_the_queue_resends_after_its_answers_were_lost_is_delivered() {
         .with_priority(2)
         .mount(&server)
         .await;
-    holds(&server, "/branches/main", json!({ "name": "main", "commit": { "id": "c90d11aa" } }))
-        .await;
+    holds(
+        &server,
+        "/branches/main",
+        json!({ "name": "main", "commit": { "id": "c90d11aa" } }),
+    )
+    .await;
     holds(
         &server,
         "/branches/feature%2FPAY-231-sepa-retry",
@@ -126,7 +138,10 @@ async fn a_branch_the_queue_resends_after_its_answers_were_lost_is_delivered() {
     .await;
 
     let gitea = source(&server);
-    let first = gitea.write(create_branch()).await.expect_err("no answer came back");
+    let first = gitea
+        .write(create_branch())
+        .await
+        .expect_err("no answer came back");
     assert_eq!(first.status(), Some(504), "{first:?}");
     gitea
         .write(create_branch())
@@ -139,8 +154,12 @@ async fn a_branch_the_queue_resends_after_its_answers_were_lost_is_delivered() {
 #[tokio::test]
 async fn a_branch_of_that_name_at_another_commit_is_still_refused() {
     let server = lands_then_refuses("/branches", 409, "The branch already exists.").await;
-    holds(&server, "/branches/main", json!({ "name": "main", "commit": { "id": "c90d11aa" } }))
-        .await;
+    holds(
+        &server,
+        "/branches/main",
+        json!({ "name": "main", "commit": { "id": "c90d11aa" } }),
+    )
+    .await;
     holds(
         &server,
         "/branches/feature%2FPAY-231-sepa-retry",
@@ -180,8 +199,7 @@ fn open_pull(number: u64, title: &str, head: &str, base: &str) -> Value {
     })
 }
 
-const ALREADY_OPEN: &str =
-    "pull request already exists for these targets [id: 145, issue_id: 160, head_repo_id: 7, \
+const ALREADY_OPEN: &str = "pull request already exists for these targets [id: 145, issue_id: 160, head_repo_id: 7, \
      base_repo_id: 7, head_branch: feature/PAY-231-sepa-retry, base_branch: main]";
 
 /// An open pull request from this head into this base, with this write's
@@ -194,7 +212,12 @@ async fn a_pull_request_opened_whose_answer_was_lost_is_delivered() {
         "/pulls",
         json!([
             open_pull(146, "Bump deps", "chore/deps", "main"),
-            open_pull(145, "SEPA retry with exponential backoff", "feature/PAY-231-sepa-retry", "main"),
+            open_pull(
+                145,
+                "SEPA retry with exponential backoff",
+                "feature/PAY-231-sepa-retry",
+                "main"
+            ),
         ]),
     )
     .await;
@@ -203,7 +226,11 @@ async fn a_pull_request_opened_whose_answer_was_lost_is_delivered() {
         .write(create_pull_request())
         .await
         .expect("the pull request this write opened is there");
-    assert_eq!(posts(&server).await, 2, "the lost one and the refused repeat");
+    assert_eq!(
+        posts(&server).await,
+        2,
+        "the lost one and the refused repeat"
+    );
 }
 
 /// The open pull request for the pair carries another title: somebody
@@ -214,7 +241,12 @@ async fn an_open_pull_request_with_another_title_is_still_refused() {
     holds(
         &server,
         "/pulls",
-        json!([open_pull(145, "WIP retry", "feature/PAY-231-sepa-retry", "main")]),
+        json!([open_pull(
+            145,
+            "WIP retry",
+            "feature/PAY-231-sepa-retry",
+            "main"
+        )]),
     )
     .await;
 
@@ -261,7 +293,11 @@ async fn a_merge_whose_answer_was_lost_is_delivered() {
         .write(merge())
         .await
         .expect("the merge this write made is there");
-    assert_eq!(posts(&server).await, 2, "the lost one and the refused repeat");
+    assert_eq!(
+        posts(&server).await,
+        2,
+        "the lost one and the refused repeat"
+    );
 }
 
 /// Merged by somebody else: not this write's merge, and Gitea's 405 stands.
