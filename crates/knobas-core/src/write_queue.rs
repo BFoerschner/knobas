@@ -965,6 +965,35 @@ pub fn moved(op: &str, queued: serde_json::Value, base: &str, current: &str) -> 
     serde_json::Value::Object(held)
 }
 
+/// The held side of a write that reached its source and was never answered
+/// (issue #1125): the snapshot taken when the write was queued, plus
+/// `unconfirmed`, naming the source a person should check (`source`, its
+/// display name) and what the transport said (`detail`).
+///
+/// The write may have landed, so the flush loop does not send it again by
+/// itself. The reader checks the source, then sends it again
+/// ([`apply_anyway`]) or discards it. Like [`moved`]'s `base`, the key marks
+/// whose hold this is: `apply_anyway` keeps `target_snapshot` for it, since
+/// the mirror did not move.
+#[must_use]
+pub fn unconfirmed(
+    op: &str,
+    queued: serde_json::Value,
+    source: &str,
+    detail: &str,
+) -> serde_json::Value {
+    let mut held = match queued {
+        serde_json::Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    held.insert("op".to_owned(), serde_json::json!(op));
+    held.insert(
+        "unconfirmed".to_owned(),
+        serde_json::json!({ "source": source, "detail": detail }),
+    );
+    serde_json::Value::Object(held)
+}
+
 /// Where an op's payload says which version of its target it was made
 /// against, for the ops whose source checks it ([`moved`]): the path
 /// [`apply_anyway`] writes the version the reader was shown into. Spelled as
@@ -1209,6 +1238,10 @@ pub async fn discard(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>, Core
 /// `target_snapshot` stays the queued one, since the mirror never moved. A
 /// write whose payload has no such path keeps its payload.
 ///
+/// **A write that may have landed** ([`unconfirmed`], #1125) is released as
+/// *Send again*: the payload and `target_snapshot` are kept, and the flush
+/// sends it once more.
+///
 /// **A change arriving after the user looked holds it again**, deliberately.
 /// The alternative is a flag that makes the next flush skip hold detection,
 /// which is a door onto exactly the silent last-write-wins this feature
@@ -1233,7 +1266,8 @@ pub async fn apply_anyway(pool: &PgPool, id: i64) -> Result<Option<QueuedWrite>,
          payload = case when held_snapshot ? 'base' and cardinality($2::text[]) > 0 \
                         then jsonb_set(payload, $2::text[], held_snapshot -> 'base') \
                         else payload end, \
-         target_snapshot = case when held_snapshot ? 'base' then target_snapshot \
+         target_snapshot = case when held_snapshot ? 'base' or held_snapshot ? 'unconfirmed' \
+                                then target_snapshot \
                                 else coalesce(held_snapshot, target_snapshot) end, \
          wait_reason = null, detail = null
           where id = $1 and state = 'held'"

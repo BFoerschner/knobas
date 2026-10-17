@@ -440,11 +440,17 @@ async fn a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out() {
         (error, server.hits())
     }
 
+    // Unconfirmed, not Unreachable (#1125): the request reached the source,
+    // so the write queue must not take the timeout for "nothing happened".
     let (error, hits) = post(true).await;
-    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unconfirmed { status: None, .. }),
+        "{error:?}"
+    );
     assert_eq!(hits, 1, "a timed-out create must not be sent again");
 
-    let (_, hits) = post(false).await;
+    let (error, hits) = post(false).await;
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
     assert_eq!(
         hits,
         knobas_http::MAX_ATTEMPTS as usize,
@@ -469,8 +475,59 @@ async fn a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer() {
         )
         .await
         .expect_err("504");
-    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unconfirmed { status: Some(504), .. }),
+        "{error:?}"
+    );
     assert_eq!(server.hits(), 1);
+}
+
+/// A busy answer that *does* say the source did nothing stays what it was
+/// (#1125): a `503` or a `429` is the source turning the request away, so the
+/// write queue may send it again later. Only a gateway's `502`/`504` is
+/// unconfirmed.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_once_sent_write_turned_away_as_busy_is_not_unconfirmed() {
+    for status in [503, 429] {
+        let server = CountingServer::always(status, "");
+        let client = HttpClient::new(config(server.url())).expect("client");
+        let error = client
+            .send(
+                client
+                    .request(Method::POST, "/rest/api/content")
+                    .json(&serde_json::json!({ "type": "comment" }))
+                    .no_retry(),
+            )
+            .await
+            .expect_err("busy");
+        assert!(
+            matches!(error, SourceError::Protocol { status: Some(s), .. } if s == status),
+            "{status}: {error:?}"
+        );
+        assert_eq!(server.hits(), 1, "{status}");
+    }
+}
+
+/// A once-sent write whose connection never opened, on every attempt, is
+/// plain `Unreachable` (#1125): nothing reached the source, so the queue may
+/// send it again on a later tick.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_once_sent_write_that_never_connected_is_unreachable() {
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+    let port = listener.local_addr().expect("addr").port();
+    drop(listener);
+    let client = HttpClient::new(config(format!("http://127.0.0.1:{port}"))).expect("client");
+
+    let error = client
+        .send(
+            client
+                .request(Method::POST, "/rest/api/2/issue")
+                .json(&serde_json::json!({ "fields": { "summary": "once" } }))
+                .no_retry(),
+        )
+        .await
+        .expect_err("nothing listens");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
 }
 
 /// A connect error is the one failure a write that opted out is still retried

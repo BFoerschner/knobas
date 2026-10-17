@@ -89,7 +89,12 @@ impl IpcError {
     pub fn from_source_error(error: &SourceError, source_id: Option<&str>) -> Self {
         let code = match error {
             SourceError::Unauthorized { .. } => IpcErrorCode::Unauthorized,
-            SourceError::Unreachable(_) => IpcErrorCode::Unreachable,
+            // A once-sent write nobody answered (#1125): the queue holds it,
+            // so this arm is reached only if a caller surfaces it, and then
+            // the source not answering is what the user can act on.
+            SourceError::Unreachable(_) | SourceError::Unconfirmed { .. } => {
+                IpcErrorCode::Unreachable
+            }
             SourceError::Protocol { .. } | SourceError::Sink(_) => IpcErrorCode::Internal,
             // A write over a target that moved (#822): the queue holds it, so
             // this arm is reached only if a caller ever surfaces the fault

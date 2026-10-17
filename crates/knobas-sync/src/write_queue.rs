@@ -231,8 +231,13 @@ pub fn target_entity(op: &WriteOp) -> &str {
 /// * `Unreachable` -- the server did not answer. It passes on its own.
 /// * `Protocol` **with a server-fault status** (408 timeout, 429 rate limit,
 ///   5xx) -- the source is having a moment, not refusing the operation.
-///   `knobas-http` has already retried these, so reaching here means the
-///   moment is lasting; waiting is still right.
+///   `knobas-http` has already retried these for a write that may be sent
+///   twice, so reaching here means the moment is lasting; waiting is still
+///   right. A write sent once (`Request::no_retry`, #1122) was asked once,
+///   and a `503` or `429` says the source turned it away, so it too waits.
+/// * `Unconfirmed` -- a write sent once reached the source and was never
+///   answered (#1125). [`attempt`] holds it before it asks here, unless
+///   [`resend_is_harmless`]; for those, and for a build, it is `Unreachable`.
 /// * anything else -- the source refused *this write*. A 400, a 404, a 422, or
 ///   a fault knobas raised itself. Retrying it forever would be pretending a
 ///   permanent answer is a temporary one, which is what story 19 forbids.
@@ -242,12 +247,67 @@ pub fn target_entity(op: &WriteOp) -> &str {
 fn retryable(error: &SourceError) -> Option<WaitReason> {
     match error {
         SourceError::Unauthorized { .. } => Some(WaitReason::Unauthorized),
-        SourceError::Unreachable(_) => Some(WaitReason::Unreachable),
+        SourceError::Unreachable(_) | SourceError::Unconfirmed { .. } => {
+            Some(WaitReason::Unreachable)
+        }
         SourceError::Protocol {
             status: Some(status),
             ..
         } if *status == 408 || *status == 429 || *status >= 500 => Some(WaitReason::Unreachable),
         SourceError::Protocol { .. } | SourceError::Sink(_) | SourceError::Moved { .. } => None,
+    }
+}
+
+/// Whether a write that may already have landed can be sent again without a
+/// person looking first (issue #1125).
+///
+/// `true` where a second arrival changes nothing or is refused by the source,
+/// which is the #1122 audit's "retried" column plus Kuma's pause and resume
+/// (setting a state that is already set). Such a write answered
+/// [`SourceError::Unconfirmed`] waits as `Unreachable` and goes on a later
+/// tick. `false` where the source would make a second one: a second comment,
+/// ticket, page, worklog, monitor, approval, review or build. Those are held,
+/// and the reader checks the source, then sends again or discards.
+///
+/// A transition is `false`: Jira usually refuses the repeat, but not on a
+/// workflow that loops back to its own status.
+///
+/// **No look-before-write is tried.** The queue holds no read that finds a
+/// created thing by a marker the payload carries: Jira answers a create with
+/// no id the queue keeps, a comment carries no knobas marker, and a title is
+/// not an address (see [`UNCLAIMED_OPS`]). Holding is the honest answer
+/// until one exists.
+///
+/// **No wildcard arm, deliberately**, as in [`target_entity`]: a new
+/// `WriteOp` variant does not compile until somebody writes the answer down.
+#[must_use]
+pub fn resend_is_harmless(op: &WriteOp) -> bool {
+    match op {
+        // The source refuses the repeat (409, 405, a stale `version` or
+        // `sha`), or the write is idempotent.
+        WriteOp::CreateBranch { .. }
+        | WriteOp::CreatePullRequest { .. }
+        | WriteOp::MergePullRequest { .. }
+        | WriteOp::UpdatePage { .. }
+        | WriteOp::SetParameter { .. }
+        | WriteOp::DeleteBranch { .. }
+        | WriteOp::EditPullRequest { .. }
+        | WriteOp::UpdatePullRequestBranch { .. }
+        | WriteOp::CommitFile { .. }
+        | WriteOp::PauseMonitor { .. }
+        | WriteOp::ResumeMonitor { .. } => true,
+        // A second arrival makes a second one.
+        WriteOp::Comment { .. }
+        | WriteOp::Transition { .. }
+        | WriteOp::CreateTicket { .. }
+        | WriteOp::Approve { .. }
+        | WriteOp::TriggerBuild { .. }
+        | WriteOp::RerunBuild { .. }
+        | WriteOp::LogWork { .. }
+        | WriteOp::CreateMonitor { .. }
+        | WriteOp::RunBuild { .. }
+        | WriteOp::SubmitReview { .. }
+        | WriteOp::CreatePage { .. } => false,
     }
 }
 
@@ -616,6 +676,7 @@ async fn attempt(
     // key rides on the call and no dedupe guards it -- the ADR records why,
     // and what would reopen the question.
     // ---------------------------------------------------------------------
+    let resend = resend_is_harmless(&op);
     match source.write(op).await {
         Ok(receipt) => {
             // The receipt, and the settle, in one statement: `sent` is where
@@ -643,6 +704,26 @@ async fn attempt(
         // against `base`.
         Err(SourceError::Moved { base, current }) => {
             let theirs = store::moved(&write.op, write.target_snapshot.clone(), &base, &current);
+            if let Some(held) = store::hold(&deps.pool, write.id, theirs).await? {
+                announce(deps, "held", &held).await;
+            }
+            Ok(false)
+        }
+        // The write reached the source and no answer says whether it acted
+        // (#1125). Sending it again on the next tick could make a second
+        // ticket or comment, minutes after the first: the double-apply #1122
+        // took out of the transport. So it is held, with the source to check
+        // named, and *Send again* (`apply_anyway`) is the reader's.
+        Err(error @ SourceError::Unconfirmed { .. }) if !resend => {
+            let source = config::get(&deps.pool, &write.source_id)
+                .await?
+                .map_or_else(|| write.source_id.clone(), |cfg| cfg.display_name);
+            let theirs = store::unconfirmed(
+                &write.op,
+                write.target_snapshot.clone(),
+                &source,
+                &error.to_string(),
+            );
             if let Some(held) = store::hold(&deps.pool, write.id, theirs).await? {
                 announce(deps, "held", &held).await;
             }

@@ -40,6 +40,11 @@ enum Answer {
     /// The source said no to the operation itself -- a fault that will not
     /// pass, and must therefore never be retried.
     Refuse,
+    /// The write lands, and then the answer never arrives: what a once-sent
+    /// POST that timed out on the way back looks like from knobas (#1125).
+    /// The fake records the write, then fails with
+    /// [`SourceError::Unconfirmed`].
+    LandsThenTimesOut,
 }
 
 /// What settles a queue row while the write it belongs to is still in flight.
@@ -136,6 +141,13 @@ impl Source for Fake {
         let dwell = *self.dwell.lock().unwrap();
         if !dwell.is_zero() {
             tokio::time::sleep(dwell).await;
+        }
+        if answer == Answer::LandsThenTimesOut {
+            self.written.lock().unwrap().push(op);
+            return Err(SourceError::Unconfirmed {
+                status: None,
+                message: "operation timed out".to_owned(),
+            });
         }
         if answer == Answer::Accept {
             let interrupt = self.interrupt.lock().unwrap().take();
@@ -1688,4 +1700,88 @@ async fn a_pull_request_opened_after_a_withdrawal_leaves_nothing_unclaimed() {
         "and this is why: the discarded row still holds the head the pull \
          request was opened from, which is the address it is found by"
     );
+}
+
+/// Issue #1125: a create that reached the source and then timed out is **not
+/// sent again by the next tick**. The source made the ticket; nothing said
+/// so. The queue holds the write, says it may have been sent and names the
+/// source to check, and only *Send again* sends it a second time.
+///
+/// The control is the same create answered `Unreachable` (the connection
+/// never opened): that one waits and goes on its own, which
+/// `an_undeliverable_write_is_kept_and_flushes_when_the_source_returns` pins.
+#[tokio::test]
+async fn a_create_that_landed_and_timed_out_is_held_and_not_sent_again() {
+    let h = harness().await;
+    let project = EntityRef::new(&h.source, "PAY");
+
+    h.answer(Answer::LandsThenTimesOut);
+    let write = h.create_ticket(&project, "SEPA retries double-book").await;
+    assert_eq!(h.delivered(), vec!["SEPA retries double-book".to_owned()]);
+
+    let held = h.reload(write.id).await;
+    assert_eq!(held.state, WriteState::Held, "{held:?}");
+    let unconfirmed = &held.held_snapshot.as_ref().expect("a held side")["unconfirmed"];
+    assert_eq!(unconfirmed["source"], "Fake", "{unconfirmed}");
+    assert_eq!(
+        unconfirmed["detail"], "unconfirmed: operation timed out",
+        "{unconfirmed}"
+    );
+    assert_eq!(h.line("held").detail["state"], "held");
+
+    // The source is back and would take anything: the queue still sends
+    // nothing, on any number of ticks.
+    h.answer(Answer::Accept);
+    for _ in 0..3 {
+        flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    }
+    assert_eq!(
+        h.delivered(),
+        vec!["SEPA retries double-book".to_owned()],
+        "a write that may have landed must not be sent again on its own"
+    );
+    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+
+    // The person checked Jira, found no ticket, and sends it again.
+    flusher::apply_anyway(&h.deps, write.id)
+        .await
+        .unwrap()
+        .expect("held");
+    assert_eq!(h.delivered().len(), 2, "{:?}", h.delivered());
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+}
+
+/// A comment is held the same way (#1125): two of the same comment on a
+/// ticket is the duplicate a person sees.
+#[tokio::test]
+async fn a_comment_that_landed_and_timed_out_is_held() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1125", "a payout fails").await;
+
+    h.answer(Answer::LandsThenTimesOut);
+    let write = h.comment(&ticket, "on it").await;
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+
+    assert_eq!(h.delivered(), vec!["on it".to_owned()]);
+    assert_eq!(h.reload(write.id).await.state, WriteState::Held);
+}
+
+/// A write the source refuses on repeat is not held (#1125): Gitea answers a
+/// second pull request from the same head with `409`, so sending it again is
+/// harmless and the write waits and goes on its own, as any `Unreachable`.
+#[tokio::test]
+async fn a_write_the_source_refuses_on_repeat_waits_rather_than_holds() {
+    let h = harness().await;
+    let repo = EntityRef::new(&h.source, "tidewater/payout-service");
+
+    h.answer(Answer::LandsThenTimesOut);
+    let write = h.create_pull_request(&repo, "knobas-1125").await;
+    let waiting = h.reload(write.id).await;
+    assert_eq!(waiting.state, WriteState::Pending, "{waiting:?}");
+    assert_eq!(waiting.wait_reason, Some(WaitReason::Unreachable));
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
 }
