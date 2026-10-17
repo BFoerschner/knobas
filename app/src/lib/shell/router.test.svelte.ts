@@ -12,65 +12,19 @@ import { expect, test, vi } from "vitest";
 import { createRouter, hashFor, parseHash } from "./router.svelte";
 
 test("parses the M1 addresses", () => {
-  expect(parseHash("#/ctx/all")).toEqual({ view: "room", ctx: "all", detail: null });
   expect(parseHash("#/sources")).toEqual({ view: "sources" });
   expect(parseHash("#/settings")).toEqual({ view: "settings" });
   expect(parseHash("#/first-run")).toEqual({ view: "first-run" });
 });
 
-test("an empty hash is the default room, not an error", () => {
-  for (const empty of ["", "#", "#/"]) {
-    expect(parseHash(empty)).toEqual({ view: "room", ctx: "all", detail: null });
+/**
+ * The rooms UI's addresses have no view here any more (#1124): `legacyAddress`
+ * in `tf/address.ts` rewrites them before the shell answers *Nothing lives at*.
+ */
+test("a rooms-UI address parses to unknown", () => {
+  for (const hash of ["", "#", "#/", "#/ctx/all", "#/ticket/mock:PAY-231", "#/entity/mock:PAY-231"]) {
+    expect(parseHash(hash)).toEqual({ view: "unknown", hash });
   }
-});
-
-/**
- * Open kinds (§3a): the router must not carry a closed list of kinds, or an
- * adapter that declares a kind nobody anticipated becomes unaddressable.
- */
-test("any unreserved first segment is a kind, not a special view", () => {
-  expect(parseHash("#/ticket/mock:PAY-231")).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "ticket", entityId: "mock:PAY-231" },
-  });
-  expect(parseHash("#/deployment/acme:d-7")).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "deployment", entityId: "acme:d-7" },
-  });
-});
-
-/**
- * A note has a stable address like anything else (#46 story 17).
- *
- * `note` was a **reserved view word** until #46 -- listed with `inbox` and
- * `time` so that a later milestone's address rendered "arrives in M<n>". Notes
- * arrived, so it is a kind now, and this is the test that fails if it is ever
- * put back: a reserved `note` makes every note in the app unopenable, and the
- * symptom is a slide-over that says the address is from a later milestone.
- */
-test("a note's address is a kind, because notes are a kind now", () => {
-  expect(parseHash("#/note/note:7f2c-4b2f")).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "note", entityId: "note:7f2c-4b2f" },
-  });
-  // ...and the kind-agnostic alias reaches it too.
-  expect(parseHash("#/entity/note:7f2c-4b2f")).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: null, entityId: "note:7f2c-4b2f" },
-  });
-});
-
-/** The kind-agnostic alias, resolved to its canonical form by the caller. */
-test("#/entity/<id> is a detail whose kind is not known yet", () => {
-  expect(parseHash("#/entity/mock:PAY-231")).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: null, entityId: "mock:PAY-231" },
-  });
 });
 
 /** M4 addresses parse, so the shell can say "arrives in M<n>" rather than
@@ -169,11 +123,8 @@ test("the monitors address reaches the same view on its other tab, and round-tri
  * The digest has an address of its own (#288), and the head owns the whole of
  * it.
  *
- * `standup` stays in `RESERVED`, so this branch is the only thing that can
- * reach the view -- without it the word would fall through to the open-kind
- * branch and `#/standup/anything` would be sent to `get_entity` as a kind. A
- * tail is *this morning's* digest all the same: the digest is defined against
- * today and there is nothing for a date segment to mean.
+ * A tail is *this morning's* digest all the same: the digest is defined
+ * against today and there is nothing for a date segment to mean.
  */
 test("the standup address reaches its own view, tail or no tail", () => {
   expect(parseHash("#/standup")).toEqual({ view: "standup" });
@@ -184,8 +135,7 @@ test("the standup address reaches its own view, tail or no tail", () => {
 /**
  * The flow's address is its identity, so it carries a ticket id and reaches a
  * view of its own -- not the "arrives in a later milestone" pane it reached
- * before #44, and not the open-kind branch, which would send `start-work` to
- * `get_entity` as if it were a kind.
+ * before #44.
  */
 test("the start-work address reaches its own view, carrying the ticket", () => {
   expect(parseHash("#/start-work/gitea:acme/repo%23142")).toEqual({
@@ -245,14 +195,9 @@ test("the day review has an address, and `time` is still not a kind", () => {
 
 test("round-trips every address it produces", () => {
   for (const hash of [
-    "#/ctx/all",
     "#/time",
     "#/time/2026-09-03",
     "#/standup",
-    "#/ctx/src:jira",
-    "#/ticket/mock:PAY-231",
-    "#/entity/mock:PAY-231",
-    "#/note/note:7f2c-4b2f",
     "#/sources",
     "#/settings",
     "#/first-run",
@@ -265,93 +210,26 @@ test("round-trips every address it produces", () => {
 });
 
 test("percent-encoded ids survive the round trip", () => {
-  const parsed = parseHash("#/pr/mock:payout-service%23142");
-  expect(parsed.view === "room" && parsed.detail?.entityId).toBe("mock:payout-service#142");
+  const parsed = parseHash("#/start-work/mock:payout-service%23142");
+  expect(parsed).toEqual({ view: "start-work", key: "mock:payout-service#142" });
   // ...and building the address back encodes it again, or the browser drops
   // everything from the `#` onwards.
-  expect(hashFor(parsed)).toBe("#/pr/mock:payout-service%23142");
+  expect(hashFor(parsed)).toBe("#/start-work/mock:payout-service%23142");
 });
 
 test("a slash inside a key is encoded rather than read as another segment", () => {
-  const hash = hashFor({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "pr", entityId: "gitea:acme/payout-service#142" },
-  });
-  expect(hash).toBe("#/pr/gitea:acme%2Fpayout-service%23142");
+  const hash = hashFor({ view: "start-work", key: "gitea:acme/payout-service#142" });
+  expect(hash).toBe("#/start-work/gitea:acme%2Fpayout-service%23142");
   expect(parseHash(hash)).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "pr", entityId: "gitea:acme/payout-service#142" },
-  });
-});
-
-/**
- * A detail address does not say which room it was opened over, so the router
- * remembers. Esc has to land back in the room the reader came from, not in a
- * default one.
- */
-test("a detail keeps the room it was opened over", () => {
-  expect(parseHash("#/ticket/mock:PAY-231", "src:jira")).toEqual({
-    view: "room",
-    ctx: "src:jira",
-    detail: { kind: "ticket", entityId: "mock:PAY-231" },
+    view: "start-work",
+    key: "gitea:acme/payout-service#142",
   });
 });
 
 test("a malformed escape is treated as literal text rather than throwing", () => {
   // `decodeURIComponent("%zz")` throws. A hash the user typed must not take
   // the window down.
-  const parsed = parseHash("#/ticket/mock:%zz");
-  expect(parsed).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "ticket", entityId: "mock:%zz" },
-  });
-});
-
-/**
- * The live router's memory of the room, as distinct from `parseHash`'s
- * `ctx` argument.
- *
- * A detail address does not carry the room it was opened over, so the router
- * holds it. Losing that is how `Esc` from a ticket opened in `src:jira` lands
- * the reader in `all` — a navigation they did not ask for, in the one gesture
- * that is supposed to undo.
- */
-test("the router remembers the room a detail was opened over", () => {
-  location.hash = "#/ctx/src:jira";
-  const router = createRouter();
-  const stop = router.start();
-
-  expect(router.ctx).toBe("src:jira");
-
-  router.go("#/ticket/mock:PAY-231");
-  expect(router.ctx).toBe("src:jira");
-  expect(router.route).toEqual({
-    view: "room",
-    ctx: "src:jira",
-    detail: { kind: "ticket", entityId: "mock:PAY-231" },
-  });
-
-  router.back();
-  expect(location.hash).toBe("#/ctx/src:jira");
-
-  stop();
-});
-
-/** A view that is not a room leaves the remembered room alone. */
-test("visiting the sources view does not forget the room behind it", () => {
-  location.hash = "#/ctx/src:jira";
-  const router = createRouter();
-  const stop = router.start();
-
-  router.go("#/sources");
-  expect(router.ctx).toBe("src:jira");
-  router.back();
-  expect(location.hash).toBe("#/ctx/src:jira");
-
-  stop();
+  expect(parseHash("#/start-work/mock:%zz")).toEqual({ view: "start-work", key: "mock:%zz" });
 });
 
 /**
@@ -364,78 +242,24 @@ test("settings is a view even with something after it, never a kind", () => {
   expect(parseHash("#/settings/mock:s-1")).toEqual({ view: "settings" });
 });
 
-/** Settings is not a room either, so Esc returns where the reader came from. */
-test("visiting settings does not forget the room behind it", () => {
-  location.hash = "#/ctx/src:jira";
-  const router = createRouter();
-  const stop = router.start();
-
-  router.go("#/settings");
-  expect(router.route).toEqual({ view: "settings" });
-  expect(router.ctx).toBe("src:jira");
-  router.back();
-  expect(location.hash).toBe("#/ctx/src:jira");
-
-  stop();
-});
-
 /**
- * `replace` is the navigation for a room that stopped existing under the
- * reader (#241): the address it leaves is *All work*'s, and the dead one is
- * not one step back in history — a `back` that landed on it would only fall
- * through to *All work* again, with the address bar naming a room that is
- * gone.
+ * `replace` rewrites the entry the reader is on (#241): the address it leaves
+ * is not one step back in history.
  *
  * jsdom grows `history.length` on a fragment navigation and leaves it alone
- * on `location.replace`, which is what lets the second assertion tell the two
- * apart.
+ * on `location.replace`, which is what lets the assertion tell the two apart.
  */
 test("replace rewrites the address without leaving the old one in history", () => {
-  location.hash = "#/ctx/proj:mock:PAY";
+  location.hash = "#/sources";
   const router = createRouter();
   const stop = router.start();
   const entries = history.length;
 
-  router.replace({ view: "room", ctx: "all", detail: null });
+  router.replace({ view: "settings" });
 
-  expect(location.hash).toBe("#/ctx/all");
-  expect(router.ctx).toBe("all");
-  expect(history.length, "the dead address must not be one step back").toBe(entries);
-  router.back();
-  expect(location.hash).toBe("#/ctx/all");
-
-  stop();
-});
-
-/**
- * A detail address does not carry its room, so handing the room to *All
- * work* under an open slide-over changes what the router remembers and
- * nothing the address bar shows: the detail stays open, and `Esc` now lands
- * in *All work* rather than on the dead id.
- */
-test("replace under an open detail keeps the detail and moves the remembered room", () => {
-  location.hash = "#/ctx/proj:mock:PAY";
-  const router = createRouter();
-  const stop = router.start();
-  router.go("#/ticket/mock:PAY-231");
-  const entries = history.length;
-
-  router.replace({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "ticket", entityId: "mock:PAY-231" },
-  });
-
-  expect(location.hash).toBe("#/ticket/mock:PAY-231");
-  expect(router.ctx).toBe("all");
-  expect(router.route).toEqual({
-    view: "room",
-    ctx: "all",
-    detail: { kind: "ticket", entityId: "mock:PAY-231" },
-  });
-  expect(history.length).toBe(entries);
-  router.back();
-  expect(location.hash).toBe("#/ctx/all");
+  expect(location.hash).toBe("#/settings");
+  expect(router.route).toEqual({ view: "settings" });
+  expect(history.length, "the old address must not be one step back").toBe(entries);
 
   stop();
 });
@@ -450,36 +274,36 @@ test("replace under an open detail keeps the detail and moves the remembered roo
  * router to have heard it.
  */
 test("back and forward are available exactly where the history has somewhere to go", async () => {
-  location.hash = "#/ctx/all";
+  location.hash = "#/inbox";
   const router = createRouter();
   const stop = router.start();
   expect([router.canGoBack, router.canGoForward], "a fresh session").toEqual([false, false]);
 
-  router.go("#/ticket/mock:PAY-231");
-  router.go("#/ticket/mock:PAY-232");
+  router.go("#/time/2026-09-01");
+  router.go("#/time/2026-09-02");
   expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
   // The same address again is not a step.
-  router.go("#/ticket/mock:PAY-232");
+  router.go("#/time/2026-09-02");
 
   router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
-  await vi.waitFor(() => expect(router.route).toMatchObject({ detail: { entityId: "mock:PAY-231" } }));
+  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-01"));
+  await vi.waitFor(() => expect(router.route).toEqual({ view: "time", day: "2026-09-01" }));
   expect([router.canGoBack, router.canGoForward]).toEqual([true, true]);
 
   router.goForward();
-  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-232"));
+  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-02"));
   await vi.waitFor(() => expect(router.canGoForward).toBe(false));
   expect(router.canGoBack).toBe(true);
 
   // `replace` rewrites where the reader stands and is not a step: back still
   // lands on the entry before it, and forward stays empty.
-  router.replace({ view: "room", ctx: "all", detail: null });
+  router.replace({ view: "standup" });
   expect([router.canGoBack, router.canGoForward]).toEqual([true, false]);
 
   router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/ticket/mock:PAY-231"));
+  await vi.waitFor(() => expect(location.hash).toBe("#/time/2026-09-01"));
   router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(location.hash).toBe("#/inbox"));
   await vi.waitFor(() => expect(router.canGoBack).toBe(false));
   expect(router.canGoForward).toBe(true);
 
@@ -490,9 +314,9 @@ test("back and forward are available exactly where the history has somewhere to 
   // `replace` in the middle of history keeps what is ahead of it, as a
   // browser's does: it rewrites one entry and steps nowhere.
   router.goBack();
-  await vi.waitFor(() => expect(location.hash).toBe("#/ctx/all"));
+  await vi.waitFor(() => expect(location.hash).toBe("#/inbox"));
   await vi.waitFor(() => expect(router.canGoForward).toBe(true));
-  router.replace({ view: "room", ctx: "src:jira", detail: null });
+  router.replace({ view: "settings" });
   expect([router.canGoBack, router.canGoForward]).toEqual([false, true]);
   router.goForward();
   await vi.waitFor(() => expect(location.hash).toBe("#/sources"));
@@ -507,20 +331,19 @@ test("back and forward are available exactly where the history has somewhere to 
 /**
  * The webview's `hashchange` for an address `go()` already read keeps the
  * route as it is (#703). A new object for the same place re-ran everything
- * that follows the route: the room restarted its hold on the next detail,
- * and the open detail read its row and its view a second time.
+ * that follows the route.
  */
 test("the hashchange for an address go() already read keeps the same route", () => {
-  location.hash = "#/ctx/all";
+  location.hash = "#/inbox";
   const router = createRouter();
   const stop = router.start();
 
-  router.go("#/repo/gitea:tidewater/ledger-api");
+  router.go("#/start-work/gitea:tidewater/ledger-api");
   const read = router.route;
   window.dispatchEvent(new HashChangeEvent("hashchange"));
   expect(router.route).toBe(read);
 
-  router.go("#/repo/gitea:tidewater/other");
+  router.go("#/start-work/gitea:tidewater/other");
   expect(router.route).not.toBe(read);
 
   stop();
