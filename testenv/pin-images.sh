@@ -194,6 +194,8 @@ trap 'rm -f "$tmp"' EXIT
   pin GITEA_IMAGE      gitea/gitea:1
   pin KUMA_IMAGE       louislam/uptime-kuma:2
   pin NODE_IMAGE       node:22-alpine
+  # The read-only Docker API Kuma's Docker host points at (#978): ~15 MB.
+  pin DOCKER_PROXY_IMAGE tecnativa/docker-socket-proxy:latest
   # Guarded: `seed-teamcity.sh` drives the server's first-start wizard, whose
   # endpoints were read off this digest. `latest` left it on 2026-09-02
   # (2026.1.3 -> 2026.2), so a plain run holds and reports (#268).

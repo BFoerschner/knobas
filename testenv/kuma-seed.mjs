@@ -98,6 +98,11 @@ const ok = (res, what) => {
   return res;
 };
 
+// Kuma pushes `dockerHostList` during login, before the login's ack, so the
+// listener has to exist first. A later push (after addDockerHost) replaces it.
+let dockerHosts = null;
+socket.on("dockerHostList", (list) => { dockerHosts = list; });
+
 await new Promise((resolve, reject) => {
   socket.once("connect", resolve);
   socket.once("connect_error", (e) => reject(new Error(`cannot reach ${KUMA_URL}: ${e.message}`)));
@@ -113,6 +118,25 @@ if (await call("needSetup")) {
 }
 ok(await call("login", { username: USER, password: PASS }), "login");
 log("logged in as", USER);
+
+// -- docker host ------------------------------------------------------------
+// One Docker host, so a Docker monitor created through knobas has a host to
+// name (#978: `CreateMonitor { kind: docker }` takes the lowest-id host of the
+// login push). It points at the `docker-proxy` service, a socket proxy that
+// exposes only container reads -- NOT at a mounted /var/run/docker.sock, which
+// would hand Kuma control of the Docker daemon (see docker-compose.yml).
+const DOCKER_HOST_NAME = "testenv-docker-proxy";
+const DOCKER_HOST = { name: DOCKER_HOST_NAME, dockerType: "tcp", dockerDaemon: "tcp://docker-proxy:2375" };
+for (let i = 0; dockerHosts === null && i < 20; i++) await new Promise((r) => setTimeout(r, 250));
+if (dockerHosts === null) die("Kuma pushed no dockerHostList at login");
+const haveHost = dockerHosts.find((h) => h.name === DOCKER_HOST_NAME);
+if (haveHost && haveHost.dockerType === DOCKER_HOST.dockerType && haveHost.dockerDaemon === DOCKER_HOST.dockerDaemon) {
+  log("keeping docker host", DOCKER_HOST_NAME);
+} else {
+  // A drifted host is edited in place (its id is what monitors reference).
+  const res = ok(await call("addDockerHost", DOCKER_HOST, haveHost?.id ?? null), "addDockerHost");
+  log(haveHost ? "redefined" : "added", "docker host", DOCKER_HOST_NAME, "as", res.id);
+}
 
 // -- monitors ---------------------------------------------------------------
 /**

@@ -68,8 +68,16 @@ const ENVIRONMENTS: &[&str] = &["dev", "stage", "prod", "shared"];
 /// `kuma-seed` is a one-shot job -- `profiles: ["seed"]` keeps it out of `up`
 /// and `seed-kuma.sh` runs it with `compose run --rm`. It is a thing that is
 /// *done to* the estate, not a thing the estate holds, so it has no asset and
-/// no monitor. Every other service in that file runs somewhere and is recorded.
-const NOT_ASSETS: &[&str] = &["kuma-seed"];
+/// no monitor.
+///
+/// `docker-proxy` (#978) is part of Uptime Kuma's own plumbing: the read-only
+/// Docker API behind the Docker host the seed gives Kuma, reachable from Kuma
+/// alone on an internal network, with no published port. Nothing in the estate
+/// routes to it and no monitor watches it; it is the means by which Kuma reads
+/// container state, not a thing a developer works on.
+///
+/// Every other service in that file runs somewhere and is recorded.
+const NOT_ASSETS: &[&str] = &["kuma-seed", "docker-proxy"];
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> PathBuf {
