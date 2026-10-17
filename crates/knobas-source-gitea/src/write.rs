@@ -81,12 +81,11 @@ pub(crate) async fn create_branch(
         .await
     {
         Ok(_) => Ok(()),
-        Err(error) if error.status() == Some(409) => {
-            if branch_made_from(client, owner, repo, name, from_ref).await {
-                Ok(())
-            } else {
-                Err(error)
-            }
+        Err(error)
+            if error.status() == Some(409)
+                && holds_branch_from(client, owner, repo, name, from_ref).await =>
+        {
+            Ok(())
         }
         Err(error) => Err(error),
     }
@@ -107,7 +106,7 @@ struct TipCommit {
 /// itself where it is a commit id (or an abbreviation of the tip's), else the
 /// tip of the branch it names. Any read that fails is "no", which keeps the
 /// refusal: a tag, or a base that moved since, reads as somebody else's.
-async fn branch_made_from(
+async fn holds_branch_from(
     client: &GiteaClient,
     owner: &str,
     repo: &str,
@@ -165,18 +164,17 @@ pub(crate) async fn create_pull_request(
         .await
     {
         Ok(_) => Ok(()),
-        Err(error) if error.status() == Some(409) => {
-            if pull_opened(client, owner, repo, title, head, base).await {
-                Ok(())
-            } else {
-                Err(error)
-            }
+        Err(error)
+            if error.status() == Some(409)
+                && holds_open_pull(client, owner, repo, title, head, base).await =>
+        {
+            Ok(())
         }
         Err(error) => Err(error),
     }
 }
 
-/// One open pull request, as far as [`pull_opened`] reads it.
+/// One open pull request, as far as [`holds_open_pull`] reads it.
 #[derive(serde::Deserialize)]
 struct OpenPull {
     #[serde(default)]
@@ -194,19 +192,21 @@ struct PullEnd {
 }
 
 impl PullEnd {
-    fn is(&self, name: &str) -> bool {
+    /// Whether this end is branch `name`, by its ref or its `owner:branch`
+    /// label.
+    fn names(&self, name: &str) -> bool {
         self.branch == name || self.label == name
     }
 }
 
-/// How many pages of open pull requests [`pull_opened`] reads: Gitea refuses a
+/// How many pages of open pull requests [`holds_open_pull`] reads: Gitea refuses a
 /// second one per pair, so the one it refused over is open, and recently
 /// updated, which is the listing's order.
 const OPEN_PULL_PAGES: u32 = 3;
 
 /// Whether an open pull request from `head` into `base` carries `title`. Any
 /// read that fails is "no", which keeps the refusal.
-async fn pull_opened(
+async fn holds_open_pull(
     client: &GiteaClient,
     owner: &str,
     repo: &str,
@@ -218,7 +218,10 @@ async fn pull_opened(
         let Ok(pulls) = client.open_pulls_as::<OpenPull>(owner, repo, page).await else {
             return false;
         };
-        if let Some(pull) = pulls.iter().find(|p| p.head.is(head) && p.base.is(base)) {
+        if let Some(pull) = pulls
+            .iter()
+            .find(|p| p.head.names(head) && p.base.names(base))
+        {
             return pull.title == title;
         }
         if pulls.len() < crate::client::PAGE_SIZE as usize {
