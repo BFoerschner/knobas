@@ -4843,8 +4843,10 @@ Merge-manager:
   **Reversing:** low per op (a read before `store::hold`).
 - **Pause and resume, and everything the #1122 audit kept retried, wait instead of holding**
   (`resend_is_harmless`). A second arrival sets what is set or is refused. A transition is held:
-  a workflow that loops back to its own status takes it twice. **Reversing:** trivial (move an
-  arm).
+  a workflow that loops back to its own status takes it twice. An approval is held too: Gitea's
+  `POST …/reviews` with `APPROVED` records a second review, which is why #1122 sends it once
+  (ADR-0012's "`approve` is naturally idempotent" predates that audit). **Reversing:** trivial
+  (move an arm).
 - **The hold is the existing `held` state with an `unconfirmed` key on `held_snapshot`.** No
   migration. `apply_anyway` keeps `target_snapshot` for it, as for `base`. The panel says *may
   have arrived*, names the source and offers *Send again* and *Discard*. **Reversing:** low.

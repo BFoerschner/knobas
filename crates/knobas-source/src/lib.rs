@@ -345,7 +345,10 @@ pub enum SourceError {
     /// Raised only by `knobas_http` for a request sent with
     /// `Request::no_retry`, which is how an adapter says a write must not
     /// arrive twice. Everywhere but the write queue it reads as
-    /// [`Unreachable`](Self::Unreachable). The queue does not send such a
+    /// [`Unreachable`](Self::Unreachable). An adapter whose write takes more
+    /// than one request turns it back into `Unreachable` when the request
+    /// that failed came before the write's own (Kuma's login,
+    /// `not_yet_emitted`). The queue does not send such a
     /// write again by itself: it holds it, so a person checks the source and
     /// sends it again or discards it (`knobas_sync::write_queue`).
     ///

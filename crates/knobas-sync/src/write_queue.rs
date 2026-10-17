@@ -237,7 +237,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
 ///   and a `503` or `429` says the source turned it away, so it too waits.
 /// * `Unconfirmed` -- a write sent once reached the source and was never
 ///   answered (#1125). [`attempt`] holds it before it asks here, unless
-///   [`resend_is_harmless`]; for those, and for a build, it is `Unreachable`.
+///   [`resend_is_harmless`]; for those, and for an adapter [`build`] that
+///   failed with it, it is `Unreachable`.
 /// * anything else -- the source refused *this write*. A 400, a 404, a 422, or
 ///   a fault knobas raised itself. Retrying it forever would be pretending a
 ///   permanent answer is a temporary one, which is what story 19 forbids.
@@ -675,6 +676,10 @@ async fn attempt(
     // pending and the next flush re-sends a write that already arrived. No
     // key rides on the call and no dedupe guards it -- the ADR records why,
     // and what would reopen the question.
+    //
+    // A send that never got an answer is a different window (#1125): the
+    // source may have acted, and a write a second arrival would duplicate is
+    // held for the reader rather than re-sent. See the `Unconfirmed` arm.
     // ---------------------------------------------------------------------
     let resend = resend_is_harmless(&op);
     match source.write(op).await {

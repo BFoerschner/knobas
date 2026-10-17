@@ -187,7 +187,7 @@ A heading of level one to three on a wiki [page](#kind), and everything under it
 _Avoid_: block (that is a unit of [time](#block)), chunk, fragment
 
 **Pending write**:
-An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012)
+An edit queued because its source cannot currently accept it. The queue is a visible, inspectable list, not a count. Delivery is at least once — a write in flight when knobas stops may arrive twice; knobas re-sends rather than guess, and never merges or deduplicates what you wrote. (ADR-0012) A write that went out and got no answer is different: if a second arrival would duplicate it, knobas holds it and asks you to check the source (a [held write](#held-write), #1125).
 
 **The word has two senses and both are load-bearing.** *This glossary's* sense is the whole open queue — pending, held and refused together — which is why the command that lists it is `pending_writes` and not `open_writes` (`docs/contract.md`, "Write-back": the name follows the glossary rather than the state column). The *state machine's* sense is narrow: `pending`, `held` and `refused` are three disjoint states of `knobas.write_queue`, and `write_queue::counts().pending` counts only the first. Neither is wrong and neither is being migrated to the other; read which one a surface means before changing it.
 

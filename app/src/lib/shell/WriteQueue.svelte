@@ -36,8 +36,8 @@
     demandOf,
     editableBody,
     movedFile,
-    unconfirmedSend,
     readSnapshot,
+    unconfirmedSend,
     withBody,
     withdrawnWorklog,
     type WithdrawnWorklog,
@@ -189,7 +189,7 @@
           {@const nowSide = readSnapshot(row.held_snapshot)}
           {@const body = editableBody(row.payload)}
           {@const file = movedFile(row)}
-          {@const unsure = row.source_enabled ? unconfirmedSend(row) : null}
+          {@const unconfirmed = row.source_enabled ? unconfirmedSend(row) : null}
           <article class="wq-row {row.state}">
             <header class="wq-row-h">
               <b class="wq-op">{row.op}</b>
@@ -212,17 +212,17 @@
                 knobas is holding this because its source is turned off. Re-enable it in Sources
                 to send it — or edit or discard it here.
               </p>
-            {:else if unsure !== null}
+            {:else if unconfirmed !== null}
               <!--
                 Sent, and never answered (#1125): the write may have landed.
                 Sending it again on its own could make a second ticket or
                 comment, so the reader checks the source first.
               -->
               <p class="wq-why">
-                knobas sent this, but {unsure.source} did not answer, so it may have arrived.
-                Check {unsure.source}, then send it again or discard it.
+                knobas sent this, but {unconfirmed.source} did not answer, so it may have arrived.
+                Check {unconfirmed.source}, then send it again or discard it.
               </p>
-              {#if unsure.detail}<pre class="log">{unsure.detail}</pre>{/if}
+              {#if unconfirmed.detail}<pre class="log">{unconfirmed.detail}</pre>{/if}
             {:else if row.state === "held" && file !== null}
               <!--
                 A commit over a file that moved (#822, #845): the queue
@@ -305,7 +305,7 @@
               {:else}
                 {#if row.state === "held" && row.source_enabled}
                   <button class="btn" disabled={queue.busy} onclick={() => queue.apply(row.id)}>
-                    {unsure === null ? "Send mine anyway" : "Send again"}
+                    {unconfirmed === null ? "Send mine anyway" : "Send again"}
                   </button>
                 {/if}
                 {#if body !== null}

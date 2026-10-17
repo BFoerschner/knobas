@@ -955,14 +955,21 @@ pub async fn refuse(
 /// marks the hold as the source's rather than the mirror's.
 #[must_use]
 pub fn moved(op: &str, queued: serde_json::Value, base: &str, current: &str) -> serde_json::Value {
+    let mut held = held_over(op, queued);
+    held.insert("text".to_owned(), serde_json::json!(current));
+    held.insert("base".to_owned(), serde_json::json!(base));
+    serde_json::Value::Object(held)
+}
+
+/// The queued snapshot as a map with the op named, which a hold the source
+/// reported ([`moved`], [`unconfirmed`]) adds its own keys to.
+fn held_over(op: &str, queued: serde_json::Value) -> serde_json::Map<String, serde_json::Value> {
     let mut held = match queued {
         serde_json::Value::Object(map) => map,
         _ => serde_json::Map::new(),
     };
     held.insert("op".to_owned(), serde_json::json!(op));
-    held.insert("text".to_owned(), serde_json::json!(current));
-    held.insert("base".to_owned(), serde_json::json!(base));
-    serde_json::Value::Object(held)
+    held
 }
 
 /// The held side of a write that reached its source and was never answered
@@ -982,11 +989,7 @@ pub fn unconfirmed(
     source: &str,
     detail: &str,
 ) -> serde_json::Value {
-    let mut held = match queued {
-        serde_json::Value::Object(map) => map,
-        _ => serde_json::Map::new(),
-    };
-    held.insert("op".to_owned(), serde_json::json!(op));
+    let mut held = held_over(op, queued);
     held.insert(
         "unconfirmed".to_owned(),
         serde_json::json!({ "source": source, "detail": detail }),
