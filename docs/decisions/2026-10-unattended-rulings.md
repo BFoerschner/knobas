@@ -4290,3 +4290,8 @@ Ruled by the implementer (PR for #1020).
 - **Kuma's `state` chip draws everywhere a declared chip draws** (search rows, lists, the
   launcher), not only in the set editor: one declaration, every reader (ADR-0007).
   **Reversing:** none wanted; the chip is the monitor's own state.
+
+## #1064 — Save as a link set: a sub-task offers the epic above its story (2026-10-17)
+
+- **The walk up stops where it is, and never throws.** If an ancestor can't be read, the last key reached is used, with no title. A loop in the parent chain stops before any ticket it has already visited. The dialog then still offers an epic rule, and the old code took the top of the path line without reading anything. **Reversing:** one function, `epicAbove`.
+- ***Save link set* waits for the walk.** If the walk hasn't finished when someone clicks, the race saves the story's rule, which is the bug itself. **Reversing:** one `await` in `TfSaveSet.save()`.
