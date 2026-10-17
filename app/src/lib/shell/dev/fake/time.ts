@@ -91,8 +91,9 @@ function todayAt(hour: number, minute: number): string {
 
 /**
  * Today's blocks, prototype-6's Friday (#827): PAY-228 logged, a passive
- * stretch on PR #142, PAY-231 unlogged, a gap, and a label block. Every row
- * state the Day tab draws but the running timer, which `fake-timer` adds.
+ * stretch on PR #142, PAY-231 unlogged, a gap, a label block, and a run of
+ * three offered rows to PAY-231 (#1108). Every row state the Day tab draws but
+ * the running timer, which `fake-timer` adds.
  */
 function todaysBlocks(): FakeBlock[] {
   const entity = (entity_id: string): FakeTarget => ({ kind: "entity", entity_id });
@@ -115,6 +116,18 @@ function todaysBlocks(): FakeBlock[] {
       target: { kind: "label", label: "Standup and planning" },
       ...manual,
     },
+    // Job, its pull request, job again (#1108): three offered rows that go to
+    // PAY-231, so the Day tab offers one *Add 47m to PAY-231* over them.
+    { id: 6, started_at: todayAt(14, 0), ended_at: todayAt(14, 20), target: entity("mock:PAY-231"), ...manual, kind: "passive" },
+    {
+      id: 7,
+      started_at: todayAt(14, 20),
+      ended_at: todayAt(14, 26),
+      target: entity("mock:payout-service#142"),
+      ...manual,
+      kind: "passive",
+    },
+    { id: 8, started_at: todayAt(14, 26), ended_at: todayAt(14, 47), target: entity("mock:PAY-231"), ...manual, kind: "passive" },
   ];
 }
 

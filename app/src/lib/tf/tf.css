@@ -609,6 +609,11 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-when b { font: 700 var(--t-lg) var(--sans); color: var(--ink); font-variant-numeric: tabular-nums; }
 .tf-tm-what small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
 .tf-tm-acts { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.tf-tm-group {
+  display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 8px 14px; border-bottom: 1px solid var(--rule-2); background: var(--info-bg); font-size: var(--t-sm);
+}
+.tf-tm-group small { display: block; color: var(--ink-2); font-size: var(--t-xs); margin-top: 2px; }
 .tf .tf-tm-foot { font-size: var(--t-xs); color: var(--ink-2); margin: 14px 0 0; max-width: 80ch; }
 .tf .tf-tm-foot a { text-decoration: underline; }
 .tf-tm-empty { padding: 28px; border: 1px dashed var(--rule); border-radius: 6px; max-width: 640px; }

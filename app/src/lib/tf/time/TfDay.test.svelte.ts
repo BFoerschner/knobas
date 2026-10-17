@@ -79,8 +79,10 @@ function render(
     open?: OpenStretch[];
     day?: string | null;
     job?: { key: string; entityId: string } | null;
+    offers?: Record<number, AdHocBlock | null>;
   } = {},
 ) {
+  const offers = over.offers ?? OFFERS;
   let listed = over.blocks ?? friday();
   const open = over.open ?? [{ started_at: at(12, 35), ended_at: at(13, 10) }];
   const updates: [number, string, string, TimerTarget][] = [];
@@ -102,7 +104,7 @@ function render(
       layers,
       ports: {
         dayBlocks: () => Promise.resolve({ blocks: listed, past_horizon: over.pastHorizon ?? false, open }),
-        adHocBlock: (id: number) => Promise.resolve(OFFERS[id] ?? null),
+        adHocBlock: (id: number) => Promise.resolve(offers[id] ?? null),
         updateBlock: (id: number, from: string, to: string, on: TimerTarget) => {
           updates.push([id, from, to, on]);
           const entry = listed.find((candidate) => candidate.block.id === id)!;
@@ -320,6 +322,67 @@ test("Dismiss on an offered block dismisses it, says knobas will not offer it ag
   expect(rows()).not.toContain("offered");
   // Only an offer has it.
   expect(() => button(row("unlogged"), "Dismiss")).toThrow();
+});
+
+// #1108: job, its pull request (confirmed link to the job), job again.
+const PR_VISIT = { kind: "entity" as const, entity_id: "gitea:payments#139" };
+function jobPrJob(): DayBlock[] {
+  const job = { kind: "entity" as const, entity_id: "jira:PAY-231" };
+  return [
+    block(21, at(9), at(9, 20), { kind: "passive", target: job }),
+    block(22, at(9, 20), at(9, 25), { kind: "passive", target: PR_VISIT }),
+    block(23, at(9, 25), at(9, 47), { kind: "passive", target: job }),
+  ];
+}
+const linked = (rule: "linked_to_target" | "last_logged" | "context_anchor") => ({
+  21: null,
+  22: { suggestion: { entity_id: "jira:PAY-231", title: null, rule } },
+  23: null,
+});
+
+function runs(): HTMLElement[] {
+  return [...target.querySelectorAll<HTMLElement>(".tf-tm-group")];
+}
+
+test("a run of offered rows going to one ticket offers one Add over all of them", async () => {
+  const sent = render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
+  await settle();
+  expect(runs()).toHaveLength(1);
+  expect(squash(runs()[0]!.textContent)).toContain("3 offered rows go to PAY-231");
+  button(runs()[0]!, "Add 47m to PAY-231").click();
+  await settle();
+  // A block per visit, each on the ticket over its own stretch: the worklog
+  // draft sums them, and the record still says a pull request was in front.
+  const ticket = { kind: "entity", entity_id: "jira:PAY-231" };
+  expect(sent.updates).toEqual([
+    [21, at(9), at(9, 20), ticket],
+    [22, at(9, 20), at(9, 25), ticket],
+    [23, at(9, 25), at(9, 47), ticket],
+  ]);
+  expect(toasts.items.at(-1)?.text).toBe("Added 47m to PAY-231");
+  expect(rows()).not.toContain("offered");
+  expect(runs()).toHaveLength(0);
+});
+
+test("each row in a run keeps its own Add to, Assign… and Dismiss", async () => {
+  render({ blocks: jobPrJob(), offers: linked("linked_to_target"), open: [] });
+  await settle();
+  const offered = [...target.querySelectorAll<HTMLElement>('.tf-tm-row[data-state="offered"]')];
+  expect(offered).toHaveLength(3);
+  for (const each of offered) {
+    for (const label of ["Add to PAY-231", "Assign…", "Dismiss"]) expect(() => button(each, label)).not.toThrow();
+  }
+});
+
+test("a guess in the middle breaks the run: no Add over the rows", async () => {
+  for (const rule of ["last_logged", "context_anchor"] as const) {
+    if (view) unmount(view);
+    target.replaceChildren();
+    render({ blocks: jobPrJob(), offers: linked(rule), open: [] });
+    await settle();
+    expect(rows()).toEqual(["offered", "offered", "offered"]);
+    expect(runs()).toHaveLength(0);
+  }
 });
 
 test("a day past the observation horizon with nothing tracked says No record", async () => {

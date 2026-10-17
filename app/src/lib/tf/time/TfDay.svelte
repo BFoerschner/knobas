@@ -36,7 +36,7 @@
   import { clockReading, dayBounds, dayKey, dayLabel, shiftDay } from "../../time/day";
   import { atClock, clockOf, offsetMinutes } from "../../time/draft";
   import { layers as sharedLayers, type Layers } from "../layers.svelte";
-  import { dayFigures, dayRows, hm, place, stripWindow, type DayRow } from "./day-view";
+  import { dayFigures, dayRows, hm, offerRuns, place, stripWindow, type DayRow, type OfferRun } from "./day-view";
   import TfBlockDialog, { type BlockForm } from "./TfBlockDialog.svelte";
 
   interface DayPorts {
@@ -178,6 +178,8 @@
         }),
   );
   const figures = $derived(dayFigures(rows));
+  /** Each run of offered rows to one ticket, by its first row's key (#1108). */
+  const runAt = $derived(new Map(offerRuns(rows).map((run) => [run.rows[0]!.key, run])));
   /**
    * Past the observation horizon what was in front of you is absent, not zero
    * (`CONTEXT.md`), so the two figures made from it say so.
@@ -209,7 +211,7 @@
   const hourLabel = (hour: number) => String(hour).padStart(2, "0");
   const span = (row: DayRow) =>
     `${clockReading(row.from, key)} to ${row.state === "running" ? "now" : clockReading(row.to, key)}`;
-  const durationOf = (row: DayRow) => hm(Math.floor(row.ms / 60_000));
+  const durationOf = ({ ms }: { ms: number }) => hm(Math.floor(ms / 60_000));
   const keyOf = (entityId: string) => entityId.slice(entityId.indexOf(":") + 1);
 
   /** The ticket an offered block is linked to, when that is not the block's own. */
@@ -256,10 +258,14 @@
     dialog = null;
     refusal = null;
     push({ text: said });
-    // `onchanged` bumps the revision this view re-reads on, so one read, not two.
+    await reread();
+    return true;
+  }
+
+  /** `onchanged` bumps the revision this view re-reads on, so one read, not two. */
+  async function reread() {
     if (onchanged) onchanged();
     else await load(key);
-    return true;
   }
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
@@ -269,6 +275,22 @@
     const block = row.block;
     if (block === null) return;
     void write(() => io.updateBlock(block.block.id, row.from, row.to, entity(entityId)), said);
+  }
+
+  /**
+   * *Add <duration> to <ticket>* over a run (#1108): each row's block goes to
+   * the ticket over its own stretch, in turn, so the record keeps a block per
+   * visit and nothing between them is claimed. A write that fails stops the
+   * rest, and the day re-reads either way: the rows already given are given.
+   */
+  async function takeRun(run: OfferRun) {
+    const to = entity(run.entityId);
+    const done = await write(async () => {
+      for (const row of run.rows) {
+        if (row.block !== null) await io.updateBlock(row.block.block.id, row.from, row.to, to);
+      }
+    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`);
+    if (!done) await reread();
   }
 
   /** *Add to <job>* on an open row (#1027): a block on the job over exactly the stretch. */
@@ -445,6 +467,17 @@
   {:else}
     <div class="tf-tm-list">
       {#each rows as row (row.key)}
+        {@const run = runAt.get(row.key)}
+        {#if run}
+          <div class="tf-tm-group">
+            <span>
+              {run.rows.length} offered rows go to <span class="tf-mono">{keyOf(run.entityId)}</span>,
+              {clockReading(run.from, key)} to {clockReading(run.to, key)}.
+              <small>Each is its own ticket or linked to it. One action adds them all.</small>
+            </span>
+            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to {keyOf(run.entityId)}</button>
+          </div>
+        {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
         <!-- A row click selects; the strip's blocks are the keyboard's way to the same. -->
         <div

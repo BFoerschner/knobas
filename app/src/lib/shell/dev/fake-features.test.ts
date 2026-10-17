@@ -4,6 +4,8 @@
  */
 import { expect, test, vi } from "vitest";
 
+import type { AdHocBlock, DayBlock, OpenStretch } from "../../ipc/time";
+import { dayRows, offerRuns } from "../../tf/time/day-view";
 import { demoHandlers } from "./fake-tauri";
 
 const MODULES = import.meta.glob<{ handlers?: unknown }>("./fake/*.ts", { eager: true });
@@ -67,6 +69,23 @@ test("the week and Log all: the label and passive blocks are never planned, and 
   expect(h["log_all_preview"]!({ days })).toEqual([]);
   const week = h["week_timesheet"]!({ days: [days[0], days[0], days[0], days[0], days[0]] }) as { rows: unknown[] };
   expect(week.rows).toHaveLength(5);
+});
+
+test("today's fake day holds one run of offered rows to PAY-231, so ?fake-ipc draws it (#1108)", () => {
+  const h = demoHandlers() as Calls;
+  const now = new Date();
+  const from = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const to = new Date(from.getTime() + 86_400_000);
+  const day = `${from.getFullYear()}-${String(from.getMonth() + 1).padStart(2, "0")}-${String(from.getDate()).padStart(2, "0")}`;
+  const read = h["day_blocks"]!({ from: from.toISOString(), to: to.toISOString() }) as {
+    blocks: DayBlock[];
+    open: OpenStretch[];
+  };
+  const offers: Record<number, AdHocBlock | null> = {};
+  for (const entry of read.blocks) offers[entry.block.id] = h["ad_hoc_block"]!({ blockId: entry.block.id }) as AdHocBlock | null;
+  const rows = dayRows({ day, blocks: read.blocks, offers, open: read.open, running: null, now });
+  const runs = offerRuns(rows);
+  expect(runs.map((run) => [run.entityId, run.rows.length, run.ms / 60_000])).toEqual([["mock:PAY-231", 3, 47]]);
 });
 
 test("Log all's dialog path: a draft comment per row, and log_work per row empties the plan (#828)", () => {
