@@ -70,8 +70,9 @@ pub struct DocSection {
     /// 1 for the first top-level heading.
     pub number: u32,
     /// The section's body as the plain text the editor opens with (`- ` for
-    /// a list item, a blank line between paragraphs), `None` when it is
-    /// refused.
+    /// a list item, a blank line between paragraphs, and a panel as a quote
+    /// whose first line is its kind in bold, `> **Info** <title>`, #975),
+    /// `None` when it is refused.
     pub text: Option<String>,
     /// Why knobas does not edit it, `None` when it does.
     pub refusal: Option<SectionRefusal>,
@@ -86,8 +87,9 @@ pub enum SectionRefusal {
     Table,
     /// A code block.
     Code,
-    /// A macro, a panel, a layout, a mention, a page or ticket link: markup
-    /// of the source's own that text cannot carry.
+    /// A macro, a layout, a mention, a page or ticket link: markup of the
+    /// source's own that text cannot carry. An info, note, warning or tip
+    /// panel is edited (#975) unless it carries more than a title.
     Macro,
     /// Bold, italics, links, a nested or a numbered list, which the text box
     /// would flatten.
@@ -129,7 +131,8 @@ pub enum EditRefused {
 #[derive(Debug, Clone, Copy)]
 pub struct DocWrites {
     /// Replace section `number`'s body of the mirrored record with `text`
-    /// (the editor's plain text), keeping everything else byte for byte.
+    /// (the editor's plain text, in [`DocSection::text`]'s spelling, panels
+    /// included), keeping everything else byte for byte.
     pub edit_section: fn(
         kind: &str,
         payload: &serde_json::Value,

@@ -33,9 +33,10 @@
  * - *For you* is prototype-6's mention on *SEPA payout retry design* only;
  *   its *Manual review queue* "SLA section is empty" is a reason no source
  *   declares, so it is not here.
- * - A section is refused for a table, code or a panel or macro, which the
- *   Confluence projection calls a macro; links, chips and marks refuse as
- *   formatting.
+ * - A section is refused for a table, code or a macro; links, chips and
+ *   marks refuse as formatting. A panel of plain text and lists is edited as
+ *   a quote naming its kind, `> **Info**`, as the Confluence projection
+ *   spells it (#975).
  */
 import type { Handler } from "../fake-tauri";
 import type {
@@ -373,21 +374,41 @@ function refusal(blocks: DocBlock[]): SectionRefusal | null {
       note(run.type === "issue" || run.type === "mention" || run.type === "page_link" ? "macro" : "formatting");
     }
   };
-  for (const b of blocks) {
-    if (b.type === "table") note("table");
-    else if (b.type === "code") note("code");
-    else if (b.type === "panel" || b.type === "placeholder") note("macro");
-    else if (b.type === "paragraph") inlines(b.text);
-    else if (b.type === "list") {
-      for (const item of b.items) {
-        for (const inner of item) {
-          if (inner.type === "paragraph") inlines(inner.text);
-          else note("formatting");
+  const visit = (list: DocBlock[], inPanel: boolean) => {
+    for (const b of list) {
+      if (b.type === "table") note("table");
+      else if (b.type === "code") note("code");
+      else if (b.type === "placeholder" || (b.type === "panel" && inPanel)) note("macro");
+      else if (b.type === "panel") visit(b.blocks, true);
+      else if (b.type === "paragraph") inlines(b.text);
+      else if (b.type === "list") {
+        for (const item of b.items) {
+          for (const inner of item) {
+            if (inner.type === "paragraph") inlines(inner.text);
+            else note("formatting");
+          }
         }
       }
     }
-  }
+  };
+  visit(blocks, false);
   return worst;
+}
+
+/** An editable section's text: a panel is a quote naming its kind, `> **Info**`. */
+function sectionText(blocks: DocBlock[]): string {
+  return blocks
+    .map((b) => {
+      if (b.type === "list") return b.items.map((item) => `- ${item.map(blockWords).join(" ")}`).join("\n");
+      if (b.type !== "panel") return blockWords(b);
+      const head = `**${b.kind.charAt(0).toUpperCase()}${b.kind.slice(1)}**${b.title ? ` ${b.title}` : ""}`;
+      const body = sectionText(b.blocks);
+      return (body === "" ? head : `${head}\n\n${body}`)
+        .split("\n")
+        .map((line) => (line === "" ? ">" : `> ${line}`))
+        .join("\n");
+    })
+    .join("\n\n");
 }
 
 function sections(blocks: DocBlock[]): DocSection[] {
@@ -395,12 +416,7 @@ function sections(blocks: DocBlock[]): DocSection[] {
     .filter((s) => s.heading !== null)
     .map((s) => {
       const why = refusal(s.blocks);
-      const text = s.blocks
-        .map((b) =>
-          b.type === "list" ? b.items.map((item) => `- ${item.map(blockWords).join(" ")}`).join("\n") : blockWords(b),
-        )
-        .join("\n\n");
-      return { number: s.number, refusal: why, text: why === null ? text : null };
+      return { number: s.number, refusal: why, text: why === null ? sectionText(s.blocks) : null };
     });
 }
 

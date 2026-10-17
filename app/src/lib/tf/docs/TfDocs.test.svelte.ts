@@ -372,6 +372,9 @@ test("Edit section opens the text, saves it through the queue against the versio
   await settle();
   const box = target.querySelector<HTMLTextAreaElement>("textarea[aria-label='Section text']")!;
   expect(box.value).toBe("Ask Mara.");
+  expect(target.querySelector(".tf-sec-edit .tf-dim")?.textContent).toBe(
+    "Text, lists and panels. Saved to Confluence through the write queue.",
+  );
   box.value = "Ask Priya.";
   box.dispatchEvent(new Event("input", { bubbles: true }));
   button("Save section")!.click();

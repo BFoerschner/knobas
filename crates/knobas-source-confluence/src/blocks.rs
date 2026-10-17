@@ -202,6 +202,55 @@ fn refusal_of(node: &Node, in_item: bool) -> Option<SectionRefusal> {
         .min_by_key(|r| rank(*r))
 }
 
+/// The panels *Edit section* keeps (R-10.13, #975): the macro's name and the
+/// word the editor's text names it by.
+const PANELS: [(&str, &str); 4] = [
+    ("info", "Info"),
+    ("note", "Note"),
+    ("warning", "Warning"),
+    ("tip", "Tip"),
+];
+
+/// The editor's word for a panel *Edit section* keeps, for a structured macro
+/// that is one. The generic `panel` macro is not one: its colours and borders
+/// are parameters a text edit would drop.
+fn panel_word(node: &Node) -> Option<&'static str> {
+    if node.name() != Some("ac:structured-macro") {
+        return None;
+    }
+    let name = node.attr("ac:name")?.to_ascii_lowercase();
+    PANELS
+        .iter()
+        .find(|(macro_name, _)| *macro_name == name)
+        .map(|(_, word)| *word)
+}
+
+/// For a panel *Edit section* keeps, at the top of a section: the worst thing
+/// it holds, by the rules a section's own body follows. A parameter other
+/// than the title (`icon`, say) refuses as a macro, since the text would
+/// drop it. `None` for any other node.
+fn panel_refusal(node: &Node) -> Option<Option<SectionRefusal>> {
+    panel_word(node)?;
+    let worst = node
+        .children()
+        .iter()
+        .filter_map(|child| match child {
+            Node::Text(t) if t.trim().is_empty() => None,
+            Node::Element { name, .. }
+                if name == "ac:parameter" && child.attr("ac:name") == Some("title") =>
+            {
+                None
+            }
+            Node::Element { name, children, .. } if name == "ac:rich-text-body" => children
+                .iter()
+                .filter_map(|c| refusal_of(c, false))
+                .min_by_key(|r| rank(*r)),
+            _ => Some(SectionRefusal::Macro),
+        })
+        .min_by_key(|r| rank(*r));
+    Some(worst)
+}
+
 fn rank(refusal: SectionRefusal) -> u8 {
     match refusal {
         SectionRefusal::Table => 0,
@@ -254,7 +303,10 @@ fn spans(storage: &str) -> Vec<Span> {
                     .collect();
                 match inside
                     .iter()
-                    .filter_map(|n| refusal_of(n, false))
+                    .filter_map(|n| {
+                        panel_refusal(n)
+                            .unwrap_or_else(|| refusal_of(n, false).or_else(|| reads_as_a_panel(n)))
+                    })
                     .min_by_key(|r| rank(*r))
                 {
                     Some(refusal) => Err(refusal),
@@ -294,6 +346,10 @@ fn plain_text(nodes: &[&Node]) -> String {
     };
     let mut blocks: Vec<String> = Vec::new();
     for node in nodes {
+        if let Some(word) = panel_word(node) {
+            blocks.push(panel_text(node, word));
+            continue;
+        }
         match node.name() {
             Some("ul" | "ol") => {
                 let items: Vec<String> = node
@@ -315,6 +371,93 @@ fn plain_text(nodes: &[&Node]) -> String {
         }
     }
     blocks.join("\n\n")
+}
+
+/// A panel as the editor's text: a quote whose first line is the kind in
+/// bold and the title beside it, then the panel's body, as the Markdown
+/// export spells a panel (`knobas_core::markdown`).
+fn panel_text(node: &Node, word: &str) -> String {
+    let mut first = format!("**{word}**");
+    if let Some(title) = node.param("title") {
+        first.push(' ');
+        first.push_str(&title.split_whitespace().collect::<Vec<_>>().join(" "));
+    }
+    let inner: Vec<&Node> = node
+        .child("ac:rich-text-body")
+        .map(|body| body.children().iter().collect())
+        .unwrap_or_default();
+    let body = plain_text(&inner);
+    let text = if body.is_empty() {
+        first
+    } else {
+        format!("{first}\n\n{body}")
+    };
+    text.lines()
+        .map(|line| {
+            if line.is_empty() {
+                ">".to_owned()
+            } else {
+                format!("> {line}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// The opening line of a panel in the editor's text: `> **Info**`, the kind
+/// in any case, then the title if any. Answers the panel's macro name and its
+/// title (empty when it has none).
+fn panel_opening(line: &str) -> Option<(&'static str, &str)> {
+    let rest = line.trim().strip_prefix('>')?.trim_start();
+    let rest = rest.strip_prefix("**")?;
+    let (word, after) = rest.split_once("**")?;
+    let (name, _) = PANELS.iter().find(|(_, w)| w.eq_ignore_ascii_case(word))?;
+    if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
+        return None;
+    }
+    Some((name, after.trim()))
+}
+
+/// A block other than a panel whose text holds a line `> **Info**` refuses as
+/// formatting: the editor's text would write it back as a panel, so saving
+/// the section unchanged would turn the words into a macro.
+fn reads_as_a_panel(node: &Node) -> Option<SectionRefusal> {
+    plain_text(&[node])
+        .lines()
+        .any(|line| panel_opening(line).is_some())
+        .then_some(SectionRefusal::Formatting)
+}
+
+/// The editor's text in storage format: [`crate::storage::from_plain`]'s
+/// rules, and a quote that opens with a panel's kind in bold
+/// ([`panel_opening`]) at the start of a block is that panel, for as long as
+/// its lines start with `>`. Any other quote stays text, as typed.
+fn from_section_text(text: &str) -> String {
+    let text = text.replace("\r\n", "\n");
+    let mut out = String::with_capacity(text.len() + 64);
+    let mut plain: Vec<&str> = Vec::new();
+    let mut lines = text.lines().peekable();
+    while let Some(line) = lines.next() {
+        let starts_a_block = plain.last().is_none_or(|l| l.trim().is_empty());
+        let Some((name, title)) = panel_opening(line).filter(|_| starts_a_block) else {
+            plain.push(line);
+            continue;
+        };
+        out.push_str(&crate::storage::from_plain(&plain.join("\n")));
+        plain.clear();
+        let mut body: Vec<&str> = Vec::new();
+        while let Some(next) = lines.next_if(|l| l.trim_start().starts_with('>')) {
+            let inner = next.trim_start().strip_prefix('>').unwrap_or_default();
+            body.push(inner.strip_prefix(' ').unwrap_or(inner));
+        }
+        out.push_str(&crate::storage::panel(
+            name,
+            title,
+            &crate::storage::from_plain(&body.join("\n")),
+        ));
+    }
+    out.push_str(&crate::storage::from_plain(&plain.join("\n")));
+    out
 }
 
 /// The page's sections as the reader numbers them, each with its text or the
@@ -375,7 +518,7 @@ pub fn edit_section(
     span.verdict.map_err(EditRefused::Section)?;
     let mut body = String::with_capacity(storage.len() + text.len());
     body.push_str(&storage[..span.from]);
-    body.push_str(&crate::storage::from_plain(text));
+    body.push_str(&from_section_text(text));
     body.push_str(&storage[span.to..]);
     Ok(SectionEdit { body, base_version })
 }
@@ -1529,7 +1672,7 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (1, Some("One\ntwo.\n\n- a\n- b".to_owned()), None),
                 (2, None, Some(SectionRefusal::Table)),
                 (3, None, Some(SectionRefusal::Code)),
-                (4, None, Some(SectionRefusal::Macro)),
+                (4, Some("> **Info**\n>\n> i".to_owned()), None),
                 (5, None, Some(SectionRefusal::Formatting)),
                 (6, None, Some(SectionRefusal::Macro)),
                 (7, None, Some(SectionRefusal::Formatting)),
@@ -1537,6 +1680,132 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 (9, None, Some(SectionRefusal::Formatting)),
                 (10, Some("- a b".to_owned()), None),
             ]
+        );
+    }
+
+    /// R-10.13, #975: a panel is edited as a quote that opens with its kind
+    /// in bold (the Markdown export's spelling), its title beside the kind.
+    #[test]
+    fn a_section_with_a_panel_reads_as_a_quote_naming_its_kind() {
+        let panel = |name: &str, inside: &str| {
+            format!(
+                "<ac:structured-macro ac:name=\"{name}\" ac:schema-version=\"1\" ac:macro-id=\"m1\">{inside}</ac:structured-macro>"
+            )
+        };
+        let body = |inner: &str| format!("<ac:rich-text-body>{inner}</ac:rich-text-body>");
+        let title = "<ac:parameter ac:name=\"title\">Before you deploy</ac:parameter>";
+        let storage = [
+            format!(
+                "<h2>Mixed</h2><p>Lead.</p>{}<p>After.</p>",
+                panel(
+                    "warning",
+                    &format!(
+                        "{title}{}",
+                        body("<p>Drain.</p><ul><li>a</li><li>b</li></ul>")
+                    )
+                )
+            ),
+            format!("<h2>Bare</h2>{}", panel("tip", "")),
+            format!("<h2>Note</h2>{}", panel("note", &body("<p>n</p>"))),
+            format!(
+                "<h2>Icon</h2>{}",
+                panel(
+                    "info",
+                    &format!(
+                        "<ac:parameter ac:name=\"icon\">false</ac:parameter>{}",
+                        body("<p>i</p>")
+                    )
+                )
+            ),
+            format!("<h2>Generic</h2>{}", panel("panel", &body("<p>p</p>"))),
+            format!(
+                "<h2>Nested</h2>{}",
+                panel("info", &body(&panel("note", &body("<p>x</p>"))))
+            ),
+            format!(
+                "<h2>Bold inside</h2>{}",
+                panel("info", &body("<p><strong>b</strong></p>"))
+            ),
+            format!(
+                "<h2>In a list</h2><ul><li>{}</li></ul>",
+                panel("info", &body("<p>i</p>"))
+            ),
+        ]
+        .concat();
+        let got: Vec<(Option<String>, Option<SectionRefusal>)> = sections(&storage)
+            .into_iter()
+            .map(|s| (s.text, s.refusal))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                (
+                    Some(
+                        "Lead.\n\n> **Warning** Before you deploy\n>\n> Drain.\n>\n> - a\n> - b\n\nAfter."
+                            .to_owned()
+                    ),
+                    None
+                ),
+                (Some("> **Tip**".to_owned()), None),
+                (Some("> **Note**\n>\n> n".to_owned()), None),
+                (None, Some(SectionRefusal::Macro)),
+                (None, Some(SectionRefusal::Macro)),
+                (None, Some(SectionRefusal::Macro)),
+                (None, Some(SectionRefusal::Formatting)),
+                (None, Some(SectionRefusal::Macro)),
+            ]
+        );
+    }
+
+    #[test]
+    fn an_edit_writes_a_quote_naming_a_kind_back_as_that_panel() {
+        let storage = "<h2>A</h2><p>old</p><h2>B</h2><p>b</p>";
+        let text = "Lead.\n\n> **Warning** Before <you> deploy\n>\n> Drain.\n>\n> - a\n> - b\n\
+                    \n> **tip**\n\n> Just a quote.\n> **Info** not first";
+        assert_eq!(
+            edit_section("page", &page(storage), 1, text).unwrap().body,
+            "<h2>A</h2><p>Lead.</p>\
+             <ac:structured-macro ac:name=\"warning\" ac:schema-version=\"1\">\
+             <ac:parameter ac:name=\"title\">Before &lt;you&gt; deploy</ac:parameter>\
+             <ac:rich-text-body><p>Drain.</p><ul><li>a</li><li>b</li></ul></ac:rich-text-body>\
+             </ac:structured-macro>\
+             <ac:structured-macro ac:name=\"tip\" ac:schema-version=\"1\">\
+             <ac:rich-text-body></ac:rich-text-body></ac:structured-macro>\
+             <p>&gt; Just a quote.<br/>&gt; **Info** not first</p>\
+             <h2>B</h2><p>b</p>"
+        );
+    }
+
+    /// Words that spell a panel's opening line are not a panel in the page,
+    /// so the section refuses rather than save them back as one (#975).
+    #[test]
+    fn a_paragraph_spelled_like_a_panel_refuses_as_formatting() {
+        let storage = "<h2>A</h2><p>&gt; **Info** not a panel</p>\
+            <h2>B</h2><p>Lead.<br/><br/>&gt; **tip**</p>";
+        let got: Vec<Option<SectionRefusal>> =
+            sections(storage).into_iter().map(|s| s.refusal).collect();
+        assert_eq!(
+            got,
+            vec![
+                Some(SectionRefusal::Formatting),
+                Some(SectionRefusal::Formatting),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_panel_section_saved_unchanged_reads_back_the_same() {
+        let storage = "<h2>A</h2><p>Lead.</p><ac:structured-macro ac:name=\"info\" ac:macro-id=\"x\">\
+            <ac:parameter ac:name=\"title\">T</ac:parameter><ac:rich-text-body><p>One<br/>two.</p>\
+            <ul><li>a</li></ul></ac:rich-text-body></ac:structured-macro><p>After.</p>";
+        let text = sections(storage)[0].text.clone().expect("editable");
+        let saved = edit_section("page", &page(storage), 1, &text).unwrap().body;
+        let again = sections(&saved);
+        assert_eq!(again[0].text.as_deref(), Some(text.as_str()));
+        assert_eq!(
+            blocks(&saved),
+            blocks(storage),
+            "the reader draws the same page"
         );
     }
 

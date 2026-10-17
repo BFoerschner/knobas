@@ -469,6 +469,25 @@ pub(crate) fn from_plain(text: &str) -> String {
     out
 }
 
+/// A panel macro (`info`, `note`, `warning`, `tip`) around `body`, which is
+/// already storage format, with a `title` parameter when `title` is not empty
+/// (*Edit section*, #975).
+#[must_use]
+pub(crate) fn panel(name: &str, title: &str, body: &str) -> String {
+    let title = if title.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "<ac:parameter ac:name=\"title\">{}</ac:parameter>",
+            escape(title)
+        )
+    };
+    format!(
+        "<ac:structured-macro ac:name=\"{name}\" ac:schema-version=\"1\">{title}\
+         <ac:rich-text-body>{body}</ac:rich-text-body></ac:structured-macro>"
+    )
+}
+
 /// The three characters that are markup in character data, escaped in the one
 /// order that is not self-defeating.
 fn escape(raw: &str) -> String {

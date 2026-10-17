@@ -1234,6 +1234,129 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     drop(state);
 }
 
+/// **Edit section keeps a panel** (R-10.13, #975): a section of text and an
+/// info panel opens in the editor with the panel as a quote naming its kind,
+/// is saved through the queue with the panel's text changed, and comes back
+/// from Confluence as an info panel, with its title, holding the new text.
+/// The page is a new one, deleted again by [`Litter`].
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn an_edited_section_keeps_its_info_panel_in_confluence() {
+    use knobas_source::docs::{DocBlock, PanelKind};
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+    let word = format!("zq{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+
+    let title = format!("Panel section {word} [{LITTER}]");
+    let storage = concat!(
+        r#"<h2>Rollout</h2><p>Lead.</p>"#,
+        r#"<ac:structured-macro ac:name="info">"#,
+        r#"<ac:parameter ac:name="title">Before you deploy</ac:parameter>"#,
+        r#"<ac:rich-text-body><p>Drain the queue.</p></ac:rich-text-body>"#,
+        r#"</ac:structured-macro>"#,
+    );
+    let (status, made) = env
+        .call(
+            reqwest::Method::POST,
+            "rest/api/content",
+            Some(json!({
+                "type": "page",
+                "title": title,
+                "space": { "key": env.space },
+                "ancestors": [{ "id": parent.id }],
+                "body": { "storage": { "value": storage, "representation": "storage" } },
+            })),
+        )
+        .await;
+    assert_eq!(status, 200, "creating the page: {made}");
+    let id = made["id"].as_str().expect("the new page's id").to_owned();
+    litter.created.push(id.clone());
+
+    let state = app("confluence_live_panel_section", &env).await;
+    sync_until(&state, &id, "the new page", |p| {
+        p["version"]["number"].as_i64() == Some(1)
+    })
+    .await;
+    let entity = format!("{CONFLUENCE}:{id}");
+    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
+        .await
+        .expect("the page reads");
+    assert_eq!(page.sections.len(), 1, "{:?}", page.sections);
+    assert_eq!(
+        page.sections[0].refusal, None,
+        "a panel section is editable"
+    );
+    assert_eq!(
+        page.sections[0].text.as_deref(),
+        Some("Lead.\n\n> **Info** Before you deploy\n>\n> Drain the queue.")
+    );
+
+    let edited = format!(
+        "Lead.\n\n> **Info** Before you deploy\n>\n> Drain the {word} queue.\n>\n> - then deploy"
+    );
+    let payload = knobas_app::commands::entity::docs_edit_section_payload(
+        &state.pool,
+        &entity,
+        1,
+        page.version,
+        &edited,
+    )
+    .await
+    .expect("the section edit is made");
+    let sent = write(&state, payload).await;
+    assert_eq!(
+        sent.state,
+        WriteState::Sent,
+        "the section edit did not land: {:?}",
+        sent.detail
+    );
+
+    // What Confluence stored: an info macro, its title, the new text inside.
+    let (after, version) = env.body_and_version(&id).await;
+    assert_eq!(version, 2, "{after}");
+    assert!(
+        after.contains(r#"ac:name="info""#),
+        "no info macro: {after}"
+    );
+    assert!(
+        after.contains(r#"<ac:parameter ac:name="title">Before you deploy</ac:parameter>"#),
+        "the title was lost: {after}"
+    );
+    let inside = after
+        .split_once("<ac:rich-text-body>")
+        .and_then(|(_, rest)| rest.split_once("</ac:rich-text-body>"))
+        .map(|(inside, _)| inside)
+        .unwrap_or_else(|| panic!("the panel has no body: {after}"));
+    assert!(
+        inside.contains(&format!("Drain the {word} queue."))
+            && inside.contains("<li>then deploy</li>"),
+        "the new text is not inside the panel: {after}"
+    );
+
+    // And through knobas: the reader draws an info panel, and the section
+    // opens with the text that was saved.
+    sync_until(&state, &id, "the edited body", |p| {
+        p["version"]["number"].as_i64() == Some(2)
+    })
+    .await;
+    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
+        .await
+        .expect("the page reads");
+    let panels: Vec<(PanelKind, Option<&str>)> = page
+        .blocks
+        .iter()
+        .filter_map(|b| match b {
+            DocBlock::Panel { kind, title, .. } => Some((*kind, title.as_deref())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(panels, [(PanelKind::Info, Some("Before you deploy"))]);
+    assert_eq!(page.sections[0].text.as_deref(), Some(edited.as_str()));
+
+    drop(state);
+}
+
 /// **Move to Confluence…** (#941, D10): each note becomes a page under the
 /// picked parent, its Markdown in storage format, and the notes stay. Two
 /// notes, one with an empty body, since a note often has none and the wiki
