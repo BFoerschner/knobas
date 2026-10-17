@@ -109,24 +109,36 @@ test("Log all's dialog path: a draft comment per row, and log_work per row empti
   expect(h["log_all_preview"]!({ days })).toEqual([]);
 });
 
-test("with fake-timer, PAY-231's draft counts the running stretch up to now, and a stop leaves it a block (#896)", () => {
-  const h = demoHandlers(new URLSearchParams("fake-timer")) as Calls;
-  const timer = h["current_timer"]!({}) as { started_at: string };
-  const at = new Date(timer.started_at);
-  const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
-  const ask = () =>
-    h["worklog_draft"]!({ entityId: "mock:PAY-231", day, offsetMinutes: 0 }) as {
-      running_since: string | null;
-      seconds: number;
-      block_ids: number[];
-    };
-  const open = ask();
-  expect(open.running_since).toBe(timer.started_at);
-  expect(open.seconds).toBeGreaterThanOrEqual(34 * 60);
-  h["stop_timer"]!({});
-  const stopped = ask();
-  expect(stopped.running_since).toBeNull();
-  expect(stopped.block_ids.length).toBe(open.block_ids.length + 1);
+// Pinned on both sides of midnight: the clock must not decide this test (#1155).
+test.each([
+  ["00:05", [0, 5]],
+  ["00:20", [0, 20]],
+  ["12:00", [12, 0]],
+  ["23:55", [23, 55]],
+] as const)("with fake-timer at %s, PAY-231's draft counts the running stretch up to now, and a stop leaves it a block (#896)", (_label, [hour, minute]) => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date(2026, 9, 17, hour, minute, 0));
+    const h = demoHandlers(new URLSearchParams("fake-timer")) as Calls;
+    const timer = h["current_timer"]!({}) as { started_at: string };
+    const at = new Date(timer.started_at);
+    const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+    const ask = () =>
+      h["worklog_draft"]!({ entityId: "mock:PAY-231", day, offsetMinutes: 0 }) as {
+        running_since: string | null;
+        seconds: number;
+        block_ids: number[];
+      };
+    const open = ask();
+    expect(open.running_since).toBe(timer.started_at);
+    expect(open.seconds).toBeGreaterThanOrEqual(34 * 60);
+    h["stop_timer"]!({});
+    const stopped = ask();
+    expect(stopped.running_since).toBeNull();
+    expect(stopped.block_ids.length).toBe(open.block_ids.length + 1);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("at ten past midnight the timer started yesterday, and its draft still counts the running stretch (#1031)", () => {

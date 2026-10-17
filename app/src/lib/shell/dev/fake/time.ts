@@ -315,8 +315,16 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
         running.target.entity_id === entityId &&
         dayKey(new Date(running.started_at)) === day;
       // Yesterday's PAY-231 (#828): *Log all*'s fixed row, with prototype-6's comment.
-      // Not when the timer started yesterday (just before midnight): then the draft is its stretch (#1031).
-      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt()) && !loggedYesterday && !runningThatDay) {
+      // Not when the timer started yesterday (just before midnight): then the draft is its stretch (#1031),
+      // running or, once stopped, a block that started that day (#1155).
+      const blockThatDay = unlogged(entityId).some((block) => dayKey(new Date(block.started_at)) === day);
+      if (
+        entityId === YESTERDAY_ROW.entity_id &&
+        day === dayKey(yesterdayAt()) &&
+        !loggedYesterday &&
+        !runningThatDay &&
+        !blockThatDay
+      ) {
         const at = yesterdayAt();
         at.setHours(YESTERDAY_ROW.hour, 0, 0, 0);
         const started_at = at.toISOString();
