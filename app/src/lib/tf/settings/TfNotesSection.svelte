@@ -118,6 +118,8 @@
   let draft = $state("");
   let saveError = $state<string | null>(null);
   let saving = $state(false);
+  /** What Save sends: the field without its surrounding spaces. */
+  const typed = $derived(draft.trim());
 
   function openShortcut() {
     draft = view?.accelerator ?? "";
@@ -134,7 +136,7 @@
     saving = true;
     saveError = null;
     try {
-      view = await ports.setCaptureShortcut(accelerator === null ? null : accelerator.trim());
+      view = await ports.setCaptureShortcut(accelerator);
       editing = false;
     } catch (cause) {
       saveError = ipcErrorMessage(cause);
@@ -228,8 +230,8 @@
       {/if}
       <button
         class="tf-btn tf-primary"
-        disabled={saving || draft.trim() === "" || draft.trim() === (view?.accelerator ?? "")}
-        onclick={() => void saveShortcut(draft)}>Save</button
+        disabled={saving || typed === "" || typed === (view?.accelerator ?? "")}
+        onclick={() => void saveShortcut(typed)}>Save</button
       >
     {/snippet}
   </TfDialog>
