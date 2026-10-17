@@ -1452,3 +1452,140 @@ async fn moved_notes_become_pages_under_the_picked_parent() {
 
     drop(state);
 }
+
+/// The account a mention of somebody else names (#953): a user nothing on the
+/// test's page is by, created once and kept, like the seeded space.
+const MENTIONED: &str = "knobas-mentioned";
+
+/// That user's key, creating the user through Confluence's admin API the first
+/// time.
+async fn mentioned_user_key(env: &Env) -> String {
+    let path = format!("rest/api/user?username={MENTIONED}");
+    let (mut status, mut user) = env.call(reqwest::Method::GET, &path, None).await;
+    if status == 404 {
+        let (made, answer) = env
+            .call(
+                reqwest::Method::POST,
+                "rest/api/admin/user",
+                Some(json!({
+                    "userName": MENTIONED,
+                    "fullName": "Mentioned Person",
+                    "email": "mentioned@knobas.invalid",
+                    "password": "knobas-mentioned-953",
+                    "notifyViaEmail": false,
+                })),
+            )
+            .await;
+        assert!(matches!(made, 200 | 201 | 204), "creating {MENTIONED}: {made} {answer}");
+        (status, user) = env.call(reqwest::Method::GET, &path, None).await;
+    }
+    assert_eq!(status, 200, "GET {path}: {user}");
+    user["userKey"]
+        .as_str()
+        .unwrap_or_else(|| panic!("{MENTIONED} has a user key: {user}"))
+        .to_owned()
+}
+
+/// **Every mention key resolves, and the tree is in Confluence's order**
+/// (#953), against the real container. A page mentions a user who neither
+/// made, edited nor commented on it, so only the sync's user lookup can name
+/// them; its two children are made in title order and then the later title is
+/// moved before the earlier one, so only `extensions.position` can put them
+/// in the order Confluence shows.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
+    use knobas_source::docs::{DocBlock, Inline};
+
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+    let key = mentioned_user_key(&env).await;
+
+    let create = |title: String, under: String, storage: String| {
+        let env = &env;
+        async move {
+            let (status, made) = env
+                .call(
+                    reqwest::Method::POST,
+                    "rest/api/content",
+                    Some(json!({
+                        "type": "page",
+                        "title": title,
+                        "space": { "key": env.space },
+                        "ancestors": [{ "id": under }],
+                        "body": { "storage": { "value": storage, "representation": "storage" } },
+                    })),
+                )
+                .await;
+            assert_eq!(status, 200, "creating {title}: {made}");
+            made["id"].as_str().expect("the new page's id").to_owned()
+        }
+    };
+    let top = create(
+        format!("Ordered parent [{LITTER}]"),
+        parent.id.clone(),
+        format!(r#"<p>Ask <ac:link><ri:user ri:userkey="{key}" /></ac:link>.</p>"#),
+    )
+    .await;
+    litter.created.push(top.clone());
+    let alpha = create(format!("Alpha child [{LITTER}]"), top.clone(), "<p>a</p>".into()).await;
+    litter.created.insert(0, alpha.clone());
+    let zeta = create(format!("Zeta child [{LITTER}]"), top.clone(), "<p>z</p>".into()).await;
+    litter.created.insert(0, zeta.clone());
+    let (status, moved) = env
+        .call(
+            reqwest::Method::PUT,
+            &format!("rest/api/content/{zeta}/move/before/{alpha}"),
+            None,
+        )
+        .await;
+    assert_eq!(status, 200, "moving Zeta before Alpha: {moved}");
+    for id in [&alpha, &zeta] {
+        let record = env.content(id, "version").await;
+        println!("page {id}: extensions = {}", record["extensions"]);
+    }
+
+    let state = app("confluence_live_order", &env).await;
+    sync_until(&state, &top, "the mentioned user beside the page", |p| {
+        p["mentioned_users"].is_array()
+    })
+    .await;
+    for id in [&alpha, &zeta] {
+        sync_until(&state, id, "the child", serde_json::Value::is_object).await;
+    }
+
+    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &format!("{CONFLUENCE}:{top}"))
+        .await
+        .expect("the reader reads the page");
+    let DocBlock::Paragraph { text } = &page.blocks[0] else {
+        panic!("the first block is the paragraph: {:#?}", page.blocks)
+    };
+    assert!(
+        text.iter().any(|i| matches!(
+            i,
+            Inline::Mention { user: Some(u), name: Some(n), me: false }
+                if u == MENTIONED && n == "Mentioned Person"
+        )),
+        "the mention names the user the page record does not: {text:?}"
+    );
+
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+        .await
+        .expect("the tree reads");
+    let parent_id = format!("{CONFLUENCE}:{top}");
+    let children: Vec<String> = tree
+        .spaces
+        .iter()
+        .flat_map(|s| &s.pages)
+        .filter(|p| p.parent.as_deref() == Some(parent_id.as_str()))
+        .map(|p| p.entity_id.clone())
+        .collect();
+    assert_eq!(
+        children,
+        vec![format!("{CONFLUENCE}:{zeta}"), format!("{CONFLUENCE}:{alpha}")],
+        "Zeta was moved before Alpha, and the tree says so"
+    );
+
+    drop(state);
+}
