@@ -486,7 +486,7 @@ test("a job with no code says nothing is connected and asks for no checkout", as
   expect(target.querySelector(".tf-checkout")).toBeNull();
 });
 
-test("Map is a tab that names itself until it is built", async () => {
+test("the Map tab hides the card and draws Dependencies in place of the sections (#874)", async () => {
   open("PAY-231", { tab: "map" });
   await settle();
   const tabs = [...target.querySelectorAll("[role='tab']")];
@@ -495,7 +495,9 @@ test("Map is a tab that names itself until it is built", async () => {
     ["Map", "true"],
     ["Conversation", "false"],
   ]);
-  expect(text()).toContain("Map is not built in the new shell yet.");
+  expect(target.querySelector(".tf-ws")!.classList.contains("tf-mapmode")).toBe(true);
+  expect(target.querySelector(".tf-wbody .tf-dp.tf-dp-job")).not.toBeNull();
+  expect(target.querySelector(".tf-setsbar")).toBeNull();
   expect(target.querySelector("[aria-labelledby='tf-sec-code']")).toBeNull();
 });
 

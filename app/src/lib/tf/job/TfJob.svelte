@@ -27,7 +27,8 @@
   so a row from the parent carries its label. Above them, a blocked ticket's
   red banner (#818, R-4.8), and on a To Do ticket of the reader's the *Start
   work* stepper (R-4.9) in place of Code and Builds, as prototype-6 draws it.
-  The Map tab is TF5's, an empty pane that names itself until then.
+  The Map tab (#874) hides the card and draws Dependencies from the ticket
+  (`deps/TfDeps.svelte` with `ticket` set): only what the ticket reaches.
 -->
 <script lang="ts">
   import { onMount, untrack } from "svelte";
@@ -95,6 +96,7 @@
   import { ASSET_LIMIT, reachFilter, SECTION_LIMIT, SECTION_READS } from "./sections";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
+  import TfDeps from "../deps/TfDeps.svelte";
   import { clones } from "../openin/clones.svelte";
   import { apps as sharedApps, type Apps } from "../openin/apps.svelte";
   import TfConnections from "./TfConnections.svelte";
@@ -652,7 +654,7 @@
   </div>
 {:else if detail}
   {@const key = keyOf(detail.row.entity_id)}
-  <div class="tf-ws">
+  <div class="tf-ws" class:tf-mapmode={current.id === "map"}>
     <TfJobCard
       {detail}
       {offered}
@@ -684,8 +686,8 @@
         </button>
       </div>
       <div class="tf-wbody">
-        {#if current.id !== "conversation" && inherited !== null}
-          <!-- R-4.4: hidden while the Conversation tab is open. -->
+        {#if current.id === "work" && inherited !== null}
+          <!-- R-4.4: hidden while the Conversation tab is open; the Map draws Dependencies alone, as prototype-6 does. -->
           <div class="tf-setsbar">
             <span class="tf-dim">Also on this job</span>
             {#each groups as group (group.key)}
@@ -738,9 +740,8 @@
             oncomment={comment}
           />
         {:else}
-          <div class="tf-empty">
-            <p>{current.name} is not built in the new shell yet.</p>
-          </div>
+          <!-- The Map tab (#874, R-11.10): Dependencies, kept to what the ticket reaches. -->
+          <TfDeps ready={true} ticket={key} ticketId={detail.row.entity_id} host="job" />
         {/if}
       </div>
     </section>

@@ -4144,3 +4144,39 @@ Ruled by the implementer (PR for #1000).
   does, so *Save as* offers the epic under `?fake-ipc`. **Reversing:** one line.
 - **Both dialogs add "Link sets stay in knobas and are never written to a source."** beyond
   prototype-6's copy, which the ticket's first criterion asks for. **Reversing:** n/a.
+
+## #874 — Job Map tab (2026-10-17)
+
+Ruled by the implementer (PR for #874).
+
+- **The switch reads *This job <key>* / *Everything*, prototype-6's segmented buttons, not
+  R-11.10's *Show everything* / *Only PAY-231*.** The ticket says copy follows prototype-6 word
+  for word; the requirement's words describe the same two moves. **Reversing:** two labels in
+  `TfDeps.svelte`.
+- **The filter keeps the ticket, every id `job_reach` answers and every pipeline
+  `job_pipelines` answers, and the relations between kept items.** The reach holds a pipeline's
+  runs, not the pipeline, and Dependencies draws pipelines; `job_pipelines` (#850) is the read
+  Builds' *This job* already uses, so the two views agree. No new command. **Reversing:** low
+  (`deps/reach.ts`).
+- **A ticket the `dependencies` read does not hold (no confirmed link to a row of it) is drawn by
+  its key with no state.** The map from a ticket always shows the ticket. **Reversing:** low.
+- **The Map tab hides the job card and the *Also on this job* bar, as prototype-6's `mapmode`
+  does.** **Reversing:** low (one class and one condition in `TfJob.svelte`).
+- **`#/deps/job/<key>` resolves the key as the job page does, unless the shell's open job is that
+  ticket, whose entity id it takes; it does not promote the ticket's context.** The opening comes
+  from a job already open, which promoted it. **Reversing:** low.
+- **The fake Dependencies fixture takes its pipelines from the Builds fixture
+  (`teamcity:buildType:<name>`), as the real read takes them from `pipelines`**, so a job's
+  pipelines from `job_pipelines` match tiles. **Reversing:** low.
+
+Ruled by the merge-manager (PR #1063).
+
+- **The switch copy does not contradict R-11.10.** `requirements.md` itself says copy follows
+  prototype-6 word for word, and prototype-6's `dpDraw` is how it draws R-11.10: *Everything*
+  goes to the top-bar opening (R-11.10's *Show everything*), *This job <key>* comes back while a
+  job is open (*Only PAY-231*). The behaviour R-11.10 asks for is built; only its italic labels
+  differ, and the spec's own copy rule picks the prototype's. No follow-up. **Reversing:** two
+  labels in `TfDeps.svelte`.
+- **The fake fixture's pipeline ids match the real read.** `assets::dependencies::read` takes
+  its pipelines from `commands::entity::pipelines_inner`, the read behind Builds and
+  `job_pipelines`, so the fixture taking them from `fakePipelines` mirrors it. **Reversing:** low.

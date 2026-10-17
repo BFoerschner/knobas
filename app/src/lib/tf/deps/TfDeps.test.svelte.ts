@@ -63,7 +63,7 @@ let calls: [string, ...unknown[]][] = [];
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 
-function render(read: Dependencies = READ, ready = true, extra: Record<string, unknown> = {}) {
+function render(read: Dependencies = READ, ready = true, extra: Record<string, unknown> = {}, more: Record<string, unknown> = {}) {
   target = document.body.appendChild(document.createElement("div"));
   const state = createDepViewState();
   calls = [];
@@ -79,6 +79,7 @@ function render(read: Dependencies = READ, ready = true, extra: Record<string, u
     props: {
       ready,
       views: state,
+      ...more,
       ports: {
         dependencies: () => Promise.resolve(read),
         depViews: () => Promise.resolve(views()),
@@ -347,4 +348,65 @@ test("clicking an asset opens its editor; a ticket follows its link", async () =
   expect(asset.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }))).toBe(false);
   flushSync();
   expect(document.querySelector(".tf-dialog")).not.toBeNull();
+});
+
+// -- #874: the opening from a ticket ----------------------------------------
+
+const REACHES = {
+  ticketId: (key: string) => Promise.resolve(key === "PAY-231" ? "jira:PAY-231" : null),
+  jobReach: (id: string) =>
+    Promise.resolve(id === "jira:PAY-231" ? [{ entity_id: "asset:payouts", kind: "asset", step: "asset:payouts", origin: { kind: "own" } }] : []),
+  jobPipelines: () => Promise.resolve([]),
+};
+
+const shownIds = () => [...target.querySelectorAll<HTMLElement>(".tf-dp-t")].map((el) => el.dataset["id"]);
+const viewButton = () => [...target.querySelectorAll("button")].find((b) => b.textContent?.startsWith("View:"))!;
+const scopeButtons = () => [...target.querySelectorAll<HTMLButtonElement>("[aria-label='Scope'] button")];
+
+test("from a ticket it draws only what the ticket reaches, in the view that opens from a ticket", async () => {
+  render(READ, true, REACHES, { ticket: "PAY-231" });
+  await settle();
+  await settle();
+  expect(shownIds().sort()).toEqual(["asset:payouts", "jira:PAY-231"]);
+  expect(viewButton().textContent).toContain("This ticket");
+  expect(target.querySelector(".tf-sub")!.textContent).toContain("What PAY-231 reaches");
+  const [mine, all] = scopeButtons();
+  expect(mine!.textContent).toBe("This job PAY-231");
+  expect(mine!.getAttribute("aria-pressed")).toBe("true");
+  expect(all!.textContent).toBe("Everything");
+  all!.click();
+  expect(location.hash).toBe("#/deps");
+});
+
+test("the top bar draws everything in its own view, and This job goes back to the ticket", async () => {
+  render(READ, true, REACHES, { job: "PAY-231" });
+  await settle();
+  expect(shownIds()).toHaveLength(READ.items.length - 1); // the network sits in no layer
+  expect(viewButton().textContent).toContain("Everything");
+  const [mine, all] = scopeButtons();
+  expect(all!.getAttribute("aria-pressed")).toBe("true");
+  mine!.click();
+  expect(location.hash).toBe("#/deps/job/PAY-231");
+});
+
+test("on the job's Map tab there is no page header, and This job stays on the tab", async () => {
+  render(READ, true, REACHES, { ticket: "PAY-231", ticketId: "jira:PAY-231", host: "job" });
+  await settle();
+  await settle();
+  expect(target.querySelector("h1")).toBeNull();
+  scopeButtons()[0]!.click();
+  expect(location.hash).toBe("#/job/PAY-231/map");
+});
+
+test("with no job open there is no scope switch on the top bar", async () => {
+  render(READ, true, REACHES);
+  await settle();
+  expect(scopeButtons()).toHaveLength(0);
+});
+
+test("a ticket nothing in the mirror answers to says so", async () => {
+  render(READ, true, REACHES, { ticket: "PAY-999" });
+  await settle();
+  await settle();
+  expect(target.querySelector("[role='alert']")!.textContent).toContain("nothing in the mirror answers to PAY-999");
 });

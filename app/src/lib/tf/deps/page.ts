@@ -1,5 +1,6 @@
 /**
- * Dependencies (#871): `#/deps`, the top-bar opening. `#/map`, the retired
+ * Dependencies (#871): `#/deps`, the top-bar opening, and `#/deps/job/<key>`,
+ * the opening from a ticket on its own page (#874). `#/map`, the retired
  * global map (D13), draws it too. The asset tree's addresses are
  * `asset-tree/page.ts`'s.
  */
@@ -9,10 +10,23 @@ import TfDeps from "./TfDeps.svelte";
 
 type DepsRoute = Extract<TfRoute, { view: "full" }> & { section: "deps" };
 
+/** The ticket key a Dependencies address opens from, or `null` for the top bar. */
+export function ticketOf(route: DepsRoute): string | null {
+  return route.head === "deps" && route.rest[0] === "job" && route.rest[1] ? route.rest[1] : null;
+}
+
 export const page = definePage({
   matches: (route): route is DepsRoute =>
     route.view === "full" && route.section === "deps" && (route.head === "deps" || route.head === "map"),
   component: TfDeps,
   crumbs: true,
-  props: ({ ready }) => ({ ready }),
+  props: ({ route, ready, job, navJob }) => {
+    const ticket = ticketOf(route);
+    return {
+      ready,
+      ticket,
+      ticketId: ticket !== null && navJob?.key === ticket ? navJob.entityId : null,
+      job,
+    };
+  },
 });

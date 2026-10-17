@@ -59,6 +59,7 @@ const ADDRESSES = [
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142", "pr"],
   ["#/pr/gitea%3Atidewater%2Fpayout-service%23142/commits", "pr"],
   ["#/deps", "deps"],
+  ["#/deps/job/PAY-231", "deps"],
   ["#/map", "deps"],
   ["#/assets", "asset tree"],
   ["#/asset/asset:vm-pay-01", "asset tree"],
@@ -101,6 +102,17 @@ test("the job page hands TfJob the address's key and tab", () => {
   const route = parseTfHash("#/job/PAY-231/code");
   const props = jobPage.props({ route } as Parameters<typeof jobPage.props>[0]);
   expect(props).toMatchObject({ segment: "PAY-231", tab: "code" });
+});
+
+test("the deps page opens from the ticket its address names, with the open job's id when it is that ticket", () => {
+  type Ctx = Parameters<typeof depsPage.props>[0];
+  const props = (hash: string, navJob: Ctx["navJob"]) =>
+    depsPage.props({ route: parseTfHash(hash), ready: true, job: "PAY-231", navJob } as Ctx);
+  const nav = { key: "PAY-231", entityId: "jira:PAY-231" };
+  expect(props("#/deps/job/PAY-231", nav)).toMatchObject({ ticket: "PAY-231", ticketId: "jira:PAY-231", job: "PAY-231" });
+  expect(props("#/deps/job/PAY-228", nav)).toMatchObject({ ticket: "PAY-228", ticketId: null });
+  expect(props("#/deps", nav)).toMatchObject({ ticket: null, ticketId: null, job: "PAY-231" });
+  expect(props("#/map", null)).toMatchObject({ ticket: null });
 });
 
 test("the review page hands TfReview the addressed proposal, or none", () => {

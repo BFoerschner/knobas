@@ -18,6 +18,12 @@ export interface DepViewState {
   readonly dirty: boolean;
   /** Take a read or a write's answer; opens the default view the first time. */
   take(views: DepViews): void;
+  /**
+   * Say which opening is on screen (#874, R-11.10): a ticket's key, or `null`
+   * for the top bar. When it differs from the last one, its default view
+   * opens (*opens from a ticket*, *opens from the top bar*) and the draft goes.
+   */
+  opening(ticket: string | null): void;
   /** Open a saved view, dropping the draft. */
   open(id: string): void;
   /** Change the draft. */
@@ -30,6 +36,8 @@ export function createDepViewState(): DepViewState {
   let saved = $state.raw<DepViews | null>(null);
   let currentId = $state<string | null>(null);
   let draft = $state.raw<DepViewSettings | null>(null);
+  /** The opening last drawn: a ticket's key, `null` for the top bar, `undefined` before any. */
+  let openedFor: string | null | undefined = undefined;
 
   const current = () => saved?.views.find((view) => view.id === currentId) ?? null;
 
@@ -56,6 +64,11 @@ export function createDepViewState(): DepViewState {
     take(views) {
       saved = views;
       if (currentId === null || !views.views.some((view) => view.id === currentId)) open(views.opens_from_top);
+    },
+    opening(ticket) {
+      if (saved === null || openedFor === ticket) return;
+      openedFor = ticket;
+      open(ticket === null ? saved.opens_from_top : saved.opens_from_ticket);
     },
     open,
     change(edit) {
