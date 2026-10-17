@@ -1482,6 +1482,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 @media (prefers-reduced-motion: reduce) { .tf-dp-t { transition: none; } }
 /* Adding (#876): *Add ▾* opens leftwards, *+ Add* sits at the band's head, a new tile flashes once. */
 .tf-dp-addmenu .tf-menu { left: auto; right: 0; }
+.tf-dp-addmenu [role="menuitem"][aria-disabled="true"] { opacity: .55; cursor: not-allowed; }
 .tf-dp-add { flex: none; }
 .tf-dp-t.tf-dp-flash { animation: tf-dp-flash 1.6s ease-out 1; }
 @keyframes tf-dp-flash { 0% { box-shadow: 0 0 0 6px var(--focus); } 100% { box-shadow: 0 0 0 0 transparent; } }
