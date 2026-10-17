@@ -4693,3 +4693,18 @@ Merge-manager:
   dismisses it; a capture's `captured-from` link can be withdrawn. Nothing reaches a source.
   Checking existence would need an async read or a page-reported state, the approach the
   implementer's first ruling turned down. **Reversing:** medium (a page reports "missing").
+
+## #1108 — Day tab: one Add takes a run of offered rows to one ticket (2026-10-17)
+
+- **Three manual blocks, not one spanning block.** *Add <total> to <ticket>* calls
+  `update_block` once per row, each over its own stretch. Time between rows that is no row is
+  not claimed, and the record keeps a block per visit. `worklog::draft` already sums them.
+  **Reversing:** low (one `create_block` plus deletes in `takeRun`).
+- **Adjacent means next in the Day list.** Any row between two offered rows breaks the run: open
+  time, a tracked block, the timer, another ticket, or a `last_logged`/`context_anchor` guess.
+  Time that is no row does not break it, because taking the run claims nothing between the rows.
+  **Reversing:** trivial (one predicate in `offerRuns`).
+- **The action is a line above the run, not a button on one row.** Each row keeps its own
+  actions unchanged. **Reversing:** trivial.
+- **A failed write stops the run and re-reads the day.** Rows already given stay given.
+  **Reversing:** trivial.
