@@ -250,6 +250,7 @@ const SETTINGS: PipelineSettings = {
   parameter_write_op: "set_parameter",
   parameter_specs: [],
   chain: [],
+  steps: [],
 };
 
 test("the Parameters tab pairs each value the run ran with with the pipeline's default", () => {

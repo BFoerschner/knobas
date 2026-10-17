@@ -57,11 +57,15 @@ export function stepSummary(step: LogStep, state: StepState): string {
 
 /** One segment of the run page's steps bar (#1003, R-9.10), placed in percent of the bar. */
 export interface StepSegment {
-  /** The step's place in `RunLog.steps`: the Log tab's fold it opens. */
+  /**
+   * The step's place in the run: in `RunLog.steps`, the Log tab's fold it
+   * opens; past them, a step not started (#1016), which has no fold.
+   */
   index: number;
   name: string;
-  state: StepState;
-  /** The name and how long it took: "Checkout, 12 s", or "cargo test, running". */
+  /** `wait`: a step of a running run its log has not reached yet (#1016). */
+  state: StepState | "wait";
+  /** The name and how long it took: "Checkout, 12 s", "cargo test, running", or "Publish, not started". */
   tip: string;
   x: number;
   width: number;
@@ -89,26 +93,44 @@ function withFloor(raw: readonly number[]): number[] {
 }
 
 /**
- * The steps bar over the log's steps: one segment per step, as wide as its
- * share of the time. A step with no duration (running, or unstamped) takes
- * the mean of the others'. No read or no steps is no bar.
+ * The steps of a run in flight its log has not reached yet (#1016): the
+ * pipeline's steps (`PipelineSettings.steps`) past the ones the log heads,
+ * when the log heads its steps by those names in that order. A pipeline
+ * changed since the run started, or one whose source names no steps ahead of
+ * time, has none.
  */
-export function stepSegments(log: RunLog | null, inFlight: boolean): StepSegment[] {
-  if (log === null || log.steps.length === 0) return [];
+function notStarted(log: RunLog, inFlight: boolean, planned: readonly string[]): string[] {
+  if (!inFlight || log.steps.length >= planned.length) return [];
+  return log.steps.every((step, i) => step.name === planned[i]) ? planned.slice(log.steps.length) : [];
+}
+
+/**
+ * The steps bar over the log's steps: one segment per step, as wide as its
+ * share of the time, then a running run's steps not started yet (#1016). A
+ * step with no duration (running, unstamped or not started) takes the mean
+ * of the others'. No read, or no step to draw, is no bar.
+ */
+export function stepSegments(log: RunLog | null, inFlight: boolean, planned: readonly string[] = []): StepSegment[] {
+  if (log === null) return [];
+  const waiting = notStarted(log, inFlight, planned);
+  if (log.steps.length + waiting.length === 0) return [];
   const known = log.steps.flatMap((s) => (s.seconds === null ? [] : [s.seconds]));
   const mean = known.length === 0 ? 1 : known.reduce((a, b) => a + b, 0) / known.length || 1;
-  const weights = log.steps.map((s) => s.seconds ?? mean);
+  const weights = [...log.steps.map((s) => s.seconds ?? mean), ...waiting.map(() => mean)];
   const total = weights.reduce((a, b) => a + b, 0);
   const shares = withFloor(weights.map((w) => (total === 0 ? 100 / weights.length : (w / total) * 100)));
   let x = 0;
-  return log.steps.map((step, index) => {
-    const state = stepState(log, index, inFlight);
-    const took = state === "run" ? "running" : step.seconds === null ? null : duration(step.seconds);
+  const place = (index: number, name: string, state: StepSegment["state"], took: string | null): StepSegment => {
     const width = shares[index]!;
-    const segment = { index, name: step.name, state, tip: took === null ? step.name : `${step.name}, ${took}`, x, width };
+    const segment = { index, name, state, tip: took === null ? name : `${name}, ${took}`, x, width };
     x += width;
     return segment;
+  };
+  const drawn = log.steps.map((step, index) => {
+    const state = stepState(log, index, inFlight);
+    return place(index, step.name, state, state === "run" ? "running" : step.seconds === null ? null : duration(step.seconds));
   });
+  return [...drawn, ...waiting.map((name, i) => place(log.steps.length + i, name, "wait", "not started"))];
 }
 
 /** How many find hits a line holds: the marked runs `marks` draws. */

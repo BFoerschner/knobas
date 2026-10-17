@@ -3977,3 +3977,40 @@ Implementer, one PR for both.
   **Reversing:** low; one field to `Option`.
 - **Implementer (#1045): ops-runbooks gets no source file.** Its `lang` is Markdown, which Gitea's
   language statistic ignores, so a file would not produce a language. **Reversing:** low.
+## #1016 — Run page: not-started steps in the steps bar (2026-10-17)
+
+- **The step names come from the settings read (#851), as `PipelineSettings.steps`.** The issue
+  offers TeamCity's `/app/rest/buildTypes/id:<id>/steps` or the run's own settings. The run page
+  already reads `pipeline_settings` on open, and TeamCity's answer is built from a configuration
+  record that already carries the steps, so the field costs no new request, no new command and no
+  new run field. A declared run field would store every step name in every run's payload; a new
+  read would be a second request per run page. **Reversing:** low (one field, `stepSegments`).
+- **The not-started steps are the configured ones past the log's, only when the log is a head of
+  them.** The log's steps must carry the configured names, in order; otherwise (the pipeline
+  changed since the run started, or the source names none) the bar draws the log's steps alone. The
+  heading's `M` is not used: it gives a count and no names. **Reversing:** low (`notStarted`).
+- **TeamCity's log step is named without its runner.** The seeded server heads its step
+  `IntegrationTests (Command Line)`; matched against the configured `IntegrationTests` it never
+  hits. The adapter now drops the last parenthesis of a heading (after any duration), so the Log
+  tab and the bar name a step as its configuration does, as prototype-6 draws them. A server that
+  heads a named step without the runner would lose a trailing parenthesis that is part of the name.
+  **Reversing:** low (`without_runner` in `log.rs`).
+- **An enabled step without a name names none of the steps.** Its log heading is the runner's
+  display name, which the configuration record does not carry, so the head match would fail anyway;
+  an empty list says so plainly. Disabled steps are left out, because the log does not number them.
+  **Reversing:** low (`step_names` in `view.rs`).
+- **A not-started step is as wide as a running one** (the mean of the finished steps' time), grey
+  (`--rule`, text `--ink-2`, prototype-6's `.wait`), with *<name>, not started* as its tip and
+  accessible name. A click opens the Log tab and opens no fold, since the step has none.
+  **Reversing:** low.
+- **Merge-manager (PR #1052): the runner is the last parenthesis matched to its opening one, not
+  the text after the last ` (`.** TeamCity has bundled runners whose display name ends in a
+  parenthesis (`Visual Studio (sln)`, `Inspections (IntelliJ IDEA)`), so a named step heads
+  `Compile (Visual Studio (sln))`, which the PR's `rfind(" (")` cut to `Compile (Visual Studio`.
+  Matching against the configured runner type was considered and not taken: the record carries the
+  type id (`VS.Solution`), not the display name the heading uses, and the log read does not fetch
+  the record. Known limit: an *unnamed* step on such a runner heads `Visual Studio (sln)` and is
+  named `Visual Studio` in the Log tab; such a pipeline's settings name no steps, so the bar is not
+  affected. The narrowed live slice was not re-run: the seeded heading `IntegrationTests (Command
+  Line)` parses to the same name under both versions, and the unit test holds that string.
+  **Reversing:** low (`without_runner` in `log.rs`).

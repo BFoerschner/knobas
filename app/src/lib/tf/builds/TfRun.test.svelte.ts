@@ -83,6 +83,7 @@ const SETTINGS: PipelineSettings = {
   parameter_write_op: "set_parameter",
   parameter_specs: [],
   chain: [],
+  steps: [],
 };
 
 function viewOf(running: boolean): SourceView {
@@ -473,6 +474,32 @@ test("a run in flight draws its last step running", async () => {
   const last = segments().at(-1)!;
   expect(last.querySelector("rect")?.getAttribute("class")).toBe("tf-sbseg tf-run");
   expect(last.querySelector("title")?.textContent).toBe("cargo test --test sepa_retry, running");
+});
+
+test("a run in flight draws the pipeline's steps its log has not reached in grey, not started, and one opens the Log tab with no fold", async () => {
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.getAttribute("data-s") ?? "");
+  };
+  const live: RunLog = { ...STEPPED, steps: STEPPED.steps.map((s, i) => (i === 2 ? { ...s, tone: null, seconds: null } : s)) };
+  const steps = [...STEPPED.steps.map((s) => s.name), "Publish test report"];
+  const drawn = draw("teamcity:build:1188", undefined, {
+    log: () => Promise.resolve(live),
+    settings: () => Promise.resolve({ ...SETTINGS, steps }),
+  });
+  await settle();
+  const wait = segments().at(-1)!;
+  expect(segments()).toHaveLength(4);
+  expect(wait.querySelector("text")?.textContent).toBe("Publish test report");
+  expect(wait.querySelector("title")?.textContent).toBe("Publish test report, not started");
+  expect(wait.getAttribute("aria-label")).toBe("Publish test report, not started");
+  expect(wait.querySelector("rect")?.getAttribute("class")).toBe("tf-sbseg tf-wait");
+  expect(wait.getAttribute("href")).toBe(`#/build/${encodeURIComponent(PIPE)}/${encodeURIComponent("teamcity:build:1188")}/log`);
+  wait.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
+  drawn.go("log");
+  await settle();
+  expect(target.querySelectorAll("details[data-s]")).toHaveLength(3);
+  expect(scrolled).toEqual([]);
 });
 
 test("a run whose source keeps no log, or whose log has no steps, draws no steps bar", async () => {

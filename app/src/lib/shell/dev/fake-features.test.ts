@@ -365,6 +365,15 @@ test("builds: a fixture run's log answers the steps bar its steps' durations, th
   ]);
 });
 
+test("builds: pipeline_settings names Payout_Build's five steps, of which 1188's log heads the first three (#1016)", () => {
+  const h = demoHandlers() as Calls;
+  const named = (config: string) => (h["pipeline_settings"]!({ pipelineId: `teamcity:buildType:${config}` }) as { steps: string[] }).steps;
+  const headed = (runId: string) => (h["run_log"]!({ runId, from: null, count: 1 }) as { steps: { name: string }[] }).steps.map((s) => s.name);
+  expect(named("Payout_Build")).toEqual(["Checkout", "cargo build --release", "cargo test", "Build image", "Publish artifacts"]);
+  expect(named("Payout_Build").slice(0, 3)).toEqual(headed("teamcity:build:Payout_Build-1188"));
+  expect(named("Payout_IntegrationTests")).toEqual(headed("teamcity:build:Payout_IntegrationTests-1187"));
+});
+
 test("builds: a fixture run answers its log, tests, a test's history, artifacts, a preview and downloads (#854, #855, #856)", () => {
   const h = demoHandlers() as Calls;
   const runId = "teamcity:build:Payout_IntegrationTests-1187";
