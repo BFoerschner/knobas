@@ -106,10 +106,15 @@ function buttons(text: string): { open: string; inner: string }[] {
   for (const match of template.matchAll(/<button(?=[\s/>])/g)) {
     const open = openTag(template, match.index + match[0].length);
     if (!open) continue;
-    const close = template.indexOf("</button>", open.end);
+    // A formatter may split the closing tag (`</button\n>`), so the end tag is
+    // matched whitespace-tolerantly; a literal `</button>` search read such a
+    // button as running on to the next one in the file.
+    const closing = /<\/button\s*>/g;
+    closing.lastIndex = open.end;
+    const close = closing.exec(template);
     found.push({
       open: open.attributes,
-      inner: close === -1 ? "" : template.slice(open.end, close),
+      inner: close === null ? "" : template.slice(open.end, close.index),
     });
   }
   return found;
@@ -140,6 +145,24 @@ test("every icon-only button has an accessible name", () => {
   }
 
   expect(offenders, "an icon-only button announces as \"button\" and nothing else").toEqual([]);
+});
+
+/**
+ * The guard's own tokenising, on inline fixtures: a closing tag split over two
+ * lines (as prettier writes it) still closes its button, and a split-tag button
+ * with no name is still an offender rather than passing by accident.
+ */
+test("a button whose closing tag is split across lines is read whole", () => {
+  const icon = '<svg aria-hidden="true"></svg>';
+  const named = `<button type="button" onclick={() => go()}>${icon}Delete branch</button\n>\n<button>${icon}</button>`;
+  const [first, second] = buttons(named);
+  expect(first!.inner.replace(/<svg\b[\s\S]*?<\/svg>/g, "").trim()).toBe("Delete branch");
+  expect(second!.inner.replace(/<svg\b[\s\S]*?<\/svg>/g, "").trim()).toBe("");
+
+  const unnamed = `<button type="button" onclick={() => go()}>${icon}</button\n>\n<button>x</button>`;
+  const [only] = buttons(unnamed);
+  expect(only!.inner.replace(/<svg\b[\s\S]*?<\/svg>/g, "").trim()).toBe("");
+  expect(/\baria-label(?:ledby)?\s*=|\btitle\s*=/.test(only!.open)).toBe(false);
 });
 
 /**
