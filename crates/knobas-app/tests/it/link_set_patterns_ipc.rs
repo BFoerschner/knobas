@@ -1,7 +1,8 @@
 //! Link-set patterns (#868, R-7.2, R-7.7) and the member rows the editor
 //! draws (#1008), through the link-set commands and the job's read, over the
 //! embedded PostgreSQL with the declarations the compiled-in adapters make
-//! (`Registry::builtin`) for a Jira, a TeamCity and a Confluence source.
+//! (`Registry::builtin`) for a Jira, a TeamCity, a Confluence, an Uptime Kuma
+//! and a Gitea source.
 //!
 //! This file's database is its own (#572); each test makes keys and project
 //! names nothing else holds.
@@ -15,7 +16,13 @@ use std::collections::BTreeSet;
 async fn pool() -> PgPool {
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
-    for (id, kind) in [("jira", "jira"), ("tc", "teamcity"), ("wiki", "confluence")] {
+    for (id, kind) in [
+        ("jira", "jira"),
+        ("tc", "teamcity"),
+        ("wiki", "confluence"),
+        ("kuma", "kuma"),
+        ("git", "gitea"),
+    ] {
         sqlx::query(
             "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
              values ($1, $2, $1, 'http://x.example', 'Pat', '{}')
@@ -536,5 +543,84 @@ async fn a_member_row_carries_its_line_and_its_dot() {
             &last.state
         ),
         (gone.as_str(), &None, &None, &None)
+    );
+}
+
+/// #1020: a monitor row draws its type and its state's dot, and a repository
+/// row its teams, else its owner, all from what Uptime Kuma and Gitea declare
+/// (ADR-0007). The payloads are the adapters' own shapes (`map`).
+#[tokio::test]
+async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner() {
+    let pool = pool().await;
+    let t = tag();
+    async fn monitor(pool: &PgPool, key: String, kind: &str, state: &str) -> String {
+        let payload = serde_json::json!({ "id": 1, "name": key, "type": kind, "state": state });
+        mirrored(pool, "kuma", "monitor", &key, &key, payload).await
+    }
+    async fn repo(pool: &PgPool, name: String, teams: serde_json::Value) -> String {
+        let payload = serde_json::json!({
+            "name": name, "full_name": format!("tidewater/{name}"),
+            "owner": { "login": "tidewater" }, "teams": teams,
+        });
+        mirrored(pool, "git", "repo", &format!("tidewater/{name}"), &name, payload).await
+    }
+    let up = monitor(&pool, format!("api{t}"), "http", "up").await;
+    let down = monitor(&pool, format!("db{t}"), "ping", "down").await;
+    let pending = monitor(&pool, format!("dns{t}"), "dns", "pending").await;
+    let resting = monitor(&pool, format!("mq{t}"), "port", "maintenance").await;
+    let teamed = repo(
+        &pool,
+        format!("payout-service{t}"),
+        serde_json::json!([{ "name": "Payments" }, { "name": "Platform" }]),
+    )
+    .await;
+    let bare = repo(&pool, format!("ledger{t}"), serde_json::json!([])).await;
+    let job = ticket(&pool).await;
+    let member = |kind: &str, id: &str| LinkSetMember {
+        kind: kind.to_owned(),
+        entity_id: id.to_owned(),
+    };
+    let saved = link_sets::save(
+        &pool,
+        draft(
+            "Watched",
+            vec![
+                member("monitor", &up),
+                member("monitor", &down),
+                member("monitor", &pending),
+                member("monitor", &resting),
+                member("repo", &teamed),
+                member("repo", &bare),
+            ],
+            vec![],
+            &job,
+        ),
+    )
+    .await
+    .unwrap();
+    use knobas_core::tone::Tone;
+    let view: Vec<_> = saved
+        .set
+        .members
+        .iter()
+        .map(|row| {
+            (
+                row.line.clone(),
+                row.state.as_ref().map(|chip| (chip.text.clone(), chip.tone)),
+            )
+        })
+        .collect();
+    let line = |s: &str| Some(s.to_owned());
+    let dot = |s: &str, tone| Some((s.to_owned(), tone));
+    assert_eq!(
+        view,
+        vec![
+            (line("http"), dot("up", Tone::Ok)),
+            (line("ping"), dot("down", Tone::Err)),
+            (line("dns"), dot("pending", Tone::Warn)),
+            (line("port"), dot("maintenance", Tone::Muted)),
+            (line("Payments, Platform"), None),
+            (line("tidewater"), None),
+        ]
     );
 }

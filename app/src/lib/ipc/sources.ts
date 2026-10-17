@@ -142,6 +142,10 @@ export interface KindPaths {
   language: PayloadPath[];
   /** The teams a repository belongs to, by name (#966). */
   teams: ListPath[];
+  /** Who owns a repository, by the account's name (#1020). */
+  owner: PayloadPath[];
+  /** How a monitor checks, in the source's word: `http`, `ping` (#1020). */
+  monitor_type: PayloadPath[];
 }
 
 /** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961). */

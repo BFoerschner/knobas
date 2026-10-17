@@ -307,8 +307,9 @@ fn fits(member_kind: &str, entity_kind: &str) -> bool {
 
 /// What each id of `$2` draws as a member row (#1008), in that order; `$1`
 /// is the declarations. Every column of a mirrored item is a declared read
-/// (ADR-0007): its chain of groups, its project, its parent chain, its own
-/// state, and for a pipeline (the Builds frame) the state of its newest run,
+/// (ADR-0007): its chain of groups, a monitor's type, a repository's teams
+/// and owner (#1020), its project, its parent chain, its own state, and for a
+/// pipeline (the Builds frame) the state of its newest run,
 /// a run of its source whose declared `pipeline` is its own -- the rule
 /// `entity::pipelines` reads runs by. An asset's type and environment are its
 /// columns; its health is [`crate::assets`]' rollup, added by [`member_rows`].
@@ -329,6 +330,13 @@ const MEMBER_ROWS: &str = concat!(
                   then i.payload #> c.at_segs else '[]'::jsonb end) with ordinality as e(elem, ord)
            where jsonb_typeof(e.elem #> c.entry_segs) = 'string'
              and nullif(btrim(e.elem #>> c.entry_segs), '') is not null) as groups, ",
+    knobas_core::declared_string!("$1", "monitor_type"),
+    " as monitor_type,
+         (select string_agg(t.value, ', ') from ",
+    knobas_core::declared_list!("$1", "teams"),
+    " t) as teams, ",
+    knobas_core::declared_string!("$1", "owner"),
+    " as owner, ",
     knobas_core::declared_state!("$1"),
     " as own_state,
          a.type_id, a.environment
@@ -338,6 +346,7 @@ const MEMBER_ROWS: &str = concat!(
     left join knobas.asset a on a.id = u.id
 )
 select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.environment,
+       m.monitor_type, m.teams, m.owner,
        case when m.frame = 'pipeline' and m.pkey is not null then
          (select ",
     knobas_core::declared_state!("$1"),
@@ -354,7 +363,8 @@ select m.id, m.kind, m.title, m.project, m.parents, m.groups, m.type_id, m.envir
 
 /// The line a member row draws beside its name, from [`MEMBER_ROWS`]'
 /// columns: an asset's `type, environment`; a mirrored item's chain of
-/// groups, else its project and parent chain.
+/// groups, a monitor's type, a repository's teams else its owner (#1020),
+/// else its project and parent chain.
 fn line_of(row: &sqlx::postgres::PgRow) -> Option<String> {
     let text = |column: &str| -> Option<String> {
         row.get::<Option<String>, _>(column)
@@ -366,8 +376,11 @@ fn line_of(row: &sqlx::postgres::PgRow) -> Option<String> {
             None => type_id,
         });
     }
-    if let Some(groups) = text("groups") {
-        return Some(groups);
+    if let Some(line) = ["groups", "monitor_type", "teams", "owner"]
+        .into_iter()
+        .find_map(text)
+    {
+        return Some(line);
     }
     let parts: Vec<String> = [text("project"), text("parents")]
         .into_iter()

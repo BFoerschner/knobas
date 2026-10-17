@@ -4272,3 +4272,21 @@ Ruled by the implementer (PR for #870).
 - **The old shell's backup section gets no *Link sets* tick** and sends the part on by its
   default (`shareDefaults`), so its exports carry sets and empty tables when there are none. It
   is the shell being replaced. **Reversing:** low.
+## #1020 — Set editor: monitor and repository rows draw a line (2026-10-17)
+
+Ruled by the implementer (PR for #1020).
+
+- **A repository row draws its teams, else its owner.** The ticket asks for the owner; it was
+  filed before #966 declared `teams`, and prototype-6's `renderSet` draws `e.team`. So the line
+  is the declared teams (joined `, `, as Code's header joins them), and the new `owner`
+  declaration (Gitea's `owner.login`) where a repository is in no team of its own (*Owners* is
+  left out by #966). **Reversing:** one entry in `link_sets::line_of`'s list.
+- **The monitor's type is its own field, `monitor_type`,** not `issue_type`: `issuetype:` matches
+  that one, and a monitor would then answer `issuetype:http`. **Reversing:** a rename across the
+  field, the battery and the mirror.
+- **`maintenance` is muted.** Somebody silenced the monitor on purpose; prototype-6 draws a paused
+  monitor with no dot, and the Monitors tab has no chip of its own for it. `pending` is warn, not
+  the fake's old info. **Reversing:** one tone in Kuma's `monitor_state`.
+- **Kuma's `state` chip draws everywhere a declared chip draws** (search rows, lists, the
+  launcher), not only in the set editor: one declaration, every reader (ADR-0007).
+  **Reversing:** none wanted; the chip is the monitor's own state.

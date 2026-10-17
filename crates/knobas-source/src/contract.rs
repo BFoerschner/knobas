@@ -783,7 +783,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 22] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 24] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -806,6 +806,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::FINISHED, &paths.finished, Wanted::Instant),
             (field::STARTED_BY, &paths.started_by, Wanted::Text),
             (field::LANGUAGE, &paths.language, Wanted::Text),
+            (field::OWNER, &paths.owner, Wanted::Text),
+            (field::MONITOR_TYPE, &paths.monitor_type, Wanted::Text),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
