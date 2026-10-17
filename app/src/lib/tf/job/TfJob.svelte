@@ -671,7 +671,7 @@
               </TfSection>
             {/if}
             <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
-            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
+            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
             <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>
         {:else if current.id === "conversation"}

@@ -4113,3 +4113,14 @@ Implementer rulings, one PR for both issues.
   **Reversing:** low.
 - **The estate file and import are unchanged:** they name no monitor for a route, so the fixture
   and the testenv estate list every route as a gap. **Reversing:** a key in the estate file.
+
+## #1000 — Open Code view and Open Monitors turn This job on (2026-10-17)
+
+Ruled by the implementer (PR for #1000).
+
+- **Open Code view turns *This job* on for Repositories only (`sessionFilter("code-repos")`), and
+  leaves the Pull requests tab (`code-prs`) as it was.** The ticket names Code's Repositories, and
+  the link opens that tab. **Reversing:** low (one more line in `TfCodeSection`'s `onopen`).
+- **Both links write the scope through `TfSection`'s `onopen`, as #863 did for Pages.** The
+  views read the scope on mount (`if (scope === null) scope = "all"`), so a write before the link
+  is followed wins, and a later pick is kept for the session (R-2.6). **Reversing:** low.
