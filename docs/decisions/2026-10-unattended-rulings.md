@@ -4649,3 +4649,26 @@ typed read stays uncapped". Implementer:
 - **The probe keeps the uncapped typed rows beside the 50 ones**, labelled for lanes, which
   still make that read; one run shows before and after on the same machine state.
   **Reversing:** trivial.
+
+## #1102 — Passive attribution and capture see the open entity page (2026-10-17)
+
+Implementer:
+
+- **The open detail is read from the address, not reported by each page.** `tf/foreground.ts`'s
+  `foregroundOf(route, job)` names the entity of `#/pr/<id>`, `#/repo/<id>`, `#/branch/<id>`,
+  `#/commit/<id>`, `#/page/<id>` and the run of `#/build/<run>` or `#/build/<pipeline>/<run>`.
+  Synchronous, so a page still reading never shows the heartbeat a gap, and one rule instead of
+  seven page stores. **Reversing:** medium (a `currentDetail` store each page sets, like `currentJob`).
+- **A tab or place inside a page is the same entity** (`#/pr/<id>/files`,
+  `#/repo/<id>/commits/<sha>`, `#/build/<p>/<r>/tests`, `#/page/<id>/3`), and App keys the
+  foreground on the id, so moving between them re-sends nothing and cuts no run. A commit opened
+  under a repository's Commits tab stays the repository. **Reversing:** low.
+- **The Tree's rung is `#/asset/<id>`**: the Tree's selection lives in its address. `#/assets`
+  and `#/route/<id>` are nothing (the route's asset is only known after the Tree reads it), as in
+  the rooms UI. **Reversing:** low.
+- **Lists are nothing**: `#/builds/<pipeline>`, `#/docs` (its "last page"), `#/docs/space/<k>`,
+  Code, Dependencies. A selected pipeline is a list row, not a detail page. **Reversing:** low
+  (one more head in `detailOf`).
+- **Job → its pull request → back is three runs**, by the glossary's order (the detail beats the
+  job). Not fragmentation: it is what was in front. No IPC change, so no §10.8 entry.
+  **Reversing:** n/a.

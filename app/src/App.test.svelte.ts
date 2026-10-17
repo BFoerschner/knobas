@@ -287,6 +287,7 @@ const { default: App } = await import("./App.svelte");
 const { EVENTS } = await import("./lib/ipc");
 const { inbox } = await import("./lib/inbox/inbox.svelte");
 const { notifications } = await import("./lib/inbox/notify.svelte");
+const { timer } = await import("./lib/shell/timer.svelte");
 const { health } = await import("./lib/shell/health.svelte");
 const { lifecycle } = await import("./lib/shell/lifecycle.svelte");
 const { toasts } = await import("./lib/shell/toasts.svelte");
@@ -617,6 +618,36 @@ test("what a capture would attach is the foreground and the context the timer re
     () => captureRecords.at(-1)?.foreground === null,
     "a page with no job never recorded an empty foreground",
   );
+});
+
+/**
+ * **An entity page is in front of the job** (#1102, `CONTEXT.md`'s *Passive
+ * attribution*): on a pull request the heartbeat and a capture both name the
+ * pull request, not the job the reader came from, and back on the job they
+ * name its ticket again. The heartbeat sends `timer.foreground` on each beat.
+ */
+test("a pull request page puts the pull request in front, for the heartbeat and a capture alike", async () => {
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/job/mock:PAY-231";
+  app = mount(App, { target, props: {} });
+  await until(() => captureRecords.at(-1)?.foreground === "mock:PAY-231", "the job never reached the capture record");
+
+  const pr = "gitea:acme/payouts#144";
+  location.hash = `#/pr/${encodeURIComponent(pr)}`;
+  await until(() => captureRecords.at(-1)?.foreground === pr, "the pull request never reached the capture record");
+  expect(timer.foreground, "the heartbeat and the capture disagree").toEqual({ kind: "entity", entity_id: pr });
+
+  // A tab of the same pull request is the same foreground: one run, no new record.
+  const records = captureRecords.length;
+  location.hash = `#/pr/${encodeURIComponent(pr)}/files`;
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(timer.foreground).toEqual({ kind: "entity", entity_id: pr });
+  expect(captureRecords.length, "a tab of the same pull request recorded the capture again").toBe(records);
+
+  location.hash = "#/job/mock:PAY-231";
+  await until(() => captureRecords.at(-1)?.foreground === "mock:PAY-231", "back on the job, its ticket never returned");
+  expect(timer.foreground).toEqual({ kind: "entity", entity_id: "mock:PAY-231" });
 });
 
 /**
