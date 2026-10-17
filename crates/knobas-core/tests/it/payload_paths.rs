@@ -935,17 +935,33 @@ async fn chips(
         knobas_core::declared_state!("$1"),
         " as state from sync.live_item i where i.entity_id = $2"
     );
+    // The signals' spelling (#1148): the same rule over the declaration's
+    // values flattened once a statement, which `has:` and the cards read.
+    const SIGNALS: &str = concat!(
+        "with state_paths as materialized (",
+        knobas_core::state_paths!("$1"),
+        ") select ",
+        knobas_core::resolved_state!(),
+        " as state from sync.live_item i where i.entity_id = $2"
+    );
     item(pool, source, kind, key, &payload).await;
-    let row = sqlx::query(CHIP)
-        .bind(declarations.as_param())
-        .bind(format!("{source}:{key}"))
-        .fetch_one(pool)
-        .await
-        .unwrap_or_else(|e| panic!("{key}'s state must resolve: {e}"));
-    let sql: Option<sqlx::types::Json<StateChip>> = row.get("state");
+    let mut answers = Vec::new();
+    for statement in [CHIP, SIGNALS] {
+        let row = sqlx::query(statement)
+            .bind(declarations.as_param())
+            .bind(format!("{source}:{key}"))
+            .fetch_one(pool)
+            .await
+            .unwrap_or_else(|e| panic!("{key}'s state must resolve: {e}"));
+        let sql: Option<sqlx::types::Json<StateChip>> = row.get("state");
+        answers.push(sql.map(|j| j.0));
+    }
+    let signals = answers.pop().unwrap();
+    let sql = answers.pop().unwrap();
+    assert_eq!(signals, sql, "the signals' state for {key} is the chip's");
     let empty = KindPaths::default();
     let declared = declarations.get(source, kind).unwrap_or(&empty);
-    (sql.map(|j| j.0), resolve_state(&payload, &declared.state))
+    (sql, resolve_state(&payload, &declared.state))
 }
 
 fn chip(text: &str, tone: Tone) -> Option<StateChip> {
