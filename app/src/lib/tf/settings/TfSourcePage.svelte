@@ -46,7 +46,7 @@
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
-  import { configChanges, formValues, pageFields, withChanges } from "./source-config";
+  import { configChanges, formValues, pageFields, withAdded, withChanges } from "./source-config";
   import TfSchemaForm from "./TfSchemaForm.svelte";
   import type { SettingsPorts } from "./ports";
   import {
@@ -60,6 +60,7 @@
     sourceLine,
     sourceState,
     userOf,
+    type ListAddition,
   } from "./settings";
   import TfDialog from "./TfDialog.svelte";
 
@@ -77,6 +78,7 @@
     onstarted,
     onstopped,
     onremoved,
+    add,
   }: {
     source: SourceSummary;
     /** The adapter's descriptor, or `null` until `list_adapters` answers. */
@@ -93,6 +95,8 @@
     onstarted: () => void;
     onstopped: () => void;
     onremoved: () => void;
+    /** A value to add to a list field, unsaved: a Jira view's *Sync WEB too* (#879). */
+    add?: ListAddition | undefined;
   } = $props();
 
   const name = $derived(source.display_name || source.id);
@@ -187,6 +191,8 @@
   function readForm(fields: typeof config.fields, stored: unknown) {
     configValues = formValues(fields, stored);
     configLoaded = validate(fields, configValues).config;
+    // A value the address adds (#879) is the reader's edit, offered unsaved.
+    configValues = withAdded(fields, configValues, add);
   }
 
   async function saveConfig() {

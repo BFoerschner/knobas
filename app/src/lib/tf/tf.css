@@ -1050,6 +1050,11 @@ a.tf-r:hover { background: var(--sheet-2); }
 /* Sources › Jira › Boards and filters (#878). */
 .tf-stg-boards { margin-top: 8px; }
 .tf-stg-boards .tf-stg-end { text-align: right; }
+/* A Jira view's source line and warn line under the board head (#879; prototype-6's .vw-srcline). */
+.tf .tf-vw-srcline { margin: -4px 22px 10px; font-size: var(--t-sm); color: var(--ink-2); line-height: 1.5; max-width: 110ch; }
+.tf-vw-srcline code { font: var(--t-xs) var(--mono); color: var(--ink); background: var(--sheet-2); padding: 0 4px; border-radius: 3px; font-variant-ligatures: none; }
+.tf-vw-srcline a { color: var(--ink); }
+.tf-vw-srcline.tf-vw-warn { color: var(--warn); }
 .tf-lab { font-size: var(--t-2xs); padding: 0 5px; border: 1px solid var(--rule); border-radius: 3px; color: var(--ink-2); }
 .tf-vw-store { font-size: var(--t-xs); align-self: center; }
 /* ---------- Builds, the pipeline page (#851): header, history chart, tabs ---------- */

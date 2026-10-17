@@ -365,19 +365,57 @@ async fn opening_a_new_jira_view_takes_its_new_mark_away() {
     assert_eq!(missing.code, IpcErrorCode::NotFound);
 }
 
-/// #878, R-13a.2: the tickets on a Jira view that knobas does not mirror,
-/// by project, for *Boards and filters* (WEB-5 is on the seeded board and in
-/// no synced project).
+/// #879, R-3.23: the tickets Jira put on a view that knobas does not have,
+/// counted per project the source does not sync, for the Tickets warn line
+/// and *Boards and filters* (#878, R-13a.2). A missing key of a project it
+/// does sync is not one: that is a sync still to come.
 #[tokio::test]
-async fn a_jira_view_names_the_tickets_on_it_that_knobas_does_not_sync() {
-    let pool = pool().await;
-    let (_, id, _) = seeded(&pool).await;
+async fn a_jira_view_counts_its_tickets_in_projects_the_source_does_not_sync() {
+    let pool = knobas_db::test_util::scratch_database("jira_views_unsynced")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool onto the scratch database");
+    let p = project();
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira', 'jira', 'Jira', 'http://x', 'Pat', $1)",
+    )
+    .bind(json!({ "projects": [p.clone(), "OPS"] }))
+    .execute(&pool)
+    .await
+    .unwrap();
+    issue(&pool, &format!("{p}-1"), "To Do", "Settle the ledger").await;
+    let keys = [
+        format!("{p}-1"),
+        "WEB-5".into(),
+        format!("{p}-9"),
+        "WEB-6".into(),
+        "CUS-1".into(),
+    ];
+    let (id, _) = board(&pool, &p, &keys).await;
     let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
-    assert_eq!(
-        jira.unsynced,
-        [ticket_views::Unsynced {
-            project: "WEB".into(),
-            count: 1
-        }]
-    );
+    let unsynced: Vec<(&str, u64)> = jira
+        .unsynced
+        .iter()
+        .map(|u| (u.project.as_str(), u.count))
+        .collect();
+    assert_eq!(unsynced, [("WEB", 2), ("CUS", 1)], "most first");
+
+    // A source that names no projects syncs everything the credential sees,
+    // and a JQL source has no projects to add to: neither has an unsynced
+    // project, and *Sync WEB too* there would narrow the source or be refused.
+    for config in [
+        json!({}),
+        json!({ "projects": [] }),
+        json!({ "jql_filter": "labels = on-call" }),
+    ] {
+        sqlx::query("update knobas.source_config set config = $1 where id = 'jira'")
+            .bind(&config)
+            .execute(&pool)
+            .await
+            .unwrap();
+        let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
+        assert_eq!(jira.unsynced, [], "{config} leaves no project out");
+    }
 }

@@ -1168,7 +1168,10 @@ const FLOW_COLUMNS = [
 ];
 
 /** A Jira board view, and a harness whose board answers it under Jira's columns, recording each read. */
-function jiraHarness(): { h: Harness; jiraReads: (string | null)[] } {
+function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
+  h: Harness;
+  jiraReads: (string | null)[];
+} {
   const h = harness([], [
     view("my-work", "My work", "Mine", 0, { query: "assignee:@me", count: 2 }),
     view("jira-board-21", "Payments and Ops flow", "Jira boards", 1, {
@@ -1186,6 +1189,7 @@ function jiraHarness(): { h: Harness; jiraReads: (string | null)[] } {
         hidden: false,
         new: false,
         unsynced: [],
+        ...over,
       },
     }),
   ]);
@@ -1414,4 +1418,51 @@ test("View settings on a Jira view says Jira decides, locks its columns, and sav
   [...box.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save view")!.click();
   await settle();
   expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", lanes: "assignee", columns: FLOW_COLUMNS, jira_ref: "jira:board-21" });
+});
+
+const srcLines = () => [...target.querySelectorAll(".tf-vw-srcline")].map((p) => p.textContent!.replace(/\s+/g, " ").trim());
+
+test("a Jira view's header says where it comes from: board and type, JQL, last read, and Open in Jira (#879)", async () => {
+  const opened: string[] = [];
+  const { h } = jiraHarness({ last_read: new Date(Date.now() - 4 * 60_000).toISOString() });
+  h.ports.openExternal = (url) => {
+    opened.push(url);
+    return Promise.resolve();
+  };
+  await open(h, null, "jira-board-21");
+  expect(srcLines()).toEqual([
+    "Jira decides which tickets, from the Kanban board Payments and Ops flow: project in (PAY, OPS) ORDER BY Rank ASC and fixVersion is EMPTY. Read again at every sync, last 4 min ago. Open in Jira",
+  ]);
+  [...target.querySelectorAll<HTMLAnchorElement>(".tf-vw-srcline a")].find((a) => a.textContent === "Open in Jira")!.click();
+  expect(opened).toEqual(["https://jira.example/secure/RapidBoard.jspa?rapidView=21"]);
+});
+
+test("a Scrum view names its active sprint and when it ends", async () => {
+  const { h } = jiraHarness({
+    board_type: "scrum",
+    sub_query: null,
+    jql: "project = PAY ORDER BY Rank ASC",
+    sprint: { id: 7, name: "Sprint 34", end_date: "2026-10-22T16:00:00Z" },
+  });
+  await open(h, null, "jira-board-21");
+  expect(srcLines()[0]).toMatch(
+    /^Jira decides which tickets, from the Scrum board Payments and Ops flow, active sprint Sprint 34 \(ends 22 Oct\): project = PAY ORDER BY Rank ASC\. /,
+  );
+});
+
+test("tickets Jira put on a view in a project the source does not sync get a warn line and Sync WEB too", async () => {
+  const { h } = jiraHarness({ unsynced: [{ project: "WEB", count: 9 }] });
+  await open(h, null, "jira-board-21");
+  const warn = target.querySelector<HTMLElement>(".tf-vw-srcline.tf-vw-warn")!;
+  expect(warn.textContent!.replace(/\s+/g, " ").trim()).toBe(
+    "9 tickets on it are in WEB, which the Jira source does not sync, so they are missing here. Sync WEB too",
+  );
+  [...warn.querySelectorAll("button")].find((b) => b.textContent === "Sync WEB too")!.click();
+  expect(location.hash).toBe("#/settings/source/jira/add/projects/WEB");
+});
+
+test("a view somebody made has no source line", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "my-work");
+  expect(srcLines()).toEqual([]);
 });

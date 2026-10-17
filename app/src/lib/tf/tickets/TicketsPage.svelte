@@ -56,6 +56,8 @@
      * query or not; or a Jira view's board, when `jiraView` names one (#877).
      */
     board: (perColumn: number | null, query: string | null, jiraView?: string | null) => Promise<MiniBoard>;
+    /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
+    openExternal?: (url: string) => Promise<void>;
     /** The selected ticket's description. */
     detail: (entityId: string) => Promise<Pick<EntityDetail, "body_text">>;
     contexts: () => Promise<ContextRow[]>;
@@ -122,6 +124,7 @@
     saveTicketView,
     ticketViews,
   } from "../../ipc/search";
+  import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
   import { isFiltering, toQuery, type FilterConfig, type FilterOption } from "../filter/filter";
@@ -130,6 +133,8 @@
   import Marked from "../filter/Marked.svelte";
   import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
+  import { sourceHash } from "../settings/settings";
+  import JiraSourceLine from "./JiraSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
   import TicketPreview from "./TicketPreview.svelte";
@@ -163,6 +168,7 @@
     groupViews,
     hiddenViews,
     JIRA_GROUPS,
+    jiraSourceId,
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
     savedShowing,
@@ -176,6 +182,7 @@
     ports = {
       board: (perColumn, query, jiraView) =>
         miniBoard({ sources: [], context: null, project: null }, perColumn, query, jiraView),
+      openExternal,
       detail: getEntity,
       contexts: listContexts,
       listEntities,
@@ -249,7 +256,7 @@
   /** Where *Choose which* goes: the first Jira view's source, else the sources. */
   const jiraSettings = $derived.by(() => {
     const ref = (views ?? []).find((row) => row.jira !== null)?.jira_ref;
-    return ref ? `#/settings/source/${encodeURIComponent(ref.split(":")[0]!)}` : "#/settings";
+    return ref ? sourceHash(jiraSourceId(ref)) : "#/settings";
   });
 
   function loadViews() {
@@ -769,6 +776,14 @@
         />
       {/if}
     </div>
+    {#if view?.jira && view.jira_ref}
+      <JiraSourceLine
+        jira={view.jira}
+        name={view.name}
+        sourceId={jiraSourceId(view.jira_ref)}
+        openExternal={ports.openExternal ?? openExternal}
+      />
+    {/if}
     {#if base !== null}
       <FilterBar
         {config}

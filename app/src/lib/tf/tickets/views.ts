@@ -31,6 +31,23 @@ export function drawnJiraColumns(own: ViewColumn[]): ViewColumn[] {
   return own.map((column) => ({ ...column, statuses: [column.name] }));
 }
 
+/** The Jira source a Jira view comes from: its `jira_ref`'s source id (`jira:board-21` → `jira`). */
+export function jiraSourceId(ref: string): string {
+  return ref.split(":")[0]!;
+}
+
+/** What a Jira view is read from, in prototype-6's words (#879): *Kanban board*, *saved filter*. */
+export function jiraKindWords(jira: Pick<JiraSource, "kind" | "board_type">): string {
+  if (jira.kind !== "board") return "saved filter";
+  const type = jira.board_type ? jira.board_type[0]!.toUpperCase() + jira.board_type.slice(1) : "";
+  return `${type} board`.trim();
+}
+
+/** A sprint's end as the header says it (#879): *22 Oct*, in the reader's zone; `""` for a date that is not one. */
+export function sprintEnds(iso: string): string {
+  const at = new Date(iso);
+  return Number.isNaN(at.getTime()) ? "" : at.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
+}
 /** What a card shows unless a view says otherwise (prototype-6's `VCARD`). */
 export const DEFAULT_CARD_FIELDS: CardField[] = ["type", "signals", "comments", "assignee"];
 /** The list's columns unless a view says otherwise (prototype-6's new view). */

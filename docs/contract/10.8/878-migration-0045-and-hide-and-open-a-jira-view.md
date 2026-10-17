@@ -38,7 +38,8 @@
   `open_jira_view` clears `is_new` (no change on any other view); `not_found` for no view.
   `ticket_views`' `JiraSource` gains `hidden: bool`, `new: bool` and `unsynced: [{project,
   count}]` (the view's members that are not live tickets, by the project in their key, most
-  first). Mirrored in `app/src/lib/ipc/search.ts` (`hideJiraView`, `openJiraView`,
+  first; #879 narrowed it to the projects the source does not sync, see
+  `879-ipc-schema-jira-view-unsynced-tickets.md`). Mirrored in `app/src/lib/ipc/search.ts` (`hideJiraView`, `openJiraView`,
   `JiraSource`, `UnsyncedTickets`) and the fake IPC (`fake/ticket-views.ts`).
 
   Pinned by `crates/knobas-source-jira/src/views.rs`' tests (a favourite filter, filters off,

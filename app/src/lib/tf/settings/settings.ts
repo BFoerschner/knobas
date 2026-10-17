@@ -40,23 +40,36 @@ export const SETTINGS_SECTIONS: readonly (readonly [SettingsSection, string])[] 
 ];
 
 /** Where in Settings the reader is: a section, or one source's page. */
-export type SettingsPlace = { section: SettingsSection } | { section: "sources"; source: string };
+export type SettingsPlace =
+  | { section: SettingsSection }
+  | { section: "sources"; source: string; add?: ListAddition };
+
+/** A value an address adds to a list field of a source's config, unsaved (#879). */
+export interface ListAddition {
+  field: string;
+  value: string;
+}
 
 /**
  * Read what follows `#/settings`. `source/<id>` is a source's page, which
  * lights Sources in the navigation; an unknown section is Sources, as in the
- * prototype (`STGV[sec] || STGV.sources`).
+ * prototype (`STGV[sec] || STGV.sources`). `source/<id>/add/<field>/<value>`
+ * is that page with `value` added to its list field `field`, unsaved: a Jira
+ * view's *Sync WEB too* (#879, R-3.23).
  */
 export function settingsPlace(rest: readonly string[]): SettingsPlace {
-  const [head, arg] = rest;
+  const [head, arg, verb, field, value] = rest;
+  if (head === "source" && arg && verb === "add" && field && value)
+    return { section: "sources", source: arg, add: { field, value } };
   if (head === "source" && arg) return { section: "sources", source: arg };
   const known = SETTINGS_SECTIONS.find(([key]) => key === head);
   return { section: known ? known[0] : "sources" };
 }
 
-/** The address of a source's page. */
-export function sourceHash(id: string): string {
-  return `#/settings/source/${encodeURIComponent(id)}`;
+/** The address of a source's page; with `add`, the page with that value added to a list field (#879). */
+export function sourceHash(id: string, add?: ListAddition): string {
+  const page = `#/settings/source/${encodeURIComponent(id)}`;
+  return add ? `${page}/add/${encodeURIComponent(add.field)}/${encodeURIComponent(add.value)}` : page;
 }
 
 /** A state dot's tone. */
