@@ -500,6 +500,10 @@ impl knobas_source::Source for Answers {
                 "connection refused".to_owned(),
             ));
         }
+        if entity.ends_with(":buildType:Slow") {
+            // A source that never answers (#1144): the caller's budget ends it.
+            tokio::time::sleep(std::time::Duration::from_secs(3600)).await;
+        }
         let repository = |name: &str, url: Option<&str>| PipelineRepository {
             name: name.to_owned(),
             url: url.map(str::to_owned),
@@ -1003,6 +1007,237 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
         recent, from_runs,
         "the list reads a run as the pipeline does"
     );
+}
+
+/// **A sha two mirrored repositories share** (#1144): a fork or a mirror on a
+/// second forge holds the same commit, so the sha alone does not say which
+/// one a run built. The run's commit is the one in the repository its
+/// pipeline builds, by that repository's URL and the sha as a build view's
+/// commit row is (#665). Where the pipeline's repositories cannot be read,
+/// an ambiguous sha links nothing, and a sha one commit holds still links it.
+#[tokio::test]
+async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
+    use knobas_app::commands::entity::pipeline_runs_live_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let suffix = &tc[2..];
+    // The fork's source id sorts before the pipeline's own Gitea, so the
+    // lowest id is the wrong one.
+    let gitea = format!("gitea{suffix}");
+    let fork = format!("fork{suffix}");
+    for (id, base) in [
+        (&gitea, "http://gitea.example"),
+        (&fork, "http://fork.example"),
+    ] {
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+             values ($1, 'gitea', $1, $2, 'Pat', '{}')",
+        )
+        .bind(id)
+        .bind(base)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let at = "2026-08-20T00:00:00Z";
+    let commit =
+        |source: &str, sha: &str| format!("{source}:commit:tidewater/payout-service/{sha}");
+    let mirrored = |source: String, base: &'static str, sha: String| {
+        let pool = pool.clone();
+        async move {
+            let id = commit(&source, &sha);
+            item(
+                &pool,
+                &id,
+                &source,
+                "commit",
+                at,
+                serde_json::json!({ "sha": sha }),
+            )
+            .await;
+            sqlx::query("update sync.item set web_url = $2 where entity_id = $1")
+                .bind(&id)
+                .bind(format!("{base}/tidewater/payout-service/commit/{sha}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            id
+        }
+    };
+    let shared = format!("b7e3{suffix}");
+    let only = format!("c0de{suffix}");
+    let ours = mirrored(gitea.clone(), "http://gitea.example", shared.clone()).await;
+    let theirs = mirrored(fork.clone(), "http://fork.example", shared.clone()).await;
+    let alone = mirrored(fork.clone(), "http://fork.example", only.clone()).await;
+    assert!(theirs < ours, "the fork's commit is the lowest id");
+
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let down = configuration(&pool, &tc, "Down", "Down").await;
+    for (id, config, sha) in [
+        (1, "Payout_IntegrationTests", &shared),
+        (2, "Payout_IntegrationTests", &only),
+        (3, "Down", &shared),
+        (4, "Down", &only),
+    ] {
+        item(
+            &pool,
+            &format!("{tc}:build:{id}"),
+            &tc,
+            "build",
+            &format!("2026-08-21T0{id}:00:00Z"),
+            serde_json::json!({
+                "id": id, "number": id.to_string(), "buildTypeId": config,
+                "state": "finished", "status": "SUCCESS", "branchName": "main",
+                "revisions": { "revision": [{ "version": sha }] }
+            }),
+        )
+        .await;
+    }
+    let commits = |runs: Vec<knobas_app::commands::entity::RunRow>| {
+        runs.into_iter()
+            .map(|r| (r.entity_id, r.commit_id))
+            .collect::<Vec<_>>()
+    };
+    let (b1, b2, b3, b4) = (
+        format!("{tc}:build:1"),
+        format!("{tc}:build:2"),
+        format!("{tc}:build:3"),
+        format!("{tc}:build:4"),
+    );
+
+    // The pipeline builds payout-service on gitea.example: the shared sha is
+    // that repository's commit, not the fork's.
+    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &tests, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        commits(live),
+        [(b2.clone(), Some(alone.clone())), (b1.clone(), Some(ours))]
+    );
+
+    // A pipeline whose settings cannot be read: the shared sha links nothing,
+    // the sha one commit holds still links it.
+    let unread = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &down, None)
+        .await
+        .unwrap();
+    assert_eq!(commits(unread), [(b4, Some(alone.clone())), (b3, None)]);
+
+    // The mirror alone cannot say which repository a run built: the same.
+    let mirror = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    assert_eq!(commits(mirror), [(b2, Some(alone)), (b1, None)]);
+}
+
+/// **The edges of a shared sha** (#1144, merge review). A sha that two of the
+/// pipeline's own repositories hold names no one commit, so it links nothing.
+/// A page URL that resolves to an item other than a commit is no hit, so it
+/// does not crowd out the one commit that is. And a source that never answers
+/// costs the runs their link, not their answer.
+#[tokio::test]
+async fn a_shared_sha_links_nothing_it_cannot_pin_and_never_waits_on_a_silent_source() {
+    use knobas_app::commands::entity::pipeline_runs_live_inner;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let suffix = &tc[2..];
+    let gitea = format!("gitea{suffix}");
+    let fork = format!("fork{suffix}");
+    for (id, base) in [
+        (&gitea, "http://gitea.example"),
+        (&fork, "http://fork.example"),
+    ] {
+        sqlx::query(
+            "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+             values ($1, 'gitea', $1, $2, 'Pat', '{}')",
+        )
+        .bind(id)
+        .bind(base)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    let at = "2026-08-20T00:00:00Z";
+    let mirrored = |source: String, kind: &'static str, repo: &'static str, sha: String| {
+        let pool = pool.clone();
+        async move {
+            let base = if source.starts_with("fork") {
+                "http://fork.example"
+            } else {
+                "http://gitea.example"
+            };
+            let id = format!("{source}:{kind}:tidewater/{repo}/{sha}");
+            let payload = if kind == "commit" {
+                serde_json::json!({ "sha": sha })
+            } else {
+                serde_json::json!({})
+            };
+            item(&pool, &id, &source, kind, at, payload).await;
+            sqlx::query("update sync.item set web_url = $2 where entity_id = $1")
+                .bind(&id)
+                .bind(format!("{base}/tidewater/{repo}/commit/{sha}"))
+                .execute(&pool)
+                .await
+                .unwrap();
+            id
+        }
+    };
+    // Both of the pipeline's repositories hold `both`.
+    let both = format!("b0b0{suffix}");
+    mirrored(gitea.clone(), "commit", "payout-service", both.clone()).await;
+    mirrored(gitea.clone(), "commit", "elsewhere", both.clone()).await;
+    // `branchy`: the fork's commit, the pipeline's `elsewhere` commit, and an
+    // item that is no commit at the page `payout-service` would have.
+    let branchy = format!("b4a7{suffix}");
+    mirrored(fork.clone(), "commit", "payout-service", branchy.clone()).await;
+    let elsewhere = mirrored(gitea.clone(), "commit", "elsewhere", branchy.clone()).await;
+    mirrored(gitea.clone(), "branch", "payout-service", branchy.clone()).await;
+
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let slow = configuration(&pool, &tc, "Slow", "Slow").await;
+    for (id, config, sha) in [
+        (1, "Payout_IntegrationTests", &both),
+        (2, "Payout_IntegrationTests", &branchy),
+        (3, "Slow", &both),
+    ] {
+        item(
+            &pool,
+            &format!("{tc}:build:{id}"),
+            &tc,
+            "build",
+            &format!("2026-08-21T0{id}:00:00Z"),
+            serde_json::json!({
+                "id": id, "number": id.to_string(), "buildTypeId": config,
+                "state": "finished", "status": "SUCCESS", "branchName": "main",
+                "revisions": { "revision": [{ "version": sha }] }
+            }),
+        )
+        .await;
+    }
+    let commits = |runs: Vec<knobas_app::commands::entity::RunRow>| {
+        runs.into_iter()
+            .map(|r| (r.entity_id, r.commit_id))
+            .collect::<Vec<_>>()
+    };
+
+    let live = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &tests, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        commits(live),
+        [
+            (format!("{tc}:build:2"), Some(elsewhere)),
+            (format!("{tc}:build:1"), None),
+        ]
+    );
+
+    let started = std::time::Instant::now();
+    let silent = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &slow, None)
+        .await
+        .unwrap();
+    assert!(
+        started.elapsed() < std::time::Duration::from_secs(20),
+        "the run page waited {:?} on a silent source",
+        started.elapsed()
+    );
+    assert_eq!(commits(silent), [(format!("{tc}:build:3"), None)]);
 }
 
 /// **How a run was started** (#961): the declared trigger in the shell's

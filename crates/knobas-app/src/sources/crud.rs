@@ -840,6 +840,68 @@ pub async fn pipeline_settings(
     Ok(Some(settings))
 }
 
+/// The mirrored commit of each of `shas` in the repositories pipeline
+/// `entity_id` builds (#1144), for a sha two mirrored repositories share.
+///
+/// The repositories are the pipeline's settings, read live as
+/// [`pipeline_settings`] reads them. Each one's URL is made canonical over the
+/// configured clone addresses, and the commit's page is composed from it and
+/// the sha the way a build view's commit row is ([`commit_page`], #665), then
+/// looked up by the paste resolver's statement. A sha maps only where exactly
+/// one mirrored commit answers across the pipeline's repositories. A pipeline
+/// with two repositories that both hold the sha maps it to nothing.
+///
+/// # Errors
+///
+/// As [`pipeline_settings`].
+pub async fn pipeline_commits(
+    pool: &PgPool,
+    secrets: &Arc<dyn SecretStore>,
+    registry: &dyn AdapterRegistry,
+    entity_id: &str,
+    shas: &[String],
+) -> Result<std::collections::HashMap<String, String>, SourcesError> {
+    let mut found = std::collections::HashMap::new();
+    let source = adapter_for(pool, secrets, registry, entity_id).await?;
+    let Some(settings) = source.pipeline_settings(entity_id).await? else {
+        return Ok(found);
+    };
+    let urls: Vec<&str> = settings
+        .repositories
+        .iter()
+        .filter_map(|r| r.url.as_deref())
+        .collect();
+    if urls.is_empty() {
+        return Ok(found);
+    }
+    let addresses = clone_addresses(pool, registry).await?;
+    let repositories: Vec<String> = urls
+        .iter()
+        .map(|url| knobas_source::clone_urls::canonical_repo_url(url, &addresses))
+        .collect();
+    for sha in shas {
+        let mut hits = std::collections::BTreeSet::new();
+        for repository in &repositories {
+            let Some(page) = commit_page(repository, sha) else {
+                continue;
+            };
+            let hit: Option<(String, String)> = sqlx::query_as(RESOLVE_URL)
+                .bind(&page)
+                .fetch_optional(pool)
+                .await?;
+            if let Some((commit, kind)) = hit
+                && kind == "commit"
+            {
+                hits.insert(commit);
+            }
+        }
+        if hits.len() == 1 {
+            found.insert(sha.clone(), hits.pop_first().expect("one hit"));
+        }
+    }
+    Ok(found)
+}
+
 /// The runs of pipeline `entity_id` older than run `before`, asked of its own
 /// source (ADR-0022, #851), routed like [`view`]. The items are the source's
 /// answer as it is: nothing is stored, and the caller reads them through the
