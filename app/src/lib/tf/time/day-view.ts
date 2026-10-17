@@ -168,7 +168,10 @@ export interface OfferRun {
   entityId: string;
   /** Two or more rows, in time order, each still with its own actions. */
   rows: DayRow[];
-  /** Their summed length, in milliseconds. */
+  /** RFC 3339: the first row's start and the last row's end. */
+  from: string;
+  to: string;
+  /** Their summed length, in milliseconds; the time between rows is not in it. */
   ms: number;
 }
 
@@ -198,11 +201,12 @@ export function offerRuns(rows: DayRow[]): OfferRun[] {
     const ticket = certainTicket(row);
     if (ticket !== null && current !== null && current.entityId === ticket) {
       current.rows.push(row);
+      current.to = row.to;
       current.ms += row.ms;
       continue;
     }
     if (current !== null && current.rows.length > 1) runs.push(current);
-    current = ticket === null ? null : { entityId: ticket, rows: [row], ms: row.ms };
+    current = ticket === null ? null : { entityId: ticket, rows: [row], from: row.from, to: row.to, ms: row.ms };
   }
   if (current !== null && current.rows.length > 1) runs.push(current);
   return runs;

@@ -198,23 +198,24 @@ function runsOf(blocks: DayBlock[], offers: DayInput["offers"], open: DayInput["
   return offerRuns(rows).map((run) => [run.entityId, run.rows.map((row) => row.block?.block.id), Math.floor(run.ms / 60_000)]);
 }
 
+/** Job, its pull request, job again. */
+const JOB_PR_JOB = [
+  passive(1, at(9), at(9, 20), "jira:PAY-231"),
+  passive(2, at(9, 20), at(9, 25), PR),
+  passive(3, at(9, 25), at(9, 47), "jira:PAY-231"),
+];
+
 test("adjacent offered rows that go to one ticket, by their own or by a confirmed link, are one run", () => {
-  const blocks = [
-    passive(1, at(9), at(9, 20), "jira:PAY-231"),
-    passive(2, at(9, 20), at(9, 25), PR),
-    passive(3, at(9, 25), at(9, 47), "jira:PAY-231"),
-  ];
+  const blocks = JOB_PR_JOB;
+  const rows = dayRows({ day: DAY, blocks, offers: { 1: onTicket, 2: offer("jira:PAY-231"), 3: onTicket }, running: null, now: new Date() });
+  expect(offerRuns(rows).map((run) => [run.from, run.to])).toEqual([[at(9), at(9, 47)]]);
   expect(runsOf(blocks, { 1: onTicket, 2: offer("jira:PAY-231"), 3: onTicket })).toEqual([
     ["jira:PAY-231", [1, 2, 3], 47],
   ]);
 });
 
 test("a guess never joins a run: last_logged or context_anchor in the middle breaks it", () => {
-  const blocks = [
-    passive(1, at(9), at(9, 20), "jira:PAY-231"),
-    passive(2, at(9, 20), at(9, 25), PR),
-    passive(3, at(9, 25), at(9, 47), "jira:PAY-231"),
-  ];
+  const blocks = JOB_PR_JOB;
   expect(runsOf(blocks, { 1: onTicket, 2: offer("jira:PAY-231", "last_logged"), 3: onTicket })).toEqual([]);
   const anchored = { suggestion: { entity_id: "jira:PAY-231", title: null, rule: "context_anchor" as const } };
   expect(runsOf(blocks, { 1: onTicket, 2: anchored, 3: onTicket })).toEqual([]);

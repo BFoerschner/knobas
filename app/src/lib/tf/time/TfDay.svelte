@@ -211,7 +211,7 @@
   const hourLabel = (hour: number) => String(hour).padStart(2, "0");
   const span = (row: DayRow) =>
     `${clockReading(row.from, key)} to ${row.state === "running" ? "now" : clockReading(row.to, key)}`;
-  const durationOf = (row: DayRow) => hm(Math.floor(row.ms / 60_000));
+  const durationOf = ({ ms }: { ms: number }) => hm(Math.floor(ms / 60_000));
   const keyOf = (entityId: string) => entityId.slice(entityId.indexOf(":") + 1);
 
   /** The ticket an offered block is linked to, when that is not the block's own. */
@@ -258,10 +258,14 @@
     dialog = null;
     refusal = null;
     push({ text: said });
-    // `onchanged` bumps the revision this view re-reads on, so one read, not two.
+    await reread();
+    return true;
+  }
+
+  /** `onchanged` bumps the revision this view re-reads on, so one read, not two. */
+  async function reread() {
     if (onchanged) onchanged();
     else await load(key);
-    return true;
   }
 
   const entity = (entityId: string): TimerTarget => ({ kind: "entity", entity_id: entityId });
@@ -285,11 +289,8 @@
       for (const row of run.rows) {
         if (row.block !== null) await io.updateBlock(row.block.block.id, row.from, row.to, to);
       }
-    }, `Added ${hm(Math.floor(run.ms / 60_000))} to ${keyOf(run.entityId)}`);
-    if (!done) {
-      if (onchanged) onchanged();
-      else await load(key);
-    }
+    }, `Added ${durationOf(run)} to ${keyOf(run.entityId)}`);
+    if (!done) await reread();
   }
 
   /** *Add to <job>* on an open row (#1027): a block on the job over exactly the stretch. */
@@ -468,14 +469,13 @@
       {#each rows as row (row.key)}
         {@const run = runAt.get(row.key)}
         {#if run}
-          {@const total = hm(Math.floor(run.ms / 60_000))}
           <div class="tf-tm-group">
             <span>
               {run.rows.length} offered rows go to <span class="tf-mono">{keyOf(run.entityId)}</span>,
-              {clockReading(run.rows[0]!.from, key)} to {clockReading(run.rows.at(-1)!.to, key)}.
+              {clockReading(run.from, key)} to {clockReading(run.to, key)}.
               <small>Each is its own ticket or linked to it. One action adds them all.</small>
             </span>
-            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {total} to {keyOf(run.entityId)}</button>
+            <button class="tf-btn tf-sm" onclick={() => void takeRun(run)}>Add {durationOf(run)} to {keyOf(run.entityId)}</button>
           </div>
         {/if}
         <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
