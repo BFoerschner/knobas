@@ -124,7 +124,7 @@ pub(crate) async fn comment(
         GiteaClient::path_segment(repo)?
     );
     client
-        .post(&path, &json!({ "body": body }))
+        .post_once(&path, &json!({ "body": body }))
         .await
         .map(|_| ())
 }
@@ -154,7 +154,7 @@ pub(crate) async fn approve(
         GiteaClient::path_segment(repo)?
     );
     client
-        .post(&path, &json!({ "event": "APPROVED", "body": body }))
+        .post_once(&path, &json!({ "event": "APPROVED", "body": body }))
         .await
         .map(|_| ())
 }
@@ -334,7 +334,7 @@ pub(crate) async fn submit_review(
         })
         .collect();
     client
-        .post(
+        .post_once(
             &path,
             &json!({ "event": event, "body": body, "comments": comments }),
         )

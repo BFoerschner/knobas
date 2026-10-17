@@ -272,6 +272,52 @@ async fn a_refusal_and_a_blip_arrive_as_different_faults() {
     }
 }
 
+/// #1122: a write Gitea would do again if it arrived twice -- a comment, an
+/// approval, a review -- is sent once even on a busy answer, since a POST
+/// that failed may still have landed. A branch create keeps the transport's
+/// retries: Gitea refuses a second one with 409, so a resend cannot double it.
+#[tokio::test]
+async fn a_write_gitea_would_repeat_is_sent_once_and_a_guarded_one_is_retried() {
+    let pr = || "gitea:tidewater/payout-service#142".to_owned();
+    let once = [
+        WriteOp::Comment {
+            entity: pr(),
+            body: "bounded".to_owned(),
+        },
+        WriteOp::Approve {
+            entity: pr(),
+            body: String::new(),
+        },
+        WriteOp::SubmitReview {
+            entity: pr(),
+            verdict: knobas_source::ReviewVerdict::Comment,
+            body: "why 30 s?".to_owned(),
+            comments: vec![],
+        },
+    ];
+    for op in once {
+        let server = refusing(503, "gitea is restarting").await;
+        let label = format!("{op:?}");
+        source(&server).write(op).await.expect_err("503");
+        let sent = server.received_requests().await.unwrap().len();
+        assert_eq!(sent, 1, "{label}");
+    }
+
+    let server = refusing(503, "gitea is restarting").await;
+    source(&server)
+        .write(WriteOp::CreateBranch {
+            entity: "gitea:tidewater/payout-service".to_owned(),
+            name: "feature/x".to_owned(),
+            from_ref: "main".to_owned(),
+        })
+        .await
+        .expect_err("503");
+    assert_eq!(
+        server.received_requests().await.unwrap().len(),
+        knobas_http::MAX_ATTEMPTS as usize
+    );
+}
+
 /// A 403 is two different answers on Gitea (#722), told apart by its body
 /// alone (measured on 1.27.3, 2026-10-13): a token lacking the scope a write
 /// needs is the credential's fault, and waits for a new one as `Unauthorized`;

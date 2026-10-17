@@ -5,7 +5,8 @@
 //! times is three times the load and the same answer), and not 4xx (the
 //! request is wrong). Writes retry too, since M2's write-backs (issue #43):
 //! [`Request::json`](crate::Request::json) buffers its body, so a retry
-//! re-sends the same bytes.
+//! re-sends the same bytes. A write that must not arrive twice opts out with
+//! [`Request::no_retry`](crate::Request::no_retry) (issue #1122).
 //!
 //! These are plain predicates rather than a `reqwest_retry` policy on purpose.
 //! The retry loop lives in [`HttpClient::send`](crate::HttpClient::send)

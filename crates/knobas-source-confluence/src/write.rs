@@ -194,3 +194,58 @@ async fn created_id(response: knobas_http::Response, what: &str) -> Result<Strin
             ))
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use crate::http::{ConfluenceHttp, credential};
+
+    /// A Confluence that answers every request `503`, `Connection: close`,
+    /// and counts them, on a std thread (this crate's tokio has no `net`). A
+    /// `503` is retried by the transport unless the request opted out.
+    fn busy() -> (ConfluenceHttp, Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for socket in listener.incoming() {
+                let Ok(mut socket) = socket else { return };
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0_u8; 8192];
+                let _ = socket.read(&mut buf);
+                let _ = socket.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\
+                      Connection: close\r\n\r\n",
+                );
+            }
+        });
+        let auth = credential(Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
+            .expect("a PAT is enough");
+        let http = ConfluenceHttp::new(
+            &format!("http://{addr}"),
+            &crate::ConfluenceConfig::default(),
+            auth,
+        )
+        .expect("the client builds");
+        (http, hits)
+    }
+
+    /// #1122: a page create and a comment are POSTs a resend could do twice,
+    /// so each is sent once, busy answer or not.
+    #[tokio::test]
+    async fn a_create_or_a_comment_is_sent_once() {
+        let (http, hits) = busy();
+        super::create_page(&http, "PAY", "1", "Runbook", "<p>x</p>")
+            .await
+            .unwrap_err();
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "create");
+
+        let (http, hits) = busy();
+        super::comment(&http, "1", "bounded").await.unwrap_err();
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "comment");
+    }
+}

@@ -1701,6 +1701,9 @@ knobas-http	test/transport	a_streamed_body_slower_than_the_request_timeout_arriv
 knobas-http	test/transport	a_streamed_body_that_stalls_breaks_off_as_unreachable
 knobas-http	test/transport	a_streamed_send_with_no_headers_is_unreachable
 knobas-http	test/transport	a_transient_failure_costs_exactly_the_documented_attempts
+knobas-http	test/transport	a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer
+knobas-http	test/transport	a_write_that_opted_out_of_retries_is_retried_after_a_refused_connection
+knobas-http	test/transport	a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out
 knobas-http	test/transport	an_unauthorized_answer_is_not_retried_and_keeps_its_class
 knobas-http	test/transport	each_auth_variant_has_its_own_wire_spelling
 knobas-http	test/transport	every_attempt_waits_for_the_rate_limiter
@@ -2350,6 +2353,7 @@ knobas-source-confluence	lib/knobas_source_confluence	time::tests::an_unreadable
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_floor_is_the_query_read_back_not_the_instant_asked_for
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_offset_is_read_off_the_servers_own_rendering
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_response_timestamp_parses_in_every_spelling_confluence_uses
+knobas-source-confluence	lib/knobas_source_confluence	write::tests::a_create_or_a_comment_is_sent_once
 knobas-source-confluence	test/live_confluence_seeded	a_full_sync_mirrors_every_seeded_page_of_the_space
 knobas-source-confluence	test/live_confluence_seeded	a_rejected_credential_is_refused_and_the_seed_account_still_works
 knobas-source-confluence	test/live_confluence_seeded	a_renamed_page_keeps_its_id_and_moves_the_watermark_to_itself
@@ -2656,6 +2660,7 @@ knobas-source-gitea	test/it	write::a_review_carries_its_verdict_as_gitea_event_a
 knobas-source-gitea	test/it	write::a_review_of_ones_own_pull_request_is_refused_with_gitea_sentence
 knobas-source-gitea	test/it	write::a_reviews_line_comments_land_on_the_side_they_name
 knobas-source-gitea	test/it	write::a_stale_base_comes_back_moved_with_what_gitea_holds_now
+knobas-source-gitea	test/it	write::a_write_gitea_would_repeat_is_sent_once_and_a_guarded_one_is_retried
 knobas-source-gitea	test/it	write::an_approval_says_approved_rather_than_filing_a_pending_review
 knobas-source-gitea	test/it	write::an_approval_with_no_words_still_approves
 knobas-source-gitea	test/it	write::an_edit_aimed_at_a_repository_is_refused_before_a_request
@@ -2856,6 +2861,7 @@ knobas-source-jira	lib/knobas_source_jira	views::tests::favourite_boards_are_the
 knobas-source-jira	lib/knobas_source_jira	views::tests::favourite_filters_turned_off_are_delivered_as_gone_at_the_next_sync
 knobas-source-jira	lib/knobas_source_jira	views::tests::no_boards_brings_none_in_and_takes_the_ones_there_were_away
 knobas-source-jira	lib/knobas_source_jira	write::tests::a_worklogs_started_carries_milliseconds_and_a_numeric_offset
+knobas-source-jira	lib/knobas_source_jira	write::tests::a_write_jira_would_repeat_is_sent_once
 knobas-source-jira	test/it	field_discovery::a_401_on_the_field_table_is_still_unauthorized
 knobas-source-jira	test/it	field_discovery::a_404_on_the_field_table_is_a_connection_that_worked
 knobas-source-jira	test/it	field_discovery::a_configured_id_is_reported_even_when_the_instance_names_another
@@ -2949,6 +2955,8 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::kumas_literal_null_label
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::only_the_monitor_families_make_monitors
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_response_time_sentinel_is_an_absence
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_help_lines_own
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_create_whose_emit_timed_out_after_landing_is_not_sent_again
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_login_refused_for_the_rate_limit_is_not_a_wrong_password
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_reaped_session_is_replaced_and_the_write_lands_once
 knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_idle_past_its_window_is_not_reused
@@ -3196,6 +3204,7 @@ knobas-source-teamcity	test/it	mockd::the_watermark_advances_on_a_finished_build
 knobas-source-teamcity	test/it	mockd::triggering_a_configuration_that_is_gone_is_refused
 knobas-source-teamcity	test/it	mockd::user_password_authentication_reaches_the_server
 knobas-source-teamcity	test/it	run::a_refused_run_is_classified_as_elsewhere_in_the_adapter
+knobas-source-teamcity	test/it	run::a_run_is_put_on_the_queue_once_even_on_a_busy_answer
 knobas-source-teamcity	test/it	run::a_run_queues_its_branch_and_only_its_overrides
 knobas-source-teamcity	test/it	run::a_run_that_names_nothing_runnable_is_refused_before_a_request
 knobas-source-teamcity	test/it	run::a_run_without_a_branch_or_overrides_sends_neither

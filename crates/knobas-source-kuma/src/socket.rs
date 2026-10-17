@@ -473,11 +473,8 @@ impl KumaSocket {
     /// (Kuma checks the login before it acts). Everything else is an error:
     /// an emit that was accepted and then went unanswered may have landed.
     ///
-    /// The `400` proves only that the *last* POST was dropped. If
-    /// `HttpClient::send` retried a timed-out POST whose packet had already
-    /// arrived, and Kuma reaped the session in between, the earlier packet may
-    /// have been acted on. That is the transport-retry hazard #1122 files, the
-    /// same one that already lets a retried POST repeat an emit on a live session.
+    /// The `400` proves only that *this* POST was dropped, which is why
+    /// [`Session::send`] never resends a POST that may have landed (#1122): the `400` can then only be the first POST's.
     async fn emit_on(
         &self,
         logged_in: &mut LoggedIn,
@@ -548,13 +545,24 @@ impl Session<'_> {
 
     /// POST one packet. The body is the packet verbatim, which is what
     /// [`knobas_http::Request::text`] exists for.
+    ///
+    /// **Sent once, never retried by the transport** (#1122), unless the
+    /// connection never opened. A POST that
+    /// timed out may have delivered its packet, and a resent `add` is a second
+    /// monitor. Worse, if Kuma reaped the session in between, the resend meets
+    /// `400 Session ID unknown`, which [`KumaSocket::emit_on`] rightly reads
+    /// as *this* packet dropped -- and the write would go out a third time on
+    /// a fresh login. Every packet rather than `add` alone: no emit here
+    /// needs the transport's retry, and a failed one comes back as the write's
+    /// error for the write queue to rule on.
     async fn send(&self, packet: String) -> Result<(), SourceError> {
         let request = self
             .socket
             .client
             .request(Method::POST, PATH)
             .query(&self.query())
-            .text(packet);
+            .text(packet)
+            .no_retry();
         self.socket.client.send(request).await?;
         Ok(())
     }

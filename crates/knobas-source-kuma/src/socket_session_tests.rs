@@ -33,6 +33,12 @@ struct Engine {
     login_limit: usize,
     /// Every emit other than the login that Kuma acted on.
     delivered: Vec<String>,
+    /// When set, an emit Kuma acted on is answered this late: the packet
+    /// landed and the client's POST times out anyway (#1122).
+    stall_after_acting: Option<Duration>,
+    /// When set, the session an emit landed on is reaped right after Kuma
+    /// acted on it, so a resent POST meets `400 Session ID unknown`.
+    reap_after_acting: bool,
 }
 
 /// The stateful half of the fake, shared by every mock it mounts.
@@ -74,12 +80,23 @@ impl Respond for Kuma {
             });
         }
         let packet = String::from_utf8_lossy(&request.body).into_owned();
+        let delivered_before = engine.delivered.len();
         let reply = engine.answer(&sid, &packet);
         if let Some(reply) = reply {
             let (_, queued) = engine.sessions.get_mut(&sid).expect("checked above");
             queued.push_back(reply);
         }
-        ResponseTemplate::new(200).set_body_string("ok")
+        let ok = ResponseTemplate::new(200).set_body_string("ok");
+        if engine.delivered.len() == delivered_before {
+            return ok;
+        }
+        if engine.reap_after_acting {
+            engine.sessions.clear();
+        }
+        match engine.stall_after_acting {
+            Some(stall) => ok.set_delay(stall),
+            None => ok,
+        }
     }
 }
 
@@ -248,6 +265,60 @@ async fn a_login_refused_for_the_rate_limit_is_not_a_wrong_password() {
         other => panic!("expected Unreachable, got {other:?}"),
     }
     assert_eq!(kuma.delivered(), 0);
+}
+
+/// A socket whose POSTs time out after one second, against a fake whose emits
+/// land and then answer `stall` late -- past that timeout (#1122).
+fn stalling(server: &MockServer, kuma: &Kuma, stall: Duration, reap: bool) -> KumaSocket {
+    {
+        let mut engine = kuma.engine();
+        engine.stall_after_acting = Some(stall);
+        engine.reap_after_acting = reap;
+    }
+    KumaSocket::new(
+        &server.uri(),
+        &crate::KumaConfig {
+            request_timeout_secs: 1,
+            ..crate::KumaConfig::default()
+        },
+        Account {
+            username: "knobas".to_owned(),
+            password: "knobas-dev".to_owned(),
+        },
+    )
+    .expect("the socket builds against an http url")
+}
+
+async fn add(socket: &KumaSocket) -> Result<serde_json::Value, SourceError> {
+    socket
+        .call(ADD_EVENT, &serde_json::json!({ "name": "payout" }))
+        .await
+}
+
+/// **#1122, on a live session.** Kuma acts on the `add` and its answer to the
+/// POST never arrives in time. The create is not sent again: one monitor, and
+/// the timeout comes back as the write's error for the write queue to rule on.
+#[tokio::test]
+async fn a_create_whose_emit_timed_out_after_landing_is_not_sent_again() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::from_millis(1500), false);
+    let error = add(&socket).await.expect_err("the emit's POST timed out");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+}
+
+/// **#1122, across a reap.** The `add` lands, its POST times out, and Kuma
+/// reaps the session before anything else arrives. A resent POST would meet
+/// `400 Session ID unknown`, which reads as *not delivered* and buys a fresh
+/// login and a third `add`. Nothing is resent, so none of that happens.
+#[tokio::test]
+async fn a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::from_millis(1500), true);
+    let error = add(&socket).await.expect_err("the emit's POST timed out");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+    assert_eq!(kuma.logins(), 1, "no fresh login to resend it on");
 }
 
 /// Adapters built for the same instance and account share one socket, and so

@@ -181,6 +181,34 @@ async fn an_answer_without_an_id_is_still_a_queued_run() {
     assert_eq!(receipt.remote_id, None);
 }
 
+/// #1122: a POST to the queue that failed may still have queued its build,
+/// and a resend queues a second one. So a trigger and a custom run are each
+/// sent once, even on a busy answer the transport retries for a read.
+#[tokio::test]
+async fn a_run_is_put_on_the_queue_once_even_on_a_busy_answer() {
+    for op in [
+        WriteOp::TriggerBuild {
+            entity: CONFIG.to_owned(),
+        },
+        run(CONFIG, Some("main"), &[]),
+    ] {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/app/rest/buildQueue"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        let label = format!("{op:?}");
+        let error = source(&server).write(op).await.expect_err("503");
+        assert_eq!(error.status(), Some(503), "{label}");
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "{label}"
+        );
+    }
+}
+
 /// A run belongs to a **build configuration**, with a branch that is a name
 /// and overrides that have one: a build's id, another source's id, an id
 /// TeamCity could not have issued, an empty or blank branch and an unnamed

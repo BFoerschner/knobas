@@ -566,6 +566,31 @@ impl GiteaClient {
         self.http.send(request).await
     }
 
+    /// [`Self::post`], sent **once** ([`knobas_http::Request::no_retry`],
+    /// #1122): for a write Gitea would accept a second time and do again -- a
+    /// comment, an approval, a review. A POST that timed out may have landed,
+    /// and a resend would be a second comment. The writes that keep
+    /// [`Self::post`] are refused the second time by Gitea itself: a branch
+    /// that exists (409), a pull request already open for the head and base
+    /// (409), a merge already made (405).
+    ///
+    /// # Errors
+    ///
+    /// As [`Self::post`], and a transient failure is returned rather than
+    /// retried.
+    pub(crate) async fn post_once(
+        &self,
+        path: &str,
+        body: &Value,
+    ) -> Result<knobas_http::Response, SourceError> {
+        let request = self
+            .http
+            .request(Method::POST, &format!("{API_ROOT}{path}"))
+            .json(body)
+            .no_retry();
+        self.http.send(request).await
+    }
+
     /// `PATCH <base>/api/v1/<path>` with `body` as JSON, keeping the response:
     /// [`Self::post`]'s twin for an edit (issue #706).
     ///
