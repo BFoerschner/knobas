@@ -15,8 +15,16 @@
   The reader's gestures (Find, the trace, folds opened by hand) hold for the
   page; the view's draft holds for the session (`views.svelte.ts`). *Add ▾*
   and the route dialog are #876's.
+
+  **From a ticket (#874, R-11.10)**: with `ticket` set (the job's Map tab,
+  `#/job/<key>/map`, or `#/deps/job/<key>`) the same read is kept to what the
+  ticket reaches (`reach.ts`, over `job_reach` and `job_pipelines`), in the
+  view set as *opens from a ticket*. The scope buttons, drawn while a job is
+  open, switch between *This job <key>* and *Everything* (`#/deps`).
 -->
 <script lang="ts">
+  import { untrack } from "svelte";
+
   import { ipcErrorMessage } from "../../ipc";
   import {
     assetTypes,
@@ -40,7 +48,18 @@
     type DepViews,
     type Dependencies,
   } from "../../ipc/assets";
-  import { createLink, submitWrite } from "../../ipc/entity";
+  import {
+    createLink,
+    getEntity,
+    jobPipelines,
+    jobReach,
+    submitWrite,
+    type JobPipeline,
+    type Reached,
+  } from "../../ipc/entity";
+  import { listSources } from "../../ipc/sources";
+  import { isEntityId, resolveTicket } from "../job/job";
+  import { reachedPart } from "./reach";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
   import { prefill } from "../monitors/monitors";
@@ -59,13 +78,25 @@
     dependencies: () => Promise<Dependencies>;
     depViews: () => Promise<DepViews>;
     submitWrite: typeof submitWrite;
+    /** A ticket key's entity id, as the job page resolves it; `null` when nothing holds it. */
+    ticketId: (key: string) => Promise<string | null>;
+    jobReach: (entityId: string) => Promise<Reached[]>;
+    jobPipelines: (entityId: string) => Promise<JobPipeline[]>;
   } & ViewPorts &
     LayerPorts &
     EditorPorts;
 
+  async function ticketIdOf(key: string): Promise<string | null> {
+    const sources = isEntityId(key) ? [] : await listSources();
+    return (await resolveTicket(key, sources, getEntity))?.row.entity_id ?? null;
+  }
+
   const DEFAULT_PORTS: Ports = {
     dependencies,
     depViews,
+    ticketId: ticketIdOf,
+    jobReach,
+    jobPipelines,
     saveDepView,
     deleteDepView,
     setDepViewDefaults,
@@ -87,9 +118,21 @@
     ready,
     ports: given = {},
     views = depViewState,
+    ticket = null,
+    ticketId = null,
+    job = null,
+    host = "page",
   }: {
     /** Whether the database answers yet. */
     ready: boolean;
+    /** The ticket key the map opens from, or `null` for the top-bar opening. */
+    ticket?: string | null;
+    /** That ticket's entity id when the host already knows it; else it is resolved. */
+    ticketId?: string | null;
+    /** The job open in the shell, for *This job* on the top-bar opening. */
+    job?: string | null;
+    /** Where it draws: its own page, or the job's Map tab. */
+    host?: "page" | "job";
     /** Stand-ins for a test; the rest are the real commands. */
     ports?: Partial<Ports>;
     /** The session's view and draft, unless a test hands its own. */
@@ -98,27 +141,66 @@
 
   const ports = $derived({ ...DEFAULT_PORTS, ...given });
 
-  let read = $state.raw<Dependencies | null>(null);
+  type Reach = { id: string; key: string; reached: Reached[]; pipelines: JobPipeline[] };
+
+  /** The top-bar read, whole. */
+  let whole = $state.raw<Dependencies | null>(null);
+  /** What the ticket reaches, on the opening from a ticket. */
+  let reach = $state.raw<Reach | null>(null);
+  /** What draws: the whole read, or the part the ticket reaches. */
+  const read = $derived.by(() => {
+    if (whole === null || ticket === null) return whole;
+    return reach !== null && reach.key === ticket ? reachedPart(whole, reach, reach.reached, reach.pipelines) : null;
+  });
   let failure = $state<string | null>(null);
 
-  async function load() {
+  async function readReach(key: string, known: string | null): Promise<Reach | null> {
+    const id = known ?? (await ports.ticketId(key));
+    if (id === null) return null;
+    const [reached, pipelines] = await Promise.all([
+      ports.jobReach(id),
+      // A job whose pipelines cannot be read still draws what it reaches.
+      ports.jobPipelines(id).catch(() => [] as JobPipeline[]),
+    ]);
+    return { id, key, reached, pipelines };
+  }
+
+  /** The reads' generation, so an answer for an opening left behind is dropped. */
+  let token = 0;
+
+  async function load(key: string | null, known: string | null, mine: number) {
     try {
-      const [estate, saved] = await Promise.all([ports.dependencies(), ports.depViews()]);
+      const [estate, saved, scoped] = await Promise.all([
+        ports.dependencies(),
+        ports.depViews(),
+        key === null ? Promise.resolve(null) : readReach(key, known),
+      ]);
+      if (mine !== token) return;
       views.take(saved);
-      read = estate;
-      failure = null;
+      views.opening(key);
+      whole = estate;
+      reach = scoped;
+      failure = key !== null && scoped === null ? `nothing in the mirror answers to ${key}` : null;
     } catch (error) {
-      failure = ipcErrorMessage(error);
+      if (mine === token) failure = ipcErrorMessage(error);
     }
   }
 
-  // Read once, when the database answers.
-  let started = false;
+  // Read when the database answers, and again for each opening.
   $effect(() => {
-    if (ready && !started) {
-      started = true;
-      void load();
-    }
+    const key = ticket;
+    const known = ticketId;
+    if (!ready) return;
+    const mine = ++token;
+    untrack(() => {
+      query = "";
+      trace = null;
+      opened = new Set();
+      shut = new Set();
+      more = new Set();
+      fold = new Map();
+      void load(key, known, mine);
+    });
   });
 
   let query = $state("");
@@ -153,7 +235,7 @@
   });
 
   function setLayers(layers: DepLayer[]) {
-    if (read !== null) read = { ...read, layers };
+    if (whole !== null) whole = { ...whole, layers };
   }
 
   function openItem(item: DepItem, event?: MouseEvent) {
@@ -308,33 +390,48 @@
 
   async function reload() {
     try {
-      read = await ports.dependencies();
+      whole = await ports.dependencies();
     } catch (error) {
       push({ text: `The estate could not be read again: ${ipcErrorMessage(error)}`, tone: "err" });
     }
   }
 </script>
 
-<header class="tf-fhead">
-  <div>
-    <h1>Dependencies</h1>
-    <div class="tf-sub">
-      Everything knobas knows, in layers from the work down to the hardware. Point at anything to see what it touches;
-      click to open it.
+{#if host === "page"}
+  <header class="tf-fhead">
+    <div>
+      <h1>Dependencies</h1>
+      <div class="tf-sub">
+        {ticket !== null ? `What ${ticket} reaches` : "Everything knobas knows"}, in layers from the work down to the hardware.
+        Point at anything to see what it touches; click to open it.
+      </div>
     </div>
-  </div>
-  <div class="tf-acts">
-    <a class="tf-btn tf-ghost" href="#/assets" title="The asset tree in columns">Asset tree</a>
-    <a class="tf-btn tf-ghost" href="#/monitors">Monitors</a>
-  </div>
-</header>
+    <div class="tf-acts">
+      <a class="tf-btn tf-ghost" href="#/assets" title="The asset tree in columns">Asset tree</a>
+      <a class="tf-btn tf-ghost" href="#/monitors">Monitors</a>
+    </div>
+  </header>
+{/if}
 
-<div class="tf-dp">
+<div class="tf-dp" class:tf-dp-job={host === "job"}>
   {#if failure !== null}
     <p class="tf-dp-fail" role="alert">The estate could not be read: {failure}. Open Dependencies again to retry.</p>
   {:else if read !== null && drawn !== null && views.draft !== null}
     {@const draft = views.draft}
+    {@const scopeKey = ticket ?? job}
     <div class="tf-dp-bar" role="toolbar" aria-label="Dependencies">
+      {#if scopeKey !== null}
+        <div class="tf-seg" role="group" aria-label="Scope">
+          <button
+            type="button"
+            aria-pressed={ticket !== null}
+            onclick={() =>
+              (location.hash = host === "job" ? `#/job/${encodeURIComponent(scopeKey)}/map` : `#/deps/job/${encodeURIComponent(scopeKey)}`)}
+            >This job <span class="tf-jobk">{scopeKey}</span></button
+          >
+          <button type="button" aria-pressed={ticket === null} onclick={() => (location.hash = "#/deps")}>Everything</button>
+        </div>
+      {/if}
       <TfDepsViewMenu bind:this={menu} {views} layerIds={read.layers.map((layer) => layer.id)} {ports} />
       {#if views.dirty}
         <button type="button" class="tf-btn tf-sm tf-primary" onclick={() => void menu?.saveChanges()}>Save view</button>

@@ -7,8 +7,10 @@
  *   its own status and the newest state of each monitor the fake roster says
  *   watches it, and `monitors` is how many do.
  * - The code is the corpus's repositories and its open pull requests, the
- *   delivery is the pipelines PAY-231's builds ran in (their newest run's
- *   chip), and the linked tickets are those a link joins to one of them.
+ *   delivery is the Builds fixture's pipelines (`fakePipelines`, their newest
+ *   run's chip, under the ids `job_pipelines` answers with, so a job's Map
+ *   keeps them, #874), and the linked tickets are those a link joins to one
+ *   of them.
  *
  * - The layers and the views (#873) are session state: migration `0038`'s
  *   four views, and the layer and view writes with the refusals the backend
@@ -24,7 +26,7 @@ import type { Tone } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { CORPUS } from "./corpus";
 import { FIXTURE_ESTATE, FIXTURE_ROUTES } from "./estate";
-import { JOB_ROWS } from "./job-reach";
+import { fakePipelines } from "./builds";
 import { fakeMonitorRoster } from "./monitors";
 
 const SEED: Dependencies["layers"] = [
@@ -132,19 +134,14 @@ function fakeDependencies(): Dependencies {
     }
   }
 
-  // A pipeline per build configuration PAY-231's runs name, with its newest run's chip.
-  const newest = new Map<string, (typeof JOB_ROWS)[number]>();
-  for (const run of JOB_ROWS.filter((row) => row.kind === "build")) {
-    const pipeline = run.title.split(" #")[0]!;
-    const seen = newest.get(pipeline);
-    if (!seen || seen.updated_at < run.updated_at) newest.set(pipeline, run);
-  }
-  for (const [pipeline, run] of newest) {
-    const chip = run.payload["chip"] as { text: string; tone: Tone } | undefined;
+  // Every pipeline the Builds fixture lists, with its newest run's chip, as the
+  // real read takes them from `pipelines` (#874: so `job_pipelines` names them).
+  for (const pipeline of fakePipelines()) {
+    const chip = pipeline.recent[0]?.state ?? null;
     items.push({
-      id: `mock:${pipeline}`,
+      id: pipeline.entity_id,
       kind: "pipeline",
-      name: pipeline,
+      name: pipeline.name,
       health: chip?.tone ?? null,
       state: chip?.text ?? null,
       monitors: 0,
