@@ -117,6 +117,37 @@ fn unique_name(name: &str, taken: &mut HashSet<String>) -> String {
 mod tests {
     use super::*;
 
+    fn note(title: &str, body_md: &str) -> NoteRow {
+        NoteRow {
+            id: "note:1".to_owned(),
+            title: title.to_owned(),
+            body_md: body_md.to_owned(),
+            created_at: chrono::DateTime::UNIX_EPOCH,
+            updated_at: chrono::DateTime::UNIX_EPOCH,
+        }
+    }
+
+    /// Captured before #952 made the converter read the Docs frame's blocks:
+    /// the title escaped onto one line, the body as typed, trailing space cut.
+    #[test]
+    fn a_note_exports_as_before() {
+        assert_eq!(
+            note_markdown(&note(
+                "SEPA *retry*:\n[v2]",
+                "Ask about [[mock:PAY-231]]\n\n- one\n\n\n"
+            )),
+            "# SEPA \\*retry\\*: \\[v2\\]\n\nAsk about [[mock:PAY-231]]\n\n- one\n"
+        );
+        assert_eq!(
+            note_markdown(&note("Untitled note", " \n\t")),
+            "# Untitled note\n"
+        );
+        assert_eq!(
+            note_markdown(&note("# Hash", "  indented")),
+            "# # Hash\n\n  indented\n"
+        );
+    }
+
     #[test]
     fn a_taken_name_gets_a_number() {
         let mut taken = HashSet::new();
