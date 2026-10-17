@@ -163,19 +163,36 @@ pub struct DocAncestor {
 /// whole space by it orders every parent's children, because the reader picks
 /// a parent's children out of the list in list order. `$1` is the
 /// declarations.
+///
+/// The pages are read from `sync.item` by their kind, live by
+/// [`knobas_core::live_by_exclusion!`], not through `sync.live_item` (#981).
+/// Through the view, on tables never analyzed, the statement was planned from
+/// `sync.item_project` -- a row per item of every kind -- with a probe into
+/// `knobas.entity` and `sync.item` per row and the kind filtered after the
+/// probe: 211 ms on the probe's 22,000 items for 2,000 pages, against 22 ms
+/// this way (31 and 21 ms analyzed).
 const PAGES: &str = concat!(
     "select i.entity_id, i.title, p.source_id, p.key, p.name, \
        (select pn.name from ",
     knobas_core::declared_parent_names!("$1"),
     " pn order by pn.pos desc, pn.name_ord limit 1) as parent \
-       from sync.live_item i \
+       from sync.item i \
        join sync.item_project p on p.entity_id = i.entity_id \
        join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind \
-      where i.kind = 'page' \
-      order by p.source_id, p.key, ",
+      where i.kind = 'page' and ",
+    knobas_core::live_by_exclusion!("i"),
+    " order by p.source_id, p.key, ",
     knobas_core::declared_integer!("$1", "position"),
     " nulls last, lower(i.title), i.entity_id"
 );
+
+/// The tree's page statement, for the plan test (`tests/it/read_plans.rs`,
+/// #981). It binds what [`tree`] binds.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_tree() -> &'static str {
+    PAGES
+}
 
 const LAST_READ: &str = "\
 select a.entity_id from knobas.activity a
