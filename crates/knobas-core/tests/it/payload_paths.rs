@@ -945,20 +945,22 @@ async fn chips(
         " as state from sync.live_item i where i.entity_id = $2"
     );
     item(pool, source, kind, key, &payload).await;
-    let mut answers = Vec::new();
-    for statement in [CHIP, SIGNALS] {
+    let state_by = async |statement: &'static str| -> Option<StateChip> {
         let row = sqlx::query(statement)
             .bind(declarations.as_param())
             .bind(format!("{source}:{key}"))
             .fetch_one(pool)
             .await
             .unwrap_or_else(|e| panic!("{key}'s state must resolve: {e}"));
-        let sql: Option<sqlx::types::Json<StateChip>> = row.get("state");
-        answers.push(sql.map(|j| j.0));
-    }
-    let signals = answers.pop().unwrap();
-    let sql = answers.pop().unwrap();
-    assert_eq!(signals, sql, "the signals' state for {key} is the chip's");
+        let state: Option<sqlx::types::Json<StateChip>> = row.get("state");
+        state.map(|j| j.0)
+    };
+    let sql = state_by(CHIP).await;
+    assert_eq!(
+        state_by(SIGNALS).await,
+        sql,
+        "the signals' state for {key} is the chip's"
+    );
     let empty = KindPaths::default();
     let declared = declarations.get(source, kind).unwrap_or(&empty);
     (sql, resolve_state(&payload, &declared.state))

@@ -258,9 +258,9 @@ macro_rules! wants_signal {
 /// Only the links that can give the kinds asked for: the `to` end of a
 /// `blocks` link for `blocker`; the other end of an open pull request's link
 /// for `open-pr`, and of one asking `$me` for a review for `review-for-me`
-/// alone ([`open_prs!`]); and for `failing-build`, the ends within
+/// alone ([`crate::open_prs!`]); and for `failing-build`, the ends within
 /// two hops of a linked build whose declared state is in the `err` tone
-/// ([`err_builds!`]), walked back the way the reach walks out. Before #939
+/// ([`crate::err_builds!`]), walked back the way the reach walks out. Before #939
 /// every kind walked from every end: `has:blocker` read the builds of
 /// 12,000 links to find the 5,000 blocked tickets. Until #1148 a pull
 /// request's ends were found by probing the kind of every link's end, 24,000
