@@ -353,6 +353,43 @@ test("the Run panel lists branch, commit, who started it, agent, start and took 
   expect(panel.querySelector("dd a")?.getAttribute("href")).toBe("#/repo/gitea%3Arepo%3Apayout-service/commits/gitea%3Acommit%3Aa41f2c");
 });
 
+// #1154: a pipeline of two mirrored repositories whose run built the second.
+const TWO_REPOS: PipelineSettings = {
+  ...SETTINGS,
+  repositories: [
+    { name: "payout-service", url: null, default_branch: "refs/heads/main", entity_id: "gitea:tidewater/payout-service" },
+    { name: "ledger", url: null, default_branch: "refs/heads/main", entity_id: "gitea:tidewater/ledger" },
+  ],
+};
+const LEDGER_COMMIT = "gitea:tidewater/ledger@a41f2c0e9b8d7c6a";
+const TWO_REPO_RUNS: RunRow[] = RUNS.map((r) => (r.entity_id === "teamcity:build:1187" ? { ...r, commit_id: LEDGER_COMMIT } : r));
+
+test("a run whose commit sits in the pipeline's second repository links it under that repository", async () => {
+  draw("teamcity:build:1187", undefined, { settings: () => Promise.resolve(TWO_REPOS) }, TWO_REPO_RUNS);
+  await settle();
+  const panel = target.querySelector('[aria-label="Run"].tf-panel')!;
+  expect(panel.querySelector("dd a")?.getAttribute("href")).toBe(
+    `#/repo/gitea%3Atidewater%2Fledger/commits/${encodeURIComponent(LEDGER_COMMIT)}`,
+  );
+  const open = [...target.querySelectorAll("a")].find((a) => a.textContent === "Open the test file");
+  expect(open?.getAttribute("href")).toBe("#/repo/gitea%3Atidewater%2Fledger/files/tests/sepa_retry.rs");
+});
+
+test("Changes without a commit id of their own follow the run's repository; a commit naming no repository falls back to the first", async () => {
+  draw("teamcity:build:1187", "changes", { settings: () => Promise.resolve(TWO_REPOS) }, TWO_REPO_RUNS);
+  await settle();
+  expect(target.querySelector('[aria-label="Changes"] a')?.getAttribute("href")).toBe(
+    "#/repo/gitea%3Atidewater%2Fledger/commits/gitea%3Acommit%3Aa41f2c",
+  );
+  if (page) unmount(page);
+  target.replaceChildren();
+  draw("teamcity:build:1187", undefined, { settings: () => Promise.resolve(TWO_REPOS) });
+  await settle();
+  expect(target.querySelector('[aria-label="Run"].tf-panel dd a')?.getAttribute("href")).toBe(
+    "#/repo/gitea%3Atidewater%2Fpayout-service/commits/gitea%3Acommit%3Aa41f2c",
+  );
+});
+
 test("the Artifacts panel lists the first four with Download through knobas, and links to all of them", async () => {
   const drawn = draw();
   await settle();

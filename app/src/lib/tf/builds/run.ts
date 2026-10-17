@@ -151,6 +151,24 @@ export function builtCommit(run: RunRow): { sha: string; entityId: string | null
   return run.revision === null ? null : { sha: shortSha(run.revision), entityId: run.commit_id };
 }
 
+/**
+ * The mirrored repository a commit sits in (#1154), among the pipeline's own:
+ * a commit's entity id is its repository's id, then `@` and the oid
+ * (`gitea:owner/repo@<oid>`), so the repository is the one of `repositories`
+ * whose entity id is that prefix. `null` for a commit whose id names none of
+ * them, which the caller answers with its fallback.
+ */
+export function repositoryOfCommit(
+  commitId: string | null,
+  repositories: readonly { entity_id: string | null }[] | undefined,
+): string | null {
+  if (commitId === null) return null;
+  const at = commitId.lastIndexOf("@");
+  if (at <= 0) return null;
+  const prefix = commitId.slice(0, at);
+  return repositories?.find((repo) => repo.entity_id === prefix)?.entity_id ?? null;
+}
+
 /** The pipeline a run belongs to: the one of `pipelines` a row of its overview carries. */
 export function pipelineOfRun(view: SourceView | null, pipelines: readonly string[]): string | null {
   return rowsOf(sectionOf(view, "overview")).find((r) => r.entity_id !== null && pipelines.includes(r.entity_id))?.entity_id ?? null;
