@@ -5855,8 +5855,10 @@ pub async fn docs_edit_section_payload(
 
 /// *New page* (#862, R-10.16): queue a `CreatePage` under a mirrored page,
 /// its body the editor's plain text in the source's markup. With `link_to`
-/// (a ticket's entity id, *Link it to <job>*), the new page is linked to it
-/// once the write has landed and a sync has brought the page in.
+/// (a ticket's entity id, *Link it to <job>*), the ticket is held with the
+/// write and the new page is linked to it once the write has landed and a
+/// sync has brought the page in, on whichever tick that is (#1121,
+/// [`create_page_in_background`]).
 ///
 /// # Errors
 ///
@@ -5868,22 +5870,36 @@ pub async fn docs_create_page<R: tauri::Runtime>(
     link_to: Option<String>,
 ) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
     let state = crate::sources::state(&app)?;
-    let (payload, source_id) = docs_create_page_payload(&state.pool, &page).await?;
-    let (queued, source) = crate::sources::write_queue::queue(&state, payload).await?;
-    let write_id = queued.id;
+    let (payload, _) = docs_create_page_payload(&state.pool, &page).await?;
+    create_page_in_background(&state, payload, link_to).await
+}
+
+/// [`docs_create_page`] once its `CreatePage` is built: queued and sent in
+/// the background, the source re-read after. With `link_to`, the ticket is
+/// held with the write (`sources::write_queue::submit_linked_in_background`,
+/// #1121), so a page whose write waits and lands on a later tick is still
+/// linked to its job, by the first sync that brings it in.
+///
+/// # Errors
+///
+/// As `submit_linked_in_background` with `link_to`, else whatever the write
+/// queue refuses.
+pub async fn create_page_in_background(
+    state: &crate::sources::SourcesState,
+    payload: serde_json::Value,
+    link_to: Option<String>,
+) -> Result<knobas_core::write_queue::QueuedWrite, IpcError> {
+    if let Some(ticket) = link_to {
+        return crate::sources::write_queue::submit_linked_in_background(state, payload, ticket)
+            .await;
+    }
+    let (queued, source) = crate::sources::write_queue::queue(state, payload).await?;
     crate::sources::write_queue::send_in_background_then(
-        &state,
+        state,
+        source.clone(),
+        queued.id,
         source,
-        write_id,
-        source_id,
-        move |state| async move {
-            if let Some(ticket) = link_to
-                && let Err(error) =
-                    crate::docs::link_created_page(&state.pool, write_id, &ticket).await
-            {
-                tracing::warn!(%error, "a new page could not be linked to its job yet");
-            }
-        },
+        |_| async {},
     );
     Ok(queued)
 }

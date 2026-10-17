@@ -99,7 +99,11 @@ fn descriptor() -> SourceDescriptor {
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         accepts_account: false,
-        write_ops: vec!["comment".to_owned(), "create_branch".to_owned()],
+        write_ops: vec![
+            "comment".to_owned(),
+            "create_branch".to_owned(),
+            "create_page".to_owned(),
+        ],
         entity_kinds: vec![KindInfo {
             id: "pull_request".to_owned(),
             label: "Pull request".to_owned(),
@@ -364,4 +368,55 @@ async fn a_linked_submit_holds_its_ticket_on_the_row_before_the_send() {
             .await
             .expect("the queue reads");
     assert_eq!(owed.as_deref(), Some(TICKET), "the row holds what it owes");
+}
+
+/// #1121: *New page* with *Link it to <job>* (`docs_create_page`'s
+/// `link_to`) holds the ticket on the queued `CreatePage` before the send,
+/// as a linked `submit_write` does, so a page whose write waits is still
+/// linked when it lands; without `link_to` the row owes nothing. Both read
+/// while the adapter is held, and both are sent once it is released.
+#[tokio::test]
+async fn a_new_page_with_link_it_to_holds_its_ticket_on_the_row_before_the_send() {
+    const TICKET: &str = "jira:PAY-231";
+    let Fixture {
+        state,
+        gate,
+        mut heard,
+        ..
+    } = fixture("background_write_page_link_held").await;
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'Retry')")
+        .bind(TICKET)
+        .execute(&state.pool)
+        .await
+        .expect("the ticket is mirrored");
+    let page = |title: &str| {
+        json!({ "CreatePage": {
+            "parent": "gitea:100", "space": "ENG", "title": title, "body": "<p>Steps</p>"
+        }})
+    };
+
+    let mut owes = Vec::new();
+    for (title, link_to) in [("Linked", Some(TICKET.to_owned())), ("Unlinked", None)] {
+        let queued = tokio::time::timeout(
+            PATIENCE,
+            knobas_app::commands::entity::create_page_in_background(&state, page(title), link_to),
+        )
+        .await
+        .expect("answered while the adapter was held")
+        .expect("the page is queued");
+        let owed: Option<String> =
+            sqlx::query_scalar("select link_to from knobas.write_queue where id = $1")
+                .bind(queued.id)
+                .fetch_one(&state.pool)
+                .await
+                .expect("the queue reads");
+        owes.push((queued.id, owed));
+    }
+    assert_eq!(owes[0].1.as_deref(), Some(TICKET), "the linked page owes");
+    assert_eq!(owes[1].1, None, "the unlinked page owes nothing");
+
+    gate.add_permits(2);
+    for (id, _) in &owes {
+        sent_line(&mut heard, *id).await;
+    }
 }

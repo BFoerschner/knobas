@@ -4785,3 +4785,35 @@ Merge-manager:
   nothing; failing the write on it would only push it to the queue's next tick. A connect
   *timeout* under the whole-request deadline reads as a timeout and stays unretried, which errs
   safe. **Reversing:** trivial (the `else` arm of `classify_transport` in `send_with`).
+
+## #1121 — A new page's *Link it to <job>* is held with its queued write (2026-10-17)
+
+- **One resolver for pages, branches and pull requests.** `docs_create_page` with `link_to` goes
+  through `submit_linked_in_background`, so the ticket sits in `knobas.write_queue.link_to` and
+  `link_arrivals` resolves it, with #1050's discard, orphan and seven-day rules. The page is
+  matched by the id its settle stamped (`remote_id`, `docs::created_page`), never by title.
+  `docs::link_created_page` is gone; its look-up stays. **Reversing:** low.
+- **A page keeps its own relation.** `link_on_arrival` draws `documents` (`docs::LINK_RELATION`)
+  for a page and `related` for a branch or pull request, as each did before. **Reversing:**
+  trivial.
+- **A job the mirror does not hold now refuses the page.** `arrival_linkable` runs before the
+  queue, so *Link it to <job>* naming an unmirrored ticket refuses the create. Before, the page was
+  made and the link failed in a log line. The shell resolves the job through the mirror first
+  (`TfDocs`' `jobTicket`), so the refusal only shows up when a job leaves the mirror between that
+  look-up and the send, as *Could not queue the page: …*. **Reversing:** trivial
+  (skip the check for a page).
+- **`submit_write`'s `link_to` accepts a `CreatePage` too.** `arrival_linkable` is shared, and
+  nothing is gained by refusing it there. **Reversing:** trivial.
+- **Merge review: the refusal stays; the page is not made with the link dropped.** The refusal
+  loses nothing: `TfNewPage` keeps the dialog and its draft open when `oncreate` answers `false`,
+  and the toast names the reason, so the reader unticks the link and sends again. Making the page
+  and dropping the link with a notice needs a second answer from `docs_create_page` (a §10.8
+  shape change) or a second call from the shell, for a race the shell's own mirror look-up already
+  narrows to a moment. **Reversing:** low (skip `arrival_linkable` for a page in
+  `create_page_in_background` and add the notice).
+- **Merge review: a timed-out page create cannot link a page this write did not make.** Since
+  #1122 a Confluence page create is sent once; a timeout waits the row and the next flush sends it
+  again (#1125 holds whether it should). The intent links only the page whose id the row's own
+  successful settle stamped, so the orphan of a first send that landed is never linked, and a
+  resend Confluence refuses (title taken) links nothing. *Send mine anyway* goes through the same
+  settle (`apply_anyway`, then `store::sent`), so it stamps `remote_id` too. **Reversing:** n/a.

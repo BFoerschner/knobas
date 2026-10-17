@@ -1414,36 +1414,33 @@ pub async fn create_page(
     ))
 }
 
-/// Link a page a queued `CreatePage` made to a ticket, once the write has
-/// settled and the mirror holds the page (`knobas.write_queue.remote_id`).
-/// Nothing yet is not an error: the page is not there to link.
+/// The page a queued `CreatePage` made, once the write has settled and the
+/// mirror holds the page: the source's id for it (`knobas.write_queue.
+/// remote_id`, stamped by the settle) in the write's source. Matched by that
+/// id, never by title, so a same-titled page someone else made is not it.
+/// `None` while there is nothing to link yet.
+///
+/// The look-up *Link it to <job>* resolves through
+/// (`sources::write_queue::link_on_arrival`, #1121), by [`LINK_RELATION`].
 ///
 /// # Errors
 ///
-/// `internal` if a read or the link write fails.
-pub async fn link_created_page(
-    pool: &PgPool,
-    write_id: i64,
-    ticket: &str,
-) -> Result<bool, IpcError> {
+/// `internal` if a read fails.
+pub async fn created_page(pool: &PgPool, write_id: i64) -> Result<Option<String>, IpcError> {
     let found: Option<(String, Option<String>)> =
         sqlx::query_as("select source_id, remote_id from knobas.write_queue where id = $1")
             .bind(write_id)
             .fetch_optional(pool)
             .await?;
     let Some((source_id, Some(remote))) = found else {
-        return Ok(false);
+        return Ok(None);
     };
     let page = format!("{source_id}:{remote}");
     let mirrored: Option<String> = sqlx::query_scalar("select id from knobas.entity where id = $1")
         .bind(&page)
         .fetch_optional(pool)
         .await?;
-    if mirrored.is_none() {
-        return Ok(false);
-    }
-    crate::protocol::draw_link(pool, &page, ticket, LINK_RELATION).await?;
-    Ok(true)
+    Ok(mirrored)
 }
 
 /// The relation *Link to <job>* and *Link it to <job>* draw from a page to a
