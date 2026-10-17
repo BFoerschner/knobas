@@ -125,6 +125,25 @@ async fn teams_gitea_will_not_list_name_none_and_the_run_goes_on() {
     assert_eq!(teams_of("gitea:tidewater/payout-service"), None);
 }
 
+/// The teams cost one request per repository whose record is written, never
+/// one per repository per run (#966): an idle run does not ask for them.
+#[tokio::test]
+async fn an_idle_run_does_not_ask_for_the_teams() {
+    let fake = Fake::start(&State::tidewater()).await;
+    let source = source(fake.base_url(), serde_json::json!({}));
+    let teams_asked = |paths: &[String]| paths.iter().filter(|p| p.ends_with("/teams")).count();
+    let (_, cursor) = full(&*source).await;
+    assert_eq!(teams_asked(&fake.paths().await), 1, "the full sync reads them once");
+
+    let (items, _) = again(&*source, &cursor).await;
+    assert!(items.is_empty(), "idle run emitted {items:?}");
+    assert_eq!(
+        teams_asked(&fake.paths().await),
+        1,
+        "the idle run asked for the teams again"
+    );
+}
+
 /// Interfaces §4.1, battery clause 2: nothing changed, nothing emitted, and the
 /// cursor comes back byte-identical -- otherwise a five-minute schedule writes
 /// 288 "synced nothing" activity lines a day.
