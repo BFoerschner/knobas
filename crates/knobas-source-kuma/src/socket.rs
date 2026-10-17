@@ -6,7 +6,7 @@
 //! `/metrics` and nothing else, and everything the dashboard does it does over
 //! socket.io. So a Kuma that can write is a Kuma knobas has an **account** for,
 //! and this module is the whole of what that account is used for: log in, emit
-//! one event, read its answer, hang up.
+//! an event, read its answer -- and keep the session for the next write.
 //!
 //! # Why the protocol is hand-written here
 //!
@@ -57,18 +57,54 @@
 //! read here can cost twenty-five seconds without anything having gone wrong.
 //! The constant's own note is where that arithmetic is written out.
 //!
+//! # One login, many writes (#983)
+//!
+//! Uptime Kuma 2.5.3 allows **twenty logins per fixed minute**, across all
+//! clients (`server/rate-limiter.js`, `loginRateLimiter`), and answers the
+//! twenty-first inside a `200` like any refused login. A session per write
+//! therefore failed the twenty-first write of a minute -- pausing many monitors,
+//! or flushing a long queue -- and it read as a wrong password.
+//!
+//! So a logged-in session is **held** after a write and reused by the next
+//! one, if that one comes within [`IDLE_REUSE`]. Three things end a held
+//! session, and each is met by logging in again *before the write is lost*:
+//!
+//! * **it was idle too long.** Nothing reads the session between writes, so
+//!   nothing answers Kuma's pings; [`IDLE_REUSE`] is short enough that Kuma has
+//!   not given up on it yet, and past it the session is not tried at all.
+//! * **Kuma reaped it anyway** (a restart, a password change, which disconnects
+//!   every socket of the account): the emit's POST answers `400 Session ID
+//!   unknown`. The packet was refused, so nothing was done, and a fresh login
+//!   sends it again.
+//! * **the socket is no longer logged in**: Kuma answers the emit with *You are
+//!   not logged in.* before acting on it, and the same retry applies.
+//!
+//! Any other failure on a held session drops it and is the write's failure:
+//! an emit that was accepted and then went unanswered may have been acted on,
+//! and sending a create twice would make two monitors.
+//!
+//! The socket itself is **shared per instance and account across the
+//! process** ([`KumaSocket::shared`]): the write queue builds an adapter per
+//! flush, and every click on *Pause* is its own flush, so a session held by
+//! one adapter value would have been one login per click all the same.
+//!
+//! A login Kuma refuses **for its rate limit** is told apart from a wrong
+//! password ([`login_verdict`]): it is [`SourceError::Unreachable`], which the
+//! write queue retries on its next tick, not `Unauthorized`, which would ask a
+//! human to re-enter a credential that is right.
+//!
 //! # What it deliberately does not do
 //!
-//! **No upgrade to websocket**, although the handshake offers one: the session
-//! lives for one write and a few hundred milliseconds, and an upgrade would
-//! buy nothing but a second transport to get wrong. **No session kept between
-//! writes**: a queue flush is rare, a held-open socket is a ping loop to
-//! maintain and a token to refresh, and Kuma's own answer to a stale session is
-//! the same refusal a wrong password gets. **No `add`, no `deleteMonitor`,
-//! nothing else** -- spec #427 gives this channel pause, resume and create, and
-//! issue #452 is the first two.
+//! **No upgrade to websocket**, although the handshake offers one: a session
+//! is read only while a write waits for its answer, and an upgrade would buy
+//! nothing but a second transport to get wrong. **No goodbye**: a held session
+//! is left for Kuma to reap on its own ping timeout once the writes stop.
+//! **No `add`, no `deleteMonitor`, nothing else** -- spec #427 gives this
+//! channel pause, resume and create, and issue #452 is the first two.
 
-use std::time::Duration;
+use std::collections::HashMap;
+use std::sync::{Arc, LazyLock, PoisonError};
+use std::time::{Duration, Instant};
 
 use knobas_http::{Auth, HttpClient, HttpConfig, Method};
 use knobas_source::SourceError;
@@ -86,13 +122,31 @@ const TRANSPORT: &str = "polling";
 /// Engine.io v4's record separator between packets in one payload.
 const SEPARATOR: char = '\u{1e}';
 
-/// The ack id the login rides on, and the one the call rides on.
-///
-/// Fixed rather than counted: one session performs exactly one login and one
-/// call, so a counter would be a variable with two values and one more thing
-/// for a reader to hold.
+/// The ack id the login rides on. A session's writes count up from the next
+/// one ([`Held::next_ack`]), which is why [`ack_of`] compares ids as numbers.
 const LOGIN_ACK: u32 = 1;
-const CALL_ACK: u32 = 2;
+
+/// How long a held session may sit unused and still be tried for a write.
+///
+/// **Under Kuma's own patience, with room.** Engine.io pings every 25 s and
+/// closes a session whose pong has not come 20 s later, and nothing reads a
+/// held session between writes, so the ping that goes unanswered can be one
+/// sent just before the last write finished. Fifteen seconds after that write
+/// is at most forty seconds after the ping, against the forty-five Kuma waits.
+/// A session reaped anyway costs a refused POST and a fresh login (the module
+/// note), so this bounds wasted requests rather than correctness.
+///
+/// Long enough for what it is for: a burst of clicks, or a queue flushed write
+/// after write, never sits fifteen seconds between two of them.
+const IDLE_REUSE: Duration = Duration::from_secs(15);
+
+/// What Kuma answers a login its rate limiter refused (`errorMessage` in
+/// `server/rate-limiter.js`, 2.5.3), in place of a verdict on the password.
+const RATE_LIMITED: &str = "Too frequently, try again later.";
+
+/// What Kuma answers an emit from a socket that is not logged in
+/// (`checkLogin`, `server/util-server.js`), before acting on it.
+const NOT_LOGGED_IN: &str = "You are not logged in.";
 
 /// How long one whole write may take: the handshake, the login and the call's
 /// own ack, measured as wall-clock time.
@@ -135,12 +189,76 @@ pub(crate) const ADD_EVENT: &str = "add";
 pub(crate) struct KumaSocket {
     client: HttpClient,
     account: Account,
+    /// What the socket was built from, so that [`KumaSocket::shared`] can tell
+    /// a source saved with other timeouts from the one it already holds.
+    cfg: crate::KumaConfig,
     /// [`CALL_BUDGET`] in production; overridden only by this module's own
     /// tests, which cannot wait a minute to watch a deadline trip.
     budget: Duration,
+    /// [`IDLE_REUSE`] in production; overridden only by this module's tests.
+    idle_reuse: Duration,
+    /// The logged-in session the next write may reuse, if any. The lock is
+    /// held for a whole write, so two writes never share a session at once --
+    /// the write queue flushes one source at a time anyway.
+    held: tokio::sync::Mutex<Option<Held>>,
 }
 
+/// A logged-in session kept between writes.
+#[derive(Debug)]
+struct Held {
+    sid: String,
+    /// The ack id the next emit on this session rides on.
+    next_ack: u32,
+    /// What the login pushed, kept current by every read since.
+    pushed: Pushed,
+    /// When the last write on it finished.
+    idle_since: Instant,
+}
+
+/// How an emit on a session went.
+enum Emitted {
+    /// Kuma acknowledged it, with this payload (not yet checked for `ok`).
+    Answered(String),
+    /// Kuma refused it **without acting on it**, because the session is gone
+    /// or no longer logged in: a fresh login may send it again.
+    NotDelivered(SourceError),
+}
+
+/// The process's sockets, one per instance and account (#983).
+type Registry = HashMap<(String, String), Arc<KumaSocket>>;
+static SOCKETS: LazyLock<std::sync::Mutex<Registry>> = LazyLock::new(Default::default);
+
 impl KumaSocket {
+    /// The socket for this instance and account, shared by every adapter the
+    /// process builds for them, so a held session outlives the adapter value
+    /// (the module note says why that matters).
+    ///
+    /// Keyed by base URL and username, and **replaced** when the password or
+    /// the configuration differs: a session logged in with the right password
+    /// must never carry the write of a source saved with a wrong one, and the
+    /// map holds one entry per instance and account rather than one per edit.
+    ///
+    /// # Errors
+    ///
+    /// [`KumaSocket::new`]'s.
+    pub(crate) fn shared(
+        base_url: &str,
+        cfg: &crate::KumaConfig,
+        account: Account,
+    ) -> Result<Arc<Self>, SourceError> {
+        let key = (base_url.trim().to_owned(), account.username.clone());
+        let mut sockets = SOCKETS.lock().unwrap_or_else(PoisonError::into_inner);
+        if let Some(socket) = sockets.get(&key)
+            && socket.account == account
+            && socket.cfg == *cfg
+        {
+            return Ok(Arc::clone(socket));
+        }
+        let socket = Arc::new(Self::new(base_url, cfg, account)?);
+        sockets.insert(key, Arc::clone(&socket));
+        Ok(socket)
+    }
+
     /// Build the channel for one configured source.
     ///
     /// **A client of its own, beside [`crate::http::KumaHttp`]**, and the two
@@ -183,8 +301,18 @@ impl KumaSocket {
                 forbidden: None,
             })?,
             account,
+            cfg: cfg.clone(),
             budget: CALL_BUDGET,
+            idle_reuse: IDLE_REUSE,
+            held: tokio::sync::Mutex::new(None),
         })
+    }
+
+    /// The same socket with a shorter idle window, for this module's tests.
+    #[cfg(test)]
+    fn with_idle_reuse(mut self, idle_reuse: Duration) -> Self {
+        self.idle_reuse = idle_reuse;
+        self
     }
 
     /// The same socket with a shorter deadline, for this module's tests.
@@ -198,7 +326,8 @@ impl KumaSocket {
         self
     }
 
-    /// Log in, emit `event` with `argument`, and answer what Kuma said.
+    /// Emit `event` with `argument` on a logged-in session -- the held one if
+    /// it is still good, a fresh login if not -- and answer what Kuma said.
     ///
     /// The answer is Kuma's own acknowledgement object, already checked for
     /// `ok` -- `{"ok":true,"msg":"successPaused"}` for a pause, and
@@ -211,7 +340,9 @@ impl KumaSocket {
     ///
     /// [`SourceError::Unauthorized`] when the account is refused -- which is
     /// what puts *Re-enter* on screen and what makes the write queue **wait**
-    /// rather than record a refusal (ADR-0004). [`SourceError::Protocol`] when
+    /// rather than record a refusal (ADR-0004). [`SourceError::Unreachable`]
+    /// when Kuma refused the login for its rate limit, which the queue retries
+    /// on a later tick. [`SourceError::Protocol`] when
     /// Kuma refuses the call itself (a monitor that is not there, an account
     /// that may not touch it), carrying Kuma's own words; when the session
     /// stays open past [`CALL_BUDGET`] without acknowledging anything; and
@@ -236,6 +367,9 @@ impl KumaSocket {
     /// and the only place Kuma says which exist is the `dockerHostList` it
     /// pushes before it acknowledges the login. `build` runs after the login
     /// and before the emit; its error is the call's, and nothing is emitted.
+    /// It is `Fn` because a held session that turns out to be gone is
+    /// replaced by a fresh login, and the argument is built again from what
+    /// that login pushed.
     ///
     /// # Errors
     ///
@@ -243,9 +377,11 @@ impl KumaSocket {
     pub(crate) async fn call_with(
         &self,
         event: &str,
-        build: impl FnOnce(&Pushed) -> Result<serde_json::Value, SourceError>,
+        build: impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<serde_json::Value, SourceError> {
-        let Ok(exchanged) = tokio::time::timeout(self.budget, self.exchange(event, build)).await
+        let mut held = self.held.lock().await;
+        let Ok(answered) =
+            tokio::time::timeout(self.budget, self.exchange(&mut held, event, &build)).await
         else {
             // `{:?}` and not `as_secs()`, which is how `knobas_http` prints
             // its own budget: this one is shortened to milliseconds by a test,
@@ -257,56 +393,115 @@ impl KumaSocket {
                 self.budget
             )));
         };
-        let (session, answered) = exchanged?;
-
-        // Best-effort, and **outside the deadline** on purpose: a session left
-        // open is one Kuma reaps on its own ping timeout, and a write that
-        // succeeded must not be reported as failed -- or hurried -- because
-        // the goodbye did not arrive.
-        if let Err(error) = session.send("41".to_owned()).await {
-            tracing::debug!(%error, "closing the Uptime Kuma socket.io session");
-        }
-        verdict(&answered, event)
+        verdict(&answered?, event)
     }
 
-    /// The session itself: open, log in, emit, and read the call's ack.
+    /// The write itself: on the held session if it is still good, else on a
+    /// fresh login, and the ack's payload back.
     ///
     /// Split out from [`KumaSocket::call`] so that one deadline can span the
     /// whole of it -- there is no point bounding the poll loop alone when a
-    /// handshake that never answers costs the same. It hands the session back
-    /// with the ack so that the goodbye can be sent *after* the deadline is
-    /// lifted, which is the one path that has a session to hand back.
+    /// handshake that never answers costs the same.
     ///
-    /// **The other two paths do not say goodbye at all**, and that is the same
-    /// best-effort reading one line up rather than a second policy: a deadline
-    /// that fires drops this future where it stood, session and all, and an
-    /// error inside returns before there is an ack to pair a session with. A
-    /// session nobody closes is one Kuma reaps on its own ping timeout, and
-    /// spending more of a write's clock on a courtesy packet to a server that
-    /// has already failed to answer would buy nothing.
+    /// **The held session is taken out of its slot first** and put back only
+    /// once an ack has arrived on it, so every way this can end early -- an
+    /// error, or the deadline dropping this future where it stood -- leaves
+    /// nothing behind to reuse. A refusal Kuma acknowledged (*You do not own
+    /// this monitor*) still puts the session back: the session answered, and
+    /// [`verdict`] is what turns the answer into the write's error.
     async fn exchange(
         &self,
+        held: &mut Option<Held>,
         event: &str,
-        build: impl FnOnce(&Pushed) -> Result<serde_json::Value, SourceError>,
-    ) -> Result<(Session<'_>, String), SourceError> {
-        let opened = self.open().await?;
+        build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
+    ) -> Result<String, SourceError> {
+        if let Some(mut session) = held
+            .take()
+            .filter(|session| session.idle_since.elapsed() < self.idle_reuse)
+        {
+            match self.emit_on(&mut session, event, build).await? {
+                Emitted::Answered(answered) => {
+                    session.idle_since = Instant::now();
+                    *held = Some(session);
+                    return Ok(answered);
+                }
+                Emitted::NotDelivered(reason) => {
+                    tracing::debug!(%reason, "the held Uptime Kuma session is gone; logging in again");
+                }
+            }
+        }
+        let mut session = self.log_in().await?;
+        match self.emit_on(&mut session, event, build).await? {
+            Emitted::Answered(answered) => {
+                session.idle_since = Instant::now();
+                *held = Some(session);
+                Ok(answered)
+            }
+            Emitted::NotDelivered(reason) => Err(reason),
+        }
+    }
+
+    /// Open a session and log in on it.
+    async fn log_in(&self) -> Result<Held, SourceError> {
+        let sid = sid_of(&self.open().await?)?;
         let session = Session {
             socket: self,
-            sid: sid_of(&opened)?,
+            sid: &sid,
         };
         session.send("40".to_owned()).await?;
-
         session
             .send(emit(LOGIN_ACK, "login", &self.login_argument()))
             .await?;
         let mut pushed = Pushed::default();
-        let login = session.wait_for(LOGIN_ACK, Some(&mut pushed)).await?;
+        let login = session.wait_for(LOGIN_ACK, &mut pushed).await?;
         login_verdict(&login, &self.account.username)?;
+        Ok(Held {
+            sid,
+            next_ack: LOGIN_ACK + 1,
+            pushed,
+            idle_since: Instant::now(),
+        })
+    }
 
-        let argument = build(&pushed)?;
-        session.send(emit(CALL_ACK, event, &argument)).await?;
-        let answered = session.wait_for(CALL_ACK, None).await?;
-        Ok((session, answered))
+    /// Build the argument, emit `event` on `held`, and read its ack.
+    ///
+    /// [`Emitted::NotDelivered`] only for the two refusals that prove Kuma did
+    /// nothing: engine.io's `400` to the emit's own POST (the session is
+    /// unknown, so the packet was dropped), and *You are not logged in.*
+    /// (Kuma checks the login before it acts). Everything else is an error:
+    /// an emit that was accepted and then went unanswered may have landed.
+    async fn emit_on(
+        &self,
+        held: &mut Held,
+        event: &str,
+        build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
+    ) -> Result<Emitted, SourceError> {
+        let argument = build(&held.pushed)?;
+        let ack = held.next_ack;
+        held.next_ack += 1;
+        let session = Session {
+            socket: self,
+            sid: &held.sid,
+        };
+        match session.send(emit(ack, event, &argument)).await {
+            Ok(()) => {}
+            Err(
+                error @ SourceError::Protocol {
+                    status: Some(400), ..
+                },
+            ) => return Ok(Emitted::NotDelivered(error)),
+            Err(error) => return Err(error),
+        }
+        let answered = session.wait_for(ack, &mut held.pushed).await?;
+        if answer(&answered).is_ok_and(|answered| {
+            !went_well(&answered)
+                && answered.get("msg").and_then(serde_json::Value::as_str) == Some(NOT_LOGGED_IN)
+        }) {
+            return Ok(Emitted::NotDelivered(SourceError::protocol(format!(
+                "Uptime Kuma refused {event}: {NOT_LOGGED_IN}"
+            ))));
+        }
+        Ok(Emitted::Answered(answered))
     }
 
     /// The `login` payload. `token` is the two-factor code, empty because
@@ -337,16 +532,12 @@ const POLL_BURST: u32 = 50;
 /// One open engine.io session: the socket plus the id the server minted.
 struct Session<'a> {
     socket: &'a KumaSocket,
-    sid: String,
+    sid: &'a str,
 }
 
 impl Session<'_> {
     fn query(&self) -> [(&str, &str); 3] {
-        [
-            ("EIO", EIO),
-            ("transport", TRANSPORT),
-            ("sid", self.sid.as_str()),
-        ]
+        [("EIO", EIO), ("transport", TRANSPORT), ("sid", self.sid)]
     }
 
     /// POST one packet. The body is the packet verbatim, which is what
@@ -371,14 +562,12 @@ impl Session<'_> {
     /// the constant's note says why bounding each wait separately would not
     /// have bounded the write.
     ///
-    /// Everything else in the stream is discarded on purpose: what a login
-    /// pushes is the dashboard's whole state, and this module has no use for
-    /// any of it -- reading a monitor is `/metrics`' job and stays so.
-    async fn wait_for(
-        &self,
-        ack: u32,
-        mut pushed: Option<&mut Pushed>,
-    ) -> Result<String, SourceError> {
+    /// Everything else in the stream is discarded on purpose, but for the
+    /// Docker host list ([`Pushed`]): what a login pushes is the dashboard's
+    /// whole state, and this module has no use for the rest of it -- reading a
+    /// monitor is `/metrics`' job and stays so. Kuma pushes the list again
+    /// when it changes, so a held session's copy stays current.
+    async fn wait_for(&self, ack: u32, pushed: &mut Pushed) -> Result<String, SourceError> {
         loop {
             let request = self
                 .socket
@@ -394,9 +583,7 @@ impl Session<'_> {
                     self.send("3".to_owned()).await?;
                 } else if let Some(payload) = ack_of(packet, ack) {
                     return Ok(payload.to_owned());
-                } else if let Some(pushed) = pushed.as_deref_mut()
-                    && let Some(hosts) = docker_hosts_of(packet)
-                {
+                } else if let Some(hosts) = docker_hosts_of(packet) {
                     pushed.docker_hosts = Some(hosts);
                 }
             }
@@ -511,10 +698,21 @@ fn went_well(answered: &serde_json::Value) -> bool {
 /// `status: None`, because nothing answered with one: Kuma refuses a login
 /// inside a successful HTTP response, which is the `missing_secret`-shaped
 /// case that field exists to distinguish.
+///
+/// **Except a refusal for Kuma's rate limit** (#983), which says nothing about
+/// the password: it is [`SourceError::Unreachable`], which the write queue
+/// retries on a later tick, rather than `Unauthorized`, which would put
+/// *Re-enter* on a credential that is right.
 fn login_verdict(payload: &str, username: &str) -> Result<(), SourceError> {
     let answered = answer(payload)?;
     if went_well(&answered) {
         return Ok(());
+    }
+    if said(&answered) == RATE_LIMITED {
+        tracing::warn!(%username, "Uptime Kuma refused the login for its rate limit");
+        return Err(SourceError::Unreachable(format!(
+            "Uptime Kuma refused the login for its rate limit (twenty a minute): {RATE_LIMITED}"
+        )));
     }
     tracing::warn!(
         %username,
@@ -541,6 +739,10 @@ fn verdict(payload: &str, event: &str) -> Result<serde_json::Value, SourceError>
         said(&answered)
     )))
 }
+
+#[cfg(test)]
+#[path = "socket_session_tests.rs"]
+mod session_tests;
 
 #[cfg(test)]
 mod tests {

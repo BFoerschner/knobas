@@ -1767,13 +1767,11 @@ kuma-live:
     cd ..
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-kuma --test live_kuma \
       -- --ignored --nocapture --test-threads=1
-    # Uptime Kuma allows twenty logins per minute window across all clients
-    # (`limiter`'s RateLimiter, `server/rate-limiter.js`), and a login refused
-    # for it reads as `unauthorized`. The seed and the suite above spend most
-    # of a window, and `kuma_write_live` logs in about six more times. Run back
-    # to back, its last test was refused (#864; 30 s was not enough, since the
-    # window is fixed rather than a drip), so start it in a fresh window.
-    sleep 61
+    # No pause between the binaries: Uptime Kuma allows twenty logins a
+    # minute, and the adapter holds one logged-in session across writes rather
+    # than logging in per write (#983), so the suite above no longer spends the
+    # window this one needs. (#864 slept 61 s here.)
+    #
     # The same write half one seam higher (#452): the pause queued through
     # `submit_write`, settled, and read back out of `sync.item`. The adapter
     # suite above proves `Source::write` pauses a monitor; everything between

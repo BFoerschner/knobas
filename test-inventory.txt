@@ -2948,6 +2948,12 @@ knobas-source-kuma	lib/knobas_source_kuma	model::tests::kumas_literal_null_label
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::only_the_monitor_families_make_monitors
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_response_time_sentinel_is_an_absence
 knobas-source-kuma	lib/knobas_source_kuma	model::tests::the_state_words_are_the_help_lines_own
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_login_refused_for_the_rate_limit_is_not_a_wrong_password
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_reaped_session_is_replaced_and_the_write_lands_once
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_idle_past_its_window_is_not_reused
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::a_session_that_lost_its_login_logs_in_again
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::adapters_for_one_account_share_a_socket_and_another_password_does_not
+knobas-source-kuma	lib/knobas_source_kuma	socket::session_tests::more_writes_than_kuma_allows_logins_all_land_on_one_login
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_refused_account_waits_and_a_refused_write_does_not
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::a_session_that_only_pings_is_given_up_on_when_the_time_is_gone
 knobas-source-kuma	lib/knobas_source_kuma	socket::tests::an_ack_is_matched_on_the_whole_id
@@ -2981,6 +2987,7 @@ knobas-source-kuma	test/live_kuma	a_refused_account_and_a_refused_write_are_diff
 knobas-source-kuma	test/live_kuma	a_tcp_check_is_published_as_a_port_monitor_and_docker_is_refused_without_a_host
 knobas-source-kuma	test/live_kuma	a_wrong_api_key_is_the_credential_health_path
 knobas-source-kuma	test/live_kuma	an_idle_poll_emits_nothing_and_keeps_its_cursor
+knobas-source-kuma	test/live_kuma	more_writes_in_a_minute_than_kuma_allows_logins_all_land
 knobas-source-kuma	test/live_kuma	only_a_source_with_an_account_offers_the_write_ops
 knobas-source-kuma	test/live_kuma	test_connection_reports_the_real_kumas_version_and_roster
 knobas-source-mock	test/it	contract::a_build_item_names_its_triggerer_as_the_author

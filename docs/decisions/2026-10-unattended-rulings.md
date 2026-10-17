@@ -4728,3 +4728,19 @@ Merge-manager:
 - **#862's new page keeps its send-only link.** The issue says it *can* use the column; it is not
   a criterion, and its look-up (`docs::link_created_page`) is a different one. Filed as backlog.
   **Reversing:** n/a.
+## #983 — Kuma adapter: one login for many writes (2026-10-17)
+
+- **Hold the session across writes, and share the socket across the process.** The issue offered
+  "reuse a session per flush" or "back off"; per flush is not enough, because the write queue
+  builds an adapter per flush and every click is its own flush. So `KumaSocket::shared` keeps one
+  socket per (base URL, username), replaced when the password or config differs. **Reversing:**
+  low (build with `KumaSocket::new` again; the held session then lives per adapter).
+- **Fifteen seconds of idle reuse.** Under engine.io's ping 25 s + timeout 20 s, since nothing
+  pongs between writes. A session reaped anyway costs one refused POST and a fresh login.
+  **Reversing:** trivial (`IDLE_REUSE`).
+- **Retry on a fresh login only when Kuma provably did nothing**: `400 Session ID unknown` on the
+  emit's POST, or *You are not logged in.* Any other failure after the emit was accepted is the
+  write's error, because a create sent twice makes two monitors. **Reversing:** trivial.
+- **A rate-limited login is `Unreachable`, not `Protocol { status: Some(429) }`.** Both wait and
+  retry in the queue; nothing answered a 429, and `status` is documented as what a response
+  carried. **Reversing:** trivial (`login_verdict`).
