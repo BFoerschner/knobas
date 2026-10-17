@@ -141,7 +141,6 @@
   import {
     aroundLines,
     COLUMN_CAP,
-    TYPED_CAP,
     columnName,
     drawnCards,
     LANE_FIELDS,
@@ -149,6 +148,7 @@
     nextSort,
     sortRows,
     splitLanes,
+    TYPED_CAP,
     when,
     type AroundLine,
     type Lane,
