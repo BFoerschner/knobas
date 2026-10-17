@@ -5773,6 +5773,60 @@ pub async fn docs_create_page_payload(
     crate::docs::create_page(pool, |kind| registry.doc_writes(kind), page).await
 }
 
+/// *Move to Confluence…* (#941, R-13a.6, D10): queue one `CreatePage` per
+/// note under a mirrored page, through the write queue, and answer what was
+/// queued. The notes stay. Every page is checked before the first is queued,
+/// so a refused parent queues nothing.
+///
+/// # Errors
+///
+/// As [`move_notes_payloads`], then whatever the write queue refuses.
+#[tauri::command]
+pub async fn move_notes_to_confluence<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    parent: String,
+) -> Result<Vec<knobas_core::write_queue::QueuedWrite>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    let payloads = move_notes_payloads(&state.pool, &parent).await?;
+    let mut queued = Vec::with_capacity(payloads.len());
+    let mut last = None;
+    for (payload, _) in payloads {
+        let (write, source) = crate::sources::write_queue::queue(&state, payload).await?;
+        last = Some((source, write.id));
+        queued.push(write);
+    }
+    // One send drains the source's queue, so the pages go in the notes' order.
+    if let Some((source, id)) = last {
+        crate::sources::write_queue::send_in_background(&state, source, id);
+    }
+    Ok(queued)
+}
+
+/// The `CreatePage`s [`move_notes_to_confluence`] queues, one per note
+/// (`notes_export::note_pages`), each with the source it goes to, for a test.
+///
+/// # Errors
+///
+/// `invalid` when there are no notes, and as [`docs_create_page_payload`]
+/// for the parent.
+pub async fn move_notes_payloads(
+    pool: &PgPool,
+    parent: &str,
+) -> Result<Vec<(serde_json::Value, String)>, IpcError> {
+    let notes = knobas_core::note::all(pool).await?;
+    if notes.is_empty() {
+        return Err(IpcError::invalid("There are no notes to move."));
+    }
+    crate::commands::search::searcher(pool).await?;
+    let registry = crate::sources::Registry::builtin();
+    let mut payloads = Vec::with_capacity(notes.len());
+    for page in crate::notes_export::note_pages(&notes, parent) {
+        payloads
+            .push(crate::docs::create_page(pool, |kind| registry.doc_writes(kind), &page).await?);
+    }
+    Ok(payloads)
+}
+
 // -- the standup digest (#288) ----------------------------------------------
 //
 // Here for the reason the two sections above give, and the reason spec #272

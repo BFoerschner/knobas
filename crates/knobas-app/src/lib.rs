@@ -586,6 +586,9 @@ pub fn run() {
             // #996's removal of a Run… preset, appended at the foot: the list
             // is append-only (§10.8).
             commands::entity::delete_run_preset,
+            // #941's *Move to Confluence…*, appended at the foot: the list
+            // is append-only (§10.8).
+            commands::entity::move_notes_to_confluence,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

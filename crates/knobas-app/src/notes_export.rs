@@ -11,6 +11,9 @@
 //! [`page_file_name`], the name a page link points at, with `-2`, `-3` after
 //! a name an earlier note already took (two notes are often both *Untitled
 //! note*). A file of that name from an earlier export is replaced.
+//!
+//! *Move to Confluence…* (#941) is the other way out: [`note_pages`] is the
+//! page each note becomes. Neither deletes a note.
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -69,6 +72,33 @@ pub async fn export(pool: &PgPool, folder: &Path) -> Result<NotesExport, IpcErro
         count: notes.len() as u64,
         folder: folder.display().to_string(),
     })
+}
+
+/// *Move to Confluence…* (#941, D10): the page each note becomes under
+/// `parent`, in the notes' order. The body is the note's Markdown as typed,
+/// which the source's `body_from_text` reads (`##` a heading, `-` a list
+/// item); a `[[ref]]` stays text. A wiki holds one page of a title per space,
+/// so a title an earlier note took, in any case, gets ` (2)`, ` (3)`.
+#[must_use]
+pub fn note_pages(notes: &[NoteRow], parent: &str) -> Vec<crate::docs::NewPage> {
+    let mut taken = HashSet::new();
+    notes
+        .iter()
+        .map(|note| {
+            let title = note.title.trim();
+            let mut candidate = title.to_owned();
+            let mut n = 1;
+            while !taken.insert(candidate.to_lowercase()) {
+                n += 1;
+                candidate = format!("{title} ({n})");
+            }
+            crate::docs::NewPage {
+                parent: parent.to_owned(),
+                title: candidate,
+                text: note.body_md.clone(),
+            }
+        })
+        .collect()
 }
 
 /// `name`, or `name` with `-2`, `-3` before `.md` when it is taken.

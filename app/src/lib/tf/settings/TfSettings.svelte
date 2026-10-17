@@ -226,7 +226,7 @@
       {:else if place.section === "checkouts"}
         <TfCheckoutsSection {layers} />
       {:else if place.section === "notes"}
-        <TfNotesSection />
+        <TfNotesSection {layers} />
       {:else if place.section !== "sources"}
         <header class="tf-stg-h"><h1>{sectionName}</h1></header>
         <p class="tf-stg-p">{sectionName} is not built in the new shell yet. The rooms UI has every setting today.</p>
