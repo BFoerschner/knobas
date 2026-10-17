@@ -187,7 +187,27 @@ function runRow(config: string, no: number, st: Latest["st"], branch: string, st
     duration_seconds: dur,
     updated_at: (finished ?? started).toISOString(),
     web_url: queued ? null : `https://ci.tidewater.example/buildConfiguration/${config}/${no}`,
+    ...startOf(config, no),
   };
+}
+
+/** prototype-6's `TRIG`: three changes, a schedule, then Mara (the reader), Jonas and Priya. */
+const TRIGGERS: readonly (string | null)[] = [null, null, null, "schedule", "mara", "jonas", "priya"];
+
+/** Whose account the fixture's reader signs in as: Mara, prototype-6's `ME`. */
+const READER = "mara";
+
+/**
+ * How a fixture run was started (#961): prototype-6's story runs are VCS
+ * changes, #1188 is the reader's, and the rest cycle through its `TRIG`.
+ */
+function startOf(config: string, no: number): Pick<RunRow, "trigger" | "started_by" | "started_by_me" | "revision"> {
+  const revision = `${storyOf(config, no).commit}${"0".repeat(34)}`;
+  const story = ["Payout_IntegrationTests-1187", "Payout_IntegrationTests-1186", "Payout_IntegrationTests-1185", "Payout_Build-1184"];
+  const pick = config === "Payout_Build" && no === 1188 ? READER : story.includes(`${config}-${no}`) ? null : TRIGGERS[no % TRIGGERS.length]!;
+  if (pick === null) return { trigger: "change", started_by: null, started_by_me: false, revision };
+  if (pick === "schedule") return { trigger: "schedule", started_by: null, started_by_me: false, revision };
+  return { trigger: "person", started_by: pick, started_by_me: pick === READER, revision };
 }
 
 /** Each configuration's runs, newest first: its story, then 33 more. */
@@ -367,6 +387,8 @@ function storyOf(config: string, no: number) {
   };
   const commit = commits[`${config}-${no}`] ?? (0x5e3a1 + no * 977).toString(16).padStart(6, "0").slice(0, 6);
   const by = config === "Payout_Build" && no === 1188 ? "you" : `VCS change ${commit}`;
+  // `by` stays the view's *Triggered by* fact, which the source's own view
+  // still draws; the shell reads the run's declared trigger (`startOf`).
   const agent = config === "Payout_IntegrationTests" && no === 1187 ? "linux-agent-03" : `linux-agent-0${1 + (no % 4)}`;
   return { commit, by, agent };
 }

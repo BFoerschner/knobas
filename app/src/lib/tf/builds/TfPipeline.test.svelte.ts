@@ -54,13 +54,22 @@ function run(no: number, tone: "ok" | "err", started: string, extra: Partial<Run
     duration_seconds: 240,
     updated_at: started,
     web_url: null,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
     ...extra,
   };
 }
 
 const RUNS: RunRow[] = [
-  run(1187, "err", today(0, 5), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 252 }),
-  run(1186, "ok", daysAgo(1, 18), { duration_seconds: 241 }),
+  run(1187, "err", today(0, 5), {
+    branch: "feature/PAY-231-sepa-retry",
+    duration_seconds: 252,
+    trigger: "change",
+    revision: "a41f2c0e9b8d7c6a",
+  }),
+  run(1186, "ok", daysAgo(1, 18), { duration_seconds: 241, trigger: "person", started_by: "mara", started_by_me: true }),
   run(1185, "err", daysAgo(1, 17), { branch: "feature/PAY-231-sepa-retry", duration_seconds: 268 }),
   ...Array.from({ length: 31 }, (_, i) => run(1184 - i, "ok", daysAgo(3, 12), { duration_seconds: 200 + i })),
 ];
@@ -245,6 +254,29 @@ test("runs come by day, a run on the job's branch carries the job's chip, and th
   const numbers = [...target.querySelectorAll(".tf-runs tbody tr .tf-run-no b")].map((b) => b.textContent);
   expect(numbers).toEqual(["#1187", "#1185"]);
   expect(target.querySelector(".tf-fcount")?.textContent).toContain("2");
+});
+
+test("each run says how it was started; Started by me keeps the reader's; the words reach the commit", async () => {
+  draw();
+  await settle();
+  const rows = () => [...target.querySelectorAll(".tf-runs tbody tr")];
+  expect(rows()[0]!.querySelector(".tf-run-trig")?.textContent).toBe("VCS change a41f2c");
+  expect(rows()[1]!.querySelector(".tf-run-trig")?.textContent).toBe("you");
+  const input = target.querySelector<HTMLInputElement>(".tf-runbar input")!;
+  expect(input.placeholder).toBe("Filter runs by number, branch, commit or person");
+  const scopes = [...target.querySelectorAll(".tf-runbar button")].map((b) => b.textContent?.trim());
+  expect(scopes.indexOf("My job’s branches")).toBeLessThan(scopes.indexOf("Started by me"));
+  expect(scopes.indexOf("Started by me")).toBeLessThan(scopes.indexOf("All"));
+
+  button("Started by me")!.click();
+  flushSync();
+  expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1186"]);
+
+  button("All")!.click();
+  input.value = "a41f2c";
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  expect(rows().map((r) => r.querySelector(".tf-run-no b")?.textContent)).toEqual(["#1187"]);
 });
 
 test("older runs are asked of the source from the oldest run held, appended, until it answers none", async () => {

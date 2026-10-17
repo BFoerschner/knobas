@@ -633,7 +633,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
     use knobas_core::payload::{
         KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
-        resolve_parents, resolve_state, resolve_string,
+        resolve_parents, resolve_state, resolve_string, resolve_trigger,
     };
 
     let kinds: std::collections::HashSet<&str> =
@@ -783,7 +783,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 20] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 21] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -804,6 +804,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::BRANCH, &paths.branch, Wanted::Text),
             (field::STARTED, &paths.started, Wanted::Instant),
             (field::FINISHED, &paths.finished, Wanted::Instant),
+            (field::STARTED_BY, &paths.started_by, Wanted::Text),
         ];
         // The list fields: who a review is asked of, the commits a build ran
         // on (#710), a ticket's labels and its sprints' states (#811), a
@@ -849,10 +850,22 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             seen.names_a_missing_key |= names_a_missing_key(payload, path);
         };
 
+        // A run its declared trigger says a change or a schedule started
+        // names nobody (#961): TeamCity omits `triggered.user` on every VCS
+        // build, so its `started_by` there is the source saying nothing, not
+        // a key the declaration invented. Type-checked still, never evidence.
+        let nobody_started = matches!(
+            resolve_trigger(&item.payload, &paths.trigger),
+            Some(knobas_core::payload::Trigger::Change | knobas_core::payload::Trigger::Schedule)
+        );
         for (name, candidates, wanted) in scalars {
             let seen = evidence.entry((&item.kind, name)).or_default();
+            let judged = seen.names_a_missing_key;
             for path in candidates {
                 weigh(seen, name, &item.payload, path, wanted, "on");
+            }
+            if name == field::STARTED_BY && nobody_started {
+                seen.names_a_missing_key = judged;
             }
         }
         for (name, candidates) in lists {
@@ -969,6 +982,29 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 seen.resolved = true;
             }
             seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+        }
+        // A run's trigger (#961): each candidate's `at` is weighed as a text
+        // path, in one slot as `state`'s candidates are; a kind that declares
+        // none must miss.
+        for candidate in &paths.trigger {
+            let seen = evidence.entry((&item.kind, field::TRIGGER)).or_default();
+            weigh(
+                seen,
+                field::TRIGGER,
+                &item.payload,
+                &candidate.at,
+                Wanted::Text,
+                "on",
+            );
+        }
+        if paths.trigger.is_empty() {
+            assert_eq!(
+                resolve_trigger(&item.payload, &paths.trigger),
+                None,
+                "kind {:?} declares no trigger, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
         }
         if !paths.state.is_empty() {
             *chips.entry(item.kind.as_str()).or_default() |=
@@ -1229,6 +1265,20 @@ mod tests {
         /// Declares a run's `started` at the ticket key, a string that is no
         /// instant (#848).
         StartedThatIsNoInstant,
+        /// Declares a run's trigger at a key its records do not have
+        /// (`triggerd`, #961).
+        TriggerAtAMissingKey,
+        /// Declares who started a run at a key its records do not have
+        /// (`startedBy`), with no trigger to say nobody did (#961).
+        StartedByAtAMissingKey,
+        /// The same `started_by`, on records whose declared trigger is a
+        /// change: runs nobody started, so the absent key is the source
+        /// saying nothing (#961). Conforming.
+        StartedByOnRunsNobodyStarted,
+        /// The same `started_by`, on records whose declared trigger is a
+        /// person: runs somebody started, so the absent key is a misspelled
+        /// path and still evidence (#961).
+        StartedByOnRunsAPersonStarted,
     }
 
     struct TestSource {
@@ -1436,6 +1486,42 @@ mod tests {
                             frame: Some(knobas_core::payload::Frame::Run),
                             pipeline: vec![PayloadPath::of(["key"])],
                             started: vec![PayloadPath::of(["key"])],
+                            ..good
+                        }],
+                        Behavior::TriggerAtAMissingKey => vec![KindPaths {
+                            trigger: vec![knobas_core::payload::TriggerPath {
+                                at: PayloadPath::of(["triggerd"]),
+                                values: vec![knobas_core::payload::TriggerValue::of(
+                                    "vcs",
+                                    knobas_core::payload::Trigger::Change,
+                                )],
+                            }],
+                            ..good
+                        }],
+                        Behavior::StartedByAtAMissingKey => vec![KindPaths {
+                            started_by: vec![PayloadPath::of(["startedBy"])],
+                            ..good
+                        }],
+                        Behavior::StartedByOnRunsNobodyStarted => vec![KindPaths {
+                            started_by: vec![PayloadPath::of(["startedBy"])],
+                            trigger: vec![knobas_core::payload::TriggerPath {
+                                at: PayloadPath::of(["fields", "status", "name"]),
+                                values: vec![knobas_core::payload::TriggerValue::of(
+                                    "In Progress",
+                                    knobas_core::payload::Trigger::Change,
+                                )],
+                            }],
+                            ..good
+                        }],
+                        Behavior::StartedByOnRunsAPersonStarted => vec![KindPaths {
+                            started_by: vec![PayloadPath::of(["startedBy"])],
+                            trigger: vec![knobas_core::payload::TriggerPath {
+                                at: PayloadPath::of(["fields", "status", "name"]),
+                                values: vec![knobas_core::payload::TriggerValue::of(
+                                    "In Progress",
+                                    knobas_core::payload::Trigger::Person,
+                                )],
+                            }],
                             ..good
                         }],
                         _ => vec![good],
@@ -2015,6 +2101,46 @@ mod tests {
         rejects(
             Behavior::PipelineWithoutName,
             "a pipeline but no `name` path",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_trigger_at_a_key_no_record_has() {
+        rejects(
+            Behavior::TriggerAtAMissingKey,
+            "declares trigger of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_started_by_at_a_key_no_record_has() {
+        rejects(
+            Behavior::StartedByAtAMissingKey,
+            "declares started_by of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// A run a change or a schedule started names nobody (#961): a source
+    /// that omits the key there is saying so, as TeamCity does for every VCS
+    /// build, and is not judged by it.
+    #[tokio::test]
+    async fn accepts_a_started_by_absent_from_runs_nobody_started() {
+        run(Behavior::StartedByOnRunsNobodyStarted)
+            .await
+            .expect("runs a change started name nobody");
+    }
+
+    /// The excuse is the trigger's, not the declaration's (#961): on runs
+    /// whose declared trigger is a person, an absent `started_by` key is a
+    /// misspelled path again.
+    #[tokio::test]
+    async fn rejects_a_started_by_absent_from_runs_a_person_started() {
+        rejects(
+            Behavior::StartedByOnRunsAPersonStarted,
+            "declares started_by of kind \"ticket\" at a path no item of that kind resolves",
         )
         .await;
     }

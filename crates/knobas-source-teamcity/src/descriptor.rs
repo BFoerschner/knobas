@@ -109,6 +109,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// `finishDate`, all of them in the record `BUILD_FIELDS` already fetches.
 /// TeamCity writes its dates in ISO 8601's basic form (`20260822T102000+0000`).
 ///
+/// **How a run was started** (#961) is `triggered.type`: `vcs` a change,
+/// `schedule` a schedule, `user` a person, whose account is
+/// `triggered.user.username`. Any other type (`buildType`, a finished
+/// dependency) is a miss, which the shell draws as no trigger.
+///
 /// **A pipeline's chain of groups** (#849) is its `projectPath`, which the
 /// sync writes beside the record from `/app/rest/projects`
 /// (`crate::projects`): every project from below the root down to the
@@ -119,7 +124,9 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// branch or a commit finds the builds of its commit by.
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_core::payload::Frame;
-    use knobas_source::{KindPaths, ListPath, ParentPath, PayloadPath};
+    use knobas_source::{
+        KindPaths, ListPath, ParentPath, PayloadPath, Trigger, TriggerPath, TriggerValue,
+    };
     vec![
         KindPaths {
             kind: KIND_BUILD.to_owned(),
@@ -141,6 +148,15 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             branch: vec![PayloadPath::of(["branchName"])],
             started: vec![PayloadPath::of(["startDate"])],
             finished: vec![PayloadPath::of(["finishDate"])],
+            trigger: vec![TriggerPath {
+                at: PayloadPath::of(["triggered", "type"]),
+                values: vec![
+                    TriggerValue::of("vcs", Trigger::Change),
+                    TriggerValue::of("schedule", Trigger::Schedule),
+                    TriggerValue::of("user", Trigger::Person),
+                ],
+            }],
+            started_by: vec![PayloadPath::of(["triggered", "user", "username"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -387,6 +403,39 @@ mod tests {
         let queued = serde_json::json!({ "id": 8, "buildTypeId": "Payout_IntegrationTests", "state": "queued" });
         assert_eq!(resolve_string(&queued, &run.number), None);
         assert_eq!(resolve_string(&queued, &run.started), None);
+    }
+
+    /// How a build was started (#961), off `triggered` as `BUILD_FIELDS`
+    /// asks for it: a VCS trigger is a change with nobody, a person names
+    /// their account, a schedule is a schedule, and a dependency is a miss.
+    #[test]
+    fn a_build_says_how_it_was_started_and_by_whom() {
+        use knobas_core::payload::{Trigger, resolve_string, resolve_trigger};
+        let declared = descriptor_template().payload_paths;
+        let run = declared.iter().find(|p| p.kind == KIND_BUILD).unwrap();
+        let build =
+            |triggered: serde_json::Value| serde_json::json!({ "id": 7, "triggered": triggered });
+        let vcs = build(serde_json::json!({ "type": "vcs" }));
+        assert_eq!(resolve_trigger(&vcs, &run.trigger), Some(Trigger::Change));
+        assert_eq!(resolve_string(&vcs, &run.started_by), None);
+        let user = build(serde_json::json!({ "type": "user", "user": { "username": "mara" } }));
+        assert_eq!(resolve_trigger(&user, &run.trigger), Some(Trigger::Person));
+        assert_eq!(
+            resolve_string(&user, &run.started_by).as_deref(),
+            Some("mara")
+        );
+        let nightly = build(serde_json::json!({ "type": "schedule" }));
+        assert_eq!(
+            resolve_trigger(&nightly, &run.trigger),
+            Some(Trigger::Schedule)
+        );
+        let chained = build(serde_json::json!({ "type": "buildType" }));
+        assert_eq!(resolve_trigger(&chained, &run.trigger), None);
+        let config = declared
+            .iter()
+            .find(|p| p.kind == KIND_BUILD_CONFIG)
+            .unwrap();
+        assert!(config.trigger.is_empty() && config.started_by.is_empty());
     }
 
     /// A build ran on every revision it lists (#710): one sha per VCS root,

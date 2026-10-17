@@ -42,6 +42,10 @@ function run(id: string, tone: "ok" | "err", extra: Partial<RunRow> = {}): RunRo
     duration_seconds: 252,
     updated_at: "2026-08-22T10:09:12Z",
     web_url: null,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
     ...extra,
   };
 }

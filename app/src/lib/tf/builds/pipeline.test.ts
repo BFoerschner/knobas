@@ -23,6 +23,7 @@ import {
   tabHash,
   tabOf,
   triggerDetail,
+  triggerLabel,
   triggersSentence,
 } from "./pipeline";
 
@@ -37,6 +38,10 @@ function run(no: number, tone: "ok" | "err" | "info", extra: Partial<RunRow> = {
     duration_seconds: 252,
     updated_at: "2026-08-22T10:09:12Z",
     web_url: null,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
     ...extra,
   };
 }
@@ -108,6 +113,35 @@ test("the Runs filter keeps by words over number and branch, the job's branches,
   expect(keep({ scope: "job" }, [])).toEqual([]);
   expect(keep({ results: ["Failed", "Running"] })).toEqual(["1190", "1188"]);
   expect(keep({ branch: "main" })).toEqual(["1189", "1188"]);
+});
+
+test("a trigger reads as prototype-6 says it: VCS change and the short sha, Schedule, the person, you for the reader", () => {
+  const sha = "a41f2c0e9b8d7c6a5f4e3d2c1b0a9f8e7d6c5b4a";
+  expect(triggerLabel(run(1, "ok", { trigger: "change", revision: sha }))).toBe("VCS change a41f2c");
+  expect(triggerLabel(run(2, "ok", { trigger: "change" }))).toBe("VCS change");
+  expect(triggerLabel(run(3, "ok", { trigger: "schedule" }))).toBe("Schedule");
+  expect(triggerLabel(run(4, "ok", { trigger: "person", started_by: "jonas" }))).toBe("jonas");
+  expect(triggerLabel(run(5, "ok", { trigger: "person", started_by: "mara", started_by_me: true }))).toBe("you");
+  expect(triggerLabel(run(6, "ok", { started_by: "priya" }))).toBe("priya");
+  expect(triggerLabel(run(7, "ok"))).toBe("");
+});
+
+test("Started by me keeps the reader's runs; the words reach the commit and who or what started a run", () => {
+  const runs = [
+    run(1190, "ok", { trigger: "change", revision: "a41f2c0e9b8d" }),
+    run(1189, "ok", { trigger: "person", started_by: "mara", started_by_me: true, revision: "91fe0c11" }),
+    run(1188, "ok", { trigger: "person", started_by: "jonas" }),
+    run(1187, "ok", { trigger: "schedule" }),
+  ];
+  const keep = (filter: Partial<Parameters<typeof keptRuns>[1]>) =>
+    keptRuns(runs, { text: "", scope: "all", results: [], branch: null, ...filter }, []).map((r) => r.number);
+  expect(keep({ scope: "mine" })).toEqual(["1189"]);
+  expect(keep({ text: "a41f2c" })).toEqual(["1190"]);
+  expect(keep({ text: "91fe0c11" })).toEqual(["1189"]);
+  expect(keep({ text: "jonas" })).toEqual(["1188"]);
+  expect(keep({ text: "mara" })).toEqual(["1189"]);
+  expect(keep({ text: "you" })).toEqual(["1189"]);
+  expect(keep({ text: "schedule" })).toEqual(["1187"]);
 });
 
 test("runs group by the local day they started, Today and Yesterday by name", () => {

@@ -39,7 +39,7 @@
   import { commitHash, fileHash } from "../repo/repo";
   import { when } from "../tickets/tickets";
   import { duration, pipelineHash, runTone } from "./builds";
-  import { chipTone, defaultBranch, jobBranchFor, queuedRunText, resultWord, staleLine } from "./pipeline";
+  import { chipTone, defaultBranch, jobBranchFor, queuedRunText, resultWord, staleLine, triggerLabel } from "./pipeline";
   import { RUN_BRIDGE, type RunPorts } from "./pipeline-ports";
   import type { RunRequest } from "./run-dialog";
   import TfRunChain from "./TfRunChain.svelte";
@@ -229,7 +229,7 @@
   const run = $derived(held?.find((r) => r.entity_id === runId) ?? null);
   const previous = $derived(run === null || held === null ? null : previousOnBranch(held, run));
   const mainBranch = $derived(defaultBranch(settings));
-  const startedBy = $derived(factOf(view, "Triggered by"));
+  const startedBy = $derived(run === null ? null : triggerLabel(run) || null);
   const agent = $derived(factOf(view, "Agent"));
   const now = $derived(factOf(view, "Now"));
   const commit = $derived(commitOf(view));

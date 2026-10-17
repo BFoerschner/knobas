@@ -66,6 +66,7 @@
     tabHash,
     tabOf,
     triggerDetail,
+    triggerLabel,
     triggersSentence,
   } from "./pipeline";
 
@@ -237,6 +238,11 @@
           duration_seconds: null,
           updated_at: new Date().toISOString(),
           web_url: null,
+          // The reader queued it: *you*, as prototype-6's `startRun` draws it.
+          trigger: "person",
+          started_by: null,
+          started_by_me: true,
+          revision: null,
         },
         ...started,
       ];
@@ -288,15 +294,13 @@
   if (filter.scope === null) filter.scope = "all";
   const config = $derived<FilterConfig>({
     id: "builds-runs",
-    placeholder: "Filter runs by number or branch",
+    placeholder: "Filter runs by number, branch, commit or person",
     noun: "runs",
-    scopes:
-      job !== null
-        ? [
-            { id: "job", label: "My job’s branches", query: "" },
-            { id: "all", label: "All", query: "" },
-          ]
-        : [],
+    scopes: [
+      ...(job !== null ? [{ id: "job", label: "My job’s branches", query: "" }] : []),
+      { id: "mine", label: "Started by me", query: "" },
+      { id: "all", label: "All", query: "" },
+    ],
     chips: [{ key: "result", label: "Result", options: RESULTS.map((value) => ({ value, label: value })) }],
     dropdowns: [{ key: "branch", label: "Branch", options: branchesOf(all ?? []).map((value) => ({ value, label: value })) }],
   });
@@ -307,7 +311,8 @@
           all,
           {
             text: filter.text,
-            scope: job !== null ? filter.scope : "all",
+            // *My job's branches* is only offered with a job; a remembered one without reads as *All*.
+            scope: job !== null || filter.scope !== "job" ? filter.scope : "all",
             results: filter.chips["result"] ?? [],
             branch: filter.dropdowns["branch"] ?? null,
           },
@@ -466,6 +471,7 @@
                     class="tf-chip tf-jobchip-sm">{job}</span
                   >{/if}</td
               >
+              <td class="tf-dim tf-run-trig"><Marked text={triggerLabel(run)} typed={filter.text} /></td>
               <td class="tf-nowrap tf-num tf-run-dur">
                 {#if run.duration_seconds !== null}
                   <svg class="tf-durbar" width={DURBAR_WIDTH} height="4" aria-hidden="true"

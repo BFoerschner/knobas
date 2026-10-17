@@ -27,7 +27,7 @@
 //! `the_selectors_ask_for_nothing_no_reader_looks_at` pairs each name with its
 //! selector for exactly that reason.
 //!
-//! Within one type it is budget: `triggered(user(username))` rather than
+//! Within one type it is budget: `triggered(type,user(username))` rather than
 //! `triggered(type,date,user(username,name))`, which mockd would serve
 //! happily.
 
@@ -88,12 +88,16 @@ pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentPr
 /// only reader is the declared `revision` path (`descriptor.rs`), which the
 /// detail of a commit finds its builds by. The build's own view asks for the
 /// rest live (`BUILD_VIEW_FIELDS`).
+///
+/// **`triggered(type,user(username))`** (#961): the declared `trigger` and
+/// `started_by`. The username was here before as `SyncItem::author`; the
+/// type is what says a change or a schedule started a build no person did.
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectId,projectName),",
     "running-info(percentageComplete,currentStageText),",
-    "triggered(user(username)),",
+    "triggered(type,user(username)),",
     "revisions(revision(version)))"
 );
 
@@ -1115,7 +1119,8 @@ mod tests {
             "queuedDate",
             "buildType(",
             "running-info(",
-            "triggered(",
+            // The declared `trigger` and `started_by` (#961).
+            "triggered(type,user(username))",
             // The declared `revision` (#710): without it every build's
             // revision is a miss, and no commit's detail draws a build.
             "revisions(revision(version))",
@@ -1336,17 +1341,19 @@ mod tests {
              + an UnknownField violation, the same as a misspelling. Adding a reader would not \
              help; the name does not exist on this type."
         );
-        // `triggered` is asked for at exactly the depth `map::build_item`
-        // reads it, and no deeper: mockd would serve
-        // `triggered(type,date,user(username,name))` without complaint.
+        // `triggered` is asked for at exactly the depth its readers read it,
+        // and no deeper: `map::build_item` and the declared `started_by` read
+        // the username, the declared `trigger` the type (#961). mockd would
+        // serve `triggered(type,date,user(username,name))` without complaint.
         assert!(
-            BUILD_FIELDS.contains("triggered(user(username))"),
-            "BUILD_FIELDS must ask for the triggerer, or every build's author is None"
+            BUILD_FIELDS.contains("triggered(type,user(username))"),
+            "BUILD_FIELDS must ask for the trigger and the triggerer, or every build's author \
+             and trigger is None"
         );
-        for deeper in ["triggered(type", "user(username,"] {
+        for deeper in ["triggered(type,date", "user(username,"] {
             assert!(
                 !BUILD_FIELDS.contains(deeper),
-                "BUILD_FIELDS asks for {deeper}; nothing in `map` reads below \
+                "BUILD_FIELDS asks for {deeper}; nothing reads below triggered.type and \
                  triggered.user.username"
             );
         }

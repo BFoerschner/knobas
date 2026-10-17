@@ -35,6 +35,10 @@ function run(no: number, tone: "ok" | "err" | null, branch = "main", extra: Part
     duration_seconds: tone === null ? null : 240,
     updated_at: "2026-10-16T08:04:00Z",
     web_url: null,
+    trigger: null,
+    started_by: null,
+    started_by_me: false,
+    revision: null,
     ...extra,
   };
 }

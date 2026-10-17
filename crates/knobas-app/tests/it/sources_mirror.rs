@@ -324,10 +324,28 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "project_name",
             "reviewers",
             "revision",
+            "started_by",
             "state",
             "status_name",
+            "trigger",
         ],
     );
+}
+
+/// `TriggerPath` and `TriggerValue` ride inside a `KindPaths` (#961), read
+/// off TeamCity's build, the one kind that declares a trigger.
+#[test]
+fn the_trigger_path_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_source_teamcity::descriptor_template()).unwrap();
+    let trigger = wire["payload_paths"]
+        .as_array()
+        .expect("payload_paths is an array")
+        .iter()
+        .find_map(|kind| kind["trigger"].as_array()?.first())
+        .expect("the TeamCity adapter declares a build's trigger")
+        .clone();
+    assert_shape("TriggerPath", &trigger, &["at", "values"]);
+    assert_shape("TriggerValue", &trigger["values"][0], &["trigger", "value"]);
 }
 
 /// `StatePath` and `StateValue` ride inside a `KindPaths` (#666), read off

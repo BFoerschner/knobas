@@ -632,7 +632,9 @@ impl knobas_source::Source for Answers {
                 serde_json::json!({
                     "id": 1099, "number": "1099", "buildTypeId": "Payout_IntegrationTests",
                     "state": "finished", "status": "FAILURE", "branchName": "main",
-                    "startDate": "20260801T100000+0000", "finishDate": "20260801T100400+0000"
+                    "startDate": "20260801T100000+0000", "finishDate": "20260801T100400+0000",
+                    "triggered": { "type": "user", "user": { "username": "older-run-starter" } },
+                    "revisions": { "revision": [{ "version": "91fe0c2b" }, { "version": "ffff" }] }
                 }),
             ),
             // A kind outside the run frame is not a run, whatever it says.
@@ -698,6 +700,16 @@ async fn older_runs_are_the_sources_answer_read_through_the_run_declarations() {
     assert_eq!(
         failed.web_url.as_deref(),
         Some("http://ci.example/build:1099")
+    );
+    // The trigger, who started it and its commit, as a mirrored run reads
+    // them (#961); nobody configured that account, so it is not the reader.
+    assert_eq!(failed.trigger, Some(knobas_core::payload::Trigger::Person));
+    assert_eq!(failed.started_by.as_deref(), Some("older-run-starter"));
+    assert!(!failed.started_by_me);
+    assert_eq!(failed.revision.as_deref(), Some("91fe0c2b"));
+    assert_eq!(
+        (older[1].trigger, older[1].started_by.as_deref()),
+        (None, None)
     );
 
     let capped =
@@ -864,4 +876,103 @@ async fn a_runs_chain_is_the_sources_answer_read_through_the_run_declarations() 
         .await
         .unwrap_err();
     assert_eq!(bad.code, knobas_app::IpcErrorCode::Invalid);
+}
+
+/// **How a run was started** (#961): the declared trigger in the shell's
+/// words, who started it, whether that is the reader -- the account a
+/// configured source signs in as -- and the commit it built, on both the
+/// list's last runs and the pipeline's runs.
+#[tokio::test]
+async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
+    use knobas_core::payload::Trigger;
+    let pool = pool().await;
+    let tc = source(&pool).await;
+    let me = format!("me-{tc}");
+    sqlx::query("update knobas.source_config set config = jsonb_build_object('username', $2::text) where id = $1")
+        .bind(&tc)
+        .bind(&me)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
+    let run = |id: i64, triggered: serde_json::Value| {
+        serde_json::json!({
+            "id": id, "number": id.to_string(), "buildTypeId": "Payout_IntegrationTests",
+            "state": "finished", "status": "SUCCESS", "branchName": "main",
+            "triggered": triggered,
+            "revisions": { "revision": [{ "version": format!("a41f2c{id}") }] }
+        })
+    };
+    let cases = [
+        (1, serde_json::json!({ "type": "vcs" })),
+        (2, serde_json::json!({ "type": "schedule" })),
+        (
+            3,
+            serde_json::json!({ "type": "user", "user": { "username": me } }),
+        ),
+        (
+            4,
+            serde_json::json!({ "type": "user", "user": { "username": "jonas" } }),
+        ),
+        (5, serde_json::json!({ "type": "buildType" })),
+    ];
+    for (id, triggered) in cases {
+        let at = format!("2026-08-21T0{id}:00:00Z");
+        item(
+            &pool,
+            &format!("{tc}:build:{id}"),
+            &tc,
+            "build",
+            &at,
+            run(id, triggered),
+        )
+        .await;
+    }
+
+    let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
+    /// How a run was started, by whom, whether that is the reader, its commit.
+    type Started<'a> = (Option<Trigger>, Option<&'a str>, bool, Option<&'a str>);
+    let seen: Vec<Started> = runs
+        .iter()
+        .rev()
+        .map(|r| {
+            (
+                r.trigger,
+                r.started_by.as_deref(),
+                r.started_by_me,
+                r.revision.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        seen,
+        [
+            (Some(Trigger::Change), None, false, Some("a41f2c1")),
+            (Some(Trigger::Schedule), None, false, Some("a41f2c2")),
+            (
+                Some(Trigger::Person),
+                Some(me.as_str()),
+                true,
+                Some("a41f2c3")
+            ),
+            (Some(Trigger::Person), Some("jonas"), false, Some("a41f2c4")),
+            (None, None, false, Some("a41f2c5")),
+        ]
+    );
+
+    let listed = pipelines_inner(&pool).await.unwrap();
+    let row = listed.iter().find(|p| p.entity_id == tests).unwrap();
+    let recent: Vec<_> = row
+        .recent
+        .iter()
+        .map(|r| (r.trigger, r.started_by_me, r.revision.clone()))
+        .collect();
+    let from_runs: Vec<_> = runs
+        .iter()
+        .map(|r| (r.trigger, r.started_by_me, r.revision.clone()))
+        .collect();
+    assert_eq!(
+        recent, from_runs,
+        "the list reads a run as the pipeline does"
+    );
 }

@@ -134,6 +134,26 @@ export interface KindPaths {
   started: PayloadPath[];
   /** When a run finished, as `started` (#848). */
   finished: PayloadPath[];
+  /** How a run was started, the source's word mapped onto the shell's (#961). */
+  trigger: TriggerPath[];
+  /** Who started a run, as the source spells the account (#961). */
+  started_by: PayloadPath[];
+}
+
+/** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961). */
+export type Trigger = "change" | "schedule" | "person";
+
+/** `knobas_core::payload::TriggerPath` — where a run's trigger word is, and what each means (#961). */
+export interface TriggerPath {
+  /** Leads to a string. */
+  at: PayloadPath;
+  values: TriggerValue[];
+}
+
+/** `knobas_core::payload::TriggerValue` — one source word and the trigger it is. */
+export interface TriggerValue {
+  value: string;
+  trigger: Trigger;
 }
 
 /** `knobas_core::payload::Frame` — a pipeline or a run of the Builds frame (#848). */

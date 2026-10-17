@@ -1785,6 +1785,38 @@ async fn the_seeded_records_fill_the_builds_frame() {
         .and_then(parse_instant)
         .expect("a finish instant");
     assert!(finished >= started, "{started} .. {finished}");
+
+    // How it was started (#961). The seed queues every build through
+    // `/app/rest/buildQueue` with a token, which the server records as a
+    // person: so the declared trigger is a person and the declared
+    // `started_by` names that account, on 1187 and on every seeded run.
+    let trigger = knobas_core::payload::resolve_trigger(&build.payload, &run.trigger);
+    println!(
+        "SEEDED 1187 trigger {trigger:?}, started by {:?}; triggered {}",
+        field(&run.started_by),
+        build.payload["triggered"]
+    );
+    assert_eq!(trigger, Some(knobas_core::payload::Trigger::Person));
+    assert!(
+        field(&run.started_by).is_some(),
+        "a person names their account"
+    );
+    for b in of_kind(&items, "build") {
+        let how = knobas_core::payload::resolve_trigger(&b.payload, &run.trigger);
+        let who = resolve_string(&b.payload, &run.started_by);
+        assert!(
+            how.is_some(),
+            "{} says how it was started: {}",
+            b.entity,
+            b.payload["triggered"]
+        );
+        assert_eq!(
+            how == Some(knobas_core::payload::Trigger::Person),
+            who.is_some(),
+            "{}: a person and only a person names an account",
+            b.entity
+        );
+    }
 }
 
 /// The contract battery -- the suite every adapter must pass -- against the

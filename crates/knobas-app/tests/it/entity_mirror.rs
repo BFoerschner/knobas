@@ -775,6 +775,10 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
         duration_seconds: None,
         updated_at: None,
         web_url: None,
+        trigger: None,
+        started_by: None,
+        started_by_me: false,
+        revision: None,
     };
     let run_keys = [
         "branch",
@@ -782,8 +786,12 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
         "entity_id",
         "finished",
         "number",
+        "revision",
         "started",
+        "started_by",
+        "started_by_me",
         "state",
+        "trigger",
         "updated_at",
         "web_url",
     ];
