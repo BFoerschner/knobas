@@ -919,6 +919,19 @@ fn state_declarations() -> Declarations {
                 ..KindPaths::default()
             }],
         )
+        // A second source's table for the same kind and path, mapped another
+        // way: each source's builds read their own table (#1148).
+        .with(
+            "jenkins",
+            vec![KindPaths {
+                kind: "build".to_owned(),
+                state: vec![StatePath {
+                    at: PayloadPath::of(["status"]),
+                    values: vec![StateValue::of("FAILURE", Tone::Muted).shown_as("broken")],
+                }],
+                ..KindPaths::default()
+            }],
+        )
 }
 
 /// One item's chip, through the database and in Rust.
@@ -1022,6 +1035,35 @@ async fn a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust() {
             "3",
             serde_json::json!({ "state": "finished", "status": " SUCCESS " }),
             chip("SUCCESS", Tone::Ok),
+        ),
+        // A path the payload lacks, and one it holds as null, fall through.
+        (
+            "teamcity",
+            "build",
+            "6",
+            serde_json::json!({ "status": "FAILURE" }),
+            chip("FAILURE", Tone::Err),
+        ),
+        (
+            "teamcity",
+            "build",
+            "7",
+            serde_json::json!({ "state": null, "status": "SUCCESS" }),
+            chip("SUCCESS", Tone::Ok),
+        ),
+        (
+            "gitea",
+            "pr",
+            "r/p#7",
+            serde_json::json!({ "state": "open" }),
+            chip("open", Tone::Info),
+        ),
+        (
+            "jenkins",
+            "build",
+            "8",
+            serde_json::json!({ "state": "running", "status": "FAILURE" }),
+            chip("broken", Tone::Muted),
         ),
     ];
     for (source, kind, key, payload, expected) in cases {
