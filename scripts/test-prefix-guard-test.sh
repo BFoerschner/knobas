@@ -21,6 +21,7 @@ expect() { # expect <pass|fail> <label>
 expect pass "empty tree"
 printf '# not knobas-test-... (reaper prefix)\n' > "$scratch/scripts/a.sh"
 expect pass "comment mention"
+# shellcheck disable=SC2016  # the planted line is literal script text
 printf 'd=$(mktemp -d "$TMPDIR/knobas-test-x.XXXX")\n' > "$scratch/scripts/b.sh"
 expect fail "planted hit in scripts/"
 rm "$scratch/scripts/b.sh"
