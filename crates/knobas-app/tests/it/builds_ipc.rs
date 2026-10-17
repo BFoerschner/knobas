@@ -1036,12 +1036,21 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
         .unwrap();
     }
     let at = "2026-08-20T00:00:00Z";
-    let commit = |source: &str, sha: &str| format!("{source}:commit:tidewater/payout-service/{sha}");
+    let commit =
+        |source: &str, sha: &str| format!("{source}:commit:tidewater/payout-service/{sha}");
     let mirrored = |source: String, base: &'static str, sha: String| {
         let pool = pool.clone();
         async move {
             let id = commit(&source, &sha);
-            item(&pool, &id, &source, "commit", at, serde_json::json!({ "sha": sha })).await;
+            item(
+                &pool,
+                &id,
+                &source,
+                "commit",
+                at,
+                serde_json::json!({ "sha": sha }),
+            )
+            .await;
             sqlx::query("update sync.item set web_url = $2 where entity_id = $1")
                 .bind(&id)
                 .bind(format!("{base}/tidewater/payout-service/commit/{sha}"))
@@ -1107,10 +1116,7 @@ async fn a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds() {
     let unread = pipeline_runs_live_inner(&pool, &no_secrets(), &Answering, &down, None)
         .await
         .unwrap();
-    assert_eq!(
-        commits(unread),
-        [(b4, Some(alone.clone())), (b3, None)]
-    );
+    assert_eq!(commits(unread), [(b4, Some(alone.clone())), (b3, None)]);
 
     // The mirror alone cannot say which repository a run built: the same.
     let mirror = pipeline_runs_inner(&pool, &tests, None).await.unwrap();

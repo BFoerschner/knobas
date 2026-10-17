@@ -1615,6 +1615,8 @@ pub async fn pipeline_runs_live_inner(
     runs_of_pipeline(pool, Some((secrets, registry)), pipeline_id, limit).await
 }
 
+/// What both `pipeline_runs` readings share; `live` is whether a shared sha
+/// may be resolved through the pipeline's settings.
 async fn runs_of_pipeline(
     pool: &PgPool,
     live: Option<LiveReads<'_>>,
@@ -1724,8 +1726,7 @@ async fn with_commits<'a>(
         .iter()
         .filter_map(|(_, r)| r.revision.as_deref())
         .collect();
-    let mut held: std::collections::HashMap<String, Vec<String>> =
-        std::collections::HashMap::new();
+    let mut held: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
     for (sha, commit) in sqlx::query_as::<_, (String, String)>(COMMITS_OF)
         .bind(declarations.as_param())
         .bind(&shas)
@@ -1755,7 +1756,10 @@ async fn with_commits<'a>(
             {
                 Ok(found) => {
                     for (sha, commit) in found {
-                        if held.get(&sha).is_some_and(|commits| commits.contains(&commit)) {
+                        if held
+                            .get(&sha)
+                            .is_some_and(|commits| commits.contains(&commit))
+                        {
                             resolved.insert((pipeline, sha), commit);
                         }
                     }
@@ -1767,13 +1771,14 @@ async fn with_commits<'a>(
         }
     }
     for (pipeline, run) in &mut runs {
-        run.commit_id = run.revision.as_ref().and_then(|sha| {
-            match held.get(sha).map(Vec::as_slice) {
-                Some([only]) => Some(only.clone()),
-                Some(_) => resolved.get(&(*pipeline, sha.clone())).cloned(),
-                None => None,
-            }
-        });
+        run.commit_id =
+            run.revision
+                .as_ref()
+                .and_then(|sha| match held.get(sha).map(Vec::as_slice) {
+                    Some([only]) => Some(only.clone()),
+                    Some(_) => resolved.get(&(*pipeline, sha.clone())).cloned(),
+                    None => None,
+                });
     }
     Ok(())
 }
