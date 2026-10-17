@@ -472,6 +472,12 @@ impl KumaSocket {
     /// unknown, so the packet was dropped), and *You are not logged in.*
     /// (Kuma checks the login before it acts). Everything else is an error:
     /// an emit that was accepted and then went unanswered may have landed.
+    ///
+    /// The `400` proves only that the *last* POST was dropped. If
+    /// `HttpClient::send` retried a timed-out POST whose packet had already
+    /// arrived, and Kuma reaped the session in between, the earlier packet may
+    /// have been acted on. That is the transport-retry hazard #1122 files, the
+    /// same one that already lets a retried POST repeat an emit on a live session.
     async fn emit_on(
         &self,
         logged_in: &mut LoggedIn,

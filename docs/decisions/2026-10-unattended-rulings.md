@@ -4741,6 +4741,10 @@ Merge-manager:
 - **Retry on a fresh login only when Kuma provably did nothing**: `400 Session ID unknown` on the
   emit's POST, or *You are not logged in.* Any other failure after the emit was accepted is the
   write's error, because a create sent twice makes two monitors. **Reversing:** trivial.
+- **Merge-manager: the `400` resend stands, with its one gap filed as #1122.** `knobas_http`
+  retries a timed-out POST, so a `400` can answer a retry whose first attempt landed. That same
+  retry already repeats an emit on a live session on main, so the fix belongs in the transport (a
+  per-request opt-out of retries), not here. **Reversing:** trivial (drop the 400 arm in `emit_on`).
 - **A rate-limited login is `Unreachable`, not `Protocol { status: Some(429) }`.** Both wait and
   retry in the queue; nothing answered a 429, and `status` is documented as what a response
   carried. **Reversing:** trivial (`login_verdict`).
