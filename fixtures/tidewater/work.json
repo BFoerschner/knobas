@@ -344,8 +344,8 @@
     { "name": "fix/PAY-228-partial-refund-drift", "repo": "payout-service", "ticket": "PAY-228", "state": "merged", "ahead": null, "checked_out": false }
   ],
   "repos": [
-    { "name": "payout-service", "lang": "Rust", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
-    { "name": "ledger-api", "lang": "Kotlin", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
-    { "name": "ops-runbooks", "lang": "Markdown", "clone": null, "default_branch": null, "commit_count": null }
+    { "name": "payout-service", "lang": "Rust", "team": "Payments", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
+    { "name": "ledger-api", "lang": "Kotlin", "team": "Payments", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
+    { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null }
   ]
 }

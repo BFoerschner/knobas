@@ -139,6 +139,53 @@ jqf '.repos[] | [.name, .lang] | @tsv' | while IFS="$(printf '\t')" read -r repo
 done
 
 # --------------------------------------------------------------------------
+# 4a. Teams and languages (#1045), so Code's Team and Language columns and the
+#    repository header have something to draw on testenv. knobas reads a
+#    repository's teams from /repos/{o}/{r}/teams and leaves out Owners (it
+#    holds every repository), so each repository joins the fixture's `team`,
+#    an organization team of its own, with no members: nothing here widens
+#    anyone's access. The language is Gitea's linguist statistic over the
+#    default branch's files, so a repository whose `lang` is a programming
+#    language gets one small source file committed to `main`, at prototype-6's
+#    path. A prose language (Markdown) counts for nothing in the statistic and
+#    gets no file. This runs before section 5 so that every branch the seed
+#    cuts afterwards already holds the file: the pull requests' and branches'
+#    own commit lists and diffs are unchanged.
+# --------------------------------------------------------------------------
+jqf '.repos[] | [.name, .team] | @tsv' | while IFS="$(printf '\t')" read -r repo team; do
+  api "$ADMIN" GET "/orgs/$ORG/teams/search?q=$team&limit=50"
+  expect "search teams for $team" 200
+  team_id=$(printf '%s' "$API_BODY" | jq -r --arg t "$team" '.data[]? | select(.name==$t) | .id')
+  if [ -z "$team_id" ]; then
+    api "$ADMIN" POST "/orgs/$ORG/teams" "$(jq -n --arg t "$team" \
+          '{name:$t, permission:"read", units:["repo.code","repo.pulls","repo.issues"], includes_all_repositories:false, can_create_org_repo:false}')"
+    expect "create team $team" 201
+    team_id=$(printf '%s' "$API_BODY" | jq -r .id)
+    echo "seed-gitea: created team $team"
+  fi
+  api "$ADMIN" GET "/teams/$team_id/repos/$ORG/$repo"
+  [ "$API_STATUS" = "200" ] && continue
+  api "$ADMIN" PUT "/teams/$team_id/repos/$ORG/$repo"
+  expect "add $repo to team $team" 204
+  echo "seed-gitea: added $ORG/$repo to team $team"
+done
+
+jqf '.repos[] | [.name, .lang] | @tsv' | while IFS="$(printf '\t')" read -r repo lang; do
+  case "$lang" in
+    Rust)   src_path=src/main.rs;                  src_text='fn main() {}' ;;
+    Kotlin) src_path=src/main/kotlin/Main.kt;      src_text='fun main() {}' ;;
+    *)      continue ;;
+  esac
+  api "$ADMIN" GET "/repos/$ORG/$repo/contents/$src_path?ref=main"
+  [ "$API_STATUS" = "200" ] && continue
+  api "$ADMIN" POST "/repos/$ORG/$repo/contents/$src_path" "$(jq -n \
+        --arg c "$(printf '%s\n' "$src_text" | base64 | tr -d '\n')" --arg m "Add $src_path" \
+        '{content:$c, message:$m, branch:"main"}')"
+  expect "commit $repo:main $src_path" 201
+  echo "seed-gitea: committed $repo:main $src_path ($lang)"
+done
+
+# --------------------------------------------------------------------------
 # Helpers used by the content sections below.
 # --------------------------------------------------------------------------
 ensure_branch() {  # ensure_branch <repo> <branch>

@@ -210,6 +210,14 @@ Atlassian run would serialise what never collided. A TeamCity run starts and
 seeds Gitea without it (the seed writes nothing to a seeded Gitea), and so
 does `live-up gitea`.
 
+**Teams and languages (#1045).** The seed puts each repository of
+`fixtures/tidewater/work.json` in its `team` (an organization team with no
+members, beside *Owners*, which knobas leaves out) and, for a `lang` that is a
+programming language, commits one source file to `main` (`src/main.rs` for
+Rust, `src/main/kotlin/Main.kt` for Kotlin) so Gitea's language statistics
+find it; Markdown counts for nothing and gets no file. Both run before the
+seed cuts any branch, and both are skipped when already there.
+
 **Gitea outlives the run that started it (#698).** No recipe stops Gitea at
 the end of its run; only `just live-down gitea` does. A run that found Gitea
 down — a `just gitea-live` (or `gitea-live-capped`, `start-work-live`), or a
