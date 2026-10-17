@@ -4635,3 +4635,17 @@ Merge-manager review (Spec axis):
 - **`occurred_at + WINDOW_DAYS` is the expiry.** `knobas_core::inbox`'s `credential_expiry`
   dates the item `secret_expires_at - make_interval(days => 14)`, and the preset is 09:00 the
   morning after, offered only while the expiry is still ahead. **Reversing:** n/a.
+## #1024 — Tickets view: a typed filter draws fifty a column (2026-10-17)
+
+Björn ruled the cap (2026-10-17, the issue's last comment), superseding #897's "R-3.4 holds: a
+typed read stays uncapped". Implementer:
+
+- **A board in lanes still reads uncapped while typing.** `capFor()` already returns no cap for
+  lanes, because lanes are split in the webview from one read; a lane's column then draws 50 and
+  its *Show N more* expands locally. Capping the laned read would cut lanes by the server's
+  per-status order. **Reversing:** low (`capFor()`).
+- ***Done* draws 50 while typing, not 3.** Before, a typed *Done* drew every match; the ruling's
+  "at most 50 cards" is the one cap for every column. **Reversing:** trivial (`drawnCards`).
+- **The probe keeps the uncapped typed rows beside the 50 ones**, labelled for lanes, which
+  still make that read; one run shows before and after on the same machine state.
+  **Reversing:** trivial.
