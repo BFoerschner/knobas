@@ -562,7 +562,15 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
             "name": name, "full_name": format!("tidewater/{name}"),
             "owner": { "login": "tidewater" }, "teams": teams,
         });
-        mirrored(pool, "git", "repo", &format!("tidewater/{name}"), &name, payload).await
+        mirrored(
+            pool,
+            "git",
+            "repo",
+            &format!("tidewater/{name}"),
+            &name,
+            payload,
+        )
+        .await
     }
     let up = monitor(&pool, format!("api{t}"), "http", "up").await;
     let down = monitor(&pool, format!("db{t}"), "ping", "down").await;
@@ -606,7 +614,9 @@ async fn a_monitor_row_draws_its_type_and_dot_and_a_repository_its_team_or_owner
         .map(|row| {
             (
                 row.line.clone(),
-                row.state.as_ref().map(|chip| (chip.text.clone(), chip.tone)),
+                row.state
+                    .as_ref()
+                    .map(|chip| (chip.text.clone(), chip.tone)),
             )
         })
         .collect();
