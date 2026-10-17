@@ -3,10 +3,10 @@
 //! Notes and quick capture hide behind a setting for one release (D10), and
 //! before anything about them is ever deleted the reader can take them out:
 //! one `.md` file per note in a folder, written through the one block-to-
-//! Markdown converter (`knobas_core::markdown`, R-10.17).
+//! Markdown converter (`knobas_source::docs::markdown`, R-10.17, #952).
 //!
-//! A note becomes two blocks: its title as a heading, and its body as
-//! Markdown that is already Markdown. So the body is written as the reader
+//! A note is a page whose body is already Markdown: its title as the
+//! heading, then the body passed through. So the body is written as the reader
 //! typed it, and a `[[ref]]` stays the text it was. Files are named by
 //! [`page_file_name`], the name a page link points at, with `-2`, `-3` after
 //! a name an earlier note already took (two notes are often both *Untitled
@@ -18,8 +18,8 @@
 use std::collections::HashSet;
 use std::path::Path;
 
-use knobas_core::markdown::{DocBlock, Inline, page_file_name, to_markdown};
 use knobas_core::note::NoteRow;
+use knobas_source::docs::markdown::{page_file_name, page_from_markdown};
 use serde::Serialize;
 use sqlx::PgPool;
 
@@ -40,18 +40,7 @@ pub struct NotesExport {
 /// The Markdown one note exports as.
 #[must_use]
 pub fn note_markdown(note: &NoteRow) -> String {
-    let mut blocks = vec![DocBlock::Heading {
-        level: 1,
-        text: vec![Inline::Text {
-            text: note.title.clone(),
-        }],
-    }];
-    if !note.body_md.trim().is_empty() {
-        blocks.push(DocBlock::Markdown {
-            text: note.body_md.clone(),
-        });
-    }
-    to_markdown(&blocks)
+    page_from_markdown(&note.title, &note.body_md)
 }
 
 /// Write every note into `folder`, creating it if it is not there.

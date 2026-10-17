@@ -1149,129 +1149,12 @@ pub struct DocExport {
     pub folder: String,
 }
 
-/// A page as Markdown (R-10.17), through the one converter
-/// (`knobas_core::markdown`): its title as the heading, then its blocks.
+/// A page as Markdown (R-10.17), through the one converter, which reads the
+/// frame's own blocks (`knobas_source::docs::markdown`, #952): its title as
+/// the heading, then its blocks.
 #[must_use]
 pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
-    use knobas_core::markdown as md;
-    let mut out = vec![md::DocBlock::Heading {
-        level: 1,
-        text: vec![md::Inline::Text {
-            text: title.to_owned(),
-        }],
-    }];
-    out.extend(blocks.iter().map(to_md_block));
-    md::to_markdown(&out)
-}
-
-fn to_md_block(block: &DocBlock) -> knobas_core::markdown::DocBlock {
-    use knobas_core::markdown as md;
-    use knobas_source::docs::PanelKind;
-    match block {
-        DocBlock::Heading { level, text } => md::DocBlock::Heading {
-            level: *level,
-            text: to_md_inlines(text),
-        },
-        DocBlock::Paragraph { text } => md::DocBlock::Paragraph {
-            text: to_md_inlines(text),
-        },
-        DocBlock::List { ordered, items } => md::DocBlock::List {
-            ordered: *ordered,
-            items: items
-                .iter()
-                .map(|item| item.iter().map(to_md_block).collect())
-                .collect(),
-        },
-        DocBlock::Code { code, language } => md::DocBlock::Code {
-            language: language.clone(),
-            text: code.clone(),
-        },
-        DocBlock::Table { rows } => {
-            let headed = rows
-                .first()
-                .is_some_and(|r| !r.is_empty() && r.iter().all(|c| c.header));
-            let cells = |row: &Vec<knobas_source::docs::TableCell>| {
-                row.iter().map(|c| to_md_inlines(&c.text)).collect()
-            };
-            md::DocBlock::Table {
-                header: if headed { cells(&rows[0]) } else { Vec::new() },
-                rows: rows.iter().skip(usize::from(headed)).map(cells).collect(),
-            }
-        }
-        DocBlock::Panel {
-            kind,
-            title,
-            blocks,
-        } => md::DocBlock::Panel {
-            kind: match kind {
-                PanelKind::Info => "info",
-                PanelKind::Note => "note",
-                PanelKind::Warning => "warning",
-                PanelKind::Tip => "tip",
-            }
-            .to_owned(),
-            title: title.clone(),
-            blocks: blocks.iter().map(to_md_block).collect(),
-        },
-        DocBlock::Placeholder { name } => md::DocBlock::Macro {
-            name: name.clone(),
-            summary: None,
-        },
-    }
-}
-
-fn to_md_inlines(text: &[Inline]) -> Vec<knobas_core::markdown::Inline> {
-    use knobas_core::markdown::Inline as Md;
-    text.iter()
-        .map(|inline| match inline {
-            Inline::Text {
-                text,
-                strong,
-                emphasis,
-                code,
-            } => {
-                if *code {
-                    return Md::Code { text: text.clone() };
-                }
-                let mut run = Md::Text { text: text.clone() };
-                if *emphasis {
-                    run = Md::Emphasis { text: vec![run] };
-                }
-                if *strong {
-                    run = Md::Strong { text: vec![run] };
-                }
-                run
-            }
-            Inline::Link { text, href } => Md::Link {
-                text: vec![Md::Text { text: text.clone() }],
-                url: href.clone(),
-            },
-            Inline::PageLink { title, .. } => Md::PageLink {
-                title: title.clone(),
-            },
-            Inline::Issue { key, .. } => Md::Text { text: key.clone() },
-            Inline::Mention { .. } => Md::Text {
-                text: mention_words(inline),
-            },
-            Inline::Break => Md::Text {
-                text: " ".to_owned(),
-            },
-        })
-        .collect()
-}
-
-/// `@` and the first word of the display name, else the account: how the
-/// reader writes a mention.
-fn mention_words(inline: &Inline) -> String {
-    let Inline::Mention { user, name, .. } = inline else {
-        return String::new();
-    };
-    let first = name
-        .as_deref()
-        .and_then(|n| n.split_whitespace().next())
-        .or(user.as_deref())
-        .unwrap_or("someone");
-    format!("@{first}")
+    knobas_source::docs::markdown::page(title, blocks)
 }
 
 /// Write one page as Markdown into `folder`.
@@ -1293,7 +1176,7 @@ pub async fn export(
             page.title
         )));
     }
-    let file = knobas_core::markdown::page_file_name(&page.title);
+    let file = knobas_source::docs::markdown::page_file_name(&page.title);
     std::fs::create_dir_all(folder).map_err(IpcError::internal)?;
     std::fs::write(folder.join(&file), page_markdown(&page.title, &page.blocks))
         .map_err(IpcError::internal)?;

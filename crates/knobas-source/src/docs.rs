@@ -24,6 +24,8 @@
 
 use serde::{Deserialize, Serialize};
 
+pub mod markdown;
+
 /// The entity kind the Docs frame draws: knobas' own word for a page since
 /// migration `0001`. A docs source emits its pages as this kind.
 pub const PAGE_KIND: &str = "page";
