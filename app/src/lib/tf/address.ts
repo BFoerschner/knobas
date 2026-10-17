@@ -19,7 +19,7 @@ import { itemHash } from "./job/job";
 import { jobHash } from "./route";
 
 /** Where Settings shows the notes and the capture shortcut (D10). */
-export const NOTES_HASH = "#/settings/notes";
+const NOTES_HASH = "#/settings/notes";
 
 /** The address of an entity of `kind`. */
 export function entityAddress(kind: string, entityId: string): string {
@@ -38,7 +38,8 @@ export type Legacy = { go: string } | { resolve: string } | null;
 /**
  * The kinds the rooms UI addressed as `#/<kind>/<id>`. Several are first
  * segments of the new shell too (`#/pr/…`, `#/build/…`), which never reach
- * here; they are listed so the rule reads whole.
+ * here; they are listed so the rule reads whole. `route` is not a kind the
+ * rooms UI had (`#/route/<id>` was a view), and the new shell reads it itself.
  */
 const ROOM_KINDS = new Set([
   "ticket",

@@ -151,6 +151,7 @@
       .then((detail) => {
         if (location.hash === from) replaceHash(entityAddress(detail.row.kind, detail.row.entity_id));
       })
+      // Not found, or not readable: the address stays, and the page says so.
       .catch(() => {});
   });
 

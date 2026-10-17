@@ -5,8 +5,9 @@
  * (start a timer, comment, change status) and, "with an empty query, the app's
  * navigation menu". The first needs write-back (M2) and the timer (M3) and is
  * out of M1 entirely — reserving rows for it would be dead chrome. The second
- * is a list of addresses, and M1 has three.
+ * is a list of addresses: two since #1085.
  */
+
 /** One row of the `>` palette. */
 export interface LauncherAction {
   /** Stable id, used as the list key. */
@@ -21,8 +22,9 @@ export interface LauncherAction {
 /**
  * The addresses the ticket-first shell has for these (`tf/route.ts`).
  *
- * **Two of the plan's four are deliberately absent, and both for the same
- * reason — they are not addresses.**
+ * **Two of the plan's four were deliberately absent from the start, and both
+ * for the same reason — they are not addresses.** (A third, *First-run
+ * setup*, went with the rooms UI in #1085.)
  *
  * *Diagnostics* has no route: interfaces §2.3 puts the sync log inside the
  * sources view, so `#/diagnostics` parses as `unknown` and would render "this

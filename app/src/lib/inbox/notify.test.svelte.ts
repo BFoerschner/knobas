@@ -600,7 +600,7 @@ test("a read that failed leaves the setting unread rather than claiming it is em
 // -- the address ------------------------------------------------------------
 
 /**
- * The address is built with `encodeURIComponent` (`tf/job/job.ts`' `itemHash`), which is what makes an
+ * `addressOf` encodes the id (through `tf/job/job.ts`' `itemHash`), which is what makes an
  * entity key carrying `#` and `/` survive: unencoded, the first truncates the
  * fragment at the browser level and the second reads as another path segment.
  */
