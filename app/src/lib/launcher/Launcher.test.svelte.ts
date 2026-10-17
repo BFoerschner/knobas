@@ -582,8 +582,8 @@ test("Enter on a row navigates to its address and closes the overlay", async () 
   await settle();
 
   // The second row is the PR, and its key carries a `#` and a `/` — both of
-  // which have to survive the address or the detail view opens on nothing.
-  expect(onnavigate).toHaveBeenCalledWith("#/pr/gitea:acme%2Fsvc%23142");
+  // which have to survive the address or the PR page opens on nothing.
+  expect(onnavigate).toHaveBeenCalledWith("#/pr/gitea%3Aacme%2Fsvc%23142");
   expect(onclose).toHaveBeenCalledTimes(1);
   expect(target.querySelector(".dlg")).toBeNull();
 });
@@ -1321,7 +1321,7 @@ test("Enter on an asset opens the Tree at it, and on a route at its exposing ass
   await settle();
   // Story 35: an asset's address *is* the Tree with a selection, not a room
   // with a slide-over over it.
-  expect(onnavigate).toHaveBeenCalledWith("#/asset/asset:9f1c");
+  expect(onnavigate).toHaveBeenCalledWith("#/asset/asset%3A9f1c");
 
   open({
     onnavigate,
@@ -1334,7 +1334,7 @@ test("Enter on an asset opens the Tree at it, and on a route at its exposing ass
   await settle();
   // A route is not a surface of its own (#432): its address is the Tree, at the
   // asset that exposes it.
-  expect(onnavigate).toHaveBeenLastCalledWith("#/route/route:2ab7");
+  expect(onnavigate).toHaveBeenLastCalledWith("#/route/route%3A2ab7");
 });
 
 /** The room the reader is standing in, as the shell names it to the launcher. */
@@ -1463,7 +1463,8 @@ test("a pasted link that resolves opens the entity it names", async () => {
   await settle();
   await search(PASTED);
 
-  expect(navigated).toEqual(["#/ticket/jira:PAY-231"]);
+  // The ticket-first shell's job, never the rooms UI's `#/ticket/…` (#1085).
+  expect(navigated).toEqual(["#/job/PAY-231"]);
   expect(closed, "the overlay gets out of the way first").toHaveBeenCalled();
 });
 
@@ -1481,7 +1482,7 @@ test("a pasted link to an asset opens the Tree at it", async () => {
   await settle();
   await search("https://kuma.example/dashboard/8");
 
-  expect(navigated).toEqual(["#/asset/asset:hel1"]);
+  expect(navigated).toEqual(["#/asset/asset%3Ahel1"]);
 });
 
 /**

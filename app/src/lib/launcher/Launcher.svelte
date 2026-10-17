@@ -63,10 +63,9 @@
     search as defaultSearch,
   } from "../ipc";
   import type { CredentialHealth } from "../ipc/sources";
-  import { addressOf as assetAddress, routeAddressOf as routeAddress } from "../assets/tree";
   import type { HealthPhase } from "../shell/health.svelte";
   import { openExternal as realOpenExternal } from "../shell/open-external";
-  import { hashFor } from "../shell/router.svelte";
+  import { entityAddress } from "../tf/address";
   import { canBeTarget } from "../shell/timer";
   import Board from "./Board.svelte";
   import Chips from "./Chips.svelte";
@@ -488,36 +487,15 @@
   }
 
   /**
-   * Where an entity of this kind is read.
-   *
-   * **The estate is not a slide-over**, which is the one place this is not
-   * "the room, with a detail open": an asset opens the Tree at itself and a
-   * route opens the Tree at the asset exposing it (story 35). Those two
-   * addresses are `assets/tree.ts`' `assetAddress` and `routeAddress`, not a
-   * third spelling here — that module's own docs give the reason, *"there is
-   * still exactly one encoder and a link from a ticket and a click in a column
-   * cannot end up in different places"*, and a launcher row is a third place
-   * that link can come from.
-   *
-   * Left to the room arm it would work today, because that arm composes
-   * `#/<kind>/<id>` and so happens to produce the same two strings. Happening
-   * to agree is not the same as saying so: the day a room detail's address
-   * changes shape, an asset hit riding on it would quietly start opening a
-   * room.
+   * Where a row goes. Every M1 row is an address (spec §2); an entity's is
+   * the ticket-first shell's, through the one rule in `tf/address.ts` (#1085).
    */
-  function addressForEntity(kind: string, entityId: string): string {
-    if (kind === "asset") return assetAddress({ id: entityId });
-    if (kind === "route") return routeAddress({ id: entityId });
-    return hashFor({ view: "room", ctx: "all", detail: { kind, entityId } });
-  }
-
-  /** Where a row goes. Every M1 row is an address (spec §2). */
   function addressOf(row: LauncherRow): string | null {
     switch (row.kind) {
       case "hit":
-        return addressForEntity(row.hit.kind, row.hit.entity_id);
+        return entityAddress(row.hit.kind, row.hit.entity_id);
       case "recent":
-        return addressForEntity(row.row.kind, row.row.entity_id);
+        return entityAddress(row.row.kind, row.row.entity_id);
       case "action":
         return row.action.hash;
       // A list and a syntax row do not navigate: they rewrite the box, which
@@ -544,7 +522,7 @@
   $effect(() => {
     const found = session.urlAnswer?.match;
     if (!found) return;
-    const hash = addressForEntity(found.kind, found.entity_id);
+    const hash = entityAddress(found.kind, found.entity_id);
     close();
     onnavigate(hash);
   });

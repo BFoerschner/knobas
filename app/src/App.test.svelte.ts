@@ -622,7 +622,9 @@ test("what a capture would attach is the foreground and the context the timer re
 /**
  * **The main window's half of *Open in knobas*** (#503): the capture window
  * asks the backend to bring this window forward, and this window listens for
- * `capture:open-note` and goes to the kind-agnostic address.
+ * `capture:open-note` and goes where notes are drawn while they hide:
+ * Settings › Notes and capture (D10, #1085), not the rooms UI's
+ * `#/entity/<note id>`.
  */
 test("a note captured in the other window is asked for here when the capture says so", async () => {
   dbReady = true;
@@ -634,9 +636,34 @@ test("a note captured in the other window is asked for here when the capture say
 
   emit("capture:open-note", "note:0f2c1a");
   await until(
-    () => location.hash === "#/entity/note:0f2c1a",
-    `the address is ${location.hash}, not the note the capture asked for`,
+    () => location.hash === "#/settings/notes",
+    `the address is ${location.hash}, not where notes are drawn`,
   );
+  await until(
+    () => target.querySelector(".tf a[aria-current='page'][href='#/settings/notes']") !== null,
+    "Settings never opened on Notes and capture",
+  );
+  expect(target.textContent).not.toContain("Nothing lives at");
+});
+
+/**
+ * **An address the rooms UI handed out lands on a ticket-first page** (#1085):
+ * a notification delivered before the fix, a bookmark. `#/ticket/<id>` is
+ * read in place; `#/entity/<id>` names no kind, so the entity is read first.
+ */
+test("a rooms-UI address arriving here is replaced by the ticket-first one", async () => {
+  dbReady = true;
+  entityAnswer = jobTicket();
+  location.hash = "#/ctx/all";
+  app = mount(App, { target, props: {} });
+  await until(() => location.hash === "#/tickets", `#/ctx/all stayed ${location.hash}`);
+
+  location.hash = "#/ticket/mock:PAY-231";
+  await until(() => location.hash === "#/job/PAY-231", `#/ticket/… stayed ${location.hash}`);
+
+  location.hash = "#/entity/mock:PAY-231";
+  await until(() => location.hash === "#/job/PAY-231", `#/entity/… stayed ${location.hash}`);
+  expect(target.textContent).not.toContain("Nothing lives at");
 });
 
 /**
@@ -664,14 +691,15 @@ test("an inbox item arriving while the window is unfocused reaches the notify co
     expect(notified[0]!.title).toBe("Title of tidewater-payouts-42");
     expect(notified[0]!.body).toBe("Why tidewater-payouts-42 is here");
     expect(notified[0]!.address, "the notification's click has nowhere to go").toBe(
-      "#/entity/gitea:acme%2Fpayouts%23144",
+      "#/pr/gitea%3Aacme%2Fpayouts%23144",
     );
 
     emit(EVENTS.notificationClicked, { address: notified[0]!.address });
     await until(
-      () => window.location.hash === "#/entity/gitea:acme%2Fpayouts%23144",
+      () => window.location.hash === "#/pr/gitea%3Aacme%2Fpayouts%23144",
       "the click never moved the window",
     );
+    expect(target.textContent, "the click landed on a dead end").not.toContain("Nothing lives at");
   } finally {
     unfocused.mockRestore();
   }

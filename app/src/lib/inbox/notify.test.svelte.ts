@@ -18,6 +18,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { InboxCategory, InboxEntry } from "../ipc/entity";
 import type { NotificationClicked, NotificationDraft as WireDraft } from "../ipc/entity";
+import { parseTfHash } from "../tf/route";
 import { addressOf } from "./address";
 import {
   clickChannel,
@@ -298,26 +299,50 @@ test("a desktop notification carries the entity's address and its click navigate
   b.store.saw([entry("review_request", "pr-12")]);
 
   const sent = b.calls.sent[0]!;
-  expect(sent.extra["address"]).toBe("#/entity/gitea:acme%2Fpayouts%23144");
+  expect(sent.extra["address"]).toBe("#/pr/gitea%3Aacme%2Fpayouts%23144");
 
   b.click(sent);
-  expect(b.calls.navigated).toEqual(["#/entity/gitea:acme%2Fpayouts%23144"]);
+  expect(b.calls.navigated).toEqual(["#/pr/gitea%3Aacme%2Fpayouts%23144"]);
 });
 
 /**
- * A credential expiry has no entity, so its door is the inbox.
- *
- * The alternative — an `#/entity/<source id>` address — is a detail slide-over
- * over a row `get_entity` has never heard of.
+ * A credential expiry has no entity: its subject is a source, so its door is
+ * that source's page in Settings, as the inbox row's *Open source* is (#1085).
  */
-test("an item with no entity navigates to the inbox rather than to a made-up address", async () => {
+test("a credential expiry's notification opens its source's page", async () => {
   const b = bench();
   cleanup = b.store.start();
   await b.primed(["credential_expiry"]);
   b.store.saw([entry("credential_expiry", "gitea", null)]);
 
   b.click(b.calls.sent[0]!);
-  expect(b.calls.navigated).toEqual(["#/inbox"]);
+  expect(b.calls.navigated).toEqual(["#/settings/source/gitea"]);
+});
+
+/** An item with nothing of its own to open is shown where it is listed. */
+test("an item with no entity and no page of its own navigates to the inbox", () => {
+  expect(addressOf(entry("mention", "x", null).item)).toBe("#/inbox");
+});
+
+/**
+ * Every category's notification lands on a page the ticket-first shell draws,
+ * never on *Nothing lives at …* (#1085).
+ */
+test("every notification address has a place in the ticket-first shell", () => {
+  const categories: InboxCategory[] = [
+    "review_request",
+    "failed_build",
+    "new_assignment",
+    "mention",
+    "credential_expiry",
+    "alert",
+  ];
+  for (const category of categories) {
+    for (const kind of ["pr", "ticket", "build", "page", null]) {
+      const item = { ...entry(category, "k").item, kind, entity_id: kind === null ? null : "gitea:x#1" };
+      expect(parseTfHash(addressOf(item)).view, `${category} / ${kind}`).not.toBe("unknown");
+    }
+  }
 });
 
 /** A click carrying nothing knobas can read navigates nowhere. */
@@ -369,8 +394,8 @@ test("a notification:clicked event navigates to the item it carries", async () =
   await vi.waitFor(() => expect(deliver).not.toBeNull());
   expect(listened).toEqual(["notification:clicked"]);
 
-  deliver!({ payload: { address: "#/entity/gitea:acme%2Fpayouts%23144" } });
-  expect(b.calls.navigated).toEqual(["#/entity/gitea:acme%2Fpayouts%23144"]);
+  deliver!({ payload: { address: "#/pr/gitea%3Aacme%2Fpayouts%23144" } });
+  expect(b.calls.navigated).toEqual(["#/pr/gitea%3Aacme%2Fpayouts%23144"]);
 
   // The teardown unlistens, so a late event is not a navigation.
   stop();
@@ -396,7 +421,7 @@ test("a sent desktop notification reaches the notify command with its address", 
     {
       title: "Title of pr-12",
       body: "Why pr-12 is here",
-      address: "#/entity/gitea:acme%2Fpayouts%23144",
+      address: "#/pr/gitea%3Aacme%2Fpayouts%23144",
     },
   ]);
 
@@ -575,15 +600,15 @@ test("a read that failed leaves the setting unread rather than claiming it is em
 // -- the address ------------------------------------------------------------
 
 /**
- * The address is built by the router's own `hashFor`, which is what makes an
+ * The address is built with `encodeURIComponent` (`tf/job/job.ts`' `itemHash`), which is what makes an
  * entity key carrying `#` and `/` survive: unencoded, the first truncates the
  * fragment at the browser level and the second reads as another path segment.
  */
 test("an entity key with a hash and a slash in it survives the address", () => {
   expect(addressOf(entry("review_request", "pr-12").item)).toBe(
-    "#/entity/gitea:acme%2Fpayouts%23144",
+    "#/pr/gitea%3Aacme%2Fpayouts%23144",
   );
-  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/inbox");
+  expect(addressOf(entry("credential_expiry", "gitea", null).item)).toBe("#/settings/source/gitea");
 });
 
 // -- the alert (#447) -------------------------------------------------------
@@ -636,11 +661,11 @@ test("an alert's desktop notification opens the Tree at the affected asset", asy
 
   const sent = b.calls.sent[0]!;
   expect(sent.extra["address"], "an alert opens the Tree, not a room detail").toBe(
-    "#/asset/asset:hel1",
+    "#/asset/asset%3Ahel1",
   );
 
   b.click(sent);
-  expect(b.calls.navigated).toEqual(["#/asset/asset:hel1"]);
+  expect(b.calls.navigated).toEqual(["#/asset/asset%3Ahel1"]);
 });
 
 /**
