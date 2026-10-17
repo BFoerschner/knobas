@@ -17,15 +17,15 @@ export interface ShareTick {
 
 /**
  * The ticks, in prototype-6's order. Each is a part of the share export
- * (`ShareParts`); prototype-6 also draws *Link sets*, which no export carries
- * yet, so it is not drawn (#831's criterion). *Smart lists* is drawn only
- * once a saved list exists, and *Ticket views* (#812) only once a view
- * exists: each part is a box about nothing before that (CONTEXT.md, *Share
- * export*).
+ * (`ShareParts`). *Smart lists* is drawn only once a saved list exists,
+ * *Ticket views* (#812) only once a view exists and *Link sets* (#870) only
+ * once a set exists: each part is a box about nothing before that
+ * (CONTEXT.md, *Share export*).
  */
-export function shareTicks(savedLists: boolean, savedViews = false): ShareTick[] {
+export function shareTicks(savedLists: boolean, savedViews = false, savedSets = false): ShareTick[] {
   const all: ShareTick[] = [
     { part: "links", label: "Links" },
+    { part: "link_sets", label: "Link sets" },
     { part: "ticket_views", label: "Ticket views" },
     { part: "contexts", label: "Contexts" },
     { part: "assets", label: "Assets and routes" },
@@ -35,7 +35,10 @@ export function shareTicks(savedLists: boolean, savedViews = false): ShareTick[]
     { part: "time", label: "Time" },
   ];
   return all.filter(
-    (tick) => (savedLists || tick.part !== "smart_lists") && (savedViews || tick.part !== "ticket_views"),
+    (tick) =>
+      (savedLists || tick.part !== "smart_lists") &&
+      (savedViews || tick.part !== "ticket_views") &&
+      (savedSets || tick.part !== "link_sets"),
   );
 }
 

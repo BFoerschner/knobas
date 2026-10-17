@@ -192,6 +192,7 @@ mod tests {
             &[
                 "assets",
                 "contexts",
+                "link_sets",
                 "links",
                 "notes",
                 "smart_lists",
@@ -211,11 +212,15 @@ mod tests {
             json["ticket_views"], true,
             "the ratified default is ticket views on (#812)"
         );
+        assert_eq!(
+            json["link_sets"], true,
+            "the ratified default is link sets on (#870)"
+        );
 
         let sent = serde_json::json!({
             "links": true, "assets": false, "contexts": false,
             "notes": true, "time": true, "sources": false,
-            "smart_lists": false, "ticket_views": false
+            "smart_lists": false, "ticket_views": false, "link_sets": false
         });
         let decoded: ShareParts = serde_json::from_value(sent).unwrap();
         assert_eq!(
@@ -229,6 +234,7 @@ mod tests {
                 sources: false,
                 smart_lists: false,
                 ticket_views: false,
+                link_sets: false,
             }
         );
     }

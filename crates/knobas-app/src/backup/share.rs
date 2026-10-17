@@ -130,6 +130,16 @@ pub struct ShareParts {
     /// entity, so it brings no address book, and its text crosses exactly as
     /// it was saved.
     pub ticket_views: bool,
+    /// `knobas.link_set`, `link_set_member` and `link_set_rule` -- the link
+    /// sets somebody made (#870, R-7.11). **On by default**, beside ticket
+    /// views and for their reason: a set is a named group of items and the
+    /// rules that show it, not a private note. It brings no address book: a
+    /// member and a rule name an item by id with no foreign key (migration
+    /// `0039`), so it resolves once the colleague's own sources sync that
+    /// item. A pattern crosses as saved, its query and its reading together.
+    /// `knobas.link_set_hidden` stays behind: *Hide here* is one reader's
+    /// choice about one ticket, as a note is.
+    pub link_sets: bool,
 }
 
 impl Default for ShareParts {
@@ -143,6 +153,7 @@ impl Default for ShareParts {
             sources: true,
             smart_lists: true,
             ticket_views: true,
+            link_sets: true,
         }
     }
 }
@@ -220,6 +231,11 @@ impl ShareParts {
         if self.ticket_views {
             push("ticket_view");
         }
+        if self.link_sets {
+            push("link_set");
+            push("link_set_member");
+            push("link_set_rule");
+        }
         tables
     }
 
@@ -236,6 +252,7 @@ impl ShareParts {
             sources: false,
             smart_lists: false,
             ticket_views: false,
+            link_sets: false,
         }
     }
 }
@@ -269,7 +286,10 @@ mod tests {
                 "context",
                 "source_config",
                 "smart_list",
-                "ticket_view"
+                "ticket_view",
+                "link_set",
+                "link_set_member",
+                "link_set_rule"
             ],
         );
     }
@@ -338,6 +358,14 @@ mod tests {
                 },
                 vec!["ticket_view"],
             ),
+            // Nor is a link set (#870); and *Hide here* stays behind.
+            (
+                ShareParts {
+                    link_sets: true,
+                    ..ShareParts::none()
+                },
+                vec!["link_set", "link_set_member", "link_set_rule"],
+            ),
         ] {
             assert_eq!(parts.tables(), expected, "{parts:?}");
         }
@@ -367,6 +395,7 @@ mod tests {
                 sources: true,
                 smart_lists: true,
                 ticket_views: true,
+                link_sets: true,
             },
         ] {
             assert!(
@@ -393,8 +422,11 @@ mod tests {
             sources: true,
             smart_lists: true,
             ticket_views: true,
+            link_sets: true,
         };
         for forbidden in [
+            // *Hide here* is one reader's choice about one ticket (#870).
+            "link_set_hidden",
             "activity",
             "write_queue",
             "sync_run",
@@ -468,12 +500,16 @@ mod tests {
             older.ticket_views,
             "a payload without `ticket_views` must decode to the ratified answer for it, which is on"
         );
+        assert!(
+            older.link_sets,
+            "a payload without `link_sets` must decode to the ratified answer for it, which is on"
+        );
         assert_eq!(older, ShareParts::default());
 
         let all: ShareParts = serde_json::from_value(serde_json::json!({
             "links": false, "assets": false, "contexts": false,
             "notes": false, "time": false, "sources": false,
-            "smart_lists": false, "ticket_views": false
+            "smart_lists": false, "ticket_views": false, "link_sets": false
         }))
         .expect("a payload naming every part");
         assert_eq!(all, ShareParts::none());

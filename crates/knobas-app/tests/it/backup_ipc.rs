@@ -759,6 +759,42 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     .await
     .expect("seed a ticket view");
 
+    // ...and a link set (#870) with a fixed member, a pattern and two rules,
+    // saved through the command the editor calls, which is what the
+    // `link_sets` part carries; and *Hide here* on its member, which it does
+    // not.
+    knobas_app::link_sets::save(
+        pool,
+        knobas_app::link_sets::LinkSetDraft {
+            id: None,
+            name: format!("Payout stack {t}"),
+            description: "What every payout ticket touches.".to_owned(),
+            members: vec![knobas_app::link_sets::LinkSetMember {
+                kind: "asset".to_owned(),
+                entity_id: asset.clone(),
+            }],
+            patterns: vec![knobas_app::link_sets::LinkSetPattern {
+                kind: "page".to_owned(),
+                query: "name:Runbook*".to_owned(),
+            }],
+            rules: vec![
+                knobas_app::link_sets::LinkSetRule {
+                    kind: "epic".to_owned(),
+                    value: "jira:PAY-200".to_owned(),
+                },
+                knobas_app::link_sets::LinkSetRule {
+                    kind: "manual".to_owned(),
+                    value: ticket.clone(),
+                },
+            ],
+        },
+    )
+    .await
+    .expect("seed a link set");
+    knobas_app::link_sets::hide(pool, &ticket, &asset, true)
+        .await
+        .expect("hide the set's member on the ticket");
+
     Seeded {
         ticket,
         pr,
@@ -785,6 +821,26 @@ async fn saved_lists(pool: &sqlx::PgPool) -> Vec<(String, String, String)> {
         .fetch_all(pool)
         .await
         .expect("read the saved smart lists")
+}
+
+/// Every link set a database holds, its members (fixed and pattern, the
+/// stored reading included) and its rules, row for row as stored (#870).
+///
+/// Read as the rows themselves rather than through `link_sets::list`, whose
+/// counts and titles depend on what the far machine has synced: what an
+/// archive moves is the rows.
+async fn stored_link_sets(pool: &sqlx::PgPool) -> serde_json::Value {
+    sqlx::query_scalar(
+        "select jsonb_build_object(
+            'sets', (select jsonb_agg(to_jsonb(s) order by s.id) from knobas.link_set s),
+            'members', (select jsonb_agg(to_jsonb(m) order by m.set_id, m.position)
+                          from knobas.link_set_member m),
+            'rules', (select jsonb_agg(to_jsonb(r) order by r.set_id, r.position)
+                        from knobas.link_set_rule r))",
+    )
+    .fetch_one(pool)
+    .await
+    .expect("read the link sets")
 }
 
 /// How many rows a table holds -- the reading every assertion below is made of.
@@ -841,6 +897,7 @@ fn hand_over(from: &tempfile::TempDir, to: &tempfile::TempDir, file: &str) {
 async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     let (sharer, sharer_dir) = service("sharesource").await;
     let estate = seed_corpus(&sharer.pool, "share").await;
+    let sets_here = stored_link_sets(&sharer.pool).await;
 
     let record = backup::share_export(&sharer, backup::ShareParts::default())
         .await
@@ -880,6 +937,9 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         ("source_config", 1),
         ("smart_list", 1),
         ("ticket_view", 1),
+        ("link_set", 1),
+        ("link_set_member", 2),
+        ("link_set_rule", 2),
     ] {
         assert_eq!(
             rows(there, table).await,
@@ -887,7 +947,15 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
             "knobas.{table} did not come across"
         );
     }
-    for absent in ["note", "block", "worklog", "timer", "heartbeat", "activity"] {
+    for absent in [
+        "note",
+        "block",
+        "worklog",
+        "timer",
+        "heartbeat",
+        "activity",
+        "link_set_hidden",
+    ] {
         assert_eq!(
             rows(there, absent).await,
             0,
@@ -967,6 +1035,40 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     assert_eq!(views[0].view.query, VIEW_QUERY);
     assert_eq!(views[0].unreadable.as_deref(), Some("sprint:next"));
     assert_eq!(views[0].count, None);
+
+    // **The link set arrived row for row** (#870): its name and description,
+    // the fixed member, the pattern with its query and its stored reading,
+    // and both rules, in order. The seed holds all of them, so an equality
+    // here is about rows that exist.
+    assert_eq!(
+        sets_here["members"].as_array().map(Vec::len),
+        Some(2),
+        "the seed has a fixed member and a pattern: {sets_here}"
+    );
+    assert!(
+        sets_here["members"][1]["pattern"].is_object(),
+        "the seed's pattern has its reading: {sets_here}"
+    );
+    assert_eq!(sets_here["rules"].as_array().map(Vec::len), Some(2));
+    assert_eq!(
+        stored_link_sets(there).await,
+        sets_here,
+        "the link set did not cross whole"
+    );
+    // ...and the far machine reads it as a set, by the command its view calls.
+    let listed = knobas_app::link_sets::list(there)
+        .await
+        .expect("the colleague's link sets");
+    assert_eq!(listed.len(), 1, "{listed:?}");
+    assert_eq!(listed[0].patterns[0].query, "name:Runbook*");
+    assert_eq!(
+        listed[0]
+            .rules
+            .iter()
+            .map(|rule| (rule.kind.as_str(), rule.value.as_str()))
+            .collect::<Vec<_>>(),
+        vec![("epic", "jira:PAY-200"), ("manual", estate.ticket.as_str())]
+    );
 }
 
 /// **Each toggle alone brings exactly its tables and nothing else**, read off
@@ -1045,6 +1147,15 @@ async fn each_part_alone_brings_exactly_its_own_tables() {
                 ..none
             },
             vec!["ticket_view"],
+        ),
+        // Nor is a link set (#870), and *Hide here* stays behind.
+        (
+            "link sets",
+            backup::ShareParts {
+                link_sets: true,
+                ..none
+            },
+            vec!["link_set", "link_set_member", "link_set_rule"],
         ),
     ] {
         let record = backup::share_export(&sharer, parts)
