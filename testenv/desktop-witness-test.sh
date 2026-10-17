@@ -382,19 +382,10 @@ pin_label() {
     fi
 }
 
-pin_label ../app/src/lib/shell/TopStrip.svelte 'aria-label="Settings"' \
-    "the top strip's Settings button still has its accessible name"
-pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save clones root"' \
-    "the clones-root Save still has an accessible name of its own"
-pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Save {command.label}"' \
-    "each open-command Save is named after its own command"
-# The **visible label text**, not the `for=`/`id=` pair: the driver focuses
-# this field by its accessible name, which the label element supplies, so a
-# pin on the id would stay green through a rename and let the run fail minutes
-# in. Same for the command fields, whose names come from
-# `knobas_app::checkout::open`'s `command_view` and are pinned there.
-pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Directory<' \
-    "the clones-root field is still labelled Directory"
+# The rooms UI's top strip, Checkouts section and checkout panel, which the
+# open-in-editor driver pressed, went in #881; their pins went with them, and
+# porting the driver to the ticket-first shell is #1084.
+#
 # The button the driver presses and the settings field it fills are both named
 # from one Rust label, so this is where the driver's `Open in VS Code` comes
 # from -- not from either component. Since #844 the label is composed
@@ -402,26 +393,11 @@ pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'for="clones-root">Dir
 # beside it asserts the composed words, so the literal is pinned there.
 pin_label ../crates/knobas-app/src/checkout/open.rs '"Open in VS Code"' \
     "the VS Code action is still labelled the way the driver asks for it"
-# The Save that stored a template puts a *Reset* beside it, and the driver
-# waits for that appearing as its proof the write landed -- so the reset
-# button's accessible name is a name it acts on too.
-pin_label ../app/src/lib/settings/CheckoutsSection.svelte 'aria-label="Reset {command.label}"' \
-    "each open-command Reset is named after its own command"
-# The panel's own heading, which is how the driver tells a repo detail from
-# every other kind: a checkout panel is what a repo and a branch have and
-# nothing else does.
+# **What a pin cannot say, which is #547's whole finding.** A pin of a source
+# string measures that the driver's constant is not stale; it measures nothing
+# whatever about what the accessibility API answers, and the only thing that
+# does is a run.
 #
-# **And what this pin cannot say, which is #547's whole finding.** It pins the
-# spelling in the markup. The driver used to look for that spelling as an
-# accessible *name*, and no element on screen has ever carried it as one -- a
-# `<span class="lab">` names nothing, and its words are an `AXValue` -- so this
-# pin was green through every run of a driver that could not have passed. A pin
-# of a source string measures that the driver's constant is not stale; it
-# measures nothing whatever about what the accessibility API answers, and the
-# only thing that does is a run. The driver reads this heading with `ax values`
-# now, which is the attribute it is in.
-pin_label ../app/src/lib/detail/CheckoutPanel.svelte '>Checkout<' \
-    "the checkout panel still carries the heading the driver looks for"
 # And the remote the driver writes into its fake clone: the scan matches it
 # against the demo repo's own URL, which this constant is the stem of.
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
@@ -444,9 +420,10 @@ check "a lower-case reading renders in upper case" "CAPTURED FROM" \
 check "an already-upper name is unchanged" "CHECKOUT" "$(rendered_label CHECKOUT)"
 check "nothing renders as nothing" "" "$(rendered_label '')"
 
-pin_label ../app/src/app.css '.lab{font:600 11px/1 var(--disp);text-transform:uppercase' \
+# In `unported.css` since `app.css` went (#881).
+pin_label ../app/src/unported.css '.lab{font:600 11px/1 var(--disp);text-transform:uppercase' \
     "the .lab class still uppercases, which is why the field names are upper case"
-pin_label ../app/src/app.css '.row.hd{height:22px;cursor:default;color:var(--faint);font:500 10px var(--mono);text-transform:uppercase' \
+pin_label ../app/src/unported.css '.row.hd{height:22px;cursor:default;color:var(--faint);font:500 10px var(--mono);text-transform:uppercase' \
     "the .row.hd class still uppercases, which is why the panel readings are upper case"
 
 # --- the capture driver's pure parts (#503) ---------------------------------
@@ -631,20 +608,13 @@ pin_label ../crates/knobas-app/src/capture.rs '.title("Capture")' \
     "the capture window is still built under the title the driver waits for"
 pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Open in knobas"' \
     "the capture window's button still has its accessible name"
-pin_label ../app/src/lib/settings/CaptureSection.svelte 'aria-label="Save capture shortcut"' \
-    "the capture shortcut's Save still has an accessible name of its own"
-# The **visible label text**, not the `for=`/`id=` pair: the driver focuses this
-# field by its accessible name, which the label element supplies, so a pin on
-# the id would stay green through a rename and let the run fail minutes in.
-pin_label ../app/src/lib/settings/CaptureSection.svelte 'for="capture-shortcut">Shortcut<' \
-    "the capture shortcut field is still labelled Shortcut"
-# The three lines the driver reads back off the screen. Each is a *value* rather
+# The rooms UI's Capture settings section, where the driver set the shortcut,
+# went in #881; its pins went with it, and porting the driver is #1084.
+#
+# The lines the driver reads back off the screen. Each is a *value* rather
 # than a name, which is why `ax values` exists at all, and each has a sibling
-# state whose line is different -- *Not registered: …*, *Nothing is kept until
-# you type.* -- so a pin on the wrong one would make the run pass on a feature
-# that had failed.
-pin_label ../app/src/lib/settings/CaptureSection.svelte '>Registered.<' \
-    "the settings section still says *Registered.* when the shortcut holds"
+# state whose line is different -- *Nothing is kept until you type.* -- so a
+# pin on the wrong one would make the run pass on a feature that had failed.
 pin_label ../app/src/lib/capture/CaptureWindow.svelte '>Saved as a note.<' \
     "the capture window still says *Saved as a note.* once the row exists"
 pin_label ../app/src/lib/detail/LinksPanel.svelte '>Linked items<' \

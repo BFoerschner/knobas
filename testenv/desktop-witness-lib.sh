@@ -289,7 +289,7 @@ sole_argument() {
 #
 # The accessible name an element has when its text is styled `.lab` or sits in a
 # `.row.hd` -- **the uppercase form**, because both carry
-# `text-transform: uppercase` in `app/src/app.css` and WebKit names an element
+# `text-transform: uppercase` in `app/src/unported.css` and WebKit names an element
 # by what is *rendered*, not by what is in the markup.
 #
 # **Measured on the dev Mac, 2026-09-08**, in the first run of this harness that

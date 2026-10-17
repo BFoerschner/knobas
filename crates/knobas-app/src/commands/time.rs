@@ -1079,7 +1079,8 @@ mod tests {
         const ADR: &str = include_str!(
             "../../../../docs/adr/0012-writes-are-at-least-once-no-idempotency-key.md"
         );
-        const DRAFT: &str = include_str!("../../../../app/src/lib/time/WorklogDraft.svelte");
+        // The ticket-first shell's draft, since the rooms UI's went (#881).
+        const DRAFT: &str = include_str!("../../../../app/src/lib/tf/TfWorklogDraft.svelte");
 
         let flatten = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
         let sentence = ADR
