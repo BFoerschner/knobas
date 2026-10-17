@@ -3939,3 +3939,36 @@ Implementer, one PR for both.
   default branch, every person through *Owners*), so the by-eye check on testenv data cannot see
   either. The live suite witnesses both on a repository it makes and removes; seeding them is
   follow-up #1045. **Reversing:** n/a.
+
+## #996 — Removing a Run… preset (2026-10-17)
+
+- **The control is a quiet text button, *Remove preset*, in the *Start from* row, shown only while
+  a preset is picked.** Prototype-6 draws none. The design system's quiet action is the underlined
+  `tf-linkish` button (as *Add a parameter*), in the error colour because it destroys; no icon, no
+  loud button, nothing in the footer where *Run* is. It sits beside the select, so what it removes
+  is the thing the select shows. **Reversing:** low; a class and one block in `TfRunDialog.svelte`.
+- **No confirmation step.** A preset is a name and a handful of settings, the dialog still holds
+  them after the removal, and *Save these settings as a preset named …* brings it back. A confirm
+  would be the heavier thing in a dialog whose point is to be quick. **Reversing:** low.
+- **After the removal *Start from* goes back to *Defaults*, and the form is reset to the defaults.**
+  The picked entry is gone, so the select cannot keep it; resetting is what choosing *Defaults*
+  already does. **Reversing:** low. *Reversed by the merge-manager, see below.*
+- **`delete_run_preset` answers `()` and `not_found` for a name the pipeline does not hold.** The
+  ticket asks for `not_found`. The dialog treats `not_found` as "already gone" and re-reads the
+  list (any other refusal: see the merge-manager's ruling below). **Reversing:** low.
+- **Merge-manager (PR #1048): after the removal the form keeps the removed preset's settings;
+  only *Start from* moves to *Defaults*.** The no-confirmation ruling rests on "the dialog still
+  holds them after the removal", but the reset above threw them away, so a misclick lost the preset
+  for good. Keeping the form makes the save the undo, as the conventions' *Writes and undo* asks
+  of a write without a confirm. *Defaults* over edited values is the state a reader already reaches
+  by picking *Defaults* and then changing a field. **Reversing:** low; `start = ""` back to
+  `pick("")` and one test line.
+- **Merge-manager (PR #1048): any refusal other than `not_found` also says it failed.** The
+  implementer's dialog re-read the list on every refusal and said nothing, so a `not_ready` or
+  `internal` left the preset in place without a word. It now pushes *Could not remove the preset:
+  <message>*, the shape the pipeline and run pages use for a failed save; `not_found` stays quiet
+  because the preset is already gone. **Reversing:** low; one `if` in `TfRunDialog.svelte`.
+- **Merge-manager (PR #1048): `delete_run_preset` binds the Rust-trimmed name.** The save stores
+  `name.trim()` (any whitespace), while SQL `btrim` strips only spaces, so a tab or newline at
+  either end matched on save but not on delete. Binding `name.trim()` makes both sides trim alike.
+  **Reversing:** low.

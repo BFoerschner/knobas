@@ -199,6 +199,7 @@ function draw(runId = "teamcity:build:1187", tab?: string, overrides: Partial<Ru
     },
     presets: () => Promise.resolve([]),
     savePreset: (preset) => Promise.resolve(preset),
+    deletePreset: () => Promise.resolve(),
     repoBranches: () => Promise.resolve(["main", FEATURE]),
     runParameters: () => Promise.resolve([{ name: "env", value: "prod-dryrun" }]),
     log: () => Promise.resolve(null),

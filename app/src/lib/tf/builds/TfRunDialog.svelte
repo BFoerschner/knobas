@@ -3,7 +3,8 @@
   of a pipeline, prototype-6's `openRunDialog`.
 
   - **Start from**: *Defaults*, *#N settings* when opened from a run, or a
-    saved preset; picking one fills the form.
+    saved preset; picking one fills the form. With a preset picked,
+    *Remove preset* (#996) deletes it (`delete_run_preset`).
   - **Branch**: a combobox with type-ahead over the branches of the
     repository the pipeline builds and those its runs built, the default
     marked *default* and the job's *your job's branch*; arrow keys and
@@ -23,7 +24,9 @@
 <script lang="ts">
   import { onMount, untrack } from "svelte";
 
+  import { ipcErrorMessage, isIpcError } from "../../ipc";
   import type { PipelineRow, PipelineSettings, RunPreset, RunRow } from "../../ipc/entity";
+  import { push } from "../../shell/toasts.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { defaultBranch } from "./pipeline";
   import type { PipelinePorts } from "./pipeline-ports";
@@ -59,7 +62,7 @@
     from?: RunRow | null;
     jobBranch?: string | null;
     signInFailing?: boolean;
-    ports: Pick<PipelinePorts, "presets" | "repoBranches" | "runParameters">;
+    ports: Pick<PipelinePorts, "presets" | "deletePreset" | "repoBranches" | "runParameters">;
     onclose: () => void;
     onrun: (request: RunRequest) => void;
   } = $props();
@@ -129,6 +132,30 @@
     first = preset.first_in_queue;
   }
 
+  const pickedPreset = $derived(presets.find((p) => `preset:${p.name}` === start) ?? null);
+
+  /**
+   * *Remove preset* (#996): drop the picked preset, then *Start from* shows
+   * *Defaults* while the form keeps the removed preset's settings, so *Save
+   * these settings as a preset* can bring it back. A refusal re-reads the list,
+   * so a preset another window already removed leaves it too; any refusal but
+   * `not_found` also says it failed, as a failed save does.
+   */
+  async function removePreset() {
+    const gone = pickedPreset;
+    if (gone === null) return;
+    try {
+      await ports.deletePreset(pipeline.entity_id, gone.name);
+      presets = presets.filter((p) => p.name !== gone.name);
+    } catch (cause) {
+      if (!isIpcError(cause) || cause.code !== "not_found") {
+        push({ text: `Could not remove the preset: ${ipcErrorMessage(cause)}`, tone: "err" });
+      }
+      presets = await ports.presets(pipeline.entity_id).catch(() => presets);
+    }
+    if (!presets.some((p) => `preset:${p.name}` === start)) start = "";
+  }
+
   const overrides = $derived(overridesOf(fields, values, extra));
   const shownBranch = $derived(branch.trim() || fallback || "the default branch");
   const summary = $derived(summaryOf(shownBranch, overrides));
@@ -193,13 +220,18 @@
   {#snippet body()}
     <div class="tf-formgrid">
       <label for={`tf-run-start-${uid}`}>Start from</label>
-      <select id={`tf-run-start-${uid}`} value={start} onchange={(event) => pick(event.currentTarget.value)}>
-        <option value="">Defaults</option>
-        {#if from !== null}<option value="from">{fromLabel}</option>{/if}
-        {#each presets as preset (preset.name)}
-          <option value={`preset:${preset.name}`}>Preset: {preset.name}</option>
-        {/each}
-      </select>
+      <div class="tf-run-start">
+        <select id={`tf-run-start-${uid}`} value={start} onchange={(event) => pick(event.currentTarget.value)}>
+          <option value="">Defaults</option>
+          {#if from !== null}<option value="from">{fromLabel}</option>{/if}
+          {#each presets as preset (preset.name)}
+            <option value={`preset:${preset.name}`}>Preset: {preset.name}</option>
+          {/each}
+        </select>
+        {#if pickedPreset !== null}
+          <button type="button" class="tf-linkish tf-run-remove" onclick={removePreset}>Remove preset</button>
+        {/if}
+      </div>
       <label for={`tf-run-branch-${uid}`}>Branch</label>
       <div class="tf-combo">
         <input

@@ -2455,6 +2455,19 @@ pub async fn save_run_preset_inner(
     crate::run_presets::save(pool, preset).await
 }
 
+/// Remove one Run… preset (#996): [`crate::run_presets::delete`].
+///
+/// # Errors
+///
+/// As [`crate::run_presets::delete`].
+pub async fn delete_run_preset_inner(
+    pool: &PgPool,
+    pipeline_id: &str,
+    name: &str,
+) -> Result<(), IpcError> {
+    crate::run_presets::delete(pool, pipeline_id, name).await
+}
+
 /// The Run… presets of a pipeline (#852).
 ///
 /// # Errors
@@ -2483,6 +2496,22 @@ pub async fn save_run_preset(
 ) -> Result<crate::run_presets::RunPreset, IpcError> {
     let pool = lifecycle.pool()?;
     save_run_preset_inner(&pool, preset).await
+}
+
+/// Remove a pipeline's Run… preset by name (#996).
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`delete_run_preset_inner`] refuses with.
+#[tauri::command]
+pub async fn delete_run_preset(
+    lifecycle: State<'_, Lifecycle>,
+    pipeline_id: String,
+    name: String,
+) -> Result<(), IpcError> {
+    let pool = lifecycle.pool()?;
+    delete_run_preset_inner(&pool, &pipeline_id, &name).await
 }
 
 /// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a

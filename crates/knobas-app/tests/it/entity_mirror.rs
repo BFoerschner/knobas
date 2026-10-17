@@ -1033,7 +1033,11 @@ fn the_run_preset_shape_matches_its_typescript_mirror() {
             "pipeline_id",
         ],
     );
-    for command in ["\"run_presets\"", "\"save_run_preset\""] {
+    for command in [
+        "\"run_presets\"",
+        "\"save_run_preset\"",
+        "\"delete_run_preset\"",
+    ] {
         assert!(MIRROR.contains(command), "{command} is not invoked");
     }
 }

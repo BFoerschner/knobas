@@ -606,6 +606,17 @@ export function handlers(): Record<string, Handler> {
       presets.set(preset.pipeline_id, kept);
       return { ...preset, name };
     },
+    delete_run_preset: (args) => {
+      const id = String(args["pipelineId"] ?? "");
+      const name = String(args["name"] ?? "").trim();
+      const held = presets.get(id) ?? [];
+      const kept = held.filter((p) => p.name.trim().toLowerCase() !== name.toLowerCase());
+      if (kept.length === held.length) {
+        throw { code: "not_found", message: `the pipeline has no preset named "${name}"`, source_id: null };
+      }
+      presets.set(id, kept);
+      return null;
+    },
     pipelines: () => fakePipelines(),
     set_pipeline_pinned: (args) => {
       const id = String(args["pipelineId"] ?? "");
