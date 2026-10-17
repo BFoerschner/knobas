@@ -4,9 +4,20 @@
  */
 import { expect, test } from "vitest";
 
-import type { Thread, ThreadComment } from "../../ipc/entity";
+import type { Thread, ThreadChange, ThreadComment } from "../../ipc/entity";
 import { emptyFilter } from "../filter/filter";
-import { CHANGES, MENTIONS, NEW, drawThread, isNew, mentionRuns, since, stamp, summary } from "./conversation";
+import {
+  CHANGES,
+  MENTIONS,
+  NEW,
+  changeLine,
+  drawThread,
+  isNew,
+  mentionRuns,
+  since,
+  stamp,
+  summary,
+} from "./conversation";
 
 const NOW = new Date(2026, 9, 15, 14, 0);
 const VISIT = "2026-10-15T07:00:00Z";
@@ -27,10 +38,30 @@ function thread(): Thread {
       said("Jonas Becker", "2026-10-15T08:00:00Z", "left a note"),
       said("Lena Hoffmann", "2026-10-15T09:00:00Z", "[~mara] will it get an SLA?", { mentions_me: true }),
     ],
-    changes: [{ at: "2026-08-15T09:00:00Z", status: "In Progress" }],
+    changes: [moved("In Progress", { at: "2026-08-15T09:00:00Z" })],
     me: ["mara"],
   };
 }
+
+function moved(status: string, over: Partial<ThreadChange> = {}): ThreadChange {
+  return { at: VISIT, kind: "status", status, from: null, by: null, mine: true, number: null, repo: null, ...over };
+}
+
+test("a change reads as who moved it from what to what, or as a pull request's opening or merge (#929)", () => {
+  expect(changeLine(moved("Done"))).toBe("You moved this to Done");
+  expect(changeLine(moved("Done", { from: "In Review", by: "Mara Lindqvist" }))).toBe(
+    "You moved this from In Review to Done",
+  );
+  expect(changeLine(moved("In Progress", { from: "To Do", by: "Priya Nair", mine: false }))).toBe(
+    "Priya moved this from To Do to In Progress",
+  );
+  const pr = { status: null, mine: false, number: "142", repo: "payout-service" };
+  expect(changeLine(moved("", { ...pr, kind: "opened" }))).toBe("PR #142 opened in payout-service");
+  expect(changeLine(moved("", { ...pr, kind: "merged", number: "57", repo: "psp-client" }))).toBe(
+    "PR #57 in psp-client merged",
+  );
+  expect(changeLine(moved("", { ...pr, kind: "merged", number: null, repo: null }))).toBe("A pull request merged");
+});
 
 test("new is somebody else's comment after the last visit, and nothing is new on a first look", () => {
   const [mine, theirs] = thread().comments.slice(8);
@@ -46,7 +77,8 @@ test("the summary counts comments only, never status changes", () => {
   const read = summary(thread(), VISIT);
   expect(read).toMatchObject({ comments: 11, fresh: 2, mentions: 1 });
   expect(read.latest?.body).toBe("[~mara] will it get an SLA?");
-  expect(summary({ comments: [], changes: [{ at: VISIT, status: "Done" }], me: [] }, VISIT).comments).toBe(0);
+  const changes = [moved("Done"), moved("", { kind: "opened", number: "142", status: null })];
+  expect(summary({ comments: [], changes, me: [] }, VISIT).comments).toBe(0);
 });
 
 test("unfiltered, the old part folds: the last six entries and every new comment stay", () => {

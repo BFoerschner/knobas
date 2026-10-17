@@ -417,6 +417,18 @@ pub struct KindPaths {
     /// for every kind that is not a monitor.
     #[serde(default)]
     pub monitor_type: Vec<PayloadPath>,
+    /// When a pull request was opened (#929), an ISO 8601 instant as
+    /// [`started`](Self::started) is written: Gitea's `created_at`. The
+    /// conversation draws it as a line on the tickets the pull request is
+    /// linked to.
+    #[serde(default)]
+    pub opened: Vec<PayloadPath>,
+    /// When a pull request was merged (#929), as [`opened`](Self::opened) is
+    /// written: Gitea's `merged_at`, absent until it is. The instant beside
+    /// the [`merged`](Self::merged) flag, a second fact and not a second
+    /// candidate for it.
+    #[serde(default)]
+    pub merged_at: Vec<PayloadPath>,
 }
 
 /// How a run was started, in the shell's words (#961).
@@ -585,6 +597,8 @@ pub mod field {
     pub const TEAMS: &str = "teams";
     pub const OWNER: &str = "owner";
     pub const MONITOR_TYPE: &str = "monitor_type";
+    pub const OPENED: &str = "opened";
+    pub const MERGED_AT: &str = "merged_at";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -626,6 +640,8 @@ pub mod field {
         TEAMS,
         OWNER,
         MONITOR_TYPE,
+        OPENED,
+        MERGED_AT,
     ];
 }
 

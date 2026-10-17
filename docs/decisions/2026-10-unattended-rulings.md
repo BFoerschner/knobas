@@ -4482,3 +4482,25 @@ Ruled by the implementer (PR for #1019).
   its UTC date. **Reversing:** low.
 - **Scrum views follow the active sprint by re-reading `sprint in openSprints()` at every sync**
   (#877's query); no extra code. **Reversing:** n/a.
+
+## #929 — Conversation: status changes made in Jira and pull-request events (2026-10-17)
+
+- **The changelog rides on `/search` (`expand=changelog`), not the per-issue changelog
+  endpoint.** No request per issue, the WADL declares the parameter, and the record lands in the
+  payload as it is, so no migration. A ticket synced before this lands has no changelog until it
+  next changes upstream or is backfilled; its knobas-sent moves still draw. **Reversing:** low
+  (one parameter in `api::search_query`).
+- **A knobas-sent move is dropped when the changelog holds a move to the same status from at most
+  two minutes before it was queued** (`conversation::SKEW`), so a move is drawn once, as Jira
+  records it, with who and from. **Reversing:** low.
+- **Pull-request times are declarations, `opened` and `merged_at`** (ADR-0007), not a named
+  payload read of Gitea's spelling, so `conversation` names no adapter, as the signals do not.
+  `merged_at` is its own field because `merged` is a flag by its own doc. **Reversing:** medium
+  (two `KindPaths` fields and their mirrors).
+- **A pull-request line names the PR by the `#N` its key ends in and the repository by the
+  shortest name its declared parent answers to** (`payout-service`, not
+  `tidewater/payout-service`), as the issue's examples read. No author on a PR line.
+  **Reversing:** low.
+- **`ThreadChange` grew in place** (`kind`, `from`, `by`, `mine`, `number`, `repo`; `status`
+  optional) rather than a second list beside `changes`, so the thread's interleaving and the
+  *Include changes* filter stay one rule. **Reversing:** medium (wire shape).

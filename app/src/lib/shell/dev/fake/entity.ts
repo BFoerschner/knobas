@@ -302,6 +302,9 @@ function fixtureTime(said: string): string {
   return at.toISOString();
 }
 
+/** A thread change with nothing said yet (#929): each line fills in its own. */
+const QUIET = { status: null, from: null, by: null, mine: false, number: null, repo: null };
+
 function entityThread(args: Record<string, unknown>) {
   const id = String(args["entityId"] ?? "");
   if (!CORPUS.some((candidate) => candidate.entity_id === id)) {
@@ -316,7 +319,19 @@ function entityThread(args: Record<string, unknown>) {
       mine: who === "ML",
       mentions_me: /@mara(?![\p{L}\p{N}_.-])/u.test(body),
     })),
-    changes: [{ at: fixtureTime("2026-08-18 09:05"), status: "In Progress" }],
+    changes: [
+      { ...QUIET, at: fixtureTime("2026-08-14 16:20"), kind: "opened", number: "142", repo: "payout-service" },
+      { ...QUIET, at: fixtureTime("2026-08-18 09:05"), kind: "status", status: "In Progress", mine: true },
+      {
+        ...QUIET,
+        at: fixtureTime("2026-08-19 11:40"),
+        kind: "status",
+        status: "In Review",
+        from: "In Progress",
+        by: "Priya Nair",
+      },
+      { ...QUIET, at: fixtureTime("2026-08-20 15:10"), kind: "merged", number: "57", repo: "psp-client" },
+    ],
     me: ["mara"],
   };
 }

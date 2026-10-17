@@ -148,6 +148,10 @@ export interface KindPaths {
   owner: PayloadPath[];
   /** How a monitor checks, in the source's word: `http`, `ping` (#1020). */
   monitor_type: PayloadPath[];
+  /** When a pull request was opened, ISO 8601 (#929). */
+  opened: PayloadPath[];
+  /** When a pull request was merged, ISO 8601; absent until it is (#929). */
+  merged_at: PayloadPath[];
 }
 
 /** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961). */

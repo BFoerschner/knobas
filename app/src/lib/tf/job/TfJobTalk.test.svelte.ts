@@ -118,7 +118,18 @@ function thread(): Thread {
       { author: "Jonas Becker", at: "2026-10-15T08:00:00Z", body: "Left a comment on the PR.", mine: false, mentions_me: false },
       { author: "Lena Hoffmann", at: "2026-10-15T10:45:00Z", body: "[~mara] will the queue get an SLA?", mine: false, mentions_me: true },
     ],
-    changes: [{ at: "2026-08-15T09:00:00Z", status: "In Progress" }],
+    changes: [
+      {
+        at: "2026-08-15T09:00:00Z",
+        kind: "status",
+        status: "In Progress",
+        from: null,
+        by: null,
+        mine: true,
+        number: null,
+        repo: null,
+      },
+    ],
     me: ["mara"],
   };
 }
@@ -227,7 +238,22 @@ test("the card says how many comments, how many are new since the visit and how 
 });
 
 test("a ticket nobody commented on says so, and a status change is not a comment", async () => {
-  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], changes: [{ at: VISIT, status: "Done" }], me: [] }) }) });
+  open(null, { ports: ports({ entityThread: () => Promise.resolve({ comments: [], changes: [
+            {
+              at: VISIT,
+              kind: "status",
+              status: "Done",
+              from: null,
+              by: null,
+              mine: true,
+              number: null,
+              repo: null,
+            },
+          ],
+          me: [],
+        }),
+    }),
+  });
   await settle();
   const card = target.querySelector("[aria-label='Job card']")!;
   expect(squash(card)).toContain("No comments yet.");

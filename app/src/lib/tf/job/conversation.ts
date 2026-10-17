@@ -91,6 +91,22 @@ export function firstName(author: string | null): string {
   return author.trim().split(/\s+/)[0] ?? author;
 }
 
+/**
+ * A change as its quiet line says it (#929): who moved the ticket, from what
+ * to what, or a linked pull request's opening or merge, named by number and
+ * repository as far as the record knows them.
+ */
+export function changeLine(change: ThreadChange): string {
+  if (change.kind === "status") {
+    const who = change.mine ? "You" : firstName(change.by);
+    const from = change.from === null ? "" : ` from ${change.from}`;
+    return `${who} moved this${from} to ${change.status ?? "another status"}`;
+  }
+  const pr = change.number === null ? "A pull request" : `PR #${change.number}`;
+  const repo = change.repo === null ? "" : ` in ${change.repo}`;
+  return change.kind === "opened" ? `${pr} opened${repo}` : `${pr}${repo} merged`;
+}
+
 /** One line of the thread. */
 export type Entry =
   | { kind: "comment"; comment: ThreadComment; fresh: boolean }

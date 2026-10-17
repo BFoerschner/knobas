@@ -2884,18 +2884,36 @@ export interface ThreadComment {
   mentions_me: boolean;
 }
 
-/** A status move on the thread — `knobas_app::conversation::ThreadChange` (#819). */
+/** What a thread change says happened — `knobas_app::conversation::ChangeKind` (#929). */
+export type ChangeKind = "status" | "opened" | "merged";
+
+/**
+ * A quiet line on the thread — `knobas_app::conversation::ThreadChange` (#819,
+ * #929): a status move made in Jira or sent by knobas, or a linked pull
+ * request's opening or merge.
+ */
 export interface ThreadChange {
   at: string;
-  /** The status the ticket was moved to. */
-  status: string;
+  kind: ChangeKind;
+  /** A status move's new status; `null` for a pull-request line. */
+  status: string | null;
+  /** A status move's old status, when Jira's changelog names it. */
+  from: string | null;
+  /** Who moved it, as the source names them to a person; `null` for a move knobas sent. */
+  by: string | null;
+  /** The reader made it. */
+  mine: boolean;
+  /** A pull request's number, without the `#`. */
+  number: string | null;
+  /** A pull request's repository. */
+  repo: string | null;
 }
 
 /** A ticket's thread — `knobas_app::conversation::Thread` (#819). */
 export interface Thread {
   /** In the source's order, oldest first. */
   comments: ThreadComment[];
-  /** The moves knobas delivered: status changes, which are never comments. */
+  /** Status moves and pull-request events, oldest first; never comments. */
   changes: ThreadChange[];
   /** The accounts `@me` resolves to, to mark `@name` in a body by. */
   me: string[];

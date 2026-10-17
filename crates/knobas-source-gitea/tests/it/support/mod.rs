@@ -176,7 +176,9 @@ pub fn branch(name: &str, sha: &str, message: &str, timestamp: &str) -> Value {
 pub fn pull(number: u64, title: &str, body: &str, updated: &str, comments: u64) -> Value {
     json!({
         "number": number, "title": title, "body": body, "state": "open",
-        "draft": false, "merged": false, "comments": comments,
+        // Gitea writes `merged_at` on every pull request, `null` until it is
+        // merged: where `merged_at` is declared (#929).
+        "draft": false, "merged": false, "merged_at": null, "comments": comments,
         "requested_reviewers": [{ "login": "tom", "id": 8 }],
         "user": { "login": "mara", "id": 7 },
         "html_url": format!("https://gitea.example/tidewater/payout-service/pulls/{number}"),
