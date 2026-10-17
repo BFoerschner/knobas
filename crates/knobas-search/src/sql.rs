@@ -438,13 +438,14 @@ fn bind_filters(builder: &mut Builder, filters: &EffectiveFilters) -> BoundFilte
     let mut bound = bind_dimensions(builder, filters, declarations.as_ref());
     bound.declarations = declarations.or_else(|| bound.under.as_ref().map(|(d, _)| d.clone()));
     for filter in &filters.fields {
-        // `has:`'s user first: its fragment reads it before the values.
+        // `has:`'s kinds before its user: its fragment reads them first,
+        // to pick the links it walks (#939).
+        let values = builder.param(Bind::Texts(filter.values.clone()));
         let me = if filter.key == crate::query::FieldKey::Has {
             builder.param(Bind::Texts(filter.me.clone()))
         } else {
             "null".to_owned()
         };
-        let values = builder.param(Bind::Texts(filter.values.clone()));
         let days = filter.within_days.map_or_else(
             || "null".to_owned(),
             |days| builder.param(Bind::I32(clamp_days(days))),

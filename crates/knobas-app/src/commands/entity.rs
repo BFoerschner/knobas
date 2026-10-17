@@ -5455,7 +5455,14 @@ fn announce_context<R: tauri::Runtime>(
 /// board is then [`jira_view_board`]'s, the tickets Jira put on that view in
 /// Jira's order under the view's own columns, and the room dimensions are
 /// not read.
+///
+/// `lanes` (#939, #1098) puts the board in lanes by that field (R-3.5) on
+/// the server: `per_column` then caps each lane's column, and only the
+/// first `lanes_first` lanes, biggest first, are sent
+/// ([`knobas_core::mini_board::MiniBoard::lanes`]). Omitted, the board has
+/// no lanes, as before.
 #[tauri::command]
+#[allow(clippy::too_many_arguments)]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
     ctx_id: Option<String>,
@@ -5464,20 +5471,37 @@ pub async fn mini_board(
     per_column: Option<u32>,
     query: Option<String>,
     jira_view: Option<String>,
+    lanes: Option<knobas_core::mini_board::LaneField>,
+    lanes_first: Option<u32>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
+    let lanes = lanes.map(|by| knobas_core::mini_board::Lanes {
+        by,
+        first: lanes_first,
+    });
     if let Some(view) = jira_view {
-        return jira_view_board(&pool, &view, per_column, query.as_deref()).await;
+        return jira_view_board_laned(&pool, &view, per_column, query.as_deref(), lanes).await;
     }
-    mini_board_inner(
+    mini_board_laned(
         &pool,
-        ctx_id.as_deref(),
-        &sources,
-        project.as_deref(),
+        Room {
+            ctx_id: ctx_id.as_deref(),
+            sources: &sources,
+            project: project.as_deref(),
+        },
         per_column,
         query.as_deref(),
+        lanes,
     )
     .await
+}
+
+/// A room's three dimensions, as [`mini_board`] takes them.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Room<'a> {
+    pub ctx_id: Option<&'a str>,
+    pub sources: &'a [String],
+    pub project: Option<&'a str>,
 }
 
 /// [`mini_board`], against a pool.
@@ -5496,6 +5520,37 @@ pub async fn mini_board_inner(
     per_column: Option<u32>,
     query: Option<&str>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    mini_board_laned(
+        pool,
+        Room {
+            ctx_id,
+            sources,
+            project,
+        },
+        per_column,
+        query,
+        None,
+    )
+    .await
+}
+
+/// [`mini_board_inner`] in lanes (#939): see [`mini_board`]'s `lanes`.
+///
+/// # Errors
+///
+/// See [`mini_board_inner`].
+pub async fn mini_board_laned(
+    pool: &PgPool,
+    room: Room<'_>,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    let Room {
+        ctx_id,
+        sources,
+        project,
+    } = room;
     let declarations = declared_paths(pool).await?;
     let only = match query.map(str::trim).filter(|query| !query.is_empty()) {
         Some(query) => {
@@ -5517,6 +5572,7 @@ pub async fn mini_board_inner(
             project,
             only: only.as_deref(),
             identity: &identity,
+            lanes,
         },
         &declarations,
         per_column,
@@ -5545,7 +5601,28 @@ pub async fn jira_view_board(
     per_column: Option<u32>,
     query: Option<&str>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    jira_view_board_laned(pool, view, per_column, query, None).await
+}
+
+/// [`jira_view_board`] in lanes (#939): the whole view put in lanes after it
+/// is read ([`knobas_core::mini_board::in_lanes`]), each lane's column in
+/// Jira's order and capped at `per_column`.
+///
+/// # Errors
+///
+/// See [`jira_view_board`].
+pub async fn jira_view_board_laned(
+    pool: &PgPool,
+    view: &str,
+    per_column: Option<u32>,
+    query: Option<&str>,
+    lanes: Option<knobas_core::mini_board::Lanes>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     use knobas_core::mini_board::{MiniBoard, MiniBoardCard, MiniBoardColumn};
+    let (per_column, lanes_cap) = match lanes {
+        Some(_) => (None, per_column),
+        None => (per_column, None),
+    };
     let columns: Option<serde_json::Value> =
         sqlx::query_scalar("select columns from sync.jira_view where entity_id = $1")
             .bind(view)
@@ -5641,9 +5718,15 @@ pub async fn jira_view_board(
             })
             .collect()
     };
-    Ok(MiniBoard {
+    let board = MiniBoard {
         columns: drawn,
         sources: whole.sources,
+        lanes: Vec::new(),
+        more_lanes: 0,
+    };
+    Ok(match lanes {
+        Some(lanes) => knobas_core::mini_board::in_lanes(board, lanes, lanes_cap),
+        None => board,
     })
 }
 

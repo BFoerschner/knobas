@@ -80,17 +80,114 @@ const LEADING: [&str; 4] = ["To Do", "In Progress", "In Review", "Done"];
 macro_rules! status_paths {
     ($decl:literal) => {
         concat!(
-            "status_paths as materialized (
-               select i.source_id, c.segs, c.ord
-                 from (select d.source_id, 'ticket'::text as kind
-                         from jsonb_object_keys(case when jsonb_typeof(",
+            "status_paths as materialized (",
+            ticket_paths!($decl, "status_name"),
+            ")"
+        )
+    };
+}
+
+/// Every declared source's ticket candidates for one string field, as
+/// `(source_id, segs, ord)`: [`status_paths!`]' body, for any field.
+macro_rules! ticket_paths {
+    ($decl:literal, $field:literal) => {
+        concat!(
+            "select i.source_id, c.segs, c.ord from ",
+            declared_tickets!($decl),
+            " i cross join lateral ",
+            $crate::declared_candidates!($decl, $field),
+            " c"
+        )
+    };
+}
+
+/// One row per source the declarations name, aliased as a ticket row
+/// (`source_id`, `kind`), which is what the declaration macros read.
+macro_rules! declared_tickets {
+    ($decl:literal) => {
+        concat!(
+            "(select d.source_id, 'ticket'::text as kind
+                from jsonb_object_keys(case when jsonb_typeof(",
             $decl,
             "::jsonb) = 'object' then ",
             $decl,
-            "::jsonb else '{}'::jsonb end) as d(source_id)) i
-                 cross join lateral ",
-            $crate::declared_candidates!($decl, "status_name"),
-            " c)"
+            "::jsonb else '{}'::jsonb end) as d(source_id))"
+        )
+    };
+}
+
+/// The lane a ticket stands in (#939), read once a row like its status:
+/// the field `$6` names (`epic`, `assignee`, `priority`, `issuetype`,
+/// `label`), and `''` where the ticket has none of it or `$6` is `null`.
+///
+/// The same reads the card's own fields are, so a card stands in the lane
+/// its fields say: the assignee, priority and type through `lane_paths`
+/// ([`lane_paths!`]), resolved once a source as the status is; the first
+/// label through `label_paths`, in the order [`crate::declared_list!`]
+/// yields the card's labels; the epic through [`crate::path_line_read!`].
+macro_rules! lane_of_ticket {
+    ($decl:literal) => {
+        concat!(
+            "case $6::text when 'epic' then coalesce(",
+            $crate::path_line_read!($decl),
+            ", '')
+               when 'label' then coalesce((select nullif(btrim(e.elem #>> c.entry_segs), '')
+                 from label_paths c cross join lateral jsonb_array_elements(
+                   case when jsonb_typeof(i.payload #> c.at_segs) = 'array'
+                        then i.payload #> c.at_segs else '[]'::jsonb end)
+                   with ordinality as e(elem, pos)
+                where c.source_id = i.source_id
+                  and jsonb_typeof(e.elem #> c.entry_segs) = 'string'
+                  and nullif(btrim(e.elem #>> c.entry_segs), '') is not null
+                order by c.ord, e.pos limit 1), '')
+               when 'assignee' then coalesce(",
+            lane_string!(),
+            ", '') when 'priority' then coalesce(",
+            lane_string!(),
+            ", '') when 'issuetype' then coalesce(",
+            lane_string!(),
+            ", '') else '' end"
+        )
+    };
+}
+
+/// A ticket's lane field, when it is a string, through `lane_paths`.
+macro_rules! lane_string {
+    () => {
+        $crate::first_string_of!(
+            "(select p.segs, p.ord from lane_paths p where p.source_id = i.source_id)"
+        )
+    };
+}
+
+/// The candidates of the field `$6` names, resolved once a source: the
+/// CTEs `lane_paths (source_id, segs, ord)` for a string field and
+/// `label_paths (source_id, at_segs, entry_segs, ord)` for the labels.
+/// Each branch is guarded by `$6`, so only the one asked for is read.
+macro_rules! lane_paths {
+    ($decl:literal) => {
+        concat!(
+            "lane_paths as materialized (
+               select * from (",
+            ticket_paths!($decl, "assignee"),
+            ") a where $6::text = 'assignee'
+               union all select * from (",
+            ticket_paths!($decl, "priority"),
+            ") p where $6::text = 'priority'
+               union all select * from (",
+            ticket_paths!($decl, "issue_type"),
+            ") t where $6::text = 'issuetype'),
+             label_paths as materialized (
+               select i.source_id, c.at_segs, c.entry_segs, c.ord from ",
+            declared_tickets!($decl),
+            " i cross join lateral (select ",
+            $crate::declared_segments!("cand->'at'"),
+            " as at_segs, ",
+            $crate::declared_segments!("cand->'entry'"),
+            " as entry_segs, ord from jsonb_array_elements(",
+            $crate::declared_array!($decl, "labels"),
+            ") with ordinality as cands(cand, ord)) c
+                where $6::text = 'label')"
         )
     };
 }
@@ -164,14 +261,27 @@ macro_rules! priority_read {
 /// candidate parent item, and the lateral `par` carries the card's own
 /// `source_id` out beside the parent's kind and name, where the probe can
 /// still see it.
+///
+/// `$6` lanes the board (#939, #1098): the field a lane shares, `null` for
+/// none. Each row's lane is read with its status ([`lane_of_ticket!`]), and
+/// the cap and the count are then per lane and status, so a lane's column
+/// is capped and counted as an unlaned column is. Lanes rank biggest first,
+/// a tie to the lane with the newer ticket, then by key; `$7` keeps the
+/// first `$7` lanes' rows (`null` for all), and every row carries how many
+/// lanes there are and, laned, every status's count over the whole board
+/// (`column_totals`), which the lanes not kept still stand in.
 const CARDS: &str = concat!(
     "with ",
     status_paths!("$4"),
+    ", ",
+    lane_paths!("$4"),
     ",
      scoped as materialized (
        select i.entity_id, coalesce(i.item_updated_at, i.synced_at) as at, ",
     status_of_ticket!(),
-    " as status
+    " as status, ",
+    lane_of_ticket!("$4"),
+    " as lane
        from sync.item i
       where i.kind = 'ticket'
         and ",
@@ -183,13 +293,25 @@ const CARDS: &str = concat!(
     crate::project_key_read!("$4"),
     " = $3)
      ),
+     lanes as (
+       select s.lane, count(*) as n,
+              row_number() over (order by count(*) desc, max(s.at) desc, s.lane) as place,
+              count(*) over () as lanes
+         from scoped s group by s.lane
+     ),
      ranked as (
-       select s.entity_id, s.at, s.status,
-              row_number() over (partition by s.status order by s.at desc, s.entity_id) as rn,
-              count(*) over (partition by s.status) as total
-         from scoped s
+       select s.entity_id, s.at, s.status, s.lane, l.n as lane_count, l.place, l.lanes,
+              row_number() over (partition by s.lane, s.status
+                                 order by s.at desc, s.entity_id) as rn,
+              count(*) over (partition by s.lane, s.status) as total
+         from scoped s join lanes l on l.lane = s.lane
+        where $7::bigint is null or l.place <= $7
      )
-     select i.entity_id, i.source_id, i.title, r.status, ",
+     select i.entity_id, i.source_id, i.title, r.status, r.lane, r.lane_count, r.place,
+            r.lanes, case when $6::text is null then null else
+              (select jsonb_agg(jsonb_build_array(c.status, c.n))
+                 from (select s.status, count(*) as n from scoped s group by s.status) c)
+            end as column_totals, ",
     priority_read!("$4"),
     " as priority, ",
     crate::declared_string!("$4", "issue_type"),
@@ -226,7 +348,7 @@ const CARDS: &str = concat!(
 /// usernames, lowercased.
 const SIGNALS: &str = concat!(
     "select s.tid, s.kind, s.text, s.tone from ",
-    crate::ticket_signals!("$1", "$2", "(select unnest($3::text[]) as tid)"),
+    crate::ticket_signals!("$1", "$2", "(select unnest($3::text[]) as tid)", "null"),
     " s order by s.tid, s.ord, s.text"
 );
 
@@ -281,6 +403,75 @@ pub struct MiniBoard {
     /// workflow read fails (#179, and #498 for why it is the fallback rather
     /// than the offer).
     pub sources: Vec<SourceStatuses>,
+    /// The board in lanes (#939), when it was asked for in lanes
+    /// ([`Scope::lanes`]); empty otherwise. Biggest first. Each lane names
+    /// its cards by id; the cards themselves are in [`Self::columns`], once.
+    pub lanes: Vec<MiniBoardLane>,
+    /// How many lanes there are past [`Self::lanes`], which a read that
+    /// asked for its first lanes ([`Lanes::first`]) did not send.
+    pub more_lanes: u32,
+}
+
+/// What a board's lanes split by (R-3.5): the Tickets view's *Lanes*
+/// switch, spelled as a ticket view stores it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LaneField {
+    /// The epic: the ticket's path line, as the card draws it.
+    Epic,
+    Assignee,
+    Priority,
+    /// The ticket's type.
+    #[serde(rename = "issuetype")]
+    IssueType,
+    /// The ticket's first label.
+    Label,
+}
+
+impl LaneField {
+    /// The spelling the board's statement takes (`$6`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            LaneField::Epic => "epic",
+            LaneField::Assignee => "assignee",
+            LaneField::Priority => "priority",
+            LaneField::IssueType => "issuetype",
+            LaneField::Label => "label",
+        }
+    }
+}
+
+/// A board read in lanes (#939): by what, and how many of them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Lanes {
+    pub by: LaneField,
+    /// Only the first this many lanes, biggest first; `None` for every lane.
+    pub first: Option<u32>,
+}
+
+/// One lane of a laned board: the value its tickets share, how many they
+/// are, and its own columns, each capped and counted as a board's column is.
+#[derive(Clone, Debug, Serialize)]
+pub struct MiniBoardLane {
+    /// What its tickets share, in the source's words; `""` for the lane of
+    /// tickets with none of it.
+    pub key: String,
+    /// How many tickets stand in it.
+    pub count: u32,
+    /// Its statuses, in the board's column order; only those it has.
+    pub columns: Vec<LaneColumn>,
+}
+
+/// One status of a lane: its cards by id, newest first, and its count.
+#[derive(Clone, Debug, Serialize)]
+pub struct LaneColumn {
+    /// As [`MiniBoardColumn::status`].
+    pub status: Option<String>,
+    /// The ids of the cards kept, each in [`MiniBoard::columns`].
+    pub ids: Vec<String>,
+    /// How many of the lane's tickets stand in this status, kept or not.
+    pub total: u32,
 }
 
 /// One column: a status, and the cards standing in it.
@@ -381,6 +572,18 @@ struct CardRow {
     parent_title: Option<String>,
     updated_at: Option<DateTime<Utc>>,
     total: i64,
+    lane: String,
+    lane_count: i64,
+    place: i64,
+    lanes: i64,
+    column_totals: Option<sqlx::types::Json<ColumnTotals>>,
+}
+
+/// Every status a laned board counts, and how many stand in it.
+type ColumnTotals = Vec<(Option<String>, i64)>;
+
+fn count(n: i64) -> u32 {
+    u32::try_from(n).unwrap_or(u32::MAX)
 }
 
 /// Which band of the board a column belongs to. **Declaration order is the
@@ -495,6 +698,9 @@ pub struct Scope<'a> {
     /// The configured usernames, which [`MiniBoardCard::mine`] is matched
     /// against ignoring case.
     pub identity: &'a [String],
+    /// Lanes (#939): `per_column` then caps each lane's column, and
+    /// [`MiniBoard::lanes`] says which cards stand in which lane.
+    pub lanes: Option<Lanes>,
 }
 
 /// [`read_capped`] over a [`Scope`]: the room's dimensions and the Tickets
@@ -516,6 +722,7 @@ pub async fn read_scoped(
         project,
         only,
         identity,
+        lanes,
     } = scope;
     let mut members = match ctx_id {
         Some(ctx) => Some(crate::context::member_ids(pool, ctx).await?),
@@ -543,6 +750,12 @@ pub async fn read_scoped(
         .bind(project)
         .bind(&declared)
         .bind(per_column.map(i64::from))
+        .bind(lanes.map(|lanes| lanes.by.as_str()))
+        .bind(
+            lanes
+                .and_then(|lanes| lanes.first)
+                .map(|first| i64::from(first.max(1))),
+        )
         .fetch_all(pool)
         .await?;
     let kept: Vec<String> = rows.iter().map(|row| row.entity_id.clone()).collect();
@@ -550,17 +763,50 @@ pub async fn read_scoped(
 
     // Grouped in the order the rows arrived, so the newest-first ordering the
     // statement asks for survives into each column; the columns themselves are
-    // put in the board's order afterwards.
+    // put in the board's order afterwards. Laned, every status the board
+    // counts is a column, whether or not a kept lane stands in it.
     let mut at: HashMap<Option<String>, usize> = HashMap::new();
     let mut columns: Vec<MiniBoardColumn> = Vec::new();
+    let laned = lanes.is_some();
+    if laned && let Some(totals) = rows.first().and_then(|row| row.column_totals.as_ref()) {
+        for (status, n) in totals.iter() {
+            at.insert(status.clone(), columns.len());
+            columns.push(MiniBoardColumn {
+                status: status.clone(),
+                cards: Vec::new(),
+                total: count(*n),
+            });
+        }
+    }
+    let mut by_lane: BTreeMap<i64, MiniBoardLane> = BTreeMap::new();
+    let more_lanes = rows.first().map_or(0, |row| row.lanes);
     let mut sources: BTreeSet<String> = BTreeSet::new();
     for row in rows {
         sources.insert(row.source_id.clone());
+        if laned {
+            let lane = by_lane.entry(row.place).or_insert_with(|| MiniBoardLane {
+                key: row.lane.clone(),
+                count: count(row.lane_count),
+                columns: Vec::new(),
+            });
+            match lane
+                .columns
+                .iter_mut()
+                .find(|cell| cell.status == row.status)
+            {
+                Some(cell) => cell.ids.push(row.entity_id.clone()),
+                None => lane.columns.push(LaneColumn {
+                    status: row.status.clone(),
+                    ids: vec![row.entity_id.clone()],
+                    total: count(row.total),
+                }),
+            }
+        }
         let index = *at.entry(row.status.clone()).or_insert_with(|| {
             columns.push(MiniBoardColumn {
                 status: row.status.clone(),
                 cards: Vec::new(),
-                total: u32::try_from(row.total).unwrap_or(u32::MAX),
+                total: count(row.total),
             });
             columns.len() - 1
         });
@@ -589,11 +835,117 @@ pub async fn read_scoped(
         });
     }
     columns.sort_by_key(|column| column_rank(column.status.as_deref()));
+    let lanes: Vec<MiniBoardLane> = by_lane
+        .into_values()
+        .map(|mut lane| {
+            lane.columns
+                .sort_by_key(|cell| column_rank(cell.status.as_deref()));
+            lane
+        })
+        .collect();
+    let more_lanes = if laned {
+        count(more_lanes).saturating_sub(u32::try_from(lanes.len()).unwrap_or(u32::MAX))
+    } else {
+        0
+    };
 
     Ok(MiniBoard {
         sources: observed_statuses(pool, &sources, declarations).await?,
         columns,
+        lanes,
+        more_lanes,
     })
+}
+
+impl MiniBoardCard {
+    /// The lane this card stands in when a board is laned `by` (R-3.5): the
+    /// field as the card carries it, `""` for none. [`CARDS`]' `lane` is
+    /// the same read, made before the card is.
+    #[must_use]
+    pub fn lane(&self, by: LaneField) -> &str {
+        let value = match by {
+            LaneField::Epic => self.path.as_deref(),
+            LaneField::Assignee => self.assignee.as_deref(),
+            LaneField::Priority => self.priority.as_deref(),
+            LaneField::IssueType => self.issue_type.as_deref(),
+            LaneField::Label => self.labels.first().map(String::as_str),
+        };
+        value.unwrap_or("")
+    }
+}
+
+/// A whole board put in lanes after it was read (#939): what a board in an
+/// order of its own (a Jira view's) does where [`read_scoped`] cannot, with
+/// the same answer. Each lane's column keeps its first `per_column` cards in
+/// the column's order and counts them all; lanes rank biggest first, a tie
+/// to the lane with the newer ticket, then by key; only the first
+/// `lanes.first` are kept. The columns keep their totals and the kept cards.
+#[must_use]
+pub fn in_lanes(mut board: MiniBoard, lanes: Lanes, per_column: Option<u32>) -> MiniBoard {
+    struct Gathered {
+        count: u32,
+        newest: Option<DateTime<Utc>>,
+        cells: Vec<LaneColumn>,
+    }
+    let mut gathered: BTreeMap<String, Gathered> = BTreeMap::new();
+    for column in &board.columns {
+        for card in &column.cards {
+            let lane = gathered
+                .entry(card.lane(lanes.by).to_owned())
+                .or_insert_with(|| Gathered {
+                    count: 0,
+                    newest: None,
+                    cells: Vec::new(),
+                });
+            lane.count += 1;
+            lane.newest = lane.newest.max(card.updated_at);
+            if lane
+                .cells
+                .last()
+                .is_none_or(|cell| cell.status != column.status)
+            {
+                lane.cells.push(LaneColumn {
+                    status: column.status.clone(),
+                    ids: Vec::new(),
+                    total: 0,
+                });
+            }
+            let cell = lane.cells.last_mut().expect("pushed above");
+            cell.total += 1;
+            if per_column.is_none_or(|cap| cell.ids.len() < cap as usize) {
+                cell.ids.push(card.entity_id.clone());
+            }
+        }
+    }
+    let mut ranked: Vec<(String, Gathered)> = gathered.into_iter().collect();
+    ranked.sort_by(|(a_key, a), (b_key, b)| {
+        b.count
+            .cmp(&a.count)
+            .then(b.newest.cmp(&a.newest))
+            .then(a_key.cmp(b_key))
+    });
+    let total = ranked.len();
+    ranked.truncate(lanes.first.map_or(total, |first| first.max(1) as usize));
+    let kept: std::collections::HashSet<&str> = ranked
+        .iter()
+        .flat_map(|(_, lane)| lane.cells.iter().flat_map(|cell| &cell.ids))
+        .map(String::as_str)
+        .collect();
+    for column in &mut board.columns {
+        column
+            .cards
+            .retain(|card| kept.contains(card.entity_id.as_str()));
+    }
+    board.more_lanes = u32::try_from(total - ranked.len()).unwrap_or(u32::MAX);
+    board.lanes = ranked
+        .into_iter()
+        .map(|(key, lane)| MiniBoardLane {
+            key,
+            count: lane.count,
+            columns: lane.cells,
+        })
+        .collect();
+    board
 }
 
 /// The signals of `tickets`, by ticket, each list in the order a card draws

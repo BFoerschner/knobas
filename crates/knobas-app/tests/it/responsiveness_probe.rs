@@ -267,14 +267,26 @@ impl Source for Synthetic {
     }
 }
 
-/// The Tickets view's board in lanes by `field`, as the view reads it.
+/// The Tickets view's board in lanes by `field`, as the view reads it
+/// (#939): its first ten lanes, eight a column, fifty while words filter.
+/// Before #939 this was the whole board, uncapped, split in the webview.
 async fn laned_board(
     pool: &PgPool,
     field: &str,
     query: Option<&str>,
 ) -> Result<knobas_core::mini_board::MiniBoard, knobas_app::IpcError> {
-    let _ = field;
-    knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, None, query).await
+    let by = serde_json::from_value(serde_json::json!(field)).expect("a lane field");
+    knobas_app::commands::entity::mini_board_laned(
+        pool,
+        knobas_app::commands::entity::Room::default(),
+        Some(if query.is_some() { 50 } else { 8 }),
+        query,
+        Some(knobas_core::mini_board::Lanes {
+            by,
+            first: Some(10),
+        }),
+    )
+    .await
 }
 
 /// One timed read: cold, then `runs` warm.
@@ -947,16 +959,21 @@ async fn what_the_reader_waits_on() {
             )
         })
         .await;
-        time(has, &format!("mini_board ({raw}, 8 a column)"), runs, || {
-            knobas_app::commands::entity::mini_board_inner(
-                pool,
-                None,
-                &[],
-                None,
-                Some(8),
-                Some(&raw),
-            )
-        })
+        time(
+            has,
+            &format!("mini_board ({raw}, 8 a column)"),
+            runs,
+            || {
+                knobas_app::commands::entity::mini_board_inner(
+                    pool,
+                    None,
+                    &[],
+                    None,
+                    Some(8),
+                    Some(&raw),
+                )
+            },
+        )
         .await;
     }
 

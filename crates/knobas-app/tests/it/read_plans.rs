@@ -25,8 +25,17 @@ use crate::responsiveness_probe::Synthetic;
 
 /// Tables and CTEs small by construction, which a plan may scan per row: the
 /// sources the user configured; `grouped`, one row per source and kind with a
-/// declared state; `status_paths`, one row per source and status candidate.
-const SMALL: &[&str] = &["source_config", "grouped", "status_paths"];
+/// declared state; `status_paths`, one row per source and status candidate;
+/// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
+/// the labels and a build's or pull request's state (#939).
+const SMALL: &[&str] = &[
+    "source_config",
+    "grouped",
+    "status_paths",
+    "lane_paths",
+    "label_paths",
+    "state_paths",
+];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
 /// and why: `credential_expiry` and `alert`, unchanged. They read the
@@ -212,9 +221,23 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             .bind(None::<String>)
             .bind(declared.clone())
             .bind(Some(50_i64))
+            .bind(None::<String>)
+            .bind(None::<i64>)
     })
     .await;
     wrong.extend(shapes("mini_board", &plan));
+    // In lanes (#939): by epic, the costliest lane read, its first ten.
+    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
+        q.bind(None::<Vec<String>>)
+            .bind(None::<Vec<String>>)
+            .bind(None::<String>)
+            .bind(declared.clone())
+            .bind(Some(8_i64))
+            .bind(Some("epic".to_owned()))
+            .bind(Some(10_i64))
+    })
+    .await;
+    wrong.extend(shapes("mini_board in lanes", &plan));
     // The board's signals (#815), for fifty of its tickets, with a tenth of
     // the proposals confirmed for the plan so the walk has links to follow,
     // and put back so the tray's plans below see the mirror as it was.

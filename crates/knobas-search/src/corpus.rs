@@ -377,7 +377,8 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
             ),
         ),
         // The cards' own reader (#815), so `has:` admits exactly the tickets
-        // whose cards show the signal: `fd.u` is the user, lowercased.
+        // whose cards show the signal: `fd.u` is the user, lowercased, and
+        // `fd.v` the kinds, which also pick the links walked (#939).
         (
             FieldKey::Has,
             concat!(
@@ -385,7 +386,8 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 knobas_core::ticket_signals!(
                     "(select fdecl.d from fdecl)",
                     "fd.u",
-                    knobas_core::linked_ends!()
+                    knobas_core::signal_ends!("(select fdecl.d from fdecl)", "fd.v"),
+                    "fd.v"
                 ),
                 " sg where sg.kind = any(fd.v))"
             ),

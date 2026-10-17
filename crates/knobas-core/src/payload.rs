@@ -1270,16 +1270,42 @@ pub fn parent_path(chain: &[ResolvedParent]) -> Option<String> {
 #[macro_export]
 macro_rules! declared_state {
     ($decl:literal) => {
+        $crate::state_of!($crate::declared_state_candidates!($decl))
+    };
+}
+
+/// The declared state candidates of the row `i`, as a relation of `(segs,
+/// vals, ord)`: [`declared_state!`]'s, exported for a statement that
+/// resolves them once a source and reads them through [`state_of!`] (#939).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! declared_state_candidates {
+    ($decl:literal) => {
+        concat!(
+            "(select ",
+            $crate::declared_segments!("t.p->'at'"),
+            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
+            $crate::declared_array!($decl, "state"),
+            ") with ordinality as t(p, ord))"
+        )
+    };
+}
+
+/// [`declared_state!`]'s rule over a relation of candidates the statement
+/// already holds, `(segs, vals, ord)` rows: the one spelling of the rule,
+/// as [`first_string_of!`] is for a string.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! state_of {
+    ($($candidates:tt)+) => {
         concat!(
             "(select jsonb_build_object('text', coalesce(v.e->>'text', s.val #>> '{}'), 'tone', v.e->>'tone') \
               from (select c.ord, c.vals, case jsonb_typeof(i.payload #> c.segs) \
                       when 'string' then to_jsonb(nullif(btrim(i.payload #>> c.segs), '')) \
                       when 'boolean' then i.payload #> c.segs end as val \
-                    from (select ",
-            $crate::declared_segments!("t.p->'at'"),
-            " as segs, t.p->'values' as vals, t.ord from jsonb_array_elements(",
-            $crate::declared_array!($decl, "state"),
-            ") with ordinality as t(p, ord)) c) s \
+                    from ",
+            $($candidates)+,
+            " c) s \
               cross join lateral jsonb_array_elements(\
                 case when jsonb_typeof(s.vals) = 'array' then s.vals else '[]'::jsonb end) \
                 with ordinality as v(e, vord) \
