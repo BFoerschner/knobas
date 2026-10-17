@@ -212,13 +212,19 @@ export function jiraViewSlug(entityId: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
+/** Where Settings shows the notes and the capture shortcut (D10). */
+const NOTES_HASH = "#/settings/notes";
+
 /**
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
  * request's number is unique only inside its repository. A kind with no view
  * of its own opens the section that lists it: a Jira view its ticket view, a
- * build configuration Builds, anything else Tickets, the home. Never Code: a
- * kind that is not code does not belong there (#1094).
+ * build configuration Builds, a route Dependencies' asset tree, a note
+ * Settings › Notes (the one place notes are drawn while they hide, D10),
+ * anything else Tickets, the home. Never Code: a kind that is not code does
+ * not belong there (#1094). Every surface opens a kind through this one rule
+ * (#1101).
  */
 export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
   const id = encodeURIComponent(row.entity_id);
@@ -245,6 +251,10 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
       return `#/tickets/${jiraViewSlug(row.entity_id)}`;
     case "build_config":
       return "#/builds";
+    case "route":
+      return `#/route/${id}`;
+    case "note":
+      return NOTES_HASH;
     default:
       return "#/tickets";
   }

@@ -18,13 +18,8 @@
 import { itemHash } from "./job/job";
 import { jobHash } from "./route";
 
-/** Where Settings shows the notes and the capture shortcut (D10). */
-const NOTES_HASH = "#/settings/notes";
-
-/** The address of an entity of `kind`. */
+/** The address of an entity of `kind`: `itemHash`, which owns every kind's rule (#1101). */
 export function entityAddress(kind: string, entityId: string): string {
-  if (kind === "note") return NOTES_HASH;
-  if (kind === "route") return `#/route/${encodeURIComponent(entityId)}`;
   return itemHash({ kind, entity_id: entityId });
 }
 
