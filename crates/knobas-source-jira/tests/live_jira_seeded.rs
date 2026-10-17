@@ -3066,7 +3066,10 @@ async fn only_the_boards_built_on_my_favourite_filters_come_in_when_the_choice_i
     }
     let (_, favourites) = seeded.get("rest/api/2/filter/favourite").await;
     for filter in favourites.as_array().into_iter().flatten() {
-        if filter["name"].as_str().is_some_and(|n| n.starts_with(PROBE)) {
+        if filter["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with(PROBE))
+        {
             seeded
                 .request(
                     reqwest::Method::DELETE,
