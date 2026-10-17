@@ -38,11 +38,14 @@ function column(status: string | null, n: number, total = n): MiniBoardColumn {
   return { status, cards: Array.from({ length: n }, (_, i) => card(i)), total };
 }
 
-test("a column draws eight, Done three, and every card once expanded or while words filter", () => {
+test("a column draws eight, Done three, fifty of either while words filter, and every card once expanded", () => {
   expect(drawnCards(column("To Do", 12), false, false)).toHaveLength(8);
   expect(drawnCards(column("done", 12), false, false)).toHaveLength(3);
   expect(drawnCards(column("To Do", 12), true, false)).toHaveLength(12);
   expect(drawnCards(column("Done", 12), false, true)).toHaveLength(12);
+  expect(drawnCards(column("To Do", 60), false, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), false, true)).toHaveLength(50);
+  expect(drawnCards(column("Done", 60), true, true)).toHaveLength(60);
 });
 
 test("Show N more counts what the column holds past what it draws, Done saying so", () => {

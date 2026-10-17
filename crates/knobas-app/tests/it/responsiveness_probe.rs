@@ -803,10 +803,11 @@ async fn what_the_reader_waits_on() {
     room(pool, "room: stored context", &[], Some(&ctx), None, runs).await;
 
     // -- the Tickets view's filter (#810, #897) ------------------------------
-    // What a keystroke in the filter reads: the board with no cap while the
-    // filter has words (R-3.4). `a` is one broad letter (every key here holds
-    // one), `jira0-123` a narrow one, and `zzqx` a word nothing holds, which
-    // makes every row's assignee read run.
+    // What a keystroke in the filter reads: the board at 50 a column while the
+    // filter has words (R-3.4, #1024), every match still counted. A board in
+    // lanes still reads every match, so that row stays beside it. `a` is one
+    // broad letter (every key here holds one), `jira0-123` a narrow one, and
+    // `zzqx` a word nothing holds, which makes every row's assignee read run.
     let tickets_view = "tickets view: filter";
     time(
         tickets_view,
@@ -816,22 +817,24 @@ async fn what_the_reader_waits_on() {
     )
     .await;
     for word in ["a", "jira0-123", "zzqx"] {
-        time(
-            tickets_view,
-            &format!("mini_board (typed `{word}`, every match)"),
-            runs,
-            || {
-                knobas_app::commands::entity::mini_board_inner(
-                    pool,
-                    None,
-                    &[],
-                    None,
-                    None,
-                    Some(word),
-                )
-            },
-        )
-        .await;
+        for (cap, label) in [(Some(50), "50 a column"), (None, "every match, lanes")] {
+            time(
+                tickets_view,
+                &format!("mini_board (typed `{word}`, {label})"),
+                runs,
+                || {
+                    knobas_app::commands::entity::mini_board_inner(
+                        pool,
+                        None,
+                        &[],
+                        None,
+                        cap,
+                        Some(word),
+                    )
+                },
+            )
+            .await;
+        }
     }
 
     // -- opening a detail ----------------------------------------------------

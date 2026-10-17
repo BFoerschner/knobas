@@ -152,7 +152,11 @@ function own(of: EntityRow): Reached {
 }
 
 /** Board reads answered over {@link CORPUS}, the query read as words that must all appear. */
-function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harness {
+function harness(
+  contexts: ContextRow[] = [],
+  views: TicketViewRow[] = [],
+  corpus: { status: string; card: MiniBoardCard }[] = CORPUS,
+): Harness {
   const reads: Harness["reads"] = [];
   const h: Harness = {
     reads,
@@ -204,7 +208,7 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
           .toLowerCase()
           .split(/\s+/)
           .filter((word) => word !== "" && !word.includes(":"));
-        const kept = CORPUS.filter(({ card }) =>
+        const kept = corpus.filter(({ card }) =>
           words.every((word) => `${card.key} ${card.title}`.toLowerCase().includes(word)),
         );
         const board: MiniBoard = { columns: [], sources: [] };
@@ -322,7 +326,7 @@ test("selecting another card moves the yellow and the preview's button follows i
   expect(preview().textContent).toContain("Assigned to jonas.becker.");
 });
 
-test("typing filters on the server, keeps focus and the caret, shows every match and marks the words", async () => {
+test("typing filters on the server, keeps focus and the caret, shows the matches and marks the words", async () => {
   const h = harness();
   await open(h);
   const input = field();
@@ -333,7 +337,7 @@ test("typing filters on the server, keeps focus and the caret, shows every match
     expect(document.activeElement).toBe(input);
   }
   expect(input.selectionStart).toBe(4);
-  expect(h.reads.at(-1)).toEqual({ perColumn: null, query: "sepa" });
+  expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "sepa" });
   expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
   expect(count()).toBe("1 of 18 tickets");
   expect(target.querySelector(".tf-tcard mark")!.textContent).toBe("SEPA");
@@ -347,6 +351,29 @@ test("typing filters on the server, keeps focus and the caret, shows every match
   expect(input.value).toBe("s epa");
 });
 
+test("a typed filter reads and draws fifty a column under its total, and Show N more reads the rest (#1024)", async () => {
+  const bulk = (status: string, n: number, word: string) =>
+    Array.from({ length: n }, (_, i) => ({ status, card: card(`BLK-${status[0]}${i + 1}`, `${word} ${i + 1}`) }));
+  const h = harness([], [], [...CORPUS, ...bulk("To Do", 60, "Bulk"), ...bulk("Done", 55, "Bulk done")]);
+  await open(h);
+  for (const char of "bulk") type(field(), char);
+  await settle();
+  expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "bulk" });
+  expect(columns()).toEqual([
+    { head: "To Do 60", cards: 50, more: "Show 10 more" },
+    { head: "Done 55", cards: 50, more: "Show 5 more done" },
+  ]);
+  expect(count()).toBe("115 of 133 tickets");
+
+  target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
+  await settle();
+  expect(h.reads.at(-1)).toEqual({ perColumn: 60, query: "bulk" });
+  expect(columns()).toEqual([
+    { head: "To Do 60", cards: 60, more: null },
+    { head: "Done 55", cards: 50, more: "Show 5 more done" },
+  ]);
+});
+
 test("keys typed inside the typing pause are one read of the whole word, and an older answer never lands", async () => {
   const h = harness();
   await open(h, null, null, 40);
@@ -356,7 +383,7 @@ test("keys typed inside the typing pause are one read of the whole word, and an 
   expect(h.reads.length).toBe(before);
   await new Promise((resolve) => setTimeout(resolve, 60));
   await settle();
-  expect(h.reads.slice(before)).toEqual([{ perColumn: null, query: "sepa" }]);
+  expect(h.reads.slice(before)).toEqual([{ perColumn: 50, query: "sepa" }]);
   expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
 
   // A read already out when the next key is typed: its answer is not drawn.
