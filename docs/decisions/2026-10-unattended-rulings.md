@@ -4397,3 +4397,15 @@ Ruled by the implementer (PR for #1019).
   it blank as on any view. **Reversing:** low.
 - ***Open in Jira* in the Jira view's settings is not added here**: it belongs with the header's
   *Open in Jira* (#879). **Reversing:** n/a.
+- **Merge-manager: an `OR` outside parentheses makes the whole query one part.** JQL binds `AND`
+  tighter than `OR`, so `project = PAY AND status = Done OR priority = High` is
+  `(project = PAY AND status = Done) OR priority = High`; splitting on `AND` kept `project:PAY`
+  and dropped every High ticket outside PAY while listing only the `OR` half as left out. The
+  copy now keeps nothing and lists the whole query. **Reversing:** parse precedence and keep the
+  `AND` parts of a query only when no `OR` sits beside them, which is this rule.
+- **Merge-manager: a negated clause on assignee, labels, sprint or priority is left out ("knobas
+  would also keep the tickets with no assignee").** Jira's `!=` and `not in` never match a ticket
+  without a value; knobas's `-` does (`not coalesce(…, false)` in `knobas-search/src/sql.rs`), so
+  `assignee != currentUser()` as `-assignee:me` added every unassigned ticket without saying so.
+  Status, project and type always have a value and still translate. **Reversing:** a grammar
+  form for "has a value" would let the copy say `-assignee:me has-assignee`; one table entry.

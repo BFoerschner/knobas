@@ -62,11 +62,9 @@ describe("clauses knobas can test", () => {
     ["priority in (High, Highest)", "priority:High priority:Highest"],
     ["assignee = currentUser()", "assignee:me"],
     ["assignee = jbecker", "assignee:jbecker"],
-    ["assignee != currentUser()", "-assignee:me"],
+    ["issuetype not in (Epic)", "-issuetype:Epic"],
     ["labels = on-call", "label:on-call"],
-    ["labels != tech-debt", "-label:tech-debt"],
     ["sprint in openSprints()", "sprint:current"],
-    ["sprint not in openSprints()", "-sprint:current"],
     ["parent = PAY-12", "under:PAY-12"],
     ['"Epic Link" = PAY-12', "under:PAY-12"],
     ["updated >= -7d", "updated:7d"],
@@ -80,8 +78,8 @@ describe("clauses knobas can test", () => {
   });
 
   test("conditions keep the query's order, and ORDER BY is not a part", () => {
-    const copy = translateJql("project in (PAY, OPS) AND labels != tech-debt ORDER BY Rank ASC");
-    expect(copy.query).toBe("project:PAY project:OPS -label:tech-debt");
+    const copy = translateJql("project in (PAY, OPS) AND status != Done ORDER BY Rank ASC");
+    expect(copy.query).toBe("project:PAY project:OPS -status:Done");
     expect(copy.kept).toBe(2);
     expect(copy.left).toEqual([]);
   });
@@ -107,12 +105,35 @@ describe("clauses knobas leaves out, with the reason", () => {
     ["parent != PAY-12", "knobas can only keep the tickets under an epic"],
     ["created >= -7d", "knobas has no condition for created"],
     ["updated <= -7d", "knobas tests only how recently a ticket changed"],
-    ["status = Done OR priority = High", "an OR between conditions, which knobas cannot say"],
     ["NOT status = Done", "knobas cannot read this part of the query"],
+    ["assignee != currentUser()", "knobas would also keep the tickets with no assignee"],
+    ["labels != tech-debt", "knobas would also keep the tickets with no label"],
+    ["sprint not in openSprints()", "knobas would also keep the tickets with no sprint"],
+    ["priority not in (Low)", "knobas would also keep the tickets with no priority"],
   ])("%s: %s", (jql, reason) => {
     const copy = translateJql(`project = PAY AND ${jql}`);
     expect(copy.query).toBe("project:PAY");
     expect(copy.left).toEqual([{ clause: jql, reason }]);
+  });
+
+  test("an OR outside parentheses makes the whole query one part, as JQL binds AND tighter", () => {
+    const jql = "project = PAY AND status = Done OR priority = High ORDER BY Rank ASC";
+    expect(translateJql(jql)).toEqual({
+      query: "",
+      kept: 0,
+      left: [
+        {
+          clause: "project = PAY AND status = Done OR priority = High",
+          reason: "an OR between conditions, which knobas cannot say",
+        },
+      ],
+    });
+  });
+
+  test("an OR inside parentheses stays in its own part", () => {
+    const copy = translateJql("project = PAY AND (status = Done OR priority = High)");
+    expect(copy.query).toBe("project:PAY");
+    expect(copy.left.map((part) => part.clause)).toEqual(["(status = Done OR priority = High)"]);
   });
 
   test("an OR over a field knobas does not sync names the field", () => {

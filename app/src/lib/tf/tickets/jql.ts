@@ -9,7 +9,8 @@
  * (or `updated >=` a recent window) over values the search grammar reads.
  * Anything else stays out whole, never half-translated: an `OR`, a `NOT`,
  * parentheses, a Jira function other than `currentUser()` and
- * `openSprints()`, a field knobas does not sync.
+ * `openSprints()`, a field knobas does not sync, a negation over a field a
+ * ticket may leave empty.
  */
 import type { JiraSource } from "../../ipc/search";
 import { conditionsText, type Condition, type ConditionField } from "./editor";
@@ -71,22 +72,38 @@ function tokenize(jql: string): Token[] {
 const isWord = (token: Token | undefined, word: string) =>
   token?.kind === "word" && token.text.toLowerCase() === word;
 
-/** The query's parts: split on each `AND` outside parentheses, up to `ORDER BY`. */
+/**
+ * The query's parts: split on each `AND` outside parentheses, up to `ORDER BY`.
+ * An `OR` outside parentheses makes the whole query one part: JQL binds `AND`
+ * tighter, so `a AND b OR c` is `(a AND b) OR c`, and keeping `a` alone would
+ * drop tickets `c` holds.
+ */
 function clausesOf(jql: string): Clause[] {
   const tokens = tokenize(jql);
   const clauses: Clause[] = [];
   let current: Token[] = [];
   let depth = 0;
+  let end = tokens.length;
+  let or = false;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i]!;
+    if (depth === 0 && isWord(token, "order") && isWord(tokens[i + 1], "by")) {
+      end = i;
+      break;
+    }
+    if (depth === 0 && isWord(token, "or")) or = true;
+    if (token.kind === "open") depth++;
+    if (token.kind === "close") depth = Math.max(0, depth - 1);
+  }
   const close = () => {
     if (current.length > 0) {
       clauses.push({ text: jql.slice(current[0]!.start, current.at(-1)!.end), tokens: current });
     }
     current = [];
   };
-  for (let i = 0; i < tokens.length; i++) {
-    const token = tokens[i]!;
-    if (depth === 0 && isWord(token, "order") && isWord(tokens[i + 1], "by")) break;
-    if (depth === 0 && isWord(token, "and")) {
+  depth = 0;
+  for (const token of tokens.slice(0, end)) {
+    if (!or && depth === 0 && isWord(token, "and")) {
       close();
       continue;
     }
@@ -123,6 +140,18 @@ const FIELDS: Record<string, ConditionField> = {
   parent: "epic",
   "epic link": "epic",
   updated: "updated",
+};
+
+/**
+ * The fields a ticket may have no value for. Jira's `!=` and `not in` never
+ * match a ticket without one, while knobas's `-` does, so a negated clause on
+ * one of these would widen the copy and stays out.
+ */
+const OPTIONAL: Partial<Record<ConditionField, string>> = {
+  assignee: "assignee",
+  label: "label",
+  sprint: "sprint",
+  priority: "priority",
 };
 
 const CANNOT_READ = "knobas cannot read this part of the query";
@@ -220,6 +249,9 @@ function readClause(tokens: Token[]): Condition | string {
   }
   if (!["=", "!=", "in", "not in"].includes(op)) return CANNOT_READ;
   const negated = op === "!=" || op === "not in";
+  // Jira's `!=` drops a ticket with no value; knobas's `-` keeps it.
+  const optional = OPTIONAL[field];
+  if (negated && optional !== undefined) return `knobas would also keep the tickets with no ${optional}`;
 
   if (field === "sprint") {
     if (!values.every((v) => v.fn && v.text === "opensprints")) return "knobas knows only the active sprint";
