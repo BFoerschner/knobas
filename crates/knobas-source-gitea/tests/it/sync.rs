@@ -95,9 +95,13 @@ async fn a_repository_carries_the_teams_it_was_added_to_and_not_owners() {
 #[tokio::test]
 async fn teams_gitea_will_not_list_name_none_and_the_run_goes_on() {
     let mut state = State::tidewater().with_elsewhere();
-    state
-        .teams
-        .insert("elsewhere/unrelated".to_owned(), (405, serde_json::json!({ "message": "repo is not owned by an organization" })));
+    state.teams.insert(
+        "elsewhere/unrelated".to_owned(),
+        (
+            405,
+            serde_json::json!({ "message": "repo is not owned by an organization" }),
+        ),
+    );
     state
         .teams
         .insert("tidewater/payout-service".to_owned(), (403, serde_json::json!({ "message": "token does not have at least one of required scope(s): [read:organization]" })));
@@ -114,7 +118,10 @@ async fn teams_gitea_will_not_list_name_none_and_the_run_goes_on() {
             .get("teams")
             .cloned()
     };
-    assert_eq!(teams_of("gitea:elsewhere/unrelated"), Some(serde_json::json!([])));
+    assert_eq!(
+        teams_of("gitea:elsewhere/unrelated"),
+        Some(serde_json::json!([]))
+    );
     assert_eq!(teams_of("gitea:tidewater/payout-service"), None);
 }
 

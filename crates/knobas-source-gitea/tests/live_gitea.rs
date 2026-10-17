@@ -4942,7 +4942,11 @@ async fn a_repository_reads_its_language_and_its_own_teams_not_owners() {
     remove().await;
 
     let status = |what: &str, response: reqwest::Response| {
-        assert!(response.status().is_success(), "{what}: {}", response.status());
+        assert!(
+            response.status().is_success(),
+            "{what}: {}",
+            response.status()
+        );
         response
     };
     status(
@@ -5033,9 +5037,15 @@ async fn a_repository_reads_its_language_and_its_own_teams_not_owners() {
     let (_, _, user_teams) = read(&user_items, &mirror);
     remove().await;
 
-    println!("LIVE declared language {language:?}, teams {teams:?}; the mirror's teams {user_teams:?}");
+    println!(
+        "LIVE declared language {language:?}, teams {teams:?}; the mirror's teams {user_teams:?}"
+    );
     assert_eq!(language.as_deref(), Some("Rust"), "Gitea said {said:?}");
-    assert_eq!(teams, vec![team_name.to_owned()], "Owners holds every repository and is left out");
+    assert_eq!(
+        teams,
+        vec![team_name.to_owned()],
+        "Owners holds every repository and is left out"
+    );
     assert_eq!(
         user_teams,
         Some(serde_json::json!([])),

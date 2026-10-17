@@ -116,8 +116,24 @@ async fn an_author_is_mine_when_it_is_the_sources_configured_username() {
     let src = gitea(&pool, " mara ").await;
     let nobody = gitea(&pool, "").await;
     let pr = serde_json::json!({ "merged": true, "state": "closed" });
-    let mine = item(&pool, &src, "tidewater/payout-service#139", "pr", Some("mara"), pr.clone()).await;
-    let theirs = item(&pool, &src, "tidewater/payout-service#142", "pr", Some("tom"), pr.clone()).await;
+    let mine = item(
+        &pool,
+        &src,
+        "tidewater/payout-service#139",
+        "pr",
+        Some("mara"),
+        pr.clone(),
+    )
+    .await;
+    let theirs = item(
+        &pool,
+        &src,
+        "tidewater/payout-service#142",
+        "pr",
+        Some("tom"),
+        pr.clone(),
+    )
+    .await;
     let branch = item(
         &pool,
         &src,
@@ -132,11 +148,21 @@ async fn an_author_is_mine_when_it_is_the_sources_configured_username() {
 
     let facts = code_facts_inner(
         &pool,
-        &[mine.clone(), theirs.clone(), branch.clone(), unconfigured.clone(), unknown.clone()],
+        &[
+            mine.clone(),
+            theirs.clone(),
+            branch.clone(),
+            unconfigured.clone(),
+            unknown.clone(),
+        ],
     )
     .await
     .unwrap();
-    assert_eq!(facts.len(), 4, "an id the mirror does not hold has no facts: {facts:?}");
+    assert_eq!(
+        facts.len(),
+        4,
+        "an id the mirror does not hold has no facts: {facts:?}"
+    );
     assert_eq!(of(&facts, &mine).author.as_deref(), Some("mara"));
     assert!(of(&facts, &mine).mine);
     assert_eq!(of(&facts, &theirs).author.as_deref(), Some("tom"));

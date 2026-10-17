@@ -231,7 +231,10 @@ impl State {
         let full = "tidewater/payout-service".to_owned();
         Self {
             repos: vec![repo("tidewater", "payout-service", "2026-08-22T11:42:00Z")],
-            teams: BTreeMap::from([(full.clone(), (200, json!([team("Owners", true), team("Payments", false)])))]),
+            teams: BTreeMap::from([(
+                full.clone(),
+                (200, json!([team("Owners", true), team("Payments", false)])),
+            )]),
             branches: BTreeMap::from([(
                 full.clone(),
                 vec![
@@ -573,10 +576,12 @@ impl Fake {
                 .await;
         }
         for (full_name, (status, body)) in &state.teams {
-            authed(Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/teams"))))
-                .respond_with(ResponseTemplate::new(*status).set_body_json(body.clone()))
-                .mount(&self.server)
-                .await;
+            authed(
+                Mock::given(method("GET")).and(path(format!("/api/v1/repos/{full_name}/teams"))),
+            )
+            .respond_with(ResponseTemplate::new(*status).set_body_json(body.clone()))
+            .mount(&self.server)
+            .await;
         }
 
         for (full_name, branches) in &state.branches {
