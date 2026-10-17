@@ -1275,6 +1275,10 @@ mod tests {
         /// change: runs nobody started, so the absent key is the source
         /// saying nothing (#961). Conforming.
         StartedByOnRunsNobodyStarted,
+        /// The same `started_by`, on records whose declared trigger is a
+        /// person: runs somebody started, so the absent key is a misspelled
+        /// path and still evidence (#961).
+        StartedByOnRunsAPersonStarted,
     }
 
     struct TestSource {
@@ -1505,6 +1509,17 @@ mod tests {
                                 values: vec![knobas_core::payload::TriggerValue::of(
                                     "In Progress",
                                     knobas_core::payload::Trigger::Change,
+                                )],
+                            }],
+                            ..good
+                        }],
+                        Behavior::StartedByOnRunsAPersonStarted => vec![KindPaths {
+                            started_by: vec![PayloadPath::of(["startedBy"])],
+                            trigger: vec![knobas_core::payload::TriggerPath {
+                                at: PayloadPath::of(["fields", "status", "name"]),
+                                values: vec![knobas_core::payload::TriggerValue::of(
+                                    "In Progress",
+                                    knobas_core::payload::Trigger::Person,
                                 )],
                             }],
                             ..good
@@ -2116,6 +2131,18 @@ mod tests {
         run(Behavior::StartedByOnRunsNobodyStarted)
             .await
             .expect("runs a change started name nobody");
+    }
+
+    /// The excuse is the trigger's, not the declaration's (#961): on runs
+    /// whose declared trigger is a person, an absent `started_by` key is a
+    /// misspelled path again.
+    #[tokio::test]
+    async fn rejects_a_started_by_absent_from_runs_a_person_started() {
+        rejects(
+            Behavior::StartedByOnRunsAPersonStarted,
+            "declares started_by of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
     }
 
     #[tokio::test]
