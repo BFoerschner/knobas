@@ -114,6 +114,28 @@ pub struct TicketViewRow {
     pub count: Option<u64>,
     /// The part of the text the grammar could not read, or `None`.
     pub unreadable: Option<String>,
+    /// Where a Jira view comes from (#877), or `None` on a view somebody made.
+    pub jira: Option<JiraSource>,
+}
+
+/// What Jira says about a Jira view (#877, `sync.jira_view`): enough for the
+/// views pane and *View settings* to say where it comes from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JiraSource {
+    /// `board` or `filter`.
+    pub kind: String,
+    /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
+    pub board_type: Option<String>,
+    /// The saved filter's JQL, as Jira holds it.
+    pub jql: String,
+    /// A Kanban board's sub-filter, or `None`.
+    pub sub_query: Option<String>,
+    /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, or `None`.
+    pub sprint: Option<serde_json::Value>,
+    /// When the last sync read it (RFC 3339).
+    pub last_read: chrono::DateTime<chrono::Utc>,
+    /// Where Jira shows it, or `None`.
+    pub web_url: Option<String>,
 }
 
 /// The columns a view is read from, in [`view_of`]'s terms; a macro so the
@@ -159,14 +181,25 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 ///
 /// `internal` if a read fails.
 pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
+    // A Jira view whose item is not live is not listed: its source is turned
+    // off, and it comes back with the source, or its source was deleted with
+    // the mirror purged, which leaves the entity tombstoned and no
+    // `sync.jira_view` row, and no later sync of that source to drop this one.
+    // Read off the entity rather than `sync.jira_view` for that second case.
     let rows = sqlx::query(concat!(
         "select ",
         fields!(),
-        " from knobas.ticket_view order by position, id"
+        " from knobas.ticket_view t
+          where not exists (select 1 from knobas.entity e
+                             where e.id = t.jira_ref
+                               and not exists (select 1 from sync.live_item i
+                                                where i.entity_id = e.id))
+          order by position, id"
     ))
     .fetch_all(pool)
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
+    let mut jira = jira_sources(pool, &views).await?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
     let readings = crate::commands::search::searcher(pool)
         .await?
@@ -175,19 +208,97 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
     Ok(views
         .into_iter()
         .zip(readings)
-        .map(|(view, reading)| match reading {
-            knobas_search::Reading::Count(count) => TicketViewRow {
-                view,
-                count: Some(count),
-                unreadable: None,
-            },
-            knobas_search::Reading::Unreadable(part) => TicketViewRow {
-                view,
-                count: None,
-                unreadable: Some(part),
-            },
+        .map(|(view, reading)| {
+            // A Jira view counts what Jira put on it that knobas mirrors,
+            // which is what its board draws (#877); its text is not its own.
+            let source = view.jira_ref.as_ref().and_then(|r| jira.remove(r));
+            let reading = match &source {
+                Some((count, _)) => knobas_search::Reading::Count(*count),
+                None => reading,
+            };
+            let jira = source.map(|(_, source)| source);
+            match reading {
+                knobas_search::Reading::Count(count) => TicketViewRow {
+                    view,
+                    count: Some(count),
+                    unreadable: None,
+                    jira,
+                },
+                knobas_search::Reading::Unreadable(part) => TicketViewRow {
+                    view,
+                    count: None,
+                    unreadable: Some(part),
+                    jira,
+                },
+            }
         })
         .collect())
+}
+
+/// Per Jira view among `views`: how many of the tickets Jira put on it the
+/// mirror holds live, and where it comes from (#877). A view whose
+/// `jira_ref` names no Jira view is absent, and is counted by its text like
+/// any other.
+async fn jira_sources(
+    pool: &PgPool,
+    views: &[TicketView],
+) -> Result<std::collections::HashMap<String, (u64, JiraSource)>, IpcError> {
+    let refs: Vec<&str> = views
+        .iter()
+        .filter_map(|view| view.jira_ref.as_deref())
+        .collect();
+    if refs.is_empty() {
+        return Ok(std::collections::HashMap::new());
+    }
+    let rows = sqlx::query(
+        "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
+                v.last_read, i.web_url,
+                (select count(*) from sync.jira_view_member m
+                   join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
+                  where m.view_id = v.entity_id) as n
+           from sync.jira_view v
+           join sync.item i on i.entity_id = v.entity_id
+          where v.entity_id = any($1)",
+    )
+    .bind(&refs)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let n: i64 = row.get("n");
+            let source = JiraSource {
+                kind: row.get("ref_kind"),
+                board_type: row.get("board_type"),
+                jql: row.get("jql"),
+                sub_query: row.get("sub_query"),
+                sprint: row.get("sprint"),
+                last_read: row.get("last_read"),
+                web_url: row.get("web_url"),
+            };
+            (
+                row.get("entity_id"),
+                (u64::try_from(n).unwrap_or(0), source),
+            )
+        })
+        .collect())
+}
+
+/// The view `id` names if it is a Jira view (#877), as stored.
+async fn jira_view_row(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: &str,
+) -> Result<Option<TicketView>, IpcError> {
+    let row = sqlx::query(concat!(
+        "select ",
+        fields!(),
+        " from knobas.ticket_view
+          where id = $1 and jira_ref in (select entity_id from sync.jira_view)"
+    ))
+    .bind(id)
+    .fetch_optional(&mut **tx)
+    .await?;
+    row.as_ref().map(view_of).transpose()
 }
 
 /// Why a draft cannot be saved, or `None`. The text is never a reason: it is
@@ -296,7 +407,7 @@ fn slug(name: &str) -> String {
 ///
 /// `invalid` with the reason for a draft [`refusal`] names; `internal` if the
 /// write fails.
-pub async fn save(pool: &PgPool, draft: TicketViewDraft) -> Result<TicketView, IpcError> {
+pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketView, IpcError> {
     if let Some(why) = refusal(&draft) {
         return Err(IpcError::invalid(why));
     }
@@ -306,6 +417,19 @@ pub async fn save(pool: &PgPool, draft: TicketViewDraft) -> Result<TicketView, I
     sqlx::query("lock table knobas.ticket_view in share row exclusive mode")
         .execute(&mut *tx)
         .await?;
+    // *View settings* on a Jira view (#877, R-3.24): the layout, lanes, card
+    // fields, list columns and sort are the reader's; the name, group, which
+    // tickets and the columns are Jira's, so the stored ones stand whatever
+    // the draft says.
+    if let Some(id) = &draft.id
+        && let Some(jira) = jira_view_row(&mut tx, id).await?
+    {
+        draft.name = jira.name;
+        draft.group = jira.group;
+        draft.query = jira.query;
+        draft.columns = jira.columns;
+        draft.jira_ref = jira.jira_ref;
+    }
     let id = match &draft.id {
         Some(id) => id.clone(),
         None => {
@@ -366,8 +490,22 @@ pub async fn save(pool: &PgPool, draft: TicketViewDraft) -> Result<TicketView, I
 ///
 /// # Errors
 ///
-/// `not_found` if no view has that id; `internal` if the delete fails.
+/// `not_found` if no view has that id; `invalid` for a Jira view (#877);
+/// `internal` if the delete fails.
 pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
+    // A Jira view is Jira's: deleted here, the next sync would put it back.
+    let jira: bool = sqlx::query_scalar(
+        "select exists (select 1 from knobas.ticket_view
+                         where id = $1 and jira_ref in (select entity_id from sync.jira_view))",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await?;
+    if jira {
+        return Err(IpcError::invalid(format!(
+            "{id} is a Jira view: it comes from Jira at every sync and cannot be deleted here"
+        )));
+    }
     let gone = sqlx::query("delete from knobas.ticket_view where id = $1")
         .bind(id)
         .execute(pool)
@@ -550,6 +688,15 @@ mod tests {
             view: view.clone(),
             count: None,
             unreadable: None,
+            jira: Some(JiraSource {
+                kind: String::new(),
+                board_type: None,
+                jql: String::new(),
+                sub_query: None,
+                sprint: None,
+                last_read: chrono::DateTime::UNIX_EPOCH,
+                web_url: None,
+            }),
         })
         .unwrap();
         let draft = serde_json::to_value(draft()).unwrap();
@@ -560,6 +707,7 @@ mod tests {
             .iter()
             .chain(&keys(&row["columns"][0]))
             .chain(&keys(&row["list_sort"]))
+            .chain(&keys(&row["jira"]))
             .chain(&keys(&draft))
         {
             assert!(
@@ -573,6 +721,7 @@ mod tests {
             "export interface TicketViewDraft {",
             "export interface ViewColumn {",
             "export interface ListSort {",
+            "export interface JiraSource {",
             "\"ticket_views\"",
             "\"save_ticket_view\"",
             "\"delete_ticket_view\"",

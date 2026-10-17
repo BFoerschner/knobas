@@ -169,7 +169,7 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
           id,
           position: draft.position ?? h.views.length,
         };
-        h.views = [...h.views.filter((row) => row.id !== id), { ...made, count: 1, unreadable: null }].sort(
+        h.views = [...h.views.filter((row) => row.id !== id), { ...made, count: 1, unreadable: null, jira: null }].sort(
           (a, b) => a.position - b.position,
         );
         return Promise.resolve(made);
@@ -442,7 +442,7 @@ test("Not a ticket lists the ad-hoc contexts", async () => {
   );
   const views = target.querySelector(".tf-views")!;
   expect(views.querySelector("h2")!.textContent).toBe("Not a ticket");
-  expect([...views.querySelectorAll("a")].map((a) => a.textContent!.trim())).toEqual([
+  expect([...views.querySelectorAll(".tf-vlist > a")].map((a) => a.textContent!.trim())).toEqual([
     "All tickets 18",
     "Staging DB configuration",
   ]);
@@ -775,6 +775,7 @@ function view(id: string, name: string, group: string, position: number, extra: 
     jira_ref: null,
     count: 3,
     unreadable: null,
+    jira: null,
     ...extra,
   };
 }
@@ -1138,4 +1139,113 @@ test("Delete view in the editor deletes it, with Undo in the toast", async () =>
   expect(dialog()).toBeNull();
   expect(h.deleted).toEqual(["backlog"]);
   expect(toasts.items.at(-1)!.action!.label).toBe("Undo");
+});
+
+// ---- Jira views (#877) ----
+
+const FLOW_COLUMNS = [
+  { name: "Ready", statuses: ["To Do"], limit: null },
+  { name: "In flight", statuses: ["In Progress", "In Review"], limit: 6 },
+  { name: "Shipped", statuses: ["Done"], limit: null },
+];
+
+/** A Jira board view, and a harness whose board answers it under Jira's columns, recording each read. */
+function jiraHarness(): { h: Harness; jiraReads: (string | null)[] } {
+  const h = harness([], [
+    view("my-work", "My work", "Mine", 0, { query: "assignee:@me", count: 2 }),
+    view("jira-board-21", "Payments and Ops flow", "Jira boards", 1, {
+      columns: FLOW_COLUMNS,
+      jira_ref: "jira:board-21",
+      count: 18,
+      jira: {
+        kind: "board",
+        board_type: "kanban",
+        jql: "project in (PAY, OPS) ORDER BY Rank ASC",
+        sub_query: "fixVersion is EMPTY",
+        sprint: null,
+        last_read: "2026-10-17T09:56:00Z",
+        web_url: "https://jira.example/secure/RapidBoard.jspa?rapidView=21",
+      },
+    }),
+  ]);
+  const jiraReads: (string | null)[] = [];
+  const plain = h.ports.board;
+  h.ports.board = async (perColumn, query, jiraView) => {
+    jiraReads.push(jiraView ?? null);
+    const whole = await plain(perColumn, query);
+    if (!jiraView) return whole;
+    // As `jira_view_board` answers: each Jira column by its name.
+    return {
+      sources: whole.sources,
+      columns: FLOW_COLUMNS.map((own) => {
+        const held = whole.columns.filter((column) => own.statuses.includes(column.status ?? ""));
+        return {
+          status: own.name,
+          cards: held.flatMap((column) => column.cards),
+          total: held.reduce((all, column) => all + column.total, 0),
+        };
+      }),
+    };
+  };
+  return { h, jiraReads };
+}
+
+test("Jira boards come last, said to be from the Jira source, and the list ends with where they come from", async () => {
+  const { h } = jiraHarness();
+  await open(h);
+  expect(pane()).toEqual(["# Mine", "My work 2", "# Jira boards from the Jira source", "Payments and Ops flow 18"]);
+  const foot = target.querySelector(".tf-vw-foot")!;
+  expect(foot.textContent!.replace(/\s+/g, " ").trim()).toBe(
+    "Boards and favourite filters come in with the Jira source at every sync. Choose which",
+  );
+  expect(foot.querySelector("a")!.getAttribute("href")).toBe("#/settings/source/jira");
+});
+
+test("a Jira view reads its board from Jira, draws Jira's columns and limits, and offers View settings only", async () => {
+  const { h, jiraReads } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  expect(jiraReads.every((ref) => ref === "jira:board-21")).toBe(true);
+  expect(jiraReads.length).toBeGreaterThan(0);
+  expect(columns()).toEqual([
+    { head: "Ready 12", cards: 8, more: "Show 4 more" },
+    { head: "In flight 1 of 6", cards: 1, more: null },
+    { head: "Shipped 5", cards: 5, more: null },
+  ]);
+  expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
+  expect(target.querySelector(".tf-vw-savef")).toBeNull();
+  const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
+    (b) => b.textContent === "View settings",
+  );
+  expect(settings).toBeDefined();
+
+  menuOf("Payments and Ops flow").click();
+  flushSync();
+  const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
+  expect(items).toEqual(["View settingslanes, cards and list columns"]);
+});
+
+test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  const box = target.querySelector<HTMLElement>(".tf-vw-dialog")!;
+  expect(box.querySelector("h2")!.textContent).toBe("Settings for Payments and Ops flow");
+  expect(box.querySelector(".tf-vw-jql")!.textContent).toBe("project in (PAY, OPS) ORDER BY Rank ASC\nfixVersion is EMPTY");
+  expect(box.querySelector<HTMLInputElement>('input[aria-label="Name"]')).toBeNull();
+  expect([...box.querySelectorAll<HTMLInputElement>('input[aria-label="Column name"]')].map((i) => [i.value, i.disabled])).toEqual([
+    ["Ready", true],
+    ["In flight", true],
+    ["Shipped", true],
+  ]);
+  expect(box.querySelector(".tf-vw-del")).toBeNull();
+  expect(box.textContent).toContain("Only how it looks here. Jira still decides which tickets.");
+
+  const lanes = box.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!;
+  lanes.value = "assignee";
+  lanes.dispatchEvent(new Event("change"));
+  flushSync();
+  [...box.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save view")!.click();
+  await settle();
+  expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", lanes: "assignee", columns: FLOW_COLUMNS, jira_ref: "jira:board-21" });
 });

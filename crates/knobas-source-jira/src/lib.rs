@@ -33,6 +33,7 @@ mod model;
 mod source;
 mod sync;
 mod time;
+mod views;
 mod write;
 
 pub use config::{Flavor, JiraConfig};
@@ -64,3 +65,8 @@ pub const WRITE_OP_LOG_WORK: &str = "log_work";
 /// The one entity kind this adapter emits. Epics are Jira issues of type
 /// `Epic`, so they arrive as tickets too (interfaces doc §4.2: kinds = `ticket`).
 pub const KIND_TICKET: &str = "ticket";
+
+/// A Jira board as a view (#877): its name, columns, sprint and the keys its
+/// query answers in Jira's order, read at every sync. Not a ticket, and never
+/// written back.
+pub const KIND_JIRA_VIEW: &str = "jira_view";

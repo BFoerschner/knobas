@@ -40,6 +40,7 @@ pub mod analyze;
 pub mod attach;
 pub mod config;
 pub mod health;
+pub mod jira_views;
 #[cfg(any(test, feature = "test-util"))]
 pub mod mirror;
 pub mod progress;
@@ -632,6 +633,9 @@ async fn run_locked(
         }
     };
     let full_sync = cursor.is_none();
+    // Read before `kinds` moves into the sink: whether this source declares
+    // Jira views, which gates their projection below.
+    let declares_jira_views = kinds.contains(jira_views::KIND);
 
     let (cursor, upserted, deleted, emitted) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds);
@@ -735,6 +739,14 @@ async fn run_locked(
         // `tests/it/attach.rs`' two controls witness the two guards separately
         // and say which is which.
         attach::resolve(tx, source_id).await?;
+    }
+
+    // The Jira views (#877): after the sweep, inside the transaction, off the
+    // mirror -- `jira_views` says why each. Gated on the declaration for the
+    // reason `attach` is above: the mirror can hold rows under an id whose
+    // current descriptor no longer has the kind.
+    if declares_jira_views {
+        jira_views::project(tx, source_id).await?;
     }
 
     sqlx::query("update knobas.source_config set cursor = $1 where id = $2")

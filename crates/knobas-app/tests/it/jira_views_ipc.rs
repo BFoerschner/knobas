@@ -1,0 +1,298 @@
+//! Jira views (#877) through the IPC bodies they reach: `ticket_views` (a
+//! Jira view is a ticket view row with a `jira_ref`), `save_ticket_view`
+//! (*View settings*), `delete_ticket_view`, and `mini_board` with its
+//! `jira_view` argument ([`jira_view_board`]). The views are made the way a
+//! sync makes them: a `jira_view` item in the mirror, projected by
+//! `knobas_sync::jira_views::project`.
+//!
+//! The database is shared by this binary's tests; each uses a project key and
+//! a board id nothing else holds.
+
+use knobas_app::IpcErrorCode;
+use knobas_app::commands::entity::jira_view_board;
+use knobas_app::ticket_views::{self, TicketViewDraft, TicketViewRow};
+use serde_json::{Value, json};
+
+async fn pool() -> sqlx::PgPool {
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ('jira', 'jira', 'Jira', 'http://x', 'Pat', '{\"username\": \"mara.lindqvist\"}')
+         on conflict (id) do update set kind = excluded.kind, enabled = true,
+                                         config = excluded.config",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    pool
+}
+
+/// A project key nothing else in this database holds: letters only.
+fn project() -> String {
+    let hex = uuid::Uuid::new_v4().simple().to_string();
+    let letters: String = hex[..10]
+        .chars()
+        .map(|c| char::from(b'A' + u8::try_from(c.to_digit(16).unwrap()).unwrap()))
+        .collect();
+    format!("J{letters}")
+}
+
+/// One mirrored row: an issue as the adapter stores it, or a Jira view.
+async fn item(pool: &sqlx::PgPool, key: &str, kind: &str, title: &str, payload: Value) {
+    let id = format!("jira:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, $2, $3)")
+        .bind(&id)
+        .bind(kind)
+        .bind(title)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload, item_updated_at)
+         values ($1, 'jira', $2, $3, $3, $4, now())",
+    )
+    .bind(&id)
+    .bind(kind)
+    .bind(title)
+    .bind(payload)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn issue(pool: &sqlx::PgPool, key: &str, status: &str, summary: &str) {
+    let project = key.split('-').next().unwrap();
+    let payload = json!({
+        "key": key,
+        "fields": {
+            "summary": summary,
+            "status": { "name": status },
+            "issuetype": { "name": "Story" },
+            "project": { "key": project, "name": "Payments" },
+        },
+    });
+    item(pool, key, "ticket", summary, payload).await;
+}
+
+/// A Kanban board over `p` holding `keys` in that order, with three columns,
+/// projected as a sync would. Answers the ticket view's id and the view's
+/// entity id.
+async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String) {
+    let key = format!("board-{}", p.to_lowercase());
+    item(
+        pool,
+        &key,
+        "jira_view",
+        &format!("{p} flow"),
+        json!({
+            "kind": "board", "id": 22, "type": "kanban", "jql": format!("project = {p}"),
+            "query": format!("(project = {p})"), "sprint": null, "keys": keys,
+            "columns": [
+                { "name": "To Do", "statuses": ["To Do"], "limit": null },
+                { "name": "Doing", "statuses": ["In Progress", "In Review"], "limit": 2 },
+                { "name": "Done", "statuses": ["Done"], "limit": null },
+            ],
+        }),
+    )
+    .await;
+    let mut tx = pool.begin().await.unwrap();
+    knobas_sync::jira_views::project(&mut tx, "jira")
+        .await
+        .unwrap();
+    tx.commit().await.unwrap();
+    (format!("jira-{key}"), format!("jira:{key}"))
+}
+
+async fn listed(pool: &sqlx::PgPool, id: &str) -> Option<TicketViewRow> {
+    ticket_views::list(pool)
+        .await
+        .expect("ticket_views")
+        .into_iter()
+        .find(|row| row.view.id == id)
+}
+
+/// Four tickets on a board in Jira's order, plus one from a project the
+/// source does not sync.
+async fn seeded(pool: &sqlx::PgPool) -> (String, String, String) {
+    let p = project();
+    issue(pool, &format!("{p}-1"), "In Review", "Settle the ledger").await;
+    issue(pool, &format!("{p}-2"), "In Progress", "Retry payouts").await;
+    issue(pool, &format!("{p}-3"), "To Do", "Retry the export").await;
+    issue(pool, &format!("{p}-4"), "Blocked", "Off the board").await;
+    let keys = ["1", "WEB", "2", "3", "4"].map(|n| {
+        if n == "WEB" {
+            "WEB-5".to_owned()
+        } else {
+            format!("{p}-{n}")
+        }
+    });
+    let (id, view) = board(pool, &p, &keys).await;
+    (p, id, view)
+}
+
+#[tokio::test]
+async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
+    let pool = pool().await;
+    let (p, id, view) = seeded(&pool).await;
+    let row = listed(&pool, &id).await.expect("the Jira view is listed");
+    assert_eq!(row.view.name, format!("{p} flow"));
+    assert_eq!(row.view.group, "Jira boards");
+    assert_eq!(row.view.jira_ref.as_deref(), Some(view.as_str()));
+    assert_eq!(row.view.columns.len(), 3);
+    assert_eq!(row.view.columns[1].limit, Some(2));
+    assert_eq!(
+        row.count,
+        Some(4),
+        "the four it mirrors, not WEB-5 and not every ticket"
+    );
+    let jira = row.jira.expect("where it comes from");
+    assert_eq!(
+        (jira.kind.as_str(), jira.board_type.as_deref()),
+        ("board", Some("kanban"))
+    );
+    assert_eq!(jira.jql, format!("project = {p}"));
+    assert_eq!(jira.sprint, None);
+
+    // A view somebody made says nothing about Jira.
+    let own = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            id: None,
+            name: format!("{p} mine"),
+            group: "Mine".into(),
+            position: None,
+            query: format!("project:{p}"),
+            layout: "board".into(),
+            columns: Vec::new(),
+            lanes: "none".into(),
+            card_fields: vec!["type".into()],
+            list_columns: vec!["key".into()],
+            list_sort: None,
+            jira_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed(&pool, &own.id).await.unwrap().jira, None);
+}
+
+#[tokio::test]
+async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() {
+    let pool = pool().await;
+    let (p, _, view) = seeded(&pool).await;
+    let board = jira_view_board(&pool, &view, None, None)
+        .await
+        .expect("the board");
+    let drawn: Vec<(Option<String>, Vec<String>, u32)> = board
+        .columns
+        .iter()
+        .map(|c| {
+            (
+                c.status.clone(),
+                c.cards.iter().map(|card| card.key.clone()).collect(),
+                c.total,
+            )
+        })
+        .collect();
+    assert_eq!(
+        drawn,
+        [
+            (Some("To Do".into()), vec![format!("{p}-3")], 1),
+            (
+                Some("Doing".into()),
+                vec![format!("{p}-1"), format!("{p}-2")],
+                2
+            ),
+            (Some("Done".into()), vec![], 0),
+        ],
+        "Jira's order inside a column of two statuses, an empty column kept, a status on no column not drawn"
+    );
+
+    let capped = jira_view_board(&pool, &view, Some(1), None).await.unwrap();
+    assert_eq!(capped.columns[1].cards.len(), 1);
+    assert_eq!(capped.columns[1].cards[0].key, format!("{p}-1"));
+    assert_eq!(capped.columns[1].total, 2);
+
+    let narrowed = jira_view_board(&pool, &view, None, Some("retry"))
+        .await
+        .unwrap();
+    let keys: Vec<String> = narrowed
+        .columns
+        .iter()
+        .flat_map(|c| c.cards.iter().map(|card| card.key.clone()))
+        .collect();
+    assert_eq!(keys, [format!("{p}-3"), format!("{p}-2")]);
+
+    let missing = jira_view_board(&pool, "jira:board-nothing", None, None)
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, IpcErrorCode::NotFound);
+}
+
+#[tokio::test]
+async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
+    let pool = pool().await;
+    let (p, id, view) = seeded(&pool).await;
+    let stored = listed(&pool, &id).await.unwrap().view;
+    let saved = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            id: Some(id.clone()),
+            name: "Renamed".into(),
+            group: "Mine".into(),
+            position: None,
+            query: "assignee:@me".into(),
+            layout: "list".into(),
+            columns: Vec::new(),
+            lanes: "assignee".into(),
+            card_fields: vec!["type".into()],
+            list_columns: vec!["key".into(), "summary".into()],
+            list_sort: None,
+            jira_ref: None,
+        },
+    )
+    .await
+    .expect("view settings save");
+    assert_eq!(
+        (saved.layout.as_str(), saved.lanes.as_str()),
+        ("list", "assignee")
+    );
+    assert_eq!(saved.card_fields, ["type"]);
+    assert_eq!(saved.name, format!("{p} flow"));
+    assert_eq!(saved.group, "Jira boards");
+    assert_eq!(saved.query, stored.query);
+    assert_eq!(saved.columns, stored.columns);
+    assert_eq!(saved.jira_ref.as_deref(), Some(view.as_str()));
+
+    let refused = ticket_views::delete(&pool, &id).await.unwrap_err();
+    assert_eq!(refused.code, IpcErrorCode::Invalid);
+    assert!(listed(&pool, &id).await.is_some());
+}
+
+/// A Jira source deleted with its mirror purged takes its views' items, and
+/// with them their `sync.jira_view` rows, but no sync of that source runs
+/// again to drop the ticket view rows. Those rows must not then be listed as
+/// views somebody made, whose empty text holds every ticket.
+#[tokio::test]
+async fn a_jira_view_whose_mirror_was_purged_is_not_listed() {
+    let pool = pool().await;
+    let (_, id, view) = seeded(&pool).await;
+    assert!(listed(&pool, &id).await.is_some());
+    // What `knobas_sync::config::delete`'s purge does, to this view's item
+    // alone: the shared database's other tests hold the rest of `jira`.
+    sqlx::query("delete from sync.item where entity_id = $1")
+        .bind(&view)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&view)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        listed(&pool, &id).await.is_none(),
+        "a purged Jira view is not a view of every ticket"
+    );
+}

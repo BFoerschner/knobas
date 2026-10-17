@@ -26,6 +26,7 @@
   import type {
     CardField,
     FieldSuggestion,
+    JiraSource,
     ListColumn,
     ParentSuggestion,
     TicketViewDraft,
@@ -50,7 +51,7 @@
     type EditColumn,
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
-  import { LIST_COLUMN_ORDER } from "./views";
+  import { drawnJiraColumns, LIST_COLUMN_ORDER } from "./views";
 
   let {
     draft,
@@ -63,7 +64,14 @@
     onsave,
     ondelete,
     onclose,
+    jira = null,
   }: {
+    /**
+     * *View settings* on a Jira view (#877, R-3.24): where it comes from. Jira
+     * decides its name, which tickets and its columns, so those are shown and
+     * not edited; layout, lanes, card fields and list columns are the reader's.
+     */
+    jira?: JiraSource | null;
     /** Where the view starts: a saved one (*Edit view*) or a new one. */
     draft: TicketViewDraft;
     /** *Edit view*: the title names the view, the button says *Save view*, *Delete view* shows. */
@@ -105,6 +113,16 @@
   let failed = $state<string | null>(null);
   const named = $derived(name.trim() !== "");
   const saveLabel = $derived(editing ? "Save view" : "Create view");
+  /** Fixed for the dialog's life: a Jira view stays one. */
+  const fromJira = untrack(() => jira);
+  const title = $derived(fromJira ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
+  /** *Which tickets* on a Jira view: where Jira's answer comes from, in prototype-6's words. */
+  const jiraLine = $derived.by(() => {
+    if (fromJira === null) return "";
+    const type = fromJira.board_type ? fromJira.board_type[0]!.toUpperCase() + fromJira.board_type.slice(1) : "";
+    const what = fromJira.kind === "board" ? `${type} board`.trim() : "saved filter";
+    return `Jira decides, from the ${what}`;
+  });
   const uid = $props.id();
 
   const read = $derived({ conditions, words });
@@ -228,6 +246,11 @@
   // The board's statuses, once, unfiltered: what a column can hold.
   $effect(() => {
     untrack(() => {
+      // A Jira view's statuses are the ones on Jira's columns, as Jira holds them.
+      if (fromJira !== null) {
+        statuses = [...new Set((columns ?? []).flatMap((column) => column.statuses))];
+        return;
+      }
       board(1, null)
         .then((whole) => {
           const own = (columns ?? []).flatMap((column) => column.statuses);
@@ -259,7 +282,12 @@
     return () => clearTimeout(timer);
   });
 
-  const shown = $derived(answer === null ? null : previewBoard(answer.columns, columns ?? []));
+  // A Jira view's board comes back under Jira's columns already, each by its name.
+  const shown = $derived(
+    answer === null
+      ? null
+      : previewBoard(answer.columns, fromJira !== null ? drawnJiraColumns(start.columns) : (columns ?? [])),
+  );
   const laneCount = $derived(
     answer === null || !laned
       ? 0
@@ -292,7 +320,7 @@
         group: group.trim() || "Mine",
         query,
         layout,
-        columns: storedColumns(columns ?? [], statuses),
+        columns: fromJira !== null ? start.columns : storedColumns(columns ?? [], statuses),
         lanes,
         card_fields: cardFields,
         list_columns: listColumns,
@@ -305,7 +333,7 @@
   }
 </script>
 
-<TfDialog title={editing ? `Edit ${start.name}` : "New view"} className="tf-vw-dialog" {onclose}>
+<TfDialog {title} className="tf-vw-dialog" {onclose}>
   {#snippet body()}
     <div class="tf-vw-body">
       <form
@@ -316,6 +344,18 @@
           void save();
         }}
       >
+        {#if fromJira !== null}
+          <section class="tf-vw-sec">
+            <h3>Which tickets</h3>
+            <p>
+              {jiraLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps Jira's order.{#if fromJira.sprint}
+                Like the board in Jira, it shows the active sprint, now {fromJira.sprint.name}, and moves on to the next
+                sprint when this one closes.{/if}
+            </p>
+            <pre class="tf-vw-jql">{fromJira.jql}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
+            <p class="tf-dim">To change which tickets it holds, change it in Jira.</p>
+          </section>
+        {:else}
         <section class="tf-vw-sec">
           <div class="tf-vw-two">
             <label>
@@ -410,6 +450,7 @@
             >
           </p>
         </section>
+        {/if}
 
         <section class="tf-vw-sec">
           <h3>How they show</h3>
@@ -420,9 +461,13 @@
           {#if layout === "board"}
             <div class="tf-vw-sub">
               <h4>Columns</h4>
-              <p class="tf-dim">
-                Each status sits on one column. A column can hold several. First in this list is leftmost on the board.
-              </p>
+              {#if fromJira !== null}
+                <p class="tf-dim">The columns come from the board in Jira and change when someone changes them there.</p>
+              {:else}
+                <p class="tf-dim">
+                  Each status sits on one column. A column can hold several. First in this list is leftmost on the board.
+                </p>
+              {/if}
               <div class="tf-vw-cols">
                 {#each columns ?? [] as column, at (at)}
                   <div class="tf-vw-col">
@@ -430,6 +475,7 @@
                       type="text"
                       aria-label="Column name"
                       value={column.name}
+                      disabled={fromJira !== null}
                       oninput={(event) => setColumn(at, { name: event.currentTarget.value })}
                     />
                     <div class="tf-vw-vals">
@@ -438,6 +484,7 @@
                           type="button"
                           class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
+                          disabled={fromJira !== null}
                           onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{status}</button
                         >
                       {/each}
@@ -448,6 +495,7 @@
                         min="0"
                         aria-label="At most"
                         value={column.limit ?? ""}
+                        disabled={fromJira !== null}
                         placeholder="any"
                         oninput={(event) => {
                           const n = Number.parseInt(event.currentTarget.value, 10);
@@ -455,6 +503,7 @@
                         }}
                       /></label
                     >
+                    {#if fromJira === null}
                     <span class="tf-vw-move">
                       <button
                         type="button"
@@ -472,12 +521,14 @@
                         onclick={() => (columns = (columns ?? []).filter((_, i) => i !== at))}>✕</button
                       >
                     </span>
+                    {/if}
                   </div>
                 {/each}
               </div>
               {#if loose.length > 0}
                 <p class="tf-vw-warn">{looseLine}</p>
               {/if}
+              {#if fromJira === null}
               <div class="tf-vw-btns">
                 <button
                   type="button"
@@ -487,6 +538,7 @@
                 >
                 <button type="button" class="tf-btn tf-sm tf-ghost" onclick={resetColumns}>One column per status</button>
               </div>
+              {/if}
             </div>
             <div class="tf-vw-sub">
               <label class="tf-vw-inline"
@@ -600,10 +652,14 @@
     </div>
   {/snippet}
   {#snippet footer()}
-    {#if editing && ondelete}
+    {#if editing && ondelete && fromJira === null}
       <button type="button" class="tf-btn tf-ghost tf-vw-del" onclick={ondelete}>Delete view</button>
     {/if}
-    <span class="tf-first tf-dim tf-vw-store">Kept in knobas. Jira never sees it.</span>
+    <span class="tf-first tf-dim tf-vw-store"
+      >{fromJira !== null
+        ? "Only how it looks here. Jira still decides which tickets."
+        : "Kept in knobas. Jira never sees it."}</span
+    >
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
     <button type="submit" class="tf-btn tf-primary" form="tf-vw-form-{uid}" disabled={!named || saving}>{saveLabel}</button>
   {/snippet}

@@ -179,6 +179,25 @@ struct Seed {
     /// before the seed made one; the sprint tests then say to re-seed.
     #[serde(default)]
     sprint: Option<SeededSprint>,
+    /// The seed's Kanban board over PAY and OPS and its favourite filter
+    /// (#877). `None` in a `seed-state.json` written before the seed made them.
+    #[serde(default)]
+    views: Option<SeededViews>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededViews {
+    kanban: SeededKanban,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededKanban {
+    board_id: u64,
+    name: String,
+    sub_query: String,
+    limit_column: String,
+    limit: u32,
+    jql: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -189,6 +208,8 @@ struct SeededSprint {
     name: String,
     /// The keys the seed put in the sprint.
     issues: Vec<String>,
+    /// The Scrum board the sprint is on (#877's Jira views read it).
+    board_id: u64,
 }
 
 impl Seed {
@@ -2502,4 +2523,168 @@ async fn an_untouched_source_is_still_quiet_after_many_polls() {
         cursor = next;
     }
     println!("SEEDED {IDLE_POLLS} idle polls, all quiet, cursor unchanged: {cursor}");
+}
+
+/// **The Jira views (#877) against the seeded boards**, from a source that
+/// syncs PAY alone. The Scrum board holds what its active sprint holds; the
+/// Kanban board over PAY and OPS carries Jira's sub-filter, the limit the seed
+/// put on In Progress, and every key Jira answers -- OPS ones included, which
+/// this source does not sync -- in exactly the order the same query answers
+/// over plain `/search` (the control). An idle poll emits no view; a board
+/// made and then deleted in Jira arrives, then arrives as gone.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_gone_at_the_next_sync()
+ {
+    const PROBE: &str = "knobas live probe board";
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let sprint = seeded.seed.sprint();
+    let kanban = &seeded
+        .seed
+        .views
+        .as_ref()
+        .expect("seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)")
+        .kanban;
+    // A probe a killed run left behind.
+    let (_, listed) = seeded
+        .get(&format!("rest/agile/1.0/board?name={}", url_encode(PROBE)))
+        .await;
+    for board in listed["values"].as_array().into_iter().flatten() {
+        seeded
+            .request(
+                reqwest::Method::DELETE,
+                &format!("rest/agile/1.0/board/{}", board["id"]),
+                None,
+            )
+            .await;
+    }
+
+    let source = seeded.source(serde_json::json!({ "projects": ["PAY"] }));
+    let (items, cursor) = full(&*source).await;
+    let views: Vec<&SyncItem> = items.iter().filter(|i| i.kind == "jira_view").collect();
+    let view = |id: u64| {
+        views
+            .iter()
+            .find(|v| v.entity.key == format!("board-{id}"))
+            .unwrap_or_else(|| panic!("no view of board {id} among {:?}", keys(&items)))
+    };
+
+    let scrum = view(sprint.board_id);
+    assert_eq!(scrum.payload["type"], "scrum");
+    assert_eq!(scrum.payload["sprint"]["name"], sprint.name.as_str());
+    assert_eq!(
+        scrum.payload["keys"],
+        serde_json::json!(sprint.issues),
+        "the active sprint's tickets"
+    );
+
+    let flow = view(kanban.board_id);
+    assert_eq!(flow.title, kanban.name);
+    assert_eq!(flow.payload["type"], "kanban");
+    assert_eq!(flow.payload["jql"], kanban.jql.as_str());
+    assert_eq!(flow.payload["sub_query"], kanban.sub_query.as_str());
+    let limited = flow.payload["columns"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["statuses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s == kanban.limit_column.as_str())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no column holds {}: {}",
+                kanban.limit_column, flow.payload["columns"]
+            )
+        });
+    assert_eq!(limited["limit"], kanban.limit);
+    let query = flow.payload["query"].as_str().unwrap();
+    let control: Vec<String> = seeded
+        .jql(query, "key")
+        .await
+        .iter()
+        .map(|row| row["key"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        flow.payload["keys"],
+        serde_json::json!(control),
+        "Jira's answer, in Jira's order"
+    );
+    assert!(
+        control.iter().any(|key| key.starts_with("OPS-")),
+        "the board reaches OPS, which this source does not sync: {control:?}"
+    );
+
+    let (idle, same) = sync_from(&*source, Some(cursor.clone())).await;
+    assert!(
+        idle.iter().all(|i| i.kind != "jira_view"),
+        "an idle poll emits no view: {:?}",
+        keys(&idle)
+    );
+    assert_eq!(same, cursor);
+
+    // A board made in Jira, then deleted there.
+    let (status, filter) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/api/2/filter",
+            Some(serde_json::json!({ "name": format!("{PROBE} filter {}", uuid_like()), "jql": "project = PAY ORDER BY Rank ASC", "favourite": false })),
+        )
+        .await;
+    assert_eq!(status, 200, "{filter}");
+    let filter_id: u64 = filter["id"].as_str().unwrap().parse().unwrap();
+    let (status, board) = seeded
+        .request(
+            reqwest::Method::POST,
+            "rest/agile/1.0/board",
+            Some(serde_json::json!({ "name": PROBE, "type": "kanban", "filterId": filter_id })),
+        )
+        .await;
+    assert!(status == 200 || status == 201, "{status} {board}");
+    let probe = format!("board-{}", board["id"]);
+    let (made, after_made) = sync_from(&*source, Some(cursor)).await;
+    assert!(
+        made.iter().any(|i| i.entity.key == probe && !i.deleted),
+        "{:?}",
+        keys(&made)
+    );
+    let (status, _) = seeded
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/agile/1.0/board/{}", board["id"]),
+            None,
+        )
+        .await;
+    assert_eq!(status, 204);
+    seeded
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/filter/{filter_id}"),
+            None,
+        )
+        .await;
+    let (gone, _) = sync_from(&*source, Some(after_made)).await;
+    let gone: Vec<&SyncItem> = gone.iter().filter(|i| i.kind == "jira_view").collect();
+    assert_eq!(gone.len(), 1, "{gone:?}");
+    assert_eq!(gone[0].entity.key, probe);
+    assert!(gone[0].deleted);
+    println!(
+        "SEEDED Jira views: {} boards on PAY; {} holds {} keys ({} from OPS); the probe {probe} came and went",
+        views.len(),
+        kanban.name,
+        control.len(),
+        control.iter().filter(|key| key.starts_with("OPS-")).count()
+    );
+}
+
+/// A name suffix no other run shares: the clock in nanoseconds.
+fn uuid_like() -> u128 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos()
 }

@@ -82,6 +82,20 @@ pub(crate) struct JiraCursor {
     pub tz_offset_secs: i32,
     /// What was delivered inside the overlap window, newest first.
     pub seen: Vec<Seen>,
+    /// The Jira views the last run delivered (#877), each with the
+    /// fingerprint of what it delivered: an unchanged view is not delivered
+    /// again, and one no longer here is delivered as gone. Left out of the
+    /// JSON when empty, so a source with no boards keeps the bytes it had --
+    /// and an older cursor without the field reads as one with no views.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub views: Vec<SeenView>,
+}
+
+/// One delivered Jira view: its item key and the fingerprint of its payload.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub(crate) struct SeenView {
+    pub k: String,
+    pub h: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -102,6 +116,7 @@ impl JiraCursor {
             updated_to: None,
             tz_offset_secs,
             seen: Vec::new(),
+            views: Vec::new(),
         }
     }
 
@@ -239,6 +254,7 @@ impl JiraCursor {
             updated_to: Some(watermark),
             tz_offset_secs,
             seen,
+            views: Vec::new(),
         }
     }
 }

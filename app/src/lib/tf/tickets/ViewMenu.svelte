@@ -1,6 +1,7 @@
 <!--
   A ticket view's ⋯ menu (#812, R-3.12), on its row in the views pane and in
-  its header: *Edit view* (#814), *Duplicate* and *Delete*.
+  its header: *Edit view* (#814), *Duplicate* and *Delete*; on a Jira view
+  (#877), *View settings*.
 
   Opens under its button; `Esc`, a pick or a click anywhere else closes it,
   and focus goes back to the button.
@@ -11,6 +12,7 @@
   let {
     name,
     className = "tf-vw-more",
+    jira = false,
     onedit,
     onduplicate,
     ondelete,
@@ -18,6 +20,8 @@
     /** The view's name, for the button's accessible name. */
     name: string;
     className?: string;
+    /** A Jira view (#877): *View settings* only; Jira decides the rest. */
+    jira?: boolean;
     onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
@@ -75,10 +79,16 @@
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
-      <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>
-      <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
-      <hr />
-      <button type="button" role="menuitem" onclick={() => pick(ondelete)}><b>Delete</b></button>
+      {#if jira}
+        <button type="button" role="menuitem" onclick={() => pick(onedit)}
+          ><b>View settings</b><span>lanes, cards and list columns</span></button
+        >
+      {:else}
+        <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>
+        <button type="button" role="menuitem" onclick={() => pick(onduplicate)}><b>Duplicate</b></button>
+        <hr />
+        <button type="button" role="menuitem" onclick={() => pick(ondelete)}><b>Delete</b></button>
+      {/if}
     </div>
   {/if}
 </span>

@@ -44,21 +44,33 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_CREATE_TICKET.to_owned(),
             WRITE_OP_LOG_WORK.to_owned(),
         ],
-        entity_kinds: vec![KindInfo {
-            id: crate::KIND_TICKET.to_owned(),
-            label: "Ticket".to_owned(),
-            plural: "Tickets".to_owned(),
-            monogram: "JI".to_owned(),
-            // A `cursor: None` run walks the whole JQL result set -- `project
-            // in (…)` or the configured filter, unbounded in time -- so every
-            // issue the credential can see is emitted, and the engine's sweep
-            // may tombstone whatever did not come back. Contrast TeamCity,
-            // which emits the newest N builds per configuration and is
-            // therefore `false`. Jira emits one kind, so this adapter is
-            // wholly exhaustive (ADR-0003 changed where the claim is written,
-            // not what Jira claims).
-            full_sync_exhaustive: true,
-        }],
+        entity_kinds: vec![
+            KindInfo {
+                id: crate::KIND_TICKET.to_owned(),
+                label: "Ticket".to_owned(),
+                plural: "Tickets".to_owned(),
+                monogram: "JI".to_owned(),
+                // A `cursor: None` run walks the whole JQL result set -- `project
+                // in (…)` or the configured filter, unbounded in time -- so every
+                // issue the credential can see is emitted, and the engine's sweep
+                // may tombstone whatever did not come back. Contrast TeamCity,
+                // which emits the newest N builds per configuration and is
+                // therefore `false`. Jira emits one kind, so this adapter is
+                // wholly exhaustive (ADR-0003 changed where the claim is written,
+                // not what Jira claims).
+                full_sync_exhaustive: true,
+            },
+            KindInfo {
+                id: crate::KIND_JIRA_VIEW.to_owned(),
+                label: "Jira view".to_owned(),
+                plural: "Jira views".to_owned(),
+                monogram: "JV".to_owned(),
+                // Every run reads every board on the synced projects (#877), and a
+                // board that stops coming back is gone in Jira: the run itself
+                // says so (`views::gone`), and a full sync's sweep agrees.
+                full_sync_exhaustive: true,
+            },
+        ],
         config_schema: config_schema(),
         payload_paths: payload_paths(),
     }
@@ -257,7 +269,7 @@ mod tests {
             ]
         );
         let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
-        assert_eq!(kinds, vec![crate::KIND_TICKET]);
+        assert_eq!(kinds, vec![crate::KIND_TICKET, crate::KIND_JIRA_VIEW]);
         assert_eq!(d.entity_kinds[0].monogram, "JI");
         assert_eq!(d.entity_kinds[0].plural, "Tickets");
     }

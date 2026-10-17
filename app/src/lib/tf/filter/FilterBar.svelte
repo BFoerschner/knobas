@@ -54,7 +54,7 @@
     /** What the view adds after the dropdowns: Tickets' *Lanes*. */
     extra?: Snippet;
     /** What follows the count at the end of the bar (Tickets' *Save as a view*, #812). */
-    after?: Snippet;
+    after?: Snippet | undefined;
   } = $props();
 
   let field: HTMLInputElement | undefined = $state();

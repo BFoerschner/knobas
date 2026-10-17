@@ -18,6 +18,7 @@ mod dedicated;
 mod delete_during_run;
 mod discovered_config;
 mod flush_all_isolation;
+mod jira_views;
 mod progress;
 mod run;
 mod run_log;

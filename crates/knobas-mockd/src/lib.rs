@@ -240,6 +240,12 @@
 //!     which). mockd's narrower workflow is still the more useful fake —
 //!     it exercises the refusal path with a status a person might plausibly
 //!     pick — but it is not what a default Jira project does.
+//! 17. **mockd is a Jira without Jira Software (#877).** The Agile REST
+//!     (`/rest/agile/1.0/…`) is Jira Software's and is not in the vendored
+//!     WADL, so mockd answers every path under it `404` and records **no**
+//!     violation: that is what a Jira Core instance answers, and the adapter
+//!     reads a 404 on the board listing as "no boards". The boards themselves
+//!     are witnessed against the real seeded Jira (`jira-live`), never here.
 //!
 //! ## The shared credentials
 //!

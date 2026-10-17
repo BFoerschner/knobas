@@ -2047,11 +2047,17 @@ export interface MiniBoard {
  *
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
+ *
+ * `jiraView` (#877) names a Jira view (its `jira_ref`): the board is then the
+ * tickets Jira put on it, in Jira's order, under the view's own columns —
+ * each column's `status` is the column's name — and the room scope is not
+ * read.
  */
 export function miniBoard(
   filter: Pick<EntityFilter, "sources" | "context" | "project">,
   perColumn?: number | null,
   query?: string | null,
+  jiraView?: string | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
@@ -2059,6 +2065,7 @@ export function miniBoard(
     project: filter.project,
     perColumn: perColumn ?? null,
     query: query ?? null,
+    jiraView: jiraView ?? null,
   });
 }
 

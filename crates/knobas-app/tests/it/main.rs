@@ -37,6 +37,7 @@ mod entity_view;
 mod estate_exit;
 mod inbox_ipc;
 mod ipc;
+mod jira_views_ipc;
 mod job_ipc;
 mod job_pipelines_ipc;
 mod link_on_arrival_ipc;

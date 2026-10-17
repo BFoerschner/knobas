@@ -1,0 +1,137 @@
+//! Jira views (#877, migration `0044`): every live `jira_view` item of a
+//! source, projected into `sync.jira_view` and `sync.jira_view_member` at the
+//! end of each of that source's runs, and each one's `knobas.ticket_view` row
+//! kept in step.
+//!
+//! **Off the mirror, not off the emitted items**, for `samples`' reason: the
+//! Jira adapter delivers a view only when it changed, so an idle run emits
+//! nothing and the views are still exactly what they were. Reading the
+//! mirror makes every run say so, and `last_read` is the run that did.
+//!
+//! **After the sweep and inside the run's transaction** (`run_locked`): a view
+//! the adapter delivered as gone, or a full sync's sweep tombstoned, is
+//! already out of `sync.live_item`, so its rows go here -- members by the
+//! foreign key's cascade -- and its ticket view with it. A run that fails
+//! leaves nothing behind.
+//!
+//! **What the ticket view row takes from Jira and what it keeps.** The name,
+//! the group (*Jira boards* or *Jira filters*) and the columns follow Jira at
+//! every run (R-3.24); the layout, lanes, card fields, list columns and sort
+//! are the reader's (*View settings*) and are written only when the row is
+//! first made. The row's id is the item's entity id as a slug
+//! (`jira:board-21` → `jira-board-21`), so `#/tickets/<id>` is stable. A view
+//! somebody made that already holds that id is left alone, and the Jira view
+//! does not show: a name collision costs a view, never somebody's own.
+//!
+//! **Payload reads outside the adapter (ADR-0007).** The paths read are the
+//! Jira adapter's own `jira_view` payload (`crate::views` in
+//! `knobas-source-jira` writes it), read in these statements and nowhere
+//! else. **A miss is an empty answer, never a guess**: a payload whose
+//! `columns` is not an array has no columns (one per status on the board), one
+//! whose `keys` is not an array holds no tickets, a missing `sprint` is none
+//! and a missing `kind` is a board. Pinned by
+//! `tests/it/jira_views.rs`'s `a_view_whose_payload_says_nothing_holds_nothing`.
+
+use sqlx::{Postgres, Transaction};
+
+/// The kind a Jira source's views arrive as (`knobas_source_jira::KIND_JIRA_VIEW`).
+pub const KIND: &str = "jira_view";
+
+const UPSERT_VIEWS: &str = "
+insert into sync.jira_view
+       (entity_id, source_id, ref_kind, ref_id, board_type, name, jql, sub_query, query,
+        columns, sprint, last_read)
+select i.entity_id, i.source_id,
+       coalesce(i.payload->>'kind', 'board'), coalesce(i.payload->>'id', ''),
+       i.payload->>'type', i.title, coalesce(i.payload->>'jql', ''),
+       i.payload->>'sub_query', coalesce(i.payload->>'query', ''),
+       case when jsonb_typeof(i.payload->'columns') = 'array'
+            then i.payload->'columns' else '[]'::jsonb end,
+       case when jsonb_typeof(i.payload->'sprint') = 'object'
+            then i.payload->'sprint' end,
+       now()
+  from sync.live_item i
+ where i.source_id = $1 and i.kind = $2
+    on conflict (entity_id) do update set
+       ref_kind = excluded.ref_kind, ref_id = excluded.ref_id,
+       board_type = excluded.board_type, name = excluded.name, jql = excluded.jql,
+       sub_query = excluded.sub_query, query = excluded.query, columns = excluded.columns,
+       sprint = excluded.sprint, last_read = excluded.last_read";
+
+const DROP_GONE_VIEWS: &str = "
+delete from sync.jira_view v
+ where v.source_id = $1
+   and not exists (select 1 from sync.live_item i
+                    where i.entity_id = v.entity_id and i.kind = $2)";
+
+const DROP_MEMBERS: &str = "
+delete from sync.jira_view_member m
+ using sync.jira_view v
+ where m.view_id = v.entity_id and v.source_id = $1";
+
+const INSERT_MEMBERS: &str = "
+insert into sync.jira_view_member (view_id, entity_id, rank)
+select v.entity_id, $1 || ':' || k.key, k.n::integer
+  from sync.jira_view v
+  join sync.item i on i.entity_id = v.entity_id
+ cross join lateral jsonb_array_elements_text(
+         case when jsonb_typeof(i.payload->'keys') = 'array'
+              then i.payload->'keys' else '[]'::jsonb end) with ordinality as k(key, n)
+ where v.source_id = $1";
+
+const UPSERT_TICKET_VIEWS: &str = "
+with views as (
+  select v.entity_id, v.name, v.columns,
+         case v.ref_kind when 'filter' then 'Jira filters' else 'Jira boards' end as view_group,
+         trim(both '-' from regexp_replace(lower(v.entity_id), '[^a-z0-9]+', '-', 'g')) as id,
+         row_number() over (order by v.entity_id) as n
+    from sync.jira_view v
+   where v.source_id = $1
+)
+insert into knobas.ticket_view (id, name, view_group, position, columns, jira_ref)
+select w.id, w.name, w.view_group,
+       (select coalesce(max(t.position), 0) from knobas.ticket_view t) + w.n::integer,
+       w.columns, w.entity_id
+  from views w
+    on conflict (id) do update set
+       name = excluded.name, view_group = excluded.view_group,
+       columns = excluded.columns, updated_at = now()
+ where knobas.ticket_view.jira_ref = excluded.jira_ref
+   and (knobas.ticket_view.name, knobas.ticket_view.view_group, knobas.ticket_view.columns)
+       is distinct from (excluded.name, excluded.view_group, excluded.columns)";
+
+const DROP_GONE_TICKET_VIEWS: &str = "
+delete from knobas.ticket_view t
+ where left(t.jira_ref, length($1) + 1) = $1 || ':'
+   and not exists (select 1 from sync.jira_view v where v.entity_id = t.jira_ref)";
+
+/// Project one source's live Jira views (see the module docs).
+///
+/// # Errors
+///
+/// The `sqlx::Error` of the statement that failed; the caller's run rolls
+/// back with it.
+pub async fn project(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+) -> Result<(), sqlx::Error> {
+    for statement in [UPSERT_VIEWS, DROP_GONE_VIEWS] {
+        sqlx::query(statement)
+            .bind(source_id)
+            .bind(KIND)
+            .execute(&mut **tx)
+            .await?;
+    }
+    for statement in [
+        DROP_MEMBERS,
+        INSERT_MEMBERS,
+        UPSERT_TICKET_VIEWS,
+        DROP_GONE_TICKET_VIEWS,
+    ] {
+        sqlx::query(statement)
+            .bind(source_id)
+            .execute(&mut **tx)
+            .await?;
+    }
+    Ok(())
+}

@@ -268,10 +268,10 @@ export function previewBoard(
     columns: columns.map((column) => {
       const held = board.filter((status) => status.status !== null && column.statuses.includes(status.status));
       const total = held.reduce((all, status) => all + status.total, 0);
-      const cards = held
-        .flatMap((status) => status.cards)
-        .sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""))
-        .slice(0, cap);
+      // One status keeps the order the read gave it (a Jira view's is Jira's, #877).
+      const cards = held.flatMap((status) => status.cards);
+      if (held.length > 1) cards.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
+      cards.splice(cap);
       return { name: column.name, total, limit: column.limit, over: column.limit !== null && total > column.limit, cards };
     }),
   };
