@@ -1004,6 +1004,8 @@ async fn the_launchers_not_monitored_list_is_the_monitors_tabs_roster() {
         .await
         .expect("the tab's roster")
         .into_iter()
+        // The tab lists routes too (#976); the launcher's list is assets.
+        .filter(|row| row.type_id != "route")
         .map(|asset| asset.id)
         .collect();
     assert_eq!(

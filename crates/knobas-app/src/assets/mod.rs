@@ -1142,6 +1142,9 @@ pub struct RouteDetail {
     pub route: RouteRow,
     /// This route's own lines from the activity stream, newest first.
     pub history: Vec<ActivityRow>,
+    /// The sources a monitor could be created in (#976), [`AssetDetail::monitor_targets`]'
+    /// rule: filled by the command and empty from [`get_route`].
+    pub monitor_targets: Vec<MonitorTarget>,
 }
 
 /// One field of an asset, and what it is being set to.
@@ -1234,6 +1237,12 @@ pub enum RouteEdit {
     Property {
         key: String,
         value: Option<PropertyValue>,
+    },
+    /// Add the names of monitors the route waits for (#976), [`AssetEdit::Monitors`]'
+    /// append on the route's own column (`0042`): *Create monitor* on a route
+    /// records the name here and the poll draws the `monitored-by` link.
+    Monitors {
+        added: Vec<String>,
     },
 }
 
@@ -2224,6 +2233,11 @@ pub struct UnmonitoredAsset {
     pub environment: Option<String>,
     /// The owner in force, the same way.
     pub owner: Option<String>,
+    /// A route's URL (#976); `null` on an asset. A route is listed here as a row
+    /// of type `route` whose `id` is `route:<uuid>`, whose `path` is where the
+    /// exposing asset sits (the asset's own name last) and whose environment and
+    /// owner are that asset's, in force.
+    pub url: Option<String>,
 }
 
 /// What a type is called: the label of [`knobas_core::asset::TYPES`], or the
@@ -2287,6 +2301,32 @@ select a.id, a.type_id, a.name,
                       and m.kind = $2)
  order by a.path_text asc, a.name asc, a.id asc";
 
+/// The routes with no confirmed [`MONITORED_BY`] link to a monitor (#976):
+/// [`UNMONITORED`]'s `not exists` over the route's id, with the exposing
+/// asset's environment and owner in force (the route takes the asset that
+/// exposes it, as `dependencies::ESTATE` does). `$1` the relation, `$2` the
+/// monitor kind. Ordered by where the exposing asset sits, then name.
+const UNMONITORED_ROUTES: &str = "with recursive in_force (id, environment, owner) as (
+         select a.id, a.environment, a.owner from knobas.asset a where a.parent_id is null
+       union all
+         select c.id, coalesce(c.environment, f.environment), coalesce(c.owner, f.owner)
+           from knobas.asset c join in_force f on c.parent_id = f.id
+     )
+select r.id, r.name, r.url,
+       concat_ws(' / ', nullif(ea.path_text, ''), ea.name) as path,
+       f.environment, f.owner
+  from knobas.route r
+  join knobas.asset ea on ea.id = r.asset_id
+  left join in_force f on f.id = ea.id
+ where not exists (select 1
+                     from knobas.confirmed_link l
+                     join knobas.entity m
+                       on m.id in (l.from_id, l.to_id) and m.id <> r.id
+                    where l.relation = $1
+                      and r.id in (l.from_id, l.to_id)
+                      and m.kind = $2)
+ order by ea.path_text asc, ea.name asc, r.name asc, r.id asc";
+
 /// The assets nothing is watching -- the Monitors tab's second list (spec #427
 /// story 68, issue #449).
 ///
@@ -2327,6 +2367,32 @@ select a.id, a.type_id, a.name,
 ///
 /// [`IpcError`] if the read fails.
 pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, IpcError> {
+    let mut out = unmonitored_assets_only(pool).await?;
+    // The routes follow the assets (#976): a route is a thing an asset exposes,
+    // so the list reads assets first and then what they expose.
+    for row in sqlx::query(UNMONITORED_ROUTES)
+        .bind(MONITORED_BY)
+        .bind(MONITOR_KIND)
+        .fetch_all(pool)
+        .await?
+    {
+        out.push(UnmonitoredAsset {
+            id: row.try_get("id")?,
+            type_id: ROUTE_NAMESPACE.to_owned(),
+            type_label: "Route".to_owned(),
+            monogram: "RT".to_owned(),
+            name: row.try_get("name")?,
+            path: row.try_get("path")?,
+            environment: row.try_get("environment")?,
+            owner: row.try_get("owner")?,
+            url: Some(row.try_get("url")?),
+        });
+    }
+    Ok(out)
+}
+
+/// The assets half of [`unmonitored_assets`].
+async fn unmonitored_assets_only(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, IpcError> {
     sqlx::query(UNMONITORED)
         .bind(MONITORED_BY)
         .bind(MONITOR_KIND)
@@ -2348,6 +2414,7 @@ pub async fn unmonitored_assets(pool: &PgPool) -> Result<Vec<UnmonitoredAsset>, 
                 path: row.try_get("path")?,
                 environment: row.try_get("environment")?,
                 owner: row.try_get("owner")?,
+                url: None,
             })
         })
         .collect()
@@ -2468,7 +2535,11 @@ pub async fn get_route(pool: &PgPool, id: &str) -> Result<RouteDetail, IpcError>
     let route = one_route(pool, id).await?;
     let entity = entity_of(id)?;
     let history = knobas_core::activity::recent(pool, HISTORY_LIMIT, Some(&entity)).await?;
-    Ok(RouteDetail { route, history })
+    Ok(RouteDetail {
+        route,
+        history,
+        monitor_targets: Vec::new(),
+    })
 }
 
 /// [`ROUTES_EXPOSED`] or [`ROUTES_REACHABLE`] for one asset.
@@ -3843,6 +3914,30 @@ pub async fn edit_route(
                 Some((
                     "edited",
                     serde_json::json!({ "field": "property", "key": key, "from": before, "to": after }),
+                ))
+            }
+            // The append, `AssetEdit::Monitors`' rule on the route's column.
+            RouteEdit::Monitors { added } => {
+                let added = vet_monitors(added, id)?;
+                let missing: Vec<String> = added
+                    .into_iter()
+                    .filter(|name| !current.monitors.contains(name))
+                    .collect();
+                if missing.is_empty() {
+                    continue;
+                }
+                sqlx::query(
+                    "update knobas.route
+                        set monitors = array_cat(monitors, $2::text[]), updated_at = now()
+                      where id = $1",
+                )
+                .bind(id)
+                .bind(&missing)
+                .execute(&mut *tx)
+                .await?;
+                Some((
+                    "edited",
+                    serde_json::json!({ "field": "monitors", "added": missing }),
                 ))
             }
         };
@@ -6258,6 +6353,7 @@ struct StoredRoute {
     url: String,
     visibility: Visibility,
     properties: serde_json::Map<String, serde_json::Value>,
+    monitors: Vec<String>,
 }
 
 /// Read a route inside a transaction and hold it until the transaction ends.
@@ -6270,7 +6366,7 @@ async fn locked_route(
     id: &str,
 ) -> Result<StoredRoute, IpcError> {
     let row = sqlx::query(
-        "select target_id, name, url, visibility, properties
+        "select target_id, name, url, visibility, properties, monitors
            from knobas.route where id = $1 for update",
     )
     .bind(id)
@@ -6288,6 +6384,7 @@ async fn locked_route(
             serde_json::Value::Object(map) => map,
             _ => serde_json::Map::new(),
         },
+        monitors: row.try_get("monitors")?,
     })
 }
 

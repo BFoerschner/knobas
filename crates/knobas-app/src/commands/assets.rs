@@ -341,12 +341,15 @@ pub async fn context_assets(
 /// [`NotReady`](crate::IpcErrorCode::NotReady) before bring-up,
 /// [`NotFound`](crate::IpcErrorCode::NotFound) for an id no route carries.
 #[tauri::command]
-pub async fn get_route(
+pub async fn get_route<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     route_id: String,
 ) -> Result<RouteDetail, IpcError> {
     let pool = lifecycle.pool()?;
-    assets::get_route(&pool, &route_id).await
+    let mut detail = assets::get_route(&pool, &route_id).await?;
+    detail.monitor_targets = monitor_targets(&app).await?;
+    Ok(detail)
 }
 
 /// Expose a route on an asset, with or without a target.
@@ -1385,12 +1388,13 @@ mod tests {
         let detail = RouteDetail {
             route: route(),
             history: Vec::new(),
+            monitor_targets: Vec::new(),
         };
         assert_shape(
             MIRROR,
             "RouteDetail",
             &serde_json::to_value(detail).unwrap(),
-            &["route", "history"],
+            &["route", "history", "monitor_targets"],
         );
     }
 
@@ -1441,6 +1445,13 @@ mod tests {
                     }),
                 },
                 &["field", "key", "value"][..],
+            ),
+            (
+                "RouteMonitorsEdit",
+                RouteEdit::Monitors {
+                    added: vec!["gitea /health".to_owned()],
+                },
+                &["field", "added"][..],
             ),
         ] {
             assert_shape(
@@ -1553,6 +1564,7 @@ mod tests {
                 path: Some("notebook / knobas-stack".to_owned()),
                 environment: Some("prod".to_owned()),
                 owner: Some("ops".to_owned()),
+                url: Some("https://gitea.local/".to_owned()),
             })
             .unwrap(),
             &[
@@ -1564,6 +1576,7 @@ mod tests {
                 "path",
                 "environment",
                 "owner",
+                "url",
             ],
         );
     }

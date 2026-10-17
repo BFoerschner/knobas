@@ -4092,3 +4092,24 @@ Implementer rulings, one PR for both issues.
   spec #808's story 169 put the move beside the export as the way out of the hidden notes, so it
   must work with *Show notes and quick capture* off. The button is not gated on `shown`.
   **Reversing:** low.
+## #976 — Routes on Assets nothing watches (2026-10-17)
+
+- **A route's monitor name goes on the route, in a new `knobas.route.monitors` column
+  (migration `0042`), not on the exposing asset.** The ticket says the name lands where the next
+  poll attaches it *to the route*; the poll attached by `knobas.asset.monitors` only, and a name on
+  the exposing asset would watch the asset and leave the route listed for ever. §10.8 entry
+  `976-routes-on-assets-nothing-watches.md`. **Reversing:** medium (a frozen surface and a column).
+- **Routes are rows of `unmonitored_assets`, type `route`, with a new `url` field, rather than a
+  second command.** One answer keeps the tab's count, empty state and ordering in one place, and
+  the ticket names the read. **Reversing:** low.
+- **A route row's *Type* reads "Route", its path is where the exposing asset sits with the asset's
+  own name last, and the routes follow the assets in the list.** The path tells two routes called
+  *Gitea* apart; the type filter in the roster tab does not exist, so the order is the only grouping.
+  **Reversing:** low (`UNMONITORED_ROUTES`).
+- **The launcher's *Not monitored* list stays assets only.** The ticket names the tab; the
+  launcher's list is `knobas_search`'s, and its test compares it with the tab, which now drops the
+  route rows first. **Reversing:** a clause in `knobas_search::lists`.
+- **A route's name opens `#/route/<id>`** (the Tree at the exposing asset, #432), not `#/asset/`.
+  **Reversing:** low.
+- **The estate file and import are unchanged:** they name no monitor for a route, so the fixture
+  and the testenv estate list every route as a gap. **Reversing:** a key in the estate file.

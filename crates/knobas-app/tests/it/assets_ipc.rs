@@ -5830,6 +5830,120 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
     );
 }
 
+/// **A route no confirmed `monitored-by` link watches is on the roster** with
+/// its URL, the exposing asset's environment and owner in force, and a `route`
+/// type; a route with one is not (#976). The watched route sits beside an
+/// unwatched one on the same asset, so a read that dropped every route of a
+/// watched asset, or none, cannot pass.
+#[tokio::test]
+async fn the_roster_lists_the_routes_nothing_watches_and_leaves_out_the_ones_it_does() {
+    let pool = pool("assets-unmonitored-routes").await;
+    let (site, vm, _) = three_levels(&pool).await;
+    assets::edit(
+        &pool,
+        &site.id,
+        &[
+            AssetEdit::Environment {
+                value: Some(Environment::Prod),
+            },
+            AssetEdit::Owner {
+                value: Some("ops".to_owned()),
+            },
+        ],
+    )
+    .await
+    .expect("the site's two");
+    let open = expose(&pool, &vm, "Gitea", "https://gitea.local/", None).await;
+    let watched = expose(&pool, &vm, "Jira", "https://jira.local/", None).await;
+    let monitor = kuma_monitor(
+        &pool,
+        "kuma",
+        "jira",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    link_as(&pool, &watched.id, &monitor, "monitored-by").await;
+
+    let routes: Vec<_> = assets::unmonitored_assets(&pool)
+        .await
+        .expect("the roster")
+        .into_iter()
+        .filter(|row| row.type_id == "route")
+        .collect();
+    assert_eq!(routes.len(), 1, "only the unwatched route: {routes:?}");
+    let row = &routes[0];
+    assert_eq!(row.id, open.id);
+    assert_eq!(row.name, "Gitea");
+    assert_eq!(row.url.as_deref(), Some("https://gitea.local/"));
+    assert_eq!(row.type_label, "Route");
+    assert_eq!(
+        row.environment.as_deref(),
+        Some("prod"),
+        "the exposing asset's, inherited from the site"
+    );
+    assert_eq!(row.owner.as_deref(), Some("ops"));
+    assert_eq!(
+        row.path.as_deref(),
+        Some(format!("{} / {}", site.name, vm.name).as_str()),
+        "where the exposing asset sits, its own name last"
+    );
+}
+
+/// **`RouteEdit::Monitors` records a name on the route, once**, and the
+/// poll's attach draws the link to the route (#976): `Create monitor` on a
+/// route lands its name here, and the route leaves the roster when the monitor
+/// of that name is mirrored.
+#[tokio::test]
+async fn a_name_recorded_on_a_route_is_attached_by_the_poll_and_takes_it_off_the_roster() {
+    let pool = pool("assets-route-monitor-name").await;
+    let (_, vm, _) = three_levels(&pool).await;
+    let route = expose(&pool, &vm, "Gitea", "https://gitea.local/", None).await;
+
+    for _ in 0..2 {
+        assets::edit_route(
+            &pool,
+            &route.id,
+            &[assets::RouteEdit::Monitors {
+                added: vec!["Gitea /health".to_owned()],
+            }],
+        )
+        .await
+        .expect("the name");
+    }
+    let names: Vec<String> =
+        sqlx::query_scalar("select unnest(monitors) from knobas.route where id = $1")
+            .bind(&route.id)
+            .fetch_all(&pool)
+            .await
+            .expect("the column");
+    assert_eq!(names, ["Gitea /health"], "the second press adds nothing");
+
+    kuma_monitor(
+        &pool,
+        "kuma",
+        "Gitea /health",
+        serde_json::json!({ "state": "up" }),
+        None,
+    )
+    .await;
+    let mut tx = pool.begin().await.expect("a transaction");
+    let drawn = knobas_sync::attach::resolve(&mut tx, "kuma")
+        .await
+        .expect("the attach");
+    tx.commit().await.expect("commit");
+    assert_eq!(drawn, 1, "one link, to the route");
+
+    assert!(
+        assets::unmonitored_assets(&pool)
+            .await
+            .expect("the roster")
+            .iter()
+            .all(|row| row.id != route.id),
+        "a route the poll attached is no longer a gap"
+    );
+}
+
 /// The two spellings the Monitors tab writes out are the **SPI's own**
 /// (issue #452).
 ///

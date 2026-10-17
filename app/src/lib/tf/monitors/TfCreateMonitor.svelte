@@ -15,22 +15,22 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { AssetDetail, AssetEdit, AssetRow, MonitorTarget } from "../../ipc/assets";
+  import type { MonitorTarget } from "../../ipc/assets";
   import type { MonitorKind, QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { prefill } from "./monitors";
+  import { isRouteId, type MonitorSubject } from "./monitors";
 
   let {
-    detail,
+    subject,
     record,
     queue,
     onclose,
     oncreated,
   }: {
-    /** The asset the monitor is for, as `get_asset` read it. */
-    detail: AssetDetail;
-    /** Record the monitor's name on the asset: the first write. */
-    record: (assetId: string, edits: AssetEdit[]) => Promise<AssetRow>;
+    /** The asset or route the monitor is for, with how the dialog opens (#976). */
+    subject: MonitorSubject;
+    /** Record the monitor's name on the asset or route: the first write. */
+    record: (name: string) => Promise<unknown>;
     /** Queue the create: the second. */
     queue: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     onclose: () => void;
@@ -48,18 +48,18 @@
 
   // svelte-ignore state_referenced_locally
   // Read once: a re-derive would overwrite what the reader has typed.
-  const opening = prefill(detail);
+  const opening = subject.opening;
   let name = $state(opening.name);
   let kind = $state<MonitorKind>(opening.kind);
   let target = $state(opening.target);
   // svelte-ignore state_referenced_locally
-  let source = $state<MonitorTarget | null>(detail.monitor_targets[0] ?? null);
+  let source = $state<MonitorTarget | null>(subject.targets[0] ?? null);
 
   let writing = $state(false);
   let failure = $state<string | null>(null);
 
   const uid = $props.id();
-  const targets = $derived(detail.monitor_targets);
+  const targets = $derived(subject.targets);
   const ready = $derived(!writing && name.trim() !== "" && target.trim() !== "" && source !== null);
 
   async function submit() {
@@ -69,7 +69,7 @@
     failure = null;
     const wanted = name.trim();
     try {
-      await record(detail.asset.id, [{ field: "monitors", added: [wanted] }]);
+      await record(wanted);
       const write = await queue({ CreateMonitor: { entity: chosen.entity, name: wanted, url: target.trim(), kind } });
       oncreated({ name: wanted, write });
     } catch (rejection) {
@@ -80,7 +80,7 @@
   }
 </script>
 
-<TfDialog title="Create a monitor for {detail.asset.name}" {onclose}>
+<TfDialog title="Create a monitor for {subject.name}" {onclose}>
   {#snippet body()}
     <div class="tf-formgrid">
       <label for="{uid}-name">Name</label>
@@ -107,7 +107,7 @@
       {/if}
     </div>
     {#if source !== null}
-      <p class="tf-dim tf-note">Created in {source.display_name} through the write queue, attached to this asset.</p>
+      <p class="tf-dim tf-note">Created in {source.display_name} through the write queue, attached to this {isRouteId(subject.id) ? "route" : "asset"}.</p>
     {:else}
       <p class="tf-dim tf-note">
         No monitoring source can create monitors. Add an Uptime Kuma account under Settings › Sources.

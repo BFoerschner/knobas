@@ -449,7 +449,7 @@ function render(hash: string, estate: AssetRow[] = ESTATE, over: Over = {}) {
           const route = ROUTES.find((candidate) => candidate.id === routeId);
           return route === undefined
             ? Promise.reject({ code: "not_found", message: `no route ${routeId}` })
-            : Promise.resolve({ route, history: [] });
+            : Promise.resolve({ route, history: [], monitor_targets: [] });
         },
         // The OS browser, for `assetTypes`' reason above: this file is about
         // the read and presses no route's URL, but a port left out falls

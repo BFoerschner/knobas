@@ -440,6 +440,7 @@ function gap(name: string, typeId: string, label: string, path: string | null): 
     path,
     environment: null,
     owner: null,
+    url: null,
   };
 }
 

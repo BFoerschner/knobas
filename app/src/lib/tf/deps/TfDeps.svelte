@@ -43,6 +43,7 @@
   import { createLink, submitWrite } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import { openWriteQueue } from "../../shell/write-queue.svelte";
+  import { prefill } from "../monitors/monitors";
   import TfCreateMonitor from "../monitors/TfCreateMonitor.svelte";
   import { isAsset, nameIsCode } from "./deps";
   import { drawOf, graphOf, hitsLine, matcher, nextTile, touches, UNNAMED_LAYER, type Gestures } from "./draw";
@@ -464,8 +465,13 @@
 {/if}
 {#if creating !== null}
   <TfCreateMonitor
-    detail={creating}
-    record={ports.editAsset}
+    subject={{
+      id: creating.asset.id,
+      name: creating.asset.name,
+      targets: creating.monitor_targets,
+      opening: prefill(creating),
+    }}
+    record={(name) => ports.editAsset(creating!.asset.id, [{ field: "monitors", added: [name] }])}
     queue={ports.submitWrite}
     onclose={() => (creating = null)}
     oncreated={() => {

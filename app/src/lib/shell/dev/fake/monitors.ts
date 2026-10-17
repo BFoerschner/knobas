@@ -6,7 +6,7 @@
 // `fakeMonitorRoster`.
 import SEEDED_MONITORS from "../../../../../../testenv/monitors.json";
 import type { Handler } from "../fake-tauri";
-import { FIXTURE_ESTATE, assetPathText } from "./estate";
+import { FIXTURE_ESTATE, FIXTURE_ROUTES, assetPathText } from "./estate";
 
 // -- the Monitors tab (#448) ------------------------------------------------
 
@@ -179,7 +179,7 @@ function fakeAck(args: Record<string, unknown>) {
  * it.
  */
 export function fakeUnmonitored() {
-  return FIXTURE_ESTATE.filter((asset) => asset.monitors.length === 0)
+  const assets = FIXTURE_ESTATE.filter((asset) => asset.monitors.length === 0)
     .map((asset) => ({
       id: asset.id,
       type_id: asset.type_id,
@@ -191,12 +191,39 @@ export function fakeUnmonitored() {
       // nearest ancestor's.
       environment: inForce(asset, (row) => row.environment),
       owner: inForce(asset, (row) => row.owner),
+      url: null as string | null,
     }))
     .sort(
       (left, right) =>
         (left.path ?? "").localeCompare(right.path ?? "") ||
         left.name.localeCompare(right.name),
     );
+  // The routes follow the assets (#976). The estate file names no monitor for
+  // a route, so every fixture route is a gap; its path is where the exposing
+  // asset sits, that asset's own name last, and its env and owner are that
+  // asset's, in force.
+  const routes = FIXTURE_ROUTES.flatMap((route) => {
+    const exposer = FIXTURE_ESTATE.find((asset) => asset.id === route.asset_id);
+    if (!exposer) return [];
+    const above = assetPathText(exposer);
+    return [
+      {
+        id: route.id,
+        type_id: "route",
+        type_label: "Route",
+        monogram: "RT",
+        name: route.name,
+        path: above === null ? exposer.name : `${above} / ${exposer.name}`,
+        environment: inForce(exposer, (row) => row.environment),
+        owner: inForce(exposer, (row) => row.owner),
+        url: route.url as string | null,
+      },
+    ];
+  }).sort(
+    (left, right) =>
+      (left.path ?? "").localeCompare(right.path ?? "") || left.name.localeCompare(right.name),
+  );
+  return [...assets, ...routes];
 }
 
 /** A field in force on `asset`: its own value, else the nearest ancestor's (#431). */
