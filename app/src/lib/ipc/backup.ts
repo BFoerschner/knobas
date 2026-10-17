@@ -79,6 +79,13 @@ export interface ShareParts {
    * The text crosses exactly as it was saved.
    */
   ticket_views: boolean;
+  /**
+   * The link sets somebody made (#870): each set, its members and patterns,
+   * and its rules. On by default, beside ticket views. The dialog offers its
+   * toggle only once a set exists and sends it off while there is none, as
+   * with smart lists. *Hide here* is one reader's choice and stays behind.
+   */
+  link_sets: boolean;
 }
 
 /** The ratified defaults, so a caller can start from them and toggle. */
@@ -91,6 +98,7 @@ export const shareDefaults: ShareParts = {
   sources: true,
   smart_lists: true,
   ticket_views: true,
+  link_sets: true,
 };
 
 /** One archive on disk — `backup::ArchiveFile`. */

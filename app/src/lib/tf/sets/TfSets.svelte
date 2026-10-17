@@ -6,19 +6,22 @@
   shows on now with how many are yours. A row opens the set's editor,
   `#/sets/<id>` (`TfSetEditor.svelte`), which this page draws in its place.
 
-  Over `link_sets`, `save_link_set` (*New link set*), `parent_links` and
+  Over `link_sets`, `save_link_set` (*New link set*, the hint's *Add to …*),
+  `link_set_hints` (#870, R-7.10's card), `parent_links` and
   `set_parent_links`. Sets stay in knobas: nothing here writes to a source.
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { LinkSetRow } from "../../ipc/entity";
+  import type { LinkSetHint, LinkSetRow } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
+  import { draftOf } from "./apply";
+  import { firstHint, notNow } from "./hints.svelte";
   import { defaultPorts, type SetPorts } from "./ports";
-  import { APPLIES_BY, contentLines, ruleLabel, visibleSets } from "./sets";
+  import { APPLIES_BY, contentLines, hintTickets, ruleLabel, visibleSets } from "./sets";
   import TfSetEditor from "./TfSetEditor.svelte";
 
   let {
@@ -39,6 +42,10 @@
   let failed = $state<string | null>(null);
   let inherit = $state<boolean | null>(null);
   let creating = $state(false);
+  /** R-7.10's hints (#870); the card draws the first one not put away. */
+  let hints = $state<LinkSetHint[]>([]);
+  let adding = $state(false);
+  const hint = $derived(firstHint(hints));
 
   $effect(() => {
     if (!ready || editing !== null) return;
@@ -51,6 +58,13 @@
       (error: unknown) => {
         if (live) failed = ipcErrorMessage(error);
       },
+    );
+    // A hint is an offer: a failed read draws no card and says nothing.
+    ports.linkSetHints().then(
+      (rows) => {
+        if (live) hints = rows;
+      },
+      () => {},
     );
     ports.parentLinks().then(
       (on) => {
@@ -94,6 +108,26 @@
     }
   }
 
+  /** *Add to …*: the set saved whole with the item added, then the list and the hints read again. */
+  async function addHinted(offer: LinkSetHint) {
+    if (adding) return;
+    adding = true;
+    try {
+      const set = sets?.find((row) => row.id === offer.set_id) ?? (await ports.linkSet(offer.set_id));
+      const draft = draftOf(set);
+      draft.members.push({ kind: offer.member.kind, entity_id: offer.member.entity_id });
+      await ports.saveLinkSet(draft);
+      push({ text: `Added ${offer.title} to ${offer.set_name}` });
+      const [rows, offered] = await Promise.all([ports.linkSets(), ports.linkSetHints().catch(() => [])]);
+      sets = rows;
+      hints = offered;
+    } catch (error) {
+      push({ text: ipcErrorMessage(error), tone: "err" });
+    } finally {
+      adding = false;
+    }
+  }
+
   /** A row opens its set; a click on a link inside it already did its own thing. */
   function open(event: MouseEvent, id: string) {
     if ((event.target as Element | null)?.closest("a, button")) return;
@@ -129,6 +163,20 @@
           ></span
         >
       </label>
+    {/if}
+    {#if hint !== null}
+      {@const offer = hint}
+      <div class="tf-hint-card">
+        <span
+          >You linked <b>{offer.title}</b> by hand to {hintTickets(offer)}. Add it to <b>{offer.set_name}</b>?</span
+        >
+        <span class="tf-acts">
+          <button type="button" class="tf-btn tf-sm" disabled={adding} onclick={() => void addHinted(offer)}
+            >Add to {offer.set_name}</button
+          >
+          <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => notNow(offer)}>Not now</button>
+        </span>
+      </div>
     {/if}
     {#if failed !== null}
       <p class="tf-ifail">Could not read the link sets: {failed}</p>

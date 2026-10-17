@@ -7,10 +7,11 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { LinkSetDetail, LinkSetDraft, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
+import type { LinkSetDetail, LinkSetDraft, LinkSetHint, LinkSetRow, LinkSetRule, RuleTicket } from "../../ipc/entity";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { Candidate, SetPorts } from "./ports";
+import { forgetHints } from "./hints.svelte";
 import TfSets from "./TfSets.svelte";
 
 const STACK: LinkSetDetail = {
@@ -77,10 +78,12 @@ let previews: LinkSetRule[];
 let patternPreviews: string[];
 let inherit: boolean[];
 let stored: LinkSetDetail;
+let hints: LinkSetHint[];
 
 function ports(): SetPorts {
   return {
     linkSets: async () => [STACK, ONCALL],
+    linkSetHints: async () => hints,
     linkSet: async (id) => {
       if (id !== stored.id) throw { code: "not_found", message: `no link set is called ${id}`, source_id: null };
       return stored;
@@ -155,6 +158,8 @@ beforeEach(() => {
   patternPreviews = [];
   inherit = [];
   stored = structuredClone(STACK);
+  hints = [];
+  forgetHints();
   target = document.createElement("div");
   document.body.appendChild(target);
   location.hash = "#/sets";
@@ -362,6 +367,62 @@ test("Delete removes the set and goes back to the list", async () => {
   expect(deleted).toEqual(["payout-stack"]);
   expect(location.hash).toBe("#/sets");
   expect(toasts.items.at(-1)?.text).toBe("Deleted the link set. Links drawn on tickets by hand stay.");
+});
+
+const DASHBOARD: LinkSetHint = {
+  set_id: "payout-stack",
+  set_name: "Payout stack",
+  epic: "jira:PAY-200",
+  member: { kind: "pipeline", entity_id: "tc:Dashboard_Build" },
+  title: "Dashboard_Build",
+  tickets: ["jira:PAY-240", "jira:PAY-241", "jira:PAY-245"],
+};
+
+test("no hint draws no card", async () => {
+  await draw([]);
+  expect(target.querySelector(".tf-hint-card")).toBeNull();
+});
+
+test("the hint card offers an item linked by hand under one epic to its set, in prototype-6's words (#870)", async () => {
+  hints = [DASHBOARD, { ...DASHBOARD, title: "Other_Build", member: { kind: "pipeline", entity_id: "tc:Other" } }];
+  await draw([]);
+  const cards = target.querySelectorAll(".tf-hint-card");
+  expect(cards).toHaveLength(1);
+  expect(cards[0]!.querySelector("span")?.textContent?.replace(/\s+/g, " ").trim()).toBe(
+    "You linked Dashboard_Build by hand to PAY-240 and 2 more tickets under PAY-200. Add it to Payout stack?",
+  );
+  expect([...cards[0]!.querySelectorAll("b")].map((b) => b.textContent)).toEqual(["Dashboard_Build", "Payout stack"]);
+});
+
+test("Add to … saves the set with the item added and nothing else changed", async () => {
+  hints = [DASHBOARD];
+  await draw([]);
+  hints = [];
+  button("Add to Payout stack").click();
+  await settle();
+  expect(saved).toHaveLength(1);
+  expect(saved[0]!.id).toBe("payout-stack");
+  expect(saved[0]!.members).toEqual([
+    ...STACK.members.map((member) => ({ kind: member.kind, entity_id: member.entity_id })),
+    { kind: "pipeline", entity_id: "tc:Dashboard_Build" },
+  ]);
+  expect(saved[0]!.patterns).toEqual([{ kind: "pipeline", query: "project:Payouts name:Payout_*" }]);
+  expect(saved[0]!.rules).toEqual(STACK.rules.map((rule) => ({ kind: rule.kind, value: rule.value })));
+  expect(toasts.items.at(-1)?.text).toBe("Added Dashboard_Build to Payout stack");
+  expect(target.querySelector(".tf-hint-card")).toBeNull();
+});
+
+test("Not now puts the hint away for the session and shows the next one", async () => {
+  const other = { ...DASHBOARD, title: "Other_Build", member: { kind: "pipeline" as const, entity_id: "tc:Other" } };
+  hints = [DASHBOARD, other];
+  await draw([]);
+  button("Not now").click();
+  await settle();
+  expect(target.querySelector(".tf-hint-card b")?.textContent).toBe("Other_Build");
+  unmount(view!);
+  await draw([]);
+  expect(target.querySelector(".tf-hint-card b")?.textContent).toBe("Other_Build");
+  expect(saved).toEqual([]);
 });
 
 test("an id nobody holds says so", async () => {

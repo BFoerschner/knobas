@@ -93,6 +93,7 @@ function sectionPorts(over: Partial<SectionPorts> = {}) {
     restoreBackup: vi.fn(() => Promise.resolve()),
     smartLists: vi.fn(() => Promise.resolve([{ saved: false }])),
     ticketViews: vi.fn(() => Promise.resolve([])),
+    linkSets: vi.fn(() => Promise.resolve([])),
     appStatus: vi.fn(() => Promise.resolve({ app_version: "1.6.0" })),
     dbStats: vi.fn(() =>
       Promise.resolve({
@@ -271,7 +272,7 @@ test("Backup: the last backup, the schedule and keep, and Back up now", async ()
 test("Share ticks map to the export's parts, and a part that does not exist is not drawn", async () => {
   const p = await open("backup");
   const ticks = () => [...target.querySelectorAll(".tf-stg-checks label")].map((el) => el.textContent?.trim());
-  // No saved smart list and no ticket view: no tick for either. Link sets are no part yet.
+  // No saved smart list, no ticket view and no link set: no tick for any.
   expect(ticks()).toEqual(["Links", "Contexts", "Assets and routes", "Sources, without passwords", "Notes", "Time"]);
   const notes = [...target.querySelectorAll<HTMLLabelElement>(".tf-stg-checks label")].find((el) =>
     el.textContent?.includes("Notes"),
@@ -287,6 +288,7 @@ test("Share ticks map to the export's parts, and a part that does not exist is n
     sources: true,
     smart_lists: false,
     ticket_views: false,
+    link_sets: false,
     notes: true,
     time: false,
   });
@@ -307,6 +309,23 @@ test("a ticket view draws its tick, on by default (#812)", async () => {
   button("Export…").click();
   await settle();
   expect(p.shareExport).toHaveBeenCalledWith(expect.objectContaining({ ticket_views: true }));
+});
+
+test("a link set draws its tick after Links, on by default, and switching it off sends it off (#870)", async () => {
+  const p = await open("backup", sectionPorts({ linkSets: vi.fn(() => Promise.resolve([{ id: "payout-stack" }])) }));
+  const labels = () => [...target.querySelectorAll<HTMLLabelElement>(".tf-stg-checks label")];
+  expect(labels().map((el) => el.textContent?.trim()).slice(0, 2)).toEqual(["Links", "Link sets"]);
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: true }));
+  labels()
+    .find((el) => el.textContent?.trim() === "Link sets")!
+    .querySelector("input")!
+    .click();
+  flushSync();
+  button("Export…").click();
+  await settle();
+  expect(p.shareExport).toHaveBeenLastCalledWith(expect.objectContaining({ link_sets: false }));
 });
 
 test("Restore from a file… lists the backups and Import… the share exports, each restoring that file", async () => {

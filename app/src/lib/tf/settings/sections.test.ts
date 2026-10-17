@@ -5,8 +5,9 @@ import { boundedNumber, databaseWords, lastBackupWords, scheduleWords, shareTick
 const NOW = new Date(2026, 9, 15, 14, 30);
 
 test("the share ticks are the export's parts, in prototype-6's order, and no tick for a part that does not exist", () => {
-  expect(shareTicks(true, true).map((tick) => [tick.part, tick.label])).toEqual([
+  expect(shareTicks(true, true, true).map((tick) => [tick.part, tick.label])).toEqual([
     ["links", "Links"],
+    ["link_sets", "Link sets"],
     ["ticket_views", "Ticket views"],
     ["contexts", "Contexts"],
     ["assets", "Assets and routes"],
@@ -15,11 +16,11 @@ test("the share ticks are the export's parts, in prototype-6's order, and no tic
     ["notes", "Notes"],
     ["time", "Time"],
   ]);
-  // Link sets are no part of `ShareParts` yet; smart lists only once one is
-  // saved, ticket views once one exists (CONTEXT.md, *Share export*; #812).
-  expect(shareTicks(false, true).map((tick) => tick.label)).not.toContain("Smart lists");
-  expect(shareTicks(true, true).map((tick) => tick.label)).not.toContain("Link sets");
-  expect(shareTicks(true, false).map((tick) => tick.label)).not.toContain("Ticket views");
+  // Smart lists only once one is saved, ticket views and link sets once one
+  // exists (CONTEXT.md, *Share export*; #812, #870).
+  expect(shareTicks(false, true, true).map((tick) => tick.label)).not.toContain("Smart lists");
+  expect(shareTicks(true, true, false).map((tick) => tick.label)).not.toContain("Link sets");
+  expect(shareTicks(true, false, true).map((tick) => tick.label)).not.toContain("Ticket views");
 });
 
 test("the last backup reads as prototype-6's line", () => {

@@ -21,10 +21,12 @@ import {
 } from "../../ipc/backup";
 import {
   getEntity,
+  linkSets,
   notify,
   setStandupPublishTarget,
   standupPublishTarget,
   type EntityDetail,
+  type LinkSetRow,
   type PublishTarget,
 } from "../../ipc/entity";
 import { search, smartLists, ticketViews, type SmartListSummary, type TicketViewRow } from "../../ipc/search";
@@ -122,6 +124,8 @@ export interface SectionPorts {
   smartLists: () => Promise<Pick<SmartListSummary, "saved">[]>;
   /** Whether any ticket view exists, for the share export's tick (#812). */
   ticketViews: () => Promise<Pick<TicketViewRow, "id">[]>;
+  /** Whether any link set exists, for the share export's tick (#870). */
+  linkSets: () => Promise<Pick<LinkSetRow, "id">[]>;
   appStatus: () => Promise<Pick<AppStatus, "app_version">>;
   dbStats: () => Promise<DbStats>;
   reindexFts: () => Promise<void>;
@@ -148,6 +152,7 @@ export const realSectionPorts: SectionPorts = {
   restoreBackup: (file) => restoreBackup(file),
   smartLists: () => smartLists(),
   ticketViews: () => ticketViews(),
+  linkSets: () => linkSets(),
   appStatus: () => appStatus(),
   dbStats: () => dbStats(),
   reindexFts: () => reindexFts(),

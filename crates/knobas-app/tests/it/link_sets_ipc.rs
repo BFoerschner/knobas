@@ -483,7 +483,12 @@ async fn sets_never_feed_membership_the_tray_the_inbox_or_the_export() {
         "the own repo's proposal, never the set member's"
     );
 
-    let parts = knobas_app::backup::share::ShareParts::default();
+    // A set crosses a share export as its own part (#870) and never as a
+    // link: with that part off, nothing of it is in the archive.
+    let parts = knobas_app::backup::share::ShareParts {
+        link_sets: false,
+        ..knobas_app::backup::share::ShareParts::default()
+    };
     assert!(
         parts
             .tables()
@@ -909,4 +914,117 @@ async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
     let off = link_sets::on_job(&pool, &sub).await;
     reach::set_parent_links(&pool, true).await.unwrap();
     assert!(off.unwrap().parent.is_none(), "the switch is off");
+}
+
+/// R-7.10's hint (#870): an item linked by hand to two or more tickets under
+/// an epic that a set's epic rule names, and that the set does not hold yet,
+/// is offered to that set with the tickets, in key order. An item on one
+/// ticket only, one already a member, one a pattern of the set matches, one
+/// linked by a suggestion and not by hand, and one on tickets under another
+/// epic are not offered.
+#[tokio::test]
+async fn an_item_linked_by_hand_under_one_epic_is_offered_to_its_set() {
+    let pool = pool().await;
+    let p = project();
+    let epic = issue(&pool, &p, 1, None, None).await;
+    let first = issue(&pool, &p, 2, Some(&epic), None).await;
+    let second = issue(&pool, &p, 3, Some(&epic), None).await;
+    let sub = issue(&pool, &p, 4, Some(&first), None).await;
+    let other_epic = issue(&pool, &p, 5, None, None).await;
+    let elsewhere = issue(&pool, &p, 6, Some(&other_epic), None).await;
+    let elsewhere_too = issue(&pool, &p, 7, Some(&other_epic), None).await;
+
+    let build = thing(&pool, "build_config", "Dashboard_Build").await;
+    let once = thing(&pool, "page", "Only once").await;
+    let held = thing(&pool, "repo", "payout-service").await;
+    let guessed = thing(&pool, "page", "Guessed").await;
+    let runbook = thing(&pool, "page", "Runbook payouts").await;
+    let outside = thing(&pool, "repo", "other-service").await;
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, 'gitea', 'page', 'Runbook payouts', '', '{}'::jsonb)",
+    )
+    .bind(&runbook)
+    .execute(&pool)
+    .await
+    .unwrap();
+    // The build on two stories and a sub-task, from both ends of a link.
+    link(&pool, &second, &build).await;
+    link(&pool, &build, &first).await;
+    link(&pool, &sub, &build).await;
+    link(&pool, &first, &once).await;
+    for ticket in [&first, &second] {
+        link(&pool, ticket, &held).await;
+        link(&pool, ticket, &runbook).await;
+    }
+    for ticket in [&elsewhere, &elsewhere_too] {
+        link(&pool, ticket, &outside).await;
+    }
+    sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at,
+                                  rule, rule_class, reason)
+         values ($1, $3, 'related', 'suggested', 'knobas', now(), 'r', 'exact_key', 'named'),
+                ($2, $3, 'related', 'suggested', 'knobas', now(), 'r', 'exact_key', 'named')",
+    )
+    .bind(&first)
+    .bind(&second)
+    .bind(&guessed)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    let mut stack = draft(
+        &named(&p, "Payout stack"),
+        vec![member("repo", &held)],
+        vec![rule("epic", &epic)],
+    );
+    stack.patterns = vec![link_sets::LinkSetPattern {
+        kind: "page".to_owned(),
+        query: "name:Runbook*".to_owned(),
+    }];
+    let stack = link_sets::save(&pool, stack).await.unwrap().set;
+
+    let hints: Vec<link_sets::LinkSetHint> = link_sets::hints(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|hint| hint.set_id == stack.id)
+        .collect();
+    assert_eq!(
+        hints,
+        vec![link_sets::LinkSetHint {
+            set_id: stack.id.clone(),
+            set_name: named(&p, "Payout stack"),
+            epic: epic.clone(),
+            member: member("pipeline", &build),
+            title: "Dashboard_Build".to_owned(),
+            tickets: vec![first.clone(), second.clone(), sub.clone()],
+        }]
+    );
+
+    // Added, it is no longer offered.
+    link_sets::save(
+        &pool,
+        LinkSetDraft {
+            id: Some(stack.id.clone()),
+            name: stack.name.clone(),
+            description: String::new(),
+            members: vec![member("repo", &held), member("pipeline", &build)],
+            patterns: vec![link_sets::LinkSetPattern {
+                kind: "page".to_owned(),
+                query: "name:Runbook*".to_owned(),
+            }],
+            rules: vec![rule("epic", &epic)],
+        },
+    )
+    .await
+    .unwrap();
+    assert!(
+        link_sets::hints(&pool)
+            .await
+            .unwrap()
+            .iter()
+            .all(|hint| hint.set_id != stack.id),
+        "a member is not offered again"
+    );
 }

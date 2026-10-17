@@ -6574,3 +6574,18 @@ pub async fn job_link_sets(
 ) -> Result<crate::link_sets::JobLinkSets, IpcError> {
     crate::link_sets::on_job(&lifecycle.pool()?, &entity_id).await
 }
+
+/// The Link sets view's hint card (#870, R-7.10): items linked by hand under
+/// an epic a set's rule names, offered to that set:
+/// [`crate::link_sets::hints`].
+///
+/// # Errors
+///
+/// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
+/// up, and whatever [`crate::link_sets::hints`] refuses with.
+#[tauri::command]
+pub async fn link_set_hints(
+    lifecycle: State<'_, Lifecycle>,
+) -> Result<Vec<crate::link_sets::LinkSetHint>, IpcError> {
+    crate::link_sets::hints(&lifecycle.pool()?).await
+}

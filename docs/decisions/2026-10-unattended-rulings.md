@@ -4249,3 +4249,26 @@ Ruled by the implementer (PR for #876).
   `https://payouts.tidewater.internal`** (#1067 merge review): the house rule against runtime
   network references (`house-rules.test.ts`) allows only reserved names, and `.internal` is not
   one. **Reversing:** low, but it needs the house rule to allow `.internal` first.
+## #870 — Link set hint and export (2026-10-17)
+
+Ruled by the implementer (PR for #870).
+
+- **"Several" tickets is two or more** (`link_sets::HINT_TICKETS`). Prototype-6's example has
+  three; two hand links under one epic are already the pattern a set saves repeating.
+  **Reversing:** one constant.
+- **"Linked by hand" is `origin = 'manual'`.** An accepted suggestion (`suggested`) is not
+  offered: knobas proposed it, the reader did not draw it. **Reversing:** one SQL term.
+- **Only `epic` rules are offered to**, as R-7.10 says "under one epic". An item the set's
+  pattern already matches is not offered. **Reversing:** low (`HINTS`).
+- **One card at a time**, the hint with the most tickets; *Not now* puts that one away for the
+  session (module state, nothing stored) and the next one shows. Prototype-6 draws one card and
+  hides it for the session. **Reversing:** low (`hints.svelte.ts`).
+- **The card draws no "LOW" tag.** Prototype-6's `<span class="tag">LOW</span>` is R-7.10's effort
+  rating copied into the mockup; a reader can do nothing with it. **Reversing:** one span.
+- **The share part carries `link_set`, `link_set_member` and `link_set_rule`, no address book,
+  and not `link_set_hidden`.** Members and rules have no foreign key (migration `0039`), so a set
+  resolves when the colleague's sources sync its items; *Hide here* is one reader's choice, as a
+  note is. **Reversing:** one `push` each in `ShareParts::tables`.
+- **The old shell's backup section gets no *Link sets* tick** and sends the part on by its
+  default (`shareDefaults`), so its exports carry sets and empty tables when there are none. It
+  is the shell being replaced. **Reversing:** low.
