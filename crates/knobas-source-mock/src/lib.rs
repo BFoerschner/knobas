@@ -330,6 +330,9 @@ pub struct Branch {
 pub struct Repo {
     pub name: String,
     pub lang: String,
+    /// The organization team the repository belongs to (prototype-6's), which
+    /// `testenv/seed-gitea.sh` creates and adds the repository to.
+    pub team: String,
     /// Path of the local clone, or `None` if it is not cloned.
     pub clone: Option<String>,
     pub default_branch: Option<String>,
