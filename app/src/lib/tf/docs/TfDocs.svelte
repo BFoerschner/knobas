@@ -496,6 +496,11 @@
   async function createPage(next: NewPage, linkToJob: boolean): Promise<boolean> {
     try {
       const ticket = linkToJob && job !== null ? await jobTicket(job) : null;
+      if (linkToJob && job !== null && ticket === null) {
+        // Asked for a link we cannot make: refuse, the dialog stays open (as *Link to <job>* does).
+        push({ text: `${job} is not in the mirror`, tone: "err" });
+        return false;
+      }
       await io.docsCreatePage(next, ticket);
       push({ text: `Queued: create page ${next.title.trim()}.` });
       return true;

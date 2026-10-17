@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { DocPage, DocsTree, Reached } from "../../ipc/entity";
 import type { QueuedWrite } from "../../ipc/sources";
+import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
 
@@ -553,6 +554,30 @@ test("a page reached through another entity is grouped under Via and that entity
   scope()[0]!.click();
   await settle();
   expect(target.querySelector(".tf-dl-for h4")?.textContent).toBe("Via Retry epic");
+});
+
+test("New page with Link it to <job> for a job the mirror lacks is refused, and the dialog stays open", async () => {
+  toasts.items = [];
+  const links = linkPorts();
+  links.listSources = vi.fn(async () => [] as never);
+  const io = await drawJob(["confluence:2"], links, ports({ docsPage: vi.fn(async () => RICH) }));
+  button("New page here")!.click();
+  await settle();
+  const dialog = document.querySelector("[role='dialog']")!;
+  const title = dialog.querySelector<HTMLInputElement>("input[aria-label='Title']")!;
+  title.value = "Rota";
+  title.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  const box = [...dialog.querySelectorAll<HTMLInputElement>("input[type='checkbox']")].find((c) =>
+    c.parentElement?.textContent?.includes("Link it to PAY-231"),
+  )!;
+  if (!box.checked) box.click();
+  await settle();
+  [...dialog.querySelectorAll("button")].find((b) => b.textContent?.trim() === "Create page")!.click();
+  await settle();
+  expect(io.docsCreatePage).not.toHaveBeenCalled();
+  expect(document.querySelector("[role='dialog']")).not.toBeNull();
+  expect(toasts.items.map((t) => t.text)).toEqual(["PAY-231 is not in the mirror"]);
 });
 
 test("the choice is kept for the session, and without a job there is no switch", async () => {
