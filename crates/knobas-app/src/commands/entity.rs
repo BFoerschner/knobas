@@ -3327,8 +3327,9 @@ pub async fn unlink<R: tauri::Runtime>(
 ///
 /// **`link_to`** (#984, a ticket's entity id) asks for a link from what a
 /// `CreateBranch` or `CreatePullRequest` makes to that ticket, drawn once the
-/// write has been sent and the source re-read
-/// (`sources::write_queue::submit_linked_in_background`); `invalid` for any
+/// write has been sent and a sync of the source brings it in, on this send or
+/// a later tick (#1050: the intent is held on the queued row,
+/// `sources::write_queue::submit_linked_in_background`); `invalid` for any
 /// other op, `not_found` for a ticket the mirror does not hold. Absent, the
 /// command is what it was.
 #[tauri::command]

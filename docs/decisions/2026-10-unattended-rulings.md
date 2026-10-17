@@ -4708,3 +4708,23 @@ Merge-manager:
   actions unchanged. **Reversing:** trivial.
 - **A failed write stops the run and re-reads the day.** Rows already given stay given.
   **Reversing:** trivial.
+
+## #1050 — A queued branch or pull request is linked when it lands on a later tick (2026-10-17)
+
+- **Resolved at the end of every run, through a `SyncEvents` wrapper.** `ArrivalLinks` wraps the
+  scheduler's events in `sources::start` and resolves the source's owed links when a run ends.
+  `knobas-sync`'s trait and the scheduler stay as they were; the alternative, a post-run hook in
+  the scheduler, would change `knobas-sync` for an app-level concern. **Reversing:** low.
+- **The column is not on `QueuedWrite`.** The pending-writes panel does not show the intent, so
+  the IPC answer stays as it was. **Reversing:** low (one field, one TS mirror).
+- **A refused write keeps its intent.** Refused is not terminal: a reader who edits and sends it
+  still wants the link, and the link follows the edited payload. Only a discard drops it.
+  **Reversing:** trivial (one state in `link_arrivals`' clearing statement).
+- **Seven days of patience.** A sent write whose branch or pull request has not arrived within
+  seven days stops being looked for, so a branch of that name made weeks later is not linked.
+  **Reversing:** trivial (`ARRIVAL_PATIENCE`).
+- **Drawn once, then cleared.** The intent is dropped when the link is drawn, so a link the
+  reader removes is not drawn again by the next sync. **Reversing:** trivial.
+- **#862's new page keeps its send-only link.** The issue says it *can* use the column; it is not
+  a criterion, and its look-up (`docs::link_created_page`) is a different one. Filed as backlog.
+  **Reversing:** n/a.
