@@ -8,7 +8,7 @@
  * bar's buckets and which chip a row is in are the rooms tab's arithmetic
  * (`assets/monitors.ts`), reused rather than copied.
  */
-import type { AssetDetail, AssetProperty, MonitorRow, UnmonitoredAsset } from "../../ipc/assets";
+import type { AssetDetail, AssetProperty, MonitorRow, MonitorTarget, UnmonitoredAsset } from "../../ipc/assets";
 import type { MonitorKind } from "../../ipc/sources";
 import { bar, chipOf as chipStateOf } from "../../assets/monitors";
 import { matchesAll } from "../filter/filter";
@@ -149,7 +149,7 @@ export function visibleMonitors(rows: readonly MonitorRow[], filter: MonitorFilt
  * services, databases and VMs. A database server is a database here; it gets
  * the same TCP check.
  */
-const WATCHABLE = ["vm", "container", "service", "database_server", "database"];
+const WATCHABLE = ["vm", "container", "service", "database_server", "database", "route"];
 
 /** The unwatched assets of a type worth a check, in the read's order. */
 export function gaps(rows: readonly UnmonitoredAsset[]): UnmonitoredAsset[] {
@@ -161,6 +161,33 @@ export interface Prefill {
   name: string;
   kind: MonitorKind;
   target: string;
+}
+
+/**
+ * What *Create monitor* is for and how it opens (#976): an asset or a route.
+ * The dialog writes the name through `record` (the asset's or the route's own
+ * `monitors` edit) and then queues the create in one of `targets`.
+ */
+export interface MonitorSubject {
+  id: string;
+  name: string;
+  targets: MonitorTarget[];
+  opening: Prefill;
+}
+
+/** The unwatched row is a route (#976): a `route:<uuid>` id, type `route`. */
+export function isRoute(row: Pick<UnmonitoredAsset, "type_id">): boolean {
+  return row.type_id === "route";
+}
+
+/** A route's opening (#976): HTTP on the route's URL plus `/health`, named as an asset's HTTP check is. */
+export function routePrefill(row: Pick<UnmonitoredAsset, "name" | "url">): Prefill {
+  const base = httpUrl([row.url]);
+  return {
+    name: `${row.name} /health`,
+    kind: "http",
+    target: base === null ? "" : `${base.replace(/\/+$/, "")}/health`,
+  };
 }
 
 /** A property's value as text, or `null` for none. */

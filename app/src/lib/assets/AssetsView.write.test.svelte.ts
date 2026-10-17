@@ -412,6 +412,7 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
         return Promise.resolve({
           route: routeRow(stored),
           history: lines.filter((line) => line.entity_id === routeId).reverse(),
+          monitor_targets: [],
         });
       } catch (cause) {
         return Promise.reject(cause);
@@ -451,6 +452,8 @@ function estate(seed: Stored[], seedRoutes: StoredRoute[] = []) {
     editRoute: (routeId: string, edits: RouteEdit[]) => {
       const stored = findRoute(routeId);
       for (const edit of edits) {
+        // The pane writes no monitor name on a route (#976's dialog does).
+        if (edit.field === "monitors") continue;
         // `assets::edit_route`'s two rules, both of which the pane depends on:
         // an edit that changes nothing writes no line, and one that does
         // writes its **old and new** value.

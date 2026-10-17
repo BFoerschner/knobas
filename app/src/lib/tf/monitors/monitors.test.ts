@@ -12,6 +12,7 @@ import {
   gaps,
   kindWord,
   prefill,
+  routePrefill,
   responseText,
   segments,
   sorted,
@@ -182,13 +183,25 @@ describe("Assets nothing watches", () => {
     path: null,
     environment: null,
     owner: null,
+    url: null,
   });
 
-  test("lists containers, services, databases and VMs, nothing else", () => {
-    const rows = ["site", "hypervisor", "vm", "container_engine", "container", "service", "database_server", "database", "network"].map(
+  test("lists containers, services, routes, databases and VMs, nothing else", () => {
+    const rows = ["site", "hypervisor", "vm", "container_engine", "container", "service", "route", "database_server", "database", "network"].map(
       (type) => gap(type, type),
     );
-    expect(gaps(rows).map((r) => r.type_id)).toEqual(["vm", "container", "service", "database_server", "database"]);
+    expect(gaps(rows).map((r) => r.type_id)).toEqual(["vm", "container", "service", "route", "database_server", "database"]);
+  });
+
+  test("a route opens as HTTP on its URL plus /health, trailing slash or not; no http(s) URL leaves the target empty", () => {
+    expect(routePrefill({ name: "Gitea", url: "https://gitea.local/" })).toEqual({
+      name: "Gitea /health",
+      kind: "http",
+      target: "https://gitea.local/health",
+    });
+    expect(routePrefill({ name: "Api", url: "http://api.test:8080/v1" }).target).toBe("http://api.test:8080/v1/health");
+    expect(routePrefill({ name: "Tunnel", url: "ssh://host" }).target).toBe("");
+    expect(routePrefill({ name: "None", url: null }).target).toBe("");
   });
 });
 

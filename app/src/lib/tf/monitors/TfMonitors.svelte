@@ -9,8 +9,8 @@
     what it **Watches** (the asset's name and type, linking to the asset),
     *Ack* on a down monitor, and *Pause* or *Resume* where the source offers
     it.
-  - **Assets nothing watches**: containers, services, databases and VMs no
-    monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
+  - **Assets nothing watches**: containers, services, routes, databases and VMs
+    no monitor watches, each with *Create monitor* (`TfCreateMonitor.svelte`).
 
   Over `monitor_roster`, `ack_alert`, `submit_write` (`PauseMonitor`,
   `ResumeMonitor`, `CreateMonitor`), `unmonitored_assets`, `get_asset` and
@@ -19,7 +19,17 @@
   here; monitoring stays Uptime Kuma's.
 -->
 <script lang="ts" module>
-  import type { AssetDetail, AssetEdit, AssetRow, MonitorRow, OpenAlert, UnmonitoredAsset } from "../../ipc/assets";
+  import type {
+    AssetDetail,
+    AssetEdit,
+    AssetRow,
+    MonitorRow,
+    OpenAlert,
+    RouteDetail,
+    RouteEdit,
+    RouteRow,
+    UnmonitoredAsset,
+  } from "../../ipc/assets";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import type { OpenJobPorts } from "../job/open-jobs";
 
@@ -31,6 +41,8 @@
     submitWrite: (payload: WriteOpPayload) => Promise<QueuedWrite>;
     getAsset: (assetId: string) => Promise<AssetDetail>;
     editAsset: (assetId: string, edits: AssetEdit[]) => Promise<AssetRow>;
+    getRoute: (routeId: string) => Promise<RouteDetail>;
+    editRoute: (routeId: string, edits: RouteEdit[]) => Promise<RouteRow>;
   }
 </script>
 
@@ -38,7 +50,7 @@
   import { onDestroy } from "svelte";
 
   import { ipcErrorMessage } from "../../ipc";
-  import { ackAlert, editAsset, getAsset, monitorRoster, unmonitoredAssets } from "../../ipc/assets";
+  import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
   import { followWrite } from "../../shell/follow-write";
@@ -52,7 +64,11 @@
   import {
     stateChip,
     gaps,
+    isRoute,
     kindWord,
+    prefill,
+    routePrefill,
+    type MonitorSubject,
     responseText,
     segments,
     sorted,
@@ -73,6 +89,8 @@
       submitWrite: (payload) => submitWrite(payload),
       getAsset: (assetId) => getAsset(assetId),
       editAsset: (assetId, edits) => editAsset(assetId, edits),
+      getRoute: (routeId) => getRoute(routeId),
+      editRoute: (routeId, edits) => editRoute(routeId, edits),
       listSources: () => listSources(),
       listContexts: () => listContexts(),
       getEntity: (entityId) => getEntity(entityId),
@@ -103,7 +121,7 @@
   let acked = $state<Record<string, true>>({});
   /** Rows whose write has not answered: a double click is one press. */
   let pressing = $state<Record<string, true>>({});
-  let creating = $state<AssetDetail | null>(null);
+  let creating = $state<MonitorSubject | null>(null);
   let opening = $state<string | null>(null);
 
   /** Bumped to read both lists again. */
@@ -238,7 +256,13 @@
     if (opening !== null) return;
     opening = asset.id;
     try {
-      creating = await ports.getAsset(asset.id);
+      if (isRoute(asset)) {
+        const detail = await ports.getRoute(asset.id);
+        creating = { id: asset.id, name: asset.name, targets: detail.monitor_targets, opening: routePrefill(asset) };
+      } else {
+        const detail = await ports.getAsset(asset.id);
+        creating = { id: asset.id, name: detail.asset.name, targets: detail.monitor_targets, opening: prefill(detail) };
+      }
     } catch (error) {
       push({ text: ipcErrorMessage(error), tone: "err" });
     } finally {
@@ -246,8 +270,15 @@
     }
   }
 
+  /** The name goes onto the asset or the route the dialog was opened for, so the next poll attaches it there. */
+  function recordName(subject: MonitorSubject, name: string): Promise<unknown> {
+    return subject.id.startsWith("route:")
+      ? ports.editRoute(subject.id, [{ field: "monitors", added: [name] }])
+      : ports.editAsset(subject.id, [{ field: "monitors", added: [name] }]);
+  }
+
   function created(what: { name: string; write: QueuedWrite }) {
-    const asset = creating?.asset.name ?? what.name;
+    const asset = creating?.name ?? what.name;
     creating = null;
     push({ text: `Create monitor queued for ${asset}` });
     following.push(followWrite(what.write, { name: `Monitor ${what.name}` }));
@@ -257,7 +288,12 @@
   /** A row opens its asset; a click on a link or button inside it already did its own thing. */
   function openAsset(event: MouseEvent, id: string) {
     if ((event.target as Element | null)?.closest("a, button")) return;
-    location.hash = `#/asset/${encodeURIComponent(id)}`;
+    location.hash = addressOf(id);
+  }
+
+  /** A route opens at `#/route/<id>` (the Tree at its exposing asset), an asset at `#/asset/<id>`. */
+  function addressOf(id: string): string {
+    return `#/${id.startsWith("route:") ? "route" : "asset"}/${encodeURIComponent(id)}`;
   }
 </script>
 
@@ -285,14 +321,14 @@
     <p class="tf-ifail">Could not read the monitors: {failed}</p>
   {/if}
   {#if tab === "unmonitored"}
-    <p class="tf-dim tf-mon-lead">Containers, services, databases and VMs that no monitor watches.</p>
+    <p class="tf-dim tf-mon-lead">Containers, services, routes, databases and VMs that no monitor watches.</p>
     {#if unwatched !== null && unwatched.length > 0}
       <table class="tf-tbl">
         <thead><tr><th>Asset</th><th>Type</th><th>Env</th><th>Owner</th><th><span class="tf-sr">Actions</span></th></tr></thead>
         <tbody>
           {#each unwatched as asset (asset.id)}
             <tr class="tf-row" onclick={(event) => openAsset(event, asset.id)}>
-              <td class="tf-mono"><a href="#/asset/{encodeURIComponent(asset.id)}">{asset.name}</a></td>
+              <td class="tf-mono"><a href={addressOf(asset.id)}>{asset.name}</a></td>
               <td>{asset.type_label}</td>
               <td>{asset.environment ?? ""}</td>
               <td>{asset.owner ?? ""}</td>
@@ -306,7 +342,7 @@
         </tbody>
       </table>
     {:else if unwatched !== null}
-      <div class="tf-empty">Every container, service, database and VM has a monitor.</div>
+      <div class="tf-empty">Every container, service, route, database and VM has a monitor.</div>
     {/if}
   {:else if roster !== null}
     {#if rows.length > 0}
@@ -363,8 +399,8 @@
 </div>
 {#if creating !== null}
   <TfCreateMonitor
-    detail={creating}
-    record={ports.editAsset}
+    subject={creating}
+    record={(name) => recordName(creating!, name)}
     queue={ports.submitWrite}
     onclose={() => (creating = null)}
     oncreated={created}

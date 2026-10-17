@@ -222,6 +222,7 @@ function unwatched(name: string, typeId: string, label: string): UnmonitoredAsse
     path: null,
     environment: null,
     owner: null,
+    url: null,
   };
 }
 

@@ -68,6 +68,10 @@ use sqlx::{Postgres, Row, Transaction};
 
 /// Every (asset, monitor) pair this source could attach and has not.
 ///
+/// **A route is an asset here** (#976): `0042` gave `knobas.route` the same
+/// `monitors` column, so the names of both tables are read as one set and a
+/// route's `route:<uuid>` id is drawn into the link exactly as an asset's is.
+///
 /// `$1` is the source, `$2` the monitor kind, `$3` the relation.
 ///
 /// **`sync.live_item` and not `sync.item`**: a tombstoned monitor is one Kuma
@@ -96,7 +100,9 @@ const UNATTACHED: &str = "select ast.id as asset_id,
                                  m.entity_id as monitor_id,
                                  m.title as monitor_name
    from sync.live_item m
-   join knobas.asset ast on m.title = any(ast.monitors)
+   join (select id, monitors from knobas.asset
+         union all
+         select id, monitors from knobas.route) ast on m.title = any(ast.monitors)
   where m.source_id = $1
     and m.kind = $2
     and not exists (

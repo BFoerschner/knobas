@@ -873,7 +873,12 @@ function routeDetail(args: Record<string, unknown>) {
   if (!route) throw { code: "not_found", message: `no route ${id}`, source_id: null };
   // Empty rather than invented: every line in a route's history is written by
   // a write, and this fixture answers none of the three that write one.
-  return { route: routeRow(route), history: [] };
+  return {
+    route: routeRow(route),
+    history: [],
+    // One target, `assetDetail`'s (#976): *Create monitor* on a route.
+    monitor_targets: [{ source_id: "kuma", display_name: "Uptime Kuma", entity: "kuma:monitors" }],
+  };
 }
 
 let mintedRoutes = 0;
@@ -934,6 +939,8 @@ function editRoute(args: Record<string, unknown>) {
       } else if (at === -1) route.properties.push({ key, label: key, value: edit.value, custom: true });
       else route.properties[at]!.value = edit.value;
     }
+    // `monitors` (#976) names a monitor the poll will attach; the fixture
+    // mirrors no monitor, so there is nothing to record.
   }
   return routeRow(route);
 }

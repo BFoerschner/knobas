@@ -269,6 +269,8 @@ export interface RouteDetail {
   route: RouteRow;
   /** This route's own activity lines, newest first. */
   history: ActivityRow[];
+  /** The sources a monitor could be created in (#976), as {@link AssetDetail.monitor_targets}. */
+  monitor_targets: MonitorTarget[];
 }
 
 /** Everything the fixed right pane draws — `assets::AssetDetail`. */
@@ -639,6 +641,15 @@ export interface RoutePropertyEdit {
 }
 
 /**
+ * Add the names of monitors a route waits for — `assets::RouteEdit::Monitors`
+ * (#976): {@link MonitorsEdit}'s append on the route's own column.
+ */
+export interface RouteMonitorsEdit {
+  field: "monitors";
+  added: string[];
+}
+
+/**
  * One field of a route changing — `assets::RouteEdit`.
  *
  * {@link AssetEdit}'s shape for its reason. The asset that **exposes** a route
@@ -650,7 +661,8 @@ export type RouteEdit =
   | RouteUrlEdit
   | RouteTargetEdit
   | RouteVisibilityEdit
-  | RoutePropertyEdit;
+  | RoutePropertyEdit
+  | RouteMonitorsEdit;
 
 /**
  * The built-in type table: what a type is called, its monogram, the properties
@@ -1241,6 +1253,12 @@ export interface UnmonitoredAsset {
   environment: string | null;
   /** The owner in force, the same way (#864). */
   owner: string | null;
+  /**
+   * A route's URL (#976); `null` on an asset. A route is a row of type
+   * `route` whose `id` is `route:<uuid>`, whose `path` is where the exposing
+   * asset sits (its own name last), with that asset's environment and owner.
+   */
+  url: string | null;
 }
 
 /**

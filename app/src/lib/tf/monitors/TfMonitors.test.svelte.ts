@@ -6,7 +6,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetDetail, AssetEdit, MonitorRow, UnmonitoredAsset } from "../../ipc/assets";
+import type { AssetDetail, AssetEdit, MonitorRow, RouteDetail, RouteEdit, UnmonitoredAsset } from "../../ipc/assets";
 import type { Reached } from "../../ipc/entity";
 import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
@@ -53,8 +53,19 @@ const gap = (id: string, type_id: string, type_label: string, name: string): Unm
   path: null,
   environment: "prod",
   owner: "ops",
+  url: null,
 });
-const UNWATCHED = [gap("asset:site", "site", "Site", "hel1"), gap("asset:pg", "database_server", "Database server", "pg-main")];
+const UNWATCHED = [
+  gap("asset:site", "site", "Site", "hel1"),
+  gap("asset:pg", "database_server", "Database server", "pg-main"),
+  { ...gap("route:gitea", "route", "Route", "Gitea"), url: "https://gitea.local/" },
+];
+
+const ROUTE_DETAIL = {
+  route: { id: "route:gitea", name: "Gitea", url: "https://gitea.local/" },
+  history: [],
+  monitor_targets: [{ source_id: "kuma", display_name: "Uptime Kuma", entity: "kuma:monitors" }],
+} as unknown as RouteDetail;
 
 const DETAIL = {
   asset: { id: "asset:pg", type_id: "database_server", name: "pg-main" },
@@ -71,6 +82,7 @@ let target: HTMLElement;
 let view: ReturnType<typeof mount> | null = null;
 let writes: WriteOpPayload[];
 let edits: [string, AssetEdit[]][];
+let routeEdits: [string, RouteEdit[]][];
 let acks: string[];
 
 beforeEach(() => {
@@ -78,6 +90,7 @@ beforeEach(() => {
   toasts.items.splice(0);
   writes = [];
   edits = [];
+  routeEdits = [];
   acks = [];
   target = document.createElement("div");
   document.body.appendChild(target);
@@ -106,6 +119,11 @@ function ports(over: Partial<MonitorPorts> = {}): MonitorPorts {
     getAsset: async () => DETAIL,
     editAsset: async (id, list) => {
       edits.push([id, list]);
+      return {} as never;
+    },
+    getRoute: async () => ROUTE_DETAIL,
+    editRoute: async (id, list) => {
+      routeEdits.push([id, list]);
       return {} as never;
     },
     listSources: async () => [{ id: "kuma", display_name: "Uptime Kuma" }, { id: "jira", display_name: "Jira" }],
@@ -143,7 +161,7 @@ test("#/monitors draws the header, both tabs with counts, and the roster sorted 
     "4 checks from Uptime Kuma, synced 1 min ago. Each one watches an asset. Bars cover the last 24 hours in half-hours.",
   );
   const tabs = [...target.querySelectorAll(".tf-tabs a")];
-  expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 1"]);
+  expect(tabs.map(text)).toEqual(["Monitors 4", "Assets nothing watches 2"]);
   expect(tabs[0]!.getAttribute("aria-current")).toBe("page");
   expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual([
     "flows-stage HTTP",
@@ -191,14 +209,36 @@ test("This job keeps the monitors watching what the job reaches; My jobs and All
   expect(rows()).toHaveLength(4);
 });
 
-test("#/monitors/unmonitored lists the assets worth a check with env and owner, and has no filter bar", async () => {
+test("#/monitors/unmonitored lists the assets and routes worth a check with env and owner, and has no filter bar", async () => {
   await draw(["unmonitored"]);
   expect(target.querySelector(".tf-tabs [aria-current='page']")?.textContent).toContain("Assets nothing watches");
-  expect(text(target.querySelector(".tf-mon-lead"))).toBe("Containers, services, databases and VMs that no monitor watches.");
+  expect(text(target.querySelector(".tf-mon-lead"))).toBe("Containers, services, routes, databases and VMs that no monitor watches.");
   expect(rows().map((tr) => [...tr.querySelectorAll("td")].map(text))).toEqual([
     ["pg-main", "Database server", "prod", "ops", "Create monitor"],
+    ["Gitea", "Route", "prod", "ops", "Create monitor"],
   ]);
+  expect(rows()[1]!.querySelector("td a")?.getAttribute("href")).toBe("#/route/route%3Agitea");
   expect(target.querySelector("input[type='search'], .tf-fbar")).toBeNull();
+});
+
+test("Create monitor on a route opens as HTTP on its URL plus /health and records the name on the route", async () => {
+  await draw(["unmonitored"]);
+  button(rows()[1]!, "Create monitor")!.click();
+  await settle();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for Gitea");
+  const inputs = [...dialog.querySelectorAll<HTMLInputElement>("input")];
+  expect(inputs.map((input) => input.value)).toEqual(["Gitea /health", "https://gitea.local/health"]);
+  expect(dialog.querySelector<HTMLSelectElement>("select")!.value).toBe("http");
+  expect(text(dialog.querySelector(".tf-note"))).toBe("Created in Uptime Kuma through the write queue, attached to this route.");
+
+  [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Create monitor")!.click();
+  await settle();
+  expect(routeEdits).toEqual([["route:gitea", [{ field: "monitors", added: ["Gitea /health"] }]]]);
+  expect(edits).toEqual([]);
+  expect(writes).toEqual([
+    { CreateMonitor: { entity: "kuma:monitors", name: "Gitea /health", url: "https://gitea.local/health", kind: "http" } },
+  ]);
 });
 
 test("Create monitor opens prefilled as TCP, records the name on the asset, then queues the create with its kind", async () => {
