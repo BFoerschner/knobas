@@ -14,6 +14,7 @@
 //! * **Retries**: [`MAX_ATTEMPTS`] attempts in total -- the first one included
 //!   -- exponential, transient statuses only, and `Retry-After` obeyed
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
+//!   A write that must not arrive twice opts out with [`Request::no_retry`].
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
 //!   **every attempt passes it**, retries included.
 //! * **One way out**: [`HttpClient::send`] (and its streamed twin
@@ -317,7 +318,10 @@ impl HttpClient {
             Auth::Basic { username, password } => request.basic_auth(username, Some(password)),
             Auth::GiteaToken(token) => request.header("Authorization", format!("token {token}")),
         };
-        Request { inner: request }
+        Request {
+            inner: request,
+            retry: true,
+        }
     }
 
     /// Send a request: rate-limited, retried, `Retry-After`-aware, classified,
@@ -379,13 +383,16 @@ impl HttpClient {
         deadline: Deadline,
     ) -> Result<reqwest::Response, SourceError> {
         let started = Instant::now();
+        // One attempt for a request that may not be repeated
+        // ([`Request::no_retry`]).
+        let attempts = if request.retry { MAX_ATTEMPTS } else { 1 };
         let mut request = request.inner;
 
-        for attempt in 1..=MAX_ATTEMPTS {
+        for attempt in 1..=attempts {
             // Cloned before sending, because sending consumes it. `None` for a
             // streaming body, which M1 never builds.
             let next = request.try_clone();
-            let last = attempt == MAX_ATTEMPTS;
+            let last = attempt == attempts;
 
             // Every attempt, not just the first: a retry that skips the
             // limiter is the burst this crate exists to prevent. Before the
@@ -598,6 +605,8 @@ impl std::error::Error for BodyBrokeOff {}
 /// orchestrator (P8).
 pub struct Request {
     inner: reqwest::RequestBuilder,
+    /// `false` once [`Request::no_retry`] said so.
+    retry: bool,
 }
 
 impl std::fmt::Debug for Request {
@@ -636,6 +645,7 @@ impl Request {
     pub fn query<T: serde::Serialize + ?Sized>(self, query: &T) -> Self {
         Self {
             inner: self.inner.query(query),
+            ..self
         }
     }
 
@@ -654,6 +664,7 @@ impl Request {
     ) -> Self {
         Self {
             inner: self.inner.header(name, value),
+            ..self
         }
     }
 
@@ -683,6 +694,7 @@ impl Request {
     pub fn json<T: serde::Serialize + ?Sized>(self, body: &T) -> Self {
         Self {
             inner: self.inner.json(body),
+            ..self
         }
     }
 
@@ -707,12 +719,9 @@ impl Request {
     /// [`HttpClient::send`] can still retry it.
     ///
     /// **A caller must know what a retry means for its protocol.** `send`
-    /// retries a transient failure, and a retried emit is a second emit; the
-    /// Kuma adapter is safe under that because pause and resume are
-    /// idempotent, and because a retry that reaches a server whose session
-    /// already closed is answered rather than silently doubled. A future
-    /// caller whose packet is not idempotent has to say so where it builds
-    /// one.
+    /// retries a transient failure, and a retried emit is a second emit. A
+    /// packet that must not arrive twice -- Kuma's `add` is one -- says so
+    /// with [`Request::no_retry`] (issue #1122).
     #[must_use]
     pub fn text(self, body: String) -> Self {
         Self {
@@ -720,6 +729,31 @@ impl Request {
                 .inner
                 .header(reqwest::header::CONTENT_TYPE, "text/plain;charset=UTF-8")
                 .body(body),
+            ..self
+        }
+    }
+
+    /// Send this request **once**: [`HttpClient::send`] makes one attempt and
+    /// returns its failure as it is, timeouts and busy answers included
+    /// (issue #1122).
+    ///
+    /// For a write that does something new each time it arrives -- a create,
+    /// a comment, a queued run -- and has no precondition the source checks.
+    /// A timed-out request may have reached the source before the answer was
+    /// lost; resending it blindly is how one create becomes two. The same
+    /// goes for a `502` or `504`, which come from a proxy that cannot say
+    /// whether the source behind it acted. The failure goes back to the
+    /// caller, and the write queue, which can look before it writes again,
+    /// decides what happens next.
+    ///
+    /// Not for reads, and not for a write the source refuses the second time
+    /// on its own (a `sha` or version precondition, a name that must be
+    /// unique): those keep the retries every other request gets.
+    #[must_use]
+    pub fn no_retry(self) -> Self {
+        Self {
+            retry: false,
+            ..self
         }
     }
 }

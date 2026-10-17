@@ -411,9 +411,68 @@ async fn a_silent_server_is_unreachable_rather_than_a_protocol_error() {
     assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
 }
 
-/// A server that accepts connections and never replies.
+/// A write that may already have landed is sent **once** when its caller says
+/// so (issue #1122). The server here takes the request in and never answers --
+/// from the client's side exactly a POST that reached the source and timed out
+/// on the way back -- and the request is not put on the wire a second time.
+///
+/// The control half is what makes the count mean something: the same request
+/// without [`Request::no_retry`](knobas_http::Request::no_retry), against the
+/// same silence, is sent [`MAX_ATTEMPTS`](knobas_http::MAX_ATTEMPTS) times.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out() {
+    async fn post(no_retry: bool) -> (SourceError, usize) {
+        let server = SilentServer::new();
+        let client = HttpClient::new(HttpConfig {
+            request_timeout: std::time::Duration::from_millis(300),
+            ..config(server.url())
+        })
+        .expect("client");
+        let request = client
+            .request(Method::POST, "/rest/api/2/issue")
+            .json(&serde_json::json!({ "fields": { "summary": "once" } }));
+        let request = if no_retry { request.no_retry() } else { request };
+        let error = client.send(request).await.expect_err("nothing answers");
+        (error, server.hits())
+    }
+
+    let (error, hits) = post(true).await;
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert_eq!(hits, 1, "a timed-out create must not be sent again");
+
+    let (_, hits) = post(false).await;
+    assert_eq!(
+        hits,
+        knobas_http::MAX_ATTEMPTS as usize,
+        "the same silence retries a request that did not opt out"
+    );
+}
+
+/// The opt-out covers a busy answer too: a `502` or `504` from a proxy says
+/// nothing about whether the source behind it acted, so a write that may not
+/// be repeated is not repeated on any answer.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_write_that_opted_out_of_retries_is_not_retried_on_a_busy_answer() {
+    let server = CountingServer::always(504, "");
+    let client = HttpClient::new(config(server.url())).expect("client");
+
+    let error = client
+        .send(
+            client
+                .request(Method::POST, "/rest/api/content")
+                .json(&serde_json::json!({ "type": "comment" }))
+                .no_retry(),
+        )
+        .await
+        .expect_err("504");
+    assert!(matches!(error, SourceError::Protocol { .. }), "{error:?}");
+    assert_eq!(server.hits(), 1);
+}
+
+/// A server that accepts connections and never replies, counting them.
 struct SilentServer {
     port: u16,
+    accepted: Arc<AtomicUsize>,
     _keep: tokio::task::JoinHandle<()>,
 }
 
@@ -423,18 +482,31 @@ impl SilentServer {
         let port = listener.local_addr().expect("addr").port();
         listener.set_nonblocking(true).expect("nonblocking");
         let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        let accepted = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&accepted);
         let keep = tokio::spawn(async move {
             let mut held = Vec::new();
             while let Ok((socket, _)) = listener.accept().await {
+                counter.fetch_add(1, Ordering::SeqCst);
                 // Held, never answered, never closed.
                 held.push(socket);
             }
         });
-        Self { port, _keep: keep }
+        Self {
+            port,
+            accepted,
+            _keep: keep,
+        }
     }
 
     fn url(&self) -> String {
         format!("http://127.0.0.1:{}", self.port)
+    }
+
+    /// Connections accepted. A timed-out request's connection is never
+    /// reused, so this is the number of attempts.
+    fn hits(&self) -> usize {
+        self.accepted.load(Ordering::SeqCst)
     }
 }
 
