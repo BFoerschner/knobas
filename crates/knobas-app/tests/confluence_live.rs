@@ -1470,7 +1470,9 @@ async fn mentioned_user_key(env: &Env) -> String {
                 Some(json!({
                     "userName": MENTIONED,
                     "fullName": "Mentioned Person",
-                    "email": "mentioned@knobas.invalid",
+                    // Confluence refuses an address in the reserved
+                    // `.invalid` domain as "Invalid email address".
+                    "email": "mentioned@example.com",
                     "password": "knobas-mentioned-953",
                     "notifyViaEmail": false,
                 })),
