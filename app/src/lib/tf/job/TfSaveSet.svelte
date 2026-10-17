@@ -9,6 +9,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
+  import { counted } from "../counted";
   import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRule, LinkSetRuleKind, RuleTicket } from "../../ipc/entity";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
@@ -141,7 +142,7 @@
           ><input type="radio" name="tf-ssr" value="epic" bind:group={applyTo} />
           <span
             >Every ticket under epic {keyOf(epic)}{epicTitle ? ` ${epicTitle}` : ""}<small
-              >{epicCount ?? "…"} tickets today, and new ones as they are created</small
+              >{epicCount === null ? "… tickets" : counted(epicCount, "ticket", "tickets")} today, and new ones as they are created</small
             ></span
           ></label
         >

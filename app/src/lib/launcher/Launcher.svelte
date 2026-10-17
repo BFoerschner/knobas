@@ -73,6 +73,7 @@
   import QueryBox from "./QueryBox.svelte";
   import Results from "./Results.svelte";
   import { type LauncherAction, filterActions, navigationActions } from "./actions";
+  import { counted } from "../tf/counted";
   import type { LauncherRow } from "./rows";
   import { Session, type SessionPorts } from "./session.svelte";
   import { type Suggestion, activeToken, complete, suggest } from "./suggest";
@@ -671,7 +672,7 @@
   const placeholder =
     "Search everything, or type > for actions, # tickets, @ people, / source, ? help";
   const footnote = $derived(
-    `mirror · ${session.home?.pending_writes ?? 0} pending writes`,
+    `mirror · ${counted(session.home?.pending_writes ?? 0, "pending write", "pending writes")}`,
   );
   /** The chips render from the answer; before one lands there is nothing to
       say about a query nobody has interpreted yet. */

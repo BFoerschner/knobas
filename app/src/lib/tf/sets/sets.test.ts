@@ -26,7 +26,16 @@ test("what is in a set is one line per kind that holds anything, in panel order,
         { kind: "pipeline", query: "name:*", count: 2, matches: [row("pipeline", "tc:A"), row("pipeline", "tc:B")] },
       ],
     }),
-  ).toEqual(["2 repositories", "2 pipelines", "1 monitors"]);
+  ).toEqual(["2 repositories", "2 pipelines", "1 monitor"]);
+});
+
+test("a kind with one member reads in the singular", () => {
+  expect(
+    contentLines({
+      members: [row("repo", "gitea:a"), row("page", "c:1"), row("asset", "a:1")],
+      patterns: [],
+    }),
+  ).toEqual(["1 repository", "1 page", "1 asset"]);
 });
 
 test("the pattern dialog's fields are written in the search grammar the backend reads", () => {

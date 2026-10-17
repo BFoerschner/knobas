@@ -67,7 +67,4 @@ export function unsyncedWords(unsynced: UnsyncedTickets[]): string | null {
   return `and ${unsynced.map((one) => `${one.count} in ${one.project}`).join(", ")}, not synced`;
 }
 
-/** *1 board*, *4 boards*. */
-export function counted(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
-}
+export { counted } from "../counted";

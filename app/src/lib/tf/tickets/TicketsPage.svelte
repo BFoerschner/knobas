@@ -302,6 +302,7 @@
       id: filterId,
       placeholder: "Filter by key, summary, epic or person",
       noun: "tickets",
+      one: "ticket",
       base: base ?? "",
       chips: [
         { key: "issuetype", label: "Type", options: values("issuetype").slice(0, CHIPS_AT_MOST) },

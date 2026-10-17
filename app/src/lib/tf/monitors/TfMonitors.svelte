@@ -31,6 +31,7 @@
     UnmonitoredAsset,
   } from "../../ipc/assets";
   import type { QueuedWrite, WriteOpPayload } from "../../ipc/sources";
+  import { counted } from "../counted";
   import type { OpenJobPorts } from "../job/open-jobs";
 
   /** The reads and writes this page makes, injectable so a test needs no bridge. */
@@ -185,6 +186,7 @@
     id: "monitors",
     placeholder: "Filter by monitor, asset or type",
     noun: "monitors",
+    one: "monitor",
     scopes: [
       ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" } satisfies FilterScope] : []),
       { id: "mine", label: "My jobs", query: "" },
@@ -213,7 +215,7 @@
     const newest = roster.map((row) => row.checked_at).sort().at(-1) ?? null;
     const from = sources.length > 0 ? ` from ${sources.join(" and ")}` : "";
     const synced = newest !== null ? `, synced ${ago(newest, now)}` : "";
-    return `${roster.length} checks${from}${synced}. Each one watches an asset. Bars cover the last 24 hours in half-hours.`;
+    return `${counted(roster.length, "check", "checks")}${from}${synced}. Each one watches an asset. Bars cover the last 24 hours in half-hours.`;
   });
 
   // -- the row actions -------------------------------------------------------

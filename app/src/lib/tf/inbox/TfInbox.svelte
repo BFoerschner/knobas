@@ -93,6 +93,7 @@
     id: "inbox",
     placeholder: "Filter by text or ticket key",
     noun: "items",
+    one: "item",
     scopes: [
       ...(job !== null ? [{ id: "job", label: "This job", tag: job, query: "" }] : []),
       { id: "all", label: "All", query: "" },

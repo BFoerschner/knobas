@@ -125,6 +125,7 @@
     id: `repo-branches:${repoId}`,
     placeholder: "Filter branches",
     noun: "branches",
+    one: "branch",
     chips: [{ key: "show", label: "Show", options: ["Mine", "No PR", "Merged"].map((value) => ({ value, label: value })) }],
   });
   const shown = $derived(visibleBranches(rows, filter.chips["show"] ?? [], filter.text));

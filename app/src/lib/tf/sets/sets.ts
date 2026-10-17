@@ -5,6 +5,7 @@
  * `TfSets.svelte` draws `#/sets` and `TfSetEditor.svelte` `#/sets/<id>` from
  * these; the backend (`knobas_app::link_sets`) is the one that matches rules.
  */
+import { counted } from "../counted";
 import { keyOf } from "../job/job";
 import type {
   LinkSetHint,
@@ -31,6 +32,15 @@ export const KIND_LABEL: Record<LinkSetMemberKind, string> = {
   page: "Pages",
   asset: "Assets",
   monitor: "Monitors",
+};
+
+/** Each panel's heading in the singular, for a count of one. */
+const KIND_ONE: Record<LinkSetMemberKind, string> = {
+  repo: "repository",
+  pipeline: "pipeline",
+  page: "page",
+  asset: "asset",
+  monitor: "monitor",
 };
 
 /** The rule kinds as the *Applies to* dropdown names them (prototype-6's `ruleRow`). */
@@ -90,7 +100,7 @@ export function contentLines(set: Pick<LinkSetRow, "members" | "patterns">): str
   const items = itemsOf(set);
   return MEMBER_KINDS.map((kind) => [kind, items.filter((member) => member.kind === kind).length] as const)
     .filter(([, count]) => count > 0)
-    .map(([kind, count]) => `${count} ${KIND_LABEL[kind].toLowerCase()}`);
+    .map(([kind, count]) => counted(count, KIND_ONE[kind], KIND_LABEL[kind].toLowerCase()));
 }
 
 /** The sets the filter keeps: every word in the name, description or an item, and any chip's rule kind. */
