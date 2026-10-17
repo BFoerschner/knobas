@@ -8,7 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
-import type { AssetType, Dependencies, DepItem, DepViews, RouteRow } from "../../ipc/assets";
+import type { AssetRow, AssetType, Dependencies, DepItem, DepViews, RouteRow } from "../../ipc/assets";
 import { toasts } from "../../shell/toasts.svelte";
 import { createDepViewState } from "./views.svelte";
 import { settingsOf } from "./views";
@@ -90,7 +90,7 @@ function render(props: Record<string, unknown> = {}, ports: Record<string, unkno
         assetTypes: () => Promise.resolve(TYPES),
         createAsset: log("createAsset", () => {
           estate = read([item("asset:new", "service", "payments-api")]);
-          return { id: "asset:new" };
+          return { id: "asset:new" } as AssetRow;
         }),
         createLink: log("createLink", () => ({})),
         getRoute: (id: string) => Promise.resolve({ route: { ...ROUTE, id }, history: [], monitor_targets: [] }),

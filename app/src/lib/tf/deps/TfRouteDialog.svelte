@@ -165,8 +165,10 @@
     {/if}
     <span class="tf-dp-gap"></span>
     <button type="button" class="tf-btn tf-ghost" onclick={onclose}>Cancel</button>
-    <button type="button" class="tf-btn tf-primary" disabled={writing || (routeId !== null && row === null)} onclick={() => void save()}
-      >{routeId !== null ? "Save" : "Create route"}</button
-    >
+    {#if routeId !== null}
+      <button type="button" class="tf-btn tf-primary" disabled={writing || row === null} onclick={() => void save()}>Save</button>
+    {:else}
+      <button type="button" class="tf-btn tf-primary" disabled={writing} onclick={() => void save()}>Create route</button>
+    {/if}
   {/snippet}
 </TfDialog>
