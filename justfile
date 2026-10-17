@@ -229,7 +229,7 @@ front-changed base="origin/main": deps
 # (`'#/time'`). Steps, one argument per shot: `'#/job/PAY-231 > #/builds'` opens a
 # job first; `'#/repo/x/branches + click:New branch…'` clicks, then captures the dialog.
 # `SHOT_THEME=light|dark` sets the colour scheme.
-# See scripts/shot.sh for query parameters, size and the rooms UI.
+# See scripts/shot.sh for query parameters and size.
 [positional-arguments]
 shot slot out +routes:
     scripts/shot.sh "$@"
