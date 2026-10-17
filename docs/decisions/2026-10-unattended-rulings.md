@@ -5223,3 +5223,28 @@ Implementer.
   mid-sweep shifts rows in a `lastmodified` order; `created` never moves. **Reversing:** low.
 - **Moved pages are re-read by `id in (…)`, not one `content/{id}` each.** A reorder renumbers
   every sibling, so they come in groups. **Reversing:** low.
+
+Merge-manager (PR #1162).
+
+- **The sweep runs before the page walk, not after the mention walk.** Swept after, a drag made
+  once the walk had delivered a page was recorded in the cursor as delivered; the delivered page
+  is not re-read, so the mirror kept the old place until the next drag or edit. Swept before,
+  the cursor's places are never newer than the mirror's, and any drag made during the run shows
+  up as a difference on the next run. Witnessed by
+  `a_drag_after_the_walk_delivered_the_page_reaches_the_next_run` (red on the PR's head).
+  **Reversing:** low.
+- **The sweep stays on every incremental run; no every-Nth-run or signal-gated schedule.** At
+  10,000 pages in scope it is 50 body-less requests and about 8 MB per run, every 5 minutes by
+  default. No cheap signal exists (measured: nothing a bounded query sees changes). A run counter
+  or a "last swept" time would have to live in the cursor, which then changes on every idle run
+  and breaks battery clause 2's byte-identical idle cursor; state outside the cursor does not
+  survive a restart. The cost scales with the scope the user configured, and the space list and
+  the sync interval are the existing knobs for it. **Reversing:** medium (a cursor field plus a
+  clause-2 exception, or adapter-held state).
+- **Rows lost to offset paging heal on the next run.** A page deleted or moved out of scope
+  mid-sweep shifts the later `created` rows down by one and the sweep skips one. The skipped page
+  drops out of the recorded places, so the next run reads it as moved and re-reads it once. A
+  moved page deleted before its re-read comes back from the `id in (…)` search as nothing and
+  costs nothing further. The one-time re-read for a cursor without `positions` is bounded by the
+  placed pages in scope, at `page_size` per request, i.e. at most a full sync's cost, once.
+  **Reversing:** n/a (a finding, not a change).

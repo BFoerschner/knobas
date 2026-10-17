@@ -13,18 +13,20 @@
 //!    corpus was when the run started (the ceiling), and which UTC offset this
 //!    instance renders timestamps in (the zone every CQL literal is read in).
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (contract §4.1).
-//! 4. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
+//! 4. **The positions sweep** ([`SyncRun::positions_sweep`], incremental runs
+//!    only): every page's place among its siblings (#1138). A reorder makes
+//!    no new version, so step 5 never sees it. Sent before the walk, so the
+//!    places the cursor records are never newer than what the mirror holds.
+//! 5. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
 //!    following `_links.next` until there is none.
-//! 5. Drop what the overlap re-delivered, complete the comments the server did
+//! 6. Drop what the overlap re-delivered, complete the comments the server did
 //!    not expand, look up the users their mentions name ([`crate::users`]),
 //!    push the rest into the sink.
-//! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
+//! 7. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
 //!    currentUser() AND type in (page, comment)` over the same window, whose
-//!    results are resolved to the pages they are on and pushed too.
-//! 7. **The positions sweep** ([`SyncRun::positions_sweep`], incremental runs
-//!    only): every page's place among its siblings, compared with the places
-//!    the cursor records; the pages that moved are read again whole and
-//!    pushed (#1138). A reorder makes no new version, so step 4 never sees it.
+//!    results are resolved to the pages they are on and pushed too. Then the
+//!    pages whose swept place differs from the cursor's record, less those
+//!    already pushed, are read again whole and pushed.
 //! 8. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
 //!
@@ -206,6 +208,16 @@ impl SyncRun<'_> {
         let previous = cursor.as_deref().and_then(ConfluenceCursor::parse);
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
+        // The positions sweep goes **before** the walk, so the places the
+        // cursor records are never newer than the ones the mirror received.
+        // Swept after, a drag made once the walk had delivered a page would be
+        // recorded as delivered, and that page is not re-read: the mirror
+        // would keep the old place for good. Swept before, the same drag only
+        // shows up as a difference on the next run, which re-reads the page.
+        let swept = match previous {
+            Some(_) => Some(self.positions_sweep().await?),
+            None => None,
+        };
 
         let mut emitted: usize = 0;
         // The entity ids this run has already handed to the sink, so the
@@ -299,11 +311,11 @@ impl SyncRun<'_> {
         // The places among siblings (#1138). A full sync read them off the
         // walk; an incremental run sweeps them, because a reorder makes no
         // new version and no `lastmodified` bound reaches it.
-        let positions = match previous.as_ref() {
+        let positions = match swept {
             None => walked_positions,
-            Some(previous) => {
-                let swept = self.positions_sweep().await?;
-                let moved = ids_to_reread(previous.positions.as_ref(), &swept, &delivered);
+            Some(swept) => {
+                let known = previous.as_ref().and_then(|c| c.positions.as_ref());
+                let moved = ids_to_reread(known, &swept, &delivered);
                 emitted += self
                     .reread(&moved, me, &mut delivered, &mut users, sink)
                     .await?;
@@ -677,6 +689,10 @@ mod tests {
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
         edit_mid_walk: Mutex<Option<(String, String)>>,
+        /// Places among siblings that change the moment the mention walk is
+        /// asked for: a drag made after the page walk has delivered the page
+        /// (#1138).
+        reorder_on_mention: Mutex<Option<Vec<(String, i64)>>>,
         /// The users `rest/api/user?key=` knows, by key (#953); any other key
         /// answers `404`.
         users: std::collections::BTreeMap<String, Value>,
@@ -694,6 +710,7 @@ mod tests {
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
+                reorder_on_mention: Mutex::new(None),
                 users: std::collections::BTreeMap::new(),
                 user_fault: None,
             }
@@ -830,6 +847,16 @@ mod tests {
                 cql.contains("type = page") || is_mention_query(cql),
                 "every query this adapter sends is the page walk's or the mention walk's: {cql}"
             );
+            if is_mention_query(cql)
+                && let Some(places) = self.reorder_on_mention.lock().unwrap().take()
+            {
+                let mut pages = self.pages.lock().unwrap();
+                for (id, position) in places {
+                    if let Some(p) = pages.iter_mut().find(|p| p["id"] == json!(id)) {
+                        p["extensions"] = json!({ "position": position });
+                    }
+                }
+            }
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
             Ok(envelope(
                 rows,
@@ -1220,6 +1247,40 @@ mod tests {
         reorder(&fake, &[("101", 0), ("102", 1)]);
         let (items, _) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
         assert_eq!(sorted(ids(&items)), vec!["101", "102"]);
+    }
+
+    /// A page the walk delivers and that is dragged before the run ends still
+    /// reaches its new place on the next run. The cursor has to record the
+    /// place the mirror received, never a newer one: a sweep sent after the
+    /// walk would record the drag as already delivered, and the delivered
+    /// page is not re-read, so the mirror would keep the old place for good.
+    #[tokio::test]
+    async fn a_drag_after_the_walk_delivered_the_page_reaches_the_next_run() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+
+        for p in fake.pages.lock().unwrap().iter_mut() {
+            if p["id"] == json!("104") {
+                p["version"]["when"] = json!("2026-08-22T10:50:00.000Z");
+                p["version"]["number"] = json!(4);
+            }
+        }
+        *fake.reorder_on_mention.lock().unwrap() = Some(vec![("104".to_owned(), 0)]);
+        let (edited, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(ids(&edited), vec!["104"]);
+        assert_eq!(
+            edited[0].payload["position"],
+            json!(null),
+            "delivered before the drag"
+        );
+
+        let (items, _) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
+        assert_eq!(
+            ids(&items),
+            vec!["104"],
+            "the drag is re-read on the next run"
+        );
+        assert_eq!(items[0].payload["position"], json!(0));
     }
 
     /// A full sync reads every page's place off the walk itself, so it sends

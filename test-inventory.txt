@@ -2360,6 +2360,7 @@ knobas-source-confluence	lib/knobas_source_confluence	storage::tests::what_a_rea
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_comment_that_mentions_me_delivers_the_page_it_is_on
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_cursor_without_places_re_reads_the_placed_pages_once
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_delivered_mention_settles_and_the_next_poll_returns_the_same_bytes
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_drag_after_the_walk_delivered_the_page_reaches_the_next_run
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_failing_lookup_stops_the_lookups_and_the_pages_still_sync
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_full_sync_records_the_places_without_a_sweep
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_full_sync_walks_every_page_following_the_next_link
