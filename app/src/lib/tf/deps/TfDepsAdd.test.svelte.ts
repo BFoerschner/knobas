@@ -193,6 +193,22 @@ test("Create sends create_asset with environment and owner unset, then the new t
   expect(toast.action?.label).toBe("Edit it");
 });
 
+test("after a create, the layer it landed in still folds by hand", async () => {
+  render();
+  await settle();
+  target.querySelector<HTMLButtonElement>("[aria-label='Add to Services']")!.click();
+  await settle();
+  type_(field("Name"), "payments-api");
+  button("Create", dialog()).click();
+  await settle();
+  await settle();
+  expect(target.querySelector(".tf-dp-t[data-id='asset:new']")).not.toBeNull();
+  target.querySelector<HTMLButtonElement>("[aria-label='Fold Services']")!.click();
+  flushSync();
+  expect(target.querySelector("[aria-label='Unfold Services']")).not.toBeNull();
+  expect(target.querySelector(".tf-dp-t[data-id='asset:new']")).toBeNull();
+});
+
 test("from a ticket, Link it to the ticket is ticked and links after the asset exists", async () => {
   render({ ticket: "PAY-231" });
   await settle();

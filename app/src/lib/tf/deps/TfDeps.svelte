@@ -257,7 +257,7 @@
   /** The ticket the map opens from, once its entity id is known: what *Link it to* links. */
   const scoped = $derived(ticket !== null && reach !== null && reach.key === ticket ? { key: ticket, id: reach.id } : null);
 
-  const add =(set: ReadonlySet<string>, key: string) => new Set([...set, key]);
+  const add = (set: ReadonlySet<string>, key: string) => new Set([...set, key]);
   const drop = (set: ReadonlySet<string>, key: string) => new Set([...set].filter((k) => k !== key));
 
   const gestures = $derived<Gestures>({ query, trace, open: opened, shut, more, fold, reveal });
@@ -643,12 +643,17 @@
             {hit}
             {lit}
             {hover}
-            onfold={(layer, folded) => (fold = new Map([...fold, [layer, folded]]))}
+            onfold={(layer, folded) => {
+              // A fold by hand lets go of what was just added, which would hold its layer open.
+              reveal = null;
+              fold = new Map([...fold, [layer, folded]]);
+            }}
             onopengroup={(key) => {
               opened = add(opened, key);
               shut = drop(shut, key);
             }}
             onshutgroup={(key) => {
+              reveal = null;
               shut = add(shut, key);
               opened = drop(opened, key);
             }}

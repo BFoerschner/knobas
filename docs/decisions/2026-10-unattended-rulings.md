@@ -4242,3 +4242,6 @@ Ruled by the implementer (PR for #876).
   **Reversing:** low.
 - ***+ Link* on work layers from a ticket opens *Link to <key>…***, as prototype-6's band header
   does. **Reversing:** low.
+- **A fold by hand lets go of `Gestures.reveal`** (#1067 merge review): the reveal held the new
+  item's layer and group open for the rest of the page, so folding them did nothing. Folding the
+  layer or shutting the group now clears it. **Reversing:** low.
