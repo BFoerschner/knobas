@@ -4622,3 +4622,16 @@ Implementer:
 - **`WINDOW_DAYS` and `expiryOf` live in `tf/inbox/inbox.ts`**, and the Rust pin
   (`the_interfaces_window_matches_the_backends`) comes back pointed at that file. No IPC change,
   so no §10.8 entry. **Reversing:** low.
+
+Merge-manager review (Spec axis):
+
+- **History stays put while a dialog is open**, keys and mouse alike (the press is still
+  `preventDefault`ed). #693's rooms keyboard did not ask, but a step there left the dialog
+  open over another address or unmounted it unanswered. A drawer (`TfConnections`) does not
+  hold history: it belongs to the view it is in. **Reversing:** low (one guard in `TfShell`).
+- **Back at the first entry cannot leave the app.** `homeIfBlank` replaces a blank address
+  with `#/tickets` instead of pushing it, so the window's first entry is already the app's;
+  `history.back()` there does nothing. Nothing added. **Reversing:** n/a.
+- **`occurred_at + WINDOW_DAYS` is the expiry.** `knobas_core::inbox`'s `credential_expiry`
+  dates the item `secret_expires_at - make_interval(days => 14)`, and the preset is 09:00 the
+  morning after, offered only while the expiry is still ahead. **Reversing:** n/a.

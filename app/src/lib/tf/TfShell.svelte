@@ -274,10 +274,20 @@
     return el instanceof HTMLElement && inTextField(el) ? el : null;
   }
 
+  /**
+   * Whether a dialog is up. History stays put while one is: the dialog asks
+   * something about this address, and stepping away would leave it open over
+   * another view or close it unanswered (#1086).
+   */
+  function dialogOpen(): boolean {
+    return layers.open.some((layer) => layer.kind === "dialog");
+  }
+
   function onkeydown(event: KeyboardEvent) {
     const travel = historyStep(event);
     if (travel !== null) {
       event.preventDefault();
+      if (dialogOpen()) return;
       if (travel === "back") nav.back();
       else nav.forward();
       return;
@@ -340,7 +350,7 @@
   function onmouse(event: MouseEvent) {
     if (event.button !== 3 && event.button !== 4) return;
     event.preventDefault();
-    if (event.type !== "mouseup") return;
+    if (event.type !== "mouseup" || dialogOpen()) return;
     if (event.button === 3) nav.back();
     else nav.forward();
   }

@@ -428,6 +428,21 @@ test("history keys leave a text field's own keys, Ctrl+arrows, ⌥ with Ctrl and
   expect(nav.back, "⌥ with ⌘ is a layout typing the bracket").toHaveBeenCalledOnce();
 });
 
+test("history stays put while a dialog is open, keys and mouse alike, and moves again once it closes", () => {
+  const nav = { back: vi.fn(), forward: vi.fn() };
+  const layers = createLayers();
+  const offDialog = layers.add({ kind: "dialog", close: () => offDialog() });
+  start({ nav, layers });
+  expect(press("[", { metaKey: true }).defaultPrevented, "the webview still adds no navigation").toBe(true);
+  press("ArrowRight", { metaKey: true });
+  window.dispatchEvent(new MouseEvent("mouseup", { button: 3, bubbles: true, cancelable: true }));
+  expect(nav.back).not.toHaveBeenCalled();
+  expect(nav.forward).not.toHaveBeenCalled();
+  offDialog();
+  press("[", { metaKey: true });
+  expect(nav.back).toHaveBeenCalledOnce();
+});
+
 test("the status bar: sync ages, a 401 with Re-enter password, the queued writes", async () => {
   start();
   await settle();
