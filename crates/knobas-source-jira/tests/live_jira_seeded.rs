@@ -2107,8 +2107,7 @@ async fn a_sub_task_names_its_parent_in_fields_parent_and_under_reaches_it() {
 }
 
 /// How many status moves [`a_long_history_comes_back_whole_from_search`]
-/// makes: past 100, the page size Jira's own paged resources default to and
-/// the cap Jira Cloud puts on a search's changelog (#1083).
+/// makes: past 100, the cap Jira Cloud puts on a search's changelog (#1083).
 const LONG_HISTORY_MOVES: usize = 120;
 
 /// How many description edits it makes, and how long each new text is: the
@@ -2157,7 +2156,10 @@ async fn a_long_history_comes_back_whole_from_search() {
         .collect();
     statuses.sort();
     statuses.dedup();
-    assert!(statuses.len() >= 2, "the corpus stands in one status only: {statuses:?}");
+    assert!(
+        statuses.len() >= 2,
+        "the corpus stands in one status only: {statuses:?}"
+    );
     let mut sent = Vec::with_capacity(LONG_HISTORY_MOVES);
     for n in 0..LONG_HISTORY_MOVES {
         let others: Vec<&String> = statuses.iter().filter(|s| **s != at).collect();
@@ -2199,10 +2201,10 @@ async fn a_long_history_comes_back_whole_from_search() {
             "{key} was moved {LONG_HISTORY_MOVES} times and edited {LONG_HISTORY_EDITS} times, \
              but no full sync within {INDEX_BUDGET:?} showed it in {at:?} with a changelog \
              total of {expected}: {:?}",
-            items
-                .iter()
-                .find(|i| i.entity.key == key)
-                .map(|i| (&i.payload["fields"]["status"]["name"], &i.payload["changelog"]["total"]))
+            items.iter().find(|i| i.entity.key == key).map(|i| (
+                &i.payload["fields"]["status"]["name"],
+                &i.payload["changelog"]["total"]
+            ))
         );
         tokio::time::sleep(Duration::from_millis(250)).await;
     };
@@ -2241,7 +2243,10 @@ async fn a_long_history_comes_back_whole_from_search() {
             )
         })
         .collect();
-    assert_eq!(moves, sent, "{key}: every move, oldest first, as it was made");
+    assert_eq!(
+        moves, sent,
+        "{key}: every move, oldest first, as it was made"
+    );
 
     let bytes = |v: &serde_json::Value| serde_json::to_vec(v).expect("JSON").len();
     let corpus: Vec<&SyncItem> = items.iter().filter(|i| i.entity.key != key).collect();
@@ -2249,7 +2254,11 @@ async fn a_long_history_comes_back_whole_from_search() {
     let corpus_changelog: usize = corpus.iter().map(|i| bytes(&i.payload["changelog"])).sum();
     let corpus_histories: usize = corpus
         .iter()
-        .map(|i| i.payload["changelog"]["histories"].as_array().map_or(0, Vec::len))
+        .map(|i| {
+            i.payload["changelog"]["histories"]
+                .as_array()
+                .map_or(0, Vec::len)
+        })
         .sum();
     println!(
         "MEASURED seeded corpus: {} issues, {corpus_histories} histories, stored payload \
@@ -2257,21 +2266,24 @@ async fn a_long_history_comes_back_whole_from_search() {
         corpus.len(),
         100.0 * corpus_changelog as f64 / corpus_payload as f64
     );
-    let is_edit = |h: &&serde_json::Value| h["items"][0]["field"] == "description";
-    let edits: Vec<&serde_json::Value> = histories.iter().filter(is_edit).collect();
-    let moves_only: Vec<&serde_json::Value> =
-        histories.iter().filter(|h| !is_edit(h)).collect();
+    // Each history this test made holds one change: a status move, or a
+    // description edit.
+    let (edit_count, edit_bytes, move_count, move_bytes) =
+        histories.iter().fold((0, 0, 0, 0), |(ec, eb, mc, mb), h| {
+            if h["items"][0]["field"] == "description" {
+                (ec + 1, eb + bytes(h), mc, mb)
+            } else {
+                (ec, eb, mc + 1, mb + bytes(h))
+            }
+        });
     println!(
-        "MEASURED {key}: stored payload {} B of which changelog {} B; {} status moves {} B \
-         ({} B each), {} description edits of {LONG_HISTORY_EDIT_CHARS} chars {} B ({} B each)",
+        "MEASURED {key}: stored payload {} B of which changelog {} B; {move_count} status moves \
+         {move_bytes} B ({} B each), {edit_count} description edits of \
+         {LONG_HISTORY_EDIT_CHARS} chars {edit_bytes} B ({} B each)",
         bytes(stored),
         bytes(changelog),
-        moves_only.len(),
-        moves_only.iter().map(|h| bytes(h)).sum::<usize>(),
-        moves_only.iter().map(|h| bytes(h)).sum::<usize>() / moves_only.len().max(1),
-        edits.len(),
-        edits.iter().map(|h| bytes(h)).sum::<usize>(),
-        edits.iter().map(|h| bytes(h)).sum::<usize>() / edits.len().max(1),
+        move_bytes / move_count.max(1),
+        edit_bytes / edit_count.max(1),
     );
     drop(sub_task);
 }
