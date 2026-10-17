@@ -1476,7 +1476,10 @@ async fn mentioned_user_key(env: &Env) -> String {
                 })),
             )
             .await;
-        assert!(matches!(made, 200 | 201 | 204), "creating {MENTIONED}: {made} {answer}");
+        assert!(
+            matches!(made, 200 | 201 | 204),
+            "creating {MENTIONED}: {made} {answer}"
+        );
         (status, user) = env.call(reqwest::Method::GET, &path, None).await;
     }
     assert_eq!(status, 200, "GET {path}: {user}");
@@ -1529,9 +1532,19 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
     )
     .await;
     litter.created.push(top.clone());
-    let alpha = create(format!("Alpha child [{LITTER}]"), top.clone(), "<p>a</p>".into()).await;
+    let alpha = create(
+        format!("Alpha child [{LITTER}]"),
+        top.clone(),
+        "<p>a</p>".into(),
+    )
+    .await;
     litter.created.insert(0, alpha.clone());
-    let zeta = create(format!("Zeta child [{LITTER}]"), top.clone(), "<p>z</p>".into()).await;
+    let zeta = create(
+        format!("Zeta child [{LITTER}]"),
+        top.clone(),
+        "<p>z</p>".into(),
+    )
+    .await;
     litter.created.insert(0, zeta.clone());
     let (status, moved) = env
         .call(
@@ -1555,9 +1568,10 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         sync_until(&state, id, "the child", serde_json::Value::is_object).await;
     }
 
-    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &format!("{CONFLUENCE}:{top}"))
-        .await
-        .expect("the reader reads the page");
+    let page =
+        knobas_app::commands::entity::docs_page_inner(&state.pool, &format!("{CONFLUENCE}:{top}"))
+            .await
+            .expect("the reader reads the page");
     let DocBlock::Paragraph { text } = &page.blocks[0] else {
         panic!("the first block is the paragraph: {:#?}", page.blocks)
     };
@@ -1583,7 +1597,10 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         .collect();
     assert_eq!(
         children,
-        vec![format!("{CONFLUENCE}:{zeta}"), format!("{CONFLUENCE}:{alpha}")],
+        vec![
+            format!("{CONFLUENCE}:{zeta}"),
+            format!("{CONFLUENCE}:{alpha}")
+        ],
         "Zeta was moved before Alpha, and the tree says so"
     );
 

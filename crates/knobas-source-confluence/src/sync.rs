@@ -1518,7 +1518,11 @@ mod tests {
             "version": { "number": 1, "when": "2026-08-02T10:00:00.000Z", "by": { "username": "priya" } }
         }]);
         let mut fake = Fake::new(vec![
-            page_saying("1", "2026-08-01T10:00:00.000Z", &format!("<p>{mara} {tw} {me}</p>")),
+            page_saying(
+                "1",
+                "2026-08-01T10:00:00.000Z",
+                &format!("<p>{mara} {tw} {me}</p>"),
+            ),
             second,
         ]);
         fake.users.insert(
@@ -1532,7 +1536,10 @@ mod tests {
             vec![Some("Mara Lindqvist".into()), None, None],
             "mara by lookup; the editor and the credential carry no display name here"
         );
-        assert_eq!(mention_names(&items[1]), vec![Some("Mara Lindqvist".into())]);
+        assert_eq!(
+            mention_names(&items[1]),
+            vec![Some("Mara Lindqvist".into())]
+        );
         assert_eq!(
             items[0].payload["mentioned_users"]
                 .as_array()
@@ -1562,8 +1569,16 @@ mod tests {
     #[tokio::test]
     async fn a_failing_lookup_stops_the_lookups_and_the_pages_still_sync() {
         let mut fake = Fake::new(vec![
-            page_saying("1", "2026-08-01T10:00:00.000Z", &format!("<p>{}</p>", mention("k-a"))),
-            page_saying("2", "2026-08-02T10:00:00.000Z", &format!("<p>{}</p>", mention("k-b"))),
+            page_saying(
+                "1",
+                "2026-08-01T10:00:00.000Z",
+                &format!("<p>{}</p>", mention("k-a")),
+            ),
+            page_saying(
+                "2",
+                "2026-08-02T10:00:00.000Z",
+                &format!("<p>{}</p>", mention("k-b")),
+            ),
         ]);
         fake.user_fault = Some(SourceError::protocol("HTTP 429 after the retry budget"));
         let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();

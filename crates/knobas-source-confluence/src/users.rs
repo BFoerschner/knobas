@@ -76,7 +76,12 @@ impl Directory {
     pub(crate) async fn annotate(&mut self, api: &(dyn ConfluenceApi + '_), raw: &mut RawContent) {
         let named = crate::blocks::people(&raw.raw);
         let mut keys: BTreeSet<String> = mentioned_keys(raw.storage());
-        if let Some(comments) = raw.content.children.as_ref().and_then(|c| c.comment.as_ref()) {
+        if let Some(comments) = raw
+            .content
+            .children
+            .as_ref()
+            .and_then(|c| c.comment.as_ref())
+        {
             for c in &comments.results {
                 keys.extend(mentioned_keys(c.storage()));
             }
