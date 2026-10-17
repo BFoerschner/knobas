@@ -11,7 +11,7 @@
 <script lang="ts">
   import type { DepItem, DepKind } from "../../ipc/assets";
   import Marked from "../filter/Marked.svelte";
-  import { hrefOf, kindOf, lineOf, nameIsCode, stateOf } from "./deps";
+  import { hrefOf, isEstate, kindOf, lineOf, nameIsCode, stateOf } from "./deps";
   import { moreLine, tileEl, type DrawnBand, type Mix } from "./draw";
 
   let {
@@ -27,6 +27,9 @@
     onmore,
     onopen,
     ontrace,
+    flash = null,
+    onadd = null,
+    onlink = null,
   }: {
     band: DrawnBand;
     kinds: readonly DepKind[];
@@ -41,7 +44,16 @@
     onmore: (key: string) => void;
     onopen: (item: DepItem, event: MouseEvent) => void;
     ontrace: (item: DepItem) => void;
+    /** The tile just added or saved, which flashes once (#876). */
+    flash?: string | null;
+    /** *+ Add* on a layer that holds assets or routes (#876, R-11.20). */
+    onadd?: ((layer: string) => void) | null;
+    /** *+ Link* on a layer of work, from a ticket. */
+    onlink?: (() => void) | null;
   } = $props();
+
+  const WORK = ["ticket", "pr", "page", "repo", "pipeline"];
+  const holdsEstate = $derived(band.kinds.some(isEstate));
 
   const dim = (el: string) => lit !== null && !lit.has(el);
   const glow = (el: string) => lit !== null && lit.has(el) && (hover === null || el !== tileEl(hover));
@@ -84,6 +96,11 @@
       </p>
       {@render bar(band.mix, "tf-dp-mini")}
     </div>
+    {#if holdsEstate && onadd !== null}
+      <button type="button" class="tf-btn tf-sm tf-ghost tf-dp-add" title="Add to {band.name}" aria-label="Add to {band.name}" onclick={() => onadd(band.id)}>+ Add</button>
+    {:else if onlink !== null && band.kinds.some((kind) => WORK.includes(kind))}
+      <button type="button" class="tf-btn tf-sm tf-ghost tf-dp-add" title="Link something to this ticket" onclick={() => onlink()}>+ Link</button>
+    {/if}
   </header>
   {#if !band.folded}
     <div class="tf-dp-body">
@@ -110,6 +127,7 @@
                 class:tf-dp-miss={query.trim() !== "" && !matched}
                 class:tf-dp-dim={dim(el)}
                 class:tf-dp-lit={glow(el)}
+                class:tf-dp-flash={flash === tile.id}
                 data-el={el}
                 data-id={tile.id}
               >

@@ -2,7 +2,19 @@
  * What Dependencies' dialogs and panels call (#873, #875): the commands, as
  * ports a test can stand in for.
  */
-import type { AssetDetail, AssetType, DepLayer, DepView, DepViews, DepViewSettings } from "../../ipc/assets";
+import type {
+  AssetDetail,
+  AssetRow,
+  AssetType,
+  DepLayer,
+  DepView,
+  DepViews,
+  DepViewSettings,
+  RouteDetail,
+  RouteEdit,
+  RouteRow,
+  Visibility,
+} from "../../ipc/assets";
 import type { SavePorts } from "./asset-edit";
 
 export interface ViewPorts {
@@ -17,6 +29,16 @@ export interface LayerPorts {
   deleteDepLayer: (layerId: string) => Promise<DepLayer[]>;
   orderDepLayers: (layerIds: string[]) => Promise<DepLayer[]>;
   placeDepKind: (kind: string, layerId: string | null) => Promise<DepLayer[]>;
+}
+
+/** *Add ▾*'s writes and the route dialog's (#876). `createLink` is {@link SavePorts}'. */
+export interface AddPorts extends SavePorts {
+  assetTypes: () => Promise<AssetType[]>;
+  createAsset: (typeId: string, name: string, parentId?: string | null) => Promise<AssetRow>;
+  getRoute: (routeId: string) => Promise<RouteDetail>;
+  createRoute: (assetId: string, name: string, url: string, targetId?: string | null, visibility?: Visibility) => Promise<RouteRow>;
+  editRoute: (routeId: string, edits: RouteEdit[]) => Promise<RouteRow>;
+  deleteRoute: (routeId: string) => Promise<void>;
 }
 
 export interface EditorPorts extends SavePorts {

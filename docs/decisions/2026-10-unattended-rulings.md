@@ -4215,3 +4215,30 @@ Merge-manager review of PR #1065 (2026-10-17):
   an info panel titled `x`. The check refuses any such line, also one in the middle of a paragraph
   that `from_section_text` would have left as text, which is the safe direction.
   **Reversing:** `blocks::reads_as_a_panel` in `spans`.
+## #876 — Add asset and route (2026-10-17)
+
+Ruled by the implementer (PR for #876).
+
+- ***Import…* in *Add ▾* is drawn disabled, with the reason in its title; follow-up #1066.** The
+  ticket's criteria name only `create_asset`, the route writes and link create, and the only
+  import dialog is the rooms UI's, which #881 removes. **Reversing:** one menu item in
+  `TfDeps.svelte` once #1066 lands.
+- **When the ticket link fails after `create_asset` succeeded, the dialog closes and an error
+  toast says the asset exists but is not linked** (with *Edit it*). Keeping the dialog open, as
+  the asset editor does, would invite a second *Create* and a duplicate asset. Same for a new
+  route. **Reversing:** low.
+- **The ticket link is `create_link(ticket, new item)` with the default relation (`related`)**,
+  the direction and relation *Link to…* draws from the job. **Reversing:** low.
+- ***New asset*'s note drops "which opens next"**: prototype-6 does not open the editor after
+  *Create*, R-11.20 offers *Edit it* in the toast, so the words would be false. **Reversing:**
+  three words.
+- **The address-needs-a-scheme message shows in the dialog's alert line, not a toast**, so it
+  sits beside the field and the dialog keeps what was typed. Same words. **Reversing:** low.
+- **A new tile is drawn open with `Gestures.reveal`**: its layer unfolds, its group opens and it
+  joins the group's lead tiles, without opening the rest of the group. prototype-6 only scrolls
+  to the tile, which fails when the tile sits in a chip or behind "N more". **Reversing:** low.
+- **The asset editor and the new dialogs pick places from the whole estate, also from a ticket**,
+  so *Inside*, *Exposed by* and *Lands on* are not limited to what the ticket reaches.
+  **Reversing:** low.
+- ***+ Link* on work layers from a ticket opens *Link to <key>…***, as prototype-6's band header
+  does. **Reversing:** low.

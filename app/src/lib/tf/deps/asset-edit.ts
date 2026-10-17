@@ -124,7 +124,7 @@ export function planOf(detail: AssetDetail, form: AssetForm): SavePlan {
 export interface SavePorts {
   editAsset: (assetId: string, edits: AssetEdit[]) => Promise<AssetRow>;
   moveAsset: (assetId: string, newParentId: string | null) => Promise<AssetRow>;
-  createLink: (fromId: string, toId: string, relation?: string) => Promise<unknown>;
+  createLink: (fromId: string, toId: string, relation?: string, note?: string) => Promise<unknown>;
 }
 
 /** How a save went: the parts that saved, and the one that did not. */

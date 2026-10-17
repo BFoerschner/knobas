@@ -87,6 +87,11 @@ export interface Gestures {
   more: ReadonlySet<string>;
   /** Layers the reader folded or unfolded by hand, over the view. */
   fold: ReadonlyMap<string, boolean>;
+  /**
+   * An item just added or saved (#876): its layer, group and tile are drawn
+   * open so it can be scrolled to and flash, without opening its whole group.
+   */
+  reveal?: string | null;
 }
 
 export const NO_GESTURES: Gestures = {
@@ -267,7 +272,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
     const shown = layerIn(settings, layer.id);
     if (shown.hidden) continue;
     const items = [...byLayer.get(layer.id)!].sort(sortTiles);
-    const anyHit = items.some(hit);
+    const anyHit = items.some((item) => hit(item) || item.id === gestures.reveal);
     const folded = (gestures.fold.get(layer.id) ?? shown.folded) && !anyHit;
     const compact = compactFor(settings.tiles, items.length);
     const big = items.length > settings.fold_at;
@@ -307,8 +312,9 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
       const key = `${layer.id}|${name}`;
       const problems = members.some(isProblem);
       const matched = members.some(hit);
+      const revealed = gestures.reveal != null && members.some((item) => item.id === gestures.reveal);
       const isOpen =
-        gestures.open.has(key) || matched || (!gestures.shut.has(key) && (problems || !big || ordered.length === 1));
+        gestures.open.has(key) || matched || revealed || (!gestures.shut.has(key) && (problems || !big || ordered.length === 1));
       if (!isOpen) {
         const el = chipEl(key);
         put(members, el);
@@ -316,7 +322,7 @@ export function drawOf(read: Dependencies, settings: DepViewSettings, gestures: 
         continue;
       }
       const all = gestures.more.has(key) || matched;
-      const lead = members.filter((item) => isProblem(item) || hit(item));
+      const lead = members.filter((item) => isProblem(item) || hit(item) || item.id === gestures.reveal);
       const rest = members.filter((item) => !lead.includes(item));
       const tiles = all ? members : [...lead, ...rest.slice(0, Math.max(0, cap - lead.length))];
       const left = members.filter((item) => !tiles.includes(item));
