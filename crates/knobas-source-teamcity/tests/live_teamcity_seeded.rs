@@ -150,6 +150,27 @@ struct Seed {
     /// fixture's, so the exact sets here count them and the leftover
     /// clearing keeps them. Optional for the reason `settings` is.
     changes: Option<SeededChanges>,
+    /// The build chain the seed leaves (#1010): three configurations in a
+    /// project of their own and one build of each on a feature branch. Its
+    /// builds are seeded builds -- the exact sets count them and the leftover
+    /// clearing keeps them -- but its configurations are not the fixture's
+    /// three, which the tests that count those leave it out of
+    /// ([`Seeded::fixture_configs`]). Optional for the reason `settings` is.
+    chain: Option<SeededChain>,
+}
+
+/// `teamcity.chain` in seed-state.json.
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededChain {
+    project: String,
+    build_types: Vec<String>,
+    builds: Vec<SeededChainBuild>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededChainBuild {
+    build_type: String,
+    real_id: i64,
 }
 
 /// `teamcity.changes` in seed-state.json: a configuration built twice on a
@@ -358,8 +379,30 @@ impl Seeded {
                 .iter()
                 .flat_map(|c| [c.before_id, c.after_id]),
         );
+        ids.extend(
+            self.seed
+                .chain
+                .iter()
+                .flat_map(|c| c.builds.iter().map(|b| b.real_id)),
+        );
         ids.sort_unstable();
         ids
+    }
+
+    /// The configurations the fixture makes: what `items` lists less the
+    /// chain's, which the seed adds beside them (#1010) and which the tests
+    /// that assert "these three and no other" must not count.
+    fn fixture_configs<'a>(&self, items: &'a [SyncItem]) -> Vec<&'a SyncItem> {
+        of_kind(items, "build_config")
+            .into_iter()
+            .filter(|i| {
+                !self.seed.chain.iter().any(|c| {
+                    c.build_types
+                        .iter()
+                        .any(|t| i.entity.key == format!("buildType:{t}"))
+                })
+            })
+            .collect()
     }
 
     /// The seeded ids of one configuration, ascending: its fixture builds
@@ -378,6 +421,14 @@ impl Seeded {
                 .iter()
                 .filter(|c| c.build_type == build_type)
                 .flat_map(|c| [c.before_id, c.after_id]),
+        );
+        ids.extend(
+            self.seed
+                .chain
+                .iter()
+                .flat_map(|c| &c.builds)
+                .filter(|b| b.build_type == build_type)
+                .map(|b| b.real_id),
         );
         ids.sort_unstable();
         ids
@@ -852,7 +903,7 @@ async fn the_seeded_projects_and_configurations_land_by_id_and_name() {
     seeded.clear_leftovers().await;
     let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
 
-    let configs = of_kind(&items, "build_config");
+    let configs = seeded.fixture_configs(&items);
     let mut keys: Vec<&str> = configs.iter().map(|i| i.entity.key.as_str()).collect();
     keys.sort_unstable();
     assert_eq!(
@@ -862,7 +913,8 @@ async fn the_seeded_projects_and_configurations_land_by_id_and_name() {
             "buildType:Payout_Build",
             "buildType:Payout_IntegrationTests",
         ],
-        "the three configurations the seed derives from the fixture's `cfg`, and no other"
+        "the three configurations the seed derives from the fixture's `cfg`, and no other \
+         but the chain's (#1010), which the seed adds in a project of its own"
     );
     for (id, title, project) in [
         ("Ledger_Deploy_Staging", "Ledger / Deploy Staging", "Ledger"),
@@ -1278,7 +1330,11 @@ async fn a_build_configurations_web_url_is_composed_from_the_configured_base_url
     println!("SEEDED connected as {:?}", connected.account);
     let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
     let configs = of_kind(&items, "build_config");
-    assert_eq!(configs.len(), 3, "the three seeded configurations");
+    assert_eq!(
+        seeded.fixture_configs(&items).len(),
+        3,
+        "the three seeded configurations, and the chain's beside them"
+    );
 
     for it in &configs {
         let id = it
@@ -1538,7 +1594,7 @@ async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_name
         );
     }
 
-    let configs = of_kind(&items, "build_config");
+    let configs = seeded.fixture_configs(&items);
     assert_eq!(configs.len(), 3, "the seed's three configurations");
     for config in configs {
         let id = config
@@ -3667,6 +3723,90 @@ async fn a_chain_names_its_steps_and_each_runs_build_on_the_branch() {
             .expect("TeamCity keeps pipelines")
             .is_empty()
     );
+}
+
+/// **The chain the seed leaves** (#1010): `./seed --teamcity` makes three
+/// configurations in a project of their own, each waiting on the one before,
+/// and one build of each on a feature branch, so the Builds view's chain line
+/// and the run's *Chain on <branch>* panel have something to show without a
+/// test building it first. Read through the adapter exactly as
+/// [`a_chain_names_its_steps_and_each_runs_build_on_the_branch`] reads its own,
+/// and kept apart from that one's `KnobasChain857`, which that test creates and
+/// deletes.
+#[tokio::test]
+#[ignore = "needs testenv's seeded TeamCity: `just teamcity-live-seeded`"]
+async fn the_seeded_chain_names_its_steps_and_each_step_has_its_run_on_the_feature_branch() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let chain = seeded
+        .seed
+        .chain
+        .clone()
+        .expect("seed-state.json records no `teamcity.chain` -- run `./seed --teamcity`");
+    assert!(chain.build_types.len() >= 3, "a chain of at least three");
+    assert_eq!(chain.builds.len(), chain.build_types.len(), "one build each");
+    assert!(
+        chain
+            .build_types
+            .iter()
+            .all(|t| t.starts_with(&format!("{}_", chain.project))),
+        "every step is in the chain's own project, which holds no fixture configuration: {chain:?}"
+    );
+    assert_ne!(chain.project, CHAIN, "not the suite's own, which it deletes");
+
+    let source = seeded.source(serde_json::json!({}));
+    let pipeline = |t: &str| format!("teamcity:buildType:{t}");
+    let run = |id: i64| format!("teamcity:build:{id}");
+    let names: Vec<(String, String)> = chain
+        .build_types
+        .iter()
+        .map(|t| {
+            (
+                pipeline(t),
+                t.strip_prefix(&format!("{}_", chain.project))
+                    .expect("checked above")
+                    .to_owned(),
+            )
+        })
+        .collect();
+    for t in &chain.build_types {
+        let settings = source
+            .pipeline_settings(&pipeline(t))
+            .await
+            .expect("the settings read")
+            .expect("TeamCity keeps pipelines");
+        let got: Vec<(String, String)> = settings
+            .chain
+            .iter()
+            .map(|s| (s.pipeline.clone(), s.name.clone()))
+            .collect();
+        assert_eq!(got, names, "{t} names the whole chain, first step first");
+    }
+
+    // Each step's build, on one branch that is not the default, and the chain
+    // of any one of them names all three runs.
+    let mut branch = None;
+    for b in &chain.builds {
+        let record = seeded.build(b.real_id).await;
+        assert_eq!(record["state"], "finished", "{record}");
+        assert_eq!(record["status"], "SUCCESS", "{record}");
+        let on = record["branchName"].as_str().expect("a branch").to_owned();
+        assert_ne!(on, "main", "a feature branch, not the default");
+        assert_eq!(*branch.get_or_insert(on.clone()), on, "one branch");
+        assert_eq!(seeded.seeded_ids_of(&b.build_type), [b.real_id]);
+    }
+    let first = chain.builds.first().expect("a build").real_id;
+    let steps = source
+        .run_chain(&run(first))
+        .await
+        .expect("the chain read")
+        .expect("TeamCity keeps pipelines");
+    let runs: Vec<Option<String>> = steps
+        .iter()
+        .map(|s| s.run.as_ref().map(|r| r.entity.to_string()))
+        .collect();
+    let want: Vec<Option<String>> = chain.builds.iter().map(|b| Some(run(b.real_id))).collect();
+    assert_eq!(runs, want, "every step has its run on {branch:?}");
 }
 
 /// The run page's reads on the seeded failed build (#854, #855, #856): the
