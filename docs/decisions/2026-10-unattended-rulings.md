@@ -4080,3 +4080,15 @@ Implementer rulings, one PR for both issues.
   link-after-create pattern is not used. **Reversing:** low.
 - **The button is disabled with no notes**, and the command refuses an empty move with `invalid`.
   **Reversing:** low.
+- **Merge-manager: a second move is not refused, even while the first batch is still queued.**
+  Every page targets the parent, and the queue sends only the head of an entity's queue
+  (`knobas_core::write_queue::due`), so the second batch waits behind the first. When its first
+  page reaches Confluence, a page of that title is already in the space, so Confluence refuses it,
+  and the rest of the batch is held behind that refusal in the write queue, where the reader
+  discards it. Confluence's title rule prevents duplicate pages. A guard would also block a
+  deliberate second move after notes have changed. **Reversing:** low (refuse while a previous
+  move's `CreatePage`s under that parent are open).
+- **Merge-manager: *Move to Confluence…* is offered while notes are hidden.** #832, R-13a.6 and
+  spec #808's story 169 put the move beside the export as the way out of the hidden notes, so it
+  must work with *Show notes and quick capture* off. The button is not gated on `shown`.
+  **Reversing:** low.
