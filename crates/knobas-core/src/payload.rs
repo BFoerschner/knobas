@@ -37,7 +37,9 @@
 //! Two implementations of one rule is a drift risk, and it is pinned rather
 //! than hoped: `crates/knobas-core/tests/it/payload_paths.rs` runs the same
 //! payload/declaration pairs through both and asserts they agree, so a change
-//! to either that the other does not make turns a test red.
+//! to either that the other does not make turns a test red. A declared state
+//! has a third spelling, the signals' [`crate::resolved_state!`], held to the
+//! same cases there.
 //!
 //! # What a declaration may say, and what it may not
 //!
@@ -1297,7 +1299,9 @@ macro_rules! declared_state_candidates {
 
 /// [`declared_state!`]'s rule over a relation of candidates the statement
 /// already holds, `(segs, vals, ord)` rows: the one spelling of the rule,
-/// as [`first_string_of!`] is for a string.
+/// as [`first_string_of!`] is for a string -- save the signals' reader's,
+/// [`resolved_state!`], which reads the values flattened once a statement for
+/// speed (#1148); `payload_paths.rs`'s state-chip cases hold it to this one.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! state_of {

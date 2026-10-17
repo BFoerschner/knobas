@@ -5166,3 +5166,19 @@ Implementer.
 - **Dropped with the core type: `Macro.summary` and the header/rows split of a table.** No caller
   set a summary, and both table branches drew the first row as the header; the golden tests,
   committed first, hold every byte. **Reversing:** low.
+## #1148 — `has:`'s walk, not the search statement, was the floor (2026-10-18)
+
+- **The issue's premise was wrong, and the fix follows the measurement instead.** `explain
+  analyze` on the 22k snapshot showed `has:review-for-me`'s ~130 ms was the walk: it probed the
+  kind of both ends of all 12,000 confirmed links, then read every ticket with any pull request.
+  The search statement around `has:` costs about 22 ms. The fix narrows the walk and leaves the
+  statement alone. **Reversing:** n/a (a diagnosis).
+- **The state rule gets a third spelling.** `resolved_state!` reads `state_of!`'s rule over the
+  values flattened once a statement, at 3.5 µs a row against 7 µs. `payload_paths.rs`'s state-chip
+  cases hold it to `declared_state!` and to Rust's `resolve_state`. **Reversing:** low (spell
+  `resolved_state!` through `state_of!` again).
+- **Criteria partly met; the rest is #1163.** `search has:open-pr` and `search has:review-for-me`
+  are under 100 ms, `has:blocker` is at 100.5 ms and `has:failing-build` at 187 ms. Both of those
+  are per-row work over exact candidate sets, so narrowing the ends further does not help. A
+  backlog ticket records the measured remainder and its directions, and this PR does not take
+  them on. **Reversing:** n/a.

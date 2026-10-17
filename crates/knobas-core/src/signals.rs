@@ -141,6 +141,14 @@ pub struct Signal {
 /// walks the reach for builds: a guard that is false is a one-time filter,
 /// and the walk it guards is never read.
 ///
+/// `prs` probes `sync.item` once a neighbour, in a `lateral ... offset 0`:
+/// with the board's few tickets on analyzed tables, the planner otherwise
+/// started from the pull requests and scanned `n1` once each (#1148).
+///
+/// Whether a `$tickets` id is a ticket is a lookup by its key, once an id:
+/// joined, the planner merged the ids with every entity sorted by id, 58 ms
+/// for the 1,200 tickets `has:failing-build` names at 22,000 items (#1148).
+///
 /// A blocker is found from the ticket's own links (`to_id`), the relation
 /// tested after: in a `lateral ... offset 0`, so the planner cannot read
 /// `relation = 'blocks'` against the pair index, whose third column it is.
@@ -155,7 +163,7 @@ macro_rules! ticket_signals {
             "),
               t as (select distinct tk.tid from ",
             $tickets,
-            " tk join knobas.entity te on te.id = tk.tid where te.kind = 'ticket'),
+            " tk where (select te.kind from knobas.entity te where te.id = tk.tid) = 'ticket'),
               n1 as (select x.tid, x.id from (
                         select t.tid, l.to_id as id
                           from t join knobas.confirmed_link l on l.from_id = t.tid
@@ -189,12 +197,12 @@ macro_rules! ticket_signals {
                              ",
             $crate::resolved_state!(),
             "->>'tone' as tone,
-                             exists (select 1 from ",
-            $crate::declared_list!($decl, "reviewers"),
-            " rv where lower(rv.value) = any(",
-            $me,
-            "::text[])) as asked
-                        from n1 join sync.item i on i.entity_id = n1.id
+                             ",
+            $crate::asked_of!($decl, $me),
+            " as asked
+                        from n1 cross join lateral (
+                               select i.entity_id, i.source_id, i.kind, i.payload from sync.item i
+                                where i.entity_id = n1.id offset 0) i
                        where i.kind = 'pr' and ",
             $crate::live_by_key!("i"),
             ")
@@ -248,18 +256,21 @@ macro_rules! wants_signal {
 /// `has:` hands [`ticket_signals!`], which keeps the tickets among them.
 ///
 /// Only the links that can give the kinds asked for: the `to` end of a
-/// `blocks` link for `blocker`; an end whose other end is a pull request for
-/// `open-pr` and `review-for-me`; and for `failing-build`, the ends within
+/// `blocks` link for `blocker`; the other end of an open pull request's link
+/// for `open-pr`, and of one asking `$me` for a review for `review-for-me`
+/// alone ([`crate::open_prs!`]); and for `failing-build`, the ends within
 /// two hops of a linked build whose declared state is in the `err` tone
-/// ([`err_builds!`]), walked back the way the reach walks out. Before #939
+/// ([`crate::err_builds!`]), walked back the way the reach walks out. Before #939
 /// every kind walked from every end: `has:blocker` read the builds of
-/// 12,000 links to find the 5,000 blocked tickets.
+/// 12,000 links to find the 5,000 blocked tickets. Until #1148 a pull
+/// request's ends were found by probing the kind of every link's end, 24,000
+/// lookups at 22,000 items, and every ticket with any pull request was read.
 ///
 /// A superset is safe and a subset is not: [`ticket_signals!`] decides
 /// over these, so an end here that carries no signal is dropped there.
 #[macro_export]
 macro_rules! signal_ends {
-    ($decl:literal, $kinds:literal) => {
+    ($decl:literal, $me:literal, $kinds:literal) => {
         concat!(
             "(with state_paths as materialized (",
             $crate::state_paths!($decl),
@@ -271,7 +282,10 @@ macro_rules! signal_ends {
             "),
               hop as materialized (
                 select l.from_id as id from eb join knobas.confirmed_link l on l.to_id = eb.id
-                union select l.to_id from eb join knobas.confirmed_link l on l.from_id = eb.id)
+                union select l.to_id from eb join knobas.confirmed_link l on l.from_id = eb.id),
+              op as materialized (",
+            $crate::open_prs!($decl, $me, $kinds),
+            ")
              select hop.id as tid from hop
              union select l.from_id from hop join knobas.entity e on e.id = hop.id
                join knobas.confirmed_link l on l.to_id = hop.id where e.kind <> 'ctx'
@@ -281,57 +295,100 @@ macro_rules! signal_ends {
                where l.relation = 'blocks' and ",
             $crate::wants_signal!($kinds, "'blocker'"),
             "
-             union select l.from_id from knobas.confirmed_link l
-               join knobas.entity e on e.id = l.to_id
-              where e.kind = 'pr' and (",
-            $crate::wants_signal!($kinds, "'open-pr'"),
-            " or ",
-            $crate::wants_signal!($kinds, "'review-for-me'"),
-            ")
-             union select l.to_id from knobas.confirmed_link l
-               join knobas.entity e on e.id = l.from_id
-              where e.kind = 'pr' and (",
-            $crate::wants_signal!($kinds, "'open-pr'"),
-            " or ",
-            $crate::wants_signal!($kinds, "'review-for-me'"),
-            "))"
+             union select l.from_id from op join knobas.confirmed_link l on l.to_id = op.id
+             union select l.to_id from op join knobas.confirmed_link l on l.from_id = op.id)"
         )
     };
 }
 
 /// The live builds whose declared state is in the `err` tone and that are an
 /// end of a confirmed link, as `(id)`: [`signal_ends!`]' start for
-/// `failing-build`, reading `state_paths` ([`state_paths!`]). The `case` reads the
-/// state before the links, so only a red build's links are probed.
+/// `failing-build`, reading `state_paths` ([`state_paths!`]). The `case` reads
+/// the state first, so only a red build is probed for being live and for its
+/// links: beside the `case`, the planner put the two liveness lookups first,
+/// two probes for each of the 5,000 builds where 600 are red (#1148).
 #[doc(hidden)]
 #[macro_export]
 macro_rules! err_builds {
     () => {
         concat!(
             "select i.entity_id as id from sync.item i
-              where i.kind = 'build' and ",
-            $crate::live_by_key!("i"),
-            " and case when ",
+              where i.kind = 'build' and case when ",
             $crate::resolved_state!(),
             "->>'tone' = 'err'
-                then exists (select 1 from knobas.confirmed_link l where l.from_id = i.entity_id)
-                  or exists (select 1 from knobas.confirmed_link l where l.to_id = i.entity_id)
+                then ",
+            $crate::live_by_key!("i"),
+            "
+                 and (exists (select 1 from knobas.confirmed_link l where l.from_id = i.entity_id)
+                      or exists (select 1 from knobas.confirmed_link l where l.to_id = i.entity_id))
                 else false end"
         )
     };
 }
 
-/// Every declared source's `state` candidates for builds and pull requests,
-/// resolved once a statement: `(source_id, kind, segs, vals, ord)`, which
+/// The live pull requests whose declared state is in the `info` tone, the
+/// open ones, as `(id)`: [`signal_ends!`]' start for `open-pr` and
+/// `review-for-me`, reading `state_paths` and `$decl`, `$me` and `$kinds` as
+/// [`ticket_signals!`] does. Asked for `review-for-me` alone, only those that
+/// ask one of `$me` for a review ([`asked_of!`]). The state is read first, as
+/// in [`err_builds!`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! open_prs {
+    ($decl:literal, $me:literal, $kinds:literal) => {
+        concat!(
+            "select i.entity_id as id from sync.item i
+              where i.kind = 'pr' and (",
+            $crate::wants_signal!($kinds, "'open-pr'"),
+            " or ",
+            $crate::wants_signal!($kinds, "'review-for-me'"),
+            ") and case when ",
+            $crate::resolved_state!(),
+            "->>'tone' = 'info'
+                then ",
+            $crate::live_by_key!("i"),
+            " and (",
+            $crate::wants_signal!($kinds, "'open-pr'"),
+            " or ",
+            $crate::asked_of!($decl, $me),
+            ")
+                else false end"
+        )
+    };
+}
+
+/// Whether the pull request `i` declares a requested reviewer among `$me`
+/// (a `text[]`, lowercased), ignoring case: `review-for-me`'s test, in
+/// [`ticket_signals!`] and [`open_prs!`].
+#[doc(hidden)]
+#[macro_export]
+macro_rules! asked_of {
+    ($decl:literal, $me:literal) => {
+        concat!(
+            "exists (select 1 from ",
+            $crate::declared_list!($decl, "reviewers"),
+            " rv where lower(rv.value) = any(",
+            $me,
+            "::text[]))"
+        )
+    };
+}
+
+/// Every declared source's `state` values for builds and pull requests,
+/// flattened once a statement: `(source_id, kind, segs, ord, value, vord,
+/// text, tone)`, one row per value a candidate maps that has a tone, which
 /// [`resolved_state!`] reads per row as the CTE `state_paths`. Through
 /// [`crate::declared_state!`] each row walked the whole declaration, about
-/// 19 µs a build on the probe (#939).
+/// 19 µs a build on the probe (#939); through [`crate::state_of!`] over the
+/// candidates it still unnested each candidate's values once a row, about
+/// 7 µs a build at 22,000 items, and 3.5 µs over these rows (#1148).
 #[doc(hidden)]
 #[macro_export]
 macro_rules! state_paths {
     ($decl:literal) => {
         concat!(
-            "select i.source_id, i.kind, c.segs, c.vals, c.ord
+            "select i.source_id, i.kind, c.segs, c.ord, v.e->'value' as value, v.vord,
+                    v.e->>'text' as text, v.e->>'tone' as tone
                from (select d.source_id, k.kind
                        from jsonb_object_keys(case when jsonb_typeof(",
             $decl,
@@ -341,21 +398,47 @@ macro_rules! state_paths {
                       cross join (values ('build'), ('pr')) as k(kind)) i
               cross join lateral ",
             $crate::declared_state_candidates!($decl),
-            " c"
+            " c
+              cross join lateral jsonb_array_elements(
+                case when jsonb_typeof(c.vals) = 'array' then c.vals else '[]'::jsonb end)
+                with ordinality as v(e, vord)
+             where jsonb_typeof(v.e->'tone') = 'string'"
         )
     };
 }
 
 /// The row `i`'s declared state through `state_paths` ([`state_paths!`]):
-/// [`crate::declared_state!`]'s answer, by the one rule ([`crate::state_of!`]).
+/// [`crate::declared_state!`]'s answer, by [`crate::state_of!`]'s rule over
+/// the values flattened -- the first candidate, then the first of its values,
+/// that equals the string (trimmed, blank as none) or boolean at its path,
+/// named by its `text` or else the value. `payload_paths.rs`'s state-chip
+/// cases hold the two spellings to one answer.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! resolved_state {
     () => {
-        $crate::state_of!(
-            "(select p.segs, p.vals, p.ord from state_paths p \
-              where p.source_id = i.source_id and p.kind = i.kind)"
+        concat!(
+            "(select jsonb_build_object('text', coalesce(p.text, (",
+            $crate::state_value_at!(),
+            ") #>> '{}'), 'tone', p.tone)
+               from state_paths p
+              where p.source_id = i.source_id and p.kind = i.kind and p.value = ",
+            $crate::state_value_at!(),
+            "
+              order by p.ord, p.vord limit 1)"
         )
+    };
+}
+
+/// The value at `p.segs` in the row `i`'s payload as [`crate::state_of!`]
+/// compares it: a string trimmed (blank as none), a boolean, else none.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! state_value_at {
+    () => {
+        "case jsonb_typeof(i.payload #> p.segs)
+                when 'string' then to_jsonb(nullif(btrim(i.payload #>> p.segs), ''))
+                when 'boolean' then i.payload #> p.segs end"
     };
 }
 
