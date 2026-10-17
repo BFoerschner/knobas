@@ -5132,8 +5132,11 @@ Implementer.
   because a later step of its chain was (87 of 100 builds on the public instance, #106), so a
   miss leaves most of a chain's runs with no trigger. `Person` would be wrong where a VCS trigger
   on the last step queued the chain, which names no account. The word is *chain* because
-  prototype-6 and `CONTEXT.md` already call these *chains* (*Chain on main*, *Step 2 of the
-  chain*). **Reversing:** medium (enum variant, SQL list, TS mirror, fake, live pin).
+  prototype-6 (its chain view) and `mockups/ticket-first/requirements.md` (*Step 2 of the
+  chain*) already call these *chains*; `CONTEXT.md` has no entry for the word.
+  **Reversing:** medium (enum variant, SQL list, TS mirror, fake, live pin).
+  (Citation corrected by the PR #1153 merge-manager: the first draft named `CONTEXT.md` and a
+  phrase, *Chain on main*, that neither document holds.)
 - **The trigger column reads *Chain*, *Chain, by jonas*, *Chain, by you*.** prototype-6 has no
   wording for a chain-queued run; its *Schedule, nightly* is the model for a qualifier after a
   comma. The account stays in the column because TeamCity names whoever queued the chain.
