@@ -1251,6 +1251,32 @@ test("an asset hit draws its monogram and the path from the root", async () => {
   expect(headings).toEqual(["Assets", "Routes"]);
 });
 
+test("Enter on a Jira view opens that view in Tickets, never Code (#1094)", async () => {
+  const onnavigate = vi.fn();
+  const views = {
+    groups: [
+      {
+        kind: "jira_view",
+        label: "Jira view",
+        plural: "Jira views",
+        monogram: "JV",
+        total: 1,
+        hits: [hit({ entity_id: "jira:board-21", kind: "jira_view", source_id: "jira", title: "PAY board" })],
+      },
+    ],
+    total: 1,
+  };
+  open({ onnavigate, ports: { search: async () => response(views), launcherHome: async () => HOME } });
+  await settle();
+  await search("pay board");
+
+  press("Enter");
+  await settle();
+
+  expect(onnavigate).toHaveBeenCalledWith("#/tickets/jira-board-21");
+  expect(onnavigate).not.toHaveBeenCalledWith("#/code");
+});
+
 /**
  * Every hit whose kind declares a parent arrives with the parent chain on its
  * `path` (#596), and the launcher draws whatever path a hit carries — no kind

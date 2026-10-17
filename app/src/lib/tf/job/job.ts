@@ -201,10 +201,24 @@ export function openPrs(rows: readonly EntityRow[]): number {
 }
 
 /**
+ * The id of the ticket view a Jira view projects to: the projection's own rule
+ * (`knobas_sync::jira_views`), so `jira:board-21` is `jira-board-21` and
+ * `#/tickets/<slug>` is stable (#1094).
+ */
+export function jiraViewSlug(entityId: string): string {
+  return entityId
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/**
  * The full view a row opens (R-4.10): the item's own address in the new
  * shell, never a panel. The address carries the entity id, because a pull
  * request's number is unique only inside its repository. A kind with no view
- * of its own in prototype-6 opens Code.
+ * of its own opens the section that lists it: a Jira view its ticket view, a
+ * build configuration Builds, anything else Tickets, the home. Never Code: a
+ * kind that is not code does not belong there (#1094).
  */
 export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
   const id = encodeURIComponent(row.entity_id);
@@ -227,8 +241,12 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
       return `#/asset/${id}`;
     case "monitor":
       return "#/monitors";
+    case "jira_view":
+      return `#/tickets/${jiraViewSlug(row.entity_id)}`;
+    case "build_config":
+      return "#/builds";
     default:
-      return "#/code";
+      return "#/tickets";
   }
 }
 
