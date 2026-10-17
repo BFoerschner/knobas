@@ -58,11 +58,11 @@ const gap = (id: string, type_id: string, type_label: string, name: string): Unm
 const UNWATCHED = [
   gap("asset:site", "site", "Site", "hel1"),
   gap("asset:pg", "database_server", "Database server", "pg-main"),
-  { ...gap("route:gitea", "route", "Route", "Gitea"), url: "https://gitea.local/" },
+  { ...gap("route:gitea", "route", "Route", "Gitea"), url: "https://gitea.test/" },
 ];
 
 const ROUTE_DETAIL = {
-  route: { id: "route:gitea", name: "Gitea", url: "https://gitea.local/" },
+  route: { id: "route:gitea", name: "Gitea", url: "https://gitea.test/" },
   history: [],
   monitor_targets: [{ source_id: "kuma", display_name: "Uptime Kuma", entity: "kuma:monitors" }],
 } as unknown as RouteDetail;
@@ -228,7 +228,7 @@ test("Create monitor on a route opens as HTTP on its URL plus /health and record
   const dialog = document.querySelector(".tf-dialog")!;
   expect(text(dialog.querySelector("h2"))).toBe("Create a monitor for Gitea");
   const inputs = [...dialog.querySelectorAll<HTMLInputElement>("input")];
-  expect(inputs.map((input) => input.value)).toEqual(["Gitea /health", "https://gitea.local/health"]);
+  expect(inputs.map((input) => input.value)).toEqual(["Gitea /health", "https://gitea.test/health"]);
   expect(dialog.querySelector<HTMLSelectElement>("select")!.value).toBe("http");
   expect(text(dialog.querySelector(".tf-note"))).toBe("Created in Uptime Kuma through the write queue, attached to this route.");
 
@@ -237,7 +237,7 @@ test("Create monitor on a route opens as HTTP on its URL plus /health and record
   expect(routeEdits).toEqual([["route:gitea", [{ field: "monitors", added: ["Gitea /health"] }]]]);
   expect(edits).toEqual([]);
   expect(writes).toEqual([
-    { CreateMonitor: { entity: "kuma:monitors", name: "Gitea /health", url: "https://gitea.local/health", kind: "http" } },
+    { CreateMonitor: { entity: "kuma:monitors", name: "Gitea /health", url: "https://gitea.test/health", kind: "http" } },
   ]);
 });
 

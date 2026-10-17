@@ -194,10 +194,10 @@ describe("Assets nothing watches", () => {
   });
 
   test("a route opens as HTTP on its URL plus /health, trailing slash or not; no http(s) URL leaves the target empty", () => {
-    expect(routePrefill({ name: "Gitea", url: "https://gitea.local/" })).toEqual({
+    expect(routePrefill({ name: "Gitea", url: "https://gitea.test/" })).toEqual({
       name: "Gitea /health",
       kind: "http",
-      target: "https://gitea.local/health",
+      target: "https://gitea.test/health",
     });
     expect(routePrefill({ name: "Api", url: "http://api.test:8080/v1" }).target).toBe("http://api.test:8080/v1/health");
     expect(routePrefill({ name: "Tunnel", url: "ssh://host" }).target).toBe("");
