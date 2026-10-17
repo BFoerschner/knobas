@@ -1491,6 +1491,35 @@ async fn mentioned_user_key(env: &Env) -> String {
         .to_owned()
 }
 
+/// Move page `id` to just before its sibling `before`, the way the page
+/// tree's drag does. Data Center 9.2 has no REST call for it
+/// (`rest/api/content/{id}/move/…` answers 404 there), so this is the page
+/// tree's own action, with the header that waives its XSRF token for a
+/// basic-auth caller. Each attempt's answer is printed, so a Confluence that
+/// moved the action says where.
+async fn move_before(env: &Env, id: &str, before: &str) {
+    let http = client();
+    let mut tried = Vec::new();
+    for method in [reqwest::Method::POST, reqwest::Method::GET] {
+        let response = http
+            .request(method.clone(), format!("{}/pages/movepage.action", env.url))
+            .query(&[("pageId", id), ("targetId", before), ("position", "above")])
+            .header("X-Atlassian-Token", "no-check")
+            .basic_auth(&env.user, Some(&env.password))
+            .send()
+            .await
+            .unwrap_or_else(|e| panic!("{method} movepage.action: {e}"));
+        let status = response.status().as_u16();
+        let text = response.text().await.unwrap_or_default();
+        println!("{method} movepage.action -> {status}: {}", &text[..text.len().min(300)]);
+        if (200..300).contains(&status) {
+            return;
+        }
+        tried.push(format!("{method} -> {status}"));
+    }
+    panic!("moving {id} before {before}: {}", tried.join(", "));
+}
+
 /// **Every mention key resolves, and the tree is in Confluence's order**
 /// (#953), against the real container. A page mentions a user who neither
 /// made, edited nor commented on it, so only the sync's user lookup can name
@@ -1548,14 +1577,7 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
     )
     .await;
     litter.created.insert(0, zeta.clone());
-    let (status, moved) = env
-        .call(
-            reqwest::Method::PUT,
-            &format!("rest/api/content/{zeta}/move/before/{alpha}"),
-            None,
-        )
-        .await;
-    assert_eq!(status, 200, "moving Zeta before Alpha: {moved}");
+    move_before(&env, &zeta, &alpha).await;
     for id in [&alpha, &zeta] {
         let record = env.content(id, "version").await;
         println!("page {id}: extensions = {}", record["extensions"]);
