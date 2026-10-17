@@ -8,10 +8,9 @@ import { expect, test } from "vitest";
 import type { PipelineSettings, RunRow, SourceView, ViewSection } from "../../ipc/entity";
 import {
   artifactsOf,
+  builtCommit,
   changesOf,
-  commitOf,
   contextLine,
-  factOf,
   failureHeading,
   firstFailure,
   locationIn,
@@ -39,6 +38,9 @@ function run(no: number, tone: "ok" | "err" | null, branch = "main", extra: Part
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
     ...extra,
   };
 }
@@ -217,16 +219,17 @@ const VIEW: SourceView = {
   ],
 };
 
-test("a fact of the run's overview is read by its label", () => {
-  expect(factOf(VIEW, "Triggered by")).toBe("mara.lindqvist");
-  expect(factOf(VIEW, "Agent")).toBe("agent-linux-03");
-  expect(factOf(VIEW, "Now")).toBeNull();
-  expect(factOf(null, "Agent")).toBeNull();
+test("the commit a run built is its declared revision, short, opening the mirrored commit where there is one (#1004)", () => {
+  const sha = "a41f2c0b9e11d4c7a3f05e2b6c8d9e0f1a2b3c4d";
+  expect(builtCommit(run(7, "ok", "main", { revision: sha, commit_id: "gitea:commit:a41f2c" }))).toEqual({
+    sha: "a41f2c",
+    entityId: "gitea:commit:a41f2c",
+  });
+  expect(builtCommit(run(7, "ok", "main", { revision: sha }))).toEqual({ sha: "a41f2c", entityId: null });
+  expect(builtCommit(run(7, "ok"))).toBeNull();
 });
 
-test("the commit is the overview's row with a sha, and the pipeline the row a pipeline of the list carries", () => {
-  expect(commitOf(VIEW)).toEqual({ sha: "a41f2c0b9e11", entityId: "gitea:commit:a41f2c" });
-  expect(commitOf(null)).toBeNull();
+test("the pipeline is the row a pipeline of the list carries", () => {
   expect(pipelineOfRun(VIEW, ["teamcity:buildType:B", "teamcity:buildType:A"])).toBe("teamcity:buildType:A");
   expect(pipelineOfRun(VIEW, ["teamcity:buildType:B"])).toBeNull();
 });

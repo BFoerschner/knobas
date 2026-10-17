@@ -114,6 +114,11 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// `triggered.user.username`. Any other type (`buildType`, a finished
 /// dependency) is a miss, which the shell draws as no trigger.
 ///
+/// **Where a run ran and what it is doing now** (#1004) are `agent.name`,
+/// which a build has from the moment an agent takes it, and
+/// `running-info.currentStageText`, which TeamCity serves only while the
+/// build runs.
+///
 /// **A pipeline's chain of groups** (#849) is its `projectPath`, which the
 /// sync writes beside the record from `/app/rest/projects`
 /// (`crate::projects`): every project from below the root down to the
@@ -161,6 +166,8 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
                 ],
             }],
             started_by: vec![PayloadPath::of(["triggered", "user", "username"])],
+            agent: vec![PayloadPath::of(["agent", "name"])],
+            current_step: vec![PayloadPath::of(["running-info", "currentStageText"])],
             ..KindPaths::default()
         },
         KindPaths {
@@ -464,6 +471,40 @@ mod tests {
             .find(|p| p.kind == KIND_BUILD_CONFIG)
             .unwrap();
         assert!(config.trigger.is_empty() && config.started_by.is_empty());
+    }
+
+    /// The agent a build ran on and what a running one is doing now (#1004),
+    /// off `agent(name)` and `running-info(currentStageText)` as
+    /// `BUILD_FIELDS` asks for them; a queued build has neither, a finished
+    /// one no step, and a configuration declares neither.
+    #[test]
+    fn a_build_names_its_agent_and_what_it_is_doing_now() {
+        use knobas_core::payload::resolve_string;
+        let declared = descriptor_template().payload_paths;
+        let run = declared.iter().find(|p| p.kind == KIND_BUILD).unwrap();
+        let running = serde_json::json!({
+            "id": 7, "state": "running", "agent": { "name": "agent-linux-03" },
+            "running-info": { "currentStageText": "step 3/5 `cargo test`" }
+        });
+        assert_eq!(
+            resolve_string(&running, &run.agent).as_deref(),
+            Some("agent-linux-03")
+        );
+        assert_eq!(
+            resolve_string(&running, &run.current_step).as_deref(),
+            Some("step 3/5 `cargo test`")
+        );
+        let finished =
+            serde_json::json!({ "id": 8, "state": "finished", "agent": { "name": "a1" } });
+        assert_eq!(resolve_string(&finished, &run.agent).as_deref(), Some("a1"));
+        assert_eq!(resolve_string(&finished, &run.current_step), None);
+        let queued = serde_json::json!({ "id": 9, "state": "queued" });
+        assert_eq!(resolve_string(&queued, &run.agent), None);
+        let config = declared
+            .iter()
+            .find(|p| p.kind == KIND_BUILD_CONFIG)
+            .unwrap();
+        assert!(config.agent.is_empty() && config.current_step.is_empty());
     }
 
     /// A build ran on every revision it lists (#710): one sha per VCS root,

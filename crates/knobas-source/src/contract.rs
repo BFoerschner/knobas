@@ -783,7 +783,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             .iter()
             .find(|p| p.kind == item.kind)
             .unwrap_or(&nothing);
-        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 27] = [
+        let scalars: [(&str, &Vec<PayloadPath>, Wanted); 29] = [
             (field::STATUS_NAME, &paths.status_name, Wanted::Text),
             (field::PRIORITY, &paths.priority, Wanted::Text),
             (field::ASSIGNEE, &paths.assignee, Wanted::Text),
@@ -806,6 +806,8 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             (field::STARTED, &paths.started, Wanted::Instant),
             (field::FINISHED, &paths.finished, Wanted::Instant),
             (field::STARTED_BY, &paths.started_by, Wanted::Text),
+            (field::AGENT, &paths.agent, Wanted::Text),
+            (field::CURRENT_STEP, &paths.current_step, Wanted::Text),
             (field::LANGUAGE, &paths.language, Wanted::Text),
             (field::OWNER, &paths.owner, Wanted::Text),
             (field::MONITOR_TYPE, &paths.monitor_type, Wanted::Text),
@@ -866,13 +868,22 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
             resolve_trigger(&item.payload, &paths.trigger),
             Some(knobas_core::payload::Trigger::Change | knobas_core::payload::Trigger::Schedule)
         );
+        // Only a run in flight is doing something now (#1004): its declared
+        // `started` reads and its `finished` does not. TeamCity serves
+        // `running-info` on a running build alone, so a finished or a queued
+        // one is the source saying nothing about `current_step`, and a corpus
+        // with no build running at all has no evidence either way.
+        let in_flight = resolve_string(&item.payload, &paths.started).is_some()
+            && resolve_string(&item.payload, &paths.finished).is_none();
         for (name, candidates, wanted) in scalars {
             let seen = evidence.entry((&item.kind, name)).or_default();
             let judged = seen.names_a_missing_key;
             for path in candidates {
                 weigh(seen, name, &item.payload, path, wanted, "on");
             }
-            if name == field::STARTED_BY && nobody_started {
+            if (name == field::STARTED_BY && nobody_started)
+                || (name == field::CURRENT_STEP && !in_flight)
+            {
                 seen.names_a_missing_key = judged;
             }
         }
@@ -1335,6 +1346,18 @@ mod tests {
         /// person: runs somebody started, so the absent key is a misspelled
         /// path and still evidence (#961).
         StartedByOnRunsAPersonStarted,
+        /// Declares the agent a run ran on at a key its records do not have
+        /// (`agnt`, #1004).
+        AgentAtAMissingKey,
+        /// Declares what a run is doing now at a key its records do not
+        /// have (`stage`), on records with no `started`: runs not in flight,
+        /// so the absent key is the source saying nothing (#1004).
+        /// Conforming.
+        CurrentStepOnRunsNotInFlight,
+        /// The same `current_step`, on records that started and have not
+        /// finished: runs in flight, so the absent key is a misspelled path
+        /// (#1004).
+        CurrentStepOnRunsInFlight,
     }
 
     struct TestSource {
@@ -1580,6 +1603,22 @@ mod tests {
                             }],
                             ..good
                         }],
+                        Behavior::AgentAtAMissingKey => vec![KindPaths {
+                            agent: vec![PayloadPath::of(["agnt"])],
+                            ..good
+                        }],
+                        Behavior::CurrentStepOnRunsNotInFlight => vec![KindPaths {
+                            current_step: vec![PayloadPath::of(["stage"])],
+                            started: vec![PayloadPath::of(["started"])],
+                            finished: vec![PayloadPath::of(["finished"])],
+                            ..good
+                        }],
+                        Behavior::CurrentStepOnRunsInFlight => vec![KindPaths {
+                            current_step: vec![PayloadPath::of(["stage"])],
+                            started: vec![PayloadPath::of(["started"])],
+                            finished: vec![PayloadPath::of(["finished"])],
+                            ..good
+                        }],
                         _ => vec![good],
                     }
                 },
@@ -1673,6 +1712,15 @@ mod tests {
                             }
                             Behavior::ParentRecordsNameIsNotAString => {
                                 payload["key"] = serde_json::json!({ "id": 1 });
+                            }
+                            // A run in flight (#1004): started, not finished.
+                            Behavior::CurrentStepOnRunsInFlight => {
+                                payload["started"] = serde_json::json!("2026-08-22T10:20:00Z");
+                            }
+                            // A finished run, which is doing nothing now.
+                            Behavior::CurrentStepOnRunsNotInFlight => {
+                                payload["started"] = serde_json::json!("2026-08-22T10:20:00Z");
+                                payload["finished"] = serde_json::json!("2026-08-22T10:24:12Z");
                             }
                             _ => {}
                         }
@@ -2197,6 +2245,36 @@ mod tests {
         rejects(
             Behavior::StartedByOnRunsAPersonStarted,
             "declares started_by of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_an_agent_at_a_key_no_record_has() {
+        rejects(
+            Behavior::AgentAtAMissingKey,
+            "declares agent of kind \"ticket\" at a path no item of that kind resolves",
+        )
+        .await;
+    }
+
+    /// A finished run is doing nothing now (#1004): TeamCity serves
+    /// `running-info` only while a build runs, so its absence there is not
+    /// judged.
+    #[tokio::test]
+    async fn accepts_a_current_step_absent_from_runs_not_in_flight() {
+        run(Behavior::CurrentStepOnRunsNotInFlight)
+            .await
+            .expect("a finished run is doing nothing now");
+    }
+
+    /// The excuse is the run's, not the declaration's (#1004): on a run in
+    /// flight, an absent `current_step` key is a misspelled path again.
+    #[tokio::test]
+    async fn rejects_a_current_step_absent_from_runs_in_flight() {
+        rejects(
+            Behavior::CurrentStepOnRunsInFlight,
+            "declares current_step of kind \"ticket\" at a path no item of that kind resolves",
         )
         .await;
     }

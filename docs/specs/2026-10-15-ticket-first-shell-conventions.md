@@ -138,3 +138,7 @@ Not yet recorded: the conventions of #826 (PR #899 was open when this was writte
 - How a run was started is said one way everywhere, `triggerLabel` over the row's declared
   `trigger`, `started_by` and `revision`; *you* is the row's `started_by_me`, never a username the
   frontend compares. (#961)
+- The run page reads a run's own facts from its row, never from the view's facts by their labels:
+  *Agent* is `agent`, *Now* is `current_step`, *Commit* is `revision` (short, `shortSha`) opening
+  `commit_id`. The view supplies only what has no declared field: tabs, artifacts, changes,
+  parameters. (#1004)

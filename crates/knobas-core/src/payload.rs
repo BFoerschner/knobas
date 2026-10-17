@@ -396,6 +396,17 @@ pub struct KindPaths {
     /// a run a change or a schedule started has none.
     #[serde(default)]
     pub started_by: Vec<PayloadPath>,
+    /// The machine a run ran on, by the name the source gives it (#1004):
+    /// TeamCity's `agent.name`. A run no agent has taken yet (a queued
+    /// TeamCity build) has none.
+    #[serde(default)]
+    pub agent: Vec<PayloadPath>,
+    /// What a run in flight is doing now, in the source's own words (#1004):
+    /// TeamCity's `running-info.currentStageText` (*step 3/5 `cargo test`*).
+    /// Only a run that has started and not finished has one; a finished or a
+    /// queued run misses.
+    #[serde(default)]
+    pub current_step: Vec<PayloadPath>,
     /// The language a repository is written in, in the source's own word
     /// (#966, R-8.1): Gitea's `language`, which it works out from the
     /// default branch's files. Gitea writes `""` for a repository it found
@@ -600,6 +611,8 @@ pub mod field {
     pub const FINISHED: &str = "finished";
     pub const TRIGGER: &str = "trigger";
     pub const STARTED_BY: &str = "started_by";
+    pub const AGENT: &str = "agent";
+    pub const CURRENT_STEP: &str = "current_step";
     pub const LANGUAGE: &str = "language";
     pub const TEAMS: &str = "teams";
     pub const OWNER: &str = "owner";
@@ -644,6 +657,8 @@ pub mod field {
         FINISHED,
         TRIGGER,
         STARTED_BY,
+        AGENT,
+        CURRENT_STEP,
         LANGUAGE,
         TEAMS,
         OWNER,

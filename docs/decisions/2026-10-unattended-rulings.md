@@ -4962,3 +4962,61 @@ Merge-manager (deep pass on false deliveries):
 - **Three pages of open pull requests is enough.** The listing is `sort=recentupdate`, 50 a page,
   and the pull request Gitea refused over was opened moments ago, so it is on page one; past the
   bound the refusal stands, which is the old answer. **Reversing:** trivial.
+
+## #1004 — Run page: agent, what a run is doing now and its commit as run fields (2026-10-17)
+
+Implementer, PR for #1004.
+
+- ***Now* is a third declared field, `current_step`, not one the ticket names.** The ticket says
+  to declare `agent` and read `revision`; its triage comment says *Now* and the commit link come
+  from the row too, and `factOf` cannot go while *Now* reads the view's fact. *Now* is not one of
+  R-9.12's *steps* (`run_log`'s list, #854): it is TeamCity's one-line
+  `running-info.currentStageText`, which `BUILD_FIELDS` already fetched. Named for what it is to
+  the shell, not TeamCity's *stage*. **Reversing:** medium (a frozen field; drop it and read the
+  log's running step instead).
+- **mockd names an agent, `knobas-agent`, on every build that ran.** ADR-0013 freezes mockd, but
+  `agent(name)` is an `UnknownField` 400 there without a known `agent` key, and with only a `null`
+  the battery's clause 3 fails on mockd's corpus (every started build names a missing key). The
+  name is the one the test environment fixes for its one agent (`docker-compose.yml`), so mockd
+  serves what the seeded server serves; unlike deviation 12's triggerer an agent is no person and
+  is indexed nowhere. Recorded as crate deviation 18. **Reversing:** low (an excuse in the battery
+  instead, which would also stop it catching a misspelled `agent` on mockd).
+- **The battery judges `current_step` only on a run in flight** (declared `started` reads,
+  `finished` does not), as #961 excused `started_by` on runs nobody started: TeamCity serves
+  `running-info` only while a build runs, so the seeded corpus normally has no evidence either
+  way. `agent` needs no excuse: a queued run lacks it, but any run that started resolves it.
+  **Reversing:** low.
+- **The commit link is found by kind and declared `commit`, in one read per command.** The view's
+  commit row was resolved by repository URL and sha (#665); `RunRow` has only the sha. A branch
+  and a pull request declare a `commit` too, so the read keeps items of kind `commit`, the kind
+  the commit page opens. Filled on every command that answers a `RunRow`, so a row means the same
+  everywhere, at the cost of one read over the mirror's commits (by kind) per call, skipped when no
+  run has a revision. **Reversing:** low (fill it on `pipeline_runs` only).
+- **The run page's commit is six characters**, the length the Runs table's *VCS change a41f2c*
+  already uses (`shortSha`), where the view's chip was TeamCity's twelve. **Reversing:** trivial.
+
+Merge-manager (deep pass):
+
+- **Deviation 18 stands within ADR-0013; the ADR is not amended.** The ADR freezes what mockd is
+  for: no mock is a witness, no Confluence half, no new system. It also keeps mockd's tests "until
+  the live suites assert the same things", and those tests run the adapter's real requests. Under
+  deviation 6, a `fields=` name mockd does not know is a 400. So once `BUILD_FIELDS` asks for
+  `agent(name)`, which the ticket's triage comment requires, every mockd-backed TeamCity sync would
+  fail unless mockd knows the key. #729 settled the same case on 2026-10-13 by adding `revisions`
+  to `build_json`. The refusals cited against "nothing new" (#297's probe, #643's sub-task, the
+  configuration-view route) were a new route or new fixture records offered as a witness. This
+  change adds a key on an existing route, and the value is the test environment's fixed agent
+  name. The witness stays `teamcity-live-seeded` (24/24 + 4/4 on this PR). **Reversing:** low
+  (drop the key and `agent(name)` together, or ask Björn to state in ADR-0013 whether served keys
+  count as "new").
+- **The commit lookup by sha alone is accepted for this ticket; disambiguation is #1144
+  (backlog).** A fork or second-forge mirror holds the same sha, and `distinct on` then picks the
+  lowest entity id, possibly in the other repository. #665's view row matched by repository URL
+  and sha. `RunRow` carries no repository, and fetching the VCS root URL is a new declaration
+  outside this ticket. The commit's content is the same either way. **Reversing:** low.
+- **The `current_step` excuse is accepted.** It mirrors #961's `started_by` excuse, and both
+  mutants are pinned. A kind that declares `current_step` but no `started` is never judged on it,
+  which the §10.8 entry says. On the live side, only the finished direction is witnessed (1187
+  `None`). The in-flight value comes from the same `running-info.currentStageText` that the
+  view's *Now* fact read before, so this gap was already there and is not new here.
+  **Reversing:** low.

@@ -1,6 +1,9 @@
 {
   "build": [
     {
+      "agent": {
+        "name": "knobas-agent"
+      },
       "branchName": "feature/PAY-231-sepa-retry",
       "buildType": {
         "href": "/app/rest/buildTypes/id:Payout_Build",
@@ -42,6 +45,9 @@
       "webUrl": "http://mockd.test/buildConfiguration/Payout_Build/1188"
     },
     {
+      "agent": {
+        "name": "knobas-agent"
+      },
       "branchName": "feature/PAY-231-sepa-retry",
       "buildType": {
         "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",
@@ -73,6 +79,9 @@
       "webUrl": "http://mockd.test/buildConfiguration/Payout_IntegrationTests/1187"
     },
     {
+      "agent": {
+        "name": "knobas-agent"
+      },
       "branchName": "main",
       "buildType": {
         "href": "/app/rest/buildTypes/id:Ledger_Deploy_Staging",

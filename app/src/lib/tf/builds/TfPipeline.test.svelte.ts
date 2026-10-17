@@ -59,6 +59,9 @@ function run(no: number, tone: "ok" | "err", started: string, extra: Partial<Run
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
     ...extra,
   };
 }

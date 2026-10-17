@@ -519,6 +519,7 @@ knobas-app	test/it	builds_ipc::a_runs_chain_is_the_sources_answer_read_through_t
 knobas-app	test/it	builds_ipc::older_runs_are_the_sources_answer_read_through_the_run_declarations
 knobas-app	test/it	builds_ipc::older_runs_of_no_pipeline_or_a_foreign_run_are_refused
 knobas-app	test/it	builds_ipc::pipelines_carry_their_name_group_and_last_twelve_runs
+knobas-app	test/it	builds_ipc::runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit
 knobas-app	test/it	builds_ipc::runs_carry_their_trigger_who_started_them_and_their_commit
 knobas-app	test/it	builds_ipc::runs_of_something_that_is_no_pipeline_are_refused
 knobas-app	test/it	builds_ipc::settings_name_the_mirrored_repository_by_its_id
@@ -2119,6 +2120,7 @@ knobas-source	lib/knobas_source	clone_urls::tests::a_clone_url_becomes_its_sourc
 knobas-source	lib/knobas_source	clone_urls::tests::a_schema_declares_the_key_as_an_array_of_strings
 knobas-source	lib/knobas_source	clone_urls::tests::an_entry_is_a_url_or_an_scp_like_remote
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
+knobas-source	lib/knobas_source	contract::tests::accepts_a_current_step_absent_from_runs_not_in_flight
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
 knobas-source	lib/knobas_source	contract::tests::accepts_a_parent_name_an_earlier_name_resolves_for
@@ -2129,6 +2131,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_n
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_sync
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
+knobas-source	lib/knobas_source	contract::tests::rejects_a_current_step_absent_from_runs_in_flight
 knobas-source	lib/knobas_source	contract::tests::rejects_a_deferred_section_that_does_not_answer_its_own_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
@@ -2161,6 +2164,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_perform
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_that_swallows_a_sink_error
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_whose_cursor_moves_while_idle
 knobas-source	lib/knobas_source	contract::tests::rejects_an_adapter_whose_view_of_its_own_entity_fails
+knobas-source	lib/knobas_source	contract::tests::rejects_an_agent_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_an_auth_failure_misclassified_by_sync
 knobas-source	lib/knobas_source	contract::tests::rejects_an_auth_failure_misclassified_by_test_connection
 knobas-source	lib/knobas_source	contract::tests::rejects_an_id_that_is_not_a_slug
@@ -3081,6 +3085,7 @@ knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_s
 knobas-source-teamcity	lib/knobas_source_teamcity	cursor::tests::the_watermark_stays_below_the_oldest_build_still_in_flight
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_declares_its_configuration_as_parent_by_name_and_id
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_draws_running_or_its_outcome
+knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_names_its_agent_and_what_it_is_doing_now
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_ran_on_each_of_its_revisions
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_build_says_how_it_was_started_and_by_whom
 knobas-source-teamcity	lib/knobas_source_teamcity	descriptor::tests::a_configuration_is_a_pipeline_and_a_build_is_a_run_of_it

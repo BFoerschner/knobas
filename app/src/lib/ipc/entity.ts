@@ -474,6 +474,12 @@ export interface RunRow {
   started_by_me: boolean;
   /** The commit it built, a full sha: the first declared revision. */
   revision: string | null;
+  /** The mirrored commit `revision` names, what *Commit* opens; none where the mirror lacks it (#1004). */
+  commit_id: string | null;
+  /** The machine it ran on: the declared agent; none while queued (#1004). */
+  agent: string | null;
+  /** What it is doing now, in the source's words; only a run in flight has one (#1004). */
+  current_step: string | null;
 }
 
 /**

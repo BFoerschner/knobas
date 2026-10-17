@@ -49,6 +49,12 @@ pub(crate) const API: &str = "teamcity";
 /// TeamCity's own default page size when a locator does not give a `count`.
 const DEFAULT_COUNT: usize = 100;
 
+/// The one build agent mockd's server has (#1004): the name the test
+/// environment fixes for its own (`testenv/docker-compose.yml`,
+/// `teamcity-agent`), so a build that ran names the agent the seeded server's
+/// builds name.
+pub const AGENT_NAME: &str = "knobas-agent";
+
 pub fn router(state: Arc<MockState>) -> Router {
     Router::new()
         .route("/app/rest/server", get(server))
@@ -407,6 +413,10 @@ fn build_json(b: &TcBuild, base: &str, s: &MockState, types: &[TcBuildType]) -> 
             .find(|t| t.id == b.build_type_id)
             .map(|t| build_type_json(t, base)),
         "running-info": running_info,
+        // The agent a build ran on (#1004, crate deviation 18): the one the
+        // test environment's server has, by its fixed name. A build on the
+        // queue or one that failed to start never had one.
+        "agent": (!queued && !b.failed_to_start).then(|| json!({ "name": AGENT_NAME })),
         // The commits a build ran on (#710), none: the dataset gives no build
         // a commit, and a sha invented here would match no mirrored commit
         // anyway. An empty list, the shape of a build with no VCS root.

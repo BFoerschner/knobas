@@ -142,6 +142,10 @@ export interface KindPaths {
   trigger: TriggerPath[];
   /** Who started a run, as the source spells the account (#961). */
   started_by: PayloadPath[];
+  /** The machine a run ran on, by the source's name for it (#1004). */
+  agent: PayloadPath[];
+  /** What a run in flight is doing now, in the source's words (#1004). */
+  current_step: PayloadPath[];
   /** The language a repository is written in, in the source's word (#966). */
   language: PayloadPath[];
   /** The teams a repository belongs to, by name (#966). */
