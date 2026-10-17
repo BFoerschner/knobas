@@ -3162,7 +3162,7 @@ async fn a_required_status_check_holds_the_merge_until_it_passes() {
     println!("LIVE check row: {row:?}");
     let meta = row.meta.unwrap_or_default();
     assert!(
-        meta == "just now" || meta.ends_with("min ago"),
+        is_age(&meta),
         "the check's row says when it was reported: {meta:?}"
     );
 
@@ -4189,6 +4189,36 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
     println!("#{number}: two line comments sent, drawn on their lines, the rewritten one outdated");
 }
 
+/// A check row's meta is `<description> · <age>`, or the age alone when the
+/// status has no description. Splits it into the description and the age.
+fn split_check_meta(meta: &str) -> (&str, &str) {
+    match meta.rsplit_once(" · ") {
+        Some((text, age)) => (text, age),
+        None => ("", meta),
+    }
+}
+
+/// Whether `age` is a shape `view::ago` draws: `just now`, `N min ago`,
+/// `N h ago`, or a `YYYY-MM-DD` date. The test cannot control how long the
+/// queue delays it, so none of the four is refused.
+fn is_age(age: &str) -> bool {
+    let counted = |suffix: &str| {
+        age.strip_suffix(suffix)
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
+    };
+    age == "just now"
+        || counted(" min ago")
+        || counted(" h ago")
+        || (age.len() == 10
+            && age.bytes().enumerate().all(|(i, b)| {
+                if i == 4 || i == 7 {
+                    b == b'-'
+                } else {
+                    b.is_ascii_digit()
+                }
+            }))
+}
+
 /// The statuses a commit carries are drawn as its *Checks* on the real server
 /// (#710): reported on a commit this test makes on a branch of its own (so no
 /// seeded commit gains a status), then read back through the commit's, the
@@ -4274,15 +4304,14 @@ async fn a_commits_statuses_are_drawn_as_its_checks() {
         let view = source.view(&id, None).await.expect("reads").expect("drawn");
         let rows = checks(&view);
         println!("LIVE checks of {id}: {rows:?}");
+        // A row's meta is its description plus the age (#1002); the age
+        // depends on the clock, so assert it separately from the text.
         let drawn: Vec<_> = rows
             .iter()
             .map(|r| {
-                (
-                    r.title.as_str(),
-                    r.chip.as_deref(),
-                    r.tone,
-                    r.meta.as_deref(),
-                )
+                let (text, age) = split_check_meta(r.meta.as_deref().unwrap_or_default());
+                assert!(is_age(age), "{id}: {} has no age in {:?}", r.title, r.meta);
+                (r.title.as_str(), r.chip.as_deref(), r.tone, Some(text))
             })
             .collect();
         assert_eq!(
