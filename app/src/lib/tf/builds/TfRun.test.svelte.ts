@@ -50,13 +50,21 @@ function run(no: number, tone: "ok" | "err" | null, branch: string, extra: Parti
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
     ...extra,
   };
 }
 
 const RUNS: RunRow[] = [
-  run(1188, null, FEATURE),
-  run(1187, "err", FEATURE, { trigger: "change", revision: "a41f2c0e9b8d7c6a" }),
+  run(1188, null, FEATURE, { agent: "linux-agent-01", current_step: "Step 3 of 5 is running." }),
+  run(1187, "err", FEATURE, {
+    trigger: "change",
+    revision: "a41f2c0e9b8d7c6a",
+    commit_id: "gitea:commit:a41f2c",
+    agent: "linux-agent-03",
+  }),
   run(1186, "ok", "main", { duration_seconds: 241 }),
   run(1185, "err", FEATURE, { duration_seconds: 268 }),
 ];
@@ -99,15 +107,16 @@ function viewOf(running: boolean): SourceView {
           {
             type: "facts",
             facts: [
-              // The source's own fact, which the shell no longer reads: who
-              // started a run is the run's declared trigger (#961).
+              // The source's own facts and commit row, which the shell no
+              // longer reads: who started a run, its agent, what it is doing
+              // now and its commit are the run's declared fields (#961, #1004).
               { label: "Triggered by", value: "the view's own words", tone: null },
-              ...(running ? [{ label: "Now", value: "Step 3 of 5 is running.", tone: null }] : []),
-              { label: "Agent", value: "linux-agent-03", tone: null },
+              ...(running ? [{ label: "Now", value: "the view's own step", tone: null }] : []),
+              { label: "Agent", value: "the view's own agent", tone: null },
             ],
           },
           { type: "entities", title: "Configuration", rows: [{ entity_id: PIPE, title: "Payouts / X", meta: null, tone: null, chip: null, url: null }] },
-          { type: "entities", title: "Revision", rows: [{ entity_id: "gitea:commit:a41f2c", title: "payout-service", meta: null, tone: null, chip: "a41f2c", url: null }] },
+          { type: "entities", title: "Revision", rows: [{ entity_id: "gitea:commit:view", title: "payout-service", meta: null, tone: null, chip: "0ld5ha", url: null }] },
         ],
       },
       {

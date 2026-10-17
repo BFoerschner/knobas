@@ -4,13 +4,14 @@
  * build view) and the pipeline's settings, so every one is a test on plain
  * data.
  *
- * Nothing here knows a source. What the view says is read by its shape: a
- * fact by its label, the commit as the overview's row with a sha, the
- * pipeline as the row whose id is one of the declared pipelines.
+ * Nothing here knows a source. The run's own fields (who started it, its
+ * agent, what it is doing now, its commit) are the declared ones on its row
+ * (#1004); what the view says is read by its shape: the pipeline as the row
+ * whose id is one of the declared pipelines, the tabs by their section ids.
  */
 import type { PipelineSettings, RunRow, SourceView, ViewRow, ViewSection } from "../../ipc/entity";
 import { duration, runHash, runTone } from "./builds";
-import { branchName, defaultBranch } from "./pipeline";
+import { branchName, defaultBranch, shortSha } from "./pipeline";
 import { fieldsOf, overridesOf, runPayload, valuesFrom, type RunRequest, type StartValue } from "./run-dialog";
 
 /** The run page's tabs, in prototype-6's order and words; `overview` is the default. */
@@ -141,20 +142,13 @@ function rowsOf(s: ViewSection | null): ViewRow[] {
   return (s?.blocks ?? []).flatMap((block) => (block.type === "entities" ? block.rows : []));
 }
 
-/** A fact of the view's *Overview*, by its label (`Triggered by`, `Agent`, `Now`). */
-export function factOf(view: SourceView | null, label: string): string | null {
-  for (const block of sectionOf(view, "overview")?.blocks ?? []) {
-    if (block.type !== "facts") continue;
-    const fact = block.facts.find((f) => f.label === label);
-    if (fact !== undefined) return fact.value;
-  }
-  return null;
-}
-
-/** The commit the run built: the overview's first row carrying a sha, and its mirrored id. */
-export function commitOf(view: SourceView | null): { sha: string; entityId: string | null } | null {
-  const row = rowsOf(sectionOf(view, "overview")).find((r) => r.chip !== null);
-  return row === undefined ? null : { sha: row.chip!, entityId: row.entity_id };
+/**
+ * The commit the run built (#1004): its declared revision, short as the Runs
+ * table writes it, and the mirrored commit it opens, `null` where the mirror
+ * holds none. `null` for a run with no revision.
+ */
+export function builtCommit(run: RunRow): { sha: string; entityId: string | null } | null {
+  return run.revision === null ? null : { sha: shortSha(run.revision), entityId: run.commit_id };
 }
 
 /** The pipeline a run belongs to: the one of `pipelines` a row of its overview carries. */

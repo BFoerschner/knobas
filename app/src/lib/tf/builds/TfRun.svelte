@@ -51,10 +51,9 @@
   import {
     RUN_TABS,
     artifactsOf,
+    builtCommit,
     changesOf,
-    commitOf,
     contextLine,
-    factOf,
     failureHeading,
     firstFailure,
     parameterRows,
@@ -230,9 +229,9 @@
   const previous = $derived(run === null || held === null ? null : previousOnBranch(held, run));
   const mainBranch = $derived(defaultBranch(settings));
   const startedBy = $derived(run === null ? null : triggerLabel(run) || null);
-  const agent = $derived(factOf(view, "Agent"));
-  const now = $derived(factOf(view, "Now"));
-  const commit = $derived(commitOf(view));
+  const agent = $derived(run?.agent ?? null);
+  const now = $derived(run?.current_step ?? null);
+  const commit = $derived(run === null ? null : builtCommit(run));
   const repoId = $derived(settings?.repositories.find((repo) => repo.entity_id !== null)?.entity_id ?? null);
   const artifacts = $derived(artifactsOf(view));
   const changes = $derived(changesOf(view));
@@ -413,7 +412,7 @@
               <dd class="tf-mono">
                 {#if commit !== null && commit.entityId !== null && repoId !== null}<a href={commitHash(repoId, commit.entityId)}
                     >{commit.sha}</a
-                  >{:else if commit !== null}{commit.sha}{:else}<span class="tf-dim">{viewRead ? "none" : "…"}</span>{/if}
+                  >{:else if commit !== null}{commit.sha}{:else}<span class="tf-dim">none</span>{/if}
               </dd>
               <dt>Started by</dt>
               <dd>{startedBy ?? ""}</dd>

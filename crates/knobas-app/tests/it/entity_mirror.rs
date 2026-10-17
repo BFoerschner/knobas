@@ -779,9 +779,15 @@ fn the_pipeline_and_run_shapes_match_their_typescript_mirror() {
         started_by: None,
         started_by_me: false,
         revision: None,
+        commit_id: None,
+        agent: None,
+        current_step: None,
     };
     let run_keys = [
+        "agent",
         "branch",
+        "commit_id",
+        "current_step",
         "duration_seconds",
         "entity_id",
         "finished",

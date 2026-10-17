@@ -1283,6 +1283,16 @@ pub struct RunRow {
     /// The commit it built: the first of the declared `revision`s (#710), a
     /// full sha.
     pub revision: Option<String>,
+    /// The mirrored commit `revision` names (#1004): the live item of kind
+    /// `commit` whose declared `commit` is that sha, what the run page's
+    /// *Commit* opens. `None` where the mirror holds no such commit.
+    pub commit_id: Option<String>,
+    /// The machine it ran on: the declared `agent` (#1004). A queued run has
+    /// none.
+    pub agent: Option<String>,
+    /// What it is doing now, in the source's words: the declared
+    /// `current_step` (#1004). Only a run in flight has one.
+    pub current_step: Option<String>,
 }
 
 /// One pipeline in the Builds list (R-9.4a, #848).
@@ -1359,7 +1369,11 @@ macro_rules! run_columns {
             knobas_core::declared_trigger!("$1"),
             " as trig, ",
             knobas_core::declared_string!("$1", "started_by"),
-            " as started_by, (select l.value from ",
+            " as started_by, ",
+            knobas_core::declared_string!("$1", "agent"),
+            " as agent, ",
+            knobas_core::declared_string!("$1", "current_step"),
+            " as current_step, (select l.value from ",
             knobas_core::declared_list!("$1", "revision"),
             " l limit 1) as revision"
         )
@@ -1420,6 +1434,7 @@ select p.entity_id, p.source_id, p.source_name, p.name, p.grp, p.web_url, p.path
                    'branch', r.branch, 'started', r.started, 'finished', r.finished,
                    'updated_at', r.item_updated_at, 'web_url', r.web_url,
                    'trigger', r.trig, 'started_by', r.started_by,
+                   'agent', r.agent, 'current_step', r.current_step,
                    'revision', r.revision) order by r.rn)
                    from r
                   where r.source_id = p.source_id and r.pkey = p.pkey and r.rn <= $2),
@@ -1473,6 +1488,8 @@ struct RawRun {
     web_url: Option<String>,
     trigger: Option<knobas_core::payload::Trigger>,
     started_by: Option<String>,
+    agent: Option<String>,
+    current_step: Option<String>,
     revision: Option<String>,
 }
 
@@ -1492,6 +1509,9 @@ impl RunRow {
             trigger: raw.trigger,
             started_by: raw.started_by,
             revision: raw.revision,
+            commit_id: None,
+            agent: raw.agent,
+            current_step: raw.current_step,
             entity_id: raw.entity_id,
             number: raw.number,
             state: raw.state,
@@ -1520,7 +1540,8 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
         .bind(PIPELINE_RECENT)
         .fetch_all(pool)
         .await?;
-    rows.iter()
+    let mut pipelines: Vec<PipelineRow> = rows
+        .iter()
         .map(|row| {
             let recent: sqlx::types::Json<Vec<RawRun>> = row.get("recent");
             let path: sqlx::types::Json<Vec<String>> = row.get("path");
@@ -1540,7 +1561,14 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
                     .collect(),
             })
         })
-        .collect()
+        .collect::<Result<_, IpcError>>()?;
+    with_commits(
+        pool,
+        &declarations,
+        pipelines.iter_mut().flat_map(|p| p.recent.iter_mut()),
+    )
+    .await?;
+    Ok(pipelines)
 }
 
 /// One pipeline's runs, newest first, at most `limit` (100 when `None`).
@@ -1570,7 +1598,7 @@ pub async fn pipeline_runs_inner(
             "{entity} is not a pipeline in the mirror"
         )));
     }
-    Ok(rows
+    let mut runs: Vec<RunRow> = rows
         .iter()
         .filter_map(|row| {
             let entity_id: Option<String> = row.get("entity_id");
@@ -1592,12 +1620,60 @@ pub async fn pipeline_runs_inner(
                         serde_json::from_value(serde_json::Value::String(word)).ok()
                     }),
                     started_by: row.get("started_by"),
+                    agent: row.get("agent"),
+                    current_step: row.get("current_step"),
                     revision: row.get("revision"),
                 },
                 &identity,
             ))
         })
-        .collect())
+        .collect();
+    with_commits(pool, &declarations, runs.iter_mut()).await?;
+    Ok(runs)
+}
+
+/// The mirrored commit of every sha in `$2`, by the declarations `$1`: the
+/// live items of kind `commit` whose declared `commit` is that sha, the
+/// lowest id where two sources mirror one commit.
+const COMMITS_OF: &str = concat!(
+    "select distinct on (c.sha) c.sha, c.entity_id from (
+  select i.entity_id, ",
+    knobas_core::declared_string!("$1", "commit"),
+    " as sha
+    from sync.live_item i
+   where i.kind = 'commit') c
+ where c.sha = any($2::text[])
+ order by c.sha, c.entity_id"
+);
+
+/// Fills each run's [`RunRow::commit_id`] from its `revision` (#1004), with
+/// one read for all of them, and none when no run names a revision.
+///
+/// A commit is found by kind and declared `commit`, not by the view's
+/// repository-and-sha hint: a branch and a pull request declare a `commit`
+/// too, and only a commit's own item is what a commit link opens.
+async fn with_commits<'a>(
+    pool: &PgPool,
+    declarations: &knobas_core::payload::Declarations,
+    runs: impl Iterator<Item = &'a mut RunRow>,
+) -> Result<(), IpcError> {
+    let mut runs: Vec<&mut RunRow> = runs.filter(|r| r.revision.is_some()).collect();
+    if runs.is_empty() {
+        return Ok(());
+    }
+    let shas: Vec<&str> = runs.iter().filter_map(|r| r.revision.as_deref()).collect();
+    let found: std::collections::HashMap<String, String> =
+        sqlx::query_as::<_, (String, String)>(COMMITS_OF)
+            .bind(declarations.as_param())
+            .bind(&shas)
+            .fetch_all(pool)
+            .await?
+            .into_iter()
+            .collect();
+    for run in &mut runs {
+        run.commit_id = run.revision.as_ref().and_then(|sha| found.get(sha)).cloned();
+    }
+    Ok(())
 }
 
 /// Whether `$2` is a live pipeline of the declarations `$1`.
@@ -1662,6 +1738,8 @@ fn run_of_item(
             web_url: item.web_url.clone(),
             trigger: resolve_trigger(payload, &paths.trigger),
             started_by: resolve_string(payload, &paths.started_by),
+            agent: resolve_string(payload, &paths.agent),
+            current_step: resolve_string(payload, &paths.current_step),
             revision: resolve_list(payload, &paths.revision).into_iter().next(),
         },
         identity,
@@ -1712,12 +1790,14 @@ pub async fn older_pipeline_runs_inner(
     )
     .await
     .map_err(|error| crate::sources::to_ipc(&error, Some(&entity.namespace)))?;
-    Ok(items
+    let mut runs: Vec<RunRow> = items
         .iter()
         .filter(|item| item.entity != run)
         .filter_map(|item| run_of_item(&declarations, &identity, item))
         .take(count as usize)
-        .collect())
+        .collect();
+    with_commits(pool, &declarations, runs.iter_mut()).await?;
+    Ok(runs)
 }
 
 /// A pipeline's settings, read live from its source (ADR-0022, #851): the
@@ -1776,7 +1856,7 @@ pub async fn run_chain_inner(
     let steps = crate::sources::crud::run_chain(pool, secrets, registry, &run.to_string())
         .await
         .map_err(|error| crate::sources::to_ipc(&error, Some(&run.namespace)))?;
-    Ok(steps
+    let mut chain: Vec<ChainStepRow> = steps
         .into_iter()
         .map(|step| ChainStepRow {
             pipeline_id: step.step.pipeline,
@@ -1786,7 +1866,14 @@ pub async fn run_chain_inner(
                 .as_ref()
                 .and_then(|item| run_of_item(&declarations, &identity, item)),
         })
-        .collect())
+        .collect();
+    with_commits(
+        pool,
+        &declarations,
+        chain.iter_mut().filter_map(|step| step.run.as_mut()),
+    )
+    .await?;
+    Ok(chain)
 }
 
 /// The chain one run is in, read live (#857).

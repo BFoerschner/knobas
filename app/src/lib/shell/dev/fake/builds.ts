@@ -188,6 +188,23 @@ function runRow(config: string, no: number, st: Latest["st"], branch: string, st
     updated_at: (finished ?? started).toISOString(),
     web_url: queued ? null : `https://ci.tidewater.example/buildConfiguration/${config}/${no}`,
     ...startOf(config, no),
+    ...ranOn(config, no, st),
+  };
+}
+
+/**
+ * Where a fixture run ran and what it is doing now (#1004): prototype-6's
+ * agent, *Step 3 of 5 is running.* while it runs, and the mirrored commit of
+ * its revision where the fixture's repository holds it, by the id the run's
+ * view names it with.
+ */
+function ranOn(config: string, no: number, st: Latest["st"]): Pick<RunRow, "agent" | "current_step" | "commit_id"> {
+  const story = storyOf(config, no);
+  const repo = repositoryOf(config);
+  return {
+    agent: st === "queued" ? null : story.agent,
+    current_step: st === "running" ? "Step 3 of 5 is running." : null,
+    commit_id: repo === null ? null : `mock:tidewater/${repo}@${story.commit}`,
   };
 }
 

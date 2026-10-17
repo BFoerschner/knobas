@@ -243,6 +243,9 @@
           started_by: null,
           started_by_me: true,
           revision: null,
+          commit_id: null,
+          agent: null,
+          current_step: null,
         },
         ...started,
       ];

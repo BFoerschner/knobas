@@ -297,9 +297,11 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
         &wire["payload_paths"][0],
         &[
             "assignee",
+            "agent",
             "blocked_statuses",
             "comment_count",
             "commit",
+            "current_step",
             "default_branch",
             "estimate",
             "finished",

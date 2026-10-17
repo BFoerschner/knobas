@@ -37,6 +37,9 @@ function run(extra: Partial<RunRow> = {}): RunRow {
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
     ...extra,
   };
 }

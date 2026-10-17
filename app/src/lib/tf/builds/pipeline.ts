@@ -153,6 +153,11 @@ export function resultOf(run: RunRow): (typeof RESULTS)[number] | null {
 /** How many characters of a sha a trigger names: prototype-6's `a41f2c`. */
 const SHORT_SHA = 6;
 
+/** A sha as a trigger and the run page's *Commit* write it: `a41f2c`. */
+export function shortSha(sha: string): string {
+  return sha.slice(0, SHORT_SHA);
+}
+
 /**
  * How a run was started, as the Runs table and the run page say it (#961):
  * *VCS change a41f2c* for a change, *Schedule*, the person's account, *you*
@@ -160,7 +165,7 @@ const SHORT_SHA = 6;
  * person; one that names neither says nothing.
  */
 export function triggerLabel(run: RunRow): string {
-  if (run.trigger === "change") return run.revision !== null ? `VCS change ${run.revision.slice(0, SHORT_SHA)}` : "VCS change";
+  if (run.trigger === "change") return run.revision !== null ? `VCS change ${shortSha(run.revision)}` : "VCS change";
   if (run.trigger === "schedule") return "Schedule";
   if (run.started_by_me) return "you";
   return run.started_by ?? "";

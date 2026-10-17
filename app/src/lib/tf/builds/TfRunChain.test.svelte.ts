@@ -46,6 +46,9 @@ function run(no: number, tone: "ok" | "err"): RunRow {
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
   };
 }
 

@@ -46,6 +46,9 @@ function run(id: string, tone: "ok" | "err", extra: Partial<RunRow> = {}): RunRo
     started_by: null,
     started_by_me: false,
     revision: null,
+    commit_id: null,
+    agent: null,
+    current_step: null,
     ...extra,
   };
 }
