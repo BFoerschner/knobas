@@ -3863,3 +3863,30 @@ Implementer, one PR for both.
   misses and draws no trigger, and its record is not excused, which keeps the battery strict
   rather than silent. **Reversing:** low; add a word to the map, or widen the excuse with a
   behaviour beside the new one.
+## #1012 — Downloads and the whole-log read outlast the request timeout (2026-10-17)
+
+- **The stall timeout is a parameter of `send_streaming`, with `knobas_http::STALL_TIMEOUT`
+  (30 s) as the value the adapter passes, not a field of `HttpConfig`.** A field would touch
+  every adapter's exhaustive `HttpConfig { … }` (Gitea, Jira, Confluence, Kuma twice, TeamCity)
+  for one caller; a parameter lets the test pass 250 ms. 30 s is the request timeout's value,
+  because both ask whether the server is still there. **Reversing:** low.
+- **The client-wide `.timeout` is gone; `send` sets the request timeout on every attempt, as it
+  already did.** A client-wide one would cut every streamed body off, and reqwest cannot unset it
+  for one request. Nothing else puts a request on the wire (`Request` has no `send`). **Reversing:**
+  low.
+- **The streamed send bounds the headers with `tokio::time::timeout`, and also bounds a failing
+  response's error-body read with the attempt timeout.** reqwest's per-request timeout covers the
+  body, so it can't be used there. Late headers are `Unreachable` and retried like any timeout.
+  **Reversing:** low.
+- **The job view's log tail (`client::log_tail`, #665) streams too.** It reads the whole log to
+  keep the last part, so it has the bug the ticket's title names ("the whole-log read"), and the
+  change is the same three lines. **Reversing:** low.
+- **The criterion's "wiremock test" is a hand-rolled socket in `knobas-http`'s suite.** wiremock
+  can delay a response but not write a body slowly, so it can't serve a body that is slow in
+  total and never stalls. The suite already hand-rolls sockets for the same reason
+  (`CountingServer`, `SilentServer`). A premise test shows that the plain `send` breaks the same
+  body off, so the fixture really is slow. **Reversing:** n/a.
+- **The adapter's switch from `send` to `send_streaming` has no fast test.** TeamCity's timeouts
+  are fixed at 30 s, so a test that tells the two apart would run for over 30 s. The wiremock
+  download and log tests and the `teamcity-live` download cases show that the switch still reads
+  every target whole. **Reversing:** n/a.

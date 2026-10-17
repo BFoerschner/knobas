@@ -16,6 +16,9 @@ license.workspace = true
 test-util = []
 
 [dependencies]
+# For `Bytes`, the chunk type of a streamed body; already in the tree through
+# reqwest (issue #1012).
+bytes = "1"
 governor.workspace = true
 knobas-source = { path = "../knobas-source" }
 reqwest.workspace = true
