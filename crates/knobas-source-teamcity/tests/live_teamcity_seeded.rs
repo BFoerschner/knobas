@@ -1817,6 +1817,42 @@ async fn the_seeded_records_fill_the_builds_frame() {
             b.entity
         );
     }
+
+    // Where it ran and what it is doing now (#1004). The test environment
+    // has one agent, `knobas-agent` (`docker-compose.yml`), so 1187 and
+    // every seeded run that started names it; a finished run is doing
+    // nothing now, and a run that has not started names no agent.
+    println!(
+        "SEEDED 1187 agent {:?}, current step {:?}; agent {}",
+        field(&run.agent),
+        field(&run.current_step),
+        build.payload["agent"]
+    );
+    assert_eq!(field(&run.agent).as_deref(), Some("knobas-agent"));
+    assert_eq!(field(&run.current_step), None, "1187 has finished");
+    for b in of_kind(&items, "build") {
+        let started = resolve_string(&b.payload, &run.started).is_some();
+        let finished = resolve_string(&b.payload, &run.finished).is_some();
+        let agent = resolve_string(&b.payload, &run.agent);
+        if started {
+            assert_eq!(
+                agent.as_deref(),
+                Some("knobas-agent"),
+                "{} ran on the one agent",
+                b.entity
+            );
+        } else {
+            assert_eq!(agent, None, "{} has not been taken", b.entity);
+        }
+        if finished || !started {
+            assert_eq!(
+                resolve_string(&b.payload, &run.current_step),
+                None,
+                "{} is not in flight",
+                b.entity
+            );
+        }
+    }
 }
 
 /// The contract battery -- the suite every adapter must pass -- against the

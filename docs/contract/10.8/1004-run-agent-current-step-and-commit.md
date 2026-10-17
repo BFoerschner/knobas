@@ -1,0 +1,52 @@
+- **`knobas_core::payload`, `crates/knobas-source/src/**` and the IPC command schema — issue #1004
+  (2026-10-17): where a run ran, what it is doing now and the commit it opens, two declared run
+  fields (ADR-0022) and three fields on `RunRow`.** Spec #808, requirement R-9.12. No migration, no
+  event, no grammar key, no `WriteOp`, no new command, no new module in `commands/` or `ipc/`.
+
+  **The declarations** (`knobas_core::payload`, re-exported by `knobas_source`). `KindPaths` gains
+  two fields, both `#[serde(default)]`, so an older peer's descriptor decodes as declaring neither:
+
+  1. `agent: Vec<PayloadPath>` (`field::AGENT`): the machine a run ran on, by the source's name
+     for it. TeamCity `["agent", "name"]`; a queued build has none. `BUILD_FIELDS` asks for
+     `agent(name)`, and nothing deeper.
+  2. `current_step: Vec<PayloadPath>` (`field::CURRENT_STEP`): what a run in flight is doing now,
+     in the source's words. TeamCity `["running-info", "currentStageText"]`, which
+     `BUILD_FIELDS` already fetched and TeamCity serves only while a build runs. Not one of R-9.12's
+     *steps* (a list, `run_log`'s, #854): it is the one line the run page's *Now* draws.
+
+  mockd serves `agent: { name: "knobas-agent" }` on every build that is not queued and did not fail
+  to start, the name the test environment gives its one agent (crate deviation 18). Without it
+  `agent(name)` is an `UnknownField` 400 and the battery's clause 3 fails on mockd's corpus. Its
+  goldens `builds_all` and `build_1187` gain the key.
+
+  **The contract battery** weighs both as text. One refinement of clause 3, in the shape of #961's
+  `started_by` one: an absent `current_step` key counts as evidence of a misspelled path only on a
+  run in flight, one whose declared `started` reads and whose `finished` does not. A seeded corpus
+  with no build running has no evidence either way; a misspelled `current_step` still fails
+  wherever one running build exists. A kind that declares no `started` is never judged on it.
+  Pinned by `AgentAtAMissingKey`, `CurrentStepOnRunsInFlight` and the conforming
+  `CurrentStepOnRunsNotInFlight`.
+
+  **`RunRow`** (`commands/entity.rs`, mirrored in `app/src/lib/ipc/entity.ts`) gains:
+
+  ```rust
+  pub commit_id: Option<String>,
+  pub agent: Option<String>,
+  pub current_step: Option<String>,
+  ```
+
+  `agent` and `current_step` are the declared fields. `commit_id` is the mirrored commit the run's
+  `revision` names: the live item of kind `commit` whose declared `commit` equals that sha, the
+  lowest id where two sources mirror it, `None` where the mirror holds none. It is found by kind,
+  because a branch and a pull request declare a `commit` too. Every command answering a `RunRow`
+  fills all three: `pipelines`, `pipeline_runs`, `older_pipeline_runs` and `run_chain`, each with
+  one extra read for the commits (`COMMITS_OF`), skipped when no run names a revision.
+  `KindPaths` is mirrored in `app/src/lib/ipc/sources.ts`; the shapes are held by
+  `sources_mirror.rs` and `entity_mirror.rs`, answered by the fake IPC (`fake/builds.ts`),
+  witnessed by `tests/it/builds_ipc.rs`'s
+  `runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit` and, on the seeded TeamCity,
+  by `live_teamcity_seeded.rs`'s `the_seeded_records_fill_the_builds_frame` and the battery.
+
+  **The run page** (`tf/builds/run.ts`, `TfRun.svelte`) reads *Agent*, *Now* and *Commit* from the
+  row; `factOf` and `commitOf` are gone, and with them the last reads of the build view's facts by
+  their labels. The commit is drawn short, six characters, as the Runs table's trigger writes it.
