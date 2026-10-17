@@ -27,6 +27,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  extraLinks = [];
   if (job) unmount(job);
   job = null;
   target.remove();
@@ -79,6 +80,9 @@ function detail(id: string, title: string, path: string | null, links: LinkEntry
   };
 }
 
+/** Links a test adds to the job's own, beside LINKS. */
+let extraLinks: LinkEntry[] = [];
+
 const LINKS = [
   link("gitea:tidewater/payout-service#142", "pr", "Idempotent retry window"),
   link("teamcity:Payout_Build", "build_config", "Payout_Build"),
@@ -113,7 +117,7 @@ function ports(applying: JobLinkSets["sets"] = []): JobPorts {
     listSources: () => Promise.resolve([{ id: "jira" }]),
     getEntity: (id) =>
       id === ID
-        ? Promise.resolve(detail(ID, "Retry failed SEPA payouts", "PAY-200", LINKS))
+        ? Promise.resolve(detail(ID, "Retry failed SEPA payouts", "PAY-200", [...LINKS, ...extraLinks]))
         : id === "jira:PAY-232"
           ? Promise.resolve(detail(id, "Retry the SEPA batch", "PAY-231", LINKS))
           : id === "jira:PAY-200"
@@ -318,4 +322,16 @@ test("Save as a link set… can apply it to the project", async () => {
   button(dialog(), "Save link set").click();
   await settle();
   expect(saved.at(-1)?.rules).toEqual([{ kind: "project", value: "jira:PAY" }]);
+});
+
+test("a note and a route in the drawer open their own addresses, not Tickets (#1101)", async () => {
+  extraLinks = [link("note:0f2c1a", "note", "Call the bank"), link("route:9a1b", "route", "POST /payouts")];
+  open();
+  await settle();
+  target.querySelector<HTMLButtonElement>(".tf-conn")!.click();
+  flushSync();
+  const hrefs = (title: string) =>
+    [...document.querySelectorAll<HTMLAnchorElement>("[aria-label='Connections'] a")].find((a) => squash(a) === title)?.getAttribute("href");
+  expect(hrefs("Call the bank")).toBe("#/settings/notes");
+  expect(hrefs("POST /payouts")).toBe("#/route/route%3A9a1b");
 });
