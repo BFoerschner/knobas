@@ -354,6 +354,18 @@ test("link sets: the job's reach carries a set's members under its name, a save 
   expect(reach().some((row) => row.entity_id === "asset:knobas-jira-db")).toBe(true);
 });
 
+test("link sets: a monitor row draws its type and its dot, a repository its team (#1020)", () => {
+  const h = demoHandlers() as Calls;
+  type Row = { entity_id: string; line: string | null; state: { text: string; tone: string } | null };
+  const rows = (h["link_set"]!({ id: "payout-stack" }) as { members: Row[] }).members;
+  const of = (id: string) => rows.find((row) => row.entity_id === id);
+  const roster = h["monitor_roster"]!({}) as { entity_id: string; monitor_type: string }[];
+  const kind = roster.find((row) => row.entity_id === "kuma:5")?.monitor_type;
+  expect(kind).toBeTruthy();
+  expect(of("kuma:5")).toMatchObject({ line: kind, state: { text: "up", tone: "ok" } });
+  expect(of("mock:tidewater/payout-service")).toMatchObject({ line: "Payments", state: null });
+});
+
 test("builds: a fixture run's log answers the steps bar its steps' durations, the running one without (#1003)", () => {
   const h = demoHandlers() as Calls;
   const steps = (runId: string) => (h["run_log"]!({ runId, from: null, count: 1 }) as { steps: { name: string; seconds: number | null }[] }).steps;

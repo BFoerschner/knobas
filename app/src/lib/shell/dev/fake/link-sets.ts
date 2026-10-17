@@ -136,6 +136,9 @@ function title(id: string): string | null {
 
 const TONES: Record<string, StateChip["tone"]> = { up: "ok", warn: "warn", down: "err", pending: "info" };
 
+/** Uptime Kuma's declared `state` chip (#1020): its four words, each in its tone. */
+const MONITOR_TONES: Record<string, StateChip["tone"]> = { up: "ok", down: "err", pending: "warn", maintenance: "muted" };
+
 /** A member's row (#1008): its title, its line and its dot, off the fixture rows the views draw. */
 function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
   const row: LinkSetMemberRow = { kind, entity_id: id, title: title(id), line: null, state: null };
@@ -152,11 +155,21 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
   }
   const monitor = fakeMonitorRoster().find((entry) => entry.entity_id === id);
   if (monitor) {
-    const tone = monitor.state ? TONES[monitor.state] : undefined;
-    return { ...row, state: monitor.state && tone ? { text: monitor.state, tone } : null };
+    const tone = monitor.state ? MONITOR_TONES[monitor.state] : undefined;
+    return {
+      ...row,
+      line: monitor.monitor_type || null,
+      state: monitor.state && tone ? { text: monitor.state, tone } : null,
+    };
   }
   const item = CORPUS.find((entry) => entry.entity_id === id);
-  const payload = (item?.payload ?? {}) as { path?: string; chip?: StateChip };
+  const payload = (item?.payload ?? {}) as { path?: string; chip?: StateChip; teams?: string[]; full_name?: string };
+  if (item?.kind === "repo") {
+    // #1020: the declared teams, else the owner Gitea's `owner.login` names.
+    const teams = (payload.teams ?? []).join(", ");
+    const owner = payload.full_name?.includes("/") ? payload.full_name.split("/")[0] : null;
+    return { ...row, line: teams || owner || null };
+  }
   return { ...row, line: payload.path ?? null, state: payload.chip ?? null };
 }
 

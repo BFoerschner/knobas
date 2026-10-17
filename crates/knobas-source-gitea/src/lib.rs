@@ -233,7 +233,7 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// Where a Gitea record keeps what knobas reads (#277, ADR-0007).
 ///
 /// A pull request's review facts, every child kind's parent, and a
-/// repository's language and teams. A kind that declares nothing is a miss
+/// repository's language, teams and owner. A kind that declares nothing is a miss
 /// for every reader.
 ///
 /// * `language` is a repository's Gitea `language`: the main language of its
@@ -244,6 +244,9 @@ pub fn descriptor_template() -> SourceDescriptor {
 ///   names no team, so `map` writes them beside it from
 ///   `/repos/{owner}/{repo}/teams`, less a team that holds every repository
 ///   of its organization (#966).
+/// * `owner` is a repository's Gitea `owner.login`: the organization or user
+///   it sits under, which a set's repository row draws where the repository
+///   is in no team of its own (#1020).
 ///
 /// * `reviewers` is Gitea's `requested_reviewers`, each element a user object
 ///   whose `login` is the account -- the same spelling `author` is filled from
@@ -304,6 +307,7 @@ fn payload_paths() -> Vec<KindPaths> {
                 at: PayloadPath::of(["teams"]),
                 entry: PayloadPath::of(["name"]),
             }],
+            owner: vec![PayloadPath::of(["owner", "login"])],
             ..KindPaths::default()
         },
         KindPaths {

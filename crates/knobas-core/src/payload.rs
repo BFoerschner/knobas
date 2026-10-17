@@ -365,6 +365,18 @@ pub struct KindPaths {
     /// is not a repository, and a miss names no team.
     #[serde(default)]
     pub teams: Vec<ListPath>,
+    /// Who owns a repository, by the account's name (#1020): Gitea's
+    /// `owner.login`, the organization or user the repository sits under.
+    /// What a set's repository row draws where no team is declared. Empty
+    /// for every kind that is not a repository.
+    #[serde(default)]
+    pub owner: Vec<PayloadPath>,
+    /// How a monitor checks, in the source's own word (#1020): Uptime
+    /// Kuma's `type` (`http`, `ping`, `dns`). Its own field and not
+    /// [`issue_type`](Self::issue_type), which `issuetype:` matches. Empty
+    /// for every kind that is not a monitor.
+    #[serde(default)]
+    pub monitor_type: Vec<PayloadPath>,
 }
 
 /// How a run was started, in the shell's words (#961).
@@ -530,6 +542,8 @@ pub mod field {
     pub const STARTED_BY: &str = "started_by";
     pub const LANGUAGE: &str = "language";
     pub const TEAMS: &str = "teams";
+    pub const OWNER: &str = "owner";
+    pub const MONITOR_TYPE: &str = "monitor_type";
 
     /// Every field that says where to look, in declaration order: plain
     /// paths, `reviewers`' list paths, `parent`'s parent declarations and
@@ -568,6 +582,8 @@ pub mod field {
         STARTED_BY,
         LANGUAGE,
         TEAMS,
+        OWNER,
+        MONITOR_TYPE,
     ];
 }
 

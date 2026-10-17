@@ -152,6 +152,15 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// without growing a `payload->>'state'` of its own, which is the coupling
 /// ADR-0007 exists to prevent.
 ///
+/// **The same word as a `state` chip (#1020)**, so a row draws the monitor's
+/// dot: `up` ok, `down` err, `pending` warn, and `maintenance` muted, since
+/// somebody silenced it on purpose. A code `crate::map` has no word for is a
+/// null `state`, which draws no dot rather than a guessed one.
+///
+/// **`monitor_type` is Kuma's `type`** (`http`, `ping`, `dns`), which
+/// `crate::map` writes at the top level too: the line a set's monitor row
+/// draws (#1020).
+///
 /// **Everything else is a miss, and deliberately.** A monitor has no priority,
 /// no assignee, no reviewers and no merged flag -- nothing watches a URL on
 /// somebody's behalf -- and no project, because Kuma's only container is a
@@ -169,7 +178,24 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
     vec![KindPaths {
         kind: crate::KIND_MONITOR.to_owned(),
         status_name: vec![PayloadPath::of(["state"])],
+        state: monitor_state(),
+        monitor_type: vec![PayloadPath::of(["type"])],
         ..KindPaths::default()
+    }]
+}
+
+/// A monitor's state chip (#1020): Kuma's four words, each in its tone.
+fn monitor_state() -> Vec<knobas_source::StatePath> {
+    use knobas_core::tone::Tone;
+    use knobas_source::{PayloadPath, StatePath, StateValue};
+    vec![StatePath {
+        at: PayloadPath::of(["state"]),
+        values: vec![
+            StateValue::of("up", Tone::Ok),
+            StateValue::of("down", Tone::Err),
+            StateValue::of("pending", Tone::Warn),
+            StateValue::of("maintenance", Tone::Muted),
+        ],
     }]
 }
 
@@ -255,10 +281,11 @@ mod tests {
         assert!(paths.project_name.is_empty(), "{:?}", paths.project_name);
     }
 
-    /// The one declared fact, and the four a monitor does not have. A path
-    /// declared for a fact the source lacks is the guess ADR-0007 forbids, and
-    /// it is exactly the kind of thing a later edit adds "for symmetry" with
-    /// the Jira declaration next door.
+    /// The declared facts (the state, as a status and as a chip, and the
+    /// type), and the four a monitor does not have. A path declared for a
+    /// fact the source lacks is the guess ADR-0007 forbids, and it is exactly
+    /// the kind of thing a later edit adds "for symmetry" with the Jira
+    /// declaration next door.
     #[test]
     fn the_state_is_declared_and_everything_else_is_a_miss() {
         let paths = &descriptor_template().payload_paths[0];
@@ -266,6 +293,24 @@ mod tests {
             paths.status_name,
             vec![knobas_source::PayloadPath::of(["state"])]
         );
+        assert_eq!(
+            paths.monitor_type,
+            vec![knobas_source::PayloadPath::of(["type"])]
+        );
+        let chip = |state: &str| {
+            let payload = serde_json::json!({ "state": state });
+            knobas_core::payload::resolve_state(&payload, &paths.state)
+                .map(|chip| (chip.text, chip.tone))
+        };
+        use knobas_core::tone::Tone;
+        assert_eq!(chip("up"), Some(("up".to_owned(), Tone::Ok)));
+        assert_eq!(chip("down"), Some(("down".to_owned(), Tone::Err)));
+        assert_eq!(chip("pending"), Some(("pending".to_owned(), Tone::Warn)));
+        assert_eq!(
+            chip("maintenance"),
+            Some(("maintenance".to_owned(), Tone::Muted))
+        );
+        assert_eq!(chip("paused"), None, "a word Kuma does not send");
         assert!(paths.priority.is_empty(), "{:?}", paths.priority);
         assert!(paths.assignee.is_empty(), "{:?}", paths.assignee);
         assert!(paths.reviewers.is_empty(), "{:?}", paths.reviewers);

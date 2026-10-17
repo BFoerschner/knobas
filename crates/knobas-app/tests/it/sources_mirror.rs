@@ -319,6 +319,8 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "head_repo",
             "kind",
             "merged",
+            "monitor_type",
+            "owner",
             "parent",
             "priority",
             "project_key",
