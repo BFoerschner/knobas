@@ -1438,6 +1438,30 @@ test("the pane lists the monitors watching the asset, with their state", async (
 });
 
 /**
+ * A monitor's name opens the ticket-first Monitors page directly: the pane
+ * hands the router `entityAddress`'s address, not a rooms `#/monitor/<id>`
+ * that the shell would have to rewrite on arrival (#1092).
+ */
+test("a monitor's name goes to the Monitors page, not a rooms address", async () => {
+  const { router } = render(`#/asset/${CONTAINER.id}`);
+  await vi.waitFor(() => expect(target.querySelector(".watch")).not.toBeNull());
+  const goes: string[] = [];
+  const go = router.go.bind(router);
+  router.go = (hash: string) => {
+    goes.push(hash);
+    go(hash);
+  };
+
+  const name = [...target.querySelectorAll<HTMLButtonElement>(".watch button")].find(
+    (candidate) => candidate.textContent?.trim() === "postgres-check",
+  );
+  expect(name).toBeDefined();
+  name!.click();
+
+  await vi.waitFor(() => expect(goes).toEqual(["#/monitors"]));
+});
+
+/**
  * Story 71: *a deep link from a monitor to its page in Uptime Kuma, so that
  * what knobas does not do is one click away.*
  *

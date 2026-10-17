@@ -136,6 +136,7 @@
   // where this app says that.
   import { push } from "../shell/toasts.svelte";
   import { hashFor, type Router } from "../shell/router.svelte";
+  import { entityAddress } from "../tf/address";
   import { openExternal as realOpenExternal } from "../shell/open-external";
   import AssetsTabs from "./AssetsTabs.svelte";
   import CreateDialog from "./CreateDialog.svelte";
@@ -1409,17 +1410,11 @@
   /**
    * A monitor's address inside knobas — its own detail, not its page in Kuma.
    *
-   * `hashFor` and not a template string, for `LinksPanel.addressOf`'s reason:
-   * an entity key can carry `#` and `/`, and an unencoded one truncates the
-   * fragment at the browser level. A Kuma monitor's key is its numeric id
-   * today, which is exactly the kind of fact that stops being true.
+   * `entityAddress` and not a template string, for `LinksPanel.addressOf`'s
+   * reason: it is the one rule for where a kind opens, and it encodes the key.
    */
   function monitorAddress(watch: AttachedMonitor): string {
-    return hashFor({
-      view: "room",
-      ctx: "all",
-      detail: { kind: "monitor", entityId: watch.entity_id },
-    });
+    return entityAddress("monitor", watch.entity_id);
   }
 
   /**
