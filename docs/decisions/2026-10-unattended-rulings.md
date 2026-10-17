@@ -4551,3 +4551,17 @@ Ruled by the merge-manager (PR #1082).
 - **Rooms addresses still produced by the launcher, notification clicks and the capture window
   are not translated here** (#1085): the ticket is the removal, and what a note opens is a D10
   question. **Reversing:** n/a.
+
+Merge-manager review (Spec axis):
+
+- **The three Rust tests deleted without a replacement stay deleted.** The `.app` width floor:
+  the new shell sets no `min-width` floor and its nav scrolls (`overflow-x: auto`), so there is
+  no second number for `minWidth` to stay above. The checkout gate: the new shell has no panel
+  gate; `TfJob` asks `entity_checkout` only for `branch` and `repo` rows, catches a refusal and
+  shows nothing, and the Code section is tested end to end in `TfJob.test`; a pin on that filter
+  would pin markup spelling. `WINDOW_DAYS`: `TfInbox` calls `snoozePresets(now)` with no
+  deadline, so nothing re-derives the expiry (the *After it expires* preset is #1086).
+  **Reversing:** low.
+- **`context_members` belongs on the PR's list of commands nothing calls.** Its wrapper
+  `contextMembers` was called by the rooms `InboxView` and `Room` only. Added to the PR body;
+  nothing removed. **Reversing:** n/a.
