@@ -7,6 +7,7 @@ import {
   columnLimit,
   draftCopy,
   draftFromFilter,
+  draftJiraCopy,
   draftRestore,
   drawnJiraColumns,
   groupViews,
@@ -128,4 +129,36 @@ test("a Jira view's columns are drawn by their own names, keeping Jira's order a
     { status: "Doing", cards: [card("PAY-2", "2026-08-01T00:00:00Z"), card("PAY-1", "2026-08-09T00:00:00Z")], total: 2 },
   ];
   expect(viewColumns(board, drawnJiraColumns(own))[0]!.cards.map((c) => c.key)).toEqual(["PAY-2", "PAY-1"]);
+});
+
+test("Make an editable copy starts a view of your own from the Jira view: its conditions, Jira's columns, what it left out", () => {
+  const jira = {
+    kind: "board" as const,
+    board_type: "kanban",
+    jql: "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
+    sub_query: null,
+    sprint: null,
+    last_read: "",
+    web_url: null,
+  };
+  const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
+  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, jira_ref: "mock:board-40", columns, lanes: "priority" });
+  const { draft, from } = draftJiraCopy(board, jira);
+  expect(draft).toEqual(
+    expect.objectContaining({ id: null, position: null, name: "Platform on-call", group: "Mine", query: "project:OPS project:WEB", lanes: "priority", jira_ref: null }),
+  );
+  expect(draft.columns).toEqual(columns);
+  expect(draft.columns).not.toBe(columns);
+  expect(from).toEqual({
+    kind: "board",
+    name: "Platform on-call",
+    left: [{ clause: "component = on-call", reason: "knobas does not sync components" }],
+  });
+
+  // *Save as a view* on a Jira view: the copy's conditions, then what the bar adds, and how the tickets show now.
+  const saved = draftJiraCopy(board, jira, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
+  expect(saved.draft).toEqual(
+    expect.objectContaining({ name: "", group: "Mine", query: "project:OPS project:WEB priority:High retry", layout: "list", lanes: "epic", jira_ref: null }),
+  );
+  expect(saved.from.left).toHaveLength(1);
 });

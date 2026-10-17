@@ -4,8 +4,17 @@
  * new view starts from, and what *Save as a view* and *Duplicate* save.
  */
 import type { MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
-import type { CardField, ListColumn, TicketView, TicketViewDraft, TicketViewRow, ViewColumn } from "../../ipc/search";
+import type {
+  CardField,
+  JiraSource,
+  ListColumn,
+  TicketView,
+  TicketViewDraft,
+  TicketViewRow,
+  ViewColumn,
+} from "../../ipc/search";
 import { matchesAll } from "../filter/filter";
+import { translateJira, type LeftOut } from "./jql";
 import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
 /** The groups that come first, in this order (R-3.2); typed groups follow. */
@@ -118,6 +127,41 @@ export function draftFromFilter(view: TicketView | null, query: string, showing:
 /** What *Duplicate* starts from (R-3.12): the view as saved, called *Copy of …*. */
 export function draftCopy(view: TicketView): TicketViewDraft {
   return { ...draftOf(view), name: `Copy of ${view.name}` };
+}
+
+/** Where a copy of a Jira view came from, for the editor's line about it (#880). */
+export interface CopiedFrom {
+  kind: JiraSource["kind"];
+  name: string;
+  /** The parts of the query it left out, and why. */
+  left: LeftOut[];
+}
+
+/**
+ * What *Make an editable copy* starts from (#880, R-3.25): a view of your
+ * own under *Mine*, the JQL parts knobas can test as its conditions, Jira's
+ * columns as its own, and the rest of the Jira view's setup. With `showing`,
+ * *Save as a view* on a Jira view: no name yet, `extra` (what the filter bar
+ * adds now) after the conditions, and how the tickets show now.
+ */
+export function draftJiraCopy(
+  view: TicketView,
+  jira: JiraSource,
+  extra = "",
+  showing?: Showing,
+): { draft: TicketViewDraft; from: CopiedFrom } {
+  const copy = translateJira(jira);
+  const query = [copy.query, extra.trim()].filter((part) => part !== "").join(" ");
+  const draft: TicketViewDraft = { ...draftOf(view), group: "Mine", query };
+  if (showing !== undefined) {
+    Object.assign(draft, {
+      name: "",
+      layout: showing.layout,
+      lanes: showing.lanes,
+      list_sort: sameSort(showing.sort, DEFAULT_SORT) ? null : showing.sort,
+    });
+  }
+  return { draft, from: { kind: jira.kind, name: view.name, left: copy.left } };
 }
 
 /** What *+ New view* starts from (R-3.12): no conditions, one column per status, the defaults. */

@@ -4369,3 +4369,31 @@ Ruled by the implementer (PR for #1019).
   purged takes `sync.jira_view` with the item and runs no sync to drop the ticket view row, which
   was then listed as a view somebody made, with an empty text that holds every ticket. A
   `jira_ref` that names no entity is listed as before. **Reversing:** low.
+
+## #880 — Make an editable copy (2026-10-17)
+
+- **The JQL is read in the frontend (`tf/tickets/jql.ts`), not by a new command.** The row
+  already carries the JQL, sub-filter and board type, the result is search text the editor
+  opens, and nothing is stored until *Create view* saves an ordinary view through
+  `save_ticket_view`. So no command, migration or §10.8 entry. **Reversing:** move the module
+  behind a command with its §10.8 entry; the tests move with it.
+- **A part is a clause joined by a top-level `AND`; a clause is kept whole or left out whole.**
+  `OR`, `NOT`, parentheses, Jira functions other than `currentUser()` and `openSprints()`, `was`,
+  `changed`, `~`, `is EMPTY` and dates other than `updated >= -Nd|-Nw` are left out, each with a
+  reason. `ORDER BY` is not a part. **Reversing:** low, per clause shape.
+- **`resolution = Unresolved` is left out ("knobas does not sync resolutions")**, where
+  prototype-6's mock maps it to *Status is not Done*. A status called Done is not the same test,
+  and the story says not to pretend. **Reversing:** one table entry.
+- **`project in (OPS, WEB)` keeps both values** even when WEB is not synced (prototype-6 drops
+  WEB). The copy cannot know which projects sync without another read; `project:WEB` matches
+  nothing and is harmless. **Reversing:** low, with the source's project list.
+- **A second positive clause on the same field (`labels = a AND labels = b`) is left out**: the
+  editor joins a field's values with *any*, which would widen the query. Negative clauses merge,
+  since *none of* is what the editor writes. **Reversing:** low.
+- **A Scrum board's copy gets `sprint:current`**, as Jira adds the open sprint to the board's
+  query; a Kanban board's sub-filter is read as more parts. **Reversing:** low.
+- **The copy goes under *Mine* and keeps Jira's columns, lanes, card fields and list columns**,
+  as prototype-6's `vwCopy` does; *Make an editable copy* keeps the name, *Save as a view* leaves
+  it blank as on any view. **Reversing:** low.
+- ***Open in Jira* in the Jira view's settings is not added here**: it belongs with the header's
+  *Open in Jira* (#879). **Reversing:** n/a.

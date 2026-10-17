@@ -35,6 +35,8 @@
   cannot read opens as text with a line naming the part, and no tickets.
   *+ New view*, *Edit view*, *Save as a view* (the text the bar sends now,
   with how the tickets show) and *Duplicate* open the view editor (#814);
+  on a Jira view, *Save as a view* and *Make an editable copy* open it on a
+  copy of your own, from the JQL parts knobas can test (#880);
   *Delete*, in the ⋯ menus and the editor, a toast's *Undo* takes back.
 -->
 <script lang="ts" module>
@@ -143,6 +145,7 @@
     draftCopy,
     draftEdit,
     draftFromFilter,
+    draftJiraCopy,
     draftNew,
     draftRestore,
     drawnJiraColumns,
@@ -152,6 +155,7 @@
     OWN_GROUPS,
     savedShowing,
     viewColumns,
+    type CopiedFrom,
   } from "./views";
 
   let {
@@ -188,10 +192,16 @@
   /** *Find a view*'s words. */
   let find = $state("");
   /** The view editor's starting point and the view it edits, or `null` while it is closed. */
-  let drafting = $state<{ draft: TicketViewDraft; editing: TicketViewRow | null } | null>(null);
+  let drafting = $state<{ draft: TicketViewDraft; editing: TicketViewRow | null; from?: CopiedFrom } | null>(null);
 
   function newView(draft: TicketViewDraft) {
     drafting = { draft, editing: null };
+  }
+
+  /** *Duplicate*; on a Jira view, *Make an editable copy* (#880, R-3.25). */
+  function copyView(row: TicketViewRow) {
+    if (row.jira === null) newView(draftCopy(row));
+    else drafting = { ...draftJiraCopy(row, row.jira), editing: null };
   }
 
   function editView(row: TicketViewRow) {
@@ -406,9 +416,15 @@
   }
 
   // ---- the views' writes ----
-  /** *Save as a view* (R-3.12): the text the bar sends now, and how the tickets show. */
+  /**
+   * *Save as a view* (R-3.12): the text the bar sends now, and how the
+   * tickets show. On a Jira view (#880), a copy: the JQL parts knobas can
+   * test, then what the bar adds.
+   */
   function saveAsView() {
-    newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
+    if (view?.jira) {
+      drafting = { ...draftJiraCopy(view, view.jira, toQuery({ ...config, base: "" }, filter), showing), editing: null };
+    } else newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
   }
 
   async function save(draft: TicketViewDraft) {
@@ -631,9 +647,9 @@
             >
             <ViewMenu
               name={row.name}
-              jira={row.jira !== null}
+              jira={row.jira?.kind ?? null}
               onedit={() => editView(row)}
-              onduplicate={() => newView(draftCopy(row))}
+              onduplicate={() => copyView(row)}
               ondelete={() => remove(row)}
             />
           </div>
@@ -676,16 +692,15 @@
         >
         <ViewMenu
           name="this view"
-          jira={view.jira !== null}
+          jira={view.jira?.kind ?? null}
           className="tf-btn tf-sm tf-ghost"
           onedit={() => editView(view)}
-          onduplicate={() => newView(draftCopy(view))}
+          onduplicate={() => copyView(view)}
           ondelete={() => remove(view)}
         />
       {/if}
     </div>
     {#if base !== null}
-      <!-- *Save as a view* on a Jira view is *Make an editable copy* (R-3.25, #880). -->
       <FilterBar
         {config}
         {filter}
@@ -693,7 +708,7 @@
         {total}
         onchange={filterChanged}
         extra={lanesSwitch}
-        after={jiraRef === null ? saveButton : undefined}
+        after={saveButton}
       />
     {/if}
     {#snippet lanesSwitch()}
@@ -846,7 +861,8 @@
 
   {#if drafting !== null}
     {@const editing = drafting.editing}
-    <ViewEditor
+    <!-- Keyed: *Make an editable copy* in a Jira view's settings opens a new editor on the copy. -->
+    {#key drafting}<ViewEditor
       draft={drafting.draft}
       editing={editing !== null}
       unreadable={editing?.unreadable ?? null}
@@ -854,11 +870,13 @@
       fields={suggested?.fields ?? []}
       parents={suggested?.parents ?? []}
       jira={editing?.jira ?? null}
+      copiedFrom={drafting.from ?? null}
+      oncopy={editing?.jira ? () => copyView(editing) : undefined}
       board={(perColumn, query) => ports.board(perColumn, query, editing?.jira ? editing.jira_ref : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}
-    />
+    />{/key}
   {/if}
 
   {#if current !== null && base !== null}
