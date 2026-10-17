@@ -664,6 +664,14 @@ test("a rooms-UI address arriving here is replaced by the ticket-first one", asy
   location.hash = "#/entity/mock:PAY-231";
   await until(() => location.hash === "#/job/PAY-231", `#/entity/… stayed ${location.hash}`);
   expect(target.textContent).not.toContain("Nothing lives at");
+
+  // An id the mirror does not know keeps its address and says so.
+  location.hash = "#/entity/mock:NOPE-1";
+  await until(
+    () => target.textContent?.includes("Nothing lives at #/entity/mock:NOPE-1") ?? false,
+    `an unknown #/entity/… read ${target.textContent}`,
+  );
+  expect(location.hash).toBe("#/entity/mock:NOPE-1");
 });
 
 /**
