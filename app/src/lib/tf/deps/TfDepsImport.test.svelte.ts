@@ -56,6 +56,9 @@ let calls: [string, ...unknown[]][] = [];
 let reads = 0;
 let estate: Dependencies;
 let produced: Produced[] = [];
+/** What the preview of `{"name":"slow"}` waits on. */
+let release = () => {};
+let held = new Promise<void>((resolve) => (release = resolve));
 let target: HTMLElement;
 let app: ReturnType<typeof mount> | null = null;
 
@@ -78,7 +81,11 @@ function render() {
           return Promise.resolve(estate);
         },
         depViews: () => Promise.resolve(VIEWS),
-        previewEstateImport: log("preview", () => PREVIEW),
+        previewEstateImport: (file: string, producer: string) => {
+          calls.push(["preview", file, producer]);
+          const answer = { ...PREVIEW, name: file === '{"name":"slow"}' ? "slow" : PREVIEW.name };
+          return file === '{"name":"slow"}' ? held.then(() => answer) : Promise.resolve(answer);
+        },
         applyEstateImport: log("apply", () => {
           estate = read([item("asset:db", "vm", "db-01")]);
           return { assets_created: 1, routes_created: 0, properties_set: 0, properties_kept: 1, monitors_kept: 0, monitors_linked: 0 };
@@ -165,6 +172,20 @@ test("Import applies the previewed file under its producer, closes, and reads th
   expect(reads).toBe(2);
   expect(target.querySelector(".tf-dp-t[data-id='asset:db']")).not.toBeNull();
   expect(toasts.items.at(-1)!.text).toBe("Imported testenv: 1 asset created, 1 property kept as you edited it");
+});
+
+test("a slower preview of an earlier file does not replace the newer one's", async () => {
+  held = new Promise<void>((resolve) => (release = resolve));
+  await openImport();
+  await chooseFile('{"name":"slow"}');
+  await chooseFile('{"name":"testenv"}');
+  release();
+  await settle();
+  button("Import", dialog()!).click();
+  await settle();
+  await settle();
+  expect(calls.at(-1)).toEqual(["apply", '{"name":"testenv"}', "estate_file"]);
+  expect(toasts.items.at(-1)!.text).toMatch(/^Imported testenv:/);
 });
 
 test("Cancel closes without a write", async () => {

@@ -3,6 +3,10 @@
  * ports a test can stand in for.
  */
 import type {
+  applyEstateImport,
+  assetTree,
+  previewEstateImport,
+  produceEstateFile,
   AssetDetail,
   AssetRow,
   AssetType,
@@ -39,6 +43,15 @@ export interface AddPorts extends SavePorts {
   createRoute: (assetId: string, name: string, url: string, targetId?: string | null, visibility?: Visibility) => Promise<RouteRow>;
   editRoute: (routeId: string, edits: RouteEdit[]) => Promise<RouteRow>;
   deleteRoute: (routeId: string) => Promise<void>;
+}
+
+/** *Import…*'s commands (#1066), the rooms UI `ImportDialog`'s. */
+export interface ImportPorts {
+  previewEstateImport: typeof previewEstateImport;
+  applyEstateImport: typeof applyEstateImport;
+  produceEstateFile: typeof produceEstateFile;
+  /** One level of the estate per read: the *land under* picker's walk. */
+  assetTree: typeof assetTree;
 }
 
 export interface EditorPorts extends SavePorts {

@@ -4,24 +4,7 @@
  * The dialog is `TfImport.svelte`; the commands are the rooms UI's
  * `ImportDialog` ones, unchanged.
  */
-import type {
-  applyEstateImport,
-  assetTree,
-  ImportOutcome,
-  ImportPreview,
-  previewEstateImport,
-  produceEstateFile,
-  PropertyValue,
-} from "../../ipc/assets";
-
-/** What the import dialog calls, as ports a test can stand in for. */
-export interface ImportPorts {
-  previewEstateImport: typeof previewEstateImport;
-  applyEstateImport: typeof applyEstateImport;
-  produceEstateFile: typeof produceEstateFile;
-  /** One level of the estate per read: the *land under* picker's walk. */
-  assetTree: typeof assetTree;
-}
+import type { ImportOutcome, ImportPreview, PropertyValue } from "../../ipc/assets";
 
 /** How a property value reads on one line of the preview. */
 export function shown(value: PropertyValue | null): string {

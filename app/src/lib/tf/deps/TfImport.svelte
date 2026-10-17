@@ -15,7 +15,7 @@
   import { IMPORT_PRODUCERS, type AssetRow, type ImportOutcome, type ImportPreview } from "../../ipc/assets";
   import { latestRead } from "../../shell/latest-read";
   import TfDialog from "../settings/TfDialog.svelte";
-  import type { ImportPorts } from "./import";
+  import type { ImportPorts } from "./ports";
   import TfImportPreview from "./TfImportPreview.svelte";
 
   let {
@@ -51,6 +51,7 @@
   const downloadName = $derived(`${producer}-estate.json`);
 
   function choseProducer() {
+    picks += 1;
     file = null;
     preview = null;
     failure = null;
@@ -83,19 +84,30 @@
     });
   });
 
+  // A blob URL lives until revoked: the last one goes when the dialog does.
+  $effect(() => () => {
+    if (downloadHref !== null) URL.revokeObjectURL(downloadHref);
+  });
+
+  /** Which pick is the newest, so a slower preview of an earlier file is dropped. */
+  let picks = 0;
+
   async function chose(event: Event & { currentTarget: HTMLInputElement }) {
     const picked = event.currentTarget.files?.[0];
     if (!picked) return;
+    const mine = ++picks;
     busy = true;
     failure = null;
     preview = null;
     file = null;
     try {
       const text = await picked.text();
+      const answer = await ports.previewEstateImport(text, producer);
+      if (mine !== picks) return;
       file = text;
-      preview = await ports.previewEstateImport(text, producer);
+      preview = answer;
     } catch (error) {
-      failure = ipcErrorMessage(error);
+      if (mine === picks) failure = ipcErrorMessage(error);
     } finally {
       busy = false;
     }

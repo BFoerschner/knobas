@@ -83,7 +83,7 @@
   import TfNewAsset from "./TfNewAsset.svelte";
   import TfRouteDialog from "./TfRouteDialog.svelte";
   import TfImport from "./TfImport.svelte";
-  import { importedLine, type ImportPorts } from "./import";
+  import { importedLine } from "./import";
   import { isEntityId, resolveTicket } from "../job/job";
   import { reachedPart } from "./reach";
   import { push } from "../../shell/toasts.svelte";
@@ -92,7 +92,7 @@
   import TfCreateMonitor from "../monitors/TfCreateMonitor.svelte";
   import { isAsset, nameIsCode } from "./deps";
   import { drawOf, graphOf, hitsLine, matcher, nextTile, tileEl, touches, UNNAMED_LAYER, type Gestures } from "./draw";
-  import type { AddPorts, EditorPorts, LayerPorts, ViewPorts } from "./ports";
+  import type { AddPorts, EditorPorts, ImportPorts, LayerPorts, ViewPorts } from "./ports";
   import TfAssetEditor from "./TfAssetEditor.svelte";
   import TfDepsBand from "./TfDepsBand.svelte";
   import TfDepsLayers from "./TfDepsLayers.svelte";
