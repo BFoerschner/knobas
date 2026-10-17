@@ -382,17 +382,39 @@ pin_label() {
     fi
 }
 
-# The rooms UI's top strip, Checkouts section and checkout panel, which the
-# open-in-editor driver pressed, went in #881; their pins went with them, and
-# porting the driver to the ticket-first shell is #1084.
-#
-# The button the driver presses and the settings field it fills are both named
-# from one Rust label, so this is where the driver's `Open in VS Code` comes
-# from -- not from either component. Since #844 the label is composed
-# ("Open in " and the shipped entry's name) in `command_view`, and the unit test
-# beside it asserts the composed words, so the literal is pinned there.
-pin_label ../crates/knobas-app/src/checkout/open.rs '"Open in VS Code"' \
-    "the VS Code action is still labelled the way the driver asks for it"
+# Ported to the ticket-first shell by #1084: Settings › Checkouts and Open in…
+# (ADR-0023's clones root and the reader's own applications) and the job's
+# Code section with its *Open in…* menu. The new shell uppercases none of these,
+# so each is pinned as the driver spells it.
+tf=../app/src/lib/tf
+pin_label $tf/TfTopBar.svelte 'aria-label="Settings"' \
+    "the top bar's Settings button still has the name both drivers press"
+pin_label $tf/settings/settings.ts '"Checkouts and Open in…"' \
+    "Settings still lists the section the open-in-editor driver opens"
+pin_label $tf/settings/TfCheckoutsSection.svelte '>Change…</button>' \
+    "the clones root row still offers Change…"
+pin_label $tf/settings/TfCheckoutsSection.svelte 'aria-label="Clones root"' \
+    "the clones root field still has its accessible name"
+pin_label $tf/settings/TfCheckoutsSection.svelte 'onclick={() => void saveTyped()}>Save</button>' \
+    "the clones root field is still stored by a button called Save"
+pin_label $tf/settings/TfCheckoutsSection.svelte '>Edit applications…</button>' \
+    "the Open in… table still offers Edit applications…"
+pin_label $tf/openin/TfAppsManage.svelte '>Add an application…</button>' \
+    "the applications dialog still offers Add an application…"
+pin_label $tf/openin/TfAppsManage.svelte 'onclick={onclose}>Done</button>' \
+    "the applications dialog still closes on Done"
+pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-name">Name</label>' \
+    "the application dialog's name field is still labelled Name"
+pin_label $tf/openin/TfAppDialog.svelte '<label for="tf-app-command">Command</label>' \
+    "the application dialog's command field is still labelled Command"
+pin_label $tf/openin/TfAppDialog.svelte '"Add application"' \
+    "the application dialog still adds with a button called Add application"
+pin_label $tf/openin/TfOpenIn.svelte '}}>Open in… <span class="tf-dim" aria-hidden="true">▾</span></button' \
+    "the checkout's menu button is still named Open in…, its arrow hidden"
+pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
+    "the menu's applications are still menu items, which the driver walks to"
+pin_label $tf/job/TfCodeSection.svelte '<span class="tf-mono">{checkout.path}</span>' \
+    "the job's Code section still draws the checkout path as a reading of its own"
 # **What a pin cannot say, which is #547's whole finding.** A pin of a source
 # string measures that the driver's constant is not stale; it measures nothing
 # whatever about what the accessibility API answers, and the only thing that
@@ -403,28 +425,24 @@ pin_label ../crates/knobas-app/src/checkout/open.rs '"Open in VS Code"' \
 pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
     "the demo corpus still lives under the host the driver's clone points at"
 
-# --- rendered_label, and the two stylesheet rules behind it -----------------
+# --- names are rendered text, and the new shell transforms none ------------
 #
-# Measured on the dev Mac on 2026-09-08, in the first harness run that got past
-# its probe: WebKit names an element by its **rendered** text, so a label the
-# stylesheet uppercases is named in upper case and a driver looking for the
-# markup's spelling finds nothing. Two drivers depend on that, so the rule is
-# one function and the stylesheet rules behind it are pinned: if either
-# `text-transform` goes, the constants in `capture.sh` and `open-in-editor.sh`
-# have to change, and this is what says so.
-
-check "a label's rendered name is its upper case" "SHORTCUT" "$(rendered_label Shortcut)"
-check "a rendered name keeps its spaces" "OPEN IN VS CODE" "$(rendered_label 'Open in VS Code')"
-check "a lower-case reading renders in upper case" "CAPTURED FROM" \
-    "$(rendered_label 'captured from')"
-check "an already-upper name is unchanged" "CHECKOUT" "$(rendered_label CHECKOUT)"
-check "nothing renders as nothing" "" "$(rendered_label '')"
-
-# In `unported.css` since `app.css` went (#881).
-pin_label ../app/src/unported.css '.lab{font:600 11px/1 var(--disp);text-transform:uppercase' \
-    "the .lab class still uppercases, which is why the field names are upper case"
-pin_label ../app/src/unported.css '.row.hd{height:22px;cursor:default;color:var(--faint);font:500 10px var(--mono);text-transform:uppercase' \
-    "the .row.hd class still uppercases, which is why the panel readings are upper case"
+# Measured on the dev Mac on 2026-09-08: WebKit names an element by its
+# **rendered** text, so the rooms UI's `.lab` labels arrived upper case and a
+# `rendered_label` helper spelled them so. Neither driver reads a transformed
+# name since #1084: `tf.css` uppercases nothing, and this pin is what says so
+# if it ever starts -- every constant in both drivers would then be stale.
+# Exit 1 only: grep's 2 (a missing or unreadable tf.css) must not read as
+# "nothing uppercases".
+transform=0
+grep -q 'text-transform' ../app/src/lib/tf/tf.css || transform=$?
+if [ "$transform" = 1 ]; then
+    check "tf.css uppercases nothing the drivers name" yes yes
+else
+    check "tf.css uppercases nothing the drivers name" yes no
+    printf '  app/src/lib/tf/tf.css has a text-transform or cannot be read (grep %s);\n' "$transform" >&2
+    printf '  the drivers spell names as the markup does.\n' >&2
+fi
 
 # --- the capture driver's pure parts (#503) ---------------------------------
 
@@ -460,6 +478,24 @@ check_matches_reading "a reading nothing on screen carries is not a match" \
     "captured in" "$readings" no
 check_matches_reading "an indented line still matches" "captured in" \
     "$(printf '   captured in   \n')" yes
+
+# `notes_total` (#1084) reads the note count off Settings › Notes and capture,
+# which is where *Open in knobas* lands while notes hide (D10): the driver reads
+# it before the shortcut and after the button, and the second must be one more.
+# The lines are `notesLine`'s own words (`tf/settings/notes.ts`).
+check "no notes is zero" 0 "$(notes_total "$(printf 'Your notes\nNo notes\n')")"
+check "one note, with its date" 1 "$(notes_total "$(printf 'Your notes\n1 note, from 18 October\n')")"
+check "many notes, with the last one's date" 37 \
+    "$(notes_total "$(printf 'Your notes\n37 notes, the last from 12 August 2025\n')")"
+check "a count with no date" 2 "$(notes_total "$(printf '2 notes\n')")"
+# The refusals: `x`, never 0, because 0 is a count the driver compares against.
+check "a screen with no notes line is unreadable, not zero" x \
+    "$(notes_total "$(printf 'Your notes\nExport notes as Markdown\nMove 3 notes\n')")"
+check "an empty screen is unreadable" x "$(notes_total "")"
+check "a sentence that only contains *No notes* is not the count" 3 \
+    "$(notes_total "$(printf 'No notes were moved\n3 notes, from 2 May\n')")"
+check "two notes lines are ambiguous, not the first" x \
+    "$(notes_total "$(printf '1 note, from 1 May\n4 notes\n')")"
 
 # --- what makes a wait a witness (#547) -------------------------------------
 #
@@ -608,23 +644,41 @@ pin_label ../crates/knobas-app/src/capture.rs '.title("Capture")' \
     "the capture window is still built under the title the driver waits for"
 pin_label ../app/src/lib/capture/CaptureWindow.svelte 'aria-label="Open in knobas"' \
     "the capture window's button still has its accessible name"
-# The rooms UI's Capture settings section, where the driver set the shortcut,
-# went in #881; its pins went with it, and porting the driver is #1084.
-#
 # The lines the driver reads back off the screen. Each is a *value* rather
 # than a name, which is why `ax values` exists at all, and each has a sibling
 # state whose line is different -- *Nothing is kept until you type.* -- so a
 # pin on the wrong one would make the run pass on a feature that had failed.
 pin_label ../app/src/lib/capture/CaptureWindow.svelte '>Saved as a note.<' \
     "the capture window still says *Saved as a note.* once the row exists"
-pin_label ../app/src/lib/detail/LinksPanel.svelte '>Linked items<' \
-    "the links panel still carries the heading the driver reads a detail by"
-# The two readings the panel groups a capture's links under, from the note's
-# own side (`readingOf`'s forward). The inverse readings -- *captured here*,
-# *captured from here* -- are what the other end shows, and `has_reading`'s
-# whole-line rule is what keeps them apart.
-pin_label ../app/src/lib/detail/relations.ts 'forward: "captured from"' \
-    "a captured-from link still reads *captured from* on the note"
+
+# Settings › Notes and capture, where the driver sets the shortcut through the
+# *Change…* dialog (#1086) and where *Open in knobas* lands while notes hide
+# (#1085). Ported by #1084. The three help lines are one row's three states,
+# each a different whole line, so the driver tells hidden, registered and
+# refused apart.
+notes=$tf/settings/TfNotesSection.svelte
+pin_label $tf/settings/settings.ts '"Notes and capture"' \
+    "Settings still lists the section the capture driver opens"
+pin_label $notes 'aria-label="Show notes"' "the notes switch still has its accessible name"
+pin_label $notes '"Inactive while notes are hidden."' \
+    "the shortcut row still says notes are hidden in the words the driver reads"
+pin_label $notes '"Opens a small window over whatever you are doing."' \
+    "the shortcut row still says the shortcut holds in the words the driver reads"
+pin_label $notes '<span>Not set</span>' "the shortcut row still reads *Not set* with none stored"
+pin_label $notes 'aria-label="Change capture shortcut"' "the shortcut's Change… still has its accessible name"
+pin_label $notes 'aria-label="Capture shortcut"' "the shortcut field still has its accessible name"
+pin_label $notes 'onclick={() => void saveShortcut(null)}>Clear</button>' \
+    "the shortcut dialog still clears with a button called Clear"
+pin_label $notes 'onclick={() => void saveShortcut(typed)}>Save</button' \
+    "the shortcut dialog still stores with a button called Save"
+pin_label $notes '>Your notes</div>' "the section still has the row the driver lands on"
+pin_label $tf/settings/notes.ts 'return "No notes"' "the notes line still reads *No notes* at zero, which notes_total reads"
+# shellcheck disable=SC2016 # the template literal is the text pinned, not an expansion
+pin_label $tf/settings/notes.ts '`${total} notes`' "the notes line still leads with the count, which notes_total reads"
+pin_label $tf/job/TfCodeSection.svelte 'openLabel="Open Code view"' \
+    "the job's Code section still has the link the driver knows a job page by"
+pin_label $tf/job/job.ts 'const NOTES_HASH = "#/settings/notes"' \
+    "a note still opens Settings › Notes and capture, which is where the driver looks for it"
 
 # --- the helper's own two answers -------------------------------------------
 #
