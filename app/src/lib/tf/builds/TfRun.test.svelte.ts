@@ -116,7 +116,7 @@ function viewOf(running: boolean): SourceView {
             ],
           },
           { type: "entities", title: "Configuration", rows: [{ entity_id: PIPE, title: "Payouts / X", meta: null, tone: null, chip: null, url: null }] },
-          { type: "entities", title: "Revision", rows: [{ entity_id: "gitea:commit:view", title: "payout-service", meta: null, tone: null, chip: "0ld5ha", url: null }] },
+          { type: "entities", title: "Revision", rows: [{ entity_id: "gitea:commit:view", title: "payout-service", meta: null, tone: null, chip: "view-sha", url: null }] },
         ],
       },
       {
