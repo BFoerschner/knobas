@@ -13,13 +13,17 @@
       pub async fn send_streaming(&self, request: Request, stall: Duration)
           -> Result<StreamedBody, SourceError>;
   }
-  pub struct StreamedBody { /* private */ }
+  #[derive(Debug)] pub struct StreamedBody { /* private */ }
   impl StreamedBody {
       pub async fn chunk(&mut self) -> Result<Option<Bytes>, BodyBrokeOff>;
   }
+  #[derive(Debug, Clone, PartialEq, Eq)]
   pub enum BodyBrokeOff { Stalled(Duration), Transport(String) }
-  impl From<BodyBrokeOff> for SourceError; // Unreachable("the body broke off: …")
+  impl Display for BodyBrokeOff; // "no bytes for 30s", or the transport's words
+  impl std::error::Error for BodyBrokeOff;
   ```
+
+  The adapter wraps a `BodyBrokeOff` in `SourceError::Unreachable` with its own context.
 
   `send_streaming` runs `send`'s attempt loop unchanged (limiter, `MAX_ATTEMPTS`, `Retry-After`,
   classification, `SEND_BUDGET`), but each attempt's timeout covers the response headers only;

@@ -641,7 +641,10 @@ async fn a_dribbled_body_outlasts_the_request_timeout() {
         .send(client.request(Method::GET, "/big.zip"))
         .await
         .expect("the headers arrive at once");
-    let error = response.bytes().await.expect_err("the total timeout cuts the body");
+    let error = response
+        .bytes()
+        .await
+        .expect_err("the total timeout cuts the body");
     assert!(error.is_timeout(), "{error:?}");
 }
 
@@ -670,7 +673,8 @@ async fn a_streamed_body_slower_than_the_request_timeout_arrives_whole() {
 }
 
 /// Issue #1012: a body that goes silent for longer than the stall timeout is
-/// given up on, as `unreachable`, even though it would have finished.
+/// given up on, even though it would have finished. The adapter reports it as
+/// `unreachable` ("… broke off: no bytes for 30s").
 #[tokio::test(flavor = "multi_thread")]
 async fn a_streamed_body_that_stalls_breaks_off_as_unreachable() {
     // Three bytes, then twice the stall timeout of silence, then the last.
@@ -691,8 +695,6 @@ async fn a_streamed_body_that_stalls_breaks_off_as_unreachable() {
     };
     assert_eq!(broke_off, knobas_http::BodyBrokeOff::Stalled(STALL));
     assert_eq!(kept, b"xxx", "what came before the stall did arrive");
-    let error = SourceError::from(broke_off);
-    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
 }
 
 /// The streamed send still bounds the wait for the headers: a server that

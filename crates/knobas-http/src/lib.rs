@@ -16,8 +16,9 @@
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
 //!   **every attempt passes it**, retries included.
-//! * **One way out**: [`HttpClient::send`] is the only thing that puts a
-//!   request on the wire. [`HttpClient::request`] hands back a [`Request`],
+//! * **One way out**: [`HttpClient::send`] (and its streamed twin
+//!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
+//!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
 //!   which has no `send` of its own -- see that type for why.
 //! * **One fault mapping** ([`classify`]), because `Unauthorized` is the fault
 //!   the user is asked to act on -- carrying the **status** it came from, so an
@@ -26,8 +27,8 @@
 //!   refuse the *request* rather than the credential says which through its
 //!   [`ForbiddenReading`](classify::ForbiddenReading) (issue #722).
 //! * **One place a failing body is read**: the caller's
-//!   [`BodyMessage`](classify::BodyMessage), consulted inside [`HttpClient::send`]
-//!   where the body still exists.
+//!   [`BodyMessage`](classify::BodyMessage), consulted inside the attempt loop
+//!   both sends share, where the body still exists.
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
 
@@ -159,13 +160,14 @@ pub struct HttpConfig {
     /// How long to wait for a connection before calling the source
     /// unreachable.
     pub connect_timeout: Duration,
-    /// How long to wait for a whole request, connection included.
+    /// How long to wait for a whole request, connection included -- or, for
+    /// [`HttpClient::send_streaming`], for its response headers.
     pub request_timeout: Duration,
     /// How this adapter reads its own error envelope out of a failing response
     /// body (ADR-0004), or `None` to keep the raw excerpt.
     ///
-    /// The body is consumed inside [`HttpClient::send`], the only door onto the
-    /// wire, so this is the adapter's one chance at it. Every source knobas
+    /// The body is consumed inside [`HttpClient::send`] (or `send_streaming`),
+    /// the only door onto the wire, so this is the adapter's one chance at it. Every source knobas
     /// reads has an envelope of its own -- Jira's `{"errorMessages":[…]}`,
     /// Gitea's `{"message":…}`, TeamCity's plain text -- and the commonest sync
     /// failure of all, a mistyped filter, is a 400 whose body is the exact
@@ -304,8 +306,8 @@ impl HttpClient {
     /// A request with the base URL, auth and default headers applied.
     ///
     /// Returns a [`Request`], which is a builder with **no way to send
-    /// itself**: [`HttpClient::send`] is the only thing that puts it on the
-    /// wire. That is the point -- see [`Request`].
+    /// itself**: [`HttpClient::send`] (or `send_streaming`) is the only thing
+    /// that puts it on the wire. That is the point -- see [`Request`].
     #[must_use]
     pub fn request(&self, method: Method, path: &str) -> Request {
         let request = self.inner.request(method, self.url_for(path));
@@ -398,12 +400,9 @@ impl HttpClient {
                 )));
             };
 
-            // `delay` is how long to wait before the next attempt; `give_up`
-            // is what to report if there is not going to be one. Carrying both
-            // is what keeps a 503-that-cannot-be-retried a 503.
-            // A transport failure arrives mapped, with whether it is worth
+            // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
-            let failed = |error: reqwest::Error| {
+            let classify_transport = |error: reqwest::Error| {
                 (
                     classify::reqwest_error(&error),
                     retry::error_is_transient(&error),
@@ -414,13 +413,13 @@ impl HttpClient {
                     .timeout(attempt_timeout)
                     .send()
                     .await
-                    .map_err(failed),
+                    .map_err(classify_transport),
                 // reqwest's own timeout would cover the body as well, so the
                 // wait for the headers is bounded from outside instead. Late
                 // headers are a timeout, and transient like one.
                 Deadline::Headers => {
                     match tokio::time::timeout(attempt_timeout, request.send()).await {
-                        Ok(answered) => answered.map_err(failed),
+                        Ok(answered) => answered.map_err(classify_transport),
                         Err(_) => Err((
                             SourceError::Unreachable(format!(
                                 "no response headers within {attempt_timeout:?}"
@@ -430,6 +429,9 @@ impl HttpClient {
                     }
                 }
             };
+            // `delay` is how long to wait before the next attempt; `give_up`
+            // is what to report if there is not going to be one. Carrying both
+            // is what keeps a 503-that-cannot-be-retried a 503.
             let (delay, give_up) = match answered {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
@@ -443,12 +445,8 @@ impl HttpClient {
                     let body = tokio::time::timeout(attempt_timeout, body_of(response))
                         .await
                         .unwrap_or_default();
-                    let error = classify::response_error(
-                        status,
-                        &body,
-                        self.body_message,
-                        self.forbidden,
-                    );
+                    let error =
+                        classify::response_error(status, &body, self.body_message, self.forbidden);
                     if last || !transient {
                         return Err(error);
                     }
@@ -561,7 +559,8 @@ impl StreamedBody {
 }
 
 /// Why a [`StreamedBody`] ended before its end. Its `Display` is the detail
-/// an adapter puts after its own "the download of … broke off: ".
+/// an adapter puts after its own "the download of … broke off: ", in a
+/// [`SourceError::Unreachable`]: the source failed to answer.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BodyBrokeOff {
     /// No byte arrived for this long.
@@ -581,13 +580,6 @@ impl std::fmt::Display for BodyBrokeOff {
 
 impl std::error::Error for BodyBrokeOff {}
 
-/// A body that broke off is the source failing to answer: unreachable.
-impl From<BodyBrokeOff> for SourceError {
-    fn from(broke_off: BodyBrokeOff) -> Self {
-        Self::Unreachable(format!("the body broke off: {broke_off}"))
-    }
-}
-
 /// A request under construction, bound to the client that built it.
 ///
 /// **This type exists to have no `send`.** A bare
@@ -598,7 +590,7 @@ impl From<BodyBrokeOff> for SourceError {
 /// one character shorter than the correct call
 /// (`client.send(req)` vs `req.send()`), it compiles, and it works, so it
 /// would be found in review or not at all. Wrapping the builder makes
-/// [`HttpClient::send`] the only door.
+/// [`HttpClient::send`] (and `send_streaming`, the same loop) the only door.
 ///
 /// The builder surface is deliberately narrow: what an adapter needs on a
 /// GET, plus [`Request::json`] for M2's ratified write set (issue #43) --
