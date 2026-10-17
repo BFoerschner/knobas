@@ -99,7 +99,7 @@ fn descriptor() -> SourceDescriptor {
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         accepts_account: false,
-        write_ops: vec!["comment".to_owned()],
+        write_ops: vec!["comment".to_owned(), "create_branch".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "pull_request".to_owned(),
             label: "Pull request".to_owned(),
@@ -326,4 +326,42 @@ async fn two_writes_queued_back_to_back_are_sent_in_order() {
         })
         .collect();
     assert_eq!(bodies, ["first", "second"]);
+}
+
+/// #1050: `submit_write` with `link_to` holds the ticket on the queued row
+/// before anything is sent, so a write that waits keeps what it owes. Read
+/// while the adapter is held, the row already carries the ticket: no send,
+/// no re-read and no sync has run yet to put it there.
+#[tokio::test]
+async fn a_linked_submit_holds_its_ticket_on_the_row_before_the_send() {
+    const TICKET: &str = "jira:PAY-231";
+    let Fixture { state, .. } = fixture("background_write_link_held").await;
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', 'Retry')")
+        .bind(TICKET)
+        .execute(&state.pool)
+        .await
+        .expect("the ticket is mirrored");
+
+    let branch = json!({ "CreateBranch": {
+        "entity": "gitea:knobas/app", "name": "feature/PAY-231", "from_ref": "main"
+    }});
+    let queued = tokio::time::timeout(
+        PATIENCE,
+        knobas_app::sources::write_queue::submit_linked_in_background(
+            &state,
+            branch,
+            TICKET.to_owned(),
+        ),
+    )
+    .await
+    .expect("answered while the adapter was held")
+    .expect("the branch is queued");
+
+    let owed: Option<String> =
+        sqlx::query_scalar("select link_to from knobas.write_queue where id = $1")
+            .bind(queued.id)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the queue reads");
+    assert_eq!(owed.as_deref(), Some(TICKET), "the row holds what it owes");
 }
