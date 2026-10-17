@@ -58,7 +58,7 @@ check:
     # The script checks are a half of their own (#920): none of them runs
     # cargo or reads `target/`, and in the cargo chain their 23 s (warm,
     # quiet, 2026-10-15) were paid in full ahead of `clippy`.
-    script_recipes=(shell test-layout witness-unit)
+    script_recipes=(shell test-layout witness-unit conflict-markers)
     cargo_recipes=(fmt clippy clippy-libs inventory test)
     descendants() {
         local p
@@ -169,6 +169,7 @@ check:
 # (#920): `front-changed` below. `check` still runs every test.
 check-front base="origin/main":
     python3 -I scripts/contract-index.py --check
+    just conflict-markers
     just front-changed "{{base}}"
     @echo "check-front: ok"
 
@@ -538,6 +539,12 @@ pre-gate:
         echo "pre-gate: WARNING sccache at '$wrapper' does not run (testenv/README.md, 'sccache on a dev machine')"
     fi
     before=$(snapshot)
+    # A leftover conflict marker, then the bundle build (#999): PR #997's
+    # rebase left a `|||||||` line in a stylesheet that only lightningcss's
+    # minify in `vite build` refused. The grep is under a second, the build
+    # about 3 s; both are also in the gate (`check`, `check-front`).
+    just conflict-markers
+    npm --prefix app run build
     env -u RUSTUP_TOOLCHAIN cargo fmt --all
     just inventory-update
     just contract-index
@@ -562,6 +569,12 @@ pre-gate:
         echo "pre-gate: green. Uncommitted changes (commit what is yours):"
         git status --short
     fi
+
+# A leftover merge-conflict marker line (`<<<<<<<`, `|||||||`, `=======`,
+# `>>>>>>>`) in any file git knows (#999). Deliberate fixtures are listed in
+# `scripts/conflict-markers-allow.txt`. In `pre-gate`, `check` and `check-front`.
+conflict-markers:
+    scripts/conflict-markers.sh
 
 # The integration-test layout guard of ADR-0017 (issue #573): a top-level
 # `crates/<crate>/tests/*.rs` must be on `test-layout-exceptions.txt`, with its

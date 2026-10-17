@@ -1,0 +1,3 @@
+# Files that hold a conflict-marker line on purpose (a test fixture, a quoted
+# example). One repo-relative path per line; `#` starts a comment.
+# Read by scripts/conflict-markers.sh. Empty today.
