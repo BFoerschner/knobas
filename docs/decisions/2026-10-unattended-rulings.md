@@ -5071,3 +5071,21 @@ Merge-manager, PR #1145.
 - **Builds' and pull requests' states read through candidates resolved once a statement**
   (`state_paths`), by `state_of!`, the rule `declared_state!` now spells through too.
   **Reversing:** trivial.
+
+Merge-manager:
+
+- **The ten-lane cap and its R-3.5 amendment stay.** R-3.5 says each lane has its own columns
+  and a count and that lanes sort by size; it never says every lane is drawn at once, so
+  sending the ten biggest and counting the rest adds to it without contradicting it. It is
+  also the only way the ticket's second criterion can be met for lanes by epic: capping each
+  lane × status cell alone still sends every card when 750 epics hold about four tickets a
+  status. It is visible behaviour Björn did not specify, so it is named for him in the PR
+  report. **Reversing:** trivial (`LANES_AT_FIRST`, or `lanes_first: null`).
+- **#939 closes with two criteria short.** A laned board while typing reads 500 to 620 ms
+  against 400 (#1151), and `has:` misses 100 ms (#1148); every row is faster than before and
+  both are filed in Backlog. **Reversing:** n/a.
+- **Probe comparability.** The default seed now adds 1,500 pull requests and about 12,000
+  confirmed links (23,500 items, not 22,000), and its snapshot key says so (`prs`, `links`).
+  Rows from before #939 were measured on a mirror with no links and no pull requests, so
+  compare them with the same PR's *before* column, not with older records. `RP_PRS=0` drops
+  the pull requests but not the ticket–build and `blocks` links. **Reversing:** n/a.
