@@ -159,7 +159,10 @@ const BOARD_PAGE: u32 = 50;
 pub(crate) fn view_jql(filter: &str, sub_query: Option<&str>, scrum: bool) -> String {
     let (condition, order) = split_order(filter);
     let mut clauses: Vec<String> = Vec::new();
-    for part in [Some(condition), sub_query.map(str::trim)].into_iter().flatten() {
+    for part in [Some(condition), sub_query.map(str::trim)]
+        .into_iter()
+        .flatten()
+    {
         if !part.is_empty() {
             clauses.push(format!("({part})"));
         }
@@ -397,26 +400,44 @@ mod tests {
     /// A Jira Software with boards: each board is `(id, name, type, filter
     /// jql, sub-query, columns, keys its query answers)`. No issues: the
     /// issue walk answers nothing, so whatever a run emits is a view.
+    type FakeBoard = (
+        u64,
+        &'static str,
+        &'static str,
+        &'static str,
+        Option<&'static str>,
+        Value,
+        Vec<&'static str>,
+    );
+
     #[derive(Default)]
     struct Agile {
-        boards: Vec<(u64, &'static str, &'static str, &'static str, Option<&'static str>, Value, Vec<&'static str>)>,
+        boards: Vec<FakeBoard>,
         no_software: bool,
         forbidden: Vec<u64>,
         queries: Mutex<Vec<String>>,
     }
 
-    fn board(id: u64) -> impl Fn(&Agile) -> Option<&(u64, &'static str, &'static str, &'static str, Option<&'static str>, Value, Vec<&'static str>)> {
-        move |agile: &Agile| agile.boards.iter().find(|b| b.0 == id)
+    impl Agile {
+        fn board(&self, id: u64) -> Option<&FakeBoard> {
+            self.boards.iter().find(|b| b.0 == id)
+        }
     }
 
     fn not_found() -> SourceError {
-        SourceError::Protocol { status: Some(404), message: "no".to_owned() }
+        SourceError::Protocol {
+            status: Some(404),
+            message: "no".to_owned(),
+        }
     }
 
     #[async_trait::async_trait]
     impl JiraApi for Agile {
         async fn server_info(&self) -> Result<ServerInfo, SourceError> {
-            Ok(serde_json::from_value(json!({ "serverTime": "2026-10-17T10:00:00.000+0000" })).unwrap())
+            Ok(
+                serde_json::from_value(json!({ "serverTime": "2026-10-17T10:00:00.000+0000" }))
+                    .unwrap(),
+            )
         }
         async fn myself(&self) -> Result<Myself, SourceError> {
             unreachable!("a sync run does not ask")
@@ -424,7 +445,13 @@ mod tests {
         async fn fields(&self) -> Result<Vec<crate::model::FieldMeta>, SourceError> {
             unreachable!("a sync run does not ask")
         }
-        async fn search(&self, jql: &str, start_at: u32, max: u32, fields: &str) -> Result<SearchPage, SourceError> {
+        async fn search(
+            &self,
+            jql: &str,
+            start_at: u32,
+            max: u32,
+            fields: &str,
+        ) -> Result<SearchPage, SourceError> {
             if fields != "key" {
                 return Ok(serde_json::from_value(json!({ "total": 0, "issues": [] })).unwrap());
             }
@@ -435,7 +462,12 @@ mod tests {
                 .find(|b| jql.starts_with(&format!("({})", b.3.split(" ORDER").next().unwrap())))
                 .map(|b| b.6.clone())
                 .unwrap_or_default();
-            let page: Vec<Value> = keys.iter().skip(start_at as usize).take(max as usize).map(|k| json!({ "key": k })).collect();
+            let page: Vec<Value> = keys
+                .iter()
+                .skip(start_at as usize)
+                .take(max as usize)
+                .map(|k| json!({ "key": k }))
+                .collect();
             Ok(serde_json::from_value(json!({ "total": keys.len(), "issues": page })).unwrap())
         }
         async fn comments(&self, _: &str, _: u32, _: u32) -> Result<CommentPage, SourceError> {
@@ -444,21 +476,35 @@ mod tests {
         async fn worklogs(&self, _: &str) -> Result<WorklogPage, SourceError> {
             unreachable!()
         }
-        async fn boards(&self, _project: &str, start_at: u32, max: u32) -> Result<BoardPage, SourceError> {
+        async fn boards(
+            &self,
+            _project: &str,
+            start_at: u32,
+            max: u32,
+        ) -> Result<BoardPage, SourceError> {
             if self.no_software {
                 return Err(not_found());
             }
-            let values: Vec<Value> = self.boards.iter().skip(start_at as usize).take(max as usize)
-                .map(|b| json!({ "id": b.0, "name": b.1, "type": b.2 })).collect();
+            let values: Vec<Value> = self
+                .boards
+                .iter()
+                .skip(start_at as usize)
+                .take(max as usize)
+                .map(|b| json!({ "id": b.0, "name": b.1, "type": b.2 }))
+                .collect();
             let is_last = start_at as usize + values.len() >= self.boards.len();
             Ok(serde_json::from_value(json!({ "values": values, "isLast": is_last })).unwrap())
         }
         async fn board_configuration(&self, id: u64) -> Result<BoardConfiguration, SourceError> {
             if self.forbidden.contains(&id) {
-                return Err(SourceError::Protocol { status: Some(403), message: "no".to_owned() });
+                return Err(SourceError::Protocol {
+                    status: Some(403),
+                    message: "no".to_owned(),
+                });
             }
-            let b = board(id)(self).ok_or_else(not_found)?;
-            let mut config = json!({ "filter": { "id": format!("{}", 100 + id) }, "columnConfig": b.5 });
+            let b = self.board(id).ok_or_else(not_found)?;
+            let mut config =
+                json!({ "filter": { "id": format!("{}", 100 + id) }, "columnConfig": b.5 });
             if let Some(sub) = b.4 {
                 config["subQuery"] = json!({ "query": sub });
             }
@@ -471,11 +517,19 @@ mod tests {
         }
         async fn filter(&self, id: &str) -> Result<Filter, SourceError> {
             let board_id: u64 = id.parse::<u64>().unwrap() - 100;
-            Ok(Filter { jql: board(board_id)(self).ok_or_else(not_found)?.3.to_owned() })
+            Ok(Filter {
+                jql: self.board(board_id).ok_or_else(not_found)?.3.to_owned(),
+            })
         }
         async fn statuses(&self) -> Result<Vec<Status>, SourceError> {
-            Ok(["To Do", "In Progress", "In Review", "Done"].iter().enumerate()
-                .map(|(n, name)| Status { id: format!("{}", 10_000 + n), name: (*name).to_owned() }).collect())
+            Ok(["To Do", "In Progress", "In Review", "Done"]
+                .iter()
+                .enumerate()
+                .map(|(n, name)| Status {
+                    id: format!("{}", 10_000 + n),
+                    name: (*name).to_owned(),
+                })
+                .collect())
         }
     }
 
@@ -490,10 +544,24 @@ mod tests {
     fn seeded() -> Agile {
         Agile {
             boards: vec![
-                (21, "PAY sprint board", "scrum", "project = PAY ORDER BY Rank ASC", None,
-                 columns(Some(9), "none"), vec!["PAY-231", "PAY-228"]),
-                (22, "PAY flow", "kanban", "project in (PAY, WEB) ORDER BY Rank ASC", Some("fixVersion is EMPTY"),
-                 columns(Some(3), "issueCount"), vec!["WEB-5", "PAY-240", "PAY-231"]),
+                (
+                    21,
+                    "PAY sprint board",
+                    "scrum",
+                    "project = PAY ORDER BY Rank ASC",
+                    None,
+                    columns(Some(9), "none"),
+                    vec!["PAY-231", "PAY-228"],
+                ),
+                (
+                    22,
+                    "PAY flow",
+                    "kanban",
+                    "project in (PAY, WEB) ORDER BY Rank ASC",
+                    Some("fixVersion is EMPTY"),
+                    columns(Some(3), "issueCount"),
+                    vec!["WEB-5", "PAY-240", "PAY-231"],
+                ),
             ],
             ..Agile::default()
         }
@@ -506,10 +574,15 @@ mod tests {
     async fn sync(api: &Agile, cursor: Option<String>) -> (Vec<knobas_source::SyncItem>, String) {
         let mut sink = VecSink(Vec::new());
         let cfg = cfg();
-        let next = crate::sync::SyncRun { api, cfg: &cfg, source_id: "jira", base_url: "https://jira.example/" }
-            .run(cursor, &mut sink)
-            .await
-            .expect("the run succeeds");
+        let next = crate::sync::SyncRun {
+            api,
+            cfg: &cfg,
+            source_id: "jira",
+            base_url: "https://jira.example/",
+        }
+        .run(cursor, &mut sink)
+        .await
+        .expect("the run succeeds");
         (sink.0, next)
     }
 
@@ -520,7 +593,11 @@ mod tests {
             "(project = PAY) AND sprint in openSprints() ORDER BY Rank ASC"
         );
         assert_eq!(
-            view_jql("project in (PAY, WEB) order by rank", Some(" fixVersion is EMPTY "), false),
+            view_jql(
+                "project in (PAY, WEB) order by rank",
+                Some(" fixVersion is EMPTY "),
+                false
+            ),
             "(project in (PAY, WEB)) AND (fixVersion is EMPTY) order by rank"
         );
         assert_eq!(
@@ -540,19 +617,36 @@ mod tests {
 
         let scrum = &items[0];
         assert_eq!(scrum.title, "PAY sprint board");
-        assert_eq!(scrum.web_url.as_deref(), Some("https://jira.example/secure/RapidBoard.jspa?rapidView=21"));
+        assert_eq!(
+            scrum.web_url.as_deref(),
+            Some("https://jira.example/secure/RapidBoard.jspa?rapidView=21")
+        );
         assert_eq!(scrum.payload["keys"], json!(["PAY-231", "PAY-228"]));
         assert_eq!(scrum.payload["sprint"]["name"], "Sprint of 21");
-        assert_eq!(scrum.payload["query"], "(project = PAY) AND sprint in openSprints() ORDER BY Rank ASC");
+        assert_eq!(
+            scrum.payload["query"],
+            "(project = PAY) AND sprint in openSprints() ORDER BY Rank ASC"
+        );
         // A board whose limits do not count (`none`) has none.
-        assert_eq!(scrum.payload["columns"][1], json!({ "name": "Doing", "statuses": ["In Progress", "In Review"], "limit": null }));
+        assert_eq!(
+            scrum.payload["columns"][1],
+            json!({ "name": "Doing", "statuses": ["In Progress", "In Review"], "limit": null })
+        );
 
         let kanban = &items[1];
-        assert_eq!(kanban.payload["keys"], json!(["WEB-5", "PAY-240", "PAY-231"]), "Jira's order, unsynced project included");
+        assert_eq!(
+            kanban.payload["keys"],
+            json!(["WEB-5", "PAY-240", "PAY-231"]),
+            "Jira's order, unsynced project included"
+        );
         assert_eq!(kanban.payload["sprint"], Value::Null);
         assert_eq!(kanban.payload["sub_query"], "fixVersion is EMPTY");
         assert_eq!(kanban.payload["columns"][1]["limit"], 3);
-        assert_eq!(kanban.payload["columns"][2]["statuses"], json!(["Done"]), "a status id Jira does not name is left out");
+        assert_eq!(
+            kanban.payload["columns"][2]["statuses"],
+            json!(["Done"]),
+            "a status id Jira does not name is left out"
+        );
         assert_eq!(
             api.queries.lock().unwrap().clone(),
             [
@@ -582,7 +676,10 @@ mod tests {
         let (_, first) = sync(&api, None).await;
         let (items, second) = sync(&api, Some(first.clone())).await;
         assert!(items.is_empty(), "{items:?}");
-        assert_eq!(second, first, "an idle run hands back the cursor it was given");
+        assert_eq!(
+            second, first,
+            "an idle run hands back the cursor it was given"
+        );
     }
 
     #[tokio::test]
@@ -612,7 +709,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_jira_without_jira_software_brings_no_views_and_keeps_the_cursor_free_of_them() {
-        let api = Agile { no_software: true, ..seeded() };
+        let api = Agile {
+            no_software: true,
+            ..seeded()
+        };
         let (items, cursor) = sync(&api, None).await;
         assert!(items.is_empty());
         assert!(!cursor.contains("views"), "{cursor}");
@@ -620,7 +720,10 @@ mod tests {
 
     #[tokio::test]
     async fn a_board_this_account_cannot_read_is_left_out() {
-        let api = Agile { forbidden: vec![21], ..seeded() };
+        let api = Agile {
+            forbidden: vec![21],
+            ..seeded()
+        };
         let (items, _) = sync(&api, None).await;
         let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
         assert_eq!(keys, ["board-22"]);

@@ -2534,7 +2534,8 @@ async fn an_untouched_source_is_still_quiet_after_many_polls() {
 /// made and then deleted in Jira arrives, then arrives as gone.
 #[tokio::test]
 #[ignore = "needs testenv's seeded Jira: `just jira-live`"]
-async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_gone_at_the_next_sync() {
+async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_gone_at_the_next_sync()
+ {
     const PROBE: &str = "knobas live probe board";
     let seeded = seeded();
     seeded.clear_leftovers().await;
@@ -2551,7 +2552,11 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
         .await;
     for board in listed["values"].as_array().into_iter().flatten() {
         seeded
-            .request(reqwest::Method::DELETE, &format!("rest/agile/1.0/board/{}", board["id"]), None)
+            .request(
+                reqwest::Method::DELETE,
+                &format!("rest/agile/1.0/board/{}", board["id"]),
+                None,
+            )
             .await;
     }
 
@@ -2568,7 +2573,11 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
     let scrum = view(sprint.board_id);
     assert_eq!(scrum.payload["type"], "scrum");
     assert_eq!(scrum.payload["sprint"]["name"], sprint.name.as_str());
-    assert_eq!(scrum.payload["keys"], serde_json::json!(sprint.issues), "the active sprint's tickets");
+    assert_eq!(
+        scrum.payload["keys"],
+        serde_json::json!(sprint.issues),
+        "the active sprint's tickets"
+    );
 
     let flow = view(kanban.board_id);
     assert_eq!(flow.title, kanban.name);
@@ -2579,8 +2588,19 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| c["statuses"].as_array().unwrap().iter().any(|s| s == kanban.limit_column.as_str()))
-        .unwrap_or_else(|| panic!("no column holds {}: {}", kanban.limit_column, flow.payload["columns"]));
+        .find(|c| {
+            c["statuses"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|s| s == kanban.limit_column.as_str())
+        })
+        .unwrap_or_else(|| {
+            panic!(
+                "no column holds {}: {}",
+                kanban.limit_column, flow.payload["columns"]
+            )
+        });
     assert_eq!(limited["limit"], kanban.limit);
     let query = flow.payload["query"].as_str().unwrap();
     let control: Vec<String> = seeded
@@ -2589,14 +2609,22 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
         .iter()
         .map(|row| row["key"].as_str().unwrap().to_owned())
         .collect();
-    assert_eq!(flow.payload["keys"], serde_json::json!(control), "Jira's answer, in Jira's order");
+    assert_eq!(
+        flow.payload["keys"],
+        serde_json::json!(control),
+        "Jira's answer, in Jira's order"
+    );
     assert!(
         control.iter().any(|key| key.starts_with("OPS-")),
         "the board reaches OPS, which this source does not sync: {control:?}"
     );
 
     let (idle, same) = sync_from(&*source, Some(cursor.clone())).await;
-    assert!(idle.iter().all(|i| i.kind != "jira_view"), "an idle poll emits no view: {:?}", keys(&idle));
+    assert!(
+        idle.iter().all(|i| i.kind != "jira_view"),
+        "an idle poll emits no view: {:?}",
+        keys(&idle)
+    );
     assert_eq!(same, cursor);
 
     // A board made in Jira, then deleted there.
@@ -2619,13 +2647,25 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
     assert!(status == 200 || status == 201, "{status} {board}");
     let probe = format!("board-{}", board["id"]);
     let (made, after_made) = sync_from(&*source, Some(cursor)).await;
-    assert!(made.iter().any(|i| i.entity.key == probe && !i.deleted), "{:?}", keys(&made));
+    assert!(
+        made.iter().any(|i| i.entity.key == probe && !i.deleted),
+        "{:?}",
+        keys(&made)
+    );
     let (status, _) = seeded
-        .request(reqwest::Method::DELETE, &format!("rest/agile/1.0/board/{}", board["id"]), None)
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/agile/1.0/board/{}", board["id"]),
+            None,
+        )
         .await;
     assert_eq!(status, 204);
     seeded
-        .request(reqwest::Method::DELETE, &format!("rest/api/2/filter/{filter_id}"), None)
+        .request(
+            reqwest::Method::DELETE,
+            &format!("rest/api/2/filter/{filter_id}"),
+            None,
+        )
         .await;
     let (gone, _) = sync_from(&*source, Some(after_made)).await;
     let gone: Vec<&SyncItem> = gone.iter().filter(|i| i.kind == "jira_view").collect();

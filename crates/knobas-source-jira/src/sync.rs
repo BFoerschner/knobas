@@ -223,7 +223,10 @@ impl SyncRun<'_> {
         // keys, and a view read first would name tickets this run had not yet
         // mirrored.
         let views = crate::views::read(self.api, self.cfg, self.base_url).await?;
-        let delivered = previous.as_ref().map(|c| c.views.as_slice()).unwrap_or_default();
+        let delivered = previous
+            .as_ref()
+            .map(|c| c.views.as_slice())
+            .unwrap_or_default();
         let now: Vec<crate::cursor::SeenView> = views
             .iter()
             .map(|view| crate::cursor::SeenView {
@@ -241,7 +244,8 @@ impl SyncRun<'_> {
         }
         for old in delivered {
             if !now.iter().any(|seen| seen.k == old.k) {
-                sink.item(crate::views::gone(self.source_id, &old.k)).await?;
+                sink.item(crate::views::gone(self.source_id, &old.k))
+                    .await?;
                 views_emitted += 1;
             }
         }
@@ -249,10 +253,11 @@ impl SyncRun<'_> {
         // Battery clause 2: nothing happened, so the position did not move.
         // Returning the *input string* rather than a re-encoded struct makes
         // that byte-identical by construction.
-        if emitted == 0 && views_emitted == 0 {
-            if let Some(cursor) = cursor {
-                return Ok(cursor);
-            }
+        if emitted == 0
+            && views_emitted == 0
+            && let Some(cursor) = cursor
+        {
+            return Ok(cursor);
         }
         let mut next = match (emitted, watermark) {
             // No issue moved: the issue half of the position is where it was.

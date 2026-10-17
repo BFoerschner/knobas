@@ -1,4 +1,4 @@
-//! Jira views (#877, migration `0043`): every live `jira_view` item of a
+//! Jira views (#877, migration `0044`): every live `jira_view` item of a
 //! source, projected into `sync.jira_view` and `sync.jira_view_member` at the
 //! end of each of that source's runs, and each one's `knobas.ticket_view` row
 //! kept in step.
@@ -111,7 +111,10 @@ delete from knobas.ticket_view t
 ///
 /// The `sqlx::Error` of the statement that failed; the caller's run rolls
 /// back with it.
-pub async fn project(tx: &mut Transaction<'_, Postgres>, source_id: &str) -> Result<(), sqlx::Error> {
+pub async fn project(
+    tx: &mut Transaction<'_, Postgres>,
+    source_id: &str,
+) -> Result<(), sqlx::Error> {
     for statement in [UPSERT_VIEWS, DROP_GONE_VIEWS] {
         sqlx::query(statement)
             .bind(source_id)

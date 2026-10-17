@@ -97,7 +97,9 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
     )
     .await;
     let mut tx = pool.begin().await.unwrap();
-    knobas_sync::jira_views::project(&mut tx, "jira").await.unwrap();
+    knobas_sync::jira_views::project(&mut tx, "jira")
+        .await
+        .unwrap();
     tx.commit().await.unwrap();
     (format!("jira-{key}"), format!("jira:{key}"))
 }
@@ -119,7 +121,11 @@ async fn seeded(pool: &sqlx::PgPool) -> (String, String, String) {
     issue(pool, &format!("{p}-3"), "To Do", "Retry the export").await;
     issue(pool, &format!("{p}-4"), "Blocked", "Off the board").await;
     let keys = ["1", "WEB", "2", "3", "4"].map(|n| {
-        if n == "WEB" { "WEB-5".to_owned() } else { format!("{p}-{n}") }
+        if n == "WEB" {
+            "WEB-5".to_owned()
+        } else {
+            format!("{p}-{n}")
+        }
     });
     let (id, view) = board(pool, &p, &keys).await;
     (p, id, view)
@@ -135,9 +141,16 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
     assert_eq!(row.view.jira_ref.as_deref(), Some(view.as_str()));
     assert_eq!(row.view.columns.len(), 3);
     assert_eq!(row.view.columns[1].limit, Some(2));
-    assert_eq!(row.count, Some(4), "the four it mirrors, not WEB-5 and not every ticket");
+    assert_eq!(
+        row.count,
+        Some(4),
+        "the four it mirrors, not WEB-5 and not every ticket"
+    );
     let jira = row.jira.expect("where it comes from");
-    assert_eq!((jira.kind.as_str(), jira.board_type.as_deref()), ("board", Some("kanban")));
+    assert_eq!(
+        (jira.kind.as_str(), jira.board_type.as_deref()),
+        ("board", Some("kanban"))
+    );
     assert_eq!(jira.jql, format!("project = {p}"));
     assert_eq!(jira.sprint, None);
 
@@ -168,17 +181,29 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
 async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() {
     let pool = pool().await;
     let (p, _, view) = seeded(&pool).await;
-    let board = jira_view_board(&pool, &view, None, None).await.expect("the board");
+    let board = jira_view_board(&pool, &view, None, None)
+        .await
+        .expect("the board");
     let drawn: Vec<(Option<String>, Vec<String>, u32)> = board
         .columns
         .iter()
-        .map(|c| (c.status.clone(), c.cards.iter().map(|card| card.key.clone()).collect(), c.total))
+        .map(|c| {
+            (
+                c.status.clone(),
+                c.cards.iter().map(|card| card.key.clone()).collect(),
+                c.total,
+            )
+        })
         .collect();
     assert_eq!(
         drawn,
         [
             (Some("To Do".into()), vec![format!("{p}-3")], 1),
-            (Some("Doing".into()), vec![format!("{p}-1"), format!("{p}-2")], 2),
+            (
+                Some("Doing".into()),
+                vec![format!("{p}-1"), format!("{p}-2")],
+                2
+            ),
             (Some("Done".into()), vec![], 0),
         ],
         "Jira's order inside a column of two statuses, an empty column kept, a status on no column not drawn"
@@ -189,11 +214,19 @@ async fn a_jira_views_board_is_jiras_tickets_in_jiras_order_under_its_columns() 
     assert_eq!(capped.columns[1].cards[0].key, format!("{p}-1"));
     assert_eq!(capped.columns[1].total, 2);
 
-    let narrowed = jira_view_board(&pool, &view, None, Some("retry")).await.unwrap();
-    let keys: Vec<String> = narrowed.columns.iter().flat_map(|c| c.cards.iter().map(|card| card.key.clone())).collect();
+    let narrowed = jira_view_board(&pool, &view, None, Some("retry"))
+        .await
+        .unwrap();
+    let keys: Vec<String> = narrowed
+        .columns
+        .iter()
+        .flat_map(|c| c.cards.iter().map(|card| card.key.clone()))
+        .collect();
     assert_eq!(keys, [format!("{p}-3"), format!("{p}-2")]);
 
-    let missing = jira_view_board(&pool, "jira:board-nothing", None, None).await.unwrap_err();
+    let missing = jira_view_board(&pool, "jira:board-nothing", None, None)
+        .await
+        .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
 }
 
@@ -221,7 +254,10 @@ async fn view_settings_keep_what_jira_decides_and_a_jira_view_is_not_deleted() {
     )
     .await
     .expect("view settings save");
-    assert_eq!((saved.layout.as_str(), saved.lanes.as_str()), ("list", "assignee"));
+    assert_eq!(
+        (saved.layout.as_str(), saved.lanes.as_str()),
+        ("list", "assignee")
+    );
     assert_eq!(saved.card_fields, ["type"]);
     assert_eq!(saved.name, format!("{p} flow"));
     assert_eq!(saved.group, "Jira boards");

@@ -5460,7 +5460,9 @@ pub async fn jira_view_board(
             .fetch_optional(pool)
             .await?;
     let Some(columns) = columns else {
-        return Err(IpcError::not_found(format!("no Jira view is called {view}")));
+        return Err(IpcError::not_found(format!(
+            "no Jira view is called {view}"
+        )));
     };
     let columns: Vec<crate::ticket_views::ViewColumn> =
         serde_json::from_value(columns).map_err(IpcError::internal)?;
@@ -5501,12 +5503,20 @@ pub async fn jira_view_board(
     )
     .await?;
     let in_order = |mut cards: Vec<MiniBoardCard>| -> MiniBoardColumn {
-        cards.sort_by_key(|card| rank.get(card.entity_id.as_str()).copied().unwrap_or(usize::MAX));
+        cards.sort_by_key(|card| {
+            rank.get(card.entity_id.as_str())
+                .copied()
+                .unwrap_or(usize::MAX)
+        });
         let total = u32::try_from(cards.len()).unwrap_or(u32::MAX);
         if let Some(cap) = per_column {
             cards.truncate(cap as usize);
         }
-        MiniBoardColumn { status: None, cards, total }
+        MiniBoardColumn {
+            status: None,
+            cards,
+            total,
+        }
     };
     let drawn: Vec<MiniBoardColumn> = if columns.is_empty() {
         whole
@@ -5531,7 +5541,9 @@ pub async fn jira_view_board(
                     column
                         .statuses
                         .iter()
-                        .flat_map(|status| by_status.remove(&Some(status.clone())).unwrap_or_default())
+                        .flat_map(|status| {
+                            by_status.remove(&Some(status.clone())).unwrap_or_default()
+                        })
                         .collect(),
                 )
             })

@@ -1,11 +1,11 @@
--- 0043_the_boards_jira_reads_as_views.sql -- the Jira views a Jira source
+-- 0044_the_boards_jira_reads_as_views.sql -- the Jira views a Jira source
 -- reads at every sync, and the tickets each holds in Jira's order (#877,
 -- spec #808 "Jira views", R-3.20, R-3.21, R-3.24, R-3.26).
 --
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/877-migration-0043-jira-views-and-their-members.md`).
+-- (`docs/contract/10.8/877-migration-0044-jira-views-and-their-members.md`).
 --
 -- ## Where the rows come from
 --

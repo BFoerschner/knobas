@@ -1,4 +1,4 @@
-- **Migration `0043`, the Jira adapter's `jira_view` entity kind and the IPC command schema —
+- **Migration `0044`, the Jira adapter's `jira_view` entity kind and the IPC command schema —
   issue #877 (2026-10-17): the Jira boards on the synced projects as Jira views
   (`sync.jira_view`, `sync.jira_view_member`), read at every sync, drawn in Jira's order.** Spec
   #808, *Jira views*; requirements R-3.20 (boards), R-3.21, R-3.24 (columns), R-3.26; milestone

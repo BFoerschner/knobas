@@ -240,7 +240,10 @@ async fn jira_sources(
     pool: &PgPool,
     views: &[TicketView],
 ) -> Result<std::collections::HashMap<String, (u64, JiraSource)>, IpcError> {
-    let refs: Vec<&str> = views.iter().filter_map(|view| view.jira_ref.as_deref()).collect();
+    let refs: Vec<&str> = views
+        .iter()
+        .filter_map(|view| view.jira_ref.as_deref())
+        .collect();
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
@@ -270,7 +273,10 @@ async fn jira_sources(
                 last_read: row.get("last_read"),
                 web_url: row.get("web_url"),
             };
-            (row.get("entity_id"), (u64::try_from(n).unwrap_or(0), source))
+            (
+                row.get("entity_id"),
+                (u64::try_from(n).unwrap_or(0), source),
+            )
         })
         .collect())
 }
