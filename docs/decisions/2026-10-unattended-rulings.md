@@ -5115,3 +5115,10 @@ Implementer, PR for #1144.
   load, and the run page reads its row from `pipeline_runs`. `pipeline_runs`, `older_pipeline_runs`
   and `run_chain` resolve. `pipeline_runs` answers the mirror alone before the sync engine is
   up. **Reversing:** low (pass the live reads to `pipelines_inner`).
+- **Merge review: the live reads share a 5 s budget** (`COMMIT_READ_BUDGET` in
+  `commands/entity.rs`). The run page's runs wait on `pipeline_runs`, and a settings read is
+  several HTTP calls of up to 45 s each (`knobas_http::SEND_BUDGET`), so a silent TeamCity held
+  the whole runs list for minutes to sharpen one link. Past the budget the read counts as
+  unreadable and the shared sha links nothing. One budget for the call, not one per pipeline, so
+  `run_chain` over several pipelines is bounded the same. **Reversing:** low (change or drop the
+  constant).

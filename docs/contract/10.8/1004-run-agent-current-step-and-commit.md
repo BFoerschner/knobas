@@ -49,13 +49,16 @@
   settings live, once per pipeline and only for such a sha, and matches each repository URL plus
   the sha the way #665's view row does (`commit_page`, `RESOLVE_URL`). Exactly one hit links it.
   Otherwise the answer is `None`: no hit, more than one, or settings that cannot be read. A failed
-  read is logged, not returned. `pipeline_runs`, `older_pipeline_runs` and `run_chain` resolve.
+  read is logged, not returned. All of one call's settings reads share a 5 s budget
+  (`COMMIT_READ_BUDGET`); a read still out when it ends counts as unreadable, so a slow or
+  unreachable source delays the runs by at most that, not by its HTTP calls' 45 s each. `pipeline_runs`, `older_pipeline_runs` and `run_chain` resolve.
   `pipelines` reads the mirror only, so a shared sha there is `None`, and so is `pipeline_runs`
   before the sync engine is up. The command `pipeline_runs` now takes the app handle and calls
   `pipeline_runs_live_inner`. Its IPC arguments and answer shape are unchanged, and
   `pipeline_runs_inner` stays as the mirror-only read. No new command, field, migration or
   declaration. Witnessed by `tests/it/builds_ipc.rs`'s
-  `a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds`.
+  `a_shared_sha_links_the_commit_in_the_repository_the_pipeline_builds` and
+  `a_shared_sha_links_nothing_it_cannot_pin_and_never_waits_on_a_silent_source`.
   `KindPaths` is mirrored in `app/src/lib/ipc/sources.ts`; the shapes are held by
   `sources_mirror.rs` and `entity_mirror.rs`, answered by the fake IPC (`fake/builds.ts`),
   witnessed by `tests/it/builds_ipc.rs`'s

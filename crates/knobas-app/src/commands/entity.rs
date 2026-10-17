@@ -1688,6 +1688,13 @@ const COMMITS_OF: &str = concat!(
  order by c.sha, c.entity_id"
 );
 
+/// How long [`with_commits`] waits for all its pipelines' settings together
+/// (#1144). The live read only sharpens a link, and the run page's runs wait
+/// on it, so a slow or unreachable source costs at most this before those
+/// runs answer without the link. One HTTP call alone may take 45 s
+/// (`knobas_http::SEND_BUDGET`), and a settings read makes several.
+const COMMIT_READ_BUDGET: std::time::Duration = std::time::Duration::from_secs(5);
+
 /// The live reads a run's commit may need (#1144): the secrets and adapters
 /// to read its pipeline's settings with.
 type LiveReads<'a> = (
@@ -1706,8 +1713,9 @@ type LiveReads<'a> = (
 /// **A sha one mirrored commit holds** links that commit. **A sha two hold**
 /// (#1144) links the one in the repository the run's pipeline builds, found
 /// by [`crate::sources::crud::pipeline_commits`] from its settings, one live
-/// read per pipeline and only for such a sha. Without `live`, or where the
-/// settings cannot be read or name none of them, it links nothing: a commit
+/// read per pipeline and only for such a sha, all of them within
+/// [`COMMIT_READ_BUDGET`]. Without `live`, or where the settings cannot be
+/// read in time or name none of them, it links nothing: a commit
 /// in another repository is never offered as the one the run built.
 async fn with_commits<'a>(
     pool: &PgPool,
@@ -1750,11 +1758,15 @@ async fn with_commits<'a>(
     let mut resolved: std::collections::HashMap<(&str, String), String> =
         std::collections::HashMap::new();
     if let Some((secrets, registry)) = live {
+        let deadline = tokio::time::Instant::now() + COMMIT_READ_BUDGET;
         for (pipeline, wanted) in shared {
-            match crate::sources::crud::pipeline_commits(pool, secrets, registry, pipeline, &wanted)
-                .await
-            {
-                Ok(found) => {
+            let read =
+                crate::sources::crud::pipeline_commits(pool, secrets, registry, pipeline, &wanted);
+            match tokio::time::timeout_at(deadline, read).await {
+                Err(_) => {
+                    tracing::warn!(pipeline, "a run's repository took too long to read");
+                }
+                Ok(Ok(found)) => {
                     for (sha, commit) in found {
                         if held
                             .get(&sha)
@@ -1764,7 +1776,7 @@ async fn with_commits<'a>(
                         }
                     }
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     tracing::warn!(pipeline, %error, "a run's repository could not be read");
                 }
             }
