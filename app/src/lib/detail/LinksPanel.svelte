@@ -25,7 +25,7 @@
   import Monogram from "../shell/Monogram.svelte";
   import { kindMonogram, kindSingular } from "../shell/kinds";
   import { kindRegistry } from "../shell/kind-registry.svelte";
-  import { hashFor } from "../shell/router.svelte";
+  import { entityAddress } from "../tf/address";
   import { ago } from "../shell/time";
   import { groupLinks } from "./relations";
 
@@ -52,16 +52,13 @@
    * The other end's stable address (spec §2), so a row is navigation rather
    * than decoration.
    *
-   * Built through `hashFor` and not by string concatenation: entity keys carry
-   * `#` and `/` (`acme/payout-service#142`), and an unencoded one truncates the
-   * fragment at the browser level.
+   * Built through `entityAddress` (the ticket-first shell's one rule for a
+   * kind's page) and not by string concatenation: entity keys carry `#` and `/`
+   * (`acme/payout-service#142`), and an unencoded one truncates the fragment
+   * at the browser level.
    */
   function addressOf(entry: LinkEntry): string {
-    return hashFor({
-      view: "room",
-      ctx: "all",
-      detail: { kind: entry.other.kind, entityId: entry.other.entity_id },
-    });
+    return entityAddress(entry.other.kind, entry.other.entity_id);
   }
 
   /** The adapter's word for a kind, falling back to §3a's humaniser. */
