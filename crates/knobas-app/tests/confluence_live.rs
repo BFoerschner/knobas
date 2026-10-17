@@ -1658,7 +1658,9 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         p["position"] == json!(0)
     })
     .await;
-    let zeta_at = mirrored(&state.pool, &zeta).await.expect("Zeta is mirrored");
+    let zeta_at = mirrored(&state.pool, &zeta)
+        .await
+        .expect("Zeta is mirrored");
     assert_eq!(
         (alpha_at["position"].clone(), zeta_at["position"].clone()),
         (json!(0), json!(1)),

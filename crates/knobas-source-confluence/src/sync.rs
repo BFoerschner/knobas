@@ -303,7 +303,7 @@ impl SyncRun<'_> {
             None => walked_positions,
             Some(previous) => {
                 let swept = self.positions_sweep().await?;
-                let moved = moved_since(previous.positions.as_ref(), &swept, &delivered);
+                let moved = ids_to_reread(previous.positions.as_ref(), &swept, &delivered);
                 emitted += self
                     .reread(&moved, me, &mut delivered, &mut users, sink)
                     .await?;
@@ -618,7 +618,7 @@ impl SyncRun<'_> {
 ///
 /// With no recorded places at all -- a cursor from before #1138 -- every
 /// placed page counts as moved, since nothing says it did not.
-fn moved_since<'s>(
+fn ids_to_reread<'s>(
     known: Option<&Positions>,
     swept: &'s [(String, Option<i64>)],
     delivered: &std::collections::BTreeSet<String>,
@@ -1193,7 +1193,12 @@ mod tests {
         assert_eq!(sorted(ids(&items)), vec!["101", "102"]);
         for item in &items {
             let expected = if item.entity.key == "102" { 0 } else { 1 };
-            assert_eq!(item.payload["position"], json!(expected), "{}", item.entity.key);
+            assert_eq!(
+                item.payload["position"],
+                json!(expected),
+                "{}",
+                item.entity.key
+            );
             assert!(
                 item.payload["body"]["storage"]["value"].is_string(),
                 "the page is delivered whole, not as a positions row"
