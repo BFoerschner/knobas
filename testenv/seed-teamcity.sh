@@ -495,6 +495,26 @@ while :; do
 done
 echo " ok ($(printf '%s' "$REST_BODY" | jq -r .count) connected, authorised agent(s))"
 
+# 5. Agents a killed run left parked (#1049). The live suite's AgentsParked
+#    guard disables every enabled agent for one case and re-enables them on
+#    drop or panic; a SIGKILL skips both, and every later build then queues
+#    forever. `authorized` (above) does not see it: enabled is a separate
+#    flag. Re-enable each disabled agent, and touch no enabled one.
+rest GET "/app/rest/agents?locator=authorized:any&fields=agent(id,name,enabled)"
+[ "$REST_STATUS" = "200" ] || die "listing agents to find disabled ones answered $REST_STATUS"
+_parked=$(printf '%s' "$REST_BODY" | jq -r '.agent[]? | select(.enabled == false) | "\(.id)\t\(.name)"')
+if [ -n "$_parked" ]; then
+  printf '%s\n' "$_parked" | while IFS="$(printf '\t')" read -r _aid _aname; do
+    _enabled=$(curl -sS --max-time 60 -H "Authorization: Bearer $TOKEN" -X PUT \
+                    -H 'Content-Type: text/plain' -H 'Accept: text/plain' --data 'true' \
+                    "$TC_URL/app/rest/agents/id:$_aid/enabled") || die "re-enabling agent $_aname failed"
+    [ "$_enabled" = "true" ] || die "PUT agents/id:$_aid/enabled answered '$_enabled'"
+    say "re-enabled agent $_aname (id $_aid): a killed run had left it disabled"
+  done
+else
+  say "no agent is disabled"
+fi
+
 # Still as the bearer of $TOKEN: this is the version the token can see.
 # Merged over the block's existing keys rather than replacing it, because
 # seed-teamcity-builds.sh keeps `teamcity.builds` in the same block.
