@@ -42,6 +42,7 @@ mod profile;
 pub mod protocol;
 pub mod run_presets;
 pub mod settings;
+mod slug;
 pub mod sources;
 pub mod standup;
 pub mod start_work;
