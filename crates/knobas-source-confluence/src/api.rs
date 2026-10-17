@@ -1,4 +1,4 @@
-//! The five calls this adapter makes.
+//! The six calls this adapter's sync makes.
 //!
 //! A trait rather than a direct dependency on [`crate::http::ConfluenceHttp`],
 //! because the interesting part of this adapter is paging, the ceiling and
@@ -15,6 +15,7 @@
 //! | [`follow`](ConfluenceApi::follow) | whatever `_links.next` said | *(the server's own)* |
 //! | [`comments`](ConfluenceApi::comments) | `rest/api/content/{id}/child/comment` | `limit`, `start`, `expand` |
 //! | [`content`](ConfluenceApi::content) | `rest/api/content/{id}` | `expand` |
+//! | [`user_by_key`](ConfluenceApi::user_by_key) | `rest/api/user` | `key` |
 //!
 //! Atlassian publishes no machine-readable specification for this product, so
 //! there is no mock that can record an invented parameter as a violation the
@@ -112,6 +113,10 @@ pub(crate) trait ConfluenceApi: Send + Sync {
     /// on a page nobody edited is precisely the case whose page the walk's own
     /// bound excludes.
     async fn content(&self, id: &str, expand: &str) -> Result<RawContent, SourceError>;
+    /// `GET /rest/api/user?key=…` -- the user a mention's `ri:userkey` names
+    /// (#953), as Confluence's own user record. Data Center has no bulk form
+    /// of this call, so [`crate::users::Directory`] asks once per key per run.
+    async fn user_by_key(&self, key: &str) -> Result<serde_json::Value, SourceError>;
 }
 
 /// The real endpoints.
@@ -165,5 +170,10 @@ impl ConfluenceApi for crate::http::ConfluenceHttp {
             &[("expand", expand.to_owned())],
         )
         .await
+    }
+
+    async fn user_by_key(&self, key: &str) -> Result<serde_json::Value, SourceError> {
+        self.get_json("rest/api/user", &[("key", key.to_owned())])
+            .await
     }
 }

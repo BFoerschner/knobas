@@ -330,6 +330,12 @@ pub struct KindPaths {
     /// miss draws nothing.
     #[serde(default)]
     pub comment_count: Vec<PayloadPath>,
+    /// Where a page sits among its siblings in the source's own order
+    /// (#953): a whole JSON number, lowest first. The Docs tree orders a
+    /// parent's children by it, and a child without one follows, by title.
+    /// Empty for every kind the source does not order.
+    #[serde(default)]
+    pub position: Vec<PayloadPath>,
     /// Which kind of the Builds frame this kind is (ADR-0022, #848): a
     /// [`Frame::Pipeline`] the Builds view lists, or a [`Frame::Run`] of one.
     /// A role, not a path, like [`blocked_statuses`](Self::blocked_statuses).
@@ -583,6 +589,7 @@ pub mod field {
     pub const SPRINT_STATE: &str = "sprint_state";
     pub const ESTIMATE: &str = "estimate";
     pub const COMMENT_COUNT: &str = "comment_count";
+    pub const POSITION: &str = "position";
     pub const NAME: &str = "name";
     pub const GROUP: &str = "group";
     pub const GROUP_PATH: &str = "group_path";
@@ -626,6 +633,7 @@ pub mod field {
         SPRINT_STATE,
         ESTIMATE,
         COMMENT_COUNT,
+        POSITION,
         NAME,
         GROUP,
         GROUP_PATH,

@@ -343,6 +343,7 @@ knobas-app	test/clone_live	a_seeded_repository_clones_and_the_scan_finds_it
 knobas-app	test/clone_live	an_existing_folder_that_is_not_a_clone_is_refused
 knobas-app	test/clone_live	stopping_a_clone_leaves_nothing_behind
 knobas-app	test/clone_live	the_app_itself_refuses_the_testenv_address
+knobas-app	test/confluence_live	a_mention_of_anyone_resolves_and_children_keep_confluences_order
 knobas-app	test/confluence_live	a_page_with_every_mapped_macro_reads_as_the_readers_blocks
 knobas-app	test/confluence_live	a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks
 knobas-app	test/confluence_live	an_edit_made_against_a_version_the_server_has_passed_is_refused_by_confluence
@@ -639,6 +640,7 @@ knobas-app	test/it	docs_ipc::a_page_under_a_parent_loop_keeps_its_parent
 knobas-app	test/it	docs_ipc::a_parent_loop_is_cut_and_both_pages_sit_at_the_top
 knobas-app	test/it	docs_ipc::a_search_finds_pages_with_every_word_and_says_where_the_snippet_is
 knobas-app	test/it	docs_ipc::a_section_edit_is_the_whole_body_against_the_version_read
+knobas-app	test/it	docs_ipc::children_are_in_the_sources_order_and_by_title_where_it_has_none
 knobas-app	test/it	docs_ipc::export_writes_the_page_as_markdown
 knobas-app	test/it	docs_ipc::for_you_is_the_pages_that_mention_the_reader
 knobas-app	test/it	docs_ipc::moving_the_notes_queues_one_page_each_under_the_parent
@@ -2216,6 +2218,7 @@ knobas-source	lib/knobas_source	view::tests::the_wire_shape_is_a_union_on_type
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_code_macro_is_a_code_block_with_its_language
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_jira_macro_is_an_issue_chip_inside_its_sentence
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_jira_macro_with_no_key_is_a_placeholder
+knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_mention_resolves_through_the_users_the_sync_looked_up
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_noformat_macro_and_a_pre_are_code_with_no_language
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_page_link_names_its_title_and_space
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_page_record_projects_its_version_labels_and_comments
@@ -2285,6 +2288,7 @@ knobas-source-confluence	lib/knobas_source_confluence	http::tests::the_confluenc
 knobas-source-confluence	lib/knobas_source_confluence	http::tests::unsupported_auth_methods_are_refused_by_name
 knobas-source-confluence	lib/knobas_source_confluence	http::tests::user_and_password_become_a_basic_credential
 knobas-source-confluence	lib/knobas_source_confluence	map::tests::a_page_declares_its_ancestors_as_its_parent_chain_answered_to_by_title
+knobas-source-confluence	lib/knobas_source_confluence	map::tests::a_page_keeps_its_place_among_its_siblings_where_confluence_gives_one
 knobas-source-confluence	lib/knobas_source_confluence	map::tests::a_page_whose_version_names_nobody_falls_back_to_its_creator
 knobas-source-confluence	lib/knobas_source_confluence	map::tests::a_page_with_no_web_link_has_no_web_url
 knobas-source-confluence	lib/knobas_source_confluence	map::tests::a_renamed_page_is_the_same_entity
@@ -2335,7 +2339,9 @@ knobas-source-confluence	lib/knobas_source_confluence	storage::tests::the_seeded
 knobas-source-confluence	lib/knobas_source_confluence	storage::tests::what_a_reader_typed_survives_both_directions
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_comment_that_mentions_me_delivers_the_page_it_is_on
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_delivered_mention_settles_and_the_next_poll_returns_the_same_bytes
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_failing_lookup_stops_the_lookups_and_the_pages_still_sync
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_full_sync_walks_every_page_following_the_next_link
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_key_nobody_answers_to_is_asked_once_and_stays_a_miss
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_mention_newer_than_every_page_leaves_the_watermark_where_it_was
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_mention_record_the_walk_cannot_place_contributes_nothing
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::a_mentioning_page_the_walk_already_sent_is_not_sent_twice
@@ -2348,6 +2354,7 @@ knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_empty_corp
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_expanded_comment_container_is_not_fetched_again
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::an_idle_incremental_run_emits_nothing_and_returns_the_same_bytes
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::comments_the_search_did_not_expand_are_fetched_and_land_in_the_payload
+knobas-source-confluence	lib/knobas_source_confluence	sync::tests::every_mention_key_resolves_with_one_lookup_per_key_per_run
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::one_edit_then_an_idle_poll_settles
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_ceiling_clamp_never_moves_the_position_backwards
 knobas-source-confluence	lib/knobas_source_confluence	sync::tests::the_configured_space_list_reaches_every_query_the_run_sends
@@ -2358,6 +2365,7 @@ knobas-source-confluence	lib/knobas_source_confluence	time::tests::an_unreadable
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_floor_is_the_query_read_back_not_the_instant_asked_for
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_offset_is_read_off_the_servers_own_rendering
 knobas-source-confluence	lib/knobas_source_confluence	time::tests::the_response_timestamp_parses_in_every_spelling_confluence_uses
+knobas-source-confluence	lib/knobas_source_confluence	users::tests::the_keys_of_a_body_are_its_user_links_and_not_its_code
 knobas-source-confluence	lib/knobas_source_confluence	write::tests::a_create_or_a_comment_is_sent_once
 knobas-source-confluence	test/live_confluence_seeded	a_full_sync_mirrors_every_seeded_page_of_the_space
 knobas-source-confluence	test/live_confluence_seeded	a_rejected_credential_is_refused_and_the_seed_account_still_works

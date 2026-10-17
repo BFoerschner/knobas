@@ -52,12 +52,14 @@ pub(crate) struct Person {
     pub display_name: Option<String>,
 }
 
-/// Who a `ri:userkey` names, as far as the record itself says.
+/// Who a `ri:userkey` names, as far as the record says.
 ///
 /// A Confluence mention carries a **key**. The page's record names some users
 /// outright -- its editor, its creator, every comment's author -- each with
-/// key, username and display name, so a mention of any of them resolves. A key
-/// the record does not name resolves to nobody: the miss, never a guess.
+/// key, username and display name, so a mention of any of them resolves. Every
+/// other key the body or a comment mentions the sync looked up and kept beside
+/// the record at [`crate::users::MENTIONED_USERS`] (#953). A key neither names
+/// resolves to nobody: the miss, never a guess.
 pub(crate) type People = HashMap<String, Person>;
 
 /// The Docs projection for this adapter: `knobas_source::docs::DocProjection`.
@@ -547,7 +549,7 @@ fn comment(raw: &Value, people: &People) -> Option<DocComment> {
 }
 
 /// Every user object the record carries, by key.
-fn people(payload: &Value) -> People {
+pub(crate) fn people(payload: &Value) -> People {
     let mut out = People::new();
     let mut add = |user: Option<&Value>| {
         let Some(user) = user else { return };
@@ -569,6 +571,15 @@ fn people(payload: &Value) -> People {
         for c in comments {
             add(c.pointer("/version/by"));
             add(c.pointer("/history/createdBy"));
+        }
+    }
+    // Last, so a user the record names itself keeps that record's spelling.
+    if let Some(users) = payload
+        .get(crate::users::MENTIONED_USERS)
+        .and_then(Value::as_array)
+    {
+        for user in users {
+            add(Some(user));
         }
     }
     out
@@ -1627,6 +1638,41 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 author_name: Some("Tomasz Wójcik".into()),
                 at: Some("2026-08-19T10:00:00.000Z".into()),
                 blocks: vec![para("Rewriting the Ledger section.")],
+            }]
+        );
+    }
+
+    /// #953: a key the record names nowhere resolves through the users the
+    /// sync looked up and kept beside the record, in a comment as in the body.
+    #[test]
+    fn a_mention_resolves_through_the_users_the_sync_looked_up() {
+        let payload = json!({
+            "body": {"storage": {"value": "<p><ac:link><ri:user ri:userkey=\"k-mara\" /></ac:link></p>"}},
+            "version": {"number": 2, "by": {"username": "tomasz", "userKey": "k-tw"}},
+            "children": {"comment": {"results": [{
+                "body": {"storage": {"value": "<p><ac:link><ri:user ri:userkey=\"k-mara\" /></ac:link> ok</p>"}},
+                "history": {"createdBy": {"username": "tomasz", "userKey": "k-tw"}}
+            }]}},
+            "mentioned_users": [
+                {"userKey": "k-mara", "username": "mara", "displayName": "Mara Lindqvist"}
+            ]
+        });
+        let doc = doc_content("page", &payload).expect("a page projects");
+        let mara = Inline::Mention {
+            user: Some("mara".into()),
+            name: Some("Mara Lindqvist".into()),
+            me: false,
+        };
+        assert_eq!(
+            doc.blocks,
+            vec![DocBlock::Paragraph {
+                text: vec![mara.clone()]
+            }]
+        );
+        assert_eq!(
+            doc.comments[0].blocks,
+            vec![DocBlock::Paragraph {
+                text: vec![mara, Inline::text(" ok")]
             }]
         );
     }

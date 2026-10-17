@@ -110,6 +110,12 @@ pub fn descriptor_template() -> SourceDescriptor {
 /// source does not sync is still in its descendants' chain. Not the content
 /// id: nobody types it.
 ///
+/// **A page's place among its siblings** (#953) is the whole number the sync
+/// keeps at [`crate::map::POSITION`], read off Confluence's
+/// `extensions.position`: there and not at Confluence's own path, because
+/// Confluence answers `"none"` there for a page nobody reordered, and a
+/// declared integer leads to a whole number or to nothing.
+///
 /// One entry, because this adapter emits one kind. A `comment` is not a kind
 /// here -- it lives in its page's payload, the way a Jira comment lives in its
 /// issue's -- so it needs no declaration.
@@ -124,6 +130,7 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             at: PayloadPath::of(["ancestors"]),
             names: vec![PayloadPath::of(["title"])],
         }],
+        position: vec![PayloadPath::of([crate::map::POSITION])],
         ..KindPaths::default()
     }]
 }

@@ -118,6 +118,8 @@ export interface KindPaths {
   estimate: PayloadPath[];
   /** How many comments a ticket has, a whole number (#894). */
   comment_count: PayloadPath[];
+  /** Where a page sits among its siblings in the source's order, a whole number, lowest first (#953). */
+  position: PayloadPath[];
   /** Which part of the Builds frame this kind is, or `null` (ADR-0022, #848). */
   frame: Frame | null;
   /** What a pipeline is called (#848). */

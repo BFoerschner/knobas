@@ -311,6 +311,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "name",
             "number",
             "pipeline",
+            "position",
             "branch",
             "started",
             "labels",

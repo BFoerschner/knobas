@@ -4857,3 +4857,53 @@ Merge-manager:
   added a consequence naming the unanswered-send window. **Reversing:** trivial (the ADR text).
 - **A Kuma login that times out is `Unreachable`.** The write's own packet was not sent yet, so a
   hold would ask the reader about a monitor Kuma never saw. **Reversing:** trivial.
+## #953 — Docs: every mention key resolves, the tree in Confluence's order (2026-10-17)
+
+- **The looked-up users ride in the page's payload, at `mentioned_users`.** The reader opens from
+  the mirror with no network, so the lookup has to happen at sync and its answer has to be in the
+  mirror. A key beside the record, as Gitea's `teams` is (#966), needs no table and no migration.
+  **Reversing:** medium (a `sync`-side user table and a migration).
+- **One lookup per distinct key per run, no cache across runs.** Confluence DC has no bulk user
+  call, so "batched" is one request per key not already named by the record or known this run; a
+  space that mentions twenty people costs twenty requests on its full sync. A cache across runs
+  would keep a renamed person's old name. **Reversing:** low (`users::Directory` lives on the
+  source instead of the run).
+- **A failed lookup never fails the sync.** A `404` is that key's miss; any other failure (a `403`
+  for a credential that may not look users up, a `429` past the retry budget) stops the lookups for
+  the run and leaves the remaining mentions drawn as *@someone* until the page syncs again. Failing
+  the run would hold every page hostage to an enrichment. **Reversing:** trivial
+  (`Directory::lookup`).
+- **`position` is a copy of `extensions.position` at the payload's root, and only when it is a
+  whole number.** Confluence answers `"none"` for a page nobody reordered, and the battery requires
+  a declared integer to lead to a whole number or to nothing. **Reversing:** low (declare
+  `extensions.position` and widen the battery).
+- **A reorder alone reaches the mirror at the next full sync.** Moving a page among its siblings
+  makes no new version, so CQL's `lastmodified` does not see it and no incremental run re-reads the
+  page. Same class as the offset walk's stepped-over row. **Reversing:** medium (a per-run child
+  walk of every mirrored parent).
+- **Positioned children first, then the rest by title.** Confluence numbers every sibling once
+  someone reorders, so the mixed case is rare. **Reversing:** trivial (the `PAGES` order clause).
+
+Merge-manager:
+
+- **The cursor version goes to 3.** The adapter runs a full sync only when its cursor is absent or
+  of another version; nothing runs one periodically, and the app has no "sync from scratch". With
+  no bump, a page mirrored before #953 would gain `position` and `mentioned_users` only when next
+  edited, so an existing mirror's tree would stay in title order. #860 bumped it for the same
+  reason. Cost: one full sync per Confluence source after the upgrade, plus one lookup per distinct
+  mentioned key. **Reversing:** trivial (the constant), though the full sync has then already run.
+- **The mirror keeps three fields of a looked-up user**: `userKey`, `username`, `displayName`, the
+  ones `blocks::people` reads. Confluence's record also carries the profile picture and links;
+  they were copied into every page that mentions the user and nothing read them. Data Center's
+  record carries no email. **Reversing:** trivial (`Directory::lookup`).
+- **The per-run cache stays per run.** An idle incremental run delivers no pages and asks
+  nothing; a busy one asks only for the distinct keys of the pages it delivers. A cache across
+  runs would save little and would keep a renamed user's old name. **Reversing:** low.
+- **A reorder alone still waits for a full sync**, which after the bump means the next cursor
+  bump. In practice a moved sibling keeps its old place until it is edited. Filed as #1138
+  (backlog). **Reversing:** n/a.
+- **`docs_tree` cost of the order term**: the probe at 22,000 items (2,000 pages), warm median,
+  208.8 ms without the `position` term and 217.7 ms with it (load 4.6 and 7.3; a third run at load
+  9.6 read 249 ms). The term is a correlated lookup per page row in a sort that already uses no
+  index (`lower(title)`), so no index applies; at most about 4%, within the noise of a loaded
+  machine. #981 owns the statement's cost. **Reversing:** n/a.
