@@ -181,7 +181,7 @@ test("the list draws each set's contents per kind, a line per rule and its ticke
   expect(target.querySelectorAll("tbody tr")).toHaveLength(2);
   expect(text("tbody tr:first-child td")).toEqual([
     "Payout stackWhat a change on the payout path touches.",
-    "2 repositories2 pipelines1 pages1 assets",
+    "2 repositories2 pipelines1 page1 asset",
     "Every ticket under epic PAY-200 Payout reliabilityPAY-228, applied by hand",
     "3 (2 yours)",
   ]);
@@ -235,7 +235,7 @@ test("the editor draws a panel per kind, the rules with live counts and the tick
     { kind: "epic", value: "jira:PAY-200" },
     { kind: "manual", value: "jira:PAY-228" },
   ]);
-  expect(text(".tf-rule-n")).toEqual(["2 tickets", "1 tickets"]);
+  expect(text(".tf-rule-n")).toEqual(["2 tickets", "1 ticket"]);
   expect(text(".tf-roll")).toEqual(["2 of them yours. New tickets join as soon as they match."]);
   expect(text(".tf-keys a.tf-mine")).toEqual(["PAY-231", "PAY-240"]);
   expect(target.querySelector<HTMLAnchorElement>(".tf-keys a")?.getAttribute("href")).toBe("#/job/PAY-231");

@@ -82,6 +82,7 @@
     id: "sets",
     placeholder: "Filter link sets by name or member",
     noun: "link sets",
+    one: "link set",
     chips: [{ key: "by", label: "Applies by", options: APPLIES_BY.map(({ value, label }) => ({ value, label })) }],
   };
   const rows = $derived(sets === null ? [] : visibleSets(sets, filter.text, filter.chips["by"] ?? []));

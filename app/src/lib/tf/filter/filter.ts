@@ -72,6 +72,8 @@ export interface FilterConfig {
   placeholder: string;
   /** What the count counts, plural: "tickets". */
   noun: string;
+  /** The same in the singular, for a count of one: "ticket". */
+  one?: string;
   /** The scope toggle's choices, in order; none draws no toggle. */
   scopes?: FilterScope[];
   chips?: FilterChips[];
@@ -144,8 +146,9 @@ export function marks(text: string, typed: string): Mark[] {
 }
 
 /** The result count (R-2.1): "8 of 75 tickets", or "75 tickets" when nothing filters. */
-export function countLine(shown: number, total: number, noun: string): string {
-  return shown === total ? `${total} ${noun}` : `${shown} of ${total} ${noun}`;
+export function countLine(shown: number, total: number, noun: string, one?: string): string {
+  const word = total === 1 && one !== undefined ? one : noun;
+  return shown === total ? `${total} ${word}` : `${shown} of ${total} ${word}`;
 }
 
 /** Whether anything narrows: words, a chip, or a dropdown off *Any*. The scope is the view's own. */

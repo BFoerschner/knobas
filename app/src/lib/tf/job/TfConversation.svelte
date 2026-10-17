@@ -56,6 +56,7 @@
     id: `convo-${jobKey}`,
     placeholder: "Filter comments",
     noun: "comments",
+    one: "comment",
     chips: [
       { key: "who", label: "People", options: people.map((person) => ({ value: person, label: firstName(person) })) },
       {

@@ -31,6 +31,7 @@
   import { keyOf } from "../job/job";
   import { draftOf } from "./apply";
   import type { Candidate, RuleChoices, SetPorts } from "./ports";
+  import { counted } from "../counted";
   import { dotClass, itemsOf, KIND_LABEL, MEMBER_KINDS, PATTERN_KINDS, RULE_KINDS, SHOWN_KEYS } from "./sets";
   import TfSetPattern from "./TfSetPattern.svelte";
   import TfSetPicker from "./TfSetPicker.svelte";
@@ -335,7 +336,7 @@
               {#if rule.waiting}<option value="">Choose…</option>{/if}
               {#each options(rule.kind, rule.value) as option (option.value)}<option value={option.value}>{option.label}</option>{/each}
             </select>
-            {#if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{count} tickets</span>{/if}
+            {#if count !== undefined && count >= 0}<span class="tf-dim tf-rule-n">{counted(count, "ticket", "tickets")}</span>{/if}
             <button type="button" class="tf-btn tf-sm tf-ghost tf-x" onclick={() => dropRule(rule.at)}>Remove</button>
           </div>
         {:else}
@@ -346,7 +347,7 @@
         </div>
       </div>
       <div class="tf-panel">
-        <header><h3>Shows on {set.shows_on.length} tickets now</h3></header>
+        <header><h3>Shows on {counted(set.shows_on.length, "ticket", "tickets")} now</h3></header>
         <div class="tf-roll">{set.shows_on.filter((ticket) => ticket.mine).length} of them yours. New tickets join as soon as they match.</div>
         <div class="tf-keys">
           {#each shownKeys as ticket (ticket.entity_id)}

@@ -163,7 +163,7 @@
   {/each}
   {@render extra?.()}
   <span class="tf-fcount" aria-live="polite"
-    >{shown !== null && total !== null ? countLine(shown, total, config.noun) : ""}</span
+    >{shown !== null && total !== null ? countLine(shown, total, config.noun, config.one) : ""}</span
   >
   {@render after?.()}
 </div>

@@ -466,6 +466,13 @@ test("the footnote names the store and counts the board's pending writes", async
   expect(target.textContent).toContain("mirror \u00b7 4 pending writes");
 });
 
+test("the footnote counts one pending write in the singular", async () => {
+  open({ ports: { launcherHome: async () => ({ ...HOME, pending_writes: 1 }) } });
+  await settle();
+  expect(target.textContent).toContain("mirror \u00b7 1 pending write");
+  expect(target.textContent).not.toContain("1 pending writes");
+});
+
 test("an empty box shows the smart lists and the recent items", async () => {
   open();
   await settle();

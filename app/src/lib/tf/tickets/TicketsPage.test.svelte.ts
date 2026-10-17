@@ -1493,3 +1493,14 @@ test("a view somebody made has no source line", async () => {
   await open(h, null, "my-work");
   expect(srcLines()).toEqual([]);
 });
+
+test("a count of one reads in the singular: the filter bar's ticket and the editor's lane (#1097)", async () => {
+  const h = harness([], [], [CORPUS[0]!]);
+  await open(h);
+  expect(count()).toBe("1 ticket");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-vw-acts button")].find((b) => b.textContent === "+ New view")!.click();
+  await previewed();
+  input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
+  await previewed();
+  expect(dialog()!.querySelector(".tf-vw-pnote")!.textContent!.trim()).toBe("In 1 lane by priority.");
+});

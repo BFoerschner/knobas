@@ -51,6 +51,7 @@
     type EditColumn,
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
+  import { counted } from "../counted";
   import { translateJira } from "./jql";
   import { drawnJiraColumns, LIST_COLUMN_ORDER, type CopiedFrom } from "./views";
 
@@ -644,7 +645,7 @@
             {/if}
             {#if laned}
               <p class="tf-dim tf-vw-pnote">
-                In {laneCount} lanes by {LANE_FIELDS.find(([value]) => value === lanes)![1].toLowerCase()}.
+                In {counted(laneCount, "lane", "lanes")} by {LANE_FIELDS.find(([value]) => value === lanes)![1].toLowerCase()}.
               </p>
             {/if}
           {:else}

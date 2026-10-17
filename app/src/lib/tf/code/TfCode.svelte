@@ -255,6 +255,7 @@
         ? "Filter repositories by name, team or language"
         : `Filter ${repos.total} repositories by name, team or language`,
     noun: "repositories",
+    one: "repository",
     scopes,
     chips: [{ key: "flag", label: "Flags", options: options(REPO_FLAGS) }],
     dropdowns: [
@@ -266,6 +267,7 @@
     id: "code-prs",
     placeholder: "Filter pull requests by title, repo, author or number",
     noun: "pull requests",
+    one: "pull request",
     scopes,
     chips: [
       { key: "state", label: "State", options: options(PR_STATES) },

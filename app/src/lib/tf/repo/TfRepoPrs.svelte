@@ -48,6 +48,7 @@
     id: `repo-prs:${repoId}`,
     placeholder: "Filter pull requests",
     noun: "pull requests",
+    one: "pull request",
     chips: [{ key: "state", label: "State", options: PR_STATES.map((value) => ({ value, label: value })) }],
   });
   const shown = $derived(rows === null ? [] : visibleRepoPrs(rows, filter.chips["state"] ?? [], filter.text));

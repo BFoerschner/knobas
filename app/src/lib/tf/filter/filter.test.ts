@@ -49,6 +49,13 @@ test("the count says how many of how many, or only how many when nothing filters
   expect(countLine(75, 75, "tickets")).toBe("75 tickets");
 });
 
+test("a total of one takes the singular noun when the config has one", () => {
+  expect(countLine(1, 1, "tickets", "ticket")).toBe("1 ticket");
+  expect(countLine(0, 1, "tickets", "ticket")).toBe("0 of 1 ticket");
+  expect(countLine(2, 2, "tickets", "ticket")).toBe("2 tickets");
+  expect(countLine(1, 1, "tickets")).toBe("1 tickets");
+});
+
 test("a server-side view sends its base query, the chips, the dropdowns and the words", () => {
   const state = emptyFilter();
   expect(toQuery(config, state)).toBe("");

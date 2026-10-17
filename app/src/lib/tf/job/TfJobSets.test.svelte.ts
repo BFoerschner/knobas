@@ -195,8 +195,8 @@ test("Apply a link set… lists the sets with what they hold, marks the one that
   await settle();
   expect(squash(dialog().querySelector("h2"))).toBe("Apply a link set to PAY-231");
   expect([...dialog().querySelectorAll(".tf-pickrow")].map(squash)).toEqual([
-    "Ledger stack1 repositories, 1 pages already applies",
-    "Payout stack1 repositories, 1 pages Apply",
+    "Ledger stack1 repository, 1 page already applies",
+    "Payout stack1 repository, 1 page Apply",
   ]);
   expect(squash(dialog())).toContain("Link sets stay in knobas and are never written to a source.");
   const field = dialog().querySelector<HTMLInputElement>("input[aria-label='Filter link sets']")!;
