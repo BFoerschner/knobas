@@ -7,4 +7,4 @@
   Mirrored in `app/src/lib/ipc/search.ts` (`LauncherHome.notes_shown`) and held by
   `the_launcher_home_shape_matches_its_typescript_mirror`; the fake IPC answers it from its
   notes setting (`fake/launcher.ts`, `fake/capture.ts`). Witnessed by `session.test.svelte.ts`
-  and `search_ipc.rs`.
+  and `notes_search_ipc.rs`.
