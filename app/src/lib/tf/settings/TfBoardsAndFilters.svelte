@@ -23,6 +23,7 @@
     unsyncedWords,
     viewType,
     type BoardScope,
+    type SourceView,
   } from "./boards";
   import type { SettingsPorts } from "./ports";
 
@@ -72,7 +73,7 @@
     if (inputs[stored]) inputs[stored].checked = true;
   }
 
-  async function toggle(view: TicketViewRow & { jira: { hidden: boolean } }) {
+  async function toggle(view: SourceView) {
     try {
       await ports.hideJiraView(view.id, !view.jira.hidden);
       read();

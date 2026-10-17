@@ -5,8 +5,9 @@
  *
  * The setting is two keys of the adapter's own config, `boards` and
  * `favourite_filters`, which its schema marks for this section
- * (`x-knobas-section`), so the generated form leaves them out. Nothing here
- * names an adapter: the section is drawn for any adapter that declares it.
+ * (`x-knobas-section`), so the generated form leaves them out. The keys, the
+ * four choices and the Jira view words are Jira's, which is the only adapter
+ * that declares the section; the page draws it for whichever adapter does.
  */
 import type { JiraSource, TicketViewRow, UnsyncedTickets } from "../../ipc/search";
 

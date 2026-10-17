@@ -106,9 +106,9 @@ pub(crate) trait JiraApi: Send + Sync {
         Err(no_agile())
     }
     /// `GET rest/api/2/filter/favourite`: this account's favourite filters
-    /// (#878). Defaults to a 404, which `crate::views` reads as none.
+    /// (#878). Core REST, not Agile: a fake that models none answers none.
     async fn favourite_filters(&self) -> Result<Vec<crate::views::FavouriteFilter>, SourceError> {
-        Err(no_agile())
+        Ok(Vec::new())
     }
     /// `GET rest/api/2/search?fields=key`: one page of keys. Its own shape,
     /// because Jira answers `"fields": null` on every issue of a keys-only

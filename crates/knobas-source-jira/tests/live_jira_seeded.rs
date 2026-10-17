@@ -426,6 +426,14 @@ impl Seeded {
         mut config: serde_json::Value,
     ) -> Box<dyn Source> {
         config["username"] = serde_json::Value::String(self.user.clone());
+        // The issue walk's tests count the items a run delivers, and the
+        // seed's favourite filter would be one more at every first run and at
+        // every run after an edit it holds (#878). A test of the Jira views
+        // turns favourite filters on itself; the default is pinned by the
+        // adapter's unit tests.
+        if config.get("favourite_filters").is_none() {
+            config["favourite_filters"] = serde_json::Value::Bool(false);
+        }
         match knobas_source_jira::build(SourceInstance {
             id: "jira".to_owned(),
             kind: knobas_source_jira::ADAPTER_KIND.to_owned(),
@@ -2707,7 +2715,8 @@ async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_take
         .as_ref()
         .expect("seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)")
         .favourite_filter;
-    let source = seeded.source(serde_json::json!({ "projects": ["PAY"] }));
+    let source =
+        seeded.source(serde_json::json!({ "projects": ["PAY"], "favourite_filters": true }));
     let (items, cursor) = full(&*source).await;
     let key = format!("filter-{}", fav.id);
     let filter = items
@@ -2717,14 +2726,21 @@ async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_take
     assert_eq!(filter.title, fav.name);
     assert_eq!(filter.payload["kind"], "filter");
     assert_eq!(filter.payload["jql"], fav.jql.as_str());
-    assert_eq!(filter.payload["query"], fav.jql.as_str(), "searched as Jira holds it");
+    assert_eq!(
+        filter.payload["query"],
+        fav.jql.as_str(),
+        "searched as Jira holds it"
+    );
     let control: Vec<String> = seeded
         .jql(&fav.jql, "key")
         .await
         .iter()
         .map(|row| row["key"].as_str().unwrap().to_owned())
         .collect();
-    assert!(!control.is_empty(), "the seed's PAY tickets have no fix version");
+    assert!(
+        !control.is_empty(),
+        "the seed's PAY tickets have no fix version"
+    );
     assert_eq!(
         filter.payload["keys"],
         serde_json::json!(control),
@@ -2753,7 +2769,10 @@ async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_take
     gone_keys.sort();
     let mut expected = delivered.clone();
     expected.sort();
-    assert_eq!(gone_keys, expected, "every view the last sync delivered, as gone");
+    assert_eq!(
+        gone_keys, expected,
+        "every view the last sync delivered, as gone"
+    );
     println!(
         "SEEDED favourite filter {} holds {} keys; {} views went when the setting turned them off",
         fav.name,

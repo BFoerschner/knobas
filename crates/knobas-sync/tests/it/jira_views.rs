@@ -368,7 +368,10 @@ async fn a_favourite_filter_shows_as_a_list_under_jira_filters() {
     assert_eq!(flags(&pool, "jira-filter-10300").await.0, "list");
     assert_eq!(
         members(&pool, "jira:filter-10300").await,
-        [("jira:PAY-240".to_owned(), 1), ("jira:PAY-231".to_owned(), 2)]
+        [
+            ("jira:PAY-240".to_owned(), 1),
+            ("jira:PAY-231".to_owned(), 2)
+        ]
     );
 }
 

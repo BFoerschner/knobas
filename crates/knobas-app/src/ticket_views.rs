@@ -270,6 +270,8 @@ async fn jira_sources(
     }
     // `unsynced` reads the member's entity id, `<source>:<KEY>-<n>`: the
     // project is what sits between the source's colon and the last hyphen.
+    // ADR-0007's direction: an id of any other shape is a miss, never a
+    // guess, and is left out of the count.
     let rows = sqlx::query(
         "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
                 v.last_read, i.web_url, tv.hidden, tv.is_new,
@@ -319,42 +321,39 @@ async fn jira_sources(
         .collect()
 }
 
-/// The Jira view `id` names, or why not: `not_found` for no view, `invalid`
-/// for a view somebody made.
-async fn jira_view_id(pool: &PgPool, id: &str) -> Result<(), IpcError> {
-    let jira: Option<bool> = sqlx::query_scalar(
-        "select coalesce(jira_ref in (select entity_id from sync.jira_view), false)
-           from knobas.ticket_view where id = $1",
-    )
-    .bind(id)
-    .fetch_optional(pool)
-    .await?;
-    match jira {
-        None => Err(IpcError::not_found(format!(
-            "no ticket view is called {id}"
-        ))),
-        Some(true) => Ok(()),
-        Some(false) => Err(IpcError::invalid(format!(
-            "{id} is not a Jira view: only a Jira view hides from the list; delete your own"
-        ))),
-    }
-}
-
 /// *Hide from the list* or *Show* a Jira view (#878, R-3.25). It keeps
-/// syncing either way.
+/// syncing either way. One statement writes it, and only on a Jira view;
+/// when it writes nothing, a second read says why.
 ///
 /// # Errors
 ///
 /// `not_found` for no view, `invalid` for a view somebody made, `internal`
 /// if the write fails.
 pub async fn hide(pool: &PgPool, id: &str, hidden: bool) -> Result<(), IpcError> {
-    jira_view_id(pool, id).await?;
-    sqlx::query("update knobas.ticket_view set hidden = $2 where id = $1")
-        .bind(id)
-        .bind(hidden)
-        .execute(pool)
-        .await?;
-    Ok(())
+    let written = sqlx::query(
+        "update knobas.ticket_view set hidden = $2
+          where id = $1 and jira_ref in (select entity_id from sync.jira_view)",
+    )
+    .bind(id)
+    .bind(hidden)
+    .execute(pool)
+    .await?
+    .rows_affected();
+    if written > 0 {
+        return Ok(());
+    }
+    let exists: bool =
+        sqlx::query_scalar("select exists (select 1 from knobas.ticket_view where id = $1)")
+            .bind(id)
+            .fetch_one(pool)
+            .await?;
+    Err(if exists {
+        IpcError::invalid(format!(
+            "{id} is not a Jira view: only a Jira view hides from the list; delete your own"
+        ))
+    } else {
+        IpcError::not_found(format!("no ticket view is called {id}"))
+    })
 }
 
 /// A view was opened: a Jira view that said *new* stops saying it (#878,

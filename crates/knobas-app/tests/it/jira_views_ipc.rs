@@ -322,7 +322,9 @@ async fn a_jira_view_hides_and_shows_again_and_keeps_its_tickets() {
     assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().hidden);
 
     ticket_views::hide(&pool, &id, true).await.expect("hide");
-    let row = listed(&pool, &id).await.expect("a hidden view is still listed");
+    let row = listed(&pool, &id)
+        .await
+        .expect("a hidden view is still listed");
     assert!(row.jira.as_ref().unwrap().hidden);
     assert_eq!(row.count, Some(4), "it keeps syncing");
 

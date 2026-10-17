@@ -296,8 +296,7 @@ async fn boards(
     if boards.is_empty() {
         return Ok(Vec::new());
     }
-    let only: Option<std::collections::HashSet<String>> = (cfg.boards
-        == BoardScope::Favourites)
+    let only: Option<std::collections::HashSet<String>> = (cfg.boards == BoardScope::Favourites)
         .then(|| favourites.iter().map(FavouriteFilter::id).collect());
     let names: std::collections::HashMap<String, String> = api
         .statuses()
@@ -364,9 +363,10 @@ async fn filter_view(
     Ok(JiraView {
         key: format!("filter-{id}"),
         name: filter.name.clone(),
-        web_url: filter.view_url.clone().unwrap_or_else(|| {
-            format!("{}/issues/?filter={id}", base_url.trim_end_matches('/'))
-        }),
+        web_url: filter
+            .view_url
+            .clone()
+            .unwrap_or_else(|| format!("{}/issues/?filter={id}", base_url.trim_end_matches('/'))),
         payload: json!({
             "kind": "filter",
             "id": id,
@@ -1019,7 +1019,10 @@ mod tests {
             filter.payload["query"], filter.payload["jql"],
             "a filter is searched as Jira holds it, untranslated"
         );
-        assert_eq!(filter.payload["keys"], json!(["PAY-240", "WEB-9", "PAY-231"]));
+        assert_eq!(
+            filter.payload["keys"],
+            json!(["PAY-240", "WEB-9", "PAY-231"])
+        );
         assert_eq!(filter.payload["columns"], json!([]));
         assert_eq!(filter.payload["sprint"], Value::Null);
     }
@@ -1041,7 +1044,11 @@ mod tests {
         let (items, _) = sync_with(&api, &cfg_with("all", false), None).await;
         assert_eq!(
             keys_of(&items),
-            [("board-21", false), ("board-22", false), ("board-31", false)]
+            [
+                ("board-21", false),
+                ("board-22", false),
+                ("board-31", false)
+            ]
         );
     }
 

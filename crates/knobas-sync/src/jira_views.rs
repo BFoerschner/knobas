@@ -21,7 +21,8 @@
 //! first made -- a filter's as a list, since Jira gives a filter no columns
 //! (#878). A row made while the source already had Jira views is marked
 //! `is_new` (*new* until opened, R-3.20); the views of a source's first run
-//! are not. `hidden` is the reader's and never written here. The row's id is the item's entity id as a slug
+//! are not. `hidden` is the reader's and never written here. The row's id
+//! is the item's entity id as a slug
 //! (`jira:board-21` → `jira-board-21`), so `#/tickets/<id>` is stable. A view
 //! somebody made that already holds that id is left alone, and the Jira view
 //! does not show: a name collision costs a view, never somebody's own.
