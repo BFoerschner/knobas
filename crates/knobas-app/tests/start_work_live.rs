@@ -1749,3 +1749,115 @@ async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_th
         "the held comment reached Gitea: {view}"
     );
 }
+
+/// One file's blob sha and base64 text on `branch`, as Gitea's contents API
+/// answers them (newlines stripped from the text; Gitea may wrap it).
+async fn blob_on(env: &Env, branch: &str, path: &str) -> (String, String) {
+    let record = env
+        .api(
+            reqwest::Method::GET,
+            &format!("/repos/{}/contents/{path}?ref={branch}", env.full_name()),
+            None,
+        )
+        .await;
+    let sha = record["sha"]
+        .as_str()
+        .unwrap_or_else(|| panic!("no sha for {path} at {branch}: {record}"))
+        .to_owned();
+    let text = record["content"]
+        .as_str()
+        .unwrap_or_default()
+        .replace('\n', "");
+    (sha, text)
+}
+
+/// **A held `commit_file` against the real Gitea** (issue #888, the live half
+/// of #822's "a stale `base_sha` held with both versions").
+///
+/// On a scratch branch the test reads `README.md`'s blob sha, changes the file
+/// behind the queue's back, then queues a `CommitFile` against the old sha.
+/// The row must be `held`: the reader's text in the payload, Gitea's new blob
+/// sha (`base`) and text (`text`) in the held snapshot. *Apply anyway* then
+/// sends it against their blob and the branch holds the reader's text.
+///
+/// Only the scratch branches are written; the [`Litter`] guard deletes both
+/// and checks the default branch did not move. No pull request is opened.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Gitea container -- see this file's header"]
+async fn a_commit_over_a_file_that_moved_is_held_with_both_versions_at_gitea() {
+    use knobas_core::write_queue::WriteState;
+    // base64 of "moved behind knobas back\n" and "the reader wrote this\n".
+    const THEIRS_B64: &str = "bW92ZWQgYmVoaW5kIGtub2JhcyBiYWNrCg==";
+    const THEIRS: &str = "moved behind knobas back\n";
+    const MINE_B64: &str = "dGhlIHJlYWRlciB3cm90ZSB0aGlzCg==";
+    const MINE: &str = "the reader wrote this\n";
+
+    let env = env();
+    let account = env.account().await;
+    let state = app_timed(&env, "http://127.0.0.1:9", &account, tick_held_off()).await;
+    let pid = std::process::id();
+    let repo = env.full_name();
+    let head = format!("{LITTER}i888-{pid}-head");
+    let base = format!("{LITTER}i888-{pid}-base");
+    let litter = Litter::new(&env, head.clone(), base.clone()).await;
+    for (new, old) in [(&base, &litter.default_branch), (&head, &base)] {
+        env.api(
+            reqwest::Method::POST,
+            &format!("/repos/{repo}/branches"),
+            Some(json!({ "new_branch_name": new, "old_branch_name": old })),
+        )
+        .await;
+    }
+
+    // The reader looks: the blob the commit will be measured against.
+    let (read_sha, _) = blob_on(&env, &head, "README.md").await;
+    // Somebody commits behind the queue's back.
+    env.api(
+        reqwest::Method::PUT,
+        &format!("/repos/{repo}/contents/README.md"),
+        Some(json!({
+            "branch": head, "content": THEIRS_B64, "sha": read_sha,
+            "message": format!("{head}: moved behind the reader"),
+        })),
+    )
+    .await;
+    let (their_sha, their_text) = blob_on(&env, &head, "README.md").await;
+    assert_ne!(their_sha, read_sha, "the file moved");
+    assert_eq!(their_text, THEIRS_B64);
+
+    let queued = knobas_app::sources::write_queue::submit_in_background(
+        &state,
+        json!({ "CommitFile": {
+            "repo": format!("{GITEA}:{repo}"), "branch": head, "new_branch": null,
+            "path": "README.md", "content": MINE,
+            "message": format!("{head}: the reader's edit"), "base_sha": read_sha,
+        } }),
+    )
+    .await
+    .expect("the commit is queued");
+    let row = settled(&state, queued.id).await;
+    assert_eq!(row.state, WriteState::Held, "{row:?}");
+    assert_eq!(
+        row.payload["CommitFile"]["content"], MINE,
+        "the reader's half"
+    );
+    assert_eq!(row.payload["CommitFile"]["base_sha"], read_sha.as_str());
+    let theirs = row.held_snapshot.clone().expect("the held side");
+    assert_eq!(theirs["base"], their_sha.as_str(), "{theirs}");
+    assert_eq!(theirs["text"], THEIRS, "{theirs}");
+    assert_eq!(
+        blob_on(&env, &head, "README.md").await.0,
+        their_sha,
+        "a held write sent nothing"
+    );
+
+    knobas_sync::write_queue::apply_anyway(state.scheduler.deps(), queued.id)
+        .await
+        .expect("apply anyway runs")
+        .expect("the write was held");
+    let row = settled(&state, queued.id).await;
+    assert_eq!(row.state, WriteState::Sent, "{row:?}");
+    let (_, now) = blob_on(&env, &head, "README.md").await;
+    assert_eq!(now, MINE_B64, "the branch holds the reader's text");
+    drop(litter);
+}
