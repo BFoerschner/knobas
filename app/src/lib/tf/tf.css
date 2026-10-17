@@ -632,6 +632,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-tm-total td { background: var(--sheet-2); font-weight: 600; }
 /* *Log all…*: wider than a form dialog, for the comment column. */
 .tf-dialog.tf-tm-logall { width: min(720px, calc(100vw - 32px)); }
+/* Dependencies' *Import…* (#1066): wide enough for a preview's property lines. */
+.tf-dialog.tf-im-dialog { width: min(640px, calc(100vw - 32px)); }
 .tf-tm-num { font-variant-numeric: tabular-nums; }
 .tf-tm-comment { width: 100%; }
 .tf-tm-comment textarea {

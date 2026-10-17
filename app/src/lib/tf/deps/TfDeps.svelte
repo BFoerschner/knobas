@@ -18,7 +18,8 @@
   **Adding (#876, R-11.20, R-11.21)**: *+ Add* on each layer that holds assets
   or routes, and *Add ▾* (Asset, Route, Import…, and *Link to <key>…* from a
   ticket) open *New asset* (`TfNewAsset.svelte`), the route dialog
-  (`TfRouteDialog.svelte`) or *Link to…*. What was added or saved is read
+  (`TfRouteDialog.svelte`), the estate import (`TfImport.svelte`, #1066; the
+  estate is read again after it) or *Link to…*. What was added or saved is read
   again, drawn open (`Gestures.reveal`), scrolled to and flashed once; the
   toast after a new asset offers *Edit it*. A route tile opens the route
   dialog, with *Delete…*.
@@ -34,8 +35,12 @@
 
   import { ipcErrorMessage } from "../../ipc";
   import {
+    applyEstateImport,
+    assetTree,
     assetTypes,
     createAsset,
+    previewEstateImport,
+    produceEstateFile,
     createDepLayer,
     createRoute,
     deleteAsset,
@@ -77,6 +82,8 @@
   import { layers } from "../layers.svelte";
   import TfNewAsset from "./TfNewAsset.svelte";
   import TfRouteDialog from "./TfRouteDialog.svelte";
+  import TfImport from "./TfImport.svelte";
+  import { importedLine, type ImportPorts } from "./import";
   import { isEntityId, resolveTicket } from "../job/job";
   import { reachedPart } from "./reach";
   import { push } from "../../shell/toasts.svelte";
@@ -105,6 +112,7 @@
     LayerPorts &
     EditorPorts &
     AddPorts &
+    ImportPorts &
     Pick<SessionPorts, "search" | "launcherHome">;
 
   async function ticketIdOf(key: string): Promise<string | null> {
@@ -138,6 +146,10 @@
     createRoute: (assetId, name, url, targetId, visibility) => createRoute(assetId, name, url, targetId, visibility),
     editRoute,
     deleteRoute,
+    previewEstateImport,
+    applyEstateImport,
+    produceEstateFile,
+    assetTree: (parentId) => assetTree(parentId),
     search: (query) => search(query),
     launcherHome: () => launcherHome(),
   };
@@ -248,6 +260,8 @@
   /** The route dialog: a new route (`id` `null`) or the one being edited. */
   let routing = $state.raw<{ id: string | null } | null>(null);
   let linking = $state(false);
+  /** *Import…* (#1066): the estate import dialog. */
+  let importing = $state(false);
   let addMenu = $state(false);
   let addButton = $state<HTMLButtonElement | null>(null);
   let addMenuEl = $state<HTMLDivElement | null>(null);
@@ -598,7 +612,7 @@
             <button type="button" role="menuitem" onclick={() => pickAdd(() => (routing = { id: null }))}
               ><b>Route</b><span class="tf-dim">an address, the asset that exposes it, and where it lands</span></button
             >
-            <button type="button" role="menuitem" aria-disabled="true" title="Not built in the new shell yet"
+            <button type="button" role="menuitem" onclick={() => pickAdd(() => (importing = true))}
               ><b>Import…</b><span class="tf-dim">estate file, hcloud, Docker host, with a preview</span></button
             >
             {#if scoped !== null}
@@ -722,6 +736,17 @@
     ondeleted={(name) => {
       routing = null;
       deleted(name);
+    }}
+  />
+{/if}
+{#if importing}
+  <TfImport
+    {ports}
+    onclose={() => (importing = false)}
+    onimported={(name, outcome) => {
+      importing = false;
+      push({ text: importedLine(name, outcome) });
+      void reload();
     }}
   />
 {/if}
