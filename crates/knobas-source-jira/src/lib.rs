@@ -36,7 +36,7 @@ mod time;
 mod views;
 mod write;
 
-pub use config::{Flavor, JiraConfig};
+pub use config::{BoardScope, Flavor, JiraConfig};
 pub use descriptor::descriptor_template;
 pub use source::{JiraSource, build};
 
