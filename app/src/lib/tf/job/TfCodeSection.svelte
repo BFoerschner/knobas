@@ -15,6 +15,7 @@
   import { ago } from "../../shell/time";
   import type { Layers } from "../layers.svelte";
   import type { Apps } from "../openin/apps.svelte";
+  import { sessionFilter } from "../filter/filter-state.svelte";
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import { byAttention, itemHash, openPrs, originLabel, reposOf, type SectionRow } from "./job";
   import TfSection from "./TfSection.svelte";
@@ -71,7 +72,7 @@
   }
 </script>
 
-<TfSection id="code" title="Code" openLabel="Open Code view" openHref="#/code" footHref="#/code" rows={lines}>
+<TfSection id="code" title="Code" openLabel="Open Code view" openHref="#/code" footHref="#/code" onopen={() => (sessionFilter("code-repos").scope = "job")} rows={lines}>
   {#snippet roll()}
     {#if repos.length > 0}
       <span>{repos.length} {repos.length > 1 ? "repos" : "repo"}: {#each repos as repo, index (repo)}{index > 0 ? ", " : ""}<span class="tf-mono">{repo}</span>{/each}</span>

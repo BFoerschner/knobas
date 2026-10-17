@@ -670,6 +670,34 @@ test("Open Docs view opens Docs with This job on (R-2.5); the other sections' li
   forgetFilters();
 });
 
+test("Open Code view opens Repositories with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
+  open("PAY-231", { ports: ports({ rows: [code("gitea:x@1", "commit", "fix", "2026-10-15T10:00:00Z", null, null)] }) });
+  await settle();
+  expect(sessionFilter("code-repos").scope).toBeNull();
+  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("code-repos").scope).toBeNull();
+  sessionFilter("code-repos").scope = "all";
+  section("code").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("code-repos").scope).toBe("job");
+  sessionFilter("code-repos").scope = "mine";
+  expect(sessionFilter("code-repos").scope).toBe("mine");
+  forgetFilters();
+});
+
+test("Open Monitors opens Monitors with This job on (R-2.5), and the pick after that is kept (R-2.6)", async () => {
+  open("PAY-231");
+  await settle();
+  expect(sessionFilter("monitors").scope).toBeNull();
+  section("pages").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("monitors").scope).toBeNull();
+  sessionFilter("monitors").scope = "all";
+  section("monitors").querySelector<HTMLAnchorElement>("a.tf-open")!.click();
+  expect(sessionFilter("monitors").scope).toBe("job");
+  sessionFilter("monitors").scope = "mine";
+  expect(sessionFilter("monitors").scope).toBe("mine");
+  forgetFilters();
+});
+
 test("a section with nothing in it says so", async () => {
   open();
   await settle();
