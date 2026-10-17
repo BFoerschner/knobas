@@ -660,6 +660,31 @@ async fn a_failed_build_reaches_me_through_a_confirmed_link_and_not_through_a_pr
     );
 }
 
+/// The link's other direction (#800): my work linked to the red build reaches
+/// me as the build linked to my work does, and a red build linked to
+/// somebody else's work does not.
+#[tokio::test]
+async fn a_failed_build_reaches_me_through_a_link_from_my_work() {
+    let pool = &scratch().await;
+    let mine = ticket(pool, "PAY-231", Some(ME), None, "", days_ago(2)).await;
+    let theirs = ticket(pool, "PAY-232", Some("someone-else"), None, "", days_ago(2)).await;
+
+    let on_mine = build(pool, "build:1187", "FAILURE", "A", None, days_ago(1)).await;
+    let on_theirs = build(pool, "build:1188", "FAILURE", "B", None, days_ago(1)).await;
+    link(pool, &mine, &on_mine, true).await;
+    link(pool, &theirs, &on_theirs, true).await;
+
+    let keys = keys(&stream(pool).await);
+    assert!(
+        keys.contains(&format!("failed_build:{on_mine}")),
+        "a red build my work links to is on my work: {keys:?}"
+    );
+    assert!(
+        !keys.contains(&format!("failed_build:{on_theirs}")),
+        "a red build on somebody else's work is not mine: {keys:?}"
+    );
+}
+
 /// Story 17, for the category the source can never resolve on its own: a build
 /// record is immutable once finished, so what clears a red build is a **later
 /// green build of the same configuration**.

@@ -9,6 +9,8 @@
 //! composed to `crate::sources::write_queue::submit`, which is where a write op
 //! is decoded and checked against what the source declares.
 
+use std::borrow::Borrow;
+
 use async_trait::async_trait;
 use knobas_core::entity::EntityRef;
 use knobas_core::payload::Declarations;
@@ -28,17 +30,22 @@ const KIND_BRANCH: &str = "branch";
 const KIND_PR: &str = "pr";
 
 /// The flow's window onto the world.
-pub struct Queue<'a> {
-    pub state: &'a SourcesState,
+///
+/// Over a borrowed state (`Queue { state: &state }`) for a flow its command
+/// waits on, or an owned copy (`Queue { state: state.clone() }`) for a run
+/// behind its command's answer, which outlives the command (#779). One
+/// implementation of [`Steps`] serves both (#789).
+pub struct Queue<S> {
+    pub state: S,
 }
 
 #[async_trait]
-impl Steps for Queue<'_> {
+impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
     async fn dispatch(&self, payload: &serde_json::Value) -> Result<(i64, Landing), IpcError> {
         // The same call the *Comment* button makes. A start-work step is not a
         // privileged write: it queues, it can be held, it can be refused, and
         // it shows up in the pending-writes panel like anything else.
-        let queued = crate::sources::write_queue::submit(self.state, payload.clone()).await?;
+        let queued = crate::sources::write_queue::submit(self.state.borrow(), payload.clone()).await?;
         // The row came back **as queued**, before the attempt -- which is the
         // honest shape for that call and says nothing about the outcome. Read
         // it again for what actually happened.
@@ -47,7 +54,7 @@ impl Steps for Queue<'_> {
     }
 
     async fn landing_of(&self, write_id: i64) -> Result<Landing, IpcError> {
-        let row = write_queue::get(&self.state.pool, write_id).await?;
+        let row = write_queue::get(&self.state.borrow().pool, write_id).await?;
         Ok(match row {
             None => Landing::Withdrawn,
             Some(row) => match row.state {
@@ -66,7 +73,7 @@ impl Steps for Queue<'_> {
 
     async fn link(&self, from: &str, to: &str, relation: &str) -> Result<Linked, IpcError> {
         match crate::commands::entity::create_link_inner(
-            &self.state.pool,
+            &self.state.borrow().pool,
             from,
             to,
             Some(relation),
@@ -85,7 +92,7 @@ impl Steps for Queue<'_> {
     }
 
     async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError> {
-        branch_named(&self.state.pool, repo, name).await
+        branch_named(&self.state.borrow().pool, repo, name).await
     }
 
     async fn pull_request(
@@ -102,10 +109,10 @@ impl Steps for Queue<'_> {
         // per flow -- the create step's, and `link_step`'s, twice where it
         // asks for a refresh -- and the listing behind `declared_paths` is the
         // same round trip the inbox makes per read.
+        let state: &SourcesState = self.state.borrow();
         let declarations =
-            crate::sources::paths::declared_paths(&self.state.pool, self.state.registry.as_ref())
-                .await?;
-        pull_request_on_head(&self.state.pool, &declarations, repo, head).await
+            crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref()).await?;
+        pull_request_on_head(&state.pool, &declarations, repo, head).await
     }
 
     async fn refresh(&self, source: &str) {
@@ -120,42 +127,7 @@ impl Steps for Queue<'_> {
         // finished** -- waiting out the one this flow's own branch write left
         // in flight is `Scheduler::sync_after_write`'s job and was the #358
         // flake.
-        crate::sources::write_queue::sync_after_write(self.state, source).await;
-    }
-}
-
-/// [`Queue`] over its own copy of the state: the window a run behind its
-/// command's answer looks through (#779), since it outlives the command.
-pub struct OwnedQueue(pub SourcesState);
-
-#[async_trait]
-impl Steps for OwnedQueue {
-    async fn dispatch(&self, payload: &serde_json::Value) -> Result<(i64, Landing), IpcError> {
-        Queue { state: &self.0 }.dispatch(payload).await
-    }
-
-    async fn landing_of(&self, write_id: i64) -> Result<Landing, IpcError> {
-        Queue { state: &self.0 }.landing_of(write_id).await
-    }
-
-    async fn link(&self, from: &str, to: &str, relation: &str) -> Result<Linked, IpcError> {
-        Queue { state: &self.0 }.link(from, to, relation).await
-    }
-
-    async fn branch(&self, repo: &EntityRef, name: &str) -> Result<Option<String>, IpcError> {
-        Queue { state: &self.0 }.branch(repo, name).await
-    }
-
-    async fn pull_request(
-        &self,
-        repo: &EntityRef,
-        head: &str,
-    ) -> Result<PullRequestOnHead, IpcError> {
-        Queue { state: &self.0 }.pull_request(repo, head).await
-    }
-
-    async fn refresh(&self, source: &str) {
-        Queue { state: &self.0 }.refresh(source).await;
+        crate::sources::write_queue::sync_after_write(self.state.borrow(), source).await;
     }
 }
 

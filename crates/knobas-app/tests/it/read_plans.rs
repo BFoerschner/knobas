@@ -45,9 +45,12 @@ const SMALL: &[&str] = &[
 /// configuration was a walk of every build of the kind per failed build
 /// (`item_kind_updated_idx`, no key for the configuration), and its
 /// confirmed-link lookup a scan of `knobas.link` per build on an analyzed,
-/// empty table. Both are read once per statement now. The rules are bound
-/// with an identity that owns every item, so each of the mirror's red builds
-/// reaches both: the case that read 195 ms on the probe.
+/// empty table. The newer green is read once per statement now, and the
+/// links are probed per red build by key (#800, [`unkeyed_link_reads`]). The
+/// rules are bound with an identity that owns every item, so each of the
+/// mirror's red builds reaches both: the case that read 195 ms on the probe;
+/// and with one that owns nothing, the case that read 100 ms after #939 gave
+/// the probe its 12,000 confirmed links.
 ///
 /// The stream itself is these unioned with the two rules left out, so it is
 /// not planned here; that it is planned for its values on every read is
@@ -198,16 +201,27 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             continue;
         }
         rules += 1;
-        let name = format!("inbox {category:?}");
-        let name = name.as_str();
-        let plan = explain(&pool, sql, |q| {
-            q.bind(vec!["mara".to_owned()])
-                .bind(chrono::Utc::now())
-                .bind(false)
-                .bind(declared.clone())
-        })
-        .await;
-        wrong.extend(shapes(name, &plan));
+        // `nobody` owns nothing, the reader whose failed-build rule walked
+        // every confirmed link (#800); `mara` owns everything.
+        for who in ["mara", "nobody"] {
+            let name = format!("inbox {category:?} as {who}");
+            let name = name.as_str();
+            let plan = explain(&pool, sql, |q| {
+                q.bind(vec![who.to_owned()])
+                    .bind(chrono::Utc::now())
+                    .bind(false)
+                    .bind(declared.clone())
+            })
+            .await;
+            wrong.extend(shapes(name, &plan));
+            if category == knobas_core::inbox::Category::FailedBuild {
+                wrong.extend(
+                    unkeyed_link_reads(&plan[0]["Plan"])
+                        .into_iter()
+                        .map(|f| format!("{name}: {f}")),
+                );
+            }
+        }
     }
     // A rule renamed or dropped from `RULES` would otherwise go unchecked.
     assert_eq!(
@@ -413,6 +427,39 @@ fn kind_filtered_probes(node: &serde_json::Value) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(kind_filtered_probes(child));
+    }
+    found
+}
+
+/// Every read of `knobas.link` not keyed by the row it is asked about (#800):
+/// a scan of the table, or an index read whose condition names no entity.
+/// The failed-build rule asks "is this red build confirmed-linked to my
+/// work"; read as the whole set of confirmed links, joined to their items, it
+/// probed `sync.item` once per link -- 12,000 on the probe, about 100 ms --
+/// for a reader who owns none of them. Probed per red build, it is the few
+/// links each one has.
+fn unkeyed_link_reads(node: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let on_link = node["Relation Name"] == "link"
+        || node["Index Name"]
+            .as_str()
+            .is_some_and(|index| index.starts_with("link_"));
+    let keyed = node["Index Cond"]
+        .as_str()
+        .is_some_and(|cond| cond.contains("entity_id"));
+    let reads = matches!(
+        node["Node Type"].as_str(),
+        Some("Seq Scan" | "Index Scan" | "Index Only Scan" | "Bitmap Index Scan")
+    );
+    if on_link && reads && !keyed {
+        found.push(format!(
+            "reads knobas.link unkeyed ({} {})",
+            node["Node Type"].as_str().unwrap_or("?"),
+            node["Index Name"].as_str().unwrap_or("")
+        ));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(unkeyed_link_reads(child));
     }
     found
 }

@@ -5182,3 +5182,23 @@ Implementer.
   are per-row work over exact candidate sets, so narrowing the ends further does not help. A
   backlog ticket records the measured remainder and its directions, and this PR does not take
   them on. **Reversing:** n/a.
+
+## #786, #789, #800, #804, #806 — backlog sweep (2026-10-18)
+
+Implementer.
+
+- **#800: the failed-build rule is fixed, and no trigram index is added.** The inbox stream is
+  over the ticket's 30 ms on the 22k probe (137 ms in `just responsiveness-probe`), but the
+  mention rule isn't the cause: it reads 7–13 ms for every identity. The cost was `failed_build`'s
+  confirmed-link sets, which read all 12,000 links #939 gave the probe and probed each link's item,
+  about 100 ms for any reader who doesn't own everything. It is now an `exists` probe per red
+  build (7 ms). A trigram index would cost a migration to save at most 13 ms. **Reversing:** low
+  (the two arms in `inbox.rs`).
+- **#800: `new_assignment`'s 66 ms for a reader who owns little is filed, not fixed (#1164).** Its
+  cost is the declared-assignee read per ticket. That fix reshapes the declaration read the way
+  the mini board did, which is separate from this ticket's link and mention reads.
+  **Reversing:** n/a.
+- **#789: `Queue` is generic over `Borrow<SourcesState>`, and `OwnedQueue` is gone.** One
+  `Steps` implementation serves the borrowed and the owned state, so the six forwarding methods
+  go. The ticket's other half, the detail panel's queue watch, went with the rooms UI (#1087).
+  **Reversing:** low.

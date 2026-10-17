@@ -413,9 +413,15 @@ macro_rules! mention {
 ///   resolved when that time is later than its own -- the same question as
 ///   "a newer green exists", answered in one sort with no join to plan. The
 ///   partition keys sort under `"C"`: only equality matters to a partition;
-/// * the confirmed links are two uncorrelated `in` sets, one per direction,
-///   which PostgreSQL hashes once: a link from the build to my work, and one
-///   from my work to the build.
+/// * the confirmed links are two `exists` probes per red build, one per
+///   direction, keyed on `link_from_idx` and `link_to_idx`: a link from the
+///   build to my work, and one from my work to the build. They were
+///   uncorrelated `in` sets until #800, hashed once, but building a set meant
+///   reading every confirmed link and probing its item: 12,000 links and
+///   about 100 ms on the probe for a reader who owns none of them, the
+///   all-but-everyone case. A red build has a few links, and only the red
+///   builds still unresolved reach the probe (7 ms in either statistics
+///   state).
 macro_rules! failed_build {
     () => {
         concat!(
@@ -442,19 +448,21 @@ macro_rules! failed_build {
           where i.status = 'FAILURE'
             and i.finished
             and (   i.author = any($1)
-                 or i.entity_id in (
-                       select l.from_id
+                 or exists (
+                       select 1
                          from knobas.confirmed_link l
                          join sync.item mine on mine.entity_id = l.to_id
-                        where mine.author = any($1)
+                        where l.from_id = i.entity_id
+                          and mine.author = any($1)
                           and ",
             $crate::live_by_key!("mine"),
             ")
-                 or i.entity_id in (
-                       select l.to_id
+                 or exists (
+                       select 1
                          from knobas.confirmed_link l
                          join sync.item mine on mine.entity_id = l.from_id
-                        where mine.author = any($1)
+                        where l.to_id = i.entity_id
+                          and mine.author = any($1)
                           and ",
             $crate::live_by_key!("mine"),
             "))
