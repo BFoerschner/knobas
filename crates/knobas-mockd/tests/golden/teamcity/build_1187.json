@@ -1,4 +1,7 @@
 {
+  "agent": {
+    "name": "knobas-agent"
+  },
   "branchName": "feature/PAY-231-sepa-retry",
   "buildType": {
     "href": "/app/rest/buildTypes/id:Payout_IntegrationTests",

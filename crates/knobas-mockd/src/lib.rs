@@ -246,6 +246,14 @@
 //!     violation: that is what a Jira Core instance answers, and the adapter
 //!     reads a 404 on the board listing as "no boards". The boards themselves
 //!     are witnessed against the real seeded Jira (`jira-live`), never here.
+//! 18. **Every TeamCity build that ran names one agent, `knobas-agent` (#1004).**
+//!     The dataset names no agents, and the declared run field `agent` needs
+//!     `BUILD_FIELDS` to ask for `agent(name)`, which would otherwise be an
+//!     `UnknownField` 400. mockd serves the name the test environment gives
+//!     its one agent (`teamcity::AGENT_NAME`), on every build that is not
+//!     queued and did not fail to start, which is what the seeded server
+//!     serves. Unlike a triggerer (deviation 12) an agent is no person and is
+//!     indexed nowhere, so naming one invents nothing a search would find.
 //!
 //! ## The shared credentials
 //!

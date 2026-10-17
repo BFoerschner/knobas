@@ -92,12 +92,17 @@ pub(crate) const PROJECT_FIELDS: &str = "count,nextHref,project(id,name,parentPr
 /// **`triggered(type,user(username))`** (#961): the declared `trigger` and
 /// `started_by`. The username was here before as `SyncItem::author`; the
 /// type is what says a change or a schedule started a build no person did.
+///
+/// **`agent(name)`** (#1004): the declared `agent`, the machine the build ran
+/// on, by name and nothing else. `running-info(currentStageText)` was already
+/// here and is now also the declared `current_step`.
 pub(crate) const BUILD_FIELDS: &str = concat!(
     "count,nextHref,build(id,number,buildTypeId,state,status,statusText,branchName,",
     "queuedDate,startDate,finishDate,",
     "buildType(id,name,projectId,projectName),",
     "running-info(percentageComplete,currentStageText),",
     "triggered(type,user(username)),",
+    "agent(name),",
     "revisions(revision(version)))"
 );
 
@@ -1121,6 +1126,9 @@ mod tests {
             "running-info(",
             // The declared `trigger` and `started_by` (#961).
             "triggered(type,user(username))",
+            // The declared `agent` and `current_step` (#1004).
+            "agent(name)",
+            "running-info(percentageComplete,currentStageText)",
             // The declared `revision` (#710): without it every build's
             // revision is a miss, and no commit's detail draws a build.
             "revisions(revision(version))",
