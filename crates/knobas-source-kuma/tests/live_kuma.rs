@@ -803,6 +803,59 @@ async fn a_monitor_paused_through_the_write_op_leaves_the_roster_and_comes_back(
     );
 }
 
+/// **More writes in a minute than Kuma allows logins, and every one lands**
+/// (#983).
+///
+/// Uptime Kuma 2.5.3 allows twenty logins per fixed minute, and a session per
+/// write refused the twenty-first as `unauthorized`. Twenty-four writes here,
+/// pause and resume in turn on the suite's own monitor, **each through a
+/// freshly built adapter** -- which is what the write queue does, one build
+/// per flush and one flush per click -- so the session that carries them has
+/// to outlive the adapter value, not only one flush.
+///
+/// The monitor ends resumed (an even count), and is deleted however the test
+/// ends. The minute is asserted, because twenty-four writes spread over two
+/// windows would pass on logins alone and witness nothing.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn more_writes_in_a_minute_than_kuma_allows_logins_all_land() {
+    const WRITES: usize = 24;
+    let env = env();
+    let _scratch = Scratch::add();
+    let present = until(
+        env.source().as_ref(),
+        "the scratch monitor is published",
+        |items| items.iter().any(|item| item.title == SCRATCH),
+    )
+    .await;
+    let entity = entity_of(&present, SCRATCH);
+
+    let started = Instant::now();
+    for write in 0..WRITES {
+        let op = if write % 2 == 0 {
+            WriteOp::PauseMonitor {
+                entity: entity.clone(),
+            }
+        } else {
+            WriteOp::ResumeMonitor {
+                entity: entity.clone(),
+            }
+        };
+        let landed = env.writable().write(op).await;
+        assert!(
+            landed.is_ok(),
+            "write {} of {WRITES} after {:?} was refused: {landed:?}",
+            write + 1,
+            started.elapsed()
+        );
+    }
+    let took = started.elapsed();
+    assert!(
+        took < Duration::from_secs(60),
+        "{WRITES} writes took {took:?}, so they did not share one rate-limit window"
+    );
+}
+
 /// The two ways a write is refused, and the fault class each takes -- which is
 /// what decides whether the queue waits for a human or records a refusal.
 ///

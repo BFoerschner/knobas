@@ -1,5 +1,7 @@
 //! The `Source` implementation: what the sync engine and `test_source` hold.
 
+use std::sync::Arc;
+
 use knobas_source::instance::SourceInstance;
 use knobas_source::{
     ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
@@ -27,7 +29,11 @@ pub struct KumaSource {
     /// The *presence of the channel* is what the descriptor advertises and
     /// what [`Source::write`] dispatches on, rather than a boolean beside it:
     /// two facts that must agree cannot disagree if there is only one.
-    socket: Option<KumaSocket>,
+    ///
+    /// Shared with every other adapter the process builds for the same
+    /// instance and account, so a logged-in session outlives this value
+    /// (#983, [`KumaSocket::shared`]).
+    socket: Option<Arc<KumaSocket>>,
 }
 
 /// The connection note (#326): how much this Kuma is watching, in one line.
@@ -73,7 +79,7 @@ pub fn build(instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
     // therefore -- through `descriptor` -- any write op to offer.
     let socket = instance
         .account
-        .map(|account| KumaSocket::new(&instance.base_url, &cfg, account))
+        .map(|account| KumaSocket::shared(&instance.base_url, &cfg, account))
         .transpose()?;
     Ok(Box::new(KumaSource {
         id: instance.id,
