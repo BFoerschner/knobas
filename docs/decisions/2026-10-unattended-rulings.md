@@ -3972,3 +3972,8 @@ Implementer, one PR for both.
   `name.trim()` (any whitespace), while SQL `btrim` strips only spaces, so a tab or newline at
   either end matched on save but not on delete. Binding `name.trim()` makes both sides trim alike.
   **Reversing:** low.
+- **Implementer (#1045): `team` is required on the mock `Repo`.** Every fixture repo carries one,
+  and a missing key should fail the parse like the others (`deny_unknown_fields` house style).
+  **Reversing:** low; one field to `Option`.
+- **Implementer (#1045): ops-runbooks gets no source file.** Its `lang` is Markdown, which Gitea's
+  language statistic ignores, so a file would not produce a language. **Reversing:** low.
