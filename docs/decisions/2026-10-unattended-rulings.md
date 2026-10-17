@@ -4907,3 +4907,16 @@ Merge-manager:
   9.6 read 249 ms). The term is a correlated lookup per page row in a sort that already uses no
   index (`lower(title)`), so no index applies; at most about 4%, within the noise of a loaded
   machine. #981 owns the statement's cost. **Reversing:** n/a.
+
+## #1136 — the favourite board is made by the test, not the seed
+
+- **The `jira-live` witness for the favourites board choice makes its own favourite filter and a
+  board on it, syncs, and deletes both before asserting; the seed gains nothing.** The ticket
+  said "seed a board whose saved filter is a favourite filter". A seeded one would be a board on
+  PAY that every other boards test (`synced`, `all`) then lists, and the seed's favourite filter
+  would gain a board; a probe made and taken back in one test spends nothing of the shared
+  fixture. The seeded Scrum and Kanban boards (filters not favourites) are the negative. The
+  description in `descriptor.rs` and `fixtures.ts` now reads "only the boards built on your
+  favourite filters" ("your", as the rest of that sentence speaks), with a §10.8 entry for the
+  wording. **Reversing:** move the create into `seed-atlassian-content.sh` and read its ids
+  from `seed-state.json`; an hour.

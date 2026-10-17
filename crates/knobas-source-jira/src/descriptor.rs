@@ -218,7 +218,7 @@ fn config_schema() -> serde_json::Value {
             "boards": {
                 "type": "string", "enum": ["synced", "favourites", "all", "none"],
                 "default": "synced", "title": "Boards",
-                "description": "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards marked as favourites in Jira, every board you can see, or none. Read at every sync.",
+                "description": "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards built on your favourite filters, every board you can see, or none. Read at every sync.",
                 "x-knobas-section": "boards-and-filters"
             },
             "favourite_filters": {
