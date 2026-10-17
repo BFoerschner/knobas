@@ -6,6 +6,7 @@
 import type { CodeFacts } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { JOB_ROWS, fakeReach } from "./job-reach";
+import { fakeJiraBoard } from "./ticket-views";
 
 // -- the demo corpus --------------------------------------------------------
 
@@ -365,7 +366,18 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * — a flat `status` and `priority` — because that is the shape this corpus is
  * in.
  */
-function miniBoard(args: Record<string, unknown>) {
+function miniBoard(args: Record<string, unknown>): ReturnType<typeof boardOf> {
+  // A Jira view's board (#877): the whole board under the same words, cut
+  // to the view's tickets in Jira's order under its own columns.
+  const jiraView = args["jiraView"];
+  if (typeof jiraView === "string") {
+    const whole = boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null });
+    return fakeJiraBoard(jiraView, whole, (args["perColumn"] as number | null | undefined) ?? null);
+  }
+  return boardOf(args);
+}
+
+function boardOf(args: Record<string, unknown>) {
   // The fixture has no link graph, so a stored context's membership is
   // honestly empty — the same answer `context_members` and `list_entities`
   // give.
@@ -624,6 +636,13 @@ export function fakeTicketCount(query: string): number {
   return CORPUS.filter(
     (entry) => entry.kind === "ticket" && entry.deleted_at === null && (query.trim() === "" || fakeQueryMatches(entry, query)),
   ).length;
+}
+
+/** Every live ticket's key: what a fake Jira view's members are picked from (#877). */
+export function fakeTicketKeys(): string[] {
+  return CORPUS.filter((entry) => entry.kind === "ticket" && entry.deleted_at === null).map(
+    (entry) => entry.entity_id.split(":")[1] ?? entry.entity_id,
+  );
 }
 
 /** `list_entities`, filtered, ordered and paged the way the real one is. */

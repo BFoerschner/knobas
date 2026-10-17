@@ -16,7 +16,7 @@
  * here are wider than the real ones would be. *Blocked* is `has:blocker`.
  */
 import type { Handler } from "../fake-tauri";
-import { fakeTicketCount } from "./corpus";
+import { fakeTicketCount, fakeTicketKeys } from "./corpus";
 
 interface View {
   id: string;
@@ -56,7 +56,107 @@ const VIEWS: View[] = [
   seeded("operations-ops", "Operations (OPS)", "Projects", "project:OPS"),
   seeded("customs-cus", "Customs (CUS)", "Projects", "project:CUS"),
   seeded("tracking-trk", "Tracking (TRK)", "Projects", "project:TRK"),
-].map((view, position) => ({ ...view, position }));
+];
+
+/**
+ * prototype-6's Jira boards (its `JB`, #877), as the sync would project them:
+ * a ticket view row each under *Jira boards*, Jira's columns and limits, and
+ * where it comes from. `member` stands in for the keys Jira's query returns;
+ * Jira's order here is the key's number.
+ */
+interface FakeJira {
+  ref: string;
+  member: (key: string) => boolean;
+  source: {
+    kind: "board";
+    board_type: string;
+    jql: string;
+    sub_query: string | null;
+    sprint: { id: number; name: string; end_date: string | null } | null;
+    last_read: string;
+    web_url: string;
+  };
+}
+const READ = "2026-10-17T09:56:00Z";
+const col = (name: string, statuses: string[], limit: number | null = null) => ({ name, statuses, limit });
+const JIRA: FakeJira[] = [];
+function jiraBoard(
+  id: number,
+  name: string,
+  type: string,
+  jql: string,
+  columns: View["columns"],
+  lanes: string,
+  member: (key: string) => boolean,
+  extra: { sub?: string; sprint?: string } = {},
+) {
+  const ref = `mock:board-${id}`;
+  JIRA.push({
+    ref,
+    member,
+    source: {
+      kind: "board",
+      board_type: type,
+      jql,
+      sub_query: extra.sub ?? null,
+      sprint: extra.sprint ? { id, name: extra.sprint, end_date: "2026-10-22T16:00:00Z" } : null,
+      last_read: READ,
+      web_url: `https://jira.example/secure/RapidBoard.jspa?rapidView=${id}`,
+    },
+  });
+  VIEWS.push({ ...seeded(`mock-board-${id}`, name, "Jira boards", "", "board"), columns, lanes, jira_ref: ref });
+}
+jiraBoard(14, "PAY board", "scrum", "project = PAY ORDER BY Rank ASC",
+  [col("To Do", ["To Do"]), col("Doing", ["In Progress"]), col("Review", ["In Review"], 4), col("Done", ["Done"])],
+  "epic", (key) => key.startsWith("PAY-"), { sprint: "Sprint 34" });
+jiraBoard(21, "Payments and Ops flow", "kanban", "project in (PAY, OPS) AND labels != tech-debt ORDER BY Rank ASC",
+  [col("Ready", ["To Do"]), col("In flight", ["In Progress", "In Review"], 6), col("Shipped", ["Done"])],
+  "assignee", (key) => /^(PAY|OPS)-/.test(key), { sub: "fixVersion in unreleasedVersions() OR fixVersion is EMPTY" });
+jiraBoard(31, "Customs sprint board", "scrum", "project = CUS ORDER BY Rank ASC",
+  [col("To Do", ["To Do"]), col("In Progress", ["In Progress"]), col("Done", ["Done"])],
+  "none", (key) => key.startsWith("CUS-"), { sprint: "CUS sprint 12" });
+jiraBoard(40, "Platform on-call", "kanban", "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
+  [col("Open", ["To Do"]), col("Working", ["In Progress", "In Review"], 3), col("Closed", ["Done"])],
+  "priority", (key) => key.startsWith("OPS-"));
+jiraBoard(52, "Tracking", "kanban", "project = TRK ORDER BY Rank ASC", [], "none", (key) => key.startsWith("TRK-"));
+VIEWS.forEach((view, position) => (view.position = position));
+
+const jiraOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
+const keyNumber = (key: string) => Number.parseInt(key.split("-")[1] ?? "0", 10);
+
+interface BoardCard {
+  entity_id: string;
+  key: string;
+}
+interface Board<Card extends BoardCard> {
+  columns: { status: string | null; cards: Card[]; total: number }[];
+  sources: { source_id: string; statuses: string[] }[];
+}
+
+/**
+ * `mini_board` with `jiraView` (#877): the uncapped board `whole` cut to the
+ * view's tickets, in Jira's order, under its own columns, each column by its
+ * name; one per status when it has none. A restatement of
+ * `commands::entity::jira_view_board`, which is the authority.
+ */
+export function fakeJiraBoard<Card extends BoardCard>(ref: string, whole: Board<Card>, perColumn: number | null): Board<Card> {
+  const jira = jiraOf(ref);
+  const view = VIEWS.find((candidate) => candidate.jira_ref === ref);
+  if (!jira || !view) throw { code: "not_found", message: `no Jira view is called ${ref}`, source_id: null };
+  const ordered = (cards: Card[]) => cards.filter((card) => jira.member(card.key)).sort((a, b) => keyNumber(a.key) - keyNumber(b.key));
+  const cut = (status: string | null, cards: Card[]) => ({
+    status,
+    cards: perColumn == null ? cards : cards.slice(0, perColumn),
+    total: cards.length,
+  });
+  const columns =
+    view.columns.length === 0
+      ? whole.columns.map((column) => cut(column.status, ordered(column.cards))).filter((column) => column.total > 0)
+      : view.columns.map((own) =>
+          cut(own.name, ordered(whole.columns.filter((column) => column.status !== null && own.statuses.includes(column.status)).flatMap((column) => column.cards))),
+        );
+  return { columns, sources: whole.sources };
+}
 
 /** The keys the fixture's matcher reads, and the ones it passes over as the real grammar would read them. */
 const KNOWN = new Set(["issuetype", "priority", "assignee", "status", "project", "under", "label", "has", "assigned", "sprint", "type", "source"]);
@@ -79,11 +179,21 @@ export function handlers(): Record<string, Handler> {
       VIEWS.slice()
         .sort((a, b) => a.position - b.position)
         .map((view) => {
+          const jira = jiraOf(view.jira_ref);
+          if (jira) {
+            const count = fakeTicketKeys().filter((key) => jira.member(key)).length;
+            return { ...view, count, unreadable: null, jira: jira.source };
+          }
           const part = unreadable(view.query);
-          return { ...view, count: part === null ? fakeTicketCount(view.query) : null, unreadable: part };
+          return { ...view, count: part === null ? fakeTicketCount(view.query) : null, unreadable: part, jira: null };
         }),
     save_ticket_view: (args) => {
-      const draft = args["view"] as Omit<View, "id" | "position"> & { id: string | null; position: number | null };
+      const sent = args["view"] as Omit<View, "id" | "position"> & { id: string | null; position: number | null };
+      // *View settings* on a Jira view keeps what Jira decides (#877).
+      const stored = VIEWS.find((view) => view.id === sent.id && jiraOf(view.jira_ref) !== null);
+      const draft = stored
+        ? { ...sent, name: stored.name, group: stored.group, query: stored.query, columns: stored.columns, jira_ref: stored.jira_ref }
+        : sent;
       if (!draft.name.trim()) throw { code: "invalid", message: "a view needs a name", source_id: null };
       let id = draft.id;
       if (id === null) {
@@ -101,6 +211,8 @@ export function handlers(): Record<string, Handler> {
     delete_ticket_view: (args) => {
       const at = VIEWS.findIndex((view) => view.id === args["id"]);
       if (at < 0) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
+      if (jiraOf(VIEWS[at]!.jira_ref))
+        throw { code: "invalid", message: `${String(args["id"])} is a Jira view: it comes from Jira at every sync and cannot be deleted here`, source_id: null };
       VIEWS.splice(at, 1);
       return null;
     },

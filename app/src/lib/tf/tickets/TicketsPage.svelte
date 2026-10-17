@@ -49,8 +49,11 @@
 
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface TicketsPorts {
-    /** `mini_board` over every source: capped per column or not, narrowed by a query or not. */
-    board: (perColumn: number | null, query: string | null) => Promise<MiniBoard>;
+    /**
+     * `mini_board` over every source: capped per column or not, narrowed by a
+     * query or not; or a Jira view's board, when `jiraView` names one (#877).
+     */
+    board: (perColumn: number | null, query: string | null, jiraView?: string | null) => Promise<MiniBoard>;
     /** The selected ticket's description. */
     detail: (entityId: string) => Promise<Pick<EntityDetail, "body_text">>;
     contexts: () => Promise<ContextRow[]>;
@@ -142,7 +145,9 @@
     draftFromFilter,
     draftNew,
     draftRestore,
+    drawnJiraColumns,
     groupViews,
+    JIRA_GROUPS,
     LIST_COLUMN_ORDER,
     OWN_GROUPS,
     savedShowing,
@@ -153,7 +158,8 @@
     ready,
     timedTicket,
     ports = {
-      board: (perColumn, query) => miniBoard({ sources: [], context: null, project: null }, perColumn, query),
+      board: (perColumn, query, jiraView) =>
+        miniBoard({ sources: [], context: null, project: null }, perColumn, query, jiraView),
       detail: getEntity,
       contexts: listContexts,
       listEntities,
@@ -211,6 +217,13 @@
   /** The base query the board is read with: the view's text, `null` when there is nothing to read. */
   const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
   const sessionKey = $derived(viewId ?? "");
+  /** The Jira view the board reads (#877), or `null`: Jira decides its tickets and their order. */
+  const jiraRef = $derived(view?.jira ? view.jira_ref : null);
+  /** Where *Choose which* goes: the first Jira view's source, else the sources. */
+  const jiraSettings = $derived.by(() => {
+    const ref = (views ?? []).find((row) => row.jira !== null)?.jira_ref;
+    return ref ? `#/settings/source/${encodeURIComponent(ref.split(":")[0]!)}` : "#/settings";
+  });
 
   function loadViews() {
     ports
@@ -291,7 +304,9 @@
   /** Whether the board is split into lanes, which reads it whole. */
   const laned = $derived(showing.layout === "board" && showing.lanes !== "none");
   /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(viewColumns(board?.columns ?? [], view?.columns ?? []));
+  const cols = $derived(
+    viewColumns(board?.columns ?? [], jiraRef !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? [])),
+  );
   const expandKey = (lane: Lane, column: MiniBoardColumn) =>
     lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
@@ -328,7 +343,7 @@
     const query = toQuery(config, filter);
     const mine = ++reading;
     ports
-      .board(capFor(), query === "" ? null : query)
+      .board(capFor(), query === "" ? null : query, jiraRef)
       .then((answer) => {
         if (mine !== reading) return;
         board = answer;
@@ -342,7 +357,7 @@
     if (query !== base && total === null) {
       const at = epoch;
       ports
-        .board(1, base === "" ? null : base)
+        .board(1, base === "" ? null : base, jiraRef)
         .then((answer) => {
           if (at === epoch) total ??= sum(answer);
         })
@@ -603,7 +618,11 @@
         >
       {/if}
       {#each groups as group (group.name)}
-        <h2>{group.name}</h2>
+        <h2>
+          {group.name}{#if (JIRA_GROUPS as readonly string[]).includes(group.name)}{" "}<span class="tf-vw-sync"
+              >from the Jira source</span
+            >{/if}
+        </h2>
         {#each group.views as row (row.id)}
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
@@ -612,6 +631,7 @@
             >
             <ViewMenu
               name={row.name}
+              jira={row.jira !== null}
               onedit={() => editView(row)}
               onduplicate={() => newView(draftCopy(row))}
               ondelete={() => remove(row)}
@@ -628,13 +648,18 @@
           <a href={jobHash(context.id)}>{context.title}</a>
         {/each}
       {/if}
+      <p class="tf-vw-foot">
+        Boards and favourite filters come in with the Jira source at every sync. <a href={jiraSettings}>Choose which</a>
+      </p>
     </div>
   </nav>
 
   <section class="tf-board-wrap">
     <div class="tf-board-head">
       <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
-      {#if view}<span class="tf-q">{view.query.trim() === "" ? "every synced ticket" : view.query}</span>{/if}
+      {#if view && view.jira === null}<span class="tf-q"
+          >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
+        >{/if}
       {#if view !== undefined && (view === null || view.unreadable === null)}
         <div class="tf-seg" role="group" aria-label="Layout">
           <button type="button" aria-pressed={showing.layout === "board"} onclick={() => chooseLayout("board")}
@@ -646,9 +671,12 @@
         </div>
       {/if}
       {#if view}
-        <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}>Edit view</button>
+        <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}
+          >{view.jira === null ? "Edit view" : "View settings"}</button
+        >
         <ViewMenu
           name="this view"
+          jira={view.jira !== null}
           className="tf-btn tf-sm tf-ghost"
           onedit={() => editView(view)}
           onduplicate={() => newView(draftCopy(view))}
@@ -657,7 +685,16 @@
       {/if}
     </div>
     {#if base !== null}
-      <FilterBar {config} {filter} {shown} {total} onchange={filterChanged} extra={lanesSwitch} after={saveButton} />
+      <!-- *Save as a view* on a Jira view is *Make an editable copy* (R-3.25, #880). -->
+      <FilterBar
+        {config}
+        {filter}
+        {shown}
+        {total}
+        onchange={filterChanged}
+        extra={lanesSwitch}
+        after={jiraRef === null ? saveButton : undefined}
+      />
     {/if}
     {#snippet lanesSwitch()}
       <!-- prototype-6 offers lanes on the ticket board only. -->
@@ -816,7 +853,8 @@
       groups={groupNames}
       fields={suggested?.fields ?? []}
       parents={suggested?.parents ?? []}
-      board={ports.board}
+      jira={editing?.jira ?? null}
+      board={(perColumn, query) => ports.board(perColumn, query, editing?.jira ? editing.jira_ref : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}

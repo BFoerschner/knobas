@@ -411,6 +411,25 @@ export interface TicketViewRow extends TicketView {
   count: number | null;
   /** The part of the text the grammar could not read, or `null`. */
   unreadable: string | null;
+  /** Where a Jira view comes from (#877), or `null` on a view somebody made. */
+  jira: JiraSource | null;
+}
+
+/** What Jira says about a Jira view — `ticket_views::JiraSource` (#877). */
+export interface JiraSource {
+  kind: "board" | "filter";
+  /** `scrum`, `kanban` or `simple` for a board; `null` for a filter. */
+  board_type: string | null;
+  /** The saved filter's JQL, as Jira holds it. */
+  jql: string;
+  /** A Kanban board's sub-filter, or `null`. */
+  sub_query: string | null;
+  /** A Scrum board's active sprint, or `null`. */
+  sprint: { id: number; name: string; end_date: string | null } | null;
+  /** RFC 3339: when the last sync read it. */
+  last_read: string;
+  /** Where Jira shows it, or `null`. */
+  web_url: string | null;
 }
 
 /** What `save_ticket_view` takes — `ticket_views::TicketViewDraft`. */

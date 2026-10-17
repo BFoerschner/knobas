@@ -10,6 +10,17 @@ import { DEFAULT_SORT, type LaneField, type ListSort } from "./tickets";
 
 /** The groups that come first, in this order (R-3.2); typed groups follow. */
 export const OWN_GROUPS = ["Mine", "Team", "Epics", "Projects"] as const;
+/** The Jira views' groups, last (#877, R-3.20): what the Jira source brings in at every sync. */
+export const JIRA_GROUPS = ["Jira boards", "Jira filters"] as const;
+
+/**
+ * A Jira view's own columns as the board read draws them (#877): the read
+ * has already gathered Jira's columns, each under its own name, so each
+ * holds just that name, keeping its limit.
+ */
+export function drawnJiraColumns(own: ViewColumn[]): ViewColumn[] {
+  return own.map((column) => ({ ...column, statuses: [column.name] }));
+}
 
 /** What a card shows unless a view says otherwise (prototype-6's `VCARD`). */
 export const DEFAULT_CARD_FIELDS: CardField[] = ["type", "signals", "comments", "assignee"];
@@ -42,12 +53,12 @@ export interface ViewGroup {
  */
 export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
   const found = views
-    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.query}`, find))
+    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.jira?.jql ?? view.query}`, find))
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
   const typed = [...new Set(found.map((view) => view.group))].filter(
-    (group) => !(OWN_GROUPS as readonly string[]).includes(group),
+    (group) => !([...OWN_GROUPS, ...JIRA_GROUPS] as readonly string[]).includes(group),
   );
-  return [...OWN_GROUPS, ...typed]
+  return [...OWN_GROUPS, ...typed, ...JIRA_GROUPS]
     .map((name) => ({ name, views: found.filter((view) => view.group === name) }))
     .filter((group) => group.views.length > 0);
 }

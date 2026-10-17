@@ -3,7 +3,16 @@ import { expect, test } from "vitest";
 
 import type { MiniBoardCard } from "../../ipc/entity";
 import type { TicketViewRow } from "../../ipc/search";
-import { columnLimit, draftCopy, draftFromFilter, draftRestore, groupViews, savedShowing, viewColumns } from "./views";
+import {
+  columnLimit,
+  draftCopy,
+  draftFromFilter,
+  draftRestore,
+  drawnJiraColumns,
+  groupViews,
+  savedShowing,
+  viewColumns,
+} from "./views";
 
 function row(id: string, group: string, position: number, extra: Partial<TicketViewRow> = {}): TicketViewRow {
   return {
@@ -21,6 +30,7 @@ function row(id: string, group: string, position: number, extra: Partial<TicketV
     jira_ref: null,
     count: 1,
     unreadable: null,
+    jira: null,
     ...extra,
   };
 }
@@ -92,4 +102,30 @@ test("Save as a view takes the text and how it shows now; Duplicate and Undo kee
   expect(draftFromFilter(null, "", savedShowing(null))).toEqual(expect.objectContaining({ group: "Mine", query: "", layout: "board" }));
   expect(draftCopy(saved)).toEqual(expect.objectContaining({ id: null, position: null, name: "Copy of pay", jira_ref: null }));
   expect(draftRestore(saved)).toEqual(expect.objectContaining({ id: "pay", position: 7, name: "pay", jira_ref: "board:3" }));
+});
+
+test("Jira boards and Jira filters come after every group of your own, and a Jira view is found by its JQL", () => {
+  const jira = { kind: "board" as const, board_type: "scrum", jql: "project = CUS", sub_query: null, sprint: null, last_read: "", web_url: null };
+  const views = [
+    row("cus", "Jira boards", 0, { jira, jira_ref: "jira:board-31" }),
+    row("ops", "Ops", 1),
+    row("mine", "Mine", 2),
+  ];
+  expect(groupViews(views, "").map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
+  expect(groupViews(views, "cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
+});
+
+test("a Jira view's columns are drawn by their own names, keeping Jira's order and limits", () => {
+  const own = [
+    { name: "Doing", statuses: ["In Progress", "In Review"], limit: 3 },
+    { name: "Done", statuses: ["Done"], limit: null },
+  ];
+  expect(drawnJiraColumns(own)).toEqual([
+    { name: "Doing", statuses: ["Doing"], limit: 3 },
+    { name: "Done", statuses: ["Done"], limit: null },
+  ]);
+  const board = [
+    { status: "Doing", cards: [card("PAY-2", "2026-08-01T00:00:00Z"), card("PAY-1", "2026-08-09T00:00:00Z")], total: 2 },
+  ];
+  expect(viewColumns(board, drawnJiraColumns(own))[0]!.cards.map((c) => c.key)).toEqual(["PAY-2", "PAY-1"]);
 });
