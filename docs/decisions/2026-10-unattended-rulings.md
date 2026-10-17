@@ -4852,6 +4852,8 @@ Merge-manager:
   have arrived*, names the source and offers *Send again* and *Discard*. **Reversing:** low.
 - **ADR-0012 is not contradicted.** It covers a crash between the send returning and the settle,
   which still re-sends. This is a send that never returned an answer, which ADR-0012 does not
-  address.
+  address. Its line calling `transition` and `approve` naturally idempotent was wrong, though, and
+  holding them contradicted it, so the merge-manager corrected that line in the ADR in this PR and
+  added a consequence naming the unanswered-send window. **Reversing:** trivial (the ADR text).
 - **A Kuma login that times out is `Unreachable`.** The write's own packet was not sent yet, so a
   hold would ask the reader about a monitor Kuma never saw. **Reversing:** trivial.
