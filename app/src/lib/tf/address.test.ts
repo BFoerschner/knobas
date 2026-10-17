@@ -14,6 +14,16 @@ test("a note opens Settings › Notes and capture, the one place notes are drawn
   expect(entityAddress("note", "note:0f2c1a")).toBe("#/settings/notes");
 });
 
+test("a Jira view opens its ticket view, by the projection's slug (#1094)", () => {
+  expect(entityAddress("jira_view", "jira:board-21")).toBe("#/tickets/jira-board-21");
+  expect(entityAddress("jira_view", "jira:filter-10230")).toBe("#/tickets/jira-filter-10230");
+});
+
+test("a kind with no page lands on its section or on Tickets, never on Code (#1094)", () => {
+  expect(entityAddress("build_config", "teamcity:Pay_Build")).toBe("#/builds");
+  expect(entityAddress("mystery", "x:1")).toBe("#/tickets");
+});
+
 test("every address entityAddress produces has a place in the new shell", () => {
   for (const kind of ["ticket", "pr", "repo", "branch", "commit", "build", "page", "asset", "route", "monitor", "note", "mystery"]) {
     expect(parseTfHash(entityAddress(kind, "x:1")).view).not.toBe("unknown");
