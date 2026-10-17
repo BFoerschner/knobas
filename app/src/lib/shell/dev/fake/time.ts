@@ -296,8 +296,14 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
       const entityId = String(args["entityId"]);
       if (!entityId.startsWith("mock:")) return null;
       const day = String(args["day"]);
+      // A running stretch that started on this day and ticket is counted below (#896).
+      const runningThatDay =
+        running?.target.kind === "entity" &&
+        running.target.entity_id === entityId &&
+        dayKey(new Date(running.started_at)) === day;
       // Yesterday's PAY-231 (#828): *Log all*'s fixed row, with prototype-6's comment.
-      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt()) && !loggedYesterday) {
+      // Not when the timer started yesterday (just before midnight): then the draft is its stretch (#1031).
+      if (entityId === YESTERDAY_ROW.entity_id && day === dayKey(yesterdayAt()) && !loggedYesterday && !runningThatDay) {
         const at = yesterdayAt();
         at.setHours(YESTERDAY_ROW.hour, 0, 0, 0);
         const started_at = at.toISOString();
@@ -316,12 +322,7 @@ function fakeTime(params: URLSearchParams): Record<string, Handler> {
       }
       const spans = unlogged(entityId);
       // The running timer's stretch up to now, on its ticket and the day it started (#896).
-      const running_since =
-        running?.target.kind === "entity" &&
-        running.target.entity_id === entityId &&
-        dayKey(new Date(running.started_at)) === day
-          ? running.started_at
-          : null;
+      const running_since = runningThatDay ? running!.started_at : null;
       const all = [...spans, ...(running_since ? [{ started_at: running_since, ended_at: new Date().toISOString() }] : [])];
       all.sort((a, b) => a.started_at.localeCompare(b.started_at));
       if (all.length === 0) return null;
