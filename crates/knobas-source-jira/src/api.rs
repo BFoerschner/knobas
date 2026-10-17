@@ -17,13 +17,16 @@
 //! | [`server_info`](JiraApi::server_info) | `api/2/serverInfo` | `doHealthCheck` | *(none)* |
 //! | [`myself`](JiraApi::myself) | `api/2/myself` | *(none)* | *(none)* |
 //! | [`fields`](JiraApi::fields) | `api/2/field` | *(none)* | *(none)* |
-//! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields` |
+//! | [`search`](JiraApi::search) | `api/2/search` | `jql`, `startAt`, `maxResults`, `validateQuery`, `fields`, `expand` | `jql`, `startAt`, `maxResults`, `fields`, `expand=changelog` (#929) |
 //! | [`comments`](JiraApi::comments) | `api/2/issue/{key}/comment` | `startAt`, `maxResults`, `orderBy`, `expand` | `startAt`, `maxResults` |
 //! | [`worklogs`](JiraApi::worklogs) | `api/2/issue/{key}/worklog` | **none at all** | *(none)* |
 //! | — | `api/2/issue/{key}` | `fields`, `expand`, `properties`, `updateHistory` | **unused in M1** |
 //!
 //! Two consequences worth naming:
 //!
+//! * **`expand=changelog` is sent on `/search`, and nothing else.** It puts
+//!   each issue's status history in the stored record for the conversation's
+//!   *Include changes* (#929).
 //! * **`expand=renderedFields` is deliberately not sent.** It returns Jira's
 //!   HTML rendering, and roadmap §4 gotcha 7 is exactly about HTML reaching
 //!   the webview. `description` and comment bodies in REST v2 are wiki markup
@@ -145,6 +148,28 @@ fn no_agile() -> SourceError {
     }
 }
 
+/// What a sync run's `/search` sends.
+///
+/// `expand=changelog` (#929) puts each issue's status history in the record,
+/// so `SyncItem::payload` carries `changelog.histories` and a ticket's
+/// conversation can draw a move made in Jira's own UI -- with no request per
+/// issue. `validateQuery` stays at its default, and `expand` names nothing
+/// else: `renderedFields` would give us HTML (gotcha 7).
+fn search_query(
+    jql: &str,
+    start_at: u32,
+    max_results: u32,
+    fields: &str,
+) -> [(&'static str, String); 5] {
+    [
+        ("jql", jql.to_owned()),
+        ("startAt", start_at.to_string()),
+        ("maxResults", max_results.to_string()),
+        ("fields", fields.to_owned()),
+        ("expand", "changelog".to_owned()),
+    ]
+}
+
 /// The real endpoints. Every path and every parameter here is declared in
 /// `testenv/specs/jira-dc-rest.wadl`; `knobas-mockd` records anything else as a
 /// violation, which is what turns "the adapter invented an endpoint" into a red
@@ -178,16 +203,10 @@ impl JiraApi for crate::http::JiraHttp {
         fields: &str,
     ) -> Result<SearchPage, SourceError> {
         // Data Center's classic search. NOT Cloud's /rest/api/3/search/jql --
-        // roadmap §4 gotcha 4. `validateQuery` and `expand` are left at their
-        // defaults: renderedFields would give us HTML (gotcha 7).
+        // roadmap §4 gotcha 4.
         self.get_json(
             "rest/api/2/search",
-            &[
-                ("jql", jql.to_owned()),
-                ("startAt", start_at.to_string()),
-                ("maxResults", max_results.to_string()),
-                ("fields", fields.to_owned()),
-            ],
+            &search_query(jql, start_at, max_results, fields),
         )
         .await
     }
@@ -355,8 +374,23 @@ mod tests {
         jira.assert_no_violations();
     }
 
+    /// A sync run's search asks for the changelog and for nothing else that
+    /// `expand` can name (#929): the status history a ticket's conversation
+    /// draws, never `renderedFields`' HTML.
+    #[test]
+    fn the_search_expands_the_changelog_and_nothing_else() {
+        let query = search_query("ORDER BY updated ASC", 0, 50, "summary");
+        let expand: Vec<&str> = query
+            .iter()
+            .filter(|(name, _)| *name == "expand")
+            .map(|(_, value)| value.as_str())
+            .collect();
+        assert_eq!(expand, ["changelog"]);
+    }
+
     /// The sixth call's path and its (empty) parameter set, against the same
-    /// document the test above validates the other five against.
+    /// document `every_call_is_one_the_wadl_declares` validates the other five
+    /// against.
     ///
     /// Read off `knobas_mockd::allowlist` -- which `build.rs` generates from
     /// the pinned `testenv/specs/jira-dc-rest.wadl` -- rather than over a

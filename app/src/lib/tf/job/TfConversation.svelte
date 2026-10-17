@@ -18,7 +18,7 @@
   import type { FilterConfig } from "../filter/filter";
   import Marked from "../filter/Marked.svelte";
   import { initials } from "../tickets/tickets";
-  import { CHANGES, MENTIONS, NEW, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
+  import { CHANGES, MENTIONS, NEW, changeLine, drawThread, firstName, mentionRuns, since, stamp } from "./conversation";
 
   let {
     jobKey,
@@ -102,7 +102,7 @@
         <div class="tf-newline">New since your last visit, {since(lastVisit, now)}</div>
       {/if}
       {#if entry.kind === "change"}
-        <div class="tf-msg tf-event"><span></span><span>You moved this to {entry.change.status}, {stamp(entry.change.at, now)}</span></div>
+        <div class="tf-msg tf-event"><span></span><span>{changeLine(entry.change)}, {stamp(entry.change.at, now)}</span></div>
       {:else}
         {@const comment = entry.comment}
         <article class="tf-msg" class:tf-new={entry.fresh} class:tf-mention={comment.mentions_me}>

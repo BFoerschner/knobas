@@ -1149,6 +1149,74 @@ async fn each_issue_carries_its_comments_and_worklogs_as_seeded() {
     );
 }
 
+/// **Each issue carries its status history** (#929): `expand=changelog` on
+/// `/search` puts Jira's `changelog.histories` in the record, whole, so the
+/// conversation can draw a move made in Jira's own UI. The seed moved its
+/// issues to the fixture's statuses through the workflow, as its admin
+/// account; each move is a `status` item there, and an issue's newest one
+/// lands on the status it stands in.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just atlassian-live`"]
+async fn each_issue_carries_its_status_history() {
+    let seeded = seeded();
+    seeded.clear_leftovers().await;
+    let (items, _) = full(&*seeded.source(serde_json::json!({}))).await;
+
+    let mut moved = 0;
+    for seeded_issue in &seeded.seed.issues {
+        let it = item(&items, &seeded_issue.key);
+        let changelog = &it.payload["changelog"];
+        let histories = changelog["histories"].as_array().unwrap_or_else(|| {
+            panic!(
+                "{}: no changelog.histories in the record: {changelog}",
+                seeded_issue.key
+            )
+        });
+        assert_eq!(
+            changelog["total"].as_u64(),
+            Some(histories.len() as u64),
+            "{}: /search returned only part of the changelog",
+            seeded_issue.key
+        );
+        let moves: Vec<(&serde_json::Value, &serde_json::Value)> = histories
+            .iter()
+            .flat_map(|h| {
+                h["items"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter(|i| i["field"] == "status")
+                    .map(move |i| (h, i))
+            })
+            .collect();
+        let Some((history, last)) = moves.last() else {
+            continue;
+        };
+        moved += 1;
+        assert_eq!(
+            last["toString"], seeded_issue.status,
+            "{}: the newest status move lands where the issue stands",
+            seeded_issue.key
+        );
+        assert!(
+            last["fromString"].is_string(),
+            "{}: {last}",
+            seeded_issue.key
+        );
+        assert!(
+            history["created"].is_string() && history["author"]["name"].is_string(),
+            "{}: who and when: {history}",
+            seeded_issue.key
+        );
+    }
+    assert!(
+        moved > 0,
+        "the seed moves issues off the workflow's first status, so some issue has a status \
+         history"
+    );
+    println!("SEEDED status histories: {moved} issue(s) with a status move");
+}
+
 /// **ADR-0010's project read, against the real payload.**
 ///
 /// `knobas_core::project_key_read!` reads a Jira ticket's project from
