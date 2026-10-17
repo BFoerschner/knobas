@@ -207,6 +207,22 @@ impl Source for Synthetic {
                         "branchName": "main",
                     }),
                 ),
+                // A pull request (#939), Gitea-shaped: two in three open,
+                // and one in five asks `mara` for a review, so the signals
+                // read and `has:` have open pull requests to find.
+                "pr" => (
+                    format!("tidewater/payout#{i}"),
+                    serde_json::json!({
+                        "number": i,
+                        "state": if i % 3 == 0 { "closed" } else { "open" },
+                        "merged": i % 3 == 0,
+                        "requested_reviewers": if i % 5 == 0 {
+                            serde_json::json!([{"login": "mara"}])
+                        } else {
+                            serde_json::json!([])
+                        },
+                    }),
+                ),
                 // A page carries a storage body of two sections, so the Docs
                 // reads (#860) project it as Confluence's would.
                 _ => (
@@ -249,6 +265,16 @@ impl Source for Synthetic {
         }
         Ok("done".to_owned())
     }
+}
+
+/// The Tickets view's board in lanes by `field`, as the view reads it.
+async fn laned_board(
+    pool: &PgPool,
+    field: &str,
+    query: Option<&str>,
+) -> Result<knobas_core::mini_board::MiniBoard, knobas_app::IpcError> {
+    let _ = field;
+    knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, None, query).await
 }
 
 /// One timed read: cold, then `runs` warm.
@@ -373,11 +399,47 @@ async fn room(
 
 /// The mirror this probe reads: the synthetic sources, then the seeded Gitea
 /// when the env says where it is. What a snapshot saves (#781).
+/// Confirmed links (#939), dense enough that the signals read and `has:`
+/// have a graph to walk: each pull request linked from a ticket and to a
+/// build, four in five builds linked from a ticket, and one ticket in three
+/// blocking the next. At the default size, 12,000 links.
+async fn confirm_links(pool: &PgPool, tickets: u64, builds: u64, prs: u64) {
+    let statement = "insert into knobas.link (from_id, to_id, relation, origin, created_by,
+                                               confirmed_at)
+         select f, t, r, 'manual', 'user', now() from (
+           select format('jira%s:JIRA%s-%s', n % 3, n % 3, n / 3) as f,
+                  format('git:tidewater/payout#%s', n) as t, 'relates' as r
+             from generate_series(0, $3 - 1) n
+           union all
+           select format('git:tidewater/payout#%s', n), format('ci:build:%s', (n * 3) % $2),
+                  'relates'
+             from generate_series(0, $3 - 1) n
+           union all
+           select format('jira%s:JIRA%s-%s', n % 3, n % 3, $1 - 1 - n / 3),
+                  format('ci:build:%s', n), 'relates'
+             from generate_series(0, ($2 * 4 / 5) - 1) n
+           union all
+           select format('jira%s:JIRA%s-%s', n % 3, n % 3, n / 3),
+                  format('jira%s:JIRA%s-%s', n % 3, n % 3, n / 3 + 1), 'blocks'
+             from generate_series(0, 3 * $1 - 4) n where (n / 3) % 3 = 0
+         ) l(f, t, r)
+         on conflict do nothing";
+    let made = sqlx::query(statement)
+        .bind(i64::try_from(tickets).unwrap())
+        .bind(i64::try_from(builds).unwrap())
+        .bind(i64::try_from(prs).unwrap())
+        .execute(pool)
+        .await
+        .unwrap();
+    println!("RP-LINKS confirmed={}", made.rows_affected());
+}
+
 async fn seed(
     pool: &PgPool,
     tickets: u64,
     pages: u64,
     builds: u64,
+    prs: u64,
     gitea: Option<&(String, String)>,
 ) {
     let mut synthetic = Vec::new();
@@ -407,11 +469,20 @@ async fn seed(
         kind: "build",
         count: builds,
     });
+    synthetic.push(Synthetic {
+        descriptor: SourceDescriptor {
+            id: "git".to_owned(),
+            ..knobas_source_gitea::descriptor_template()
+        },
+        kind: "pr",
+        count: prs,
+    });
     for source in &synthetic {
         knobas_app::sources::demo::load_mirror_of(pool, source)
             .await
             .unwrap();
     }
+    confirm_links(pool, tickets, builds, prs).await;
 
     // The seeded Gitea, synced through its real adapter. Its views are the
     // live reads the detail makes.
@@ -489,6 +560,7 @@ async fn build_snapshots(
     tickets: u64,
     pages: u64,
     builds: u64,
+    prs: u64,
     gitea: Option<&(String, String)>,
     never: &std::path::Path,
     analyzed: &std::path::Path,
@@ -507,7 +579,7 @@ async fn build_snapshots(
         .await
         .unwrap();
     }
-    seed(&pool, tickets, pages, builds, gitea).await;
+    seed(&pool, tickets, pages, builds, prs, gitea).await;
     pool.close().await;
     db.stop().await.unwrap();
     probe_snapshot::save(&root, never);
@@ -584,6 +656,9 @@ async fn what_the_reader_waits_on() {
     let tickets = env("RP_TICKETS", scaled(5_000));
     let pages = env("RP_PAGES", scaled(2_000));
     let builds = env("RP_BUILDS", scaled(5_000));
+    // Pull requests and the confirmed links around them (#939): beyond the
+    // 22,000, which stays what `RP_ITEMS` names.
+    let prs = env("RP_PRS", scaled(1_500));
     let runs = env("RP_RUNS", 7);
     // `RP_ANALYZED=1` reads against tables the planner has statistics for;
     // otherwise they are never analyzed (see `tables_of_the_mirror`).
@@ -620,6 +695,10 @@ async fn what_the_reader_waits_on() {
         ("tickets", tickets.to_string()),
         ("pages", pages.to_string()),
         ("builds", builds.to_string()),
+        // Pull requests and confirmed links (#939): a seed without them is
+        // another seed.
+        ("prs", prs.to_string()),
+        ("links", "939".to_owned()),
         ("synthetic", synthetic().to_string()),
         // A page's body and marks (#860): a seed of the shape before them is
         // another seed.
@@ -668,6 +747,7 @@ async fn what_the_reader_waits_on() {
             tickets,
             pages,
             builds,
+            prs,
             gitea_env.as_ref(),
             &never,
             &analyzed_copy,
@@ -712,7 +792,7 @@ async fn what_the_reader_waits_on() {
         .await
         .unwrap();
     println!(
-        "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} gitea={gitea} snapshot={how} in {} s",
+        "RP-SEED items={items} tickets/source={tickets} pages={pages} builds={builds} prs={prs} gitea={gitea} snapshot={how} in {} s",
         seeded.elapsed().as_secs()
     );
     if skip_pass {
@@ -835,6 +915,49 @@ async fn what_the_reader_waits_on() {
             )
             .await;
         }
+    }
+
+    // -- lanes and `has:` over confirmed links (#939, #1098) -----------------
+    // A laned board, by three fields: the epic (a lane of about twenty
+    // tickets each), the assignee and the priority (one lane each here).
+    let lanes = "tickets view: lanes";
+    for field in ["epic", "assignee", "priority"] {
+        for word in [None, Some("a")] {
+            let typed = word.map_or("no words".to_owned(), |word| format!("typed `{word}`"));
+            time(
+                lanes,
+                &format!("mini_board (lanes by {field}, {typed})"),
+                runs,
+                || laned_board(pool, field, word),
+            )
+            .await;
+        }
+    }
+    let has = "tickets view: has:";
+    for value in ["failing-build", "blocker", "open-pr", "review-for-me"] {
+        let raw = format!("has:{value}");
+        time(has, &format!("search {raw}"), runs, || {
+            search_inner(
+                pool,
+                knobas_search::SearchQuery {
+                    raw: raw.clone(),
+                    limit: 50,
+                    filters: Default::default(),
+                },
+            )
+        })
+        .await;
+        time(has, &format!("mini_board ({raw}, 8 a column)"), runs, || {
+            knobas_app::commands::entity::mini_board_inner(
+                pool,
+                None,
+                &[],
+                None,
+                Some(8),
+                Some(&raw),
+            )
+        })
+        .await;
     }
 
     // -- opening a detail ----------------------------------------------------
