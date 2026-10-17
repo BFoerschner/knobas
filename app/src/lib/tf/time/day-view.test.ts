@@ -9,7 +9,7 @@
 import { expect, test } from "vitest";
 
 import type { AdHocBlock, Block, DayBlock, RunningTimer } from "../../ipc/time";
-import { dayFigures, dayRows, hm, place, stripWindow, type DayRow } from "./day-view";
+import { dayFigures, dayRows, hm, offerRuns, place, stripWindow, type DayInput, type DayRow } from "./day-view";
 
 const DAY = "2026-08-22";
 
@@ -186,4 +186,57 @@ test("a row is placed by its share of the window, in percent", () => {
   // Clipped at either edge rather than drawn off the strip.
   expect(place(DAY, window, at(7), at(8, 30))).toEqual({ left: 0, width: 5 });
   expect(place(DAY, window, at(17), at(19))).toEqual({ left: 90, width: 10 });
+});
+
+// #1108: job → its pull request → job is one piece of work, so one *Add*.
+const passive = (id: number, from: string, to: string, entity_id: string) =>
+  block(id, from, to, { kind: "passive", target: { kind: "entity", entity_id } });
+const PR = "gitea:payments#139";
+
+function runsOf(blocks: DayBlock[], offers: DayInput["offers"], open: DayInput["open"] = []) {
+  const rows = dayRows({ day: DAY, blocks, offers, open, running: null, now: new Date(2026, 7, 22, 18) });
+  return offerRuns(rows).map((run) => [run.entityId, run.rows.map((row) => row.block?.block.id), Math.floor(run.ms / 60_000)]);
+}
+
+test("adjacent offered rows that go to one ticket, by their own or by a confirmed link, are one run", () => {
+  const blocks = [
+    passive(1, at(9), at(9, 20), "jira:PAY-231"),
+    passive(2, at(9, 20), at(9, 25), PR),
+    passive(3, at(9, 25), at(9, 47), "jira:PAY-231"),
+  ];
+  expect(runsOf(blocks, { 1: onTicket, 2: offer("jira:PAY-231"), 3: onTicket })).toEqual([
+    ["jira:PAY-231", [1, 2, 3], 47],
+  ]);
+});
+
+test("a guess never joins a run: last_logged or context_anchor in the middle breaks it", () => {
+  const blocks = [
+    passive(1, at(9), at(9, 20), "jira:PAY-231"),
+    passive(2, at(9, 20), at(9, 25), PR),
+    passive(3, at(9, 25), at(9, 47), "jira:PAY-231"),
+  ];
+  expect(runsOf(blocks, { 1: onTicket, 2: offer("jira:PAY-231", "last_logged"), 3: onTicket })).toEqual([]);
+  const anchored = { suggestion: { entity_id: "jira:PAY-231", title: null, rule: "context_anchor" as const } };
+  expect(runsOf(blocks, { 1: onTicket, 2: anchored, 3: onTicket })).toEqual([]);
+  // No suggestion at all breaks it too.
+  expect(runsOf(blocks, { 1: onTicket, 2: { suggestion: null }, 3: onTicket })).toEqual([]);
+});
+
+test("another ticket, or a row that is not offered, breaks a run; a run is two rows or more", () => {
+  const blocks = [
+    passive(1, at(9), at(9, 10), "jira:PAY-231"),
+    passive(2, at(9, 10), at(9, 20), "jira:PAY-231"),
+    passive(3, at(9, 20), at(9, 30), "jira:PAY-228"),
+    passive(4, at(9, 30), at(9, 40), "jira:PAY-231"),
+    block(5, at(9, 40), at(10)),
+    passive(6, at(10), at(10, 10), "jira:PAY-231"),
+    passive(8, at(10, 20), at(10, 30), "jira:PAY-231"),
+    passive(9, at(10, 30), at(10, 40), "jira:PAY-231"),
+  ];
+  const offers = { 1: onTicket, 2: onTicket, 3: onTicket, 4: onTicket, 5: onTicket, 6: onTicket, 8: onTicket, 9: onTicket };
+  // 10:10 to 10:20 is open time: nothing claims it, so it breaks the run too.
+  expect(runsOf(blocks, offers, [{ started_at: at(10, 10), ended_at: at(10, 20) }])).toEqual([
+    ["jira:PAY-231", [1, 2], 20],
+    ["jira:PAY-231", [8, 9], 20],
+  ]);
 });

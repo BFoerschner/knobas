@@ -159,6 +159,55 @@ function blockRows(input: DayInput): DayRow[] {
   });
 }
 
+/**
+ * A run of adjacent offered rows that all go to one ticket (#1108): job, its
+ * pull request, job again is one piece of work, so one *Add* takes it.
+ */
+export interface OfferRun {
+  /** The ticket every row in the run goes to. */
+  entityId: string;
+  /** Two or more rows, in time order, each still with its own actions. */
+  rows: DayRow[];
+  /** Their summed length, in milliseconds. */
+  ms: number;
+}
+
+/**
+ * The ticket an offered row goes to for certain: its own ticket, or the one a
+ * confirmed link names. Both read as `linked_to_target` (see `suggestionOf`).
+ * A guess (`last_logged`, `context_anchor`) is no certainty and goes nowhere.
+ */
+function certainTicket(row: DayRow): string | null {
+  if (row.state !== "offered") return null;
+  return row.suggestion?.rule === "linked_to_target" ? row.suggestion.entity_id : null;
+}
+
+/**
+ * The day's runs, in time order. Adjacent means next to each other in the list:
+ * any other row between them (open time, a block you tracked, the timer, an
+ * offered row going elsewhere or to a guess) breaks the run. Time that is no
+ * row (lunch, as far as knobas knows) does not, because taking a run gives each
+ * row to the ticket over its own stretch and claims nothing between.
+ *
+ * Only the offer is grouped. The record keeps a block per visit.
+ */
+export function offerRuns(rows: DayRow[]): OfferRun[] {
+  const runs: OfferRun[] = [];
+  let current: OfferRun | null = null;
+  for (const row of rows) {
+    const ticket = certainTicket(row);
+    if (ticket !== null && current !== null && current.entityId === ticket) {
+      current.rows.push(row);
+      current.ms += row.ms;
+      continue;
+    }
+    if (current !== null && current.rows.length > 1) runs.push(current);
+    current = ticket === null ? null : { entityId: ticket, rows: [row], ms: row.ms };
+  }
+  if (current !== null && current.rows.length > 1) runs.push(current);
+  return runs;
+}
+
 /** The five figures above the strip, in whole minutes. */
 export interface DayFigures {
   /** Manual blocks and the running timer: what you said your day was. */
