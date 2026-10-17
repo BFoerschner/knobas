@@ -229,6 +229,8 @@ knobas-app	lib/knobas_app	protocol::tests::inline_markdown_is_left_as_the_charac
 knobas-app	lib/knobas_app	protocol::tests::prose_is_paragraphs_and_a_run_of_bullets_is_one_list
 knobas-app	lib/knobas_app	protocol::tests::the_action_items_heading_is_matched_case_insensitively
 knobas-app	lib/knobas_app	protocol::tests::the_template_carries_the_three_sections_and_a_readable_action_item
+knobas-app	lib/knobas_app	slug::tests::a_slug_is_an_address_whatever_the_name_was
+knobas-app	lib/knobas_app	slug::tests::the_first_free_id_counts_up_from_two
 knobas-app	lib/knobas_app	sources::crud::tests::a_failed_test_only_blames_the_credential_when_the_source_did
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_unique_violation_reads_as_a_duplicate_id
 knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releases_the_backoff

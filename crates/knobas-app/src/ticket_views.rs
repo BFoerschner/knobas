@@ -38,8 +38,7 @@ pub const SORT_COLUMNS: &[&str] = &[
 /// A sort's two directions.
 pub const SORT_DIRECTIONS: &[&str] = &["ascending", "descending"];
 
-/// How long an id may grow before the slug stops, so an address stays short.
-const MAX_ID_CHARS: usize = 48;
+use crate::slug::is_slug;
 
 /// One ticket board column: its name, the statuses on it, and an optional
 /// *At most* (R-3.15).
@@ -488,36 +487,9 @@ fn refusal(draft: &TicketViewDraft) -> Option<String> {
     None
 }
 
-fn is_slug(id: &str) -> bool {
-    !id.is_empty()
-        && !id.starts_with('-')
-        && !id.ends_with('-')
-        && !id.contains("--")
-        && id
-            .chars()
-            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
-}
-
-/// A name as an address: lowercase letters and digits joined by single
-/// hyphens, `view` for a name with neither.
+/// A view name as an address: `view` for a name with no letter or digit.
 fn slug(name: &str) -> String {
-    let mut out = String::new();
-    for character in name.chars() {
-        if character.is_ascii_alphanumeric() {
-            out.push(character.to_ascii_lowercase());
-        } else if !out.ends_with('-') {
-            out.push('-');
-        }
-        if out.trim_end_matches('-').len() >= MAX_ID_CHARS {
-            break;
-        }
-    }
-    let slug = out.trim_matches('-').to_owned();
-    if slug.is_empty() {
-        "view".to_owned()
-    } else {
-        slug
-    }
+    crate::slug::slug(name, "view")
 }
 
 /// Save a view: a new one under an id from its name, or over the view the
@@ -560,13 +532,7 @@ pub async fn save(pool: &PgPool, mut draft: TicketViewDraft) -> Result<TicketVie
                     .bind(format!("{base}-%"))
                     .fetch_all(&mut *tx)
                     .await?;
-            let mut candidate = base.clone();
-            let mut suffix = 1_u32;
-            while taken.contains(&candidate) {
-                suffix += 1;
-                candidate = format!("{base}-{suffix}");
-            }
-            candidate
+            crate::slug::first_free(&base, &taken)
         }
     };
     let last: i32 =
@@ -642,6 +608,7 @@ pub async fn delete(pool: &PgPool, id: &str) -> Result<(), IpcError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::slug::MAX_ID_CHARS;
 
     fn draft() -> TicketViewDraft {
         TicketViewDraft {
