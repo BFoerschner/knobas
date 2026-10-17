@@ -39,6 +39,9 @@ struct Engine {
     /// When set, the session an emit landed on is reaped right after Kuma
     /// acted on it, so a resent POST meets `400 Session ID unknown`.
     reap_after_acting: bool,
+    /// When set, the login is answered this late: the client's POST times
+    /// out before the write's own packet is sent (#1125).
+    stall_login: Option<Duration>,
 }
 
 /// The stateful half of the fake, shared by every mock it mounts.
@@ -87,6 +90,11 @@ impl Respond for Kuma {
             queued.push_back(reply);
         }
         let ok = ResponseTemplate::new(200).set_body_string("ok");
+        if let Some(stall) = engine.stall_login
+            && packet.contains(r#"["login""#)
+        {
+            return ok.set_delay(stall);
+        }
         if engine.delivered.len() == delivered_before {
             return ok;
         }
@@ -303,8 +311,25 @@ async fn a_create_whose_emit_timed_out_after_landing_is_not_sent_again() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = stalling(&server, &kuma, Duration::from_millis(1500), false);
     let error = add(&socket).await.expect_err("the emit's POST timed out");
-    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    // Unconfirmed (#1125): the write queue holds it rather than resending.
+    assert!(
+        matches!(error, SourceError::Unconfirmed { .. }),
+        "{error:?}"
+    );
     assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
+}
+
+/// **#1125:** a login whose POST times out has sent nothing of the write, so
+/// the failure is plain `Unreachable` and the queue may send the write again
+/// later. `Unconfirmed` here would hold a create Kuma never saw.
+#[tokio::test]
+async fn a_login_that_timed_out_before_the_write_was_emitted_is_unreachable() {
+    let (server, kuma) = Kuma::start(20).await;
+    let socket = stalling(&server, &kuma, Duration::ZERO, false);
+    kuma.engine().stall_login = Some(Duration::from_millis(1500));
+    let error = add(&socket).await.expect_err("the login's POST timed out");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert_eq!(kuma.delivered(), 0, "the create never reached Kuma");
 }
 
 /// **#1122, across a reap.** The `add` lands, its POST times out, and Kuma
@@ -316,7 +341,10 @@ async fn a_create_that_landed_before_a_reap_is_not_sent_on_a_fresh_login() {
     let (server, kuma) = Kuma::start(20).await;
     let socket = stalling(&server, &kuma, Duration::from_millis(1500), true);
     let error = add(&socket).await.expect_err("the emit's POST timed out");
-    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+    assert!(
+        matches!(error, SourceError::Unconfirmed { .. }),
+        "{error:?}"
+    );
     assert_eq!(kuma.delivered(), 1, "exactly one create reached Kuma");
     assert_eq!(kuma.logins(), 1, "no fresh login to resend it on");
 }

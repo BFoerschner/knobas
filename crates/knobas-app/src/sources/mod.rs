@@ -373,12 +373,14 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
         SourcesError::Secret(knobas_secrets::SecretError::NotFound) => Code::Unauthorized,
         SourcesError::Secret(_) => Code::Internal,
         SourcesError::Source(Se::Unauthorized { .. }) => Code::Unauthorized,
-        SourcesError::Source(Se::Unreachable(_)) => Code::Unreachable,
+        SourcesError::Source(Se::Unreachable(_) | Se::Unconfirmed { .. }) => Code::Unreachable,
         SourcesError::Source(_) => Code::Internal,
         SourcesError::Sync(knobas_sync::SyncError::Source(Se::Unauthorized { .. })) => {
             Code::Unauthorized
         }
-        SourcesError::Sync(knobas_sync::SyncError::Source(Se::Unreachable(_))) => Code::Unreachable,
+        SourcesError::Sync(knobas_sync::SyncError::Source(
+            Se::Unreachable(_) | Se::Unconfirmed { .. },
+        )) => Code::Unreachable,
         SourcesError::Sync(knobas_sync::SyncError::NotConfigured { .. }) => Code::NotFound,
         SourcesError::Sync(_) => Code::Internal,
         SourcesError::Trigger(Te::ShuttingDown) => Code::NotReady,

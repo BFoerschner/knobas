@@ -4828,3 +4828,32 @@ Merge-manager:
   Not changed: the adapter's schema description text (Rust, frozen surface) and the
   `jira-live` assertion (option 1/2 of the ticket need a testenv board-star check no agent has
   run). **Reversing:** trivial (one string).
+## #1125 — A once-sent write that may have landed is held, not resent (2026-10-17)
+
+- **A new `SourceError::Unconfirmed`, not a string the queue parses.** The transport is the only
+  place that knows a request was sent once and got past its connect, so it says so in the type.
+  The variant is read as `Unreachable` everywhere but the queue. **Reversing:** moderate (one
+  variant and its arms in six matches).
+- **Only a timeout past connect and a `502`/`504` are unconfirmed.** A `503`/`429` says the
+  source turned the request away, and a `500` stays a refusal-or-wait as before; the issue named
+  timeouts and `502`/`504`. **Reversing:** trivial (`classify::once_sent`).
+- **No look-before-write; every such write is held.** The queue has no read that finds a created
+  thing by a stable marker (Jira's create answers no id the queue keeps, comments carry no knobas
+  marker, a title is not an address). Holding is right until such a read exists.
+  **Reversing:** low per op (a read before `store::hold`).
+- **Pause and resume, and everything the #1122 audit kept retried, wait instead of holding**
+  (`resend_is_harmless`). A second arrival sets what is set or is refused. A transition is held:
+  a workflow that loops back to its own status takes it twice. An approval is held too: Gitea's
+  `POST …/reviews` with `APPROVED` records a second review, which is why #1122 sends it once
+  (ADR-0012's "`approve` is naturally idempotent" predates that audit). **Reversing:** trivial
+  (move an arm).
+- **The hold is the existing `held` state with an `unconfirmed` key on `held_snapshot`.** No
+  migration. `apply_anyway` keeps `target_snapshot` for it, as for `base`. The panel says *may
+  have arrived*, names the source and offers *Send again* and *Discard*. **Reversing:** low.
+- **ADR-0012 is not contradicted.** It covers a crash between the send returning and the settle,
+  which still re-sends. This is a send that never returned an answer, which ADR-0012 does not
+  address. Its line calling `transition` and `approve` naturally idempotent was wrong, though, and
+  holding them contradicted it, so the merge-manager corrected that line in the ADR in this PR and
+  added a consequence naming the unanswered-send window. **Reversing:** trivial (the ADR text).
+- **A Kuma login that times out is `Unreachable`.** The write's own packet was not sent yet, so a
+  hold would ask the reader about a monitor Kuma never saw. **Reversing:** trivial.

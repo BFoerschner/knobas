@@ -411,12 +411,14 @@ impl HttpClient {
             // A transport failure, mapped, and whether it is transient: worth
             // another attempt.
             let classify_transport = |error: reqwest::Error| {
-                let transient = if retry {
-                    retry::error_is_transient(&error)
+                let mapped = classify::reqwest_error(&error);
+                if retry {
+                    (mapped, retry::error_is_transient(&error))
                 } else {
-                    error.is_connect()
-                };
-                (classify::reqwest_error(&error), transient)
+                    // Sent once: past a connect error, it may have landed.
+                    let connected = !error.is_connect();
+                    (classify::once_sent(mapped, connected), !connected)
+                }
             };
             let answered = match deadline {
                 Deadline::Whole => request
@@ -430,12 +432,16 @@ impl HttpClient {
                 Deadline::Headers => {
                     match tokio::time::timeout(attempt_timeout, request.send()).await {
                         Ok(answered) => answered.map_err(classify_transport),
-                        Err(_) => Err((
-                            SourceError::Unreachable(format!(
+                        Err(_) => {
+                            let late = SourceError::Unreachable(format!(
                                 "no response headers within {attempt_timeout:?}"
-                            )),
-                            retry,
-                        )),
+                            ));
+                            if retry {
+                                Err((late, true))
+                            } else {
+                                Err((classify::once_sent(late, true), false))
+                            }
+                        }
                     }
                 }
             };
@@ -457,6 +463,9 @@ impl HttpClient {
                         .unwrap_or_default();
                     let error =
                         classify::response_error(status, &body, self.body_message, self.forbidden);
+                    if !retry {
+                        return Err(classify::once_sent(error, true));
+                    }
                     if last || !transient {
                         return Err(error);
                     }

@@ -75,9 +75,10 @@ impl SyncOutcome {
             SyncError::Source(knobas_source::SourceError::Unauthorized { .. }) => {
                 SyncOutcome::Unauthorized
             }
-            SyncError::Source(knobas_source::SourceError::Unreachable(_)) => {
-                SyncOutcome::Unreachable
-            }
+            SyncError::Source(
+                knobas_source::SourceError::Unreachable(_)
+                | knobas_source::SourceError::Unconfirmed { .. },
+            ) => SyncOutcome::Unreachable,
             _ => SyncOutcome::Error,
         }
     }

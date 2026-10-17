@@ -275,7 +275,9 @@ impl RunFailure {
             RunFailure::MissingSecret => SyncOutcome::Unauthorized,
             RunFailure::Sync(error) => SyncOutcome::of(error),
             RunFailure::Source(SourceError::Unauthorized { .. }) => SyncOutcome::Unauthorized,
-            RunFailure::Source(SourceError::Unreachable(_)) => SyncOutcome::Unreachable,
+            RunFailure::Source(SourceError::Unreachable(_) | SourceError::Unconfirmed { .. }) => {
+                SyncOutcome::Unreachable
+            }
             RunFailure::NotConfigured
             | RunFailure::Secret(_)
             | RunFailure::Source(_)

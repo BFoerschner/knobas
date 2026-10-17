@@ -128,6 +128,37 @@ fn message_of(body: &str, body_message: Option<BodyMessage>) -> String {
     }
 }
 
+/// What a failure means for a request sent once ([`Request::no_retry`]), when
+/// it may have reached the source (issue #1125).
+///
+/// A timeout after the connection opened, and a gateway's `502`/`504`, say
+/// nothing about whether the source acted, so they become
+/// [`SourceError::Unconfirmed`]: the write queue holds such a write rather
+/// than sending it again. Every other failure keeps its class. A connect error
+/// stays [`SourceError::Unreachable`] (nothing left this machine), and a
+/// `503`/`429` stays [`SourceError::Protocol`] (the source turned it away).
+///
+/// `connected` is `false` when the failure was a connect error.
+///
+/// [`Request::no_retry`]: crate::Request::no_retry
+#[must_use]
+pub fn once_sent(error: SourceError, connected: bool) -> SourceError {
+    match error {
+        SourceError::Unreachable(message) if connected => SourceError::Unconfirmed {
+            status: None,
+            message,
+        },
+        SourceError::Protocol {
+            status: Some(status @ (502 | 504)),
+            message,
+        } => SourceError::Unconfirmed {
+            status: Some(status),
+            message,
+        },
+        other => other,
+    }
+}
+
 /// The fault a `reqwest` failure means.
 #[must_use]
 pub fn reqwest_error(error: &reqwest::Error) -> SourceError {

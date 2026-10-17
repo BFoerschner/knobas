@@ -625,10 +625,12 @@ async fn an_undeclared_op_never_reaches_the_server() {
     jira.assert_no_violations();
 }
 
-/// ADR-0004, on the write path: a source that is down is `Unreachable` -- which
-/// the queue waits on -- and not a refusal, which it would not retry.
+/// ADR-0004, on the write path: a source that hangs is not a refusal, which
+/// the queue would drop. Since #1125 a comment that timed out after it went
+/// out is `Unconfirmed`, since it may have landed: the queue holds it for a
+/// person rather than refusing it or sending it again.
 #[tokio::test]
-async fn a_write_to_an_unreachable_jira_waits_rather_than_being_refused() {
+async fn a_write_to_a_jira_that_hangs_is_unconfirmed_rather_than_refused() {
     let jira = spawn_mock_jira().await;
     jira.set_fault(MockFault::Timeout { hang_ms: 2_000 });
     let source = source(
@@ -642,7 +644,7 @@ async fn a_write_to_an_unreachable_jira_waits_rather_than_being_refused() {
         })
         .await;
     assert!(
-        matches!(failed, Err(SourceError::Unreachable(_))),
+        matches!(failed, Err(SourceError::Unconfirmed { status: None, .. })),
         "{failed:?}"
     );
 }

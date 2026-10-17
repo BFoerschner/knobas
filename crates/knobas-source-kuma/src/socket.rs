@@ -430,7 +430,7 @@ impl KumaSocket {
         let (session, answered) = match reused {
             Some(done) => done,
             None => {
-                let mut session = self.log_in().await?;
+                let mut session = self.log_in().await.map_err(not_yet_emitted)?;
                 match self.emit_on(&mut session, event, build).await? {
                     Emitted::Answered(answered) => (session, answered),
                     Emitted::NotDelivered(reason) => return Err(reason),
@@ -525,6 +525,17 @@ impl KumaSocket {
             .request(Method::GET, PATH)
             .query(&[("EIO", EIO), ("transport", TRANSPORT)]);
         text_of(self.client.send(request).await?).await
+    }
+}
+
+/// A failure on the way to the emit, before the write's own packet went out
+/// (#1125): an unanswered login POST says nothing about the write, which was
+/// never sent, so it is plain [`SourceError::Unreachable`] and the write
+/// queue sends the write again on a later tick rather than holding it.
+fn not_yet_emitted(error: SourceError) -> SourceError {
+    match error {
+        SourceError::Unconfirmed { message, .. } => SourceError::Unreachable(message),
+        other => other,
     }
 }
 

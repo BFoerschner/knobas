@@ -333,8 +333,32 @@ pub enum SourceError {
         #[serde(default)]
         status: Option<u16>,
     },
+    /// The source did not answer, and **nothing it did depends on that**: a
+    /// read that can be asked again, a write the transport sends again
+    /// itself, or a once-sent write whose connection never opened.
     #[error("unreachable: {0}")]
     Unreachable(String),
+    /// A write that may be applied only once reached the source, and no answer
+    /// says whether the source acted (issue #1125): it timed out after the
+    /// request went out, or a gateway answered `502`/`504` for it.
+    ///
+    /// Raised only by `knobas_http` for a request sent with
+    /// `Request::no_retry`, which is how an adapter says a write must not
+    /// arrive twice. Everywhere but the write queue it reads as
+    /// [`Unreachable`](Self::Unreachable). An adapter whose write takes more
+    /// than one request turns it back into `Unreachable` when the request
+    /// that failed came before the write's own (Kuma's login,
+    /// `not_yet_emitted`). The queue does not send such a
+    /// write again by itself: it holds it, so a person checks the source and
+    /// sends it again or discards it (`knobas_sync::write_queue`).
+    ///
+    /// `status` is the gateway's, and `None` for a timeout.
+    #[error("unconfirmed: {message}")]
+    Unconfirmed {
+        #[serde(default)]
+        status: Option<u16>,
+        message: String,
+    },
     /// knobas could not make sense of what the source said, or the source said
     /// no with a status that is not about the credential.
     ///
@@ -380,7 +404,9 @@ impl SourceError {
     #[must_use]
     pub fn status(&self) -> Option<u16> {
         match self {
-            Self::Unauthorized { status } | Self::Protocol { status, .. } => *status,
+            Self::Unauthorized { status }
+            | Self::Protocol { status, .. }
+            | Self::Unconfirmed { status, .. } => *status,
             Self::Unreachable(_) | Self::Sink(_) | Self::Moved { .. } => None,
         }
     }
@@ -1972,6 +1998,34 @@ mod tests {
         assert_eq!(
             back.to_string(),
             "moved: the target changed since the write was made against it"
+        );
+    }
+
+    /// A once-sent write that may have landed crosses as data (#1125), with
+    /// the gateway's status where there was one, and decodes from a peer that
+    /// sends none.
+    #[test]
+    fn an_unconfirmed_write_crosses_with_its_status() {
+        let busy = SourceError::Unconfirmed {
+            status: Some(504),
+            message: "gateway timeout".into(),
+        };
+        let json = serde_json::to_value(&busy).unwrap();
+        assert_eq!(
+            json,
+            serde_json::json!({ "Unconfirmed": { "status": 504, "message": "gateway timeout" } })
+        );
+        let back: SourceError = serde_json::from_value(json).unwrap();
+        assert_eq!(back.status(), Some(504));
+        assert_eq!(back.to_string(), "unconfirmed: gateway timeout");
+
+        let older: SourceError = serde_json::from_value(
+            serde_json::json!({ "Unconfirmed": { "message": "timed out" } }),
+        )
+        .unwrap();
+        assert!(
+            matches!(&older, SourceError::Unconfirmed { status: None, message } if message == "timed out"),
+            "{older:?}"
         );
     }
 
