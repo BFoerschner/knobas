@@ -8,27 +8,39 @@
   setting, because the capture shortcut is registered in Rust: off, nothing is
   registered (`crate::capture`, `capture.notes_shown`).
 
-  *Move to Confluence…* needs the Docs view's page picker, which TF4 builds;
-  until then it says so.
+  *Move to Confluence…* (#941) opens the standup's page picker
+  (`PublishTargetPicker`): each note becomes a page under the one picked, one
+  `create_page` each through the write queue (`move_notes_to_confluence`).
+  The notes stay (D10).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { CaptureShortcut } from "../../ipc/entity";
+  import type { CaptureShortcut, PublishTarget } from "../../ipc/entity";
   import { push } from "../../shell/toasts.svelte";
+  import PublishTargetPicker from "../../standup/PublishTargetPicker.svelte";
+  import { publishableSources, type PublishableSource } from "../../standup/protocol";
+  import type { Layers } from "../layers.svelte";
   import { homePath, keyCaps, noteCount, notesLine } from "./notes";
   import { realNotesPorts, type NotesPorts } from "./notes-ports";
+  import TfDialog from "./TfDialog.svelte";
 
   let {
     ports = realNotesPorts,
     now = () => new Date(),
+    layers,
   }: {
     ports?: NotesPorts;
     now?: () => Date;
+    layers?: Layers;
   } = $props();
 
   let view = $state<CaptureShortcut | null>(null);
   let error = $state<string | null>(null);
   let busy = $state(false);
+  let moving = $state(false);
+  let sources = $state<PublishableSource[]>([]);
+  let chosen = $state<PublishTarget | null>(null);
+  let sending = $state(false);
 
   function load() {
     error = null;
@@ -66,11 +78,35 @@
     }
   }
 
-  function moveToConfluence() {
-    push({
-      text: "Moving notes to Confluence comes with the Docs view. Export notes as Markdown keeps them until then.",
-    });
+  async function openMove() {
+    chosen = null;
+    try {
+      const [configured, descriptors] = await Promise.all([ports.listSources(), ports.listAdapters()]);
+      sources = publishableSources(configured, descriptors);
+    } catch (cause) {
+      push({ text: `Could not read the sources: ${ipcErrorMessage(cause)}`, tone: "err" });
+      return;
+    }
+    // The picker presumes the one Confluence when it mounts, so it mounts
+    // once the sources are read.
+    moving = true;
   }
+
+  async function move() {
+    if (chosen === null) return;
+    sending = true;
+    try {
+      const queued = await ports.moveNotes(chosen.parent);
+      moving = false;
+      push({ text: `Queued ${pageCount(queued.length)} in Confluence. Your notes stay in knobas.` });
+    } catch (cause) {
+      push({ text: `Could not move the notes: ${ipcErrorMessage(cause)}`, tone: "err" });
+    } finally {
+      sending = false;
+    }
+  }
+
+  const pageCount = (n: number) => (n === 1 ? "1 page" : `${n} pages`);
 
   const shown = $derived(view?.shown ?? false);
   const help = $derived.by(() => {
@@ -121,6 +157,25 @@
   </div>
   <div class="tf-stg-acts">
     <button class="tf-btn" disabled={busy} onclick={() => void exportNotes()}>Export notes as Markdown</button>
-    <button class="tf-btn tf-ghost" onclick={moveToConfluence}>Move to Confluence…</button>
+    <button class="tf-btn tf-ghost" disabled={view.note_count === 0} onclick={() => void openMove()}
+      >Move to Confluence…</button
+    >
   </div>
+{/if}
+
+{#if moving && view !== null}
+  <TfDialog title="Move notes to Confluence" onclose={() => (moving = false)} {layers}>
+    {#snippet body()}
+      <p class="tf-dsub">Each note becomes a page under the one you pick. Your notes stay in knobas.</p>
+      <div class="tf-stg-pick">
+        <PublishTargetPicker {sources} search={ports.search} onchange={(target) => (chosen = target)} />
+      </div>
+    {/snippet}
+    {#snippet footer()}
+      <button class="tf-btn" onclick={() => (moving = false)}>Cancel</button>
+      <button class="tf-btn tf-primary" disabled={sending || chosen === null} onclick={() => void move()}
+        >Move {noteCount(view?.note_count ?? 0)}</button
+      >
+    {/snippet}
+  </TfDialog>
 {/if}

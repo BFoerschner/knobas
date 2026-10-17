@@ -10,6 +10,7 @@
 use knobas_app::commands::entity::{
     create_link_inner, docs_create_page_payload, docs_edit_section_payload,
     docs_export_markdown_inner, docs_page_inner, docs_search_inner, docs_tree_inner,
+    move_notes_payloads,
 };
 use knobas_app::docs::DocsScope;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
@@ -939,4 +940,54 @@ async fn a_new_page_goes_under_its_parent_in_storage_format() {
         ..new
     };
     assert!(docs_create_page_payload(&pool, &blank).await.is_err());
+}
+
+/// *Move to Confluence…* (#941, D10): one `CreatePage` per note under the
+/// picked page, oldest note first, its Markdown in storage format; two notes
+/// of one title get pages of two titles, and the notes stay.
+///
+/// The only test in this file that writes notes, so `note::all` is these three.
+#[tokio::test]
+async fn moving_the_notes_queues_one_page_each_under_the_parent() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let parent = page(&pool, &src, "1", "Notes", "ENG", &[], "").await;
+    for (title, body) in [
+        (
+            "Retry runbook",
+            "Intro with [[PAY-1]]\n\n## Steps\n- restart",
+        ),
+        ("Untitled note", ""),
+        ("untitled note", "a < b"),
+    ] {
+        knobas_core::note::create(&pool, title, body, &[], "user")
+            .await
+            .unwrap();
+    }
+
+    let payloads = move_notes_payloads(&pool, &parent).await.unwrap();
+
+    assert_eq!(
+        payloads,
+        [
+            (
+                json!({"CreatePage": {"parent": parent, "space": "ENG", "title": "Retry runbook",
+                    "body": "<p>Intro with [[PAY-1]]</p><h2>Steps</h2><ul><li>restart</li></ul>"}}),
+                src.clone(),
+            ),
+            (
+                json!({"CreatePage": {"parent": parent, "space": "ENG", "title": "Untitled note",
+                    "body": ""}}),
+                src.clone(),
+            ),
+            (
+                json!({"CreatePage": {"parent": parent, "space": "ENG", "title": "untitled note (2)",
+                    "body": "<p>a &lt; b</p>"}}),
+                src.clone(),
+            ),
+        ]
+    );
+    assert_eq!(knobas_core::note::all(&pool).await.unwrap().len(), 3);
+    let elsewhere = move_notes_payloads(&pool, "conf-none:9").await.unwrap_err();
+    assert_eq!(elsewhere.code, knobas_app::IpcErrorCode::NotFound);
 }

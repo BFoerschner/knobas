@@ -29,6 +29,8 @@
 //!   detail reads it -- with the author and instant `EXPAND` now asks for.
 //! * **A created page appears under its parent**, which is the one claim
 //!   `CreatePage`'s `parent` field exists to make.
+//! * **Moved notes become pages under the picked parent** (#941), one per
+//!   note, and the notes stay.
 //!
 //! # What this file writes, and what it takes away
 //!
@@ -1228,6 +1230,102 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
         Some(knobas_source::docs::SectionRefusal::Macro)
     );
     assert!(page.writes.iter().any(|w| w == "update_page"));
+
+    drop(state);
+}
+
+/// **Move to Confluence…** (#941, D10): each note becomes a page under the
+/// picked parent, its Markdown in storage format, and the notes stay. Two
+/// notes, one with an empty body, since a note often has none and the wiki
+/// has to take that page too.
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "needs testenv's seeded Confluence: `just confluence-live`"]
+async fn moved_notes_become_pages_under_the_picked_parent() {
+    let env = env();
+    let parent = env.page(PARENT);
+    let mut litter = Litter::default();
+    let state = app("confluence_live_notes_move", &env).await;
+    sync(&state, CONFLUENCE).await;
+
+    let written = format!("Payout retries [{LITTER}]");
+    let empty = format!("Empty note [{LITTER}]");
+    knobas_core::note::create(
+        &state.pool,
+        &written,
+        "Why we retry.\n\n## Steps\n- park the batch",
+        &[],
+        "user",
+    )
+    .await
+    .unwrap();
+    knobas_core::note::create(&state.pool, &empty, "", &[], "user")
+        .await
+        .unwrap();
+
+    let payloads = knobas_app::commands::entity::move_notes_payloads(
+        &state.pool,
+        &format!("{CONFLUENCE}:{}", parent.id),
+    )
+    .await
+    .expect("the parent is a mirrored page");
+    assert_eq!(payloads.len(), 2);
+    for (payload, _) in payloads {
+        let sent = write(&state, payload).await;
+        assert_eq!(
+            sent.state,
+            WriteState::Sent,
+            "a note's page was not created: {:?}",
+            sent.detail
+        );
+    }
+
+    for (title, body) in [
+        (
+            &written,
+            "<p>Why we retry.</p><h2>Steps</h2><ul><li>park the batch</li></ul>",
+        ),
+        (&empty, ""),
+    ] {
+        let (status, found) = env
+            .call(
+                reqwest::Method::GET,
+                &format!(
+                    "rest/api/content?spaceKey={}&type=page&title={}",
+                    env.space,
+                    url_encode(title)
+                ),
+                None,
+            )
+            .await;
+        assert_eq!(status, 200, "searching for {title:?}: {found}");
+        let id = found["results"][0]["id"]
+            .as_str()
+            .unwrap_or_else(|| panic!("no page titled {title:?} came back: {found}"))
+            .to_owned();
+        litter.created.push(id.clone());
+        let record = env.content(&id, "ancestors,body.storage").await;
+        let ancestors: Vec<&str> = record["ancestors"]
+            .as_array()
+            .expect("the new page has ancestors")
+            .iter()
+            .filter_map(|a| a["id"].as_str())
+            .collect();
+        assert!(
+            ancestors.contains(&parent.id.as_str()),
+            "{title:?} is not under {}: {ancestors:?}",
+            parent.title
+        );
+        assert_eq!(
+            record["body"]["storage"]["value"].as_str(),
+            Some(body),
+            "{title:?} was not stored as the note's Markdown in storage format"
+        );
+    }
+    assert_eq!(
+        knobas_core::note::all(&state.pool).await.unwrap().len(),
+        2,
+        "the notes stay in knobas"
+    );
 
     drop(state);
 }

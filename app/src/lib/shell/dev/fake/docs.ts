@@ -3,7 +3,8 @@
  *
  * Answers `docs_tree`, `docs_page`, `docs_search` (#860), and the writes
  * `docs_export_markdown` (#861), `docs_edit_section` and `docs_create_page`
- * (#862), which answer as queued and change nothing.
+ * (#862), and `move_notes_to_confluence` (#941), which answer as queued and
+ * change nothing.
  *
  * **Shape from prototype-6's Docs data**: its five spaces and their trees
  * (`tree`), the editors and times of its pages (`pageMeta`), and the bodies
@@ -596,6 +597,13 @@ export function handlers(): Record<string, Handler> {
     docs_create_page: (args) => {
       const next = args["page"] as { parent: string; title: string };
       return queued("create_page", next.parent, { CreatePage: { parent: next.parent, space: "", title: next.title, body: "" } });
+    },
+    // *Move to Confluence…* (#941): one page per note, the 37 `capture_shortcut` counts.
+    move_notes_to_confluence: (args) => {
+      const parent = String(args["parent"] ?? "");
+      return Array.from({ length: 37 }, (_, n) =>
+        queued("create_page", parent, { CreatePage: { parent, space: "", title: `Note ${n + 1}`, body: "" } }),
+      );
     },
   };
 }

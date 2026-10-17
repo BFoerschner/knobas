@@ -1,6 +1,6 @@
 /**
- * Settings › Notes and capture (#832), against stand-ins for its three
- * commands. Whether the shortcut is registered is
+ * Settings › Notes and capture (#832), against stand-ins for its commands
+ * and, for *Move to Confluence…* (#941), the page picker's reads. Whether the shortcut is registered is
  * `crates/knobas-app/tests/it/capture_ipc.rs`'s; here it is what the section
  * draws and what each control sends.
  */
@@ -39,8 +39,41 @@ function stub(initial: Partial<CaptureShortcut> = {}) {
     ...initial,
   };
   const sent: boolean[] = [];
+  const moved: string[] = [];
   let exported = 0;
   const ports: NotesPorts = {
+    moveNotes: (parent) => {
+      moved.push(parent);
+      return Promise.resolve(Array.from({ length: 37 }, () => ({}) as never));
+    },
+    listSources: () =>
+      Promise.resolve([{ id: "wiki", display_name: "Wiki", adapter_kind: "confluence", enabled: true }] as never),
+    listAdapters: () => Promise.resolve([{ adapter_kind: "confluence", write_ops: ["create_page"] }] as never),
+    search: () =>
+      Promise.resolve({
+        interpreted: { text: "", prefix: null, filters: {}, unknown_tokens: [] },
+        groups: [
+          {
+            kind: "page",
+            hits: [
+              {
+                entity_id: "wiki:98500",
+                kind: "page",
+                source_id: "wiki",
+                updated_at: null,
+                synced_at: "2026-10-16T07:00:00Z",
+                title: "Notes archive",
+                path: null,
+                rank: 1,
+                snippet: [],
+              },
+            ],
+          },
+        ],
+        total: 1,
+        took_ms: 1,
+        coverage: [],
+      } as never),
     captureShortcut: () => Promise.resolve(stored),
     setNotesShown: (shown) => {
       sent.push(shown);
@@ -52,7 +85,7 @@ function stub(initial: Partial<CaptureShortcut> = {}) {
       return Promise.resolve({ count: 37, folder: "/Users/mara/Downloads/knobas-notes" });
     },
   };
-  return { ports, sent, exported: () => exported };
+  return { ports, sent, moved, exported: () => exported };
 }
 
 async function render(ports: NotesPorts) {
@@ -110,8 +143,55 @@ test("Export notes as Markdown says where the files went", async () => {
   expect(toasts.items.map((t) => t.text)).toContain("Saved 37 notes as Markdown to ~/Downloads/knobas-notes");
 });
 
-test("Move to Confluence… says it comes with the Docs view", async () => {
-  await render(stub().ports);
+async function settle() {
+  for (let tick = 0; tick < 10; tick += 1) await Promise.resolve();
+  flushSync();
+}
+
+test("Move to Confluence… picks a page and queues the notes under it", async () => {
+  const fake = stub();
+  await render(fake.ports);
+
   button("Move to Confluence…").click();
-  expect(toasts.items.at(-1)?.text).toContain("comes with the Docs view");
+  await settle();
+  expect(target.querySelector('[role="dialog"] h2')?.textContent).toBe("Move notes to Confluence");
+  expect(button("Move 37 notes").disabled).toBe(true);
+
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
+  find.value = "archive";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  button("Notes archive").click();
+  flushSync();
+  button("Move 37 notes").click();
+  await settle();
+
+  expect(fake.moved).toEqual(["wiki:98500"]);
+  expect(target.querySelector('[role="dialog"]')).toBeNull();
+  expect(toasts.items.at(-1)?.text).toBe("Queued 37 pages in Confluence. Your notes stay in knobas.");
+});
+
+test("a move the backend refuses keeps the dialog open and says why", async () => {
+  const fake = stub();
+  fake.ports.moveNotes = () => Promise.reject({ code: "not_found", message: "wiki:98500 is not in the mirror" });
+  await render(fake.ports);
+
+  button("Move to Confluence…").click();
+  await settle();
+  const find = target.querySelector<HTMLInputElement>('input[aria-label="Parent page"]')!;
+  find.value = "archive";
+  find.dispatchEvent(new Event("input", { bubbles: true }));
+  await settle();
+  button("Notes archive").click();
+  flushSync();
+  button("Move 37 notes").click();
+  await settle();
+
+  expect(target.querySelector('[role="dialog"]')).not.toBeNull();
+  expect(toasts.items.at(-1)?.text).toBe("Could not move the notes: wiki:98500 is not in the mirror");
+});
+
+test("with no notes there is nothing to move", async () => {
+  await render(stub({ note_count: 0 }).ports);
+  expect(button("Move to Confluence…").disabled).toBe(true);
 });

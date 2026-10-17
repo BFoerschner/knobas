@@ -2938,6 +2938,16 @@ export function exportNotesMarkdown(): Promise<NotesExport> {
   return invoke<NotesExport>("export_notes_markdown");
 }
 
+/**
+ * *Move to Confluence…* — `move_notes_to_confluence` (#941, D10): one
+ * `create_page` per note under `parent` (a mirrored page), through the write
+ * queue, answering what was queued. The notes stay. Rejects with `invalid`
+ * when there are no notes and `not_found` for a parent the mirror does not hold.
+ */
+export function moveNotesToConfluence(parent: string): Promise<QueuedWrite[]> {
+  return invoke<QueuedWrite[]>("move_notes_to_confluence", { parent });
+}
+
 // -- the Docs reader (#859, ADR-0022) ----------------------------------------
 
 /** Every space the mirror holds pages of, and the page read last — `DocsTree`. */
