@@ -97,7 +97,7 @@
         <div class="tf-sec-edit">
           <textarea bind:value={draft} aria-label="Section text" use:focus></textarea>
           <div class="tf-acts">
-            <span class="tf-dim">Text and lists. Saved to {sourceName} through the write queue.</span>
+            <span class="tf-dim">Text, lists and panels. Saved to {sourceName} through the write queue.</span>
             <button type="button" class="tf-btn tf-sm tf-ghost" onclick={() => (editing = null)}>Cancel</button>
             <button type="button" class="tf-btn tf-sm tf-primary" disabled={saving} onclick={() => save(section.number)}
               >Save section</button>

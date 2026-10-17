@@ -4180,3 +4180,29 @@ Ruled by the merge-manager (PR #1063).
 - **The fake fixture's pipeline ids match the real read.** `assets::dependencies::read` takes
   its pipelines from `commands::entity::pipelines_inner`, the read behind Builds and
   `job_pipelines`, so the fixture taking them from `fakePipelines` mirrors it. **Reversing:** low.
+
+## #975 — Edit section on a section with panels (2026-10-17)
+
+Ruled by the implementer (PR for #975). Supersedes #862's and PR #980's rulings that a panel
+refuses.
+
+- **Panels become editable; R-10.13 is not amended.** The requirement and prototype-6 ("Text,
+  lists and panels") both name them, and the reader already draws a panel's kind and title. The
+  editor's text spells a panel as the Markdown export does, `> **Info** <title>`, a `>` line, then
+  the body, every line quoted, so one spelling of a panel exists in knobas. **Reversing:**
+  `blocks::panel_refusal` returning `Some(Macro)`, and the note back to "Text and lists".
+- **Only info, note, warning and tip, with no parameter but the title.** The generic `panel`
+  macro's colours and borders, and an `icon` parameter, are parameters a text edit would drop, so
+  those still refuse as a macro. **Reversing:** a parameter list carried through
+  `from_section_text`.
+- **A panel opens only at the start of a block** (start of the text or after a blank line) and runs
+  while its lines start with `>`. A `> **Info**` line in the middle of a paragraph stays the text
+  typed, and any other quote stays text, as before. **Reversing:** `starts_a_block` in
+  `from_section_text`.
+- **The written macro is `ac:structured-macro` with `ac:schema-version="1"` and no `ac:macro-id`.**
+  Confluence assigns a new id; nothing in knobas reads it. **Reversing:** low.
+- **New page's text does not read panels.** `body_from_text` is a frozen surface of its own and the
+  ticket names *Edit section* only. **Reversing:** call `from_section_text` from
+  `DOC_WRITES.body_from_text`.
+- **The refusal title stays prototype-6's** ("knobas edits text-only sections"), since a panel
+  section no longer shows it. **Reversing:** `refusalReason`.

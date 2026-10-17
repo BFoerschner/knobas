@@ -471,7 +471,7 @@ pub(crate) fn from_plain(text: &str) -> String {
 
 /// The three characters that are markup in character data, escaped in the one
 /// order that is not self-defeating.
-fn escape(raw: &str) -> String {
+pub(crate) fn escape(raw: &str) -> String {
     raw.replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
