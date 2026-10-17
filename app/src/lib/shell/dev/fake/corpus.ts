@@ -6,8 +6,7 @@
 import type { CodeFacts, LaneField } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { JOB_ROWS, fakeReach } from "./job-reach";
-import { fakeLanes } from "./lanes";
-import { fakeJiraBoard } from "./ticket-views";
+import { fakeJiraBoard, fakeLanes } from "./ticket-views";
 
 // -- the demo corpus --------------------------------------------------------
 

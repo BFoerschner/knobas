@@ -582,7 +582,8 @@ struct CardRow {
 /// Every status a laned board counts, and how many stand in it.
 type ColumnTotals = Vec<(Option<String>, i64)>;
 
-fn count(n: i64) -> u32 {
+/// A count from the database, as the answer's `u32`.
+fn as_u32(n: i64) -> u32 {
     u32::try_from(n).unwrap_or(u32::MAX)
 }
 
@@ -774,7 +775,7 @@ pub async fn read_scoped(
             columns.push(MiniBoardColumn {
                 status: status.clone(),
                 cards: Vec::new(),
-                total: count(*n),
+                total: as_u32(*n),
             });
         }
     }
@@ -786,7 +787,7 @@ pub async fn read_scoped(
         if laned {
             let lane = by_lane.entry(row.place).or_insert_with(|| MiniBoardLane {
                 key: row.lane.clone(),
-                count: count(row.lane_count),
+                count: as_u32(row.lane_count),
                 columns: Vec::new(),
             });
             match lane
@@ -798,7 +799,7 @@ pub async fn read_scoped(
                 None => lane.columns.push(LaneColumn {
                     status: row.status.clone(),
                     ids: vec![row.entity_id.clone()],
-                    total: count(row.total),
+                    total: as_u32(row.total),
                 }),
             }
         }
@@ -806,7 +807,7 @@ pub async fn read_scoped(
             columns.push(MiniBoardColumn {
                 status: row.status.clone(),
                 cards: Vec::new(),
-                total: count(row.total),
+                total: as_u32(row.total),
             });
             columns.len() - 1
         });
@@ -844,7 +845,7 @@ pub async fn read_scoped(
         })
         .collect();
     let more_lanes = if laned {
-        count(more_lanes).saturating_sub(u32::try_from(lanes.len()).unwrap_or(u32::MAX))
+        as_u32(more_lanes).saturating_sub(u32::try_from(lanes.len()).unwrap_or(u32::MAX))
     } else {
         0
     };
@@ -1137,7 +1138,8 @@ mod tests {
         };
         let by = LaneField::Assignee;
         let laned = in_lanes(board, Lanes { by, first: Some(2) }, Some(2));
-        let shape: Vec<(String, u32, Vec<(Option<String>, Vec<String>, u32)>)> = laned
+        type Cell = (Option<String>, Vec<String>, u32);
+        let shape: Vec<(String, u32, Vec<Cell>)> = laned
             .lanes
             .iter()
             .map(|lane| {

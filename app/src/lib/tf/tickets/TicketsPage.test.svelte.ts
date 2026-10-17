@@ -17,10 +17,10 @@ import type {
   StateChip,
 } from "../../ipc/entity";
 import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
-import { fakeLanes } from "../../shell/dev/fake/lanes";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
+import { laneOf } from "./tickets";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -153,6 +153,34 @@ function own(of: EntityRow): Reached {
   return { entity_id: of.entity_id, kind: of.kind, step: of.entity_id, origin: { kind: "own" } };
 }
 
+/**
+ * A whole board in lanes (#939), as `mini_board` answers: each lane's
+ * column capped at `perColumn`, lanes biggest first (ties by key here), the
+ * first `lanes.first` sent and the rest counted.
+ */
+function inLanes(whole: MiniBoard, lanes: LanesAsked, perColumn: number | null): MiniBoard {
+  const keys = [...new Set(whole.columns.flatMap((column) => column.cards.map((card) => laneOf(card, lanes.by))))];
+  const ranked = keys
+    .map((key) => {
+      const columns = whole.columns
+        .map((column) => {
+          const ids = column.cards.filter((card) => laneOf(card, lanes.by) === key).map((card) => card.entity_id);
+          return { status: column.status, ids: perColumn === null ? ids : ids.slice(0, perColumn), total: ids.length };
+        })
+        .filter((cell) => cell.total > 0);
+      return { key, count: columns.reduce((all, cell) => all + cell.total, 0), columns };
+    })
+    .sort((a, b) => b.count - a.count || a.key.localeCompare(b.key));
+  const sent = ranked.slice(0, lanes.first);
+  const kept = new Set(sent.flatMap((lane) => lane.columns.flatMap((cell) => cell.ids)));
+  return {
+    columns: whole.columns.map((column) => ({ ...column, cards: column.cards.filter((card) => kept.has(card.entity_id)) })),
+    sources: whole.sources,
+    lanes: sent,
+    more_lanes: ranked.length - sent.length,
+  };
+}
+
 /** Board reads answered over {@link CORPUS}, the query read as words that must all appear. */
 function harness(
   contexts: ContextRow[] = [],
@@ -223,8 +251,7 @@ function harness(
             total: cards.length,
           });
         }
-        // In lanes (#939), as the command answers: the fixture's restatement.
-        if (lanes) return Promise.resolve(fakeLanes(board, lanes.by, perColumn, lanes.first));
+        if (lanes) return Promise.resolve(inLanes(board, lanes, perColumn));
         return Promise.resolve(board);
       },
       detail: (id) => Promise.resolve({ body_text: `The description of ${id}.` }),
