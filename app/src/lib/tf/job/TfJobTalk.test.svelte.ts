@@ -515,7 +515,7 @@ test("Also on this job names each set that applies with its reason, then the par
   open(null, { ports: setPorts() });
   await settle();
   const bar = target.querySelector(".tf-setsbar")!;
-  expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections");
+  expect(squash(bar)).toBe("Also on this job Payout stack via epic PAY-200 Parent PAY-230 sub-tasks show their parent’s connections Apply a link set…");
   expect([...bar.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["#/sets/payout-stack", "#/job/PAY-230"]);
   // Two own links and three more from the set and the parent, the page once.
   expect(squash(target.querySelector(".tf-conn"))).toBe("5 connected, 1 proposed L");
@@ -528,7 +528,7 @@ test("Also on this job names each set that applies with its reason, then the par
 test("with nothing applying the bar says so", async () => {
   open();
   await settle();
-  expect(squash(target.querySelector(".tf-setsbar"))).toBe("Also on this job no link sets yet");
+  expect(squash(target.querySelector(".tf-setsbar"))).toBe("Also on this job no link sets yet Apply a link set…");
 });
 
 test("the drawer draws a group per set and the parent; a linked row says which set also holds it", async () => {

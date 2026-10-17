@@ -1887,9 +1887,11 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-set-note { margin: 0; font-size: var(--t-xs); }
 .tf-fsearch.tf-wide { max-width: none; flex: none; }
 .tf-picks { display: flex; flex-direction: column; max-height: 46vh; overflow: auto; border: 1px solid var(--rule); border-radius: 4px; }
-.tf-picks label { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
-.tf-picks label .tf-dim { margin-left: auto; font-size: var(--t-xs); }
-.tf-picks label.tf-in { opacity: .55; }
+.tf-picks label, .tf-picks .tf-pickrow { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--rule-2); font-size: var(--t-sm); }
+.tf-picks label .tf-dim, .tf-picks .tf-pickrow > .tf-dim { margin-left: auto; font-size: var(--t-xs); }
+.tf-picks label.tf-in, .tf-picks .tf-pickrow.tf-in { opacity: .55; }
+/* *Apply a link set…* (#869): a set's name over what it holds. */
+.tf-pickrow .tf-pick-sub { display: block; font-size: var(--t-xs); }
 .tf-picks-more { padding: 6px 10px; margin: 0; }
 .tf-picked { margin-right: auto; align-self: center; }
 .tf-stays { margin: 0; font-size: var(--t-xs); }

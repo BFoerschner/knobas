@@ -19,6 +19,9 @@
   *Also on this job* chips above the tab's body (not on Conversation, R-4.4)
   and the drawer's set and parent groups; *Hide here* and *Show again* re-read
   it with the reach and the sections, and never edit the set (R-7.5).
+  *Apply a link set…* (the bar and the drawer) and *Save as a link set…* (the
+  drawer) are #869's dialogs: both save through `save_link_set`, then re-read
+  the same way.
   the five sections (#817): Code, Builds, Assets, Monitors and Pages, each read
   through the job-reach read (`job_reach`, and `list_entities` scoped by it),
   so a row from the parent carries its label. Above them, a blocked ticket's
@@ -36,6 +39,8 @@
     EntityRow,
     JobLinkSets,
     LinkEntry,
+    LinkSetDetail,
+    LinkSetRow,
     Reached,
     SuggestionEntry,
     Thread,
@@ -83,7 +88,11 @@
     type SourceFacts,
     type WeekReading,
   } from "./job";
-  import { bridgePorts, type JobPorts } from "./ports";
+  import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
+  import { applyToast, withHandRule, withoutHandRule } from "../sets/apply";
+  import { ruleLabel } from "../sets/sets";
+  import TfApplySet from "./TfApplySet.svelte";
+  import TfSaveSet from "./TfSaveSet.svelte";
   import { ASSET_LIMIT, reachFilter, SECTION_LIMIT, SECTION_READS } from "./sections";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
@@ -107,6 +116,7 @@
     ports = bridgePorts,
     today = () => new Date(),
     apps = sharedApps,
+    sets = bridgeSetPorts,
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
@@ -122,6 +132,8 @@
     today?: () => Date;
     /** The *Open in…* applications (#844). */
     apps?: Apps;
+    /** *Apply a link set…* and *Save as a link set…* (#869). */
+    sets?: JobSetPorts;
   } = $props();
 
   /** `undefined` while reading, `null` when nothing answers to the address. */
@@ -139,6 +151,9 @@
   let proposals = $state<SuggestionEntry[] | null>(null);
   let drawer = $state(false);
   let linking = $state(false);
+  /** *Apply a link set…* and *Save as a link set…* open (#869). */
+  let applyingSet = $state(false);
+  let savingSet = $state(false);
   /** The job-reach read, by entity id: the rows' labels. */
   let reached = $state<Map<string, Reached>>(new Map());
   /** The link sets that apply and the parent (#867), `null` until read. */
@@ -329,6 +344,46 @@
     } catch (cause) {
       push({ text: `Could not show it again: ${ipcErrorMessage(cause)}`, tone: "err" });
     }
+  }
+
+  /**
+   * *Apply* (R-7.8): the set saved with a by-hand rule for this ticket, then
+   * the job re-read. *Undo* saves what that save answered without the rule,
+   * on the ticket it was applied to, since the toast outlives a move.
+   */
+  async function applySet(set: LinkSetRow) {
+    if (!detail) return;
+    const id = detail.row.entity_id;
+    applyingSet = false;
+    try {
+      const stored = await sets.saveLinkSet(withHandRule(set, id));
+      rereadReach(id);
+      push({
+        text: applyToast(stored, keyOf(id)),
+        action: {
+          label: "Undo",
+          run: () =>
+            void sets
+              .saveLinkSet(withoutHandRule(stored, id))
+              .then(() => rereadReach(id))
+              .catch((cause: unknown) => push({ text: `Could not undo it: ${ipcErrorMessage(cause)}`, tone: "err" })),
+        },
+      });
+    } catch (cause) {
+      push({ text: `Could not apply ${set.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
+    }
+  }
+
+  /** *Save link set* (R-7.9): the dialog and the drawer close, the job re-reads, the toast opens the set. */
+  function savedSet(set: LinkSetDetail) {
+    savingSet = false;
+    drawer = false;
+    if (detail) rereadReach(detail.row.entity_id);
+    const rule = set.rules[0];
+    push({
+      text: `Saved ${set.name}.${rule ? ` ${ruleLabel(rule)} now shows it.` : ""}`,
+      action: { label: "Open it", run: () => (location.hash = `#/sets/${encodeURIComponent(set.id)}`) },
+    });
   }
 
   /** What the Builds section's warning reads: every source's credential and last run. */
@@ -640,6 +695,7 @@
             {:else}
               <span class="tf-dim">no link sets yet</span>
             {/each}
+            <button type="button" class="tf-linkish" onclick={() => (applyingSet = true)}>Apply a link set…</button>
           </div>
         {/if}
         {#if current.id === "work"}
@@ -705,6 +761,28 @@
       onlinkto={() => (linking = true)}
       onhide={(row) => void hideHere(row)}
       onshow={(memberId) => void showAgain(memberId)}
+      onapplyset={() => (applyingSet = true)}
+      onsaveset={() => (savingSet = true)}
+    />
+  {/if}
+  {#if applyingSet}
+    <TfApplySet
+      jobKey={key}
+      applied={new Set((inherited?.sets ?? []).map((set) => set.id))}
+      read={sets.linkSets}
+      {layers}
+      onapply={(set) => void applySet(set)}
+      onclose={() => (applyingSet = false)}
+    />
+  {/if}
+  {#if savingSet}
+    <TfSaveSet
+      ticket={detail.row}
+      links={connected.map((entry) => entry.other)}
+      ports={{ saveLinkSet: sets.saveLinkSet, previewLinkSetRule: sets.previewLinkSetRule, getEntity: ports.getEntity }}
+      {layers}
+      onsaved={savedSet}
+      onclose={() => (savingSet = false)}
     />
   {/if}
   {#if linking}

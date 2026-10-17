@@ -414,6 +414,8 @@ const TfSets = (await import("../tf/sets/TfSets.svelte")).default;
 const TfSetEditor = (await import("../tf/sets/TfSetEditor.svelte")).default;
 const TfSetPicker = (await import("../tf/sets/TfSetPicker.svelte")).default;
 const TfSetPattern = (await import("../tf/sets/TfSetPattern.svelte")).default;
+const TfApplySet = (await import("../tf/job/TfApplySet.svelte")).default;
+const TfSaveSet = (await import("../tf/job/TfSaveSet.svelte")).default;
 const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
@@ -1561,6 +1563,46 @@ const CASES: Case[] = [
           have: new Set<string>(),
           read: () => deferred([{ entity_id: "confluence:1", name: "PSP error codes", sub: "" }]),
           onadd: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** *Apply a link set…* (#869): its one read, answering late. */
+    name: "TfApplySet",
+    source: "lib/tf/job/TfApplySet.svelte",
+    open: (target) => ({
+      app: mount(TfApplySet, {
+        target,
+        props: {
+          jobKey: "PAY-231",
+          applied: new Set<string>(),
+          read: () => deferred([]),
+          layers: createLayers(),
+          onapply: () => {},
+          onclose: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /** *Save as a link set…* (#869): the counts and the epic's title, answering late. */
+    name: "TfSaveSet",
+    source: "lib/tf/job/TfSaveSet.svelte",
+    open: (target) => ({
+      app: mount(TfSaveSet, {
+        target,
+        props: {
+          ticket: { entity_id: "jira:PAY-231", source_id: "jira", path: "PAY-200", title: "Retry failed SEPA payouts" },
+          links: [],
+          ports: {
+            saveLinkSet: () => new Promise(() => {}),
+            previewLinkSetRule: () => deferred([]),
+            getEntity: () => new Promise(() => {}),
+          },
+          layers: createLayers(),
+          onsaved: () => {},
           onclose: () => {},
         },
       }),

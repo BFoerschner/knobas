@@ -2,8 +2,8 @@
   The Connections drawer (#820, R-6.1, R-6.2): everything connected to the
   job, from the right, over a scrim, without moving the page.
 
-  Top row: a filter field, then *Link to…* (*Apply a link set…* and *Save as a
-  link set…* arrive with #869). Groups: **Linked on KEY**, the links drawn on
+  Top row: a filter field, then *Link to…*, *Apply a link set…* and *Save as
+  a link set…* (#869), whose dialogs the job opens. Groups: **Linked on KEY**, the links drawn on
   the ticket, each with *Unlink* on hover or focus and "also in" the sets that
   hold it too; **From Payout stack, via epic PAY-200**, one per link set that
   applies and one for the parent (#867), a set's rows with *Hide here* and the
@@ -36,6 +36,8 @@
     onlinkto,
     onhide = () => {},
     onshow = () => {},
+    onapplyset = () => {},
+    onsaveset = () => {},
   }: {
     jobKey: string;
     /** The links drawn on the ticket. */
@@ -55,6 +57,9 @@
     /** *Hide here* on a set's row. */
     onhide?: (row: GroupRow) => void;
     onshow?: (id: string) => void;
+    /** *Apply a link set…* and *Save as a link set…* (#869). */
+    onapplyset?: () => void;
+    onsaveset?: () => void;
   } = $props();
 
   let field = $state<HTMLInputElement | null>(null);
@@ -90,6 +95,8 @@
     </label>
     <div class="tf-dacts">
       <button type="button" class="tf-btn tf-sm" onclick={onlinkto}>Link to…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={onapplyset}>Apply a link set…</button>
+      <button type="button" class="tf-btn tf-sm" onclick={onsaveset}>Save as a link set…</button>
     </div>
   </div>
   <div class="tf-dbody">
