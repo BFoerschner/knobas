@@ -307,7 +307,62 @@ pub(crate) async fn log_work(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
     use chrono::TimeZone;
+
+    use crate::http::{JiraHttp, credential};
+
+    /// A Jira that answers every request `503`, `Connection: close`, and
+    /// counts them. A `503` is retried by the transport unless the request
+    /// opted out, so the count says which a write did.
+    fn busy() -> (JiraHttp, Arc<AtomicUsize>) {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&hits);
+        std::thread::spawn(move || {
+            use std::io::{Read, Write};
+            for socket in listener.incoming() {
+                let Ok(mut socket) = socket else { return };
+                counter.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0_u8; 8192];
+                let _ = socket.read(&mut buf);
+                let _ = socket.write_all(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\
+                      Connection: close\r\n\r\n",
+                );
+            }
+        });
+        let auth = credential(Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
+            .expect("a PAT is enough");
+        let http = JiraHttp::new(&format!("http://{addr}"), &crate::JiraConfig::default(), auth)
+            .expect("the client builds");
+        (http, hits)
+    }
+
+    /// #1122: a comment, a create and a worklog are each done again if they
+    /// arrive twice, and a POST that failed may have landed -- so each is
+    /// sent once, busy answer or not.
+    #[tokio::test]
+    async fn a_write_jira_would_repeat_is_sent_once() {
+        let (http, hits) = busy();
+        super::comment(&http, "PAY-231", "bounded").await.unwrap_err();
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "comment");
+
+        let (http, hits) = busy();
+        super::create_ticket(&http, "PAY", "Bound the jitter", "", "Task")
+            .await
+            .unwrap_err();
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "create");
+
+        let (http, hits) = busy();
+        super::log_work(&http, "PAY-231", chrono::Utc::now(), 1800, "")
+            .await
+            .unwrap_err();
+        assert_eq!(hits.load(Ordering::SeqCst), 1, "worklog");
+    }
 
     /// The one thing about this module that is a *format* rather than a
     /// request, and the one Jira rejects outright when it is wrong.

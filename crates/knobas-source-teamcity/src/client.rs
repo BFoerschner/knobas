@@ -219,6 +219,12 @@ impl HttpRest {
     /// What matters is that the request was accepted, which `knobas-http` has
     /// already decided by the time this returns.
     ///
+    /// **Sent once, never retried by the transport** (#1122), as is
+    /// [`Self::queue_run`]: a POST that timed out may have queued its build,
+    /// and a resend queues a second one. TeamCity may merge two identical
+    /// queued builds, but only while the first still waits, so nothing on its
+    /// side makes the resend safe. A failure comes back as the write's error.
+    ///
     /// # Errors
     ///
     /// The [`SourceError`] the request maps to.
@@ -226,7 +232,8 @@ impl HttpRest {
         let request = self
             .client
             .request(knobas_http::Method::POST, "app/rest/buildQueue")
-            .json(&serde_json::json!({ "buildType": { "id": build_type_id } }));
+            .json(&serde_json::json!({ "buildType": { "id": build_type_id } }))
+            .no_retry();
         self.client.send(request).await.map(|_| ())
     }
 
@@ -270,7 +277,8 @@ impl HttpRest {
         let request = self
             .client
             .request(knobas_http::Method::POST, "app/rest/buildQueue")
-            .json(&body);
+            .json(&body)
+            .no_retry();
         let response = self.client.send(request).await?;
         let answer: Option<serde_json::Value> = response.json().await.ok();
         Ok(answer.and_then(|a| a.get("id").and_then(serde_json::Value::as_i64)))

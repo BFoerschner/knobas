@@ -199,6 +199,14 @@ impl ConfluenceHttp {
     /// all -- a helper that insisted on a shape would have to invent one for
     /// the second (issue #286).
     ///
+    /// **Sent once, never retried by the transport** (#1122). A comment
+    /// arriving twice is two comments, and a POST that timed out may have
+    /// landed. A page create is refused the second time while the title is
+    /// taken in the space, but it goes once too: nothing here needs the retry,
+    /// and a failure comes back as the write's error for the write queue to
+    /// rule on. [`Self::put_json`] keeps its retries: the version it carries
+    /// makes a second arrival a 409.
+    ///
     /// # Errors
     ///
     /// The [`SourceError`] the failure maps to, with Confluence's own words in
@@ -208,7 +216,11 @@ impl ConfluenceHttp {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<knobas_http::Response, SourceError> {
-        let request = self.client.request(Method::POST, path).json(body);
+        let request = self
+            .client
+            .request(Method::POST, path)
+            .json(body)
+            .no_retry();
         self.client.send(request).await
     }
 

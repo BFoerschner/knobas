@@ -182,6 +182,14 @@ impl JiraHttp {
     /// comment, and a create is 201 with `{id, key, self}`. A helper that
     /// insisted on JSON would have to invent a body for the first.
     ///
+    /// **Sent once, never retried by the transport** (#1122). A comment, a
+    /// create and a worklog are each done again if they arrive twice, and a
+    /// POST that timed out may have landed. A transition is mostly refused
+    /// the second time (the issue has moved and no longer offers it), but not
+    /// on a workflow whose transition loops back to its own status, so it
+    /// goes once too. A failure comes back as the write's error, and the
+    /// write queue decides whether to send it again.
+    ///
     /// # Errors
     ///
     /// The [`SourceError`] the failure maps to, with Jira's own words in the
@@ -191,7 +199,11 @@ impl JiraHttp {
         path: &str,
         body: &serde_json::Value,
     ) -> Result<knobas_http::Response, SourceError> {
-        let request = self.client.request(Method::POST, path).json(body);
+        let request = self
+            .client
+            .request(Method::POST, path)
+            .json(body)
+            .no_retry();
         self.client.send(request).await
     }
 }

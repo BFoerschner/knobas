@@ -4760,3 +4760,20 @@ Merge-manager:
   100 moves stores about 80 KB more, and a 100-issue page of such tickets about 8 MB. Nothing
   trims it, because the conversation reads only status items and the rest is one jsonb column.
   **Reversing:** low (strip non-status items in `map::to_sync_item`).
+
+## #1122 — A timed-out write is not resent by the transport (2026-10-17)
+
+- **`no_retry` means one attempt on every failure, busy answers included.** Not just timeouts: a
+  `502`/`504` comes from a proxy that cannot say whether the source acted. A `429` is safe to
+  resend but rare on a write, and one rule is easier to read than a table. **Reversing:** trivial
+  (count attempts per failure class in `send_with`).
+- **Every Kuma socket POST goes once, not `add` alone.** No packet there needs the in-call retry,
+  and a pause that fails comes back to the queue, which retries it. **Reversing:** trivial (opt
+  out in `emit_on` only).
+- **Jira's and Confluence's `post_json` go once as a whole, transitions and page creates
+  included.** Each is mostly refused the second time, but a transition that loops back to its own
+  status isn't, and nothing in either adapter needs the retry. **Reversing:** low (a second POST
+  helper per adapter).
+- **Gitea keeps the retry where Gitea refuses the repeat** (branch and pull request create: `409`;
+  merge: `405`; file commit: `sha`). The cost: a create that landed and was retried reads as a
+  refusal. **Reversing:** trivial (`post` → `post_once` at the call site).
