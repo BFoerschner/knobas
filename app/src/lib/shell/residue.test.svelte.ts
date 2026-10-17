@@ -724,7 +724,13 @@ const CASES: Case[] = [
           groups: ["Mine"],
           fields: [],
           parents: [],
-          board: () => Promise.resolve({ columns: [{ status: "To Do", cards: [], total: 0 }], sources: [] }),
+          board: () =>
+            Promise.resolve({
+              columns: [{ status: "To Do", cards: [], total: 0 }],
+              sources: [],
+              lanes: [],
+              more_lanes: 0,
+            }),
           onsave: () => Promise.resolve(),
           onclose: () => {},
         },
@@ -796,6 +802,8 @@ const CASES: Case[] = [
                   },
                 ],
                 sources: [],
+                lanes: [],
+                more_lanes: 0,
               }),
             detail: () => deferred({ body_text: "" }),
             contexts: () => deferred([]),

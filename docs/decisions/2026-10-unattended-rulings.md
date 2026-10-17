@@ -5043,3 +5043,31 @@ Merge-manager, PR #1145.
   The proxy is Kuma's plumbing: no route, no monitor, reachable from Kuma alone. Recording it
   as an asset moved the estate's pinned count (16 to 17) in 22 tests across five files, which
   was tried and backed out. **Reversing:** medium (add the asset and update those counts).
+## #939, #1098 — Lanes grouped on the server; `has:` walks only the links it needs (2026-10-17)
+
+- **PR #933's ruling 1 is reversed: lanes are grouped on the server.** `mini_board` takes the
+  lane field; each lane's column is capped and counted as a board's column is, so a laned
+  board reads 8 a column (50 while typing, R-3.4) instead of every ticket. **Reversing:** low
+  (drop the argument; `splitLanes` is still there for the editor's preview).
+- **Only the first ten lanes are sent; *Show N more lanes* reads ten more.** A cap per lane and
+  status does not cut a board laned by epic: on the probe each epic holds about four tickets a
+  status, so 750 lanes still sent every card. The rest are counted (`more_lanes`), not sent.
+  **Reversing:** trivial (`LANES_AT_FIRST`, or `lanes_first: null`).
+- **Lanes rank by count, a tie to the lane with the newer ticket, then by key.** The webview
+  broke ties in the order it first met a lane; the server has no such order. **Reversing:**
+  trivial (the `place` window).
+- **A lane's *Show N more* reads**, raising the cap to that cell's count for every lane's
+  column, as an unlaned column's does for every column. **Reversing:** low.
+- **A Jira view in lanes is put in lanes after its whole read** (`in_lanes`), since it already
+  reads the whole view to put it in Jira's order. **Reversing:** low.
+- **`has:failing-build` starts from the red builds.** Its candidates are the link ends within
+  two hops of a linked build whose declared state is `err`, a superset of the tickets the reader
+  then admits. `has:blocker` reads only `blocks` links, `open-pr` and `review-for-me` only
+  pull-request ends. **Reversing:** trivial (`linked_ends!` back).
+- **The blocker branch finds links from the ticket's `to_id`, the relation tested outside a
+  `lateral ... offset 0`.** On tables never analyzed the planner read `relation = 'blocks'`
+  against the pair index's third column and scanned the whole index once a ticket.
+  **Reversing:** trivial.
+- **Builds' and pull requests' states read through candidates resolved once a statement**
+  (`state_paths`), by `state_of!`, the rule `declared_state!` now spells through too.
+  **Reversing:** trivial.

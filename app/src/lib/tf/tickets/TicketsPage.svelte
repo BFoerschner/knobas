@@ -18,8 +18,9 @@
 
   The board is `mini_board`'s, the same read the rooms' Tickets tile makes,
   with its columns and their order (`knobas_core::mini_board`). A laned
-  board reads every ticket, uncapped, and splits it here: a lane's columns
-  and counts are its own, which a per-status cap cannot give.
+  board is read in lanes (#939): the server groups it, caps each lane's
+  column as it caps a board's and counts it whole, and sends the first ten
+  lanes, biggest first; *Show N more lanes* reads ten more.
 
   **Keys** (R-3.10): `j`/`k` and the arrows move the selection through the
   cards on screen in reading order (lane by lane, column by column, top to
@@ -43,6 +44,7 @@
   import type {
     ContextRow,
     EntityDetail,
+    LanesAsked,
     MiniBoard,
   } from "../../ipc/entity";
   import type { FilterSuggestions, TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/search";
@@ -53,9 +55,15 @@
   export interface TicketsPorts {
     /**
      * `mini_board` over every source: capped per column or not, narrowed by a
-     * query or not; or a Jira view's board, when `jiraView` names one (#877).
+     * query or not; or a Jira view's board, when `jiraView` names one (#877);
+     * in lanes or not (#939).
      */
-    board: (perColumn: number | null, query: string | null, jiraView?: string | null) => Promise<MiniBoard>;
+    board: (
+      perColumn: number | null,
+      query: string | null,
+      jiraView?: string | null,
+      lanes?: LanesAsked | null,
+    ) => Promise<MiniBoard>;
     /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
     openExternal?: (url: string) => Promise<void>;
     /** The selected ticket's description. */
@@ -140,14 +148,16 @@
   import TicketPreview from "./TicketPreview.svelte";
   import {
     aroundLines,
+    boardLanes,
     COLUMN_CAP,
     columnName,
     drawnCards,
     LANE_FIELDS,
+    LANES_AT_FIRST,
+    moreLanesLine,
     moreLine,
     nextSort,
     sortRows,
-    splitLanes,
     TYPED_CAP,
     when,
     type AroundLine,
@@ -181,8 +191,8 @@
     ready,
     timedTicket,
     ports = {
-      board: (perColumn, query, jiraView) =>
-        miniBoard({ sources: [], context: null, project: null }, perColumn, query, jiraView),
+      board: (perColumn, query, jiraView, lanes) =>
+        miniBoard({ sources: [], context: null, project: null }, perColumn, query, jiraView, lanes),
       openExternal,
       detail: getEntity,
       contexts: listContexts,
@@ -337,28 +347,41 @@
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
   const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
   const isExpanded = (column: MiniBoardColumn) => expanded.includes(columnKey(column));
-  /** Whether the board is split into lanes, which reads it whole. */
+  /**
+   * Whether the board is split into lanes: read in lanes on the server
+   * (#939), each lane's column capped as a board's is, the first lanes only.
+   */
   const laned = $derived(showing.layout === "board" && showing.lanes !== "none");
+  /** How many lanes a laned board reads: the first ten, ten more a *Show N more lanes*. */
+  let lanesShown = $state(LANES_AT_FIRST);
+  /** The view's own columns, which gather the board's statuses (R-3.15). */
+  const ownColumns = $derived(jiraRef !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
   /** The board's columns as the view's own columns gather them (R-3.15). */
-  const cols = $derived(
-    viewColumns(board?.columns ?? [], jiraRef !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? [])),
-  );
+  const cols = $derived(viewColumns(board?.columns ?? [], ownColumns));
   const expandKey = (lane: Lane, column: MiniBoardColumn) =>
     lane.key === null ? columnKey(column) : `${lane.key}|${columnKey(column)}`;
 
   /**
    * The per-column cap a read asks for: the eight a column draws, fifty while
-   * words filter (R-3.4, #1024), the largest expanded column's count once one
-   * is expanded (every column's once the list is), and none for lanes.
+   * words filter (R-3.4, #1024), and the largest expanded column's count once
+   * one is expanded (every column's once the list is). In lanes the same,
+   * each lane's column counted on its own (#939).
    */
   function capFor(): number | null {
-    if (laned) return null;
     const cap = typing ? TYPED_CAP : COLUMN_CAP;
     if ((expanded.length === 0 && !listAll) || board === null) return cap;
-    const wanted = (listAll ? board.columns : cols.filter((column) => isExpanded(column))).map(
-      (column) => column.total,
-    );
+    const wanted = laned
+      ? bands.flatMap(({ lane, drawn }) =>
+          drawn.filter(({ column }) => expanded.includes(expandKey(lane, column))).map(({ column }) => column.total),
+        )
+      : (listAll ? board.columns : cols.filter((column) => isExpanded(column))).map((column) => column.total);
     return Math.max(cap, ...wanted);
+  }
+
+  /** What a laned read asks for (#939), or `null` without lanes. */
+  function lanesAsked(): LanesAsked | null {
+    if (!laned || showing.lanes === "none") return null;
+    return { by: showing.lanes, first: lanesShown };
   }
 
   /**
@@ -381,7 +404,7 @@
     const query = toQuery(config, filter);
     const mine = ++reading;
     ports
-      .board(capFor(), query === "" ? null : query, jiraRef)
+      .board(capFor(), query === "" ? null : query, jiraRef, lanesAsked())
       .then((answer) => {
         if (mine !== reading) return;
         board = answer;
@@ -410,8 +433,14 @@
 
   function expand(lane: Lane, column: MiniBoardColumn) {
     here().expanded = [...expanded, expandKey(lane, column)];
-    // A lane's column is already read whole; the board's own is capped.
-    if (lane.key === null) read();
+    // A lane's column is capped as the board's own is (#939).
+    read();
+  }
+
+  /** *Show N more lanes* (#939): ten more of them, read. */
+  function moreLanes() {
+    lanesShown += LANES_AT_FIRST;
+    read();
   }
 
   function chooseLayout(layout: "board" | "list") {
@@ -422,9 +451,12 @@
   }
 
   function chooseLanes(lanes: LaneField) {
+    if (showing.lanes === lanes) return;
     const wasLaned = laned;
     here().lanes = lanes;
-    if (wasLaned !== laned) read();
+    lanesShown = LANES_AT_FIRST;
+    // Each field is its own read of lanes (#939).
+    if (wasLaned || laned) read();
   }
 
   function sortBy(column: SortColumn) {
@@ -525,7 +557,9 @@
   // ---- what is drawn, and the selection ----
   /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
   const bands = $derived(
-    splitLanes(cols, laned ? showing.lanes : "none").map((lane) => ({
+    boardLanes(board ?? { columns: [], sources: [], lanes: [], more_lanes: 0 }, laned ? showing.lanes : "none", (columns) =>
+      viewColumns(columns, ownColumns),
+    ).map((lane) => ({
       lane,
       drawn: lane.columns.map((column) => ({
         column,
@@ -884,6 +918,10 @@
           </div>
         </div>
       {/each}
+      {@const moreLanesText = laned && board !== null ? moreLanesLine(board.more_lanes) : null}
+      {#if moreLanesText}
+        <button type="button" class="tf-btn tf-sm" onclick={moreLanes}>{moreLanesText}</button>
+      {/if}
     {:else}
       <div class="tf-list">
         <table class="tf-tbl">

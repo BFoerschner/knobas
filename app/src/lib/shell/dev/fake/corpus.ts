@@ -3,9 +3,10 @@
  * one link graph, and the reads that list it (`list_entities`, the mini
  * board, the project census). Other feature modules read `CORPUS` from here.
  */
-import type { CodeFacts } from "../../../ipc/entity";
+import type { CodeFacts, LaneField } from "../../../ipc/entity";
 import type { Handler } from "../fake-tauri";
 import { JOB_ROWS, fakeReach } from "./job-reach";
+import { fakeLanes } from "./lanes";
 import { fakeJiraBoard } from "./ticket-views";
 
 // -- the demo corpus --------------------------------------------------------
@@ -366,15 +367,29 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * — a flat `status` and `priority` — because that is the shape this corpus is
  * in.
  */
-function miniBoard(args: Record<string, unknown>): ReturnType<typeof boardOf> {
+function miniBoard(args: Record<string, unknown>) {
+  const perColumn = (args["perColumn"] as number | null | undefined) ?? null;
+  const lanes = (args["lanes"] as LaneField | null | undefined) ?? null;
   // A Jira view's board (#877): the whole board under the same words, cut
   // to the view's tickets in Jira's order under its own columns.
   const jiraView = args["jiraView"];
-  if (typeof jiraView === "string") {
-    const whole = boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null });
-    return fakeJiraBoard(jiraView, whole, (args["perColumn"] as number | null | undefined) ?? null);
+  const whole =
+    typeof jiraView === "string"
+      ? fakeJiraBoard(jiraView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
+      : boardOf({ ...args, perColumn: null });
+  // In lanes (#939): each lane's column capped, the first lanes sent.
+  if (lanes !== null) {
+    return fakeLanes(whole, lanes, perColumn, (args["lanesFirst"] as number | null | undefined) ?? null);
   }
-  return boardOf(args);
+  return {
+    columns: whole.columns.map((column) => ({
+      ...column,
+      cards: perColumn === null ? column.cards : column.cards.slice(0, perColumn),
+    })),
+    sources: whole.sources,
+    lanes: [],
+    more_lanes: 0,
+  };
 }
 
 function boardOf(args: Record<string, unknown>) {

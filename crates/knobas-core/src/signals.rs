@@ -128,8 +128,8 @@ pub struct Signal {
 /// **Set-based, never once per ticket** (#815): the walk joins the tickets
 /// to the confirmed links once, so its cost is the links the tickets have,
 /// not a walk per ticket. The board names the cards it keeps; `has:` names
-/// every end of a confirmed link, the only tickets that can carry a signal,
-/// and asks which of them carry the kind it wants. The per-row parts are
+/// the link ends that can carry the kinds it wants ([`signal_ends!`]) and
+/// asks which of them carry one. The per-row parts are
 /// index probes and the declaration's own reads. `builds` keeps the reach's
 /// builds by the entity's kind before it joins `sync.item`: joined on the
 /// id alone, the planner underestimated the reach and compared every reach
