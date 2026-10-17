@@ -273,8 +273,8 @@ pub(crate) async fn read(
     Ok(views)
 }
 
-/// The boards the setting names (#878, D17). *Only boards I marked as
-/// favourites* is the boards whose saved filter is a favourite filter: Jira
+/// The boards the setting names (#878, D17). *Only boards built on my
+/// favourite filters* is the boards whose saved filter is a favourite filter: Jira
 /// Data Center's Agile REST has no favourite-board read (ruling in #878's PR).
 async fn boards(
     api: &(dyn JiraApi + '_),
