@@ -902,39 +902,89 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
     let commit = format!("{gitea}:commit:tidewater/payout-service/{sha}");
     let tip = format!("{gitea}:branch:tidewater/payout-service/main");
     let at = "2026-08-20T00:00:00Z";
-    item(&pool, &tip, &gitea, "branch", at, serde_json::json!({ "name": "main", "commit": { "id": sha } })).await;
-    item(&pool, &commit, &gitea, "commit", at, serde_json::json!({ "sha": sha })).await;
+    item(
+        &pool,
+        &tip,
+        &gitea,
+        "branch",
+        at,
+        serde_json::json!({ "name": "main", "commit": { "id": sha } }),
+    )
+    .await;
+    item(
+        &pool,
+        &commit,
+        &gitea,
+        "commit",
+        at,
+        serde_json::json!({ "sha": sha }),
+    )
+    .await;
     let tests = configuration(&pool, &tc, "Payout_IntegrationTests", "Integration Tests").await;
     let run = |id: i64, more: serde_json::Value| {
         let mut run = serde_json::json!({
             "id": id, "number": id.to_string(), "buildTypeId": "Payout_IntegrationTests",
             "branchName": "main", "startDate": "20260821T100000+0000"
         });
-        run.as_object_mut().unwrap().extend(more.as_object().unwrap().clone());
+        run.as_object_mut()
+            .unwrap()
+            .extend(more.as_object().unwrap().clone());
         run
     };
-    let running = run(1, serde_json::json!({
-        "state": "running", "agent": { "name": "agent-linux-03" },
-        "running-info": { "currentStageText": "step 3/5 `cargo test`" },
-        "revisions": { "revision": [{ "version": sha }] }
-    }));
-    let finished = run(2, serde_json::json!({
-        "state": "finished", "status": "SUCCESS", "finishDate": "20260821T100412+0000",
-        "agent": { "name": "agent-linux-01" },
-        "revisions": { "revision": [{ "version": "0000000unmirrored" }] }
-    }));
-    item(&pool, &format!("{tc}:build:1"), &tc, "build", "2026-08-21T02:00:00Z", running).await;
-    item(&pool, &format!("{tc}:build:2"), &tc, "build", "2026-08-21T01:00:00Z", finished).await;
+    let running = run(
+        1,
+        serde_json::json!({
+            "state": "running", "agent": { "name": "agent-linux-03" },
+            "running-info": { "currentStageText": "step 3/5 `cargo test`" },
+            "revisions": { "revision": [{ "version": sha }] }
+        }),
+    );
+    let finished = run(
+        2,
+        serde_json::json!({
+            "state": "finished", "status": "SUCCESS", "finishDate": "20260821T100412+0000",
+            "agent": { "name": "agent-linux-01" },
+            "revisions": { "revision": [{ "version": "0000000unmirrored" }] }
+        }),
+    );
+    item(
+        &pool,
+        &format!("{tc}:build:1"),
+        &tc,
+        "build",
+        "2026-08-21T02:00:00Z",
+        running,
+    )
+    .await;
+    item(
+        &pool,
+        &format!("{tc}:build:2"),
+        &tc,
+        "build",
+        "2026-08-21T01:00:00Z",
+        finished,
+    )
+    .await;
 
     let runs = pipeline_runs_inner(&pool, &tests, None).await.unwrap();
     let seen: Vec<_> = runs
         .iter()
-        .map(|r| (r.agent.as_deref(), r.current_step.as_deref(), r.commit_id.as_deref()))
+        .map(|r| {
+            (
+                r.agent.as_deref(),
+                r.current_step.as_deref(),
+                r.commit_id.as_deref(),
+            )
+        })
         .collect();
     assert_eq!(
         seen,
         [
-            (Some("agent-linux-03"), Some("step 3/5 `cargo test`"), Some(commit.as_str())),
+            (
+                Some("agent-linux-03"),
+                Some("step 3/5 `cargo test`"),
+                Some(commit.as_str())
+            ),
             (Some("agent-linux-01"), None, None),
         ]
     );
@@ -949,7 +999,10 @@ async fn runs_carry_their_agent_what_they_do_now_and_their_mirrored_commit() {
         .iter()
         .map(|r| (r.agent.clone(), r.current_step.clone(), r.commit_id.clone()))
         .collect();
-    assert_eq!(recent, from_runs, "the list reads a run as the pipeline does");
+    assert_eq!(
+        recent, from_runs,
+        "the list reads a run as the pipeline does"
+    );
 }
 
 /// **How a run was started** (#961): the declared trigger in the shell's

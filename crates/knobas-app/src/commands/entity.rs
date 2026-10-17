@@ -1671,7 +1671,11 @@ async fn with_commits<'a>(
             .into_iter()
             .collect();
     for run in &mut runs {
-        run.commit_id = run.revision.as_ref().and_then(|sha| found.get(sha)).cloned();
+        run.commit_id = run
+            .revision
+            .as_ref()
+            .and_then(|sha| found.get(sha))
+            .cloned();
     }
     Ok(())
 }
