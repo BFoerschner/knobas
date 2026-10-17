@@ -2193,6 +2193,7 @@ knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_noformat_
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_page_link_names_its_title_and_space
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_page_record_projects_its_version_labels_and_comments
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_panel_section_saved_unchanged_reads_back_the_same
+knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_paragraph_spelled_like_a_panel_refuses_as_formatting
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_section_with_a_panel_reads_as_a_quote_naming_its_kind
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_table_keeps_header_cells_and_rows
 knobas-source-confluence	lib/knobas_source_confluence	blocks::tests::a_user_mention_resolves_by_name_or_by_a_key_the_record_names

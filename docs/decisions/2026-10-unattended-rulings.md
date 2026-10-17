@@ -4206,3 +4206,12 @@ refuses.
   `DOC_WRITES.body_from_text`.
 - **The refusal title stays prototype-6's** ("knobas edits text-only sections"), since a panel
   section no longer shows it. **Reversing:** `refusalReason`.
+
+Merge-manager review of PR #1065 (2026-10-17):
+
+- **A block that is not a panel but whose text holds a line `> **Info**` refuses as formatting.**
+  A paragraph typed in Confluence as `> **Info** x` (or with such a line after a blank line in one
+  paragraph) opened in the editor as those words, and saving the section unchanged wrote it back as
+  an info panel titled `x`. The check refuses any such line, also one in the middle of a paragraph
+  that `from_section_text` would have left as text, which is the safe direction.
+  **Reversing:** `blocks::reads_as_a_panel` in `spans`.
