@@ -792,6 +792,12 @@ mod tests {
                 sprint: None,
                 last_read: chrono::DateTime::UNIX_EPOCH,
                 web_url: None,
+                hidden: false,
+                new: false,
+                unsynced: vec![Unsynced {
+                    project: String::new(),
+                    count: 0,
+                }],
             }),
         })
         .unwrap();
@@ -804,6 +810,7 @@ mod tests {
             .chain(&keys(&row["columns"][0]))
             .chain(&keys(&row["list_sort"]))
             .chain(&keys(&row["jira"]))
+            .chain(&keys(&row["jira"]["unsynced"][0]))
             .chain(&keys(&draft))
         {
             assert!(
@@ -821,6 +828,9 @@ mod tests {
             "\"ticket_views\"",
             "\"save_ticket_view\"",
             "\"delete_ticket_view\"",
+            "export interface UnsyncedTickets {",
+            "\"hide_jira_view\"",
+            "\"open_jira_view\"",
         ] {
             assert!(mirror.contains(name), "{name} is not in the mirror");
         }
