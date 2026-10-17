@@ -14,7 +14,8 @@
     branch `from_ref`).
   - **Gitea `create_pull_request`, 409:** the open pull request from `head` into `base` (its `ref`
     or `label`), found in the first three pages of open pull requests, carries this write's
-    `title`.
+    `title` and its `user` is the account the token is (`GET /user`). Opened by anyone else, the
+    409 stands.
   - **Gitea `merge_pull_request`, 405** (not *Please try again later*): the pull request is
     `merged` and `merged_by` is the account the token is (`GET /user`). Merged by anyone else, the
     405 stands.

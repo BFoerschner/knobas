@@ -188,15 +188,30 @@ fn create_pull_request() -> WriteOp {
     }
 }
 
-/// An open pull request, as Gitea's listing answers it.
+/// An open pull request opened by `bjoern`, as Gitea's listing answers it.
 fn open_pull(number: u64, title: &str, head: &str, base: &str) -> Value {
+    open_pull_by(number, title, head, base, "bjoern")
+}
+
+/// An open pull request opened by `by`.
+fn open_pull_by(number: u64, title: &str, head: &str, base: &str, by: &str) -> Value {
     json!({
         "number": number,
         "state": "open",
         "title": title,
         "head": { "ref": head, "label": head },
         "base": { "ref": base, "label": base },
+        "user": { "login": by },
     })
+}
+
+/// This token is `bjoern`'s.
+async fn token_is_bjoern(server: &MockServer) {
+    Mock::given(method("GET"))
+        .and(path("/api/v1/user"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": "bjoern" })))
+        .mount(server)
+        .await;
 }
 
 const ALREADY_OPEN: &str = "pull request already exists for these targets [id: 145, issue_id: 160, head_repo_id: 7, \
@@ -221,6 +236,7 @@ async fn a_pull_request_opened_whose_answer_was_lost_is_delivered() {
         ]),
     )
     .await;
+    token_is_bjoern(&server).await;
 
     source(&server)
         .write(create_pull_request())
@@ -257,6 +273,32 @@ async fn an_open_pull_request_with_another_title_is_still_refused() {
     assert_eq!(error.status(), Some(409), "{error:?}");
 }
 
+/// A colleague opened the pull request for the pair under the same title:
+/// their body is on it, not this write's, and Gitea's 409 stands.
+#[tokio::test]
+async fn a_pull_request_somebody_else_opened_under_this_title_is_still_refused() {
+    let server = lands_then_refuses("/pulls", 409, ALREADY_OPEN).await;
+    holds(
+        &server,
+        "/pulls",
+        json!([open_pull_by(
+            145,
+            "SEPA retry with exponential backoff",
+            "feature/PAY-231-sepa-retry",
+            "main",
+            "marta"
+        )]),
+    )
+    .await;
+    token_is_bjoern(&server).await;
+
+    let error = source(&server)
+        .write(create_pull_request())
+        .await
+        .expect_err("the pull request is marta's");
+    assert_eq!(error.status(), Some(409), "{error:?}");
+}
+
 fn merge() -> WriteOp {
     WriteOp::MergePullRequest {
         entity: "gitea:tidewater/payout-service#142".to_owned(),
@@ -276,11 +318,7 @@ async fn merged_by(by: &str) -> MockServer {
         json!({ "number": 142, "state": "closed", "merged": true, "merged_by": { "login": by } }),
     )
     .await;
-    Mock::given(method("GET"))
-        .and(path("/api/v1/user"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "login": "bjoern" })))
-        .mount(&server)
-        .await;
+    token_is_bjoern(&server).await;
     server
 }
 

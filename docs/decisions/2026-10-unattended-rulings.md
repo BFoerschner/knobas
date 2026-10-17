@@ -4943,3 +4943,22 @@ Merge-manager:
   held before the adapter is asked. *Send again* keeps the payload and reaches the check, which
   then delivers it. Skipping hold detection for a write that waited would be the flag
   `apply_anyway`'s doc rules out. **Reversing:** moderate.
+
+Merge-manager (deep pass on false deliveries):
+
+- **A pull request also has to be opened by this account** (its `user.login` against `GET /user`),
+  as the merge already is. A colleague who opened the pull request for the same pair under the same
+  title (Gitea's own default title is the branch's commit subject, so this is not far-fetched) made
+  a pull request without this write's body; answering *delivered* would close the queued row and
+  link-on-arrival would link their pull request as the reader's. With the check, Gitea's *already
+  exists* stands, which is true. Costs one `GET /user` on a 409. **Reversing:** trivial.
+- **A branch and a page keep no author check.** Gitea records no creator for a branch, so there is
+  nothing cheap to compare; a colleague's branch of the same name at the same commit is the same git
+  object the reader asked for, and the link-on-arrival it fires is the one the branch's name
+  already proposes. A page at `base_version + 1` holding byte-for-byte this body is the page the
+  reader asked for whoever saved it. In both cases a false *delivered* leaves the source exactly as
+  the write would have, so the extra read is not worth it. **Reversing:** low (`version.by` against
+  `rest/api/user/current` for the page).
+- **Three pages of open pull requests is enough.** The listing is `sort=recentupdate`, 50 a page,
+  and the pull request Gitea refused over was opened moments ago, so it is on page one; past the
+  bound the refusal stands, which is the old answer. **Reversing:** trivial.

@@ -139,9 +139,10 @@ async fn holds_branch_from(
 /// `Protocol` carrying what it said.
 ///
 /// Gitea's 409 for the pair, where the open pull request for `head` into
-/// `base` carries this write's `title`, is this write's own, met again after
-/// its answer was lost (#1129): answered as delivered. One with another
-/// title keeps the refusal.
+/// `base` carries this write's `title` and was opened by this token's
+/// account, is this write's own, met again after its answer was lost
+/// (#1129): answered as delivered. One with another title, or opened by
+/// somebody else, keeps the refusal.
 pub(crate) async fn create_pull_request(
     client: &GiteaClient,
     owner: &str,
@@ -181,6 +182,8 @@ struct OpenPull {
     title: String,
     head: PullEnd,
     base: PullEnd,
+    #[serde(default)]
+    user: Option<crate::model::UserRef>,
 }
 
 #[derive(serde::Deserialize)]
@@ -204,8 +207,11 @@ impl PullEnd {
 /// updated, which is the listing's order.
 const OPEN_PULL_PAGES: u32 = 3;
 
-/// Whether an open pull request from `head` into `base` carries `title`. Any
-/// read that fails is "no", which keeps the refusal.
+/// Whether an open pull request from `head` into `base` carries `title` and
+/// was opened by the account this token is. A colleague's pull request for
+/// the same pair, even under the same title, keeps the refusal: their body,
+/// not this write's, is on it. Any read that fails is "no", which keeps the
+/// refusal.
 async fn holds_open_pull(
     client: &GiteaClient,
     owner: &str,
@@ -222,7 +228,10 @@ async fn holds_open_pull(
             .iter()
             .find(|p| p.head.names(head) && p.base.names(base))
         {
-            return pull.title == title;
+            let Some(by) = pull.user.as_ref().and_then(|u| u.login.as_deref()) else {
+                return false;
+            };
+            return pull.title == title && is_this_account(client, by).await;
         }
         if pulls.len() < crate::client::PAGE_SIZE as usize {
             return false;
@@ -367,10 +376,16 @@ async fn merged_by_this_account(client: &GiteaClient, owner: &str, repo: &str, i
     let Some(by) = pull.merged_by.and_then(|u| u.login).filter(|_| pull.merged) else {
         return false;
     };
-    client.current_user().await.is_ok_and(|me| {
-        me.login
-            .is_some_and(|login| login.eq_ignore_ascii_case(&by))
-    })
+    is_this_account(client, &by).await
+}
+
+/// Whether `login` is the account this token is (`GET /user`). A failed read
+/// is "no".
+async fn is_this_account(client: &GiteaClient, login: &str) -> bool {
+    client
+        .current_user()
+        .await
+        .is_ok_and(|me| me.login.is_some_and(|me| me.eq_ignore_ascii_case(login)))
 }
 
 /// What [`merge`] is asked to do: the style, whether Gitea deletes the head
