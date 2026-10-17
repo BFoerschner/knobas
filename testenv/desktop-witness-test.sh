@@ -432,11 +432,16 @@ pin_label ../crates/knobas-source-mock/src/lib.rs 'https://tidewater.example' \
 # `rendered_label` helper spelled them so. Neither driver reads a transformed
 # name since #1084: `tf.css` uppercases nothing, and this pin is what says so
 # if it ever starts -- every constant in both drivers would then be stale.
-if grep -q 'text-transform' ../app/src/lib/tf/tf.css; then
-    check "tf.css uppercases nothing the drivers name" yes no
-    printf '  app/src/lib/tf/tf.css now has a text-transform; the drivers spell names as the markup does.\n' >&2
-else
+# Exit 1 only: grep's 2 (a missing or unreadable tf.css) must not read as
+# "nothing uppercases".
+transform=0
+grep -q 'text-transform' ../app/src/lib/tf/tf.css || transform=$?
+if [ "$transform" = 1 ]; then
     check "tf.css uppercases nothing the drivers name" yes yes
+else
+    check "tf.css uppercases nothing the drivers name" yes no
+    printf '  app/src/lib/tf/tf.css has a text-transform or cannot be read (grep %s);\n' "$transform" >&2
+    printf '  the drivers spell names as the markup does.\n' >&2
 fi
 
 # --- the capture driver's pure parts (#503) ---------------------------------
