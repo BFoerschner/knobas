@@ -527,7 +527,13 @@ mod tests {
         keys.sort_unstable();
         assert_eq!(
             keys,
-            ["notes_shown", "pending_writes", "recent", "smart_lists", "sources"]
+            [
+                "notes_shown",
+                "pending_writes",
+                "recent",
+                "smart_lists",
+                "sources"
+            ]
         );
         for key in &keys {
             assert!(
