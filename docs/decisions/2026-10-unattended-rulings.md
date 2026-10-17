@@ -4316,3 +4316,8 @@ Ruled by the implementer (PR for #1019).
 - **The dialog sorts nested projects by path** (`Payments`, then `Payments › Payouts`) and keeps
   the label *Project*, not prototype-6's *TeamCity project*: the dialog is source-neutral and its
   accessible name is tested. **Reversing:** one string.
+
+## #1066 — *Import…* in Dependencies' *Add ▾* (2026-10-17)
+
+- **A port, not a reuse.** `TfImport.svelte` copies `ImportDialog`'s behaviour into `TfDialog` rather than mounting the rooms UI's dialog, because #881 removes that one. **Reversing:** delete `TfImport` and mount `ImportDialog`, until #881 lands.
+- **The toast after an import is new copy.** Prototype-6 shows only the menu item's toast, and the rooms UI shows nothing after an import. It reads "Imported <estate>: 1 asset created, 1 property kept as you edited it" and lists only the counts that are not zero ("nothing changed" when all are). **Reversing:** one function, `importedLine`.
