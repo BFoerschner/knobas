@@ -110,9 +110,13 @@ fn three_columns() -> Value {
 }
 
 async fn pool(label: &str) -> PgPool {
+    pool_of(label, 2).await
+}
+
+async fn pool_of(label: &str, connections: u32) -> PgPool {
     let pool = knobas_db::test_util::scratch_database(label)
         .await
-        .pool(2)
+        .pool(connections)
         .await
         .expect("a pool on the scratch database");
     sqlx::query(
@@ -413,5 +417,83 @@ async fn a_view_that_turns_up_after_the_first_sync_is_new_and_a_hidden_one_stays
         flags(&pool, "jira-board-21").await,
         ("board".into(), true, false),
         "hidden stays hidden, and an old board does not turn new"
+    );
+}
+
+/// #1088: a board's item deleted while the projection reads it -- a purge
+/// (`config::delete`'s `PURGE_ITEMS`) committing in the middle of a run's
+/// `project` -- is a board that is gone, not a failed sync. The delete is held
+/// open until the projection is seen waiting on it, so the projection has read
+/// the board as live and meets the delete only at its row; then the delete
+/// commits.
+#[tokio::test]
+async fn a_board_whose_item_is_deleted_mid_projection_is_skipped_not_a_failed_sync() {
+    let pool = pool_of("jira_views_purged_mid_projection", 3).await;
+    let (src, _) = source(vec![
+        (
+            "board-21".into(),
+            "PAY sprint board".into(),
+            board(21, &["PAY-231"], three_columns()),
+            false,
+        ),
+        (
+            "board-22".into(),
+            "PAY flow".into(),
+            board(22, &["PAY-240"], three_columns()),
+            false,
+        ),
+    ]);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    let mut purge = pool.begin().await.unwrap();
+    sqlx::query("delete from sync.item where entity_id = 'jira:board-21'")
+        .execute(&mut *purge)
+        .await
+        .unwrap();
+
+    let mut run = pool.begin().await.unwrap();
+    let pid: i32 = sqlx::query_scalar("select pg_backend_pid()")
+        .fetch_one(&mut *run)
+        .await
+        .unwrap();
+    let projection = tokio::spawn(async move {
+        let projected = knobas_sync::jira_views::project(&mut run, "jira").await;
+        (projected, run)
+    });
+
+    let mut waited = false;
+    for _ in 0..200 {
+        let wait: Option<String> =
+            sqlx::query_scalar("select wait_event_type from pg_stat_activity where pid = $1")
+                .bind(pid)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        if wait.as_deref() == Some("Lock") {
+            waited = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+    }
+    assert!(
+        waited,
+        "the projection never met the open delete, so this test witnessed nothing"
+    );
+    purge.commit().await.unwrap();
+
+    let (projected, run) = projection.await.unwrap();
+    projected.expect("a board whose item went mid-projection is skipped, not a failed sync");
+    run.commit().await.unwrap();
+
+    let views: Vec<String> =
+        sqlx::query_scalar("select entity_id from sync.jira_view order by entity_id")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+    assert_eq!(views, ["jira:board-22"]);
+    assert_eq!(ticket_view(&pool, "jira-board-21").await, None);
+    assert_eq!(
+        members(&pool, "jira:board-22").await,
+        [("jira:PAY-240".to_owned(), 1)]
     );
 }

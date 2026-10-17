@@ -4565,3 +4565,16 @@ Merge-manager review (Spec axis):
 - **`context_members` belongs on the PR's list of commands nothing calls.** Its wrapper
   `contextMembers` was called by the rooms `InboxView` and `Room` only. Added to the PR body;
   nothing removed. **Reversing:** n/a.
+
+## #1088 — Flaky `jira_views_ipc`: a board's item purged mid-projection (2026-10-17)
+
+- **The fix is in the projection, not the test.** The flake is a real race: `UPSERT_VIEWS` read
+  `sync.live_item` from its snapshot while the foreign key checked the item as it is now, and
+  `config::delete`'s purge runs beside a source's run by design (#127, #632). Isolating the test
+  would have hidden a run failure the app can hit. **Reversing:** low.
+- **`for key share` that waits, not `skip locked`.** Waiting for a delete in flight is the wait
+  the foreign key check already made, so no new wait; `skip locked` would also drop a view whose
+  delete then rolls back from that run's projection. The lock covers every `jira_view` item of
+  the source, live or not (the lock cannot reach through `sync.live_item`'s outer join); a purge
+  during the run skips those rows and the scheduler's re-purge takes them when the run settles,
+  as for every row a run holds. **Reversing:** low.

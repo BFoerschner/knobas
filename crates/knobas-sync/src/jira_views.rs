@@ -41,7 +41,22 @@ use sqlx::{Postgres, Transaction};
 /// The kind a Jira source's views arrive as (`knobas_source_jira::KIND_JIRA_VIEW`).
 pub const KIND: &str = "jira_view";
 
+/// `held` is what keeps a purge from failing the run (#1088). The statement
+/// reads `sync.live_item` from its snapshot, and the foreign key on
+/// `sync.jira_view.entity_id` checks against the item as it is *now*: an item
+/// deleted after the snapshot -- `config::delete`'s purge, which runs beside a
+/// source's run by design (#127, #632) -- was read as live and then failed the
+/// insert, and with it the whole run. `for key share` waits for a delete in
+/// flight and drops a row already deleted, so a view whose item went is not
+/// projected; and the lock it leaves, the one the foreign key takes anyway,
+/// keeps the item until the run commits (the purge's `skip locked` passes it
+/// by, as it does every row a run holds).
 const UPSERT_VIEWS: &str = "
+with held as (
+  select entity_id from sync.item
+   where source_id = $1 and kind = $2
+     for key share
+)
 insert into sync.jira_view
        (entity_id, source_id, ref_kind, ref_id, board_type, name, jql, sub_query, query,
         columns, sprint, last_read)
@@ -55,6 +70,7 @@ select i.entity_id, i.source_id,
             then i.payload->'sprint' end,
        now()
   from sync.live_item i
+  join held h on h.entity_id = i.entity_id
  where i.source_id = $1 and i.kind = $2
     on conflict (entity_id) do update set
        ref_kind = excluded.ref_kind, ref_id = excluded.ref_id,
