@@ -1,5 +1,5 @@
 /**
- * `?fake-ipc`: The sources cockpit: four sources, their health, runs and adapters, and
+ * `?fake-ipc`: The sources cockpit: five sources, their health, runs and adapters, and
  * the Add-source dialog's writes.
  */
 import { GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "../../../sources/fixtures";
@@ -14,7 +14,7 @@ const KIND_INFO = [
   { id: "pr", label: "Pull request", plural: "Pull requests", monogram: "PR", full_sync_exhaustive: false },
 ];
 
-/** The four sources the sources view draws. */
+/** The five sources the sources view draws. */
 export const FIXTURE_SOURCES = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
@@ -55,6 +55,10 @@ export const FIXTURE_SOURCES = [
     },
     next_run_at: null,
   },
+  // The monitor roster's rows name `kuma` (#977): without this source the
+  // Monitors header read the bare id, and with no account the roster would not
+  // offer Pause and Resume. Kuma's descriptor declares an API token.
+  fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "ok", 6, 95, "ApiToken"),
 ];
 
 /**
@@ -246,7 +250,7 @@ function fakeRuns(args: Record<string, unknown>) {
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
-    // The sources cockpit. Four sources, one of them refusing its credential
+    // The sources cockpit. Five sources, one of them refusing its credential
     // and one with a PAT running out, because those are the two rows a person
     // has to *do* something about and they are the ones a screenshot has to be
     // able to show.
