@@ -377,6 +377,8 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-formgrid input, .tf-formgrid select {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink); width: 100%;
 }
+/* A tick box in the grid (*Link to <job>*, #984) keeps its own size beside its words. */
+.tf-formgrid .tf-ck input[type="checkbox"] { width: auto; padding: 0; }
 .tf-radio { display: flex; flex-direction: column; gap: 6px; }
 .tf-radio label { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
 .tf-radio label:has(input:checked) { border-color: var(--ink); background: var(--sheet-2); }
