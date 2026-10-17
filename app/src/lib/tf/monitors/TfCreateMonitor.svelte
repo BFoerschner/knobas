@@ -18,7 +18,7 @@
   import type { MonitorTarget } from "../../ipc/assets";
   import type { MonitorKind, QueuedWrite, WriteOpPayload } from "../../ipc/sources";
   import TfDialog from "../settings/TfDialog.svelte";
-  import type { MonitorSubject } from "./monitors";
+  import { isRouteId, type MonitorSubject } from "./monitors";
 
   let {
     subject,
@@ -107,7 +107,7 @@
       {/if}
     </div>
     {#if source !== null}
-      <p class="tf-dim tf-note">Created in {source.display_name} through the write queue, attached to this {subject.id.startsWith("route:") ? "route" : "asset"}.</p>
+      <p class="tf-dim tf-note">Created in {source.display_name} through the write queue, attached to this {isRouteId(subject.id) ? "route" : "asset"}.</p>
     {:else}
       <p class="tf-dim tf-note">
         No monitoring source can create monitors. Add an Uptime Kuma account under Settings › Sources.

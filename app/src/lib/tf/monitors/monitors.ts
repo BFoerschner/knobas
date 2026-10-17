@@ -180,6 +180,11 @@ export function isRoute(row: Pick<UnmonitoredAsset, "type_id">): boolean {
   return row.type_id === "route";
 }
 
+/** An entity id that names a route (`route:<uuid>`) rather than an asset. */
+export function isRouteId(id: string): boolean {
+  return id.startsWith("route:");
+}
+
 /** A route's opening (#976): HTTP on the route's URL plus `/health`, named as an asset's HTTP check is. */
 export function routePrefill(row: Pick<UnmonitoredAsset, "name" | "url">): Prefill {
   const base = httpUrl([row.url]);

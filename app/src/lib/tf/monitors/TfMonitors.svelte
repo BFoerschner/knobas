@@ -65,6 +65,7 @@
     stateChip,
     gaps,
     isRoute,
+    isRouteId,
     kindWord,
     prefill,
     routePrefill,
@@ -272,7 +273,7 @@
 
   /** The name goes onto the asset or the route the dialog was opened for, so the next poll attaches it there. */
   function recordName(subject: MonitorSubject, name: string): Promise<unknown> {
-    return subject.id.startsWith("route:")
+    return isRouteId(subject.id)
       ? ports.editRoute(subject.id, [{ field: "monitors", added: [name] }])
       : ports.editAsset(subject.id, [{ field: "monitors", added: [name] }]);
   }
@@ -293,7 +294,7 @@
 
   /** A route opens at `#/route/<id>` (the Tree at its exposing asset), an asset at `#/asset/<id>`. */
   function addressOf(id: string): string {
-    return `#/${id.startsWith("route:") ? "route" : "asset"}/${encodeURIComponent(id)}`;
+    return `#/${isRouteId(id) ? "route" : "asset"}/${encodeURIComponent(id)}`;
   }
 </script>
 
