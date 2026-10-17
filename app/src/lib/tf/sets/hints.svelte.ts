@@ -9,16 +9,17 @@ import type { LinkSetHint } from "../../ipc/entity";
 
 const putAway = new SvelteSet<string>();
 
-const keyOf = (hint: Pick<LinkSetHint, "set_id" | "member">) => `${hint.set_id}\u0000${hint.member.entity_id}`;
+/** One hint's identity: the set and the item it offers. */
+const offerKey = (hint: Pick<LinkSetHint, "set_id" | "member">) => `${hint.set_id}\u0000${hint.member.entity_id}`;
 
 /** *Not now* on one hint. */
 export function notNow(hint: Pick<LinkSetHint, "set_id" | "member">): void {
-  putAway.add(keyOf(hint));
+  putAway.add(offerKey(hint));
 }
 
 /** The first hint not put away, or `null`. */
 export function firstHint(hints: readonly LinkSetHint[]): LinkSetHint | null {
-  return hints.find((hint) => !putAway.has(keyOf(hint))) ?? null;
+  return hints.find((hint) => !putAway.has(offerKey(hint))) ?? null;
 }
 
 /** For tests: every hint offered again. */

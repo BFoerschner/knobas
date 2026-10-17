@@ -6,7 +6,8 @@
   shows on now with how many are yours. A row opens the set's editor,
   `#/sets/<id>` (`TfSetEditor.svelte`), which this page draws in its place.
 
-  Over `link_sets`, `save_link_set` (*New link set*), `parent_links` and
+  Over `link_sets`, `save_link_set` (*New link set*, the hint's *Add to …*),
+  `link_set_hints` (#870, R-7.10's card), `parent_links` and
   `set_parent_links`. Sets stay in knobas: nothing here writes to a source.
 -->
 <script lang="ts">
