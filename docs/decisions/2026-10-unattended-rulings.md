@@ -5020,3 +5020,21 @@ Merge-manager (deep pass):
   `None`). The in-flight value comes from the same `running-info.currentStageText` that the
   view's *Now* fact read before, so this gap was already there and is not new here.
   **Reversing:** low.
+
+## #978 — the test Kuma's Docker host is a socket proxy on a Kuma-only network (2026-10-17)
+
+Merge-manager, PR #1145.
+
+- **The proxy sits on an internal `docker-api` network shared with Kuma alone, not on the
+  default network.** `GET /containers/<id>/json` returns each container's environment, so
+  whatever reaches the proxy reads the env of every container on the developer's engine. On the
+  default network that included the TeamCity agent, which runs build code. `internal: true` also
+  leaves the proxy with no route out. Measured: Kuma gets 200 on a container read and 403 on
+  `/events` and on a POST; Gitea cannot resolve `docker-proxy`. **Reversing:** low (drop the
+  network keys).
+- **`EVENTS: 0`.** The image turns it on by default, and Kuma's check reads only
+  `/containers/<name>/json`. `PING` and `VERSION` stay at the image's default (on): they are
+  read-only and disclose nothing beyond the engine version. **Reversing:** low.
+- **A plain `docker compose up` starts the proxy.** It already starts Kuma, which depends on
+  the proxy, so the proxy runs only where Kuma does. This is documented in `testenv/README.md`
+  and not put behind a profile. **Reversing:** low (a profile on both).

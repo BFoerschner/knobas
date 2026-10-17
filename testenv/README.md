@@ -355,7 +355,10 @@ the ways until #684 and is the rule that ended it; the four after it still are:
 - **Kuma has one Docker host, `testenv-docker-proxy`** (#978), which
   `./seed-kuma.sh` creates and repairs. It points at `tcp://docker-proxy:2375`,
   the `docker-proxy` service (tecnativa/docker-socket-proxy: container reads
-  only, no POST, no published port). Kuma deliberately does **not** mount
+  only, no POST, no published port, on an internal network shared with Kuma
+  alone). A plain `docker compose up` starts it, as it starts Kuma, and Kuma
+  depends on it; container reads include every container's environment, which
+  is why nothing else reaches it. Kuma deliberately does **not** mount
   `/var/run/docker.sock`: that would give the container control of the Docker
   daemon. It is what lets a Docker check created through knobas have a host
   (`kuma-live`'s `a_docker_check_is_published_with_the_seeded_docker_host`).

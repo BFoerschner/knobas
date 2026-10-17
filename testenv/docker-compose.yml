@@ -88,18 +88,26 @@ services:
   # Only this proxy holds the socket, and it exposes just the read endpoints
   # (CONTAINERS=1 allows GET /containers/*; POST, which is what start, exec and
   # create need, stays refused by its default POST=0, as do images, volumes,
-  # networks, exec and the rest). It publishes no port: only containers on this
-  # compose network reach it, at tcp://docker-proxy:2375. The `:ro` on the
-  # mount is belt only -- it does not restrict the API -- the filter is the
-  # protection.
+  # networks, exec and the rest; EVENTS, on by the image's default, is turned
+  # off because Kuma's check reads only GET /containers/<name>/json). It
+  # publishes no port and sits only on `docker-api`, an internal network it
+  # shares with Kuma alone: no other testenv container (the TeamCity agent runs
+  # build code) reaches tcp://docker-proxy:2375, and the proxy has no route
+  # out. GET /containers/<id>/json includes each container's environment, so
+  # whoever reaches the proxy reads every container's env on this engine; that
+  # is why the reach is Kuma's only. The `:ro` on the mount is belt only -- it
+  # does not restrict the API -- the filter is the protection.
   docker-proxy:
     image: ${DOCKER_PROXY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     container_name: knobas-docker-proxy
     environment:
       CONTAINERS: 1
+      EVENTS: 0
       POST: 0
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - docker-api
     restart: unless-stopped
 
   uptime-kuma:
@@ -147,6 +155,10 @@ services:
       # So `up uptime-kuma` also starts the Docker API the seeded Docker host
       # points at.
       - docker-proxy
+    networks:
+      # `default` for the monitors' targets, `docker-api` for the Docker host.
+      - default
+      - docker-api
     volumes:
       - kuma-data:/app/data
     healthcheck:
@@ -401,6 +413,11 @@ services:
     depends_on:
       confluence-db:
         condition: service_healthy
+
+networks:
+  # Kuma and the Docker socket proxy only (#978). `internal`: no route out.
+  docker-api:
+    internal: true
 
 volumes:
   gitea-data:
