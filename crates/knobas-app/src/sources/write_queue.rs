@@ -123,12 +123,11 @@ pub async fn submit_linked_in_background(
     arrival_linkable(&state.pool, &payload, &ticket).await?;
     let (queued, source_id) = queue(state, payload).await?;
     hold_arrival_link(&state.pool, queued.id, &ticket).await?;
-    let reread = source_id.clone();
     send_in_background_then(
         state,
         source_id.clone(),
         queued.id,
-        reread,
+        source_id.clone(),
         move |state| async move {
             resolve_arrivals(&state.pool, state.registry.as_ref(), &source_id).await;
         },
@@ -136,9 +135,9 @@ pub async fn submit_linked_in_background(
     Ok(queued)
 }
 
-/// Hold on write `write_id` the ticket what it makes is to be linked to once
-/// it arrives (#1050): `knobas.write_queue.link_to`, resolved by
-/// [`link_arrivals`].
+/// Store `ticket` on write `write_id` as the job that what the write makes is
+/// linked to once it arrives (#1050): `knobas.write_queue.link_to`, resolved
+/// by [`link_arrivals`].
 ///
 /// # Errors
 ///
