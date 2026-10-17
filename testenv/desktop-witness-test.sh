@@ -487,6 +487,8 @@ check "a count with no date" 2 "$(notes_total "$(printf '2 notes\n')")"
 check "a screen with no notes line is unreadable, not zero" x \
     "$(notes_total "$(printf 'Your notes\nExport notes as Markdown\nMove 3 notes\n')")"
 check "an empty screen is unreadable" x "$(notes_total "")"
+check "a sentence that only contains *No notes* is not the count" 3 \
+    "$(notes_total "$(printf 'No notes were moved\n3 notes, from 2 May\n')")"
 check "two notes lines are ambiguous, not the first" x \
     "$(notes_total "$(printf '1 note, from 1 May\n4 notes\n')")"
 
