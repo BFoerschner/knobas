@@ -5855,8 +5855,10 @@ pub async fn docs_edit_section_payload(
 
 /// *New page* (#862, R-10.16): queue a `CreatePage` under a mirrored page,
 /// its body the editor's plain text in the source's markup. With `link_to`
-/// (a ticket's entity id, *Link it to <job>*), the new page is linked to it
-/// once the write has landed and a sync has brought the page in.
+/// (a ticket's entity id, *Link it to <job>*), the ticket is held with the
+/// write and the new page is linked to it once the write has landed and a
+/// sync has brought the page in, on whichever tick that is (#1121,
+/// [`create_page_in_background`]).
 ///
 /// # Errors
 ///

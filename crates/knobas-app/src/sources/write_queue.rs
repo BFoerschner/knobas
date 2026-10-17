@@ -354,15 +354,15 @@ pub async fn link_on_arrival(
     let op: WriteOp = serde_json::from_value(write.payload).map_err(IpcError::internal)?;
     let repo_of =
         |entity: &str| knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal);
-    let mut relation = crate::commands::entity::DEFAULT_RELATION;
+    let relation = match &op {
+        WriteOp::CreatePage { .. } => crate::docs::LINK_RELATION,
+        _ => crate::commands::entity::DEFAULT_RELATION,
+    };
     let made = match &op {
         WriteOp::CreateBranch { entity, name, .. } => {
             crate::start_work::queue::branch_named(pool, &repo_of(entity)?, name).await?
         }
-        WriteOp::CreatePage { .. } => {
-            relation = crate::docs::LINK_RELATION;
-            crate::docs::created_page(pool, write_id).await?
-        }
+        WriteOp::CreatePage { .. } => crate::docs::created_page(pool, write_id).await?,
         WriteOp::CreatePullRequest { entity, head, .. } => {
             match crate::start_work::queue::pull_request_on_head(
                 pool,

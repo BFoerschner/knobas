@@ -566,16 +566,14 @@ async fn the_end_of_a_run_resolves_what_the_source_owes() {
 }
 
 /// Refused before anything is queued: a write that makes nothing to link, a
-/// job that is not an id, and a job the mirror does not hold.
+/// job that is not an id, and a job the mirror does not hold. A new branch,
+/// pull request or page (#1121) may carry one.
 #[tokio::test]
-async fn only_a_new_branch_or_pull_request_is_linked_and_only_to_a_mirrored_job() {
+async fn only_a_new_branch_pull_request_or_page_is_linked_and_only_to_a_mirrored_job() {
     let pool = corpus("arrival_check").await;
-    arrival_linkable(&pool, &new_branch(), TICKET)
-        .await
-        .unwrap();
-    arrival_linkable(&pool, &new_pull_request(), TICKET)
-        .await
-        .unwrap();
+    for made in [new_branch(), new_pull_request(), new_page()] {
+        arrival_linkable(&pool, &made, TICKET).await.unwrap();
+    }
 
     let comment = serde_json::json!({ "Comment": { "entity": PR, "body": "hi" } });
     let refused = arrival_linkable(&pool, &comment, TICKET).await.unwrap_err();
@@ -688,11 +686,4 @@ async fn a_new_page_that_lands_on_a_later_tick_is_linked_to_its_job() {
     );
     assert!(relations(&pool, "wiki:999").await.is_empty());
     assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
-}
-
-/// A new page may carry a link on arrival, like a branch or pull request.
-#[tokio::test]
-async fn a_new_page_may_carry_a_link_on_arrival() {
-    let pool = corpus("arrival_page_check").await;
-    arrival_linkable(&pool, &new_page(), TICKET).await.unwrap();
 }
