@@ -11,7 +11,7 @@
 -->
 <script lang="ts">
   import AssetsView from "../../assets/AssetsView.svelte";
-  import { DEFAULT_CTX, parseHash, type Router } from "../../shell/router.svelte";
+  import { parseHash, type Router } from "../../shell/router.svelte";
 
   let { head, rest }: { head: string; rest: string[] } = $props();
 
@@ -21,15 +21,11 @@
     get route() {
       return parseHash(address);
     },
-    ctx: DEFAULT_CTX,
     go: (hash) => {
       location.hash = hash;
     },
     replace: () => {
       location.replace("#/deps");
-    },
-    back: () => {
-      location.hash = "#/deps";
     },
     canGoBack: false,
     canGoForward: false,
