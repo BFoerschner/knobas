@@ -225,7 +225,10 @@ CHANGE_BRANCH=seed/change-witness
 # from one request and none of the fixture's configurations is in the chain:
 # no fixture build number moves.
 CHAIN_PROJECT=SeededChain
-CHAIN_STEPS="Build Package Release"
+# Step names that no fixture configuration is called: the app's `under:` search
+# finds a configuration by its name, so a chain step named `Build` would be
+# found beside Payout's `Build`.
+CHAIN_STEPS="Compile Package Release"
 CHAIN_BRANCH=feature/PAY-231-sepa-retry
 
 # One VCS root per project, since both Payout configurations build the same
@@ -793,6 +796,17 @@ drop_chain_built_from_another_gitea() {
 
 ensure_chain() {
   drop_chain_built_from_another_gitea
+  # A chain an older version of this script made, with other steps, goes whole.
+  rest GET "/app/rest/projects/id:$CHAIN_PROJECT/buildTypes?fields=buildType(id)"
+  if [ "$REST_STATUS" = "200" ]; then
+    _have=$(printf '%s' "$REST_BODY" | jq -r '[.buildType[]?.id] | sort | join(" ")')
+    _want=$(for _s in $CHAIN_STEPS; do echo "${CHAIN_PROJECT}_$_s"; done | sort | paste -sd' ' -)
+    if [ -n "$_have" ] && [ "$_have" != "$_want" ]; then
+      rest DELETE "/app/rest/projects/id:$CHAIN_PROJECT"
+      expect "delete project $CHAIN_PROJECT, which an older seed made with other steps" 200 204
+      say "deleted project $CHAIN_PROJECT: it held '$_have', wanted '$_want'; it is made again"
+    fi
+  fi
   ensure_project "$CHAIN_PROJECT"
   ensure_vcs_root "$CHAIN_PROJECT"
   _root=$(vcs_root_id "$CHAIN_PROJECT")

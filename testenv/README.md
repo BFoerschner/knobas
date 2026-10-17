@@ -521,7 +521,7 @@ invents none, exactly as mockd does.
 **A build chain, for the chain views (#1010).** The Builds view's chain line
 and the run's *Chain on <branch>* panel (#857) need configurations joined by
 snapshot dependencies, which the fixture has none of. The seed adds project
-`SeededChain` under `_Root` with `SeededChain_Build`, `SeededChain_Package`
+`SeededChain` under `_Root` with `SeededChain_Compile`, `SeededChain_Package`
 and `SeededChain_Release`, each building payout-service through a VCS root of
 its own and each waiting on the one before, and queues one `Release` build on
 `feature/PAY-231-sepa-retry`, which runs all three. It is **not** in
