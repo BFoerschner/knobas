@@ -4994,3 +4994,29 @@ Implementer, PR for #1004.
   run has a revision. **Reversing:** low (fill it on `pipeline_runs` only).
 - **The run page's commit is six characters**, the length the Runs table's *VCS change a41f2c*
   already uses (`shortSha`), where the view's chip was TeamCity's twelve. **Reversing:** trivial.
+
+Merge-manager (deep pass):
+
+- **Deviation 18 stands within ADR-0013; the ADR is not amended.** The ADR freezes what mockd is
+  for: no mock is a witness, no Confluence half, no new system. It also keeps mockd's tests "until
+  the live suites assert the same things", and those tests run the adapter's real requests. Under
+  deviation 6, a `fields=` name mockd does not know is a 400. So once `BUILD_FIELDS` asks for
+  `agent(name)`, which the ticket's triage comment requires, every mockd-backed TeamCity sync would
+  fail unless mockd knows the key. #729 settled the same case on 2026-10-13 by adding `revisions`
+  to `build_json`. The refusals cited against "nothing new" (#297's probe, #643's sub-task, the
+  configuration-view route) were a new route or new fixture records offered as a witness. This
+  change adds a key on an existing route, and the value is the test environment's fixed agent
+  name. The witness stays `teamcity-live-seeded` (24/24 + 4/4 on this PR). **Reversing:** low
+  (drop the key and `agent(name)` together, or ask Björn to state in ADR-0013 whether served keys
+  count as "new").
+- **The commit lookup by sha alone is accepted for this ticket; disambiguation is #1144
+  (backlog).** A fork or second-forge mirror holds the same sha, and `distinct on` then picks the
+  lowest entity id, possibly in the other repository. #665's view row matched by repository URL
+  and sha. `RunRow` carries no repository, and fetching the VCS root URL is a new declaration
+  outside this ticket. The commit's content is the same either way. **Reversing:** low.
+- **The `current_step` excuse is accepted.** It mirrors #961's `started_by` excuse, and both
+  mutants are pinned. A kind that declares `current_step` but no `started` is never judged on it,
+  which the §10.8 entry says. On the live side, only the finished direction is witnessed (1187
+  `None`). The in-flight value comes from the same `running-info.currentStageText` that the
+  view's *Now* fact read before, so this gap was already there and is not new here.
+  **Reversing:** low.
