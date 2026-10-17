@@ -3937,5 +3937,5 @@ Implementer, one PR for both.
   **Reversing:** low.
 - **The seeded testenv repositories carry neither a team nor a language** (no source file on any
   default branch, every person through *Owners*), so the by-eye check on testenv data cannot see
-  either. The live suite witnesses both on a repository it makes and removes; seeding them is a
-  follow-up. **Reversing:** n/a.
+  either. The live suite witnesses both on a repository it makes and removes; seeding them is
+  follow-up #1045. **Reversing:** n/a.
