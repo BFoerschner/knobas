@@ -782,6 +782,87 @@ else
   created "start $SPRINT_NAME"
 fi
 
+# -- a Kanban board over PAY and OPS, and a favourite filter (#877) -----------
+# The Jira views' witness, beside the Scrum board above: `PAY and OPS flow`, a
+# Kanban board over `project in (PAY, OPS) ORDER BY Rank ASC` -- so a source
+# that syncs PAY alone finds it through PAY and gets OPS keys it does not
+# sync -- with Jira's own default Kanban sub-filter and a limit of 2 on its
+# In Progress column. And `PAY without a fix version`, a favourite filter with
+# a clause knobas cannot translate (it syncs no fix versions), for #878/#880.
+# The Agile REST makes the board and reads its configuration back; the
+# limit is set through Jira Software's own board-settings REST
+# (`/rest/greenhopper/1.0/rapidviewconfig`), which is what the board's
+# Columns settings page sends, because the Agile REST has no write for it.
+# Each step is a skip when it is already so, and the result is read back
+# through `/rest/agile/1.0/board/{id}/configuration` -- the read the adapter
+# makes -- and the seed fails if it is not what this comment says.
+FLOW_BOARD='PAY and OPS flow'
+FLOW_LIMIT=2
+FAV_FILTER='PAY without a fix version'
+jira GET "/rest/agile/1.0/board?name=$(urlenc "$FLOW_BOARD")&type=kanban"
+expect "find board $FLOW_BOARD" 200
+FLOW_ID=$(printf '%s' "$API_BODY" | jq -r --arg n "$FLOW_BOARD" '[.values[] | select(.name == $n)][0].id // empty')
+if [ -n "$FLOW_ID" ]; then
+  skip "board $FLOW_BOARD"
+else
+  jira POST /rest/api/2/filter "$(jq -n --arg n "$FLOW_BOARD" \
+      '{name: "\($n) filter", jql: "project in (PAY, OPS) ORDER BY Rank ASC", favourite: false}')"
+  expect "create the filter of $FLOW_BOARD" 200
+  _filter=$(printf '%s' "$API_BODY" | jq -r .id)
+  jira POST /rest/agile/1.0/board "$(jq -n --arg n "$FLOW_BOARD" --arg f "$_filter" \
+      '{name: $n, type: "kanban", filterId: ($f | tonumber)}')"
+  expect "create board $FLOW_BOARD" 200 201
+  FLOW_ID=$(printf '%s' "$API_BODY" | jq -r .id)
+  created "board $FLOW_BOARD (id $FLOW_ID, filter $_filter)"
+fi
+jira GET "/rest/agile/1.0/board/$FLOW_ID/configuration"
+expect "configuration of $FLOW_BOARD" 200
+_config=$API_BODY
+jira GET "/rest/api/2/status"
+expect "statuses" 200
+IN_PROGRESS_ID=$(printf '%s' "$API_BODY" | jq -r '[.[] | select(.name == "In Progress")][0].id // empty')
+[ -n "$IN_PROGRESS_ID" ] || die "this Jira has no In Progress status"
+if printf '%s' "$_config" | jq -e --arg s "$IN_PROGRESS_ID" --argjson m "$FLOW_LIMIT" \
+     '.columnConfig.constraintType == "issueCount"
+      and any(.columnConfig.columns[]; any(.statuses[]; .id == $s) and .max == $m)' >/dev/null; then
+  skip "limit $FLOW_LIMIT on the In Progress column of $FLOW_BOARD"
+else
+  jira GET "/rest/greenhopper/1.0/rapidviewconfig/editmodel.json?rapidViewId=$FLOW_ID"
+  expect "board settings of $FLOW_BOARD" 200
+  _columns=$(printf '%s' "$API_BODY" | jq --arg s "$IN_PROGRESS_ID" --arg m "$FLOW_LIMIT" '
+    [.rapidListConfig.mappedColumns[]
+     | {id, name, isKanPlanColumn: (.isKanPlanColumn // false),
+        mappedStatuses: [.mappedStatuses[] | {id}],
+        min: (if .min == null then "" else (.min | tostring) end),
+        max: (if any(.mappedStatuses[]; .id == $s) then $m
+              elif .max == null then "" else (.max | tostring) end)}]')
+  jira PUT /rest/greenhopper/1.0/rapidviewconfig/columns "$(jq -n --arg b "$FLOW_ID" --argjson c "$_columns" \
+      '{rapidViewId: ($b | tonumber), currentStatisticsField: {id: "issueCount_"}, mappedColumns: $c}')"
+  expect "set the limit on $FLOW_BOARD" 200 204
+  created "limit $FLOW_LIMIT on the In Progress column of $FLOW_BOARD"
+  jira GET "/rest/agile/1.0/board/$FLOW_ID/configuration"
+  expect "configuration of $FLOW_BOARD" 200
+  _config=$API_BODY
+  printf '%s' "$_config" | jq -e --arg s "$IN_PROGRESS_ID" --argjson m "$FLOW_LIMIT" \
+     '.columnConfig.constraintType == "issueCount"
+      and any(.columnConfig.columns[]; any(.statuses[]; .id == $s) and .max == $m)' >/dev/null \
+    || die "$FLOW_BOARD: the limit did not read back: $(printf '%s' "$_config" | jq -c .columnConfig)"
+fi
+FLOW_SUB=$(printf '%s' "$_config" | jq -r '.subQuery.query // empty')
+[ -n "$FLOW_SUB" ] || die "$FLOW_BOARD has no sub-filter; a new Kanban board gets Jira's default one"
+jira GET /rest/api/2/filter/favourite
+expect "favourite filters" 200
+FAV_ID=$(printf '%s' "$API_BODY" | jq -r --arg n "$FAV_FILTER" '[.[] | select(.name == $n)][0].id // empty')
+if [ -n "$FAV_ID" ]; then
+  skip "favourite filter $FAV_FILTER"
+else
+  jira POST /rest/api/2/filter "$(jq -n --arg n "$FAV_FILTER" \
+      '{name: $n, jql: "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC", favourite: true}')"
+  expect "create favourite filter $FAV_FILTER" 200
+  FAV_ID=$(printf '%s' "$API_BODY" | jq -r .id)
+  created "favourite filter $FAV_FILTER (id $FAV_ID)"
+fi
+
 # -- jira's ids to seed-state.json --------------------------------------------
 JIRA_IDS='[]'
 for row in $ISSUES; do
@@ -817,6 +898,15 @@ record '.jira += {
                           --arg it "$NARROW_TYPE" --argjson st "$NARROW_STATUSES" \
                           '{key: $k, name: $n, template_key: $t, issue_type: $it, statuses: $st}')" \
         '{template: $t, author: $a, statuses: $st, epic_link: $el, projects: $pr, issues: $ids, unreachable: $un, narrowing: $nw, sprint: $sp}')"
+# shellcheck disable=SC2016
+record '.jira += {views: $v}' "$(jq -n --arg b "$FLOW_ID" --arg n "$FLOW_BOARD" --arg q "$FLOW_SUB" \
+    --argjson m "$FLOW_LIMIT" --arg f "$FAV_ID" --arg fn "$FAV_FILTER" \
+    '{kanban: {board_id: ($b | tonumber), name: $n, sub_query: $q, limit_column: "In Progress", limit: $m,
+               jql: "project in (PAY, OPS) ORDER BY Rank ASC"},
+      favourite_filter: {id: ($f | tonumber), name: $fn,
+                         jql: "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+                         untranslatable: "fixVersion is EMPTY"},
+      _comment: "Seeded for the Jira views (#877): a Kanban board over PAY and OPS with Jira'"'"'s default sub-filter and a limit on In Progress, and a favourite filter with a clause knobas cannot translate."}')"
 
 fi  # want jira
 

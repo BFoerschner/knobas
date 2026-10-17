@@ -674,6 +674,15 @@ mod tests {
             view: view.clone(),
             count: None,
             unreadable: None,
+            jira: Some(JiraSource {
+                kind: String::new(),
+                board_type: None,
+                jql: String::new(),
+                sub_query: None,
+                sprint: None,
+                last_read: chrono::DateTime::UNIX_EPOCH,
+                web_url: None,
+            }),
         })
         .unwrap();
         let draft = serde_json::to_value(draft()).unwrap();
@@ -684,6 +693,7 @@ mod tests {
             .iter()
             .chain(&keys(&row["columns"][0]))
             .chain(&keys(&row["list_sort"]))
+            .chain(&keys(&row["jira"]))
             .chain(&keys(&draft))
         {
             assert!(
@@ -697,6 +707,7 @@ mod tests {
             "export interface TicketViewDraft {",
             "export interface ViewColumn {",
             "export interface ListSort {",
+            "export interface JiraSource {",
             "\"ticket_views\"",
             "\"save_ticket_view\"",
             "\"delete_ticket_view\"",
