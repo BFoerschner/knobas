@@ -73,6 +73,50 @@ pub(crate) trait JiraApi: Send + Sync {
     /// `GET /rest/api/2/issue/{key}/worklog` -- no parameters exist on this
     /// resource, so there is no paging to do.
     async fn worklogs(&self, key: &str) -> Result<WorklogPage, SourceError>;
+
+    // ---- Jira views (#877): Jira Software's Agile REST, read-only ----
+    //
+    // Each defaults to the 404 a Jira without Jira Software answers, which is
+    // what the sync run's fakes stand for: they model no boards, and
+    // `crate::views` reads a 404 on the board listing as "no boards here".
+
+    /// `GET rest/agile/1.0/board?projectKeyOrId=..`, one page.
+    async fn boards(
+        &self,
+        _project: &str,
+        _start_at: u32,
+        _max_results: u32,
+    ) -> Result<crate::views::BoardPage, SourceError> {
+        Err(no_agile())
+    }
+    /// `GET rest/agile/1.0/board/{id}/configuration`.
+    async fn board_configuration(
+        &self,
+        _board: u64,
+    ) -> Result<crate::views::BoardConfiguration, SourceError> {
+        Err(no_agile())
+    }
+    /// `GET rest/agile/1.0/board/{id}/sprint?state=active`.
+    async fn active_sprints(&self, _board: u64) -> Result<crate::views::SprintPage, SourceError> {
+        Err(no_agile())
+    }
+    /// `GET rest/api/2/filter/{id}`.
+    async fn filter(&self, _id: &str) -> Result<crate::views::Filter, SourceError> {
+        Err(no_agile())
+    }
+    /// `GET rest/api/2/status`: every status, for the names a board's
+    /// columns hold by id.
+    async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
+        Err(no_agile())
+    }
+}
+
+/// The answer of a Jira that has no Jira Software, so no Agile REST.
+fn no_agile() -> SourceError {
+    SourceError::Protocol {
+        status: Some(404),
+        message: "this Jira answers no Agile REST".to_owned(),
+    }
 }
 
 /// The real endpoints. Every path and every parameter here is declared in
@@ -142,6 +186,47 @@ impl JiraApi for crate::http::JiraHttp {
         // No parameters: the WADL declares none on this resource.
         self.get_json(&format!("rest/api/2/issue/{key}/worklog"), &[])
             .await
+    }
+
+    async fn boards(
+        &self,
+        project: &str,
+        start_at: u32,
+        max_results: u32,
+    ) -> Result<crate::views::BoardPage, SourceError> {
+        self.get_json(
+            "rest/agile/1.0/board",
+            &[
+                ("projectKeyOrId", project.to_owned()),
+                ("startAt", start_at.to_string()),
+                ("maxResults", max_results.to_string()),
+            ],
+        )
+        .await
+    }
+
+    async fn board_configuration(
+        &self,
+        board: u64,
+    ) -> Result<crate::views::BoardConfiguration, SourceError> {
+        self.get_json(&format!("rest/agile/1.0/board/{board}/configuration"), &[])
+            .await
+    }
+
+    async fn active_sprints(&self, board: u64) -> Result<crate::views::SprintPage, SourceError> {
+        self.get_json(
+            &format!("rest/agile/1.0/board/{board}/sprint"),
+            &[("state", "active".to_owned())],
+        )
+        .await
+    }
+
+    async fn filter(&self, id: &str) -> Result<crate::views::Filter, SourceError> {
+        self.get_json(&format!("rest/api/2/filter/{id}"), &[]).await
+    }
+
+    async fn statuses(&self) -> Result<Vec<crate::views::Status>, SourceError> {
+        self.get_json("rest/api/2/status", &[]).await
     }
 }
 

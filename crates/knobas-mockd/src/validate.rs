@@ -167,6 +167,12 @@ pub(crate) async fn jira_guard(
         return jira_error(StatusCode::NOT_FOUND, format!("No such resource: {path}"));
     };
 
+    // A Jira without Jira Software (deviation 17): no Agile REST, and asking
+    // is not a violation, because a Core instance answers exactly this.
+    if rest.starts_with("agile/") {
+        return jira_error(StatusCode::NOT_FOUND, format!("No such resource: {path}"));
+    }
+
     // 2. Path and verb.
     let allowed_query = match allowlist::lookup(&method, rest) {
         allowlist::Lookup::Allowed { query } => query,

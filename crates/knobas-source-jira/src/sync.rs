@@ -219,21 +219,56 @@ impl SyncRun<'_> {
             }
         }
 
-        match (emitted, watermark) {
-            // Battery clause 2: nothing happened, so the position did not move.
-            // Returning the *input string* rather than a re-encoded struct makes
-            // that byte-identical by construction.
-            (0, _) => Ok(cursor.unwrap_or_else(|| JiraCursor::empty(offset).encode())),
-            // Items arrived, but neither they nor the previous cursor carry a
-            // readable `updated`; advancing to anything would be a guess. An
-            // issue with no `updated` at all is therefore re-delivered on every
-            // run -- it never enters `seen`, because `advanced` bounds that set
-            // by the timestamp such an issue does not have. Real Jira always
-            // sets the field, and mockd synthesizes it for the fixture's one
-            // null, so this is a tolerated shape and not a supported one.
-            (_, None) => Ok(cursor.unwrap_or_else(|| JiraCursor::empty(offset).encode())),
-            (_, Some(w)) => Ok(JiraCursor::advanced(w, offset, &seen_in_window).encode()),
+        // The Jira views (#877), after the issues: their keys are the issues'
+        // keys, and a view read first would name tickets this run had not yet
+        // mirrored.
+        let views = crate::views::read(self.api, self.cfg, self.base_url).await?;
+        let delivered = previous.as_ref().map(|c| c.views.as_slice()).unwrap_or_default();
+        let now: Vec<crate::cursor::SeenView> = views
+            .iter()
+            .map(|view| crate::cursor::SeenView {
+                k: view.key.clone(),
+                h: crate::fingerprint::of(&view.payload),
+            })
+            .collect();
+        let mut views_emitted = 0_usize;
+        for (view, seen) in views.iter().zip(&now) {
+            if delivered.contains(seen) {
+                continue;
+            }
+            sink.item(crate::views::item(self.source_id, view)).await?;
+            views_emitted += 1;
         }
+        for old in delivered {
+            if !now.iter().any(|seen| seen.k == old.k) {
+                sink.item(crate::views::gone(self.source_id, &old.k)).await?;
+                views_emitted += 1;
+            }
+        }
+
+        // Battery clause 2: nothing happened, so the position did not move.
+        // Returning the *input string* rather than a re-encoded struct makes
+        // that byte-identical by construction.
+        if emitted == 0 && views_emitted == 0 {
+            if let Some(cursor) = cursor {
+                return Ok(cursor);
+            }
+        }
+        let mut next = match (emitted, watermark) {
+            // No issue moved: the issue half of the position is where it was.
+            // Also where items arrived but neither they nor the previous
+            // cursor carry a readable `updated`; advancing to anything would
+            // be a guess. An issue with no `updated` at all is therefore
+            // re-delivered on every run -- it never enters `seen`, because
+            // `advanced` bounds that set by the timestamp such an issue does
+            // not have. Real Jira always sets the field, and mockd synthesizes
+            // it for the fixture's one null, so this is a tolerated shape and
+            // not a supported one.
+            (0, _) | (_, None) => previous.unwrap_or_else(|| JiraCursor::empty(offset)),
+            (_, Some(w)) => JiraCursor::advanced(w, offset, &seen_in_window),
+        };
+        next.views = now;
+        Ok(next.encode())
     }
 
     /// Fill in what `/search` truncated.

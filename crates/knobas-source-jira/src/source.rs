@@ -437,7 +437,7 @@ mod tests {
         assert_eq!(d.id, "jira-eu");
         assert_eq!(d.adapter_kind, crate::ADAPTER_KIND);
         assert_eq!(d.name, "Tidewater Jira");
-        assert_eq!(d.entity_kinds.len(), 1);
+        assert_eq!(d.entity_kinds.len(), 2, "tickets and Jira views (#877)");
         assert_eq!(d.capabilities, vec![knobas_source::Capability::Write]);
         assert_eq!(
             d.write_ops,
