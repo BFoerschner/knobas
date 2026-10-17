@@ -201,7 +201,11 @@ async fn a_run_is_put_on_the_queue_once_even_on_a_busy_answer() {
         let label = format!("{op:?}");
         let error = source(&server).write(op).await.expect_err("503");
         assert_eq!(error.status(), Some(503), "{label}");
-        assert_eq!(server.received_requests().await.unwrap().len(), 1, "{label}");
+        assert_eq!(
+            server.received_requests().await.unwrap().len(),
+            1,
+            "{label}"
+        );
     }
 }
 

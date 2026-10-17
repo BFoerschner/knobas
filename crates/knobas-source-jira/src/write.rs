@@ -337,8 +337,12 @@ mod tests {
         });
         let auth = credential(Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
             .expect("a PAT is enough");
-        let http = JiraHttp::new(&format!("http://{addr}"), &crate::JiraConfig::default(), auth)
-            .expect("the client builds");
+        let http = JiraHttp::new(
+            &format!("http://{addr}"),
+            &crate::JiraConfig::default(),
+            auth,
+        )
+        .expect("the client builds");
         (http, hits)
     }
 
@@ -348,7 +352,9 @@ mod tests {
     #[tokio::test]
     async fn a_write_jira_would_repeat_is_sent_once() {
         let (http, hits) = busy();
-        super::comment(&http, "PAY-231", "bounded").await.unwrap_err();
+        super::comment(&http, "PAY-231", "bounded")
+            .await
+            .unwrap_err();
         assert_eq!(hits.load(Ordering::SeqCst), 1, "comment");
 
         let (http, hits) = busy();

@@ -431,7 +431,11 @@ async fn a_write_that_opted_out_of_retries_is_sent_once_when_it_times_out() {
         let request = client
             .request(Method::POST, "/rest/api/2/issue")
             .json(&serde_json::json!({ "fields": { "summary": "once" } }));
-        let request = if no_retry { request.no_retry() } else { request };
+        let request = if no_retry {
+            request.no_retry()
+        } else {
+            request
+        };
         let error = client.send(request).await.expect_err("nothing answers");
         (error, server.hits())
     }

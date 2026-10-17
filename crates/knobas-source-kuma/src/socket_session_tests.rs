@@ -80,14 +80,14 @@ impl Respond for Kuma {
             });
         }
         let packet = String::from_utf8_lossy(&request.body).into_owned();
-        let acted = engine.delivered.len();
+        let delivered_before = engine.delivered.len();
         let reply = engine.answer(&sid, &packet);
         if let Some(reply) = reply {
             let (_, queued) = engine.sessions.get_mut(&sid).expect("checked above");
             queued.push_back(reply);
         }
         let ok = ResponseTemplate::new(200).set_body_string("ok");
-        if engine.delivered.len() == acted {
+        if engine.delivered.len() == delivered_before {
             return ok;
         }
         if engine.reap_after_acting {
