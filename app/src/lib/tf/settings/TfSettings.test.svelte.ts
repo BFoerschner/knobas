@@ -181,7 +181,7 @@ test("Boards and filters: the choice and the favourite filters saved into the co
   const radios = [...boards.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
   expect(radios.map((radio) => radio.parentElement!.textContent!.replace(/\s+/g, " ").trim())).toEqual([
     "Boards on the projects this source syncs1 board",
-    "Only boards I marked as favourites in Jira",
+    "Only boards built on my favourite filters",
     "Every board I can see",
     "No boards",
   ]);
