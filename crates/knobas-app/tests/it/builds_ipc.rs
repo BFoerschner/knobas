@@ -1277,6 +1277,10 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
             serde_json::json!({ "type": "user", "user": { "username": "jonas" } }),
         ),
         (5, serde_json::json!({ "type": "buildType" })),
+        (
+            6,
+            serde_json::json!({ "type": "snapshotDependency", "user": { "username": me } }),
+        ),
     ];
     for (id, triggered) in cases {
         let at = format!("2026-08-21T0{id}:00:00Z");
@@ -1319,6 +1323,12 @@ async fn runs_carry_their_trigger_who_started_them_and_their_commit() {
             ),
             (Some(Trigger::Person), Some("jonas"), false, Some("a41f2c4")),
             (None, None, false, Some("a41f2c5")),
+            (
+                Some(Trigger::Chain),
+                Some(me.as_str()),
+                true,
+                Some("a41f2c6")
+            ),
         ]
     );
 

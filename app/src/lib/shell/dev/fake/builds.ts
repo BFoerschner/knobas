@@ -216,15 +216,21 @@ const READER = "mara";
 
 /**
  * How a fixture run was started (#961): prototype-6's story runs are VCS
- * changes, #1188 is the reader's, and the rest cycle through its `TRIG`.
+ * changes, #1188 is the reader's, and the rest cycle through its `TRIG`. A
+ * person's run of any step but a chain's last is the chain's, queued when
+ * they ran a later step (#1146, prototype-6's "Run… on any step runs the
+ * steps before it too"), so it still names them.
  */
 function startOf(config: string, no: number): Pick<RunRow, "trigger" | "started_by" | "started_by_me" | "revision"> {
   const revision = `${storyOf(config, no).commit}${"0".repeat(34)}`;
   const story = ["Payout_IntegrationTests-1187", "Payout_IntegrationTests-1186", "Payout_IntegrationTests-1185", "Payout_Build-1184"];
-  const pick = config === "Payout_Build" && no === 1188 ? READER : story.includes(`${config}-${no}`) ? null : TRIGGERS[no % TRIGGERS.length]!;
+  const readersRun = config === "Payout_Build" && no === 1188;
+  const pick = readersRun ? READER : story.includes(`${config}-${no}`) ? null : TRIGGERS[no % TRIGGERS.length]!;
   if (pick === null) return { trigger: "change", started_by: null, started_by_me: false, revision };
   if (pick === "schedule") return { trigger: "schedule", started_by: null, started_by_me: false, revision };
-  return { trigger: "person", started_by: pick, started_by_me: pick === READER, revision };
+  const chain = chainOf(config);
+  const chained = !readersRun && chain.length > 0 && chain.indexOf(config) < chain.length - 1;
+  return { trigger: chained ? "chain" : "person", started_by: pick, started_by_me: pick === READER, revision };
 }
 
 /** Each configuration's runs, newest first: its story, then 33 more. */

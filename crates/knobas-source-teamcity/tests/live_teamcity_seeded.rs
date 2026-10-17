@@ -1874,11 +1874,16 @@ async fn the_seeded_records_fill_the_builds_frame() {
         let how = knobas_core::payload::resolve_trigger(&b.payload, &run.trigger);
         let who = resolve_string(&b.payload, &run.started_by);
         if b.payload["triggered"]["type"] == "snapshotDependency" {
-            // A step the chain queued for a later step (#1010): the declared
-            // vocabulary (change, schedule, person) has no word for it, so it
-            // says nothing, as the adapter declares today (the account that
-            // queued the chain is still on the record, so `started_by` reads).
-            assert_eq!(how, None, "{}", b.entity);
+            // A step the chain queued for a later step (#1010): the chain
+            // started it (#1146), and the account that queued the chain is
+            // still on the record, so `started_by` reads.
+            assert_eq!(
+                how,
+                Some(knobas_core::payload::Trigger::Chain),
+                "{}",
+                b.entity
+            );
+            assert!(who.is_some(), "{} names who queued the chain", b.entity);
             continue;
         }
         assert!(
