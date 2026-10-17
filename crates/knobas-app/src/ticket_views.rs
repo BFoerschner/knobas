@@ -114,6 +114,28 @@ pub struct TicketViewRow {
     pub count: Option<u64>,
     /// The part of the text the grammar could not read, or `None`.
     pub unreadable: Option<String>,
+    /// Where a Jira view comes from (#877), or `None` on a view somebody made.
+    pub jira: Option<JiraSource>,
+}
+
+/// What Jira says about a Jira view (#877, `sync.jira_view`): enough for the
+/// views pane and *View settings* to say where it comes from.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct JiraSource {
+    /// `board` or `filter`.
+    pub kind: String,
+    /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
+    pub board_type: Option<String>,
+    /// The saved filter's JQL, as Jira holds it.
+    pub jql: String,
+    /// A Kanban board's sub-filter, or `None`.
+    pub sub_query: Option<String>,
+    /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, or `None`.
+    pub sprint: Option<serde_json::Value>,
+    /// When the last sync read it (RFC 3339).
+    pub last_read: chrono::DateTime<chrono::Utc>,
+    /// Where Jira shows it, or `None`.
+    pub web_url: Option<String>,
 }
 
 /// The columns a view is read from, in [`view_of`]'s terms; a macro so the
@@ -174,7 +196,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
     .fetch_all(pool)
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
-    let jira = jira_counts(pool, &views).await?;
+    let mut jira = jira_sources(pool, &views).await?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
     let readings = crate::commands::search::searcher(pool)
         .await?
@@ -186,43 +208,50 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
         .map(|(view, reading)| {
             // A Jira view counts what Jira put on it that knobas mirrors,
             // which is what its board draws (#877); its text is not its own.
-            let reading = match view.jira_ref.as_ref().and_then(|r| jira.get(r)) {
-                Some(count) => knobas_search::Reading::Count(*count),
+            let source = view.jira_ref.as_ref().and_then(|r| jira.remove(r));
+            let reading = match &source {
+                Some((count, _)) => knobas_search::Reading::Count(*count),
                 None => reading,
             };
+            let jira = source.map(|(_, source)| source);
             match reading {
                 knobas_search::Reading::Count(count) => TicketViewRow {
                     view,
                     count: Some(count),
                     unreadable: None,
+                    jira,
                 },
                 knobas_search::Reading::Unreadable(part) => TicketViewRow {
                     view,
                     count: None,
                     unreadable: Some(part),
+                    jira,
                 },
             }
         })
         .collect())
 }
 
-/// Per Jira view among `views`, how many of the tickets Jira put on it the
-/// mirror holds live (#877). A view whose `jira_ref` names no Jira view is
-/// absent, and is counted by its text like any other.
-async fn jira_counts(
+/// Per Jira view among `views`: how many of the tickets Jira put on it the
+/// mirror holds live, and where it comes from (#877). A view whose
+/// `jira_ref` names no Jira view is absent, and is counted by its text like
+/// any other.
+async fn jira_sources(
     pool: &PgPool,
     views: &[TicketView],
-) -> Result<std::collections::HashMap<String, u64>, IpcError> {
+) -> Result<std::collections::HashMap<String, (u64, JiraSource)>, IpcError> {
     let refs: Vec<&str> = views.iter().filter_map(|view| view.jira_ref.as_deref()).collect();
     if refs.is_empty() {
         return Ok(std::collections::HashMap::new());
     }
     let rows = sqlx::query(
-        "select v.entity_id,
+        "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
+                v.last_read, i.web_url,
                 (select count(*) from sync.jira_view_member m
-                   join sync.live_item i on i.entity_id = m.entity_id and i.kind = 'ticket'
+                   join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
                   where m.view_id = v.entity_id) as n
            from sync.jira_view v
+           join sync.item i on i.entity_id = v.entity_id
           where v.entity_id = any($1)",
     )
     .bind(&refs)
@@ -232,7 +261,16 @@ async fn jira_counts(
         .iter()
         .map(|row| {
             let n: i64 = row.get("n");
-            (row.get("entity_id"), u64::try_from(n).unwrap_or(0))
+            let source = JiraSource {
+                kind: row.get("ref_kind"),
+                board_type: row.get("board_type"),
+                jql: row.get("jql"),
+                sub_query: row.get("sub_query"),
+                sprint: row.get("sprint"),
+                last_read: row.get("last_read"),
+                web_url: row.get("web_url"),
+            };
+            (row.get("entity_id"), (u64::try_from(n).unwrap_or(0), source))
         })
         .collect())
 }

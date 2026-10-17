@@ -136,6 +136,32 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
     assert_eq!(row.view.columns.len(), 3);
     assert_eq!(row.view.columns[1].limit, Some(2));
     assert_eq!(row.count, Some(4), "the four it mirrors, not WEB-5 and not every ticket");
+    let jira = row.jira.expect("where it comes from");
+    assert_eq!((jira.kind.as_str(), jira.board_type.as_deref()), ("board", Some("kanban")));
+    assert_eq!(jira.jql, format!("project = {p}"));
+    assert_eq!(jira.sprint, None);
+
+    // A view somebody made says nothing about Jira.
+    let own = ticket_views::save(
+        &pool,
+        TicketViewDraft {
+            id: None,
+            name: format!("{p} mine"),
+            group: "Mine".into(),
+            position: None,
+            query: format!("project:{p}"),
+            layout: "board".into(),
+            columns: Vec::new(),
+            lanes: "none".into(),
+            card_fields: vec!["type".into()],
+            list_columns: vec!["key".into()],
+            list_sort: None,
+            jira_ref: None,
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(listed(&pool, &own.id).await.unwrap().jira, None);
 }
 
 #[tokio::test]
