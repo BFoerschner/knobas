@@ -594,3 +594,105 @@ async fn only_a_new_branch_or_pull_request_is_linked_and_only_to_a_mirrored_job(
         .unwrap();
     assert_eq!(count, 0, "a check queues nothing");
 }
+
+// -- *Link it to <job>* on *New page* (#862, #1121) --------------------------
+
+const WIKI: &str = "wiki";
+const PARENT: &str = "wiki:100";
+const NEW_PAGE: &str = "wiki:4242";
+
+fn new_page() -> serde_json::Value {
+    serde_json::json!({ "CreatePage": {
+        "parent": PARENT, "space": "ENG", "title": "Retry runbook", "body": "<p>Steps</p>"
+    }})
+}
+
+/// A `CreatePage` as `queue` leaves it, under its parent.
+async fn queued_page(pool: &PgPool) -> i64 {
+    knobas_core::write_queue::queue(
+        pool,
+        WIKI,
+        &EntityRef::parse(PARENT).unwrap(),
+        "create_page",
+        new_page(),
+        serde_json::json!({}),
+    )
+    .await
+    .unwrap()
+    .id
+}
+
+/// The issue's criterion: a new page whose write waits (its source down) and
+/// lands on a later tick is linked to its job by the first sync that brings
+/// the page in, by the `documents` relation *Link it to <job>* draws. The page
+/// is the one the write's settle named (`remote_id`), so a page of the same
+/// title that some other hand made is not taken for it.
+#[tokio::test]
+async fn a_new_page_that_lands_on_a_later_tick_is_linked_to_its_job() {
+    let pool = corpus("arrival_page").await;
+    item(&pool, PARENT, "page", "Payments", serde_json::json!({})).await;
+    let id = queued_page(&pool).await;
+    hold_arrival_link(&pool, id, TICKET).await.unwrap();
+    knobas_core::write_queue::wait(
+        &pool,
+        id,
+        knobas_core::write_queue::WaitReason::Unreachable,
+        Some("connection refused"),
+    )
+    .await
+    .unwrap();
+    item(
+        &pool,
+        "wiki:999",
+        "page",
+        "Retry runbook",
+        serde_json::json!({}),
+    )
+    .await;
+    assert!(
+        link_arrivals(&pool, &declarations(), WIKI)
+            .await
+            .unwrap()
+            .is_empty(),
+        "a waiting write links nothing"
+    );
+
+    // A later tick sends it; Confluence names the page it made.
+    knobas_core::write_queue::sent(&pool, id, Some("4242"))
+        .await
+        .unwrap();
+    assert!(
+        link_arrivals(&pool, &declarations(), WIKI)
+            .await
+            .unwrap()
+            .is_empty(),
+        "the page is not mirrored yet, and the same-titled one is not it"
+    );
+    assert_eq!(owed(&pool, id).await.as_deref(), Some(TICKET), "still owed");
+
+    item(
+        &pool,
+        NEW_PAGE,
+        "page",
+        "Retry runbook",
+        serde_json::json!({}),
+    )
+    .await;
+    assert_eq!(
+        link_arrivals(&pool, &declarations(), WIKI).await.unwrap(),
+        vec![NEW_PAGE.to_owned()]
+    );
+    assert_eq!(
+        relations(&pool, NEW_PAGE).await,
+        vec![("documents".to_owned(), true)]
+    );
+    assert!(relations(&pool, "wiki:999").await.is_empty());
+    assert_eq!(owed(&pool, id).await, None, "drawn, so no longer owed");
+}
+
+/// A new page may carry a link on arrival, like a branch or pull request.
+#[tokio::test]
+async fn a_new_page_may_carry_a_link_on_arrival() {
+    let pool = corpus("arrival_page_check").await;
+    arrival_linkable(&pool, &new_page(), TICKET).await.unwrap();
+}

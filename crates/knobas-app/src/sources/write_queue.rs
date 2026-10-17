@@ -281,13 +281,13 @@ impl<E: knobas_sync::scheduler::SyncEvents> knobas_sync::scheduler::SyncEvents f
 }
 
 /// Whether `payload` may carry a link on arrival to `ticket` (#984): a
-/// `CreateBranch` or a `CreatePullRequest`, the two writes that make
-/// something a job reaches, and a ticket the mirror holds, since
-/// `create_link` refuses an end it does not hold.
+/// `CreateBranch`, a `CreatePullRequest` or a `CreatePage` (#1121), the
+/// writes that make something a job reaches, and a ticket the mirror holds,
+/// since `create_link` refuses an end it does not hold.
 ///
 /// # Errors
 ///
-/// `invalid` for a payload that is not one of the two, or a ticket that is
+/// `invalid` for a payload that is not one of the three, or a ticket that is
 /// not an entity id; `not_found` for a ticket the mirror does not hold;
 /// `internal` if the read fails.
 pub async fn arrival_linkable(
@@ -299,10 +299,12 @@ pub async fn arrival_linkable(
         .map_err(|error| IpcError::invalid(format!("not a write operation: {error}")))?;
     if !matches!(
         op,
-        WriteOp::CreateBranch { .. } | WriteOp::CreatePullRequest { .. }
+        WriteOp::CreateBranch { .. }
+            | WriteOp::CreatePullRequest { .. }
+            | WriteOp::CreatePage { .. }
     ) {
         return Err(IpcError::invalid(format!(
-            "only a new branch or pull request is linked once it arrives, not {:?}",
+            "only a new branch, pull request or page is linked once it arrives, not {:?}",
             op.identifier()
         )));
     }
@@ -322,9 +324,11 @@ pub async fn arrival_linkable(
 
 /// Link what write `write_id` made to `ticket`, once it has: the branch a
 /// sent `CreateBranch` named, or the pull request open on a sent
-/// `CreatePullRequest`'s head, as the mirror holds them (#984). Answers the
-/// entity linked, or `None` where the write was not sent or what it made is
-/// not mirrored yet.
+/// `CreatePullRequest`'s head, as the mirror holds them (#984), or the page a
+/// sent `CreatePage` made, by the id its settle stamped
+/// (`docs::created_page`, #1121) and drawn as `docs::LINK_RELATION`. Answers
+/// the entity linked, or `None` where the write was not sent or what it made
+/// is not mirrored yet.
 ///
 /// The look-ups are start work's own (`start_work::queue`): the branch by its
 /// name in the repository, the pull request open on the head (a merged or
@@ -350,9 +354,14 @@ pub async fn link_on_arrival(
     let op: WriteOp = serde_json::from_value(write.payload).map_err(IpcError::internal)?;
     let repo_of =
         |entity: &str| knobas_core::entity::EntityRef::parse(entity).map_err(IpcError::internal);
+    let mut relation = crate::commands::entity::DEFAULT_RELATION;
     let made = match &op {
         WriteOp::CreateBranch { entity, name, .. } => {
             crate::start_work::queue::branch_named(pool, &repo_of(entity)?, name).await?
+        }
+        WriteOp::CreatePage { .. } => {
+            relation = crate::docs::LINK_RELATION;
+            crate::docs::created_page(pool, write_id).await?
         }
         WriteOp::CreatePullRequest { entity, head, .. } => {
             match crate::start_work::queue::pull_request_on_head(
@@ -372,13 +381,7 @@ pub async fn link_on_arrival(
     let Some(made) = made else {
         return Ok(None);
     };
-    crate::protocol::draw_link(
-        pool,
-        &made,
-        ticket,
-        crate::commands::entity::DEFAULT_RELATION,
-    )
-    .await?;
+    crate::protocol::draw_link(pool, &made, ticket, relation).await?;
     Ok(Some(made))
 }
 
