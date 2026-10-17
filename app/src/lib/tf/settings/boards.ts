@@ -16,10 +16,14 @@ export const BOARDS_SECTION = "boards-and-filters";
 
 export type BoardScope = "synced" | "favourites" | "all" | "none";
 
-/** The choices, in prototype-6's words and order. */
+/**
+ * The choices, in prototype-6's order. The second reads a favourite *filter*, not a board star
+ * (Jira DC has no favourite-board read we can witness, #878), so its label says that rather
+ * than prototype-6's "boards I marked as favourites" (#1096).
+ */
 export const BOARD_SCOPES: readonly (readonly [BoardScope, string])[] = [
   ["synced", "Boards on the projects this source syncs"],
-  ["favourites", "Only boards I marked as favourites in Jira"],
+  ["favourites", "Only boards built on my favourite filters"],
   ["all", "Every board I can see"],
   ["none", "No boards"],
 ];

@@ -4817,3 +4817,14 @@ Merge-manager:
   successful settle stamped, so the orphan of a first send that landed is never linked, and a
   resend Confluence refuses (title taken) links nothing. *Send mine anyway* goes through the same
   settle (`apply_anyway`, then `store::sent`), so it stamps `remote_id` too. **Reversing:** n/a.
+
+## #1096 — the favourites choice says "filters"
+
+- **The Jira board choice reads "Only boards built on my favourite filters", not prototype-6's
+  "Only boards I marked as favourites in Jira".** The code reads the favourite filters
+  (#878); Jira DC has no favourite-board read the testenv can witness, so the old label promised
+  a board star it never read. Only the label changes (`BOARD_SCOPES`, the settings test,
+  R-3.20); the config key and its value (`favourites`) keep their meaning, so no §10.8 entry.
+  Not changed: the adapter's schema description text (Rust, frozen surface) and the
+  `jira-live` assertion (option 1/2 of the ticket need a testenv board-star check no agent has
+  run). **Reversing:** trivial (one string).
