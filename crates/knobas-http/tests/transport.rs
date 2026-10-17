@@ -704,9 +704,15 @@ async fn a_streamed_send_with_no_headers_is_unreachable() {
     let server = SilentServer::new();
     let client = quick_client(server.url());
 
-    let error = client
-        .send_streaming(client.request(Method::GET, "/big.zip"), STALL)
-        .await
-        .expect_err("nothing ever answers");
+    // Bounded from outside, so a streamed send that lost its headers timeout
+    // fails here instead of hanging the suite: three 300 ms attempts and
+    // their backoff end well inside 10 s.
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.send_streaming(client.request(Method::GET, "/big.zip"), STALL),
+    )
+    .await
+    .expect("the headers timeout ends the call")
+    .expect_err("nothing ever answers");
     assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
 }
