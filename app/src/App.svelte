@@ -25,6 +25,8 @@
   import { entityAddress } from "./lib/tf/address";
   import { HOME, homeIfBlank } from "./lib/tf/home";
   import { currentJob } from "./lib/tf/job/current.svelte";
+  import { foregroundOf } from "./lib/tf/foreground";
+  import { parseTfHash } from "./lib/tf/route";
   import TfShell from "./lib/tf/TfShell.svelte";
   import TfWorklogDraft from "./lib/tf/TfWorklogDraft.svelte";
   import { createDraftFlow } from "./lib/tf/drafting.svelte";
@@ -49,15 +51,19 @@
   /** Whether the ⌘K overlay is up; the launcher binds ⌘K itself. */
   let launcherOpen = $state(false);
 
+  /** The address, read again on every change; the shell owns what it draws. */
+  let hash = $state(location.hash);
+
   /**
-   * What is in front of the reader: the job on screen (R-1.4). A page with no
-   * job leaves ⌘T asking. The store holds the answer because the heartbeat
+   * What is in front of the reader (#1102): the entity page on screen, else
+   * the asset the Tree selects, else the job on screen (R-1.4), else nothing,
+   * by `foregroundOf`'s reading of `CONTEXT.md`'s rule. A page with none of
+   * them leaves ⌘T asking. The store holds the answer because the heartbeat
    * reads it from an interval, outside any reactive scope.
    */
-  const foreground = $derived.by(() => {
-    const job = currentJob.entityId;
-    return job === null ? null : ({ kind: "entity", entity_id: job } as const);
-  });
+  const foregroundId = $derived(foregroundOf(parseTfHash(hash), currentJob.entityId)?.entity_id ?? null);
+  // Keyed on the id, so a tab of the same page (`#/pr/<id>/files`) changes nothing downstream.
+  const foreground = $derived(foregroundId === null ? null : ({ kind: "entity", entity_id: foregroundId } as const));
 
   $effect(() => {
     timer.foreground = foreground;
@@ -272,6 +278,8 @@
     }
   }
 </script>
+
+<svelte:window onhashchange={() => (hash = location.hash)} />
 
 {#if lifecycle.ready && firstRun}
   <FirstRun demo={lifecycle.status?.demo ?? false} onfinish={onFirstRunDone} />
