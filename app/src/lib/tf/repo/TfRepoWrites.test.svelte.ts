@@ -588,3 +588,56 @@ test("a file with no blob sha to commit against cannot be edited, and says why",
   expect(edit.getAttribute("aria-disabled")).toBe("true");
   expect(edit.title).toBe("The source did not say which version of the file this is, so a commit could not be checked against it");
 });
+
+const PROTECTED =
+  "main is a protected branch that this account may not push to: commit to a new branch and open a pull request instead";
+
+/** The file section declaring its own `commit_file`, disabled with `disabled` where given (#985). */
+function declaring(disabled: string | null): RepoPorts {
+  const stand = ports();
+  const read = stand.entityView;
+  stand.entityView = async (id, section) => {
+    const answer = await read(id, section);
+    if (section === "file:README.md") answer!.sections[0]!.blocks.push({ type: "actions", actions: [action("commit_file", disabled)] });
+    return answer;
+  };
+  return stand;
+}
+
+test("on a protected branch the commit dialog opens on a new branch, Commit to <branch> disabled with the source's reason (#985)", async () => {
+  await draw([REPO, "edit", "README.md"], "PAY-231", declaring(PROTECTED));
+  type(editor(), "# payout\nnew line\n");
+  button("Commit change…", target)!.click();
+  flushSync();
+  const [same, fresh] = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
+  expect(same!.disabled).toBe(true);
+  expect(same!.checked).toBe(false);
+  expect(fresh!.checked).toBe(true);
+  expect(text(same!.closest("label")!.querySelector("small"))).toBe(PROTECTED);
+  expect(text(document.getElementById(same!.getAttribute("aria-describedby")!))).toBe(PROTECTED);
+
+  button("Commit change", dialog()!)!.click();
+  await settle();
+  expect(writes).toEqual([
+    {
+      CommitFile: {
+        repo: REPO,
+        branch: "main",
+        new_branch: "fix/PAY-231-README",
+        path: "README.md",
+        content: "# payout\nnew line\n",
+        message: "PAY-231: update README.md",
+        base_sha: "blob-1",
+      },
+    },
+  ]);
+});
+
+test("a commit the source declares taken opens on Commit to <branch>, enabled (#985)", async () => {
+  await draw([REPO, "edit", "README.md"], null, declaring(null));
+  type(editor(), "changed\n");
+  button("Commit change…", target)!.click();
+  flushSync();
+  const [same] = [...dialog()!.querySelectorAll<HTMLInputElement>("input[type=radio]")];
+  expect([same!.disabled, same!.checked, same!.hasAttribute("aria-describedby")]).toEqual([false, true, false]);
+});

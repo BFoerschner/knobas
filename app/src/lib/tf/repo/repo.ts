@@ -429,3 +429,20 @@ export function commitPrefill(job: string | null, path: string): { message: stri
     branch: job === null ? `fix/${stem}` : `fix/${job}-${stem}`,
   };
 }
+
+/**
+ * Why a commit straight onto the file's branch is refused (#985, R-8.6): the
+ * reason the source declares on the file section's own `commit_file` action
+ * (Gitea: a protected branch this account may not push to). `null` where it
+ * declares the commit taken, or says nothing, and the flush stays the
+ * backstop. Whether a write is offered is the source's answer (ADR-0020
+ * rule 4); the shell never reads protection itself.
+ */
+export function commitRefusal(section: ViewSection | undefined): string | null {
+  for (const block of section?.blocks ?? []) {
+    if (block.type !== "actions") continue;
+    const offer = block.actions.find((action) => action.write_op === "commit_file");
+    if (offer !== undefined) return offer.disabled ?? null;
+  }
+  return null;
+}

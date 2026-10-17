@@ -380,6 +380,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-radio { display: flex; flex-direction: column; gap: 6px; }
 .tf-radio label { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border: 1px solid var(--rule); border-radius: 4px; cursor: pointer; }
 .tf-radio label:has(input:checked) { border-color: var(--ink); background: var(--sheet-2); }
+.tf-radio label:has(> input:disabled) { cursor: not-allowed; color: var(--ink-2); }
 .tf-radio small { display: block; color: var(--ink-2); }
 
 /* ---------- settings: prototype-6's .stg ---------- */

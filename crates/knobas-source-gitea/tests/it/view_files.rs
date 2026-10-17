@@ -576,3 +576,84 @@ async fn a_path_that_walks_out_is_refused() {
         .collect();
     assert!(asked.is_empty(), "{asked:?}");
 }
+
+/// `branches/main` answers whether it is protected and whether this account
+/// may push to it anyway.
+async fn branch_main(server: &MockServer, protected: bool, user_can_push: bool) {
+    Mock::given(method("GET"))
+        .and(path(format!("{REPO}/branches/main")))
+        .and(header("Authorization", format!("token {TOKEN}").as_str()))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "name": "main", "protected": protected, "user_can_push": user_can_push,
+            "commit": { "id": "c90d11aa" }
+        })))
+        .mount(server)
+        .await;
+}
+
+/// The file section's own actions: the `commit_file` it declares, if any.
+fn commit_action(section: &ViewSection) -> Option<&knobas_source::view::ViewAction> {
+    section.blocks.iter().find_map(|block| match block {
+        Block::Actions { actions } => actions.iter().find(|a| a.write_op == "commit_file"),
+        _ => None,
+    })
+}
+
+/// #985 (R-8.6, story 94): a file on a protected branch this account may not
+/// push to declares its *Commit change…* disabled, with the reason the flush
+/// refuses it with (#822's rule and sentence), so the dialog can say it
+/// before the reader writes the message.
+#[tokio::test]
+async fn a_file_on_a_protected_branch_declares_its_commit_disabled_with_the_reason() {
+    let server = gitea().await;
+    raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
+    branch_main(&server, true, false).await;
+    let section = read(&server, ENTITY, "file:src/main.rs").await;
+    assert!(
+        matches!(section.blocks.first(), Some(Block::File { .. })),
+        "the file comes first, its actions after it"
+    );
+    let action = commit_action(&section).expect("the file declares its commit");
+    assert_eq!(
+        action.disabled.as_deref(),
+        Some(
+            "main is a protected branch that this account may not push to: commit to a new \
+             branch and open a pull request instead"
+        )
+    );
+}
+
+/// A protected branch the account may push to anyway, and an unprotected
+/// one, take the commit: declared, and enabled.
+#[tokio::test]
+async fn a_file_on_a_branch_the_account_may_push_to_declares_its_commit_enabled() {
+    for (protected, user_can_push) in [(true, true), (false, true)] {
+        let server = gitea().await;
+        raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
+        branch_main(&server, protected, user_can_push).await;
+        let section = read(&server, ENTITY, "file:src/main.rs").await;
+        let action = commit_action(&section).expect("the file declares its commit");
+        assert_eq!(action.disabled, None, "protected: {protected}");
+    }
+}
+
+/// A branch Gitea does not answer for declares nothing: the reader is not
+/// told a reason knobas did not read, and the flush stays the backstop.
+#[tokio::test]
+async fn a_file_whose_branch_does_not_answer_declares_no_commit() {
+    let server = gitea().await;
+    raw(&server, "src/main.rs", "main", b"fn main() {}\n".to_vec()).await;
+    let section = read(&server, ENTITY, "file:src/main.rs").await;
+    assert_eq!(section.blocks.len(), 1, "{:#?}", section.blocks);
+    assert!(commit_action(&section).is_none());
+}
+
+/// A directory takes no commit, and reads no branch for one.
+#[tokio::test]
+async fn a_directory_declares_no_commit() {
+    let server = gitea().await;
+    listing(&server, "", "main", json!([entry("a.rs", "a.rs", "file", 3)])).await;
+    branch_main(&server, true, false).await;
+    let section = read(&server, ENTITY, "files").await;
+    assert!(commit_action(&section).is_none());
+}

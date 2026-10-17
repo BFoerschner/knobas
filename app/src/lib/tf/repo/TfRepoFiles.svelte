@@ -30,7 +30,7 @@
   import TfOpenIn from "../openin/TfOpenIn.svelte";
   import TfCommitFile from "./TfCommitFile.svelte";
   import type { RepoPorts } from "./TfRepo.svelte";
-  import { ancestors, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
+  import { ancestors, commitRefusal, editHash, fileHash, fileLines, pickDefaultFile, repoHash } from "./repo";
 
   type FileBlock = Extract<ViewBlock, { type: "file" }>;
 
@@ -74,6 +74,8 @@
   let treeFailed = $state<string | null>(null);
   const open = new SvelteSet<string>();
   let file = $state<FileBlock | null>(null);
+  /** Why the source refuses a commit straight onto the branch (#985), `null` where it takes one. */
+  let refusal = $state<string | null>(null);
   let fileFailed = $state<string | null>(null);
   /** Directory reads asked and not answered, at the current `at`. */
   let asked = new Set<string>();
@@ -149,6 +151,7 @@
     const section = fileSection;
     const where = at;
     file = null;
+    refusal = null;
     fileFailed = null;
     if (section === null) return;
     if (section === MISSING) {
@@ -156,10 +159,12 @@
       return;
     }
     let live = true;
-    readSection(section, where).then(
-      (block) => {
+    ports.entityView(where, section).then(
+      (view) => {
         if (!live) return;
+        const block = view?.sections[0]?.blocks[0];
         file = block?.type === "file" ? block : null;
+        refusal = commitRefusal(view?.sections[0]);
         draft = null;
       },
       (error) => {
@@ -328,6 +333,7 @@
     before={file.text}
     after={text}
     baseSha={file.sha}
+    {refusal}
     {job}
     {checkoutBranch}
     {ports}

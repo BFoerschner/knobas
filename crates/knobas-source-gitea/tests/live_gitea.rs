@@ -4620,7 +4620,8 @@ async fn file_on(http: &reqwest::Client, env: &Env, branch: &str, path: &str) ->
 ///    and the file left as they made it;
 /// 4. **onto a protected branch**: refused before the request, with the
 ///    reason and what to do instead, the file untouched -- while a new branch
-///    from it still goes.
+///    from it still goes. The file's view declares *Commit change…* taken
+///    before the protection and disabled with that same reason after (#985).
 ///
 /// [`Litter`] deletes both branches, the protection named for the first and
 /// the pull request, whether this passes or panics. Nothing touches `main`.
@@ -4750,7 +4751,32 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
     );
 
     // 4. The branch is protected: refused with the reason, before a request;
-    //    a new branch from it still goes.
+    //    a new branch from it still goes. The file's view declares its commit
+    //    taken before, and disabled with the same reason after (#985).
+    let branch_entity = format!("{repo_id}@refs/heads/{branch}");
+    let file_section = format!("file:{path}");
+    let declared_commit = || async {
+        let view = source
+            .view(&branch_entity, Some(&file_section))
+            .await
+            .expect("the file's view")
+            .expect("drawn");
+        view.sections[0]
+            .blocks
+            .iter()
+            .find_map(|block| match block {
+                knobas_source::view::Block::Actions { actions } => {
+                    actions.iter().find(|a| a.write_op == "commit_file").cloned()
+                }
+                _ => None,
+            })
+            .expect("the file declares its commit")
+    };
+    assert_eq!(
+        declared_commit().await.disabled,
+        None,
+        "an unprotected branch takes the commit"
+    );
     let protected = http
         .post(format!("{api}/branch_protections"))
         .header("Authorization", &auth)
@@ -4776,6 +4802,15 @@ async fn a_file_is_committed_onto_a_branch_a_new_branch_held_when_it_moved_and_r
         matches!(&refused, Err(SourceError::Protocol { status: None, message })
                  if message.contains("protected") && message.contains("new branch")),
         "{refused:?}"
+    );
+    let reason = declared_commit()
+        .await
+        .disabled
+        .expect("a protected branch's commit is declared disabled");
+    println!("LIVE the file's commit on a protected branch: {reason:?}");
+    assert!(
+        matches!(&refused, Err(SourceError::Protocol { message, .. }) if message.ends_with(&reason)),
+        "the declared reason is the flush's: {reason:?} vs {refused:?}"
     );
     assert_eq!(file_on(&http, &env, &branch, &path).await.1, "theirs\n");
     let off_protected = format!("{branch}-off");
