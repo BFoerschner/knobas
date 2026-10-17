@@ -20,6 +20,25 @@ pub enum Flavor {
     Cloud,
 }
 
+/// Which Jira boards come in as Jira views (#878, R-3.20, D17): the
+/// *Boards and filters* setting. Read at every sync, so a change takes effect
+/// at the next one, and a board it no longer covers is delivered as gone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum BoardScope {
+    /// The boards on the projects this source syncs (the default, D17).
+    #[default]
+    Synced,
+    /// Only the boards marked as favourites in Jira: a board whose saved
+    /// filter is one of this account's favourite filters (see
+    /// `crate::views`, ruling in #878's PR).
+    Favourites,
+    /// Every board this account can see.
+    All,
+    /// No boards.
+    None,
+}
+
 /// One Jira source's configuration blob (`knobas.source_config.config`).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields, default)]
@@ -78,6 +97,11 @@ pub struct JiraConfig {
     /// fills it in when the reader left it empty. Left empty, no ticket is in
     /// a sprint as far as knobas knows.
     pub sprint_field: Option<String>,
+    /// Which Jira boards come in as Jira views (#878, *Boards and filters*).
+    pub boards: BoardScope,
+    /// Whether this account's favourite Jira filters come in as Jira views
+    /// under *Jira filters* (#878, R-3.20). On by default (D17).
+    pub favourite_filters: bool,
     /// `maxResults` per `/search` page (interfaces §4.1 default: 100).
     pub page_size: u32,
     /// Per-instance rate limit (interfaces §4.1 default: 5 req/s, burst 10).
@@ -96,6 +120,8 @@ impl Default for JiraConfig {
             username: None,
             epic_link_field: None,
             sprint_field: None,
+            boards: BoardScope::Synced,
+            favourite_filters: true,
             page_size: 100,
             rate_per_sec: 5,
             rate_burst: 10,

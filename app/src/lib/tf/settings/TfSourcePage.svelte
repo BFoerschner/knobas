@@ -15,6 +15,9 @@
     Every config save reads the stored config again and lays only the
     reader's changes over it (`source-config.ts`), so an id the sync recorded
     after the page opened is kept.
+  - **Boards and filters** (#878), for an adapter whose schema declares the
+    section: which Jira boards and favourite filters come in, and every Jira
+    view with *Hide* / *Show* (`TfBoardsAndFilters.svelte`).
   - **Sync runs**: the source's last runs.
   - **Maintenance**: *Backfill* (`backfill_source`) and *Remove…*, which asks
     whether to keep what the source synced.
@@ -38,7 +41,9 @@
   } from "../../ipc/sources";
   import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
-  import { validate } from "../../sources/schema-form";
+  import { declaresSection, validate } from "../../sources/schema-form";
+  import { BOARDS_SECTION } from "./boards";
+  import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
   import { push } from "../../shell/toasts.svelte";
   import type { Layers } from "../layers.svelte";
   import { configChanges, formValues, pageFields, withChanges } from "./source-config";
@@ -152,6 +157,8 @@
 
   // ---- What it syncs: the adapter's own config, generated (#904) ----
   const config = $derived(adapter === null ? { fields: [], error: null } : pageFields(adapter.config_schema));
+  /** *Boards and filters* (#878): drawn for an adapter whose schema declares it. */
+  const boardsSection = $derived(adapter !== null && declaresSection(adapter.config_schema, BOARDS_SECTION));
   let configValues = $state<Record<string, unknown>>({});
   /** The config the form was read from, validated as the form validates it. */
   let configLoaded = $state<Record<string, unknown>>({});
@@ -430,6 +437,16 @@
     </div>
   {/if}
 </section>
+
+{#if boardsSection}
+  <TfBoardsAndFilters
+    {source}
+    {ports}
+    {saving}
+    {finished}
+    onsave={(changes, done) => update(async () => ({ config: withChanges(await storedConfig(), changes) }), done)}
+  />
+{/if}
 
 <section class="tf-stg-sec">
   <h2>Sync runs</h2>

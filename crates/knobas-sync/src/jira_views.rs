@@ -18,7 +18,11 @@
 //! the group (*Jira boards* or *Jira filters*) and the columns follow Jira at
 //! every run (R-3.24); the layout, lanes, card fields, list columns and sort
 //! are the reader's (*View settings*) and are written only when the row is
-//! first made. The row's id is the item's entity id as a slug
+//! first made -- a filter's as a list, since Jira gives a filter no columns
+//! (#878). A row made while the source already had Jira views is marked
+//! `is_new` (*new* until opened, R-3.20); the views of a source's first run
+//! are not. `hidden` is the reader's and never written here. The row's id
+//! is the item's entity id as a slug
 //! (`jira:board-21` → `jira-board-21`), so `#/tickets/<id>` is stable. A view
 //! somebody made that already holds that id is left alone, and the Jira view
 //! does not show: a name collision costs a view, never somebody's own.
@@ -83,16 +87,21 @@ const UPSERT_TICKET_VIEWS: &str = "
 with views as (
   select v.entity_id, v.name, v.columns,
          case v.ref_kind when 'filter' then 'Jira filters' else 'Jira boards' end as view_group,
+         case v.ref_kind when 'filter' then 'list' else 'board' end as layout,
          trim(both '-' from regexp_replace(lower(v.entity_id), '[^a-z0-9]+', '-', 'g')) as id,
          row_number() over (order by v.entity_id) as n
     from sync.jira_view v
    where v.source_id = $1
+),
+earlier as (
+  select exists (select 1 from knobas.ticket_view t
+                  where left(t.jira_ref, length($1) + 1) = $1 || ':') as any
 )
-insert into knobas.ticket_view (id, name, view_group, position, columns, jira_ref)
+insert into knobas.ticket_view (id, name, view_group, position, layout, columns, jira_ref, is_new)
 select w.id, w.name, w.view_group,
        (select coalesce(max(t.position), 0) from knobas.ticket_view t) + w.n::integer,
-       w.columns, w.entity_id
-  from views w
+       w.layout, w.columns, w.entity_id, e.any
+  from views w cross join earlier e
     on conflict (id) do update set
        name = excluded.name, view_group = excluded.view_group,
        columns = excluded.columns, updated_at = now()

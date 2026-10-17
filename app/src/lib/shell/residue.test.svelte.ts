@@ -422,6 +422,7 @@ const { createLayers } = await import("../tf/layers.svelte");
 const TfSettings = (await import("../tf/settings/TfSettings.svelte")).default;
 const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).default;
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
+const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ContextTabs = (await import("./ContextTabs.svelte")).default;
@@ -591,6 +592,8 @@ function settingsPorts() {
     syncAll: () => deferred([]),
     addSource: () => new Promise<never>(() => {}),
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
+    ticketViews: () => deferred([]),
+    hideJiraView: () => deferred(undefined),
   };
 }
 
@@ -915,6 +918,8 @@ const CASES: Case[] = [
             views: () => deferred([]),
             saveView: () => new Promise(() => {}),
             deleteView: () => new Promise(() => {}),
+            hideView: () => new Promise(() => {}),
+            openView: () => new Promise(() => {}),
           },
         },
       }),
@@ -1695,6 +1700,23 @@ const CASES: Case[] = [
     name: "TfSourcePage",
     source: "lib/tf/settings/TfSourcePage.svelte",
     open: (target) => ({ app: mount(TfSourcePage, { target, props: sourcePageProps() }) }),
+  },
+  {
+    /** *Boards and filters* (#878): its ticket views read lands after the unmount. */
+    name: "TfBoardsAndFilters",
+    source: "lib/tf/settings/TfBoardsAndFilters.svelte",
+    open: (target) => ({
+      app: mount(TfBoardsAndFilters, {
+        target,
+        props: {
+          source: sourcePageProps().source,
+          ports: settingsPorts(),
+          saving: false,
+          finished: 0,
+          onsave: () => Promise.resolve(null),
+        },
+      }),
+    }),
   },
   {
     /** *Add a source* (#903): its adapters read lands after the unmount. */

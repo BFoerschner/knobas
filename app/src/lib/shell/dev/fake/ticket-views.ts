@@ -1,6 +1,7 @@
 /**
  * `?fake-ipc`: Ticket views (#812): `ticket_views`, `save_ticket_view` and
- * `delete_ticket_view`, over a session-long list seeded with prototype-6's own
+ * `delete_ticket_view` (and #878's `hide_jira_view` and `open_jira_view`),
+ * over a session-long list seeded with prototype-6's own
  * views (its `views` array), each as search text in the grammar the real
  * command reads.
  *
@@ -68,13 +69,17 @@ interface FakeJira {
   ref: string;
   member: (key: string) => boolean;
   source: {
-    kind: "board";
-    board_type: string;
+    kind: "board" | "filter";
+    board_type: string | null;
     jql: string;
     sub_query: string | null;
     sprint: { id: number; name: string; end_date: string | null } | null;
     last_read: string;
     web_url: string;
+    /** #878: *Hide from the list*, *new* until opened, the tickets in projects not synced. */
+    hidden: boolean;
+    new: boolean;
+    unsynced: { project: string; count: number }[];
   };
 }
 const READ = "2026-10-17T09:56:00Z";
@@ -90,7 +95,7 @@ function jiraBoard(
   member: (key: string) => boolean,
   extra: { sub?: string; sprint?: string } = {},
 ) {
-  const ref = `mock:board-${id}`;
+  const ref = `jira:board-${id}`;
   JIRA.push({
     ref,
     member,
@@ -102,9 +107,36 @@ function jiraBoard(
       sprint: extra.sprint ? { id, name: extra.sprint, end_date: "2026-10-22T16:00:00Z" } : null,
       last_read: READ,
       web_url: `https://jira.example/secure/RapidBoard.jspa?rapidView=${id}`,
+      hidden: false,
+      // prototype-6's `S.vnew`: the board that turned up at the last sync.
+      new: id === 21,
+      // prototype-6's `outside`: on-call reaches WEB, which is not synced.
+      unsynced: id === 40 ? [{ project: "WEB", count: 9 }] : [],
     },
   });
-  VIEWS.push({ ...seeded(`mock-board-${id}`, name, "Jira boards", "", "board"), columns, lanes, jira_ref: ref });
+  VIEWS.push({ ...seeded(`jira-board-${id}`, name, "Jira boards", "", "board"), columns, lanes, jira_ref: ref });
+}
+
+/** prototype-6's favourite filters (its `JF`, #878): a list each under *Jira filters*. */
+function jiraFilter(id: number, name: string, jql: string, member: (key: string) => boolean) {
+  const ref = `jira:filter-${id}`;
+  JIRA.push({
+    ref,
+    member,
+    source: {
+      kind: "filter",
+      board_type: null,
+      jql,
+      sub_query: null,
+      sprint: null,
+      last_read: READ,
+      web_url: `https://jira.example/issues/?filter=${id}`,
+      hidden: false,
+      new: false,
+      unsynced: [],
+    },
+  });
+  VIEWS.push({ ...seeded(`jira-filter-${id}`, name, "Jira filters", ""), jira_ref: ref });
 }
 jiraBoard(14, "PAY board", "scrum", "project = PAY ORDER BY Rank ASC",
   [col("To Do", ["To Do"]), col("Doing", ["In Progress"]), col("Review", ["In Review"], 4), col("Done", ["Done"])],
@@ -119,6 +151,14 @@ jiraBoard(40, "Platform on-call", "kanban", "project in (OPS, WEB) AND component
   [col("Open", ["To Do"]), col("Working", ["In Progress", "In Review"], 3), col("Closed", ["Done"])],
   "priority", (key) => key.startsWith("OPS-"));
 jiraBoard(52, "Tracking", "kanban", "project = TRK ORDER BY Rank ASC", [], "none", (key) => key.startsWith("TRK-"));
+jiraFilter(10230, "My open bugs everywhere", "assignee = currentUser() AND issuetype = Bug AND resolution = Unresolved",
+  (key) => keyNumber(key) % 5 === 0);
+jiraFilter(10231, "High priority, not done", "priority = High AND statusCategory != Done ORDER BY updated DESC",
+  (key) => keyNumber(key) % 3 === 0);
+jiraFilter(10244, "Blocked in PAY", 'project = PAY AND issueFunction in linkedIssuesOf("status != Done", "is blocked by")',
+  (key) => key.startsWith("PAY-") && keyNumber(key) % 7 === 0);
+jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -7d",
+  (key) => /^(PAY|OPS)-/.test(key) && keyNumber(key) % 4 === 0);
 VIEWS.forEach((view, position) => (view.position = position));
 
 const jiraOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
@@ -214,6 +254,23 @@ export function handlers(): Record<string, Handler> {
       if (jiraOf(VIEWS[at]!.jira_ref))
         throw { code: "invalid", message: `${String(args["id"])} is a Jira view: it comes from Jira at every sync and cannot be deleted here`, source_id: null };
       VIEWS.splice(at, 1);
+      return null;
+    },
+    // #878: *Hide from the list* / *Show*, and *new* until opened.
+    hide_jira_view: (args) => {
+      const view = VIEWS.find((each) => each.id === args["id"]);
+      if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
+      const jira = jiraOf(view.jira_ref);
+      if (!jira)
+        throw { code: "invalid", message: `${view.id} is not a Jira view: only a Jira view hides from the list; delete your own`, source_id: null };
+      jira.source.hidden = args["hidden"] === true;
+      return null;
+    },
+    open_jira_view: (args) => {
+      const view = VIEWS.find((each) => each.id === args["id"]);
+      if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
+      const jira = jiraOf(view.jira_ref);
+      if (jira) jira.source.new = false;
       return null;
     },
   };

@@ -296,3 +296,88 @@ async fn a_jira_view_whose_mirror_was_purged_is_not_listed() {
         "a purged Jira view is not a view of every ticket"
     );
 }
+
+fn own_draft(name: String) -> TicketViewDraft {
+    TicketViewDraft {
+        id: None,
+        name,
+        group: "Mine".into(),
+        position: None,
+        query: String::new(),
+        layout: "board".into(),
+        columns: Vec::new(),
+        lanes: "none".into(),
+        card_fields: vec!["type".into()],
+        list_columns: vec!["key".into()],
+        list_sort: None,
+        jira_ref: None,
+    }
+}
+
+/// #878, R-3.25: *Hide from the list* and *Show*. Only a Jira view hides.
+#[tokio::test]
+async fn a_jira_view_hides_and_shows_again_and_keeps_its_tickets() {
+    let pool = pool().await;
+    let (p, id, _) = seeded(&pool).await;
+    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().hidden);
+
+    ticket_views::hide(&pool, &id, true).await.expect("hide");
+    let row = listed(&pool, &id)
+        .await
+        .expect("a hidden view is still listed");
+    assert!(row.jira.as_ref().unwrap().hidden);
+    assert_eq!(row.count, Some(4), "it keeps syncing");
+
+    ticket_views::hide(&pool, &id, false).await.expect("show");
+    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().hidden);
+
+    let own = ticket_views::save(&pool, own_draft(format!("{p} mine")))
+        .await
+        .unwrap();
+    let refused = ticket_views::hide(&pool, &own.id, true).await.unwrap_err();
+    assert_eq!(refused.code, IpcErrorCode::Invalid);
+    let missing = ticket_views::hide(&pool, "no-such-view-878", true)
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, IpcErrorCode::NotFound);
+}
+
+/// #878, R-3.20: a new Jira view says *new* until it is opened.
+#[tokio::test]
+async fn opening_a_new_jira_view_takes_its_new_mark_away() {
+    let pool = pool().await;
+    let (_, id, _) = seeded(&pool).await;
+    sqlx::query("update knobas.ticket_view set is_new = true where id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(listed(&pool, &id).await.unwrap().jira.unwrap().new);
+
+    ticket_views::open(&pool, &id).await.expect("open");
+    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().new);
+    ticket_views::open(&pool, &id)
+        .await
+        .expect("opening it again is no change");
+    let missing = ticket_views::open(&pool, "no-such-view-878")
+        .await
+        .unwrap_err();
+    assert_eq!(missing.code, IpcErrorCode::NotFound);
+}
+
+/// #878, R-13a.2: the tickets on a Jira view that knobas does not mirror,
+/// by project, for *Boards and filters* (WEB-5 is on the seeded board and in
+/// no synced project).
+#[tokio::test]
+async fn a_jira_view_names_the_tickets_on_it_that_knobas_does_not_sync() {
+    let pool = pool().await;
+    let (_, id, _) = seeded(&pool).await;
+    let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
+    assert_eq!(
+        jira.unsynced,
+        [ticket_views::Unsynced {
+            project: "WEB".into(),
+            count: 1
+        }]
+    );
+}

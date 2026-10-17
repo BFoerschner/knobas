@@ -215,6 +215,17 @@ fn config_schema() -> serde_json::Value {
                 "type": ["string", "null"], "default": null, "title": "Sprint field id",
                 "description": "Where Jira Software keeps the sprints a ticket is in. Filled in by Test connection, and by the next sync when left empty: the id is different on every Jira. An id you type is kept. Leave it empty and no ticket is in a sprint as far as knobas knows."
             },
+            "boards": {
+                "type": "string", "enum": ["synced", "favourites", "all", "none"],
+                "default": "synced", "title": "Boards",
+                "description": "Which Jira boards come in as views in Tickets: the boards on the projects this source syncs, only the boards marked as favourites in Jira, every board you can see, or none. Read at every sync.",
+                "x-knobas-section": "boards-and-filters"
+            },
+            "favourite_filters": {
+                "type": "boolean", "default": true, "title": "My favourite filters",
+                "description": "Whether your favourite Jira filters come in as views in Tickets. Read at every sync.",
+                "x-knobas-section": "boards-and-filters"
+            },
             "page_size": {
                 "type": "integer", "minimum": 1, "maximum": 1000, "default": 100,
                 "title": "Issues per request"

@@ -1,8 +1,8 @@
 <!--
   A ticket view's ⋯ menu (#812, R-3.12), on its row in the views pane and in
   its header: *Edit view* (#814), *Duplicate* and *Delete*; on a Jira view
-  (#877), *View settings* and *Make an editable copy* (#880), which is what
-  *Duplicate* is for a Jira view.
+  (#877), *View settings*, *Make an editable copy* (#880), which is what
+  *Duplicate* is for a Jira view, and *Hide from the list* (#878).
 
   Opens under its button; `Esc`, a pick or a click anywhere else closes it,
   and focus goes back to the button.
@@ -17,6 +17,7 @@
     onedit,
     onduplicate,
     ondelete,
+    onhide = () => {},
   }: {
     /** The view's name, for the button's accessible name. */
     name: string;
@@ -29,6 +30,8 @@
     onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
+    /** *Hide from the list* on a Jira view (#878, R-3.25). */
+    onhide?: () => void;
   } = $props();
 
   let open = $state(false);
@@ -89,6 +92,10 @@
         >
         <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
           ><b>Make an editable copy</b><span>your own view, starting from this {jira}</span></button
+        >
+        <hr />
+        <button type="button" role="menuitem" onclick={() => pick(onhide)}
+          ><b>Hide from the list</b><span>it keeps syncing, so you can show it again</span></button
         >
       {:else}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>

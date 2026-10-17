@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { MiniBoardCard } from "../../ipc/entity";
-import type { TicketViewRow } from "../../ipc/search";
+import type { JiraSource, TicketViewRow } from "../../ipc/search";
 import {
   columnLimit,
   draftCopy,
@@ -11,6 +11,7 @@ import {
   draftRestore,
   drawnJiraColumns,
   groupViews,
+  hiddenViews,
   savedShowing,
   viewColumns,
 } from "./views";
@@ -106,14 +107,41 @@ test("Save as a view takes the text and how it shows now; Duplicate and Undo kee
 });
 
 test("Jira boards and Jira filters come after every group of your own, and a Jira view is found by its JQL", () => {
-  const jira = { kind: "board" as const, board_type: "scrum", jql: "project = CUS", sub_query: null, sprint: null, last_read: "", web_url: null };
   const views = [
-    row("cus", "Jira boards", 0, { jira, jira_ref: "jira:board-31" }),
+    row("cus", "Jira boards", 0, { jira: jiraOf("project = CUS"), jira_ref: "jira:board-31" }),
     row("ops", "Ops", 1),
     row("mine", "Mine", 2),
   ];
   expect(groupViews(views, "").map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
   expect(groupViews(views, "cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
+});
+
+function jiraOf(jql: string, extra: Partial<JiraSource> = {}): JiraSource {
+  return {
+    kind: "board",
+    board_type: "scrum",
+    jql,
+    sub_query: null,
+    sprint: null,
+    last_read: "",
+    web_url: null,
+    hidden: false,
+    new: false,
+    unsynced: [],
+    ...extra,
+  };
+}
+
+test("a hidden Jira view leaves its group and is listed apart, in list order (#878, R-3.25)", () => {
+  const views = [
+    row("flow", "Jira boards", 4, { jira: jiraOf("project = PAY", { hidden: true }), jira_ref: "jira:board-22" }),
+    row("cus", "Jira boards", 2, { jira: jiraOf("project = CUS"), jira_ref: "jira:board-31" }),
+    row("fix", "Jira filters", 3, { jira: jiraOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), jira_ref: "jira:filter-1" }),
+  ];
+  expect(groupViews(views, "").map((group) => [group.name, group.views.map((view) => view.id)])).toEqual([
+    ["Jira boards", ["cus"]],
+  ]);
+  expect(hiddenViews(views).map((view) => view.id)).toEqual(["fix", "flow"]);
 });
 
 test("a Jira view's columns are drawn by their own names, keeping Jira's order and limits", () => {
@@ -140,6 +168,9 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
     sprint: null,
     last_read: "",
     web_url: null,
+    hidden: false,
+    new: false,
+    unsynced: [],
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
   const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, jira_ref: "mock:board-40", columns, lanes: "priority" });

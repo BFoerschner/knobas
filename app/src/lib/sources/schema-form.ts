@@ -88,6 +88,18 @@ function words(key: string): string[] {
     .map((word) => word.toLowerCase());
 }
 
+/**
+ * The schema annotation that names the section of a source's page drawing a
+ * property itself, outside the generated form (#878): `boards-and-filters`.
+ */
+export const SECTION_KEY = "x-knobas-section";
+
+/** Whether an adapter's schema declares a property for `section` (#878). */
+export function declaresSection(schema: unknown, section: string): boolean {
+  if (!isRecord(schema) || !isRecord(schema.properties)) return false;
+  return Object.values(schema.properties).some((raw) => isRecord(raw) && raw[SECTION_KEY] === section);
+}
+
 /** A plain JSON object — not an array, not null. */
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -120,13 +132,16 @@ export function schemaFields(schema: unknown): SchemaField[] {
     Array.isArray(schema.required) ? schema.required.filter((key) => typeof key === "string") : [],
   );
 
-  return Object.entries(properties).map(([key, raw]) => {
+  return Object.entries(properties).flatMap(([key, raw]) => {
     if (SECRET_HEADS.has(words(key).at(-1) ?? "")) {
       throw new Error(
         `config_schema declares '${key}', which is a secret. Secrets live in the OS keychain and are set with set_source_secret; nothing secret may reach the config column.`,
       );
     }
     const property = isRecord(raw) ? raw : {};
+    // A property a section of its own draws (#878: Jira's *Boards and
+    // filters*) is not a row of the generated form; its default applies.
+    if (typeof property[SECTION_KEY] === "string") return [];
     return {
       key,
       label: typeof property.title === "string" ? property.title : humanise(key),

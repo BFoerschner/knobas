@@ -10,10 +10,13 @@
 //! translated: Jira decides which tickets a view holds, and the keys are kept
 //! in the order Jira answered them.
 //!
-//! **Which boards.** The boards on each project in `projects`, deduplicated
-//! (a board over two synced projects is listed under both). A source scoped
-//! by `jql_filter` alone names no project, so it brings no boards in; the
-//! *Boards and filters* setting is #878's.
+//! **Which boards** is the *Boards and filters* setting (#878, `boards`):
+//! by default the boards on each project in `projects`, deduplicated (a board
+//! over two synced projects is listed under both; a source scoped by
+//! `jql_filter` alone names no project, so it brings no boards in); or every
+//! board this account can see; or the boards whose saved filter is one of its
+//! favourite filters; or none. **Favourite filters** (`favourite_filters`,
+//! on by default) come in too, each searched by its JQL as Jira holds it.
 //!
 //! **A Jira without Jira Software** answers the board listing with a 404, and
 //! that is no boards, not a failed sync. A board whose configuration or
@@ -25,6 +28,7 @@ use knobas_source::SourceError;
 use serde::Deserialize;
 use serde_json::{Value, json};
 
+use crate::BoardScope;
 use crate::api::JiraApi;
 
 /// One page of `GET rest/agile/1.0/board`.
@@ -113,6 +117,26 @@ pub(crate) struct Sprint {
 pub(crate) struct Filter {
     #[serde(default)]
     pub jql: String,
+}
+
+/// One entry of `GET rest/api/2/filter/favourite` (#878), the parts read.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FavouriteFilter {
+    pub id: Value,
+    pub name: String,
+    #[serde(default)]
+    pub jql: String,
+    pub view_url: Option<String>,
+}
+
+impl FavouriteFilter {
+    fn id(&self) -> String {
+        match &self.id {
+            Value::String(id) => id.clone(),
+            other => other.to_string(),
+        }
+    }
 }
 
 /// One page of a keys-only search (`fields=key`).
@@ -210,43 +234,70 @@ fn not_readable(error: &SourceError) -> bool {
     matches!(error.status(), Some(403 | 404))
 }
 
-/// Every Jira view this source brings in, in board id order.
+/// Every Jira view this source brings in: the boards the *Boards and
+/// filters* setting names, in board id order, then the favourite filters, in
+/// filter id order (#878).
 pub(crate) async fn read(
     api: &(dyn JiraApi + '_),
     cfg: &crate::JiraConfig,
     base_url: &str,
 ) -> Result<Vec<JiraView>, SourceError> {
-    let mut boards: Vec<Board> = Vec::new();
-    for project in &cfg.projects {
-        let mut start_at = 0;
-        for page in 0.. {
-            if page >= MAX_PAGES {
-                return Err(SourceError::protocol(format!(
-                    "the Jira board listing of {project} did not end within {MAX_PAGES} pages"
-                )));
-            }
-            // A 404 is no boards on this project, not no boards at all: a
-            // Jira without Jira Software answers it on every project, and a
-            // project whose listing alone answers it must not take the other
-            // projects' boards with it, which would deliver them as gone.
-            let listed = match api.boards(project, start_at, BOARD_PAGE).await {
-                Ok(listed) => listed,
-                Err(error) if error.status() == Some(404) => break,
+    let favourites = if cfg.favourite_filters || cfg.boards == BoardScope::Favourites {
+        // A 404 is a Jira that answers no favourites here: none, not a
+        // failed sync, for the board listing's reason.
+        match api.favourite_filters().await {
+            Ok(favourites) => favourites,
+            Err(error) if error.status() == Some(404) => Vec::new(),
+            Err(error) => return Err(error),
+        }
+    } else {
+        Vec::new()
+    };
+    let mut views = boards(api, cfg, base_url, &favourites).await?;
+    if cfg.favourite_filters {
+        let mut filters = favourites;
+        filters.sort_by_key(|filter| (filter.id().parse::<u64>().ok(), filter.id()));
+        filters.dedup_by_key(|filter| filter.id());
+        for filter in &filters {
+            match filter_view(api, cfg, base_url, filter).await {
+                Ok(view) => views.push(view),
+                // A filter Jira can no longer run (400: a field or a project
+                // gone since it was saved) or this account may not read is
+                // left out, like an unreadable board: one stale favourite
+                // must not fail every sync of the source.
+                Err(error) if not_readable(&error) || error.status() == Some(400) => {}
                 Err(error) => return Err(error),
-            };
-            let returned = u32::try_from(listed.values.len()).unwrap_or(u32::MAX);
-            boards.extend(listed.values);
-            start_at += returned;
-            if returned == 0 || listed.is_last.unwrap_or(true) {
-                break;
             }
         }
+    }
+    Ok(views)
+}
+
+/// The boards the setting names (#878, D17). *Only boards I marked as
+/// favourites* is the boards whose saved filter is a favourite filter: Jira
+/// Data Center's Agile REST has no favourite-board read (ruling in #878's PR).
+async fn boards(
+    api: &(dyn JiraApi + '_),
+    cfg: &crate::JiraConfig,
+    base_url: &str,
+    favourites: &[FavouriteFilter],
+) -> Result<Vec<JiraView>, SourceError> {
+    let listings: Vec<Option<&str>> = match cfg.boards {
+        BoardScope::None => return Ok(Vec::new()),
+        BoardScope::Synced => cfg.projects.iter().map(|p| Some(p.as_str())).collect(),
+        BoardScope::Favourites | BoardScope::All => vec![None],
+    };
+    let mut boards: Vec<Board> = Vec::new();
+    for project in listings {
+        boards.extend(listing(api, project).await?);
     }
     boards.sort_by_key(|board| board.id);
     boards.dedup_by_key(|board| board.id);
     if boards.is_empty() {
         return Ok(Vec::new());
     }
+    let only: Option<std::collections::HashSet<String>> = (cfg.boards == BoardScope::Favourites)
+        .then(|| favourites.iter().map(FavouriteFilter::id).collect());
     let names: std::collections::HashMap<String, String> = api
         .statuses()
         .await?
@@ -255,8 +306,9 @@ pub(crate) async fn read(
         .collect();
     let mut views = Vec::new();
     for board in boards {
-        match one(api, cfg, base_url, &board, &names).await {
-            Ok(view) => views.push(view),
+        match one(api, cfg, base_url, &board, &names, only.as_ref()).await {
+            Ok(Some(view)) => views.push(view),
+            Ok(None) => {}
             Err(error) if not_readable(&error) => {}
             Err(error) => return Err(error),
         }
@@ -264,16 +316,91 @@ pub(crate) async fn read(
     Ok(views)
 }
 
-/// One board's view: configuration, filter, sprint, then its keys.
+/// One board listing, paged: a project's, or with `None` every board this
+/// account can see.
+async fn listing(
+    api: &(dyn JiraApi + '_),
+    project: Option<&str>,
+) -> Result<Vec<Board>, SourceError> {
+    let mut boards = Vec::new();
+    let mut start_at = 0;
+    for page in 0.. {
+        if page >= MAX_PAGES {
+            return Err(SourceError::protocol(format!(
+                "the Jira board listing of {} did not end within {MAX_PAGES} pages",
+                project.unwrap_or("every project")
+            )));
+        }
+        // A 404 is no boards on this project, not no boards at all: a
+        // Jira without Jira Software answers it on every project, and a
+        // project whose listing alone answers it must not take the other
+        // projects' boards with it, which would deliver them as gone.
+        let listed = match api.boards(project, start_at, BOARD_PAGE).await {
+            Ok(listed) => listed,
+            Err(error) if error.status() == Some(404) => break,
+            Err(error) => return Err(error),
+        };
+        let returned = u32::try_from(listed.values.len()).unwrap_or(u32::MAX);
+        boards.extend(listed.values);
+        start_at += returned;
+        if returned == 0 || listed.is_last.unwrap_or(true) {
+            break;
+        }
+    }
+    Ok(boards)
+}
+
+/// One favourite filter's view (#878): its JQL as Jira holds it, searched as
+/// it is, keys in Jira's order. No columns: Jira gives a filter none.
+async fn filter_view(
+    api: &(dyn JiraApi + '_),
+    cfg: &crate::JiraConfig,
+    base_url: &str,
+    filter: &FavouriteFilter,
+) -> Result<JiraView, SourceError> {
+    let id = filter.id();
+    let keys = keys(api, cfg, &filter.jql).await?;
+    Ok(JiraView {
+        key: format!("filter-{id}"),
+        name: filter.name.clone(),
+        web_url: filter
+            .view_url
+            .clone()
+            .unwrap_or_else(|| format!("{}/issues/?filter={id}", base_url.trim_end_matches('/'))),
+        payload: json!({
+            "kind": "filter",
+            "id": id,
+            "type": null,
+            "name": filter.name,
+            "filter_id": id,
+            "jql": filter.jql,
+            "sub_query": null,
+            "query": filter.jql,
+            "columns": [],
+            "sprint": null,
+            "keys": keys,
+        }),
+    })
+}
+
+/// One board's view: configuration, filter, sprint, then its keys. `None`
+/// when `only` names the filters a board must have and this one's is not
+/// among them.
 async fn one(
     api: &(dyn JiraApi + '_),
     cfg: &crate::JiraConfig,
     base_url: &str,
     board: &Board,
     names: &std::collections::HashMap<String, String>,
-) -> Result<JiraView, SourceError> {
+    only: Option<&std::collections::HashSet<String>>,
+) -> Result<Option<JiraView>, SourceError> {
     let config = api.board_configuration(board.id).await?;
     let filter_id = config.filter.as_ref().map(IdRef::id);
+    if let Some(only) = only
+        && !filter_id.as_ref().is_some_and(|id| only.contains(id))
+    {
+        return Ok(None);
+    }
     let filter_jql = match &filter_id {
         Some(id) => api.filter(id).await?.jql,
         None => String::new(),
@@ -316,7 +443,7 @@ async fn one(
         .collect();
     let query = view_jql(&filter_jql, sub_query.as_deref(), scrum);
     let keys = keys(api, cfg, &query).await?;
-    Ok(JiraView {
+    Ok(Some(JiraView {
         key: format!("board-{}", board.id),
         name: board.name.clone(),
         web_url: format!(
@@ -337,7 +464,7 @@ async fn one(
             "sprint": sprint,
             "keys": keys,
         }),
-    })
+    }))
 }
 
 /// The keys a view's query answers, in Jira's order: `fields=key`, paged like
@@ -421,12 +548,21 @@ mod tests {
         /// Projects whose board listing alone answers 404.
         unlisted: Vec<&'static str>,
         forbidden: Vec<u64>,
+        /// Boards on no synced project: only *Every board I can see* lists them.
+        elsewhere: Vec<FakeBoard>,
+        /// This account's favourite filters: `(id, name, jql, keys)`.
+        favourites: Vec<(u64, &'static str, &'static str, Vec<&'static str>)>,
+        /// A query Jira refuses with a 400 (a field gone since it was saved).
+        refused: Option<&'static str>,
         queries: Mutex<Vec<String>>,
     }
 
     impl Agile {
         fn board(&self, id: u64) -> Option<&FakeBoard> {
-            self.boards.iter().find(|b| b.0 == id)
+            self.boards
+                .iter()
+                .chain(&self.elsewhere)
+                .find(|b| b.0 == id)
         }
     }
 
@@ -462,12 +598,24 @@ mod tests {
                 return Ok(serde_json::from_value(json!({ "total": 0, "issues": [] })).unwrap());
             }
             self.queries.lock().unwrap().push(jql.to_owned());
-            let keys: Vec<&str> = self
-                .boards
-                .iter()
-                .find(|b| jql.starts_with(&format!("({})", b.3.split(" ORDER").next().unwrap())))
-                .map(|b| b.6.clone())
-                .unwrap_or_default();
+            if self.refused == Some(jql) {
+                return Err(SourceError::Protocol {
+                    status: Some(400),
+                    message: "Field 'gone' does not exist".to_owned(),
+                });
+            }
+            let keys: Vec<&str> = match self.favourites.iter().find(|f| f.2 == jql) {
+                Some(filter) => filter.3.clone(),
+                None => self
+                    .boards
+                    .iter()
+                    .chain(&self.elsewhere)
+                    .find(|b| {
+                        jql.starts_with(&format!("({})", b.3.split(" ORDER").next().unwrap()))
+                    })
+                    .map(|b| b.6.clone())
+                    .unwrap_or_default(),
+            };
             let page: Vec<Value> = keys
                 .iter()
                 .skip(start_at as usize)
@@ -484,22 +632,39 @@ mod tests {
         }
         async fn boards(
             &self,
-            project: &str,
+            project: Option<&str>,
             start_at: u32,
             max: u32,
         ) -> Result<BoardPage, SourceError> {
-            if self.no_software || self.unlisted.contains(&project) {
+            if self.no_software || project.is_some_and(|p| self.unlisted.contains(&p)) {
                 return Err(not_found());
             }
-            let values: Vec<Value> = self
-                .boards
+            let listed: Vec<&FakeBoard> = match project {
+                Some(_) => self.boards.iter().collect(),
+                None => self.boards.iter().chain(&self.elsewhere).collect(),
+            };
+            let values: Vec<Value> = listed
                 .iter()
                 .skip(start_at as usize)
                 .take(max as usize)
                 .map(|b| json!({ "id": b.0, "name": b.1, "type": b.2 }))
                 .collect();
-            let is_last = start_at as usize + values.len() >= self.boards.len();
+            let is_last = start_at as usize + values.len() >= listed.len();
             Ok(serde_json::from_value(json!({ "values": values, "isLast": is_last })).unwrap())
+        }
+        async fn favourite_filters(&self) -> Result<Vec<FavouriteFilter>, SourceError> {
+            Ok(self
+                .favourites
+                .iter()
+                .map(|f| {
+                    serde_json::from_value(json!({
+                        "id": f.0.to_string(), "name": f.1, "jql": f.2,
+                        "viewUrl": format!("https://jira.example/issues/?filter={}", f.0),
+                        "favourite": true,
+                    }))
+                    .unwrap()
+                })
+                .collect())
         }
         async fn board_configuration(&self, id: u64) -> Result<BoardConfiguration, SourceError> {
             if self.forbidden.contains(&id) {
@@ -578,11 +743,28 @@ mod tests {
     }
 
     async fn sync(api: &Agile, cursor: Option<String>) -> (Vec<knobas_source::SyncItem>, String) {
+        sync_with(api, &cfg(), cursor).await
+    }
+
+    /// A run under a *Boards and filters* setting other than the default.
+    fn cfg_with(boards: &str, favourite_filters: bool) -> crate::JiraConfig {
+        crate::JiraConfig::from_json(&json!({
+            "projects": ["PAY", "OPS"],
+            "boards": boards,
+            "favourite_filters": favourite_filters,
+        }))
+        .unwrap()
+    }
+
+    async fn sync_with(
+        api: &Agile,
+        cfg: &crate::JiraConfig,
+        cursor: Option<String>,
+    ) -> (Vec<knobas_source::SyncItem>, String) {
         let mut sink = VecSink(Vec::new());
-        let cfg = cfg();
         let next = crate::sync::SyncRun {
             api,
-            cfg: &cfg,
+            cfg,
             source_id: "jira",
             base_url: "https://jira.example/",
         }
@@ -768,5 +950,133 @@ mod tests {
         let (items, _) = sync(&api, None).await;
         let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
         assert_eq!(keys, ["board-22"]);
+    }
+
+    /// The seed's favourite filter, plus one boards 22's filter is (id 122).
+    fn with_favourites() -> Agile {
+        Agile {
+            favourites: vec![
+                (
+                    10_300,
+                    "PAY without a fix version",
+                    "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC",
+                    vec!["PAY-240", "WEB-9", "PAY-231"],
+                ),
+                (
+                    122,
+                    "PAY flow filter",
+                    "project in (PAY, WEB) ORDER BY Rank ASC",
+                    vec!["WEB-5"],
+                ),
+            ],
+            elsewhere: vec![(
+                31,
+                "WEB board",
+                "kanban",
+                "project = WEB ORDER BY Rank ASC",
+                None,
+                columns(None, "none"),
+                vec!["WEB-5"],
+            )],
+            ..seeded()
+        }
+    }
+
+    fn keys_of(items: &[knobas_source::SyncItem]) -> Vec<(&str, bool)> {
+        items
+            .iter()
+            .map(|i| (i.entity.key.as_str(), i.deleted))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn a_favourite_filter_arrives_as_a_view_holding_what_its_jql_answers_in_jiras_order() {
+        let api = with_favourites();
+        let (items, _) = sync(&api, None).await;
+        assert_eq!(
+            keys_of(&items),
+            [
+                ("board-21", false),
+                ("board-22", false),
+                ("filter-122", false),
+                ("filter-10300", false),
+            ]
+        );
+        let filter = &items[3];
+        assert_eq!(filter.kind, "jira_view");
+        assert_eq!(filter.title, "PAY without a fix version");
+        assert_eq!(
+            filter.web_url.as_deref(),
+            Some("https://jira.example/issues/?filter=10300")
+        );
+        assert_eq!(filter.payload["kind"], "filter");
+        assert_eq!(filter.payload["id"], "10300");
+        assert_eq!(
+            filter.payload["jql"],
+            "project = PAY AND fixVersion is EMPTY ORDER BY updated DESC"
+        );
+        assert_eq!(
+            filter.payload["query"], filter.payload["jql"],
+            "a filter is searched as Jira holds it, untranslated"
+        );
+        assert_eq!(
+            filter.payload["keys"],
+            json!(["PAY-240", "WEB-9", "PAY-231"])
+        );
+        assert_eq!(filter.payload["columns"], json!([]));
+        assert_eq!(filter.payload["sprint"], Value::Null);
+    }
+
+    #[tokio::test]
+    async fn favourite_filters_turned_off_are_delivered_as_gone_at_the_next_sync() {
+        let api = with_favourites();
+        let (_, first) = sync(&api, None).await;
+        let (items, _) = sync_with(&api, &cfg_with("synced", false), Some(first)).await;
+        assert_eq!(
+            keys_of(&items),
+            [("filter-122", true), ("filter-10300", true)]
+        );
+    }
+
+    #[tokio::test]
+    async fn every_board_i_can_see_adds_the_boards_on_projects_this_source_does_not_sync() {
+        let api = with_favourites();
+        let (items, _) = sync_with(&api, &cfg_with("all", false), None).await;
+        assert_eq!(
+            keys_of(&items),
+            [
+                ("board-21", false),
+                ("board-22", false),
+                ("board-31", false)
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn favourite_boards_are_the_boards_whose_filter_is_a_favourite_filter() {
+        let api = with_favourites();
+        let (items, _) = sync_with(&api, &cfg_with("favourites", false), None).await;
+        assert_eq!(keys_of(&items), [("board-22", false)]);
+    }
+
+    #[tokio::test]
+    async fn no_boards_brings_none_in_and_takes_the_ones_there_were_away() {
+        let api = with_favourites();
+        let (_, first) = sync(&api, None).await;
+        let (items, _) = sync_with(&api, &cfg_with("none", true), Some(first)).await;
+        assert_eq!(keys_of(&items), [("board-21", true), ("board-22", true)]);
+    }
+
+    /// A favourite filter Jira can no longer run (a field deleted since it
+    /// was saved) is left out, rather than failing every sync of the source.
+    #[tokio::test]
+    async fn a_favourite_filter_jira_refuses_to_run_is_left_out() {
+        let api = Agile {
+            refused: Some("project = PAY AND fixVersion is EMPTY ORDER BY updated DESC"),
+            ..with_favourites()
+        };
+        let (items, _) = sync(&api, None).await;
+        let keys: Vec<&str> = items.iter().map(|i| i.entity.key.as_str()).collect();
+        assert_eq!(keys, ["board-21", "board-22", "filter-122"]);
     }
 }

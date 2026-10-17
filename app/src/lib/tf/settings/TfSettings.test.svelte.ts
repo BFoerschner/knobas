@@ -8,6 +8,7 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
+import type { TicketViewRow } from "../../ipc/search";
 import type { CredentialHealth, SourceSummary, SyncRunRow } from "../../ipc/sources";
 import { JIRA_SCHEMA } from "../../sources/fixtures";
 import { createLayers } from "../layers.svelte";
@@ -135,9 +136,81 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
     addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
     listen: vi.fn(() => Promise.resolve(() => {})),
+    ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
+    hideJiraView: vi.fn(() => Promise.resolve()),
     ...over,
   };
 }
+
+/** The Jira views the `jira` source keeps (#878): a board with tickets in an unsynced project, a hidden filter. */
+const JIRA_VIEWS: TicketViewRow[] = [
+  ["jira-board-21", "Payments and Ops flow", "board", "kanban", false, [{ project: "WEB", count: 3 }], 18],
+  ["jira-filter-10300", "PAY without a fix version", "filter", null, true, [], 4],
+].map(([id, name, kind, type, hidden, unsynced, count], position) => ({
+  id: id as string,
+  name: name as string,
+  group: kind === "board" ? "Jira boards" : "Jira filters",
+  position,
+  query: "",
+  layout: "board" as const,
+  columns: [],
+  lanes: "none" as const,
+  card_fields: [],
+  list_columns: ["key" as const],
+  list_sort: null,
+  jira_ref: `jira:${(id as string).replace("jira-", "")}`,
+  count: count as number,
+  unreadable: null,
+  jira: {
+    kind: kind as "board" | "filter",
+    board_type: type as string | null,
+    jql: "",
+    sub_query: null,
+    sprint: null,
+    last_read: "",
+    web_url: null,
+    hidden: hidden as boolean,
+    new: false,
+    unsynced: unsynced as { project: string; count: number }[],
+  },
+}));
+
+test("Boards and filters: the choice and the favourite filters saved into the config, and each view with Hide or Show (#878)", async () => {
+  const { p } = await open(["source", "jira"]);
+  const boards = section("Boards and filters");
+  const radios = [...boards.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+  expect(radios.map((radio) => radio.parentElement!.textContent!.replace(/\s+/g, " ").trim())).toEqual([
+    "Boards on the projects this source syncs1 board",
+    "Only boards I marked as favourites in Jira",
+    "Every board I can see",
+    "No boards",
+  ]);
+  expect(radios[0]!.checked).toBe(true);
+  // Not rows of the generated form: this section draws them.
+  expect(section("What it syncs").querySelector("#tf-src-cfg-boards")).toBeNull();
+
+  radios[2]!.click();
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
+    config: { username: "mara", projects: ["TW", "OPS"], boards: "all" },
+  });
+  boards.querySelector<HTMLButtonElement>('button[aria-label="Favourite filters"]')!.click();
+  await settle();
+  expect(p.updateSource).toHaveBeenLastCalledWith("jira", {
+    config: { username: "mara", projects: ["TW", "OPS"], favourite_filters: false },
+  });
+
+  const rows = [...boards.querySelectorAll("tbody tr")].map((row) =>
+    [...row.querySelectorAll("td")].map((cell) => cell.textContent!.replace(/\s+/g, " ").trim()),
+  );
+  expect(rows).toEqual([
+    ["Payments and Ops flow", "Kanban board", "18 and 3 in WEB, not synced", "Hide"],
+    ["PAY without a fix version hidden", "Filter", "4", "Show"],
+  ]);
+  boards.querySelector<HTMLButtonElement>('button[aria-label="Show PAY without a fix version"]')!.click();
+  await settle();
+  expect(p.hideJiraView).toHaveBeenCalledWith("jira-filter-10300", false);
+});
 
 async function settle() {
   for (let turn = 0; turn < 6; turn += 1) await new Promise((resolve) => setTimeout(resolve, 0));

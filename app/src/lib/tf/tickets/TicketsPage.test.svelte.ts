@@ -114,6 +114,10 @@ interface Harness {
   views: TicketViewRow[];
   saved: TicketViewDraft[];
   deleted: string[];
+  /** Every `hide_jira_view` (#878): the view and whether it was hidden. */
+  hidden: [string, boolean][];
+  /** Every `open_jira_view` (#878). */
+  opened: string[];
   /** The mirror rows a reach or a context can hold. */
   rows: EntityRow[];
   /** What each ticket reaches (`job_reach`), by entity id. */
@@ -155,6 +159,8 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
     views,
     saved: [],
     deleted: [],
+    hidden: [],
+    opened: [],
     rows: [...AROUND_ROWS],
     reach: {},
     members: {},
@@ -177,6 +183,18 @@ function harness(contexts: ContextRow[] = [], views: TicketViewRow[] = []): Harn
       deleteView: (id) => {
         h.deleted.push(id);
         h.views = h.views.filter((row) => row.id !== id);
+        return Promise.resolve();
+      },
+      hideView: (id, hidden) => {
+        h.hidden.push([id, hidden]);
+        const row = h.views.find((each) => each.id === id);
+        if (row?.jira) row.jira = { ...row.jira, hidden };
+        return Promise.resolve();
+      },
+      openView: (id) => {
+        h.opened.push(id);
+        const row = h.views.find((each) => each.id === id);
+        if (row?.jira) row.jira = { ...row.jira, new: false };
         return Promise.resolve();
       },
       board: (perColumn, query) => {
@@ -1165,6 +1183,9 @@ function jiraHarness(): { h: Harness; jiraReads: (string | null)[] } {
         sprint: null,
         last_read: "2026-10-17T09:56:00Z",
         web_url: "https://jira.example/secure/RapidBoard.jspa?rapidView=21",
+        hidden: false,
+        new: false,
+        unsynced: [],
       },
     }),
   ]);
@@ -1223,6 +1244,7 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   expect(items).toEqual([
     "View settingslanes, cards and list columns",
     "Make an editable copyyour own view, starting from this board",
+    "Hide from the listit keeps syncing, so you can show it again",
   ]);
 });
 
@@ -1297,6 +1319,75 @@ test("Save as a view on a Jira view is a copy too: the JQL it could test, then t
   expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("");
   expect(fromLine()).toBe(COPIED);
   expect(searchLine().textContent).toBe("project:PAY project:OPS issuetype:Story r");
+});
+
+// ---- Jira filters, new and hidden (#878) ----
+
+/** {@link jiraHarness} plus a favourite filter, the board marked as `board` says. */
+function filtersHarness(board: Partial<NonNullable<TicketViewRow["jira"]>> = {}) {
+  const { h, jiraReads } = jiraHarness();
+  const flow = h.views[1]!;
+  flow.jira = { ...flow.jira!, ...board };
+  h.views.push(
+    view("jira-filter-10300", "PAY without a fix version", "Jira filters", 2, {
+      layout: "list",
+      jira_ref: "jira:filter-10300",
+      count: 4,
+      jira: {
+        ...flow.jira!,
+        kind: "filter",
+        board_type: null,
+        sub_query: null,
+        jql: "project = PAY AND fixVersion is EMPTY",
+        new: false,
+      },
+    }),
+  );
+  return { h, jiraReads };
+}
+
+test("favourite filters come in under Jira filters, after the boards, and a new board says new", async () => {
+  const { h } = filtersHarness({ new: true });
+  await open(h);
+  expect(pane()).toEqual([
+    "# Mine",
+    "My work 2",
+    "# Jira boards from the Jira source",
+    // Prototype-6 sets *new* right after the name, spaced by its margin.
+    "Payments and Ops flownew 18",
+    "# Jira filters from the Jira source",
+    "PAY without a fix version 4",
+  ]);
+  expect(h.opened).toEqual([]);
+});
+
+test("opening a new Jira view takes its new away, once", async () => {
+  const { h } = filtersHarness({ new: true });
+  await open(h, null, "jira-board-21");
+  expect(h.opened).toEqual(["jira-board-21"]);
+  expect(pane()).toContain("Payments and Ops flow 18");
+});
+
+test("Hide from the list moves a Jira view to one hidden line, with Undo, and Show brings it back", async () => {
+  const { h } = filtersHarness();
+  await open(h);
+  menuOf("PAY without a fix version").click();
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((b) => b.textContent!.startsWith("Hide"))!.click();
+  await settle();
+  expect(h.hidden).toEqual([["jira-filter-10300", true]]);
+  expect(pane()).not.toContain("PAY without a fix version 4");
+  expect(toasts.items.at(-1)).toMatchObject({ text: "Hid PAY without a fix version", action: { label: "Undo" } });
+
+  const line = target.querySelector<HTMLButtonElement>(".tf-vw-hidden")!;
+  expect(line.textContent).toBe("1 hidden");
+  line.click();
+  flushSync();
+  target.querySelector<HTMLButtonElement>('button[aria-label="Show PAY without a fix version again"]')!.click();
+  await settle();
+  expect(h.hidden.at(-1)).toEqual(["jira-filter-10300", false]);
+  expect(pane()).toContain("PAY without a fix version 4");
+  expect(target.querySelector(".tf-vw-hidden")).toBeNull();
 });
 
 test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {

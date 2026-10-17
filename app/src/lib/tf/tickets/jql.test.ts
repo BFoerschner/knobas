@@ -13,6 +13,9 @@ function source(jql: string, extra: Partial<JiraSource> = {}): JiraSource {
     sprint: null,
     last_read: "2026-10-17T09:56:00Z",
     web_url: null,
+    hidden: false,
+    new: false,
+    unsynced: [],
     ...extra,
   };
 }

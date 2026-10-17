@@ -38,6 +38,10 @@ pub fn router(state: Arc<MockState>) -> Router {
         .route("/rest/api/2/serverInfo", get(server_info))
         .route("/rest/api/2/myself", get(myself))
         .route("/rest/api/2/search", get(search))
+        // #878: the Jira adapter reads Mara's favourite filters at every sync.
+        // The fixture gives her none, which is what an account that never
+        // starred one answers: an empty array.
+        .route("/rest/api/2/filter/favourite", get(favourite_filters))
         .route("/rest/api/2/issue/{issueIdOrKey}", get(issue))
         .route(
             "/rest/api/2/issue/{issueIdOrKey}/comment",
@@ -135,6 +139,10 @@ async fn server_info(State(s): State<Arc<MockState>>) -> Json<Value> {
         "scmInfo": "mockd",
         "serverTitle": "Tidewater Jira (mockd)",
     }))
+}
+
+async fn favourite_filters() -> Json<Value> {
+    Json(Value::Array(Vec::new()))
 }
 
 async fn myself(State(s): State<Arc<MockState>>) -> Json<Value> {

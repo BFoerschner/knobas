@@ -80,10 +80,11 @@ pub(crate) trait JiraApi: Send + Sync {
     // what the sync run's fakes stand for: they model no boards, and
     // `crate::views` reads a 404 on the board listing as "no boards here".
 
-    /// `GET rest/agile/1.0/board?projectKeyOrId=..`, one page.
+    /// `GET rest/agile/1.0/board?projectKeyOrId=..`, one page; with no
+    /// project, every board this account can see (#878).
     async fn boards(
         &self,
-        _project: &str,
+        _project: Option<&str>,
         _start_at: u32,
         _max_results: u32,
     ) -> Result<crate::views::BoardPage, SourceError> {
@@ -103,6 +104,11 @@ pub(crate) trait JiraApi: Send + Sync {
     /// `GET rest/api/2/filter/{id}`.
     async fn filter(&self, _id: &str) -> Result<crate::views::Filter, SourceError> {
         Err(no_agile())
+    }
+    /// `GET rest/api/2/filter/favourite`: this account's favourite filters
+    /// (#878). Core REST, not Agile: a fake that models none answers none.
+    async fn favourite_filters(&self) -> Result<Vec<crate::views::FavouriteFilter>, SourceError> {
+        Ok(Vec::new())
     }
     /// `GET rest/api/2/search?fields=key`: one page of keys. Its own shape,
     /// because Jira answers `"fields": null` on every issue of a keys-only
@@ -210,19 +216,22 @@ impl JiraApi for crate::http::JiraHttp {
 
     async fn boards(
         &self,
-        project: &str,
+        project: Option<&str>,
         start_at: u32,
         max_results: u32,
     ) -> Result<crate::views::BoardPage, SourceError> {
-        self.get_json(
-            "rest/agile/1.0/board",
-            &[
-                ("projectKeyOrId", project.to_owned()),
-                ("startAt", start_at.to_string()),
-                ("maxResults", max_results.to_string()),
-            ],
-        )
-        .await
+        let mut query = vec![
+            ("startAt", start_at.to_string()),
+            ("maxResults", max_results.to_string()),
+        ];
+        if let Some(project) = project {
+            query.insert(0, ("projectKeyOrId", project.to_owned()));
+        }
+        self.get_json("rest/agile/1.0/board", &query).await
+    }
+
+    async fn favourite_filters(&self) -> Result<Vec<crate::views::FavouriteFilter>, SourceError> {
+        self.get_json("rest/api/2/filter/favourite", &[]).await
     }
 
     async fn board_configuration(

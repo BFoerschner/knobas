@@ -188,6 +188,15 @@ struct Seed {
 #[derive(Debug, Clone, serde::Deserialize)]
 struct SeededViews {
     kanban: SeededKanban,
+    /// The seed's favourite filter (#877's seed, read by #878).
+    favourite_filter: SeededFilter,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+struct SeededFilter {
+    id: u64,
+    name: String,
+    jql: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -417,6 +426,14 @@ impl Seeded {
         mut config: serde_json::Value,
     ) -> Box<dyn Source> {
         config["username"] = serde_json::Value::String(self.user.clone());
+        // The issue walk's tests count the items a run delivers, and the
+        // seed's favourite filter would be one more at every first run and at
+        // every run after an edit it holds (#878). A test of the Jira views
+        // turns favourite filters on itself; the default is pinned by the
+        // adapter's unit tests.
+        if config.get("favourite_filters").is_none() {
+            config["favourite_filters"] = serde_json::Value::Bool(false);
+        }
         match knobas_source_jira::build(SourceInstance {
             id: "jira".to_owned(),
             kind: knobas_source_jira::ADAPTER_KIND.to_owned(),
@@ -2678,6 +2695,89 @@ async fn the_seeded_boards_arrive_as_jira_views_and_a_board_deleted_in_jira_is_g
         kanban.name,
         control.len(),
         control.iter().filter(|key| key.starts_with("OPS-")).count()
+    );
+}
+
+/// **Favourite filters and the *Boards and filters* setting (#878)** against
+/// the seed's favourite filter: it arrives as a Jira view holding what its
+/// JQL answers over plain `/search`, in that order (the control), with Jira's
+/// `fixVersion is EMPTY` run by Jira and never translated. The setting is
+/// read at the next sync: turned to no boards and no filters, every view the
+/// last sync delivered arrives as gone.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_takes_effect_at_the_next_sync()
+ {
+    let seeded = seeded();
+    let fav = &seeded
+        .seed
+        .views
+        .as_ref()
+        .expect("seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)")
+        .favourite_filter;
+    let source =
+        seeded.source(serde_json::json!({ "projects": ["PAY"], "favourite_filters": true }));
+    let (items, cursor) = full(&*source).await;
+    let key = format!("filter-{}", fav.id);
+    let filter = items
+        .iter()
+        .find(|i| i.kind == "jira_view" && i.entity.key == key)
+        .unwrap_or_else(|| panic!("no view of filter {} among {:?}", fav.id, keys(&items)));
+    assert_eq!(filter.title, fav.name);
+    assert_eq!(filter.payload["kind"], "filter");
+    assert_eq!(filter.payload["jql"], fav.jql.as_str());
+    assert_eq!(
+        filter.payload["query"],
+        fav.jql.as_str(),
+        "searched as Jira holds it"
+    );
+    let control: Vec<String> = seeded
+        .jql(&fav.jql, "key")
+        .await
+        .iter()
+        .map(|row| row["key"].as_str().unwrap().to_owned())
+        .collect();
+    assert!(
+        !control.is_empty(),
+        "the seed's PAY tickets have no fix version"
+    );
+    assert_eq!(
+        filter.payload["keys"],
+        serde_json::json!(control),
+        "Jira's answer, in Jira's order"
+    );
+    let delivered: Vec<String> = items
+        .iter()
+        .filter(|i| i.kind == "jira_view")
+        .map(|i| i.entity.key.clone())
+        .collect();
+    assert!(
+        delivered.iter().any(|k| k.starts_with("board-")),
+        "the boards on PAY came too: {delivered:?}"
+    );
+
+    let off = seeded.source(serde_json::json!({
+        "projects": ["PAY"], "boards": "none", "favourite_filters": false,
+    }));
+    let (gone, _) = sync_from(&*off, Some(cursor)).await;
+    let mut gone_keys: Vec<String> = gone
+        .iter()
+        .filter(|i| i.kind == "jira_view")
+        .inspect(|i| assert!(i.deleted, "{} is not delivered as gone", i.entity.key))
+        .map(|i| i.entity.key.clone())
+        .collect();
+    gone_keys.sort();
+    let mut expected = delivered.clone();
+    expected.sort();
+    assert_eq!(
+        gone_keys, expected,
+        "every view the last sync delivered, as gone"
+    );
+    println!(
+        "SEEDED favourite filter {} holds {} keys; {} views went when the setting turned them off",
+        fav.name,
+        control.len(),
+        gone_keys.len()
     );
 }
 

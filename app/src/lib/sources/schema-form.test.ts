@@ -8,7 +8,7 @@
 import { describe, expect, test } from "vitest";
 
 import { EMPTY_SCHEMA, GITEA_SCHEMA, JIRA_SCHEMA, TEAMCITY_SCHEMA } from "./fixtures";
-import { defaultValues, schemaFields, validate } from "./schema-form";
+import { declaresSection, defaultValues, schemaFields, validate } from "./schema-form";
 
 describe("schemaFields", () => {
   test("an enum becomes a select with its default preselected", () => {
@@ -24,6 +24,15 @@ describe("schemaFields", () => {
       options: ["datacenter", "cloud"],
       default: "datacenter",
     });
+  });
+
+  test("a property a section draws itself is no row of the form, and the section is declared (#878)", () => {
+    const keys = schemaFields(JIRA_SCHEMA).map((f) => f.key);
+    expect(keys).not.toContain("boards");
+    expect(keys).not.toContain("favourite_filters");
+    expect(keys).toContain("sprint_field");
+    expect(declaresSection(JIRA_SCHEMA, "boards-and-filters")).toBe(true);
+    expect(declaresSection(GITEA_SCHEMA, "boards-and-filters")).toBe(false);
   });
 
   test("an array of strings becomes a list control", () => {

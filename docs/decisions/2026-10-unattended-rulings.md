@@ -4409,3 +4409,42 @@ Ruled by the implementer (PR for #1019).
   `assignee != currentUser()` as `-assignee:me` added every unassigned ticket without saying so.
   Status, project and type always have a value and still translate. **Reversing:** a grammar
   form for "has a value" would let the copy say `-assignee:me has-assignee`; one table entry.
+## #878 — Jira filters and the *Boards and filters* setting (2026-10-17)
+
+- **The setting is two keys of the Jira source's config** (`boards`, `favourite_filters`), read
+  by the adapter at every sync, not a table: a change takes effect at the next sync for free,
+  and a view the setting no longer covers is delivered as gone through #877's cursor. Saved
+  through `update_source` like every other config key. **Reversing:** low.
+- **The schema marks both `x-knobas-section: "boards-and-filters"`**, and the generated form
+  leaves a marked property out; the source page draws the section for any adapter that declares
+  it. No adapter is named in the frontend. **Reversing:** low.
+- **"Only boards I marked as favourites in Jira" is the boards whose saved filter is one of my
+  favourite filters.** Jira DC's Agile REST 1.0 has no favourite-board read that the vendored
+  specs or the testenv can witness, and starring a board is not a documented resource. The
+  option is kept because the ticket and prototype-6 name it. Not witnessed against Jira's own
+  board star. **Reversing:** low (one function in `knobas-source-jira/src/views.rs`).
+- **A favourite filter is searched with its JQL as Jira holds it**, `ORDER BY` included, keys
+  only; a filter Jira refuses to run (400) or this account may not read (403/404) is left out
+  rather than failing every sync. A 404 on `filter/favourite` is no favourites. **Reversing:**
+  low.
+- **`hidden` and `is_new` live on `knobas.ticket_view`** (migration `0045`), beside the other
+  reader settings, not on `sync.jira_view`, which only the engine writes. **Reversing:** medium
+  (a migration).
+- **"New" means made at a sync after the source already had Jira views.** A source's first sync
+  marks nothing new: every board would otherwise say *new* on day one, and the prototype marks
+  one. **Reversing:** low (one CTE in `knobas_sync::jira_views`).
+- **Opening is the Tickets page showing the view**; it calls `open_jira_view` once per visit. A
+  read that writes (`mini_board` clearing the mark) was the other road. **Reversing:** low.
+- **Two commands, `hide_jira_view` and `open_jira_view`**, in `commands/search.rs`, rather than
+  flags on `save_ticket_view`, whose draft is the view's display settings. `hide_jira_view`
+  refuses a view somebody made: only Jira views hide (R-3.25). **Reversing:** low.
+- **`JiraSource.unsynced`** (the members that are not live tickets, by the project in their key)
+  is added here for *Boards and filters*' "and 9 in WEB, not synced" (R-13a.2); #879's warn line
+  can read the same field. **Reversing:** low.
+- **The radio choices say only how many boards the current choice brought.** Prototype-6's "2
+  boards" and "48 boards" for the other choices would need a Jira read the page does not make.
+  **Reversing:** low.
+- **mockd answers `GET /rest/api/2/filter/favourite` with `[]`** (Mara has no favourite filters),
+  instead of its 501 for an unserved route, which would fail every mockd sync. **Reversing:** low.
+- **The fake IPC's Jira views moved from `mock:` to `jira:` refs**, so *Choose which* opens
+  `#/settings/source/jira` as in prototype-6 and that page lists them. **Reversing:** low.
