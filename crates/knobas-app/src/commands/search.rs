@@ -56,6 +56,11 @@ pub struct LauncherHome {
     ///
     /// [`QueueCounts::pending`]: knobas_core::write_queue::QueueCounts::pending
     pub pending_writes: u32,
+    /// Whether *Show notes and quick capture* is on (#1036, R-13a.6): the one
+    /// read of `capture.notes_shown` the board's own searcher already made.
+    /// The launcher drops its `note:` syntax row and Help entry while this is
+    /// `false`, because typing the prefix then finds nothing.
+    pub notes_shown: bool,
 }
 
 /// A search failure, as something the frontend can branch on (ruling P1).
@@ -360,6 +365,7 @@ pub async fn search_inner(
 /// See [`launcher_home`].
 pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError> {
     let board = searcher(pool).await?.launcher_board().await?;
+    let notes_shown = crate::capture::shown(pool).await?;
     Ok(LauncherHome {
         smart_lists: board.smart_lists,
         recent: board.recent,
@@ -370,6 +376,7 @@ pub async fn launcher_home_inner(pool: &PgPool) -> Result<LauncherHome, IpcError
         // overflow one is a footer nobody is reading a number off any more.
         pending_writes: u32::try_from(knobas_core::write_queue::counts(pool).await?.pending)
             .unwrap_or(u32::MAX),
+        notes_shown,
     })
 }
 
@@ -507,6 +514,7 @@ mod tests {
             recent: Vec::new(),
             sources: Vec::new(),
             pending_writes: 0,
+            notes_shown: true,
         };
 
         let wire = serde_json::to_value(&value).expect("LauncherHome serializes");
@@ -517,7 +525,16 @@ mod tests {
             .map(String::as_str)
             .collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["pending_writes", "recent", "smart_lists", "sources"]);
+        assert_eq!(
+            keys,
+            [
+                "notes_shown",
+                "pending_writes",
+                "recent",
+                "smart_lists",
+                "sources"
+            ]
+        );
         for key in &keys {
             assert!(
                 declares(home, key),

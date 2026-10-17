@@ -3,6 +3,7 @@
  * query box's suggestions (#601).
  */
 import type { Handler } from "../fake-tauri";
+import { fakeNotesAreShown } from "./capture";
 import { CORPUS, SYNCED_AT, mirrorRow } from "./corpus";
 import { FIXTURE_ESTATE, assetPathText } from "./estate";
 import { fakeSmartListItems, fakeSmartLists } from "./smart-lists";
@@ -109,6 +110,7 @@ export function handlers(): Record<string, Handler> {
         .map(mirrorRow),
       sources: FIXTURE_SOURCES.map((source) => source.health),
       pending_writes: FIXTURE_QUEUE.filter((row) => row.state === "pending").length,
+      notes_shown: fakeNotesAreShown(),
     }),
     // The Tree's search box (#430), and **only** the Tree's: a query that is
     // not narrowed to assets is refused rather than answered from the estate,

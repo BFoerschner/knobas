@@ -573,7 +573,7 @@ const LAUNCHER_PORTS = {
       coverage: [],
     }),
   launcherHome: () =>
-    deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0 }),
+    deferred({ smart_lists: [], recent: [], sources: [], pending_writes: 0, notes_shown: true }),
 };
 
 /** Settings' commands (#830), every one answering through `deferred`. */

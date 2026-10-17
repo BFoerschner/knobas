@@ -134,6 +134,7 @@ const HOME: LauncherHome = {
   ],
   sources: [],
   pending_writes: 0,
+  notes_shown: true,
 };
 
 let target: HTMLDivElement;

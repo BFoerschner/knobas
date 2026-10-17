@@ -13,7 +13,6 @@
 -->
 <script lang="ts">
   import type { LauncherRow } from "./rows";
-  import { SYNTAX } from "./syntax";
 
   let {
     rows,
@@ -28,22 +27,24 @@
   } = $props();
 </script>
 
-<div class="secl"><span class="lab">Prefix syntax</span><span class="n">{SYNTAX.length}</span></div>
+<div class="secl"><span class="lab">Prefix syntax</span><span class="n">{rows.length}</span></div>
 <div class="prefixes">
-  {#each SYNTAX as entry, i (entry.token)}
-    {@const row = rows[i]}
+  {#each rows as row, i (row.id)}
+    {#if row.kind === "syntax"}
+    {@const entry = row.entry}
     <button
       class="pfx"
       class:on={i === selected}
       class:greyed={entry.expect === "reported"}
       role="option"
       aria-selected={i === selected}
-      onclick={() => row && onopen(row)}
+      onclick={() => onopen(row)}
       onmouseenter={() => onhover(i)}
     >
       <span class="k">{entry.token}</span>
       <span class="s">{entry.summary}</span>
     </button>
+    {/if}
   {/each}
 </div>
 
