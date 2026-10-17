@@ -5089,3 +5089,29 @@ Merge-manager:
   Rows from before #939 were measured on a mirror with no links and no pull requests, so
   compare them with the same PR's *before* column, not with older records. `RP_PRS=0` drops
   the pull requests but not the ticket–build and `blocks` links. **Reversing:** n/a.
+## #1144 — A run's commit, where two mirrored repositories share its sha (2026-10-18)
+
+Implementer, PR for #1144.
+
+- **The run's repository comes from its pipeline's settings, read live, not from a new
+  declaration.** The mirror cannot say which repository a run built. A mirrored TeamCity build
+  carries only `revisions.revision[].version`. The VCS root URL sits in
+  `vcs-root-instance.properties`, a name/value list that no declared path shape can pick one
+  property from. Asking `BUILD_FIELDS` for it would store every VCS root property of every build
+  raw (interfaces §4.1), including a URL with its credential if one was written into it. The
+  ticket's cheaper shape, *the pipeline's settings repository*, is what `pipeline_settings`
+  already resolves (#851). `crud::pipeline_commits` reads those settings and matches by URL and
+  sha the way #665's view row does (`commit_page`, `RESOLVE_URL`). **Reversing:** medium (a
+  declared revision repository plus a keyed path shape, the ticket's first shape).
+- **The settings are read only for a sha that two mirrored commits share**, once per pipeline.
+  A sha that one commit holds still links that commit without a live read. Its content is the
+  same commit, and the common case (no fork synced) stays a mirror read. **Reversing:** low (read
+  the settings for every run with a revision).
+- **An unresolvable sha links nothing.** Settings that cannot be read, or that name none of the
+  commits or more than one of them, leave `commit_id` `None`. A failed settings read is logged and
+  does not fail the command. **Reversing:** low.
+- **`pipelines` (the Builds list) reads the mirror only**, so a shared sha there has no
+  `commit_id`. Resolving it would cost one live read per pipeline with a shared sha on every list
+  load, and the run page reads its row from `pipeline_runs`. `pipeline_runs`, `older_pipeline_runs`
+  and `run_chain` resolve. `pipeline_runs` answers the mirror alone before the sync engine is
+  up. **Reversing:** low (pass the live reads to `pipelines_inner`).
