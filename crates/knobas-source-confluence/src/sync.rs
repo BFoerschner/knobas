@@ -16,7 +16,8 @@
 //! 4. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
 //!    following `_links.next` until there is none.
 //! 5. Drop what the overlap re-delivered, complete the comments the server did
-//!    not expand, push the rest into the sink.
+//!    not expand, look up the users their mentions name ([`crate::users`]),
+//!    push the rest into the sink.
 //! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
 //!    currentUser() AND type in (page, comment)` over the same window, whose
 //!    results are resolved to the pages they are on and pushed too.
@@ -98,6 +99,7 @@ use crate::cursor::{ConfluenceCursor, Seen};
 use crate::map;
 use crate::model::RawContent;
 use crate::storage::Account;
+use crate::users::Directory;
 
 /// A stop so a server that keeps handing out `_links.next` cannot spin a run
 /// forever. At the default page size this is a quarter of a million pages.
@@ -186,6 +188,9 @@ impl SyncRun<'_> {
             username,
             user_key: whoami.user_key.as_deref(),
         });
+        // Who each mention key names, asked once per key for the whole run
+        // (`crate::users`, #953).
+        let mut users = Directory::new(&whoami);
 
         let witnessed = self.run_start().await?;
         let offset = witnessed.offset_secs;
@@ -235,6 +240,7 @@ impl SyncRun<'_> {
                     continue;
                 }
                 self.complete(&mut raw).await?;
+                users.annotate(self.api, &mut raw).await;
                 let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
                 // Sink failures are never swallowed (SPI doc on `Source::sync`).
                 delivered.insert(raw.content.id.clone());
@@ -270,6 +276,7 @@ impl SyncRun<'_> {
                 },
                 &mut delivered,
                 &mut seen_in_window,
+                &mut users,
                 sink,
             )
             .await?;
@@ -340,6 +347,7 @@ impl SyncRun<'_> {
         window: &Window<'_>,
         delivered: &mut std::collections::BTreeSet<String>,
         seen_in_window: &mut Vec<Seen>,
+        users: &mut Directory,
         sink: &mut (dyn Sink + Send),
     ) -> Result<usize, SourceError> {
         let cql = build_mention_cql(self.cfg, window.since, window.offset_secs);
@@ -382,6 +390,7 @@ impl SyncRun<'_> {
                 }
                 let mut target = self.api.content(&page_id, EXPAND).await?;
                 self.complete(&mut target).await?;
+                users.annotate(self.api, &mut target).await;
                 let item = map::to_sync_item(self.source_id, self.base_url, &target, window.me);
                 sink.item(item).await?;
                 emitted += 1;
@@ -510,6 +519,11 @@ mod tests {
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
         edit_mid_walk: Mutex<Option<(String, String)>>,
+        /// The users `rest/api/user?key=` knows, by key (#953); any other key
+        /// answers `404`.
+        users: std::collections::BTreeMap<String, Value>,
+        /// Set to fail every user lookup with this instead.
+        user_fault: Option<SourceError>,
     }
 
     impl Fake {
@@ -522,6 +536,8 @@ mod tests {
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
+                users: std::collections::BTreeMap::new(),
+                user_fault: None,
             }
         }
 
@@ -712,6 +728,17 @@ mod tests {
                 object.remove("children");
             }
             Ok(serde_json::from_value(row).expect("the fake holds well-formed records"))
+        }
+
+        async fn user_by_key(&self, key: &str) -> Result<Value, SourceError> {
+            self.calls.lock().unwrap().push(format!("user {key}"));
+            if let Some(fault) = &self.user_fault {
+                return Err(clone_fault(fault));
+            }
+            self.users.get(key).cloned().ok_or(SourceError::Protocol {
+                status: Some(404),
+                message: format!("No user found with key: {key}"),
+            })
         }
     }
 
@@ -1438,5 +1465,109 @@ mod tests {
             "{got:?}"
         );
         assert!(sink.0.is_empty());
+    }
+
+    // -- who a mention names (#953) -------------------------------------------
+
+    /// A page whose body says `body`, edited by `tomasz` (key `k-tw`).
+    fn page_saying(id: &str, when: &str, body: &str) -> Value {
+        let mut p = page(id, id, when, 1);
+        p["body"]["storage"]["value"] = json!(body);
+        p["version"]["by"] = json!({ "username": "tomasz", "userKey": "k-tw" });
+        p
+    }
+
+    fn mention(key: &str) -> String {
+        format!("<ac:link><ri:user ri:userkey=\"{key}\" /></ac:link>")
+    }
+
+    fn user_calls(fake: &Fake) -> Vec<String> {
+        fake.calls()
+            .into_iter()
+            .filter(|c| c.starts_with("user "))
+            .collect()
+    }
+
+    fn mention_names(item: &SyncItem) -> Vec<Option<String>> {
+        use knobas_source::docs::{DocBlock, Inline};
+        let doc = crate::blocks::doc_content("page", &item.payload).expect("a page projects");
+        let mut blocks: Vec<DocBlock> = doc.blocks;
+        for c in doc.comments {
+            blocks.extend(c.blocks);
+        }
+        knobas_source::docs::inlines_mut(&mut blocks)
+            .into_iter()
+            .filter_map(|i| match i {
+                Inline::Mention { name, .. } => Some(name.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// Every key resolves, each looked up once per run: a key two pages share
+    /// costs one request, and a key the record names (the editor) or the
+    /// credential's own costs none.
+    #[tokio::test]
+    async fn every_mention_key_resolves_with_one_lookup_per_key_per_run() {
+        let mara = mention("k-mara");
+        let (tw, me) = (mention("k-tw"), mention(MY_KEY));
+        let mut second = page_saying("2", "2026-08-02T10:00:00.000Z", "<p>none</p>");
+        second["children"]["comment"]["results"] = json!([{
+            "id": "77", "type": "comment",
+            "body": { "storage": { "value": format!("<p>{mara} again</p>") } },
+            "version": { "number": 1, "when": "2026-08-02T10:00:00.000Z", "by": { "username": "priya" } }
+        }]);
+        let mut fake = Fake::new(vec![
+            page_saying("1", "2026-08-01T10:00:00.000Z", &format!("<p>{mara} {tw} {me}</p>")),
+            second,
+        ]);
+        fake.users.insert(
+            "k-mara".into(),
+            json!({ "type": "known", "userKey": "k-mara", "username": "mara", "displayName": "Mara Lindqvist" }),
+        );
+        let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(user_calls(&fake), vec!["user k-mara"]);
+        assert_eq!(
+            mention_names(&items[0]),
+            vec![Some("Mara Lindqvist".into()), None, None],
+            "mara by lookup; the editor and the credential carry no display name here"
+        );
+        assert_eq!(mention_names(&items[1]), vec![Some("Mara Lindqvist".into())]);
+        assert_eq!(
+            items[0].payload["mentioned_users"]
+                .as_array()
+                .map(|u| u.iter().map(|u| u["userKey"].clone()).collect::<Vec<_>>()),
+            Some(vec![json!(MY_KEY), json!("k-mara")]),
+            "the credential's own key is kept too, so the reader names it"
+        );
+    }
+
+    /// A key Confluence does not know is asked once, stays a miss and leaves
+    /// the payload as the server sent it.
+    #[tokio::test]
+    async fn a_key_nobody_answers_to_is_asked_once_and_stays_a_miss() {
+        let gone = mention("k-gone");
+        let fake = Fake::new(vec![
+            page_saying("1", "2026-08-01T10:00:00.000Z", &format!("<p>{gone}</p>")),
+            page_saying("2", "2026-08-02T10:00:00.000Z", &format!("<p>{gone}</p>")),
+        ]);
+        let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(user_calls(&fake), vec!["user k-gone"]);
+        assert_eq!(mention_names(&items[0]), vec![None]);
+        assert!(items[0].payload.get("mentioned_users").is_none());
+    }
+
+    /// A lookup that fails for any other reason does not fail the sync, and
+    /// ends the lookups for the run rather than asking again per key.
+    #[tokio::test]
+    async fn a_failing_lookup_stops_the_lookups_and_the_pages_still_sync() {
+        let mut fake = Fake::new(vec![
+            page_saying("1", "2026-08-01T10:00:00.000Z", &format!("<p>{}</p>", mention("k-a"))),
+            page_saying("2", "2026-08-02T10:00:00.000Z", &format!("<p>{}</p>", mention("k-b"))),
+        ]);
+        fake.user_fault = Some(SourceError::protocol("HTTP 429 after the retry budget"));
+        let (items, _) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(ids(&items), vec!["1", "2"]);
+        assert_eq!(user_calls(&fake), vec!["user k-a"]);
     }
 }
