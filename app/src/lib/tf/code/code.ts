@@ -13,6 +13,7 @@ import { matchesAll } from "../filter/filter";
 /** `code_facts`' answer by entity id. */
 export type FactsById = ReadonlyMap<string, CodeFacts>;
 
+/** `code_facts`' answer keyed by entity id, for the reads below. */
 export function factsById(facts: readonly CodeFacts[]): FactsById {
   return new Map(facts.map((entry) => [entry.entity_id, entry]));
 }

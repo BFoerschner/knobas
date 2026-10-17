@@ -35,8 +35,8 @@ export function headLine(
   now: Date,
 ): string {
   const lead = [...(facts?.teams ?? []), ...(facts?.language ? [facts.language] : [])];
-  const push = `last push ${when(pushedAt, now)}.`;
-  return lead.length > 0 ? `${lead.join(", ")}, ${push}` : `L${push.slice(1)}`;
+  const pushed = when(pushedAt, now);
+  return lead.length > 0 ? `${lead.join(", ")}, last push ${pushed}.` : `Last push ${pushed}.`;
 }
 
 /**

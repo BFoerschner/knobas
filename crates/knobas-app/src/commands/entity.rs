@@ -2684,6 +2684,7 @@ pub async fn job_pipelines(
 /// and these four facts are Code's alone. Code asks for the rows it holds.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct CodeFacts {
+    /// The row asked about.
     pub entity_id: String,
     /// The row's §4.1 author, as its source spells the account: Gitea's
     /// login of a pull request's opener, of a commit's author, of a branch
