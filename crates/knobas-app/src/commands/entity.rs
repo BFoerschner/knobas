@@ -1562,12 +1562,19 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
             })
         })
         .collect::<Result<_, IpcError>>()?;
-    with_commits(
-        pool,
-        &declarations,
-        pipelines.iter_mut().flat_map(|p| p.recent.iter_mut()),
-    )
-    .await?;
+    // The list reads the mirror only: a sha two repositories share links
+    // nothing here, rather than one live read per pipeline (#1144).
+    let runs: Vec<(&str, &mut RunRow)> = pipelines
+        .iter_mut()
+        .flat_map(|p| {
+            let PipelineRow {
+                entity_id, recent, ..
+            } = p;
+            let entity_id: &str = entity_id;
+            recent.iter_mut().map(move |r| (entity_id, r))
+        })
+        .collect();
+    with_commits(pool, &declarations, None, runs).await?;
     Ok(pipelines)
 }
 
@@ -1579,8 +1586,38 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
 /// entity id; [`NotFound`](crate::IpcErrorCode::NotFound) when no live
 /// pipeline carries it; [`Internal`](crate::IpcErrorCode::Internal) for a
 /// query failure.
+///
+/// The mirror alone: a run whose sha two mirrored repositories share has no
+/// `commit_id` here. [`pipeline_runs_live_inner`] is what the command answers.
 pub async fn pipeline_runs_inner(
     pool: &PgPool,
+    pipeline_id: &str,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    runs_of_pipeline(pool, None, pipeline_id, limit).await
+}
+
+/// One pipeline's runs as [`pipeline_runs_inner`] reads them, with a sha two
+/// mirrored repositories share linked to the commit in the repository the
+/// pipeline builds, read from its settings live (#1144, [`with_commits`]).
+/// A failed settings read is no failure here: those runs link nothing.
+///
+/// # Errors
+///
+/// As [`pipeline_runs_inner`].
+pub async fn pipeline_runs_live_inner(
+    pool: &PgPool,
+    secrets: &std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+    pipeline_id: &str,
+    limit: Option<u32>,
+) -> Result<Vec<RunRow>, IpcError> {
+    runs_of_pipeline(pool, Some((secrets, registry)), pipeline_id, limit).await
+}
+
+async fn runs_of_pipeline(
+    pool: &PgPool,
+    live: Option<LiveReads<'_>>,
     pipeline_id: &str,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
@@ -1628,15 +1665,18 @@ pub async fn pipeline_runs_inner(
             ))
         })
         .collect();
-    with_commits(pool, &declarations, runs.iter_mut()).await?;
+    let pipeline = entity.to_string();
+    let pairs = runs.iter_mut().map(|r| (pipeline.as_str(), r)).collect();
+    with_commits(pool, &declarations, live, pairs).await?;
     Ok(runs)
 }
 
-/// The mirrored commit of every sha in `$2`, by the declarations `$1`: the
-/// live items of kind `commit` whose declared `commit` is that sha, the
-/// lowest id where two sources mirror one commit.
+/// Every mirrored commit of every sha in `$2`, by the declarations `$1`: the
+/// live items of kind `commit` whose declared `commit` is that sha. Two rows
+/// for one sha are two mirrored repositories holding it, a fork or a mirror
+/// on a second forge (#1144).
 const COMMITS_OF: &str = concat!(
-    "select distinct on (c.sha) c.sha, c.entity_id from (
+    "select c.sha, c.entity_id from (
   select i.entity_id, ",
     knobas_core::declared_string!("$1", "commit"),
     " as sha
@@ -1646,36 +1686,94 @@ const COMMITS_OF: &str = concat!(
  order by c.sha, c.entity_id"
 );
 
+/// The live reads a run's commit may need (#1144): the secrets and adapters
+/// to read its pipeline's settings with.
+type LiveReads<'a> = (
+    &'a std::sync::Arc<dyn knobas_secrets::SecretStore>,
+    &'a dyn knobas_sync::scheduler::AdapterRegistry,
+);
+
 /// Fills each run's [`RunRow::commit_id`] from its `revision` (#1004), with
-/// one read for all of them, and none when no run names a revision.
+/// one read for all of them, and none when no run names a revision. Each run
+/// comes with the id of its pipeline.
 ///
 /// A commit is found by kind and declared `commit`, not by the view's
 /// repository-and-sha hint: a branch and a pull request declare a `commit`
 /// too, and only a commit's own item is what a commit link opens.
+///
+/// **A sha one mirrored commit holds** links that commit. **A sha two hold**
+/// (#1144) links the one in the repository the run's pipeline builds, found
+/// by [`crate::sources::crud::pipeline_commits`] from its settings, one live
+/// read per pipeline and only for such a sha. Without `live`, or where the
+/// settings cannot be read or name none of them, it links nothing: a commit
+/// in another repository is never offered as the one the run built.
 async fn with_commits<'a>(
     pool: &PgPool,
     declarations: &knobas_core::payload::Declarations,
-    runs: impl Iterator<Item = &'a mut RunRow>,
+    live: Option<LiveReads<'_>>,
+    runs: Vec<(&'a str, &'a mut RunRow)>,
 ) -> Result<(), IpcError> {
-    let mut runs: Vec<&mut RunRow> = runs.filter(|r| r.revision.is_some()).collect();
+    let mut runs: Vec<(&str, &mut RunRow)> = runs
+        .into_iter()
+        .filter(|(_, r)| r.revision.is_some())
+        .collect();
     if runs.is_empty() {
         return Ok(());
     }
-    let shas: Vec<&str> = runs.iter().filter_map(|r| r.revision.as_deref()).collect();
-    let found: std::collections::HashMap<String, String> =
-        sqlx::query_as::<_, (String, String)>(COMMITS_OF)
-            .bind(declarations.as_param())
-            .bind(&shas)
-            .fetch_all(pool)
-            .await?
-            .into_iter()
-            .collect();
-    for run in &mut runs {
-        run.commit_id = run
-            .revision
-            .as_ref()
-            .and_then(|sha| found.get(sha))
-            .cloned();
+    let shas: Vec<&str> = runs
+        .iter()
+        .filter_map(|(_, r)| r.revision.as_deref())
+        .collect();
+    let mut held: std::collections::HashMap<String, Vec<String>> =
+        std::collections::HashMap::new();
+    for (sha, commit) in sqlx::query_as::<_, (String, String)>(COMMITS_OF)
+        .bind(declarations.as_param())
+        .bind(&shas)
+        .fetch_all(pool)
+        .await?
+    {
+        held.entry(sha).or_default().push(commit);
+    }
+    let mut shared: std::collections::BTreeMap<&str, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for (pipeline, run) in &runs {
+        if let Some(sha) = run.revision.as_ref()
+            && held.get(sha).is_some_and(|commits| commits.len() > 1)
+        {
+            let wanted = shared.entry(pipeline).or_default();
+            if !wanted.contains(sha) {
+                wanted.push(sha.clone());
+            }
+        }
+    }
+    let mut resolved: std::collections::HashMap<(&str, String), String> =
+        std::collections::HashMap::new();
+    if let Some((secrets, registry)) = live {
+        for (pipeline, wanted) in shared {
+            match crate::sources::crud::pipeline_commits(pool, secrets, registry, pipeline, &wanted)
+                .await
+            {
+                Ok(found) => {
+                    for (sha, commit) in found {
+                        if held.get(&sha).is_some_and(|commits| commits.contains(&commit)) {
+                            resolved.insert((pipeline, sha), commit);
+                        }
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!(pipeline, %error, "a run's repository could not be read");
+                }
+            }
+        }
+    }
+    for (pipeline, run) in &mut runs {
+        run.commit_id = run.revision.as_ref().and_then(|sha| {
+            match held.get(sha).map(Vec::as_slice) {
+                Some([only]) => Some(only.clone()),
+                Some(_) => resolved.get(&(*pipeline, sha.clone())).cloned(),
+                None => None,
+            }
+        });
     }
     Ok(())
 }
@@ -1800,7 +1898,9 @@ pub async fn older_pipeline_runs_inner(
         .filter_map(|item| run_of_item(&declarations, &identity, item))
         .take(count as usize)
         .collect();
-    with_commits(pool, &declarations, runs.iter_mut()).await?;
+    let pipeline = entity.to_string();
+    let pairs = runs.iter_mut().map(|r| (pipeline.as_str(), r)).collect();
+    with_commits(pool, &declarations, Some((secrets, registry)), pairs).await?;
     Ok(runs)
 }
 
@@ -1871,12 +1971,17 @@ pub async fn run_chain_inner(
                 .and_then(|item| run_of_item(&declarations, &identity, item)),
         })
         .collect();
-    with_commits(
-        pool,
-        &declarations,
-        chain.iter_mut().filter_map(|step| step.run.as_mut()),
-    )
-    .await?;
+    let pairs = chain
+        .iter_mut()
+        .filter_map(|step| {
+            let ChainStepRow {
+                pipeline_id, run, ..
+            } = step;
+            let pipeline_id: &str = pipeline_id;
+            run.as_mut().map(|r| (pipeline_id, r))
+        })
+        .collect();
+    with_commits(pool, &declarations, Some((secrets, registry)), pairs).await?;
     Ok(chain)
 }
 
@@ -2286,15 +2391,29 @@ pub async fn pipelines(lifecycle: State<'_, Lifecycle>) -> Result<Vec<PipelineRo
 /// # Errors
 ///
 /// [`NotReady`](crate::IpcErrorCode::NotReady) while the database is coming
-/// up, and whatever [`pipeline_runs_inner`] refuses with.
+/// up, and whatever [`pipeline_runs_inner`] refuses with. Before the sync
+/// engine is up it answers the mirror alone ([`pipeline_runs_inner`]).
 #[tauri::command]
-pub async fn pipeline_runs(
+pub async fn pipeline_runs<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
     lifecycle: State<'_, Lifecycle>,
     pipeline_id: String,
     limit: Option<u32>,
 ) -> Result<Vec<RunRow>, IpcError> {
     let pool = lifecycle.pool()?;
-    pipeline_runs_inner(&pool, &pipeline_id, limit).await
+    match crate::sources::state(&app) {
+        Ok(state) => {
+            pipeline_runs_live_inner(
+                &pool,
+                &state.secrets,
+                state.registry.as_ref(),
+                &pipeline_id,
+                limit,
+            )
+            .await
+        }
+        Err(_) => pipeline_runs_inner(&pool, &pipeline_id, limit).await,
+    }
 }
 
 // -- *Viewed* on a pull request's files (#842) ------------------------------
