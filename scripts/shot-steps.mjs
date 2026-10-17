@@ -5,7 +5,8 @@
 //     ` > ` separates routes opened in turn inside one page (in-memory state
 //     survives, so a job opened first scopes the next route);
 //     ` + click:<name>` after a route clicks the first button, link, tab or menu
-//     item whose accessible name or text is <name>; `click:testid=<id>` takes a
+//     item whose accessible name or text is <name> (failing that, whose first child
+//     element's text is, so an item with a dim description matches); `click:testid=<id>` takes a
 //     data-testid. Waits up to 5 s; a miss exits 1 naming the step.
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -56,11 +57,17 @@ try {
     const want = JSON.stringify(byId ? name.slice(7) : name);
     return `(() => {
       const want = ${want};
-      const nodes = ${byId}
-        ? [...document.querySelectorAll("[data-testid]")].filter((x) => x.getAttribute("data-testid") === want)
-        : [...document.querySelectorAll("button, a, summary, [role=button], [role=menuitem], [role=tab]")].filter(
-            (x) => (x.getAttribute("aria-label") ?? x.textContent).trim() === want);
-      const el = nodes.find((x) => !x.disabled && x.getAttribute("aria-disabled") !== "true");
+      const enabled = (x) => !x.disabled && x.getAttribute("aria-disabled") !== "true";
+      let el;
+      if (${byId}) {
+        el = [...document.querySelectorAll("[data-testid]")].find((x) => x.getAttribute("data-testid") === want && enabled(x));
+      } else {
+        const all = [...document.querySelectorAll("button, a, summary, [role=button], [role=menuitem], [role=tab]")].filter(enabled);
+        // The whole name wins; only when none matches does the leading label count
+        // (an item with a dim description: <b>Import…</b><span>estate file, …</span>).
+        el = all.find((x) => (x.getAttribute("aria-label") ?? x.textContent).trim() === want)
+          ?? all.find((x) => !x.hasAttribute("aria-label") && x.firstElementChild?.textContent.trim() === want);
+      }
       if (!el) return false;
       el.click();
       return true;
