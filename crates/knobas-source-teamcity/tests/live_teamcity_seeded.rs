@@ -1519,12 +1519,19 @@ async fn the_feature_branch_build_is_served_by_both_item_producing_locators() {
         .map(|i| i.entity.key["build:".len()..].parse().expect("numeric"))
         .collect();
     seen.sort_unstable();
+    // The quiet configurations' builds only: the chain's are in no scope here.
+    let mut quiet: Vec<i64> = QUIET_CONFIGURATIONS
+        .iter()
+        .flat_map(|c| seeded.seeded_ids_of(c))
+        .collect();
+    quiet.sort_unstable();
     assert_eq!(
-        seen,
-        seeded.seeded_ids(),
-        "an incremental run from below everything mirrors every seeded build, the \
-         feature-branch one included"
+        seen, quiet,
+        "an incremental run from below everything mirrors every seeded build of the scope, \
+         the feature-branch one included"
     );
+    // The watermark is the server's, not the scope's: the chain's builds are
+    // the newest.
     assert_eq!(
         since_build_id(&cursor),
         *seeded.seeded_ids().last().expect("seeded")
@@ -1567,7 +1574,13 @@ async fn a_synced_build_carries_its_configuration_and_is_found_by_under_its_name
             "Ledger_Deploy_Staging" => "Deploy Staging",
             "Payout_Build" => "Build",
             "Payout_IntegrationTests" => "IntegrationTests",
-            other => panic!("a configuration the seed does not make: {other}"),
+            other => seeded
+                .seed
+                .chain
+                .iter()
+                .find(|c| c.build_types.iter().any(|t| t == other))
+                .and_then(|c| other.strip_prefix(&format!("{}_", c.project)))
+                .unwrap_or_else(|| panic!("a configuration the seed does not make: {other}")),
         };
         [name.to_owned(), id.to_owned()]
     };
@@ -1860,6 +1873,14 @@ async fn the_seeded_records_fill_the_builds_frame() {
     for b in of_kind(&items, "build") {
         let how = knobas_core::payload::resolve_trigger(&b.payload, &run.trigger);
         let who = resolve_string(&b.payload, &run.started_by);
+        if b.payload["triggered"]["type"] == "snapshotDependency" {
+            // A step the chain queued for a later step (#1010): the declared
+            // vocabulary (change, schedule, person) has no word for it, so it
+            // says nothing, as the adapter declares today (the account that
+            // queued the chain is still on the record, so `started_by` reads).
+            assert_eq!(how, None, "{}", b.entity);
+            continue;
+        }
         assert!(
             how.is_some(),
             "{} says how it was started: {}",
@@ -3744,7 +3765,11 @@ async fn the_seeded_chain_names_its_steps_and_each_step_has_its_run_on_the_featu
         .clone()
         .expect("seed-state.json records no `teamcity.chain` -- run `./seed --teamcity`");
     assert!(chain.build_types.len() >= 3, "a chain of at least three");
-    assert_eq!(chain.builds.len(), chain.build_types.len(), "one build each");
+    assert_eq!(
+        chain.builds.len(),
+        chain.build_types.len(),
+        "one build each"
+    );
     assert!(
         chain
             .build_types
@@ -3752,7 +3777,10 @@ async fn the_seeded_chain_names_its_steps_and_each_step_has_its_run_on_the_featu
             .all(|t| t.starts_with(&format!("{}_", chain.project))),
         "every step is in the chain's own project, which holds no fixture configuration: {chain:?}"
     );
-    assert_ne!(chain.project, CHAIN, "not the suite's own, which it deletes");
+    assert_ne!(
+        chain.project, CHAIN,
+        "not the suite's own, which it deletes"
+    );
 
     let source = seeded.source(serde_json::json!({}));
     let pipeline = |t: &str| format!("teamcity:buildType:{t}");
