@@ -23,12 +23,13 @@
   awaits it before the login's ack). The socket reads that push and the create takes the lowest
   id; an account with none is refused before `add` is sent, since a Docker monitor with no host
   is created and then down for ever. Witnessed live by
-  `a_tcp_check_is_published_as_a_port_monitor_and_docker_is_refused_without_a_host`
-  (`just kuma-live`): a TCP check published as Kuma's `port`, and Docker refused on the test
-  Kuma, which has no Docker host. The ping is witnessed at the unit seam only, to keep the
-  suite inside Kuma's twenty logins a minute. The direction "a Docker host is chosen" is witnessed only at
-  the unit seam (`the_docker_hosts_come_out_of_the_pushed_list`); the test environment has no
-  Docker host to choose.
+  `a_tcp_check_is_published_as_a_port_monitor` (`just kuma-live`): a TCP check published as
+  Kuma's `port`. The ping is witnessed at the unit seam only, to keep the
+  suite inside Kuma's twenty logins a minute. The direction "a Docker host is chosen" is
+  witnessed live since #978: the seed gives the test Kuma a Docker host (a read-only socket
+  proxy), and `a_docker_check_is_published_with_the_seeded_docker_host` creates a Docker check
+  of a testenv container and sees it published as `docker`. "No Docker host is refused" is now
+  the unit seam's (`create::tests`), since the test Kuma has one.
 
   **`assets::MonitoredAsset` gains `type_label: String`**, the asset type's label resolved by the
   backend from the one type table, for the *Watches* column ("knobas-jira Container").

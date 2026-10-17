@@ -79,6 +79,29 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # The Docker daemon Uptime Kuma's seeded Docker host talks to (#978), so a
+  # Docker monitor created in this Kuma has a host to name.
+  #
+  # SECURITY: Kuma does NOT get /var/run/docker.sock. A mounted socket is
+  # control of the Docker daemon -- root on the host -- for whatever runs in
+  # that container, and Kuma is a large Node app that fetches arbitrary URLs.
+  # Only this proxy holds the socket, and it exposes just the read endpoints
+  # (CONTAINERS=1 allows GET /containers/*; POST, which is what start, exec and
+  # create need, stays refused by its default POST=0, as do images, volumes,
+  # networks, exec and the rest). It publishes no port: only containers on this
+  # compose network reach it, at tcp://docker-proxy:2375. The `:ro` on the
+  # mount is belt only -- it does not restrict the API -- the filter is the
+  # protection.
+  docker-proxy:
+    image: ${DOCKER_PROXY_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    container_name: knobas-docker-proxy
+    environment:
+      CONTAINERS: 1
+      POST: 0
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    restart: unless-stopped
+
   uptime-kuma:
     image: ${KUMA_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
     container_name: knobas-uptime-kuma
@@ -120,6 +143,10 @@ services:
       - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:3001:3001"
+    depends_on:
+      # So `up uptime-kuma` also starts the Docker API the seeded Docker host
+      # points at.
+      - docker-proxy
     volumes:
       - kuma-data:/app/data
     healthcheck:

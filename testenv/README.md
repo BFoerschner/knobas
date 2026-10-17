@@ -352,6 +352,13 @@ the ways until #684 and is the rule that ended it; the four after it still are:
   the length of that run every other reader of this environment is talking to a
   server that answers one record per page. A concurrent `just gitea-live` fails
   on missing records, which reads as an adapter defect and is not one.
+- **Kuma has one Docker host, `testenv-docker-proxy`** (#978), which
+  `./seed-kuma.sh` creates and repairs. It points at `tcp://docker-proxy:2375`,
+  the `docker-proxy` service (tecnativa/docker-socket-proxy: container reads
+  only, no POST, no published port). Kuma deliberately does **not** mount
+  `/var/run/docker.sock`: that would give the container control of the Docker
+  daemon. It is what lets a Docker check created through knobas have a host
+  (`kuma-live`'s `a_docker_check_is_published_with_the_seeded_docker_host`).
 - **`./seed-kuma.sh` deletes every monitor `monitors.json` does not name**
   (since 2026-09-06, #441). That is what makes the seed idempotent, and it is
   also a sweep: a monitor a sibling added by hand, or that knobas itself

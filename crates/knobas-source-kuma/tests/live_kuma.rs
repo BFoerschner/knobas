@@ -1021,19 +1021,18 @@ async fn a_monitor_created_through_the_write_op_is_published_under_the_id_it_ans
 
 /// The TCP check a reader is offered for a database (#864): created through
 /// the same op and published with Kuma's own type, `port`. It watches the
-/// canary's host, whose state is never asserted. A Docker check is refused by
-/// name: this environment's Kuma has no Docker host, and a Docker monitor with
-/// no host would be down for ever.
+/// canary's host, whose state is never asserted. (Until #978 this test also
+/// asserted that a Docker check was refused because the test Kuma had no
+/// Docker host; the seed now gives it one, and that direction is the unit
+/// seam's -- `create::tests` -- while the chosen-host direction is
+/// `a_docker_check_is_published_with_the_seeded_docker_host` below.)
 ///
-/// **Three logins and no more.** Kuma refuses logins past twenty a minute, and
-/// `kuma_write_live` runs right after this suite on the same account, so this
-/// test makes one create, one refusal and one clean-up. The ping is witnessed
-/// at the unit seam only (`create::tests`), and there is no delete before the
-/// create: `just kuma-live` seeds first, and the seed sweeps any monitor
-/// `monitors.json` does not name.
+/// The ping is witnessed at the unit seam only (`create::tests`), and there is
+/// no delete before the create: `just kuma-live` seeds first, and the seed
+/// sweeps any monitor `monitors.json` does not name.
 #[tokio::test]
 #[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
-async fn a_tcp_check_is_published_as_a_port_monitor_and_docker_is_refused_without_a_host() {
+async fn a_tcp_check_is_published_as_a_port_monitor() {
     const TCP: &str = "knobas-live-created-tcp";
     let env = env();
     let source = env.writable();
@@ -1063,15 +1062,46 @@ async fn a_tcp_check_is_published_as_a_port_monitor_and_docker_is_refused_withou
         Some("port"),
         "{tcp:?}"
     );
+}
 
-    let refused = source
+/// **The chosen-host direction of #864's Docker check, live (#978).** The seed
+/// gives this Kuma a Docker host (`testenv-docker-proxy`, a read-only socket
+/// proxy), so a Docker check of a testenv container is created with that host
+/// and published as Kuma's own type, `docker`. The container is Gitea's, which
+/// the default compose set starts (`knobas-gitea`, named literally in its
+/// `container_name`); the check's *state* is never asserted, only that Kuma
+/// publishes the monitor as a Docker one watching that container.
+#[tokio::test]
+#[ignore = "needs the seeded Uptime Kuma; run with `just kuma-live`"]
+async fn a_docker_check_is_published_with_the_seeded_docker_host() {
+    const DOCKER: &str = "knobas-live-created-docker";
+    const CONTAINER: &str = "knobas-gitea";
+    let env = env();
+    let source = env.writable();
+    let _docker = Scratch::removing(DOCKER);
+
+    source
         .write(WriteOp::CreateMonitor {
             entity: knobas_source::monitor_target("kuma"),
-            name: "knobas-live-never".to_owned(),
-            url: "payout-worker".to_owned(),
+            name: DOCKER.to_owned(),
+            url: CONTAINER.to_owned(),
             kind: knobas_source::MonitorKind::Docker,
         })
         .await
-        .expect_err("no Docker host, no Docker check");
-    assert!(refused.to_string().contains("no Docker host"), "{refused}");
+        .expect("an account with a Docker host creates a Docker check");
+
+    let items = until(source.as_ref(), "the Docker check is published", |items| {
+        items.iter().any(|item| item.title == DOCKER)
+    })
+    .await;
+    let docker = items
+        .iter()
+        .find(|item| item.title == DOCKER)
+        .map(|item| item.payload.clone())
+        .expect("published");
+    assert_eq!(
+        docker.get("type").and_then(|v| v.as_str()),
+        Some("docker"),
+        "{docker:?}"
+    );
 }
