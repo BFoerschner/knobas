@@ -123,7 +123,7 @@ const TRANSPORT: &str = "polling";
 const SEPARATOR: char = '\u{1e}';
 
 /// The ack id the login rides on. A session's writes count up from the next
-/// one ([`Held::next_ack`]), which is why [`ack_of`] compares ids as numbers.
+/// one ([`LoggedIn::next_ack`]), which is why [`ack_of`] compares ids as numbers.
 const LOGIN_ACK: u32 = 1;
 
 /// How long a held session may sit unused and still be tried for a write.
@@ -200,12 +200,12 @@ pub(crate) struct KumaSocket {
     /// The logged-in session the next write may reuse, if any. The lock is
     /// held for a whole write, so two writes never share a session at once --
     /// the write queue flushes one source at a time anyway.
-    held: tokio::sync::Mutex<Option<Held>>,
+    held: tokio::sync::Mutex<Option<LoggedIn>>,
 }
 
 /// A logged-in session kept between writes.
 #[derive(Debug)]
-struct Held {
+struct LoggedIn {
     sid: String,
     /// The ack id the next emit on this session rides on.
     next_ack: u32,
@@ -411,43 +411,40 @@ impl KumaSocket {
     /// [`verdict`] is what turns the answer into the write's error.
     async fn exchange(
         &self,
-        held: &mut Option<Held>,
+        held: &mut Option<LoggedIn>,
         event: &str,
         build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<String, SourceError> {
+        let mut reused = None;
         if let Some(mut session) = held
             .take()
             .filter(|session| session.idle_since.elapsed() < self.idle_reuse)
         {
             match self.emit_on(&mut session, event, build).await? {
-                Emitted::Answered(answered) => {
-                    session.idle_since = Instant::now();
-                    *held = Some(session);
-                    return Ok(answered);
-                }
+                Emitted::Answered(answered) => reused = Some((session, answered)),
                 Emitted::NotDelivered(reason) => {
                     tracing::debug!(%reason, "the held Uptime Kuma session is gone; logging in again");
                 }
             }
         }
-        let mut session = self.log_in().await?;
-        match self.emit_on(&mut session, event, build).await? {
-            Emitted::Answered(answered) => {
-                session.idle_since = Instant::now();
-                *held = Some(session);
-                Ok(answered)
+        let (session, answered) = match reused {
+            Some(done) => done,
+            None => {
+                let mut session = self.log_in().await?;
+                match self.emit_on(&mut session, event, build).await? {
+                    Emitted::Answered(answered) => (session, answered),
+                    Emitted::NotDelivered(reason) => return Err(reason),
+                }
             }
-            Emitted::NotDelivered(reason) => Err(reason),
-        }
+        };
+        *held = Some(session);
+        Ok(answered)
     }
 
     /// Open a session and log in on it.
-    async fn log_in(&self) -> Result<Held, SourceError> {
+    async fn log_in(&self) -> Result<LoggedIn, SourceError> {
         let sid = sid_of(&self.open().await?)?;
-        let session = Session {
-            socket: self,
-            sid: &sid,
-        };
+        let session = self.session(&sid);
         session.send("40".to_owned()).await?;
         session
             .send(emit(LOGIN_ACK, "login", &self.login_argument()))
@@ -455,7 +452,7 @@ impl KumaSocket {
         let mut pushed = Pushed::default();
         let login = session.wait_for(LOGIN_ACK, &mut pushed).await?;
         login_verdict(&login, &self.account.username)?;
-        Ok(Held {
+        Ok(LoggedIn {
             sid,
             next_ack: LOGIN_ACK + 1,
             pushed,
@@ -463,7 +460,12 @@ impl KumaSocket {
         })
     }
 
-    /// Build the argument, emit `event` on `held`, and read its ack.
+    fn session<'a>(&'a self, sid: &'a str) -> Session<'a> {
+        Session { socket: self, sid }
+    }
+
+    /// Build the argument, emit `event` on `logged_in`, and read its ack.
+    /// An ack restarts the session's idle clock.
     ///
     /// [`Emitted::NotDelivered`] only for the two refusals that prove Kuma did
     /// nothing: engine.io's `400` to the emit's own POST (the session is
@@ -472,17 +474,14 @@ impl KumaSocket {
     /// an emit that was accepted and then went unanswered may have landed.
     async fn emit_on(
         &self,
-        held: &mut Held,
+        logged_in: &mut LoggedIn,
         event: &str,
         build: &impl Fn(&Pushed) -> Result<serde_json::Value, SourceError>,
     ) -> Result<Emitted, SourceError> {
-        let argument = build(&held.pushed)?;
-        let ack = held.next_ack;
-        held.next_ack += 1;
-        let session = Session {
-            socket: self,
-            sid: &held.sid,
-        };
+        let argument = build(&logged_in.pushed)?;
+        let ack = logged_in.next_ack;
+        logged_in.next_ack += 1;
+        let session = self.session(&logged_in.sid);
         match session.send(emit(ack, event, &argument)).await {
             Ok(()) => {}
             Err(
@@ -492,8 +491,8 @@ impl KumaSocket {
             ) => return Ok(Emitted::NotDelivered(error)),
             Err(error) => return Err(error),
         }
-        let answered = session.wait_for(ack, &mut held.pushed).await?;
-        if answer(&answered).is_ok_and(|answered| {
+        let payload = session.wait_for(ack, &mut logged_in.pushed).await?;
+        if answer(&payload).is_ok_and(|answered| {
             !went_well(&answered)
                 && answered.get("msg").and_then(serde_json::Value::as_str) == Some(NOT_LOGGED_IN)
         }) {
@@ -501,7 +500,8 @@ impl KumaSocket {
                 "Uptime Kuma refused {event}: {NOT_LOGGED_IN}"
             ))));
         }
-        Ok(Emitted::Answered(answered))
+        logged_in.idle_since = Instant::now();
+        Ok(Emitted::Answered(payload))
     }
 
     /// The `login` payload. `token` is the two-factor code, empty because
