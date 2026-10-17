@@ -4883,3 +4883,27 @@ Merge-manager:
   walk of every mirrored parent).
 - **Positioned children first, then the rest by title.** Confluence numbers every sibling once
   someone reorders, so the mixed case is rare. **Reversing:** trivial (the `PAGES` order clause).
+
+Merge-manager:
+
+- **The cursor version goes to 3.** The adapter runs a full sync only when its cursor is absent or
+  of another version; nothing runs one periodically, and the app has no "sync from scratch". With
+  no bump, a page mirrored before #953 would gain `position` and `mentioned_users` only when next
+  edited, so an existing mirror's tree would stay in title order. #860 bumped it for the same
+  reason. Cost: one full sync per Confluence source after the upgrade, plus one lookup per distinct
+  mentioned key. **Reversing:** trivial (the constant), though the full sync has then already run.
+- **The mirror keeps three fields of a looked-up user**: `userKey`, `username`, `displayName`, the
+  ones `blocks::people` reads. Confluence's record also carries the profile picture and links;
+  they were copied into every page that mentions the user and nothing read them. Data Center's
+  record carries no email. **Reversing:** trivial (`Directory::lookup`).
+- **The per-run cache stays per run.** An idle incremental run delivers no pages and asks
+  nothing; a busy one asks only for the distinct keys of the pages it delivers. A cache across
+  runs would save little and would keep a renamed user's old name. **Reversing:** low.
+- **A reorder alone still waits for a full sync**, which after the bump means the next cursor
+  bump. In practice a moved sibling keeps its old place until it is edited. Filed as #1138
+  (backlog). **Reversing:** n/a.
+- **`docs_tree` cost of the order term**: the probe at 22,000 items (2,000 pages), warm median,
+  208.8 ms without the `position` term and 217.7 ms with it (load 4.6 and 7.3; a third run at load
+  9.6 read 249 ms). The term is a correlated lookup per page row in a sort that already uses no
+  index (`lower(title)`), so no index applies; at most about 4%, within the noise of a loaded
+  machine. #981 owns the statement's cost. **Reversing:** n/a.

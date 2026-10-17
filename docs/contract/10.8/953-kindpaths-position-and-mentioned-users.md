@@ -21,7 +21,10 @@
   `GET /rest/api/user?key=…` for every `ri:userkey` a page's body or comments mention that the
   record does not name, once per key per run, and keeps the users found at the payload's
   `mentioned_users`, where the Docs projection reads them. A `404` is a miss; any other failure
-  stops the lookups for the run and never fails the sync. No cursor bump: a page mirrored before
-  this reads as before until it syncs again. Witnessed offline by `sync.rs`'s fake and, against
+  stops the lookups for the run and never fails the sync. The adapter's cursor version goes from 2
+  to 3 (merge-manager, as #860 did), so the first run after the upgrade is one full sync that
+  gives every mirrored page its `position` and `mentioned_users`; without it, a page would gain
+  them only when next edited. The mirror keeps only `userKey`, `username` and `displayName` of
+  each user record. Witnessed offline by `sync.rs`'s fake and, against
   the real container, `confluence_live.rs`'s
   `a_mention_of_anyone_resolves_and_children_keep_confluences_order`.
