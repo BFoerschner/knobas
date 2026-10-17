@@ -220,7 +220,7 @@ async function settle() {
 async function open(rest: string[], p: SettingsPorts = ports(), health = createHealthStub()) {
   view = mount(TfSettings, {
     target,
-    props: { rest, job: null, ready: true,ports: p, health, layers: createLayers(), now: () => NOW },
+    props: { rest, job: null, ready: true, ports: p, health, layers: createLayers(), now: () => NOW },
   });
   await settle();
   return { p, health };
@@ -390,7 +390,7 @@ test("Add a source opens in the ticket-first look, and Esc closes it through the
   const layers = createLayers();
   view = mount(TfSettings, {
     target,
-    props: { rest: [], job: null, ready: true,ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+    props: { rest: [], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
   button("+ Add a source").click();
@@ -605,7 +605,7 @@ test("Esc closes a dialog through the shell's layer stack", async () => {
   const layers = createLayers();
   view = mount(TfSettings, {
     target,
-    props: { rest: ["source", "jira"], job: null, ready: true,ports: ports(), health: createHealthStub(), layers, now: () => NOW },
+    props: { rest: ["source", "jira"], job: null, ready: true, ports: ports(), health: createHealthStub(), layers, now: () => NOW },
   });
   await settle();
   button("Remove…").click();
