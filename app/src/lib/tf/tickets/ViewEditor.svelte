@@ -51,7 +51,8 @@
     type EditColumn,
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
-  import { drawnJiraColumns, LIST_COLUMN_ORDER } from "./views";
+  import { translateJira } from "./jql";
+  import { drawnJiraColumns, LIST_COLUMN_ORDER, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -65,7 +66,13 @@
     ondelete,
     onclose,
     jira = null,
+    copiedFrom = null,
+    oncopy,
   }: {
+    /** A copy of a Jira view (#880): where it came from and the JQL parts it left out. */
+    copiedFrom?: CopiedFrom | null;
+    /** *Make an editable copy*, offered in a Jira view's settings (#880). */
+    oncopy?: (() => void) | undefined;
     /**
      * *View settings* on a Jira view (#877, R-3.24): where it comes from. Jira
      * decides its name, which tickets and its columns, so those are shown and
@@ -122,6 +129,14 @@
     const type = fromJira.board_type ? fromJira.board_type[0]!.toUpperCase() + fromJira.board_type.slice(1) : "";
     const what = fromJira.kind === "board" ? `${type} board`.trim() : "saved filter";
     return `Jira decides, from the ${what}`;
+  });
+  /** How much of a Jira view's query a copy would keep (#880). */
+  const copyKeeps = $derived.by(() => {
+    if (fromJira === null) return "";
+    const copy = translateJira(fromJira);
+    return copy.left.length === 0
+      ? "A copy keeps every part of the query."
+      : `A copy keeps ${copy.kept} of ${copy.kept + copy.left.length} parts of the query.`;
   });
   const uid = $props.id();
 
@@ -353,7 +368,12 @@
                 sprint when this one closes.{/if}
             </p>
             <pre class="tf-vw-jql">{fromJira.jql}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
-            <p class="tf-dim">To change which tickets it holds, change it in Jira.</p>
+            <p class="tf-dim">To change which tickets it holds, change it in Jira, or make your own copy. {copyKeeps}</p>
+            {#if oncopy}
+              <div class="tf-vw-btns">
+                <button type="button" class="tf-btn tf-sm" onclick={oncopy}>Make an editable copy</button>
+              </div>
+            {/if}
           </section>
         {:else}
         <section class="tf-vw-sec">
@@ -381,6 +401,13 @@
 
         <section class="tf-vw-sec">
           <h3>Which tickets</h3>
+          {#if copiedFrom !== null}
+            <p class="tf-vw-from">
+              Copied from the Jira {copiedFrom.kind} <b>{copiedFrom.name}</b>. It no longer follows Jira.{#if copiedFrom.left.length > 0}{" "}Left out, because knobas cannot test {copiedFrom.left.length > 1 ? "them" : "it"}:
+                {#each copiedFrom.left as part, i (i)}{i > 0 ? ", " : ""}<code class="tf-mono">{part.clause}</code>
+                  ({part.reason}){/each}.{/if}
+            </p>
+          {/if}
           {#if unreadable !== null}
             <p class="tf-vw-warn">The search cannot read <code class="tf-mono">{unreadable}</code> in this view.</p>
           {/if}

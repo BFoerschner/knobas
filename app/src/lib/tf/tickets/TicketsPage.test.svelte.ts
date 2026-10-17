@@ -1212,7 +1212,6 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
     { head: "Shipped 5", cards: 5, more: null },
   ]);
   expect(target.querySelector(".tf-board-head .tf-q")).toBeNull();
-  expect(target.querySelector(".tf-vw-savef")).toBeNull();
   const settings = [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find(
     (b) => b.textContent === "View settings",
   );
@@ -1221,7 +1220,83 @@ test("a Jira view reads its board from Jira, draws Jira's columns and limits, an
   menuOf("Payments and Ops flow").click();
   flushSync();
   const items = [...target.querySelectorAll("[role=menuitem]")].map((b) => b.textContent!.replace(/\s+/g, " ").trim());
-  expect(items).toEqual(["View settingslanes, cards and list columns"]);
+  expect(items).toEqual([
+    "View settingslanes, cards and list columns",
+    "Make an editable copyyour own view, starting from this board",
+  ]);
+});
+
+// ---- Make an editable copy (#880) ----
+
+const fromLine = () => dialog()!.querySelector(".tf-vw-from")!.textContent!.replace(/\s+/g, " ").trim();
+const COPIED =
+  "Copied from the Jira board Payments and Ops flow. It no longer follows Jira. Left out, because knobas cannot test it: fixVersion is EMPTY (knobas does not sync fix versions).";
+
+test("Make an editable copy opens New view on your own copy: the JQL it could test as conditions, what it left out and why", async () => {
+  const { h, jiraReads } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  menuOf("Payments and Ops flow").click();
+  flushSync();
+  [...target.querySelectorAll<HTMLButtonElement>("[role=menuitem]")].find((b) => b.textContent!.startsWith("Make an editable copy"))!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
+  expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("Payments and Ops flow");
+  expect(fromLine()).toBe(COPIED);
+  expect(searchLine().textContent).toBe("project:PAY project:OPS");
+  expect(dialog()!.textContent).toContain("Kept in knobas. Jira never sees it.");
+  // Jira's columns come along, now the reader's to change.
+  expect([...dialog()!.querySelectorAll<HTMLInputElement>('input[aria-label="Column name"]')].map((i) => [i.value, i.disabled])).toEqual([
+    ["Ready", false],
+    ["In flight", false],
+    ["Shipped", false],
+  ]);
+  // The preview reads the copy's own text, not the Jira view's board.
+  jiraReads.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  await settle();
+  expect(jiraReads.length).toBeGreaterThan(0);
+  expect(jiraReads.every((ref) => ref === null)).toBe(true);
+
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Create view")!.click();
+  await settle();
+  expect(h.saved.at(-1)).toEqual(
+    expect.objectContaining({
+      id: null,
+      name: "Payments and Ops flow",
+      group: "Mine",
+      query: "project:PAY project:OPS",
+      columns: FLOW_COLUMNS,
+      jira_ref: null,
+    }),
+  );
+});
+
+test("View settings on a Jira view says how much a copy keeps and offers Make an editable copy", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-board-head button")].find((b) => b.textContent === "View settings")!.click();
+  await settle();
+  expect(dialog()!.textContent!.replace(/\s+/g, " ")).toContain(
+    "To change which tickets it holds, change it in Jira, or make your own copy. A copy keeps 1 of 2 parts of the query.",
+  );
+  [...dialog()!.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Make an editable copy")!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
+  expect(fromLine()).toBe(COPIED);
+});
+
+test("Save as a view on a Jira view is a copy too: the JQL it could test, then the chips and words, no name yet", async () => {
+  const { h } = jiraHarness();
+  await open(h, null, "jira-board-21");
+  [...target.querySelectorAll<HTMLButtonElement>(".tf-fchips button")].find((b) => b.textContent === "Story")!.click();
+  type(field(), "r");
+  await settle();
+  [...target.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save as a view")!.click();
+  await settle();
+  expect(dialog()!.querySelector("h2")!.textContent).toBe("New view");
+  expect(dialog()!.querySelector<HTMLInputElement>('input[aria-label="Name"]')!.value).toBe("");
+  expect(fromLine()).toBe(COPIED);
+  expect(searchLine().textContent).toBe("project:PAY project:OPS issuetype:Story r");
 });
 
 test("View settings on a Jira view says Jira decides, locks its columns, and saves only how it shows", async () => {

@@ -1,7 +1,8 @@
 <!--
   A ticket view's ⋯ menu (#812, R-3.12), on its row in the views pane and in
   its header: *Edit view* (#814), *Duplicate* and *Delete*; on a Jira view
-  (#877), *View settings*.
+  (#877), *View settings* and *Make an editable copy* (#880), which is what
+  *Duplicate* is for a Jira view.
 
   Opens under its button; `Esc`, a pick or a click anywhere else closes it,
   and focus goes back to the button.
@@ -12,7 +13,7 @@
   let {
     name,
     className = "tf-vw-more",
-    jira = false,
+    jira = null,
     onedit,
     onduplicate,
     ondelete,
@@ -20,8 +21,11 @@
     /** The view's name, for the button's accessible name. */
     name: string;
     className?: string;
-    /** A Jira view (#877): *View settings* only; Jira decides the rest. */
-    jira?: boolean;
+    /**
+     * A Jira view's kind (#877): *View settings* and *Make an editable copy*
+     * (`onduplicate`, #880) only; Jira decides the rest.
+     */
+    jira?: "board" | "filter" | null;
     onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
@@ -79,9 +83,12 @@
   >
   {#if open}
     <div class="tf-menu" role="menu" tabindex="-1" bind:this={menu} {onkeydown}>
-      {#if jira}
+      {#if jira !== null}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}
           ><b>View settings</b><span>lanes, cards and list columns</span></button
+        >
+        <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
+          ><b>Make an editable copy</b><span>your own view, starting from this {jira}</span></button
         >
       {:else}
         <button type="button" role="menuitem" onclick={() => pick(onedit)}><b>Edit view</b></button>
