@@ -164,6 +164,13 @@ fn a_table_is_a_pipe_table_headed_by_its_first_row() {
         md,
         "| Service | Owner |\n| --- | --- |\n| payouts\\|api | Mara |\n| ledger |  |\n"
     );
+    assert_eq!(
+        body(&[DocBlock::Table {
+            rows: vec![vec![cell("a"), cell("b"), cell("c")], vec![cell("1")]],
+        }]),
+        "| a | b | c |\n| --- | --- | --- |\n| 1 |  |  |\n",
+        "a header wider than every row sets the width"
+    );
     assert_eq!(page("T", &[DocBlock::Table { rows: vec![] }]), "# T\n");
 }
 
