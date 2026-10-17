@@ -518,6 +518,23 @@ the adapter's tests and the project census already expect:
 No configuration has a description: the fixture gives none, and the seed
 invents none, exactly as mockd does.
 
+**A build chain, for the chain views (#1010).** The Builds view's chain line
+and the run's *Chain on <branch>* panel (#857) need configurations joined by
+snapshot dependencies, which the fixture has none of. The seed adds project
+`SeededChain` under `_Root` with `SeededChain_Compile`, `SeededChain_Package`
+and `SeededChain_Release`, each building payout-service through a VCS root of
+its own and each waiting on the one before, and queues one `Release` build on
+`feature/PAY-231-sepa-retry`, which runs all three. It is **not** in
+`fixtures/tidewater/work.json` (a cross-stream contract), no fixture
+configuration is in the chain (a build queues the ones it depends on, so a
+fixture configuration in it would move that configuration's build numbers),
+and it is not the live suite's own `KnobasChain857`, which that test creates
+and deletes. `live_teamcity_seeded.rs` counts the fixture's three
+configurations apart from the chain's, keeps the chain's builds in the exact
+sets (`seed-state.json`'s `teamcity.chain` records them), and witnesses the
+chain itself. Like the change witness, it waits while `--running` holds the
+agent.
+
 **Parameters and a trigger, for the source view (#664).** The fixture says
 nothing about either, so the seed decides, all on `Payout_IntegrationTests`:
 `tidewater.region = eu-central-1` on project `Payout` (so the configuration

@@ -190,6 +190,7 @@ repo_for_project() {  # repo_for_project <project id> -> repo name
   case "$1" in
     Payout) echo payout-service ;;
     Ledger) echo ledger-api ;;
+    "$CHAIN_PROJECT") echo payout-service ;;
     *) die "no repository decided for project $1 -- add it to repo_for_project" ;;
   esac
 }
@@ -207,6 +208,28 @@ repo_for_project() {  # repo_for_project <project id> -> repo name
 CHANGE_CONFIG=Ledger_Deploy_Staging
 CHANGE_REPO=ledger-api
 CHANGE_BRANCH=seed/change-witness
+
+# The build chain (#1010): what the Builds view's chain line and the run's
+# *Chain on <branch>* panel (#857) read, which the fixture has none of. It is
+# NOT in fixtures/tidewater/work.json -- that file is a cross-stream contract
+# (mockd's tc_state.rs, the seeds, the three exact-count live tests) -- so it
+# lives in a project of its own under _Root, which no fixture configuration
+# belongs to, and the live suite counts it apart from the fixture's three
+# (seed-state.json's teamcity.chain). Three configurations, each waiting on the
+# one before by a snapshot dependency, each building payout-service with one
+# `echo` step. The project id is not a prefix of any fixture `cfg` and not the
+# suite's own ChainProject (KnobasChain857), which it creates and deletes.
+#
+# One build of the last step on a feature branch queues the whole chain on it
+# (a snapshot dependency queues what it depends on), so the three builds come
+# from one request and none of the fixture's configurations is in the chain:
+# no fixture build number moves.
+CHAIN_PROJECT=SeededChain
+# Step names that no fixture configuration is called: the app's `under:` search
+# finds a configuration by its name, so a chain step named `Build` would be
+# found beside Payout's `Build`.
+CHAIN_STEPS="Compile Package Release"
+CHAIN_BRANCH=feature/PAY-231-sepa-retry
 
 # One VCS root per project, since both Payout configurations build the same
 # repository: Payout_PayoutService, Ledger_LedgerApi.
@@ -749,6 +772,112 @@ ensure_change_witness() {
 }
 
 # --------------------------------------------------------------------------
+# The build chain (#1010). Sets CHAIN_JSON for seed-state.json.
+CHAIN_JSON=''
+chain_last() { printf '%s' "$CHAIN_STEPS" | awk '{ print $NF }'; }
+
+# A chain whose builds name a commit this Gitea never held goes whole, for the
+# reason drop_projects_built_from_another_gitea gives.
+drop_chain_built_from_another_gitea() {
+  rest GET "/app/rest/builds?locator=buildType:(id:${CHAIN_PROJECT}_$(chain_last)),defaultFilter:false,state:finished,count:1&fields=build(id,revisions(revision(version)))"
+  [ "$REST_STATUS" = "200" ] || return 0
+  _sha=$(printf '%s' "$REST_BODY" | jq -r '.build[0].revisions.revision[0].version // empty')
+  [ -n "$_sha" ] || return 0
+  gitea GET "/repos/$GITEA_ORG/$(repo_for_project "$CHAIN_PROJECT")/git/commits/$_sha"
+  case "$GITEA_STATUS" in
+    200) return 0 ;;
+    404|422) ;;
+    *) die "look for commit $_sha of the chain in Gitea: HTTP $GITEA_STATUS: $GITEA_BODY" ;;
+  esac
+  rest DELETE "/app/rest/projects/id:$CHAIN_PROJECT"
+  expect "delete project $CHAIN_PROJECT, whose builds ran on commit $_sha" 200 204
+  say "deleted project $CHAIN_PROJECT: its builds ran on $_sha, which is not a commit of this Gitea; it is made again"
+}
+
+ensure_chain() {
+  drop_chain_built_from_another_gitea
+  # A chain an older version of this script made, with other steps, goes whole.
+  rest GET "/app/rest/projects/id:$CHAIN_PROJECT/buildTypes?fields=buildType(id)"
+  if [ "$REST_STATUS" = "200" ]; then
+    _have=$(printf '%s' "$REST_BODY" | jq -r '[.buildType[]?.id] | sort | join(" ")')
+    _want=$(for _s in $CHAIN_STEPS; do echo "${CHAIN_PROJECT}_$_s"; done | sort | paste -sd' ' -)
+    if [ -n "$_have" ] && [ "$_have" != "$_want" ]; then
+      rest DELETE "/app/rest/projects/id:$CHAIN_PROJECT"
+      expect "delete project $CHAIN_PROJECT, which an older seed made with other steps" 200 204
+      say "deleted project $CHAIN_PROJECT: it held '$_have', wanted '$_want'; it is made again"
+    fi
+  fi
+  ensure_project "$CHAIN_PROJECT"
+  ensure_vcs_root "$CHAIN_PROJECT"
+  _root=$(vcs_root_id "$CHAIN_PROJECT")
+  _before=''
+  for _step in $CHAIN_STEPS; do
+    _id="${CHAIN_PROJECT}_$_step"
+    rest GET "/app/rest/buildTypes/id:$_id"
+    if [ "$REST_STATUS" = "404" ]; then
+      rest POST /app/rest/buildTypes "$(jq -n --arg i "$_id" --arg n "$_step" --arg p "$CHAIN_PROJECT" \
+          '{id:$i, name:$n, project:{id:$p}}')"
+      expect "create build configuration $_id" 200
+      say "created build configuration $_id (\"$_step\" in $CHAIN_PROJECT)"
+    else
+      expect "read build configuration $_id" 200
+    fi
+    rest GET "/app/rest/buildTypes/id:$_id/vcs-root-entries"
+    expect "list VCS roots of $_id" 200
+    if [ "$(printf '%s' "$REST_BODY" | jq '."vcs-root-entry" // [] | length')" = "0" ]; then
+      rest POST "/app/rest/buildTypes/id:$_id/vcs-root-entries" "$(jq -n --arg r "$_root" '{"vcs-root":{id:$r}}')"
+      expect "attach VCS root $_root to $_id" 200
+    fi
+    rest GET "/app/rest/buildTypes/id:$_id/steps"
+    expect "list steps of $_id" 200
+    if [ "$(printf '%s' "$REST_BODY" | jq '.count // 0')" = "0" ]; then
+      add_step "$_id" "$_step" "# Seeded by testenv/seed-teamcity-builds.sh (#1010): one step of the build chain.
+echo \"$_step: a step of the seeded chain\""
+    fi
+    if [ -n "$_before" ]; then
+      rest GET "/app/rest/buildTypes/id:$_id/snapshot-dependencies"
+      expect "list snapshot dependencies of $_id" 200
+      if [ "$(printf '%s' "$REST_BODY" | jq '.count // 0')" = "0" ]; then
+        rest POST "/app/rest/buildTypes/id:$_id/snapshot-dependencies" \
+          "$(jq -n --arg d "$_before" '{id:$d, type:"snapshot_dependency", "source-buildType":{id:$d}}')"
+        expect "make $_id wait on $_before" 200
+        say "$_id waits on $_before"
+      fi
+    fi
+    _before=$_id
+  done
+
+  # One build of the last step on the feature branch queues the others.
+  _last="${CHAIN_PROJECT}_$(chain_last)"
+  _loc="branch:(name:$CHAIN_BRANCH),defaultFilter:false,state:finished,status:SUCCESS"
+  rest GET "/app/rest/builds?locator=buildType:(id:$_last),$_loc&fields=count"
+  expect "look for a finished build of $_last on $CHAIN_BRANCH" 200
+  if [ "$(printf '%s' "$REST_BODY" | jq '.count // 0')" = "0" ]; then
+    rest POST /app/rest/buildQueue "$(jq -n --arg b "$_last" --arg br "$CHAIN_BRANCH" \
+      '{buildType:{id:$b}, branchName:$br, comment:{text:"testenv/seed-teamcity-builds.sh: the chain (#1010)"}}')"
+    expect "queue a build of $_last on $CHAIN_BRANCH" 200
+    _bid=$(printf '%s' "$REST_BODY" | jq -r '.id')
+    say "queued the chain: build id $_bid of $_last on $CHAIN_BRANCH"
+    wait_for_state "$_bid" finished
+  fi
+
+  _builds='[]'
+  for _step in $CHAIN_STEPS; do
+    _id="${CHAIN_PROJECT}_$_step"
+    rest GET "/app/rest/builds?locator=buildType:(id:$_id),$_loc,count:1&fields=build(id,number,branchName)"
+    expect "read the chain's build of $_id" 200
+    _bi=$(printf '%s' "$REST_BODY" | jq -r '.build[0].id // empty')
+    [ -n "$_bi" ] || die "the chain has no finished successful build of $_id on $CHAIN_BRANCH"
+    _got=$(printf '%s' "$REST_BODY" | jq -r '.build[0].branchName')
+    [ "$_got" = "$CHAIN_BRANCH" ] || die "the chain's build id $_bi of $_id ran on '$_got', wanted '$CHAIN_BRANCH'"
+    _builds=$(printf '%s' "$_builds" | jq -c --arg t "$_id" --argjson i "$_bi" '. + [{build_type:$t, real_id:$i}]')
+    say "chain: build id $_bi of $_id on $CHAIN_BRANCH"
+  done
+  CHAIN_JSON=$(jq -n -c --arg p "$CHAIN_PROJECT" --arg b "$CHAIN_BRANCH" --argjson s "$(printf '%s' "$CHAIN_STEPS" | jq -R -c --arg p "$CHAIN_PROJECT" 'split(" ") | map($p + "_" + .)')" --argjson x "$_builds" \
+    '{project:$p, branch:$b, build_types:$s, builds:$x}')
+}
+
+# --------------------------------------------------------------------------
 rest GET /app/rest/server
 expect "GET /app/rest/server as the recorded token" 200
 say "server $(printf '%s' "$REST_BODY" | jq -r .version), token ok"
@@ -901,6 +1030,14 @@ else
   ensure_change_witness
 fi
 
+# 4b. The build chain (#1010), on the same terms: it needs the agent.
+if [ -n "$RUNNING_LINE" ]; then
+  CHAIN_JSON=$(jq -c '.teamcity.chain // empty' "$STATE")
+  say "the build chain waits while build $RUNNING_LINE holds the agent; re-run without --running for it"
+else
+  ensure_chain
+fi
+
 # 5. seed-state.json: fixture number -> real id, under the teamcity block
 #    seed-teamcity.sh wrote, without disturbing the rest of it.
 BUILDS_JSON=$(printf '%s' "$BUILD_MAP" | jq -R -s '
@@ -908,9 +1045,10 @@ BUILDS_JSON=$(printf '%s' "$BUILD_MAP" | jq -R -s '
   | {fixture_number: (.[0] | tonumber), build_type: .[1], real_id: (.[2] | tonumber)})
   | sort_by(.fixture_number)')
 jq --argjson b "$BUILDS_JSON" --arg c "$SETTINGS_CONFIG" --arg s "$SETTINGS_SECRET" \
-   --argjson w "${CHANGES_JSON:-null}" \
+   --argjson w "${CHANGES_JSON:-null}" --argjson ch "${CHAIN_JSON:-null}" \
   '.teamcity += {builds: $b, settings: {build_type: $c, secret_parameter: "env.SEPA_SANDBOX_KEY", secret_value: $s}}
-   | if $w == null then del(.teamcity.changes) else .teamcity.changes = $w end' \
+   | if $w == null then del(.teamcity.changes) else .teamcity.changes = $w end
+   | if $ch == null then del(.teamcity.chain) else .teamcity.chain = $ch end' \
   "$STATE" > "$STATE.tmp"
 mv "$STATE.tmp" "$STATE"
 say "wrote $STATE (teamcity.builds: $(printf '%s' "$BUILDS_JSON" | jq -r 'map("\(.fixture_number)->\(.real_id)") | join(", ")'))"
