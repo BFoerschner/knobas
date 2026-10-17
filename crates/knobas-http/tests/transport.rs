@@ -554,3 +554,165 @@ async fn a_request_with_a_body_is_retried_like_any_other() {
         "a request with a body must get the documented attempts, not one"
     );
 }
+
+/// A server that answers its headers at once and then **dribbles** the body:
+/// `pieces` bytes, one every `gap`, then `stall` of silence before the rest
+/// (when `stall` is set), on a socket it never closes early.
+///
+/// Hand-rolled rather than `wiremock`, which can delay a response but cannot
+/// write a body slowly: a fixture that answered late but whole would let a
+/// total timeout and a stall timeout look the same, and this pair of tests
+/// is about telling them apart (issue #1012).
+struct DribblingServer {
+    port: u16,
+    _keep: tokio::task::JoinHandle<()>,
+}
+
+impl DribblingServer {
+    fn new(pieces: usize, gap: Duration, stall: Option<Duration>) -> Self {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        listener.set_nonblocking(true).expect("nonblocking");
+        let listener = tokio::net::TcpListener::from_std(listener).expect("tokio listener");
+        let keep = tokio::spawn(async move {
+            while let Ok((mut socket, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+                    let mut buffer = [0u8; 2048];
+                    let _ = socket.read(&mut buffer).await;
+                    // One byte more than the dribble when it stalls: the byte
+                    // that only arrives after the silence.
+                    let length = pieces + usize::from(stall.is_some());
+                    let head = format!(
+                        "HTTP/1.1 200 OK\r\ncontent-length: {length}\r\nconnection: close\r\n\r\n"
+                    );
+                    if socket.write_all(head.as_bytes()).await.is_err() {
+                        return;
+                    }
+                    for _ in 0..pieces {
+                        tokio::time::sleep(gap).await;
+                        if socket.write_all(b"x").await.is_err() {
+                            return;
+                        }
+                    }
+                    if let Some(stall) = stall {
+                        tokio::time::sleep(stall).await;
+                        let _ = socket.write_all(b"y").await;
+                    }
+                    let _ = socket.shutdown().await;
+                });
+            }
+        });
+        Self { port, _keep: keep }
+    }
+
+    fn url(&self) -> String {
+        format!("http://127.0.0.1:{}", self.port)
+    }
+}
+
+use std::time::Duration;
+
+/// A client whose request timeout is 300 ms.
+fn quick_client(url: String) -> HttpClient {
+    HttpClient::new(HttpConfig {
+        request_timeout: Duration::from_millis(300),
+        connect_timeout: Duration::from_millis(300),
+        ..config(url)
+    })
+    .expect("client")
+}
+
+/// Ten bytes 80 ms apart: 800 ms in all, well past the 300 ms request
+/// timeout, and never 80 ms without a byte.
+const PIECES: usize = 10;
+const GAP: Duration = Duration::from_millis(80);
+const STALL: Duration = Duration::from_millis(250);
+
+/// The fixture's own premise, checked: the plain `send` breaks this body off.
+/// Without it, the test below would stay green against a server that is not
+/// actually slow (the lesson of a stub that is wrong about the tool).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_dribbled_body_outlasts_the_request_timeout() {
+    let server = DribblingServer::new(PIECES, GAP, None);
+    let client = quick_client(server.url());
+
+    let response = client
+        .send(client.request(Method::GET, "/big.zip"))
+        .await
+        .expect("the headers arrive at once");
+    let error = response
+        .bytes()
+        .await
+        .expect_err("the total timeout cuts the body");
+    assert!(error.is_timeout(), "{error:?}");
+}
+
+/// Issue #1012: a body slower in total than the request timeout, but never
+/// stalling, arrives whole through the streamed send.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_body_slower_than_the_request_timeout_arrives_whole() {
+    let server = DribblingServer::new(PIECES, GAP, None);
+    let client = quick_client(server.url());
+
+    let started = std::time::Instant::now();
+    let mut body = client
+        .send_streaming(client.request(Method::GET, "/big.zip"), STALL)
+        .await
+        .expect("the headers arrive at once");
+    let mut kept = Vec::new();
+    while let Some(chunk) = body.chunk().await.expect("never stalls") {
+        kept.extend_from_slice(&chunk);
+    }
+    assert_eq!(kept, b"x".repeat(PIECES));
+    assert!(
+        started.elapsed() > Duration::from_millis(300),
+        "the body took longer than the request timeout: {:?}",
+        started.elapsed()
+    );
+}
+
+/// Issue #1012: a body that goes silent for longer than the stall timeout is
+/// given up on, even though it would have finished. The adapter reports it as
+/// `unreachable` ("… broke off: no bytes for 30s").
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_body_that_stalls_breaks_off_as_unreachable() {
+    // Three bytes, then twice the stall timeout of silence, then the last.
+    let server = DribblingServer::new(3, GAP, Some(STALL * 2));
+    let client = quick_client(server.url());
+
+    let mut body = client
+        .send_streaming(client.request(Method::GET, "/big.zip"), STALL)
+        .await
+        .expect("the headers arrive at once");
+    let mut kept = Vec::new();
+    let broke_off = loop {
+        match body.chunk().await {
+            Ok(Some(chunk)) => kept.extend_from_slice(&chunk),
+            Ok(None) => panic!("the stalled body read as whole: {kept:?}"),
+            Err(broke_off) => break broke_off,
+        }
+    };
+    assert_eq!(broke_off, knobas_http::BodyBrokeOff::Stalled(STALL));
+    assert_eq!(kept, b"xxx", "what came before the stall did arrive");
+}
+
+/// The streamed send still bounds the wait for the headers: a server that
+/// never answers is `unreachable`, not a call that hangs.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_streamed_send_with_no_headers_is_unreachable() {
+    let server = SilentServer::new();
+    let client = quick_client(server.url());
+
+    // Bounded from outside, so a streamed send that lost its headers timeout
+    // fails here instead of hanging the suite: three 300 ms attempts and
+    // their backoff end well inside 10 s.
+    let error = tokio::time::timeout(
+        Duration::from_secs(10),
+        client.send_streaming(client.request(Method::GET, "/big.zip"), STALL),
+    )
+    .await
+    .expect("the headers timeout ends the call")
+    .expect_err("nothing ever answers");
+    assert!(matches!(error, SourceError::Unreachable(_)), "{error:?}");
+}

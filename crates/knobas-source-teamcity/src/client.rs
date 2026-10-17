@@ -579,7 +579,11 @@ impl HttpRest {
             .client
             .request(knobas_http::Method::GET, "downloadBuildLog.html")
             .query(&[("buildId", id)]);
-        let mut response = self.client.send(request).await?;
+        // Streamed: a long log takes longer than a request may (#1012).
+        let mut response = self
+            .client
+            .send_streaming(request, knobas_http::STALL_TIMEOUT)
+            .await?;
         let mut kept: Vec<u8> = Vec::new();
         let mut cut = false;
         while let Some(chunk) = response.chunk().await.map_err(|error| {

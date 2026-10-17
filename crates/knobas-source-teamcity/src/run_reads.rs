@@ -163,7 +163,8 @@ fn last_segment(path: &str) -> &str {
 
 impl HttpRest {
     /// A GET streamed chunk by chunk into `each`; `each` answers `false` to
-    /// stop reading.
+    /// stop reading. The body has no total deadline, only a stall timeout: a
+    /// whole log can take longer than a request may (#1012).
     async fn stream(
         &self,
         path: &str,
@@ -174,7 +175,10 @@ impl HttpRest {
             .client
             .request(knobas_http::Method::GET, path)
             .query(query);
-        let mut response = self.client.send(request).await?;
+        let mut response = self
+            .client
+            .send_streaming(request, knobas_http::STALL_TIMEOUT)
+            .await?;
         while let Some(chunk) = response.chunk().await.map_err(|error| {
             SourceError::Unreachable(format!("teamcity: {path} broke off: {error}"))
         })? {
@@ -408,12 +412,16 @@ impl HttpRest {
             }
         };
         // The sink's writes are async and `stream`'s callback is not, so the
-        // bytes are read here chunk by chunk rather than through it.
+        // bytes are read here chunk by chunk rather than through it. Streamed
+        // like `stream`: a 1 GB zip may take as long as it takes (#1012).
         let request = self
             .client
             .request(knobas_http::Method::GET, &path)
             .query(&query);
-        let mut response = self.client.send(request).await?;
+        let mut response = self
+            .client
+            .send_streaming(request, knobas_http::STALL_TIMEOUT)
+            .await?;
         sink.start(&name).await?;
         while let Some(chunk) = response.chunk().await.map_err(|error| {
             SourceError::Unreachable(format!(

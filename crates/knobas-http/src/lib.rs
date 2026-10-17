@@ -7,13 +7,18 @@
 //!   without a bundled root store (roadmap §4).
 //! * **Timeouts**: 10 s to connect, 30 s for the whole request. A sync that
 //!   hangs is worse than one that fails: the scheduler retries a failure.
+//!   A read too large to arrive in 30 s -- a run's download, its whole log --
+//!   goes through [`HttpClient::send_streaming`] instead: the 30 s covers
+//!   the headers, and the body may take as long as it takes as long as it
+//!   never goes [`STALL_TIMEOUT`] without a byte (issue #1012).
 //! * **Retries**: [`MAX_ATTEMPTS`] attempts in total -- the first one included
 //!   -- exponential, transient statuses only, and `Retry-After` obeyed
 //!   *before* the retry it applies to, up to [`classify::RETRY_AFTER_CAP`].
 //! * **Rate limiting**: per instance, so two Jiras do not share a budget, and
 //!   **every attempt passes it**, retries included.
-//! * **One way out**: [`HttpClient::send`] is the only thing that puts a
-//!   request on the wire. [`HttpClient::request`] hands back a [`Request`],
+//! * **One way out**: [`HttpClient::send`] (and its streamed twin
+//!   [`HttpClient::send_streaming`], the same attempt loop) is the only thing
+//!   that puts a request on the wire. [`HttpClient::request`] hands back a [`Request`],
 //!   which has no `send` of its own -- see that type for why.
 //! * **One fault mapping** ([`classify`]), because `Unauthorized` is the fault
 //!   the user is asked to act on -- carrying the **status** it came from, so an
@@ -22,8 +27,8 @@
 //!   refuse the *request* rather than the credential says which through its
 //!   [`ForbiddenReading`](classify::ForbiddenReading) (issue #722).
 //! * **One place a failing body is read**: the caller's
-//!   [`BodyMessage`](classify::BodyMessage), consulted inside [`HttpClient::send`]
-//!   where the body still exists.
+//!   [`BodyMessage`](classify::BodyMessage), consulted inside the attempt loop
+//!   both sends share, where the body still exists.
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
 
@@ -58,6 +63,8 @@ pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error,
 // type is not named here, it cannot be reached through this crate.
 // `RequestBuilder` and `Client` are both deliberately absent.
 pub use reqwest::{Method, Response, StatusCode, header};
+// What a [`StreamedBody`] chunk is; reqwest's own, so no copy per chunk.
+pub use bytes::Bytes;
 
 /// Total attempts per request, the first one included.
 ///
@@ -89,6 +96,13 @@ pub const MAX_ATTEMPTS: u32 = 3;
 /// The structural fix is for the transaction not to span the network at all;
 /// that is stream F's (interfaces §10.6).
 pub const SEND_BUDGET: Duration = Duration::from_secs(45);
+
+/// How long a streamed body may go without a byte before it is given up on
+/// ([`HttpClient::send_streaming`], issue #1012).
+///
+/// The request timeout's 30 s, because it answers the same question -- "is
+/// anyone still there?" -- about one read instead of about the whole body.
+pub const STALL_TIMEOUT: Duration = Duration::from_secs(30);
 
 type Limiter = RateLimiter<NotKeyed, InMemoryState, DefaultClock>;
 
@@ -146,13 +160,14 @@ pub struct HttpConfig {
     /// How long to wait for a connection before calling the source
     /// unreachable.
     pub connect_timeout: Duration,
-    /// How long to wait for a whole request, connection included.
+    /// How long to wait for a whole request, connection included -- or, for
+    /// [`HttpClient::send_streaming`], for its response headers.
     pub request_timeout: Duration,
     /// How this adapter reads its own error envelope out of a failing response
     /// body (ADR-0004), or `None` to keep the raw excerpt.
     ///
-    /// The body is consumed inside [`HttpClient::send`], the only door onto the
-    /// wire, so this is the adapter's one chance at it. Every source knobas
+    /// The body is consumed inside [`HttpClient::send`] (or `send_streaming`),
+    /// the only door onto the wire, so this is the adapter's one chance at it. Every source knobas
     /// reads has an envelope of its own -- Jira's `{"errorMessages":[…]}`,
     /// Gitea's `{"message":…}`, TeamCity's plain text -- and the commonest sync
     /// failure of all, a mistyped filter, is a 400 whose body is the exact
@@ -256,7 +271,9 @@ impl HttpClient {
             // §4) would hold on nobody's machine.
             .use_rustls_tls()
             .connect_timeout(config.connect_timeout)
-            .timeout(config.request_timeout)
+            // No client-wide `.timeout`: a request's timeout is set per
+            // attempt in `send_with`, and a client-wide one would cut every
+            // streamed body off at the request timeout, which is #1012's bug.
             .default_headers(headers)
             .build()
             .map_err(|error| SourceError::protocol(format!("building the http client: {error}")))?;
@@ -289,8 +306,8 @@ impl HttpClient {
     /// A request with the base URL, auth and default headers applied.
     ///
     /// Returns a [`Request`], which is a builder with **no way to send
-    /// itself**: [`HttpClient::send`] is the only thing that puts it on the
-    /// wire. That is the point -- see [`Request`].
+    /// itself**: [`HttpClient::send`] (or `send_streaming`) is the only thing
+    /// that puts it on the wire. That is the point -- see [`Request`].
     #[must_use]
     pub fn request(&self, method: Method, path: &str) -> Request {
         let request = self.inner.request(method, self.url_for(path));
@@ -326,6 +343,41 @@ impl HttpClient {
     /// *last* failure rather than as a retry-specific one: what the caller
     /// needs to know is what the source finally said.
     pub async fn send(&self, request: Request) -> Result<reqwest::Response, SourceError> {
+        self.send_with(request, Deadline::Whole).await
+    }
+
+    /// Send a read whose body may be too large to arrive within the request
+    /// timeout -- a run's download or its whole log (issue #1012).
+    ///
+    /// Everything [`send`](Self::send) guarantees holds up to the response
+    /// headers: the limiter, the retries, `Retry-After`, the classification
+    /// and [`SEND_BUDGET`], with each attempt's timeout covering the wait for
+    /// the headers only. The body then has no total deadline; it is bounded
+    /// by `stall` instead -- [`StreamedBody::chunk`] gives up when no byte
+    /// arrives for that long. A 1 GB artifact over a slow tunnel downloads
+    /// whole; a server that stops sending is still noticed.
+    ///
+    /// # Errors
+    ///
+    /// As [`send`](Self::send); headers that do not arrive within the
+    /// attempt's timeout are [`SourceError::Unreachable`], retried like any
+    /// timeout.
+    pub async fn send_streaming(
+        &self,
+        request: Request,
+        stall: Duration,
+    ) -> Result<StreamedBody, SourceError> {
+        let response = self.send_with(request, Deadline::Headers).await?;
+        Ok(StreamedBody { response, stall })
+    }
+
+    /// [`send`](Self::send)'s attempt loop, with `deadline` saying what each
+    /// attempt's timeout covers.
+    async fn send_with(
+        &self,
+        request: Request,
+        deadline: Deadline,
+    ) -> Result<reqwest::Response, SourceError> {
         let started = Instant::now();
         let mut request = request.inner;
 
@@ -348,22 +400,53 @@ impl HttpClient {
                 )));
             };
 
+            // A transport failure, mapped, and whether it is transient: worth
+            // another attempt.
+            let classify_transport = |error: reqwest::Error| {
+                (
+                    classify::reqwest_error(&error),
+                    retry::error_is_transient(&error),
+                )
+            };
+            let answered = match deadline {
+                Deadline::Whole => request
+                    .timeout(attempt_timeout)
+                    .send()
+                    .await
+                    .map_err(classify_transport),
+                // reqwest's own timeout would cover the body as well, so the
+                // wait for the headers is bounded from outside instead. Late
+                // headers are a timeout, and transient like one.
+                Deadline::Headers => {
+                    match tokio::time::timeout(attempt_timeout, request.send()).await {
+                        Ok(answered) => answered.map_err(classify_transport),
+                        Err(_) => Err((
+                            SourceError::Unreachable(format!(
+                                "no response headers within {attempt_timeout:?}"
+                            )),
+                            true,
+                        )),
+                    }
+                }
+            };
             // `delay` is how long to wait before the next attempt; `give_up`
             // is what to report if there is not going to be one. Carrying both
             // is what keeps a 503-that-cannot-be-retried a 503.
-            let (delay, give_up) = match request.timeout(attempt_timeout).send().await {
+            let (delay, give_up) = match answered {
                 Ok(response) if response.status().is_success() => return Ok(response),
                 Ok(response) => {
                     let status = response.status();
                     let transient = retry::status_is_transient(status.as_u16());
                     // Read before the body is consumed to build the message.
                     let asked_for = classify::parse_retry_after(response.headers());
-                    let error = classify::response_error(
-                        status,
-                        &body_of(response).await,
-                        self.body_message,
-                        self.forbidden,
-                    );
+                    // Bounded here too: a streamed send's response carries no
+                    // deadline of its own, and an error body that dribbles
+                    // must not hold the call open.
+                    let body = tokio::time::timeout(attempt_timeout, body_of(response))
+                        .await
+                        .unwrap_or_default();
+                    let error =
+                        classify::response_error(status, &body, self.body_message, self.forbidden);
                     if last || !transient {
                         return Err(error);
                     }
@@ -371,9 +454,8 @@ impl HttpClient {
                     // is read *before* the wait it applies to.
                     (asked_for.unwrap_or_else(|| retry::backoff(attempt)), error)
                 }
-                Err(error) => {
-                    let mapped = classify::reqwest_error(&error);
-                    if last || !retry::error_is_transient(&error) {
+                Err((mapped, transient)) => {
+                    if last || !transient {
                         return Err(mapped);
                     }
                     (retry::backoff(attempt), mapped)
@@ -442,6 +524,62 @@ impl HttpClient {
     }
 }
 
+/// What one attempt's timeout covers.
+#[derive(Clone, Copy)]
+enum Deadline {
+    /// The whole exchange, body included ([`HttpClient::send`]).
+    Whole,
+    /// The response headers only ([`HttpClient::send_streaming`]).
+    Headers,
+}
+
+/// A successful response whose body is read chunk by chunk, with no total
+/// deadline and a stall timeout instead ([`HttpClient::send_streaming`]).
+#[derive(Debug)]
+pub struct StreamedBody {
+    response: reqwest::Response,
+    stall: Duration,
+}
+
+impl StreamedBody {
+    /// The next bytes of the body, `None` at its end.
+    ///
+    /// # Errors
+    ///
+    /// [`BodyBrokeOff`] when no byte arrived within the stall timeout, or the
+    /// connection failed mid-body. Either way the body is not whole, and the
+    /// caller must not keep what it has as if it were.
+    pub async fn chunk(&mut self) -> Result<Option<Bytes>, BodyBrokeOff> {
+        match tokio::time::timeout(self.stall, self.response.chunk()).await {
+            Ok(Ok(chunk)) => Ok(chunk),
+            Ok(Err(error)) => Err(BodyBrokeOff::Transport(error.to_string())),
+            Err(_) => Err(BodyBrokeOff::Stalled(self.stall)),
+        }
+    }
+}
+
+/// Why a [`StreamedBody`] ended before its end. Its `Display` is the detail
+/// an adapter puts after its own "the download of … broke off: ", in a
+/// [`SourceError::Unreachable`]: the source failed to answer.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BodyBrokeOff {
+    /// No byte arrived for this long.
+    Stalled(Duration),
+    /// The connection failed; the transport's own words.
+    Transport(String),
+}
+
+impl std::fmt::Display for BodyBrokeOff {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Stalled(stall) => write!(formatter, "no bytes for {stall:?}"),
+            Self::Transport(detail) => formatter.write_str(detail),
+        }
+    }
+}
+
+impl std::error::Error for BodyBrokeOff {}
+
 /// A request under construction, bound to the client that built it.
 ///
 /// **This type exists to have no `send`.** A bare
@@ -452,7 +590,7 @@ impl HttpClient {
 /// one character shorter than the correct call
 /// (`client.send(req)` vs `req.send()`), it compiles, and it works, so it
 /// would be found in review or not at all. Wrapping the builder makes
-/// [`HttpClient::send`] the only door.
+/// [`HttpClient::send`] (and `send_streaming`, the same loop) the only door.
 ///
 /// The builder surface is deliberately narrow: what an adapter needs on a
 /// GET, plus [`Request::json`] for M2's ratified write set (issue #43) --

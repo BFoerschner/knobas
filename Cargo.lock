@@ -2881,6 +2881,7 @@ dependencies = [
 name = "knobas-http"
 version = "2.0.0-m2"
 dependencies = [
+ "bytes",
  "governor",
  "knobas-http",
  "knobas-source",
