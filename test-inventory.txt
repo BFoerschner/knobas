@@ -822,6 +822,7 @@ knobas-app	test/it	link_sets_ipc::a_set_reads_with_its_contents_rules_and_ticket
 knobas-app	test/it	link_sets_ipc::a_sub_task_reads_its_parents_own_links_behind_the_switch
 knobas-app	test/it	link_sets_ipc::a_this_job_list_holds_the_sets_members
 knobas-app	test/it	link_sets_ipc::an_epic_rule_shows_its_members_on_every_ticket_under_the_epic
+knobas-app	test/it	link_sets_ipc::an_item_linked_by_hand_under_one_epic_is_offered_to_its_set
 knobas-app	test/it	link_sets_ipc::an_item_shows_once_with_its_first_reason
 knobas-app	test/it	link_sets_ipc::editing_a_set_changes_every_job_at_once
 knobas-app	test/it	link_sets_ipc::hiding_a_member_on_one_ticket_leaves_the_set_and_the_others

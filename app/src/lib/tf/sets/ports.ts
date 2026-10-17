@@ -8,6 +8,7 @@ import type {
   EntityPage,
   LinkSetDetail,
   LinkSetDraft,
+  LinkSetHint,
   LinkSetMemberKind,
   LinkSetPattern,
   LinkSetPatternPreview,
@@ -20,6 +21,7 @@ import type {
 import {
   deleteLinkSet,
   linkSet,
+  linkSetHints,
   linkSets,
   listEntities,
   listProjects,
@@ -34,6 +36,8 @@ import { filterSuggestions, type ParentSuggestion } from "../../ipc/search";
 
 export interface SetPorts {
   linkSets: () => Promise<LinkSetRow[]>;
+  /** R-7.10's hint card (#870). */
+  linkSetHints: () => Promise<LinkSetHint[]>;
   linkSet: (id: string) => Promise<LinkSetDetail>;
   saveLinkSet: (draft: LinkSetDraft) => Promise<LinkSetDetail>;
   deleteLinkSet: (id: string) => Promise<void>;
@@ -97,6 +101,7 @@ const ticketParents = (parents: ParentSuggestion[]) =>
 
 export const defaultPorts: SetPorts = {
   linkSets: () => linkSets(),
+  linkSetHints: () => linkSetHints(),
   linkSet: (id) => linkSet(id),
   saveLinkSet: (draft) => saveLinkSet(draft),
   deleteLinkSet: (id) => deleteLinkSet(id),

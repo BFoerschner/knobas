@@ -1187,6 +1187,113 @@ pub async fn on_job(pool: &PgPool, ticket_id: &str) -> Result<JobLinkSets, IpcEr
     Ok(JobLinkSets { sets: out, parent })
 }
 
+/// How many tickets under one epic an item must be linked to by hand before
+/// the Link sets view offers it to the epic's set (R-7.10's "several").
+pub const HINT_TICKETS: i64 = 2;
+
+/// R-7.10's hint (#870): "You linked Dashboard_Build by hand to PAY-240 and 2
+/// more tickets under PAY-200. Add it to Payout stack?"
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct LinkSetHint {
+    pub set_id: String,
+    pub set_name: String,
+    /// The epic the set's rule names, a ticket entity id.
+    pub epic: String,
+    /// What *Add to …* adds: the item, as a member of its kind.
+    pub member: LinkSetMember,
+    /// The item's title.
+    pub title: String,
+    /// The tickets under the epic it is linked to by hand, in key order.
+    pub tickets: Vec<String>,
+}
+
+/// One row per set, epic rule and item: the items linked by hand (a live
+/// `manual` link, either end) to [`HINT_TICKETS`] or more live tickets under
+/// the epic, that can be a member and that the set neither holds nor matches
+/// by a pattern. Most tickets first.
+const HINTS: &str = concat!(
+    "with recursive epics(n, set_id, value) as (
+        select row_number() over (order by set_id, position)::int, set_id, value
+          from knobas.link_set_rule where kind = 'epic'
+    ),
+    rules(n, rule, kind, value) as (
+        select n, n, 'epic', value from epics
+    ),
+    ",
+    knobas_core::link_set_rule_tickets!(),
+    ",
+    under(n, ticket) as (
+        select distinct t.n, t.id
+          from rule_ticket t
+          join sync.live_item i on i.entity_id = t.id and i.kind = 'ticket'
+    ),
+    by_hand(ticket, item) as (
+        select from_id, to_id from knobas.link where deleted_at is null and origin = 'manual'
+        union
+        select to_id, from_id from knobas.link where deleted_at is null and origin = 'manual'
+    ),
+    pat as (
+        select set_id, position, kind, pattern from knobas.link_set_member
+         where pattern is not null
+    ),
+    pattern_hit as (",
+    knobas_core::link_set_pattern_hits!("pat"),
+    "),
+    offered as (
+        select e.set_id, e.value as epic, x.id as item, x.kind, x.title, u.ticket,
+               case when x.kind in ('repo', 'page', 'asset', 'monitor') then x.kind
+                    else 'pipeline' end as member_kind
+          from under u
+          join epics e on e.n = u.n
+          join by_hand h on h.ticket = u.ticket
+          join knobas.entity x on x.id = h.item and x.deleted_at is null
+    )
+    select o.set_id, s.name as set_name, o.epic, o.member_kind, o.item, o.title,
+           array_agg(distinct o.ticket) as tickets
+      from offered o
+      join knobas.link_set s on s.id = o.set_id
+     where ",
+    knobas_core::link_set_member_fits!("o.member_kind", "o.kind"),
+    "
+       and not exists (select 1 from knobas.link_set_member m
+                        where m.set_id = o.set_id and m.entity_id = o.item)
+       and not exists (select 1 from pattern_hit ph where ph.set_id = o.set_id and ph.id = o.item)
+     group by o.set_id, s.name, o.epic, o.member_kind, o.item, o.title
+    having count(distinct o.ticket) >= $1
+     order by count(distinct o.ticket) desc, lower(s.name), lower(o.title), o.item"
+);
+
+/// The hints the Link sets view offers (R-7.10, #870): see [`HINTS`].
+///
+/// # Errors
+///
+/// `internal` if a read fails.
+pub async fn hints(pool: &PgPool) -> Result<Vec<LinkSetHint>, IpcError> {
+    crate::commands::search::searcher(pool).await?;
+    let rows = sqlx::query(HINTS)
+        .bind(HINT_TICKETS)
+        .fetch_all(pool)
+        .await?;
+    Ok(rows
+        .iter()
+        .map(|row| {
+            let mut tickets: Vec<String> = row.get("tickets");
+            tickets.sort_by(|a, b| a.len().cmp(&b.len()).then_with(|| a.cmp(b)));
+            LinkSetHint {
+                set_id: row.get("set_id"),
+                set_name: row.get("set_name"),
+                epic: row.get("epic"),
+                member: LinkSetMember {
+                    kind: row.get("member_kind"),
+                    entity_id: row.get("item"),
+                },
+                title: row.get("title"),
+                tickets,
+            }
+        })
+        .collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

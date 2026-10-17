@@ -3372,6 +3372,28 @@ export function hideLinkSetMember(ticketId: string, memberId: string, hidden: bo
   return invoke<boolean>("hide_link_set_member", { ticketId, memberId, hidden });
 }
 
+/**
+ * The Link sets view's hint card (#870, R-7.10) — `LinkSetHint`: an item
+ * linked by hand to two or more tickets under the epic a set's rule names,
+ * which the set does not hold yet.
+ */
+export interface LinkSetHint {
+  set_id: string;
+  set_name: string;
+  /** The epic, a ticket entity id. */
+  epic: string;
+  /** What *Add to …* adds. */
+  member: LinkSetMember;
+  title: string;
+  /** The tickets under the epic it is linked to by hand, in key order. */
+  tickets: string[];
+}
+
+/** The hints, most tickets first (#870). */
+export function linkSetHints(): Promise<LinkSetHint[]> {
+  return invoke<LinkSetHint[]>("link_set_hints");
+}
+
 /** One member of a set that applies to a job — `JobMember` (#867). */
 export interface JobMember {
   /** The member's kind: the row's section. */

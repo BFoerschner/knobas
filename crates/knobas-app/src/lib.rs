@@ -589,6 +589,9 @@ pub fn run() {
             // #941's *Move to Confluence…*, appended at the foot: the list
             // is append-only (§10.8).
             commands::entity::move_notes_to_confluence,
+            // #870's link-set hint card, appended at the foot: the list is
+            // append-only (§10.8).
+            commands::entity::link_set_hints,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

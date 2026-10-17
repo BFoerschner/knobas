@@ -2305,9 +2305,28 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
         "\"preview_link_set_pattern\"",
         "\"hide_link_set_member\"",
         "\"job_link_sets\"",
+        "\"link_set_hints\"",
     ] {
         assert!(MIRROR.contains(command), "{command} is not invoked");
     }
+    // #870's hint card.
+    let hint = serde_json::to_value(knobas_app::link_sets::LinkSetHint {
+        set_id: "payout-stack".to_owned(),
+        set_name: "Payout stack".to_owned(),
+        epic: "jira:PAY-200".to_owned(),
+        member: LinkSetMember {
+            kind: "pipeline".to_owned(),
+            entity_id: "teamcity:Dashboard_Build".to_owned(),
+        },
+        title: "Dashboard_Build".to_owned(),
+        tickets: vec!["jira:PAY-240".to_owned()],
+    })
+    .unwrap();
+    assert_shape(
+        "LinkSetHint",
+        &hint,
+        &["epic", "member", "set_id", "set_name", "tickets", "title"],
+    );
 }
 
 /// #854 to #856's run reads: every field on the wire, through each shape the

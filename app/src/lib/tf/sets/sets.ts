@@ -7,6 +7,7 @@
  */
 import { keyOf } from "../job/job";
 import type {
+  LinkSetHint,
   LinkSetMemberKind,
   LinkSetMemberRow,
   LinkSetRow,
@@ -122,6 +123,16 @@ export function patternQuery(kind: LinkSetMemberKind, project: string, text: str
   if (kind === "pipeline") parts.push(`name:${grammarValue(typed || "*")}`);
   else if (typed) parts.push(`under:${grammarValue(typed)}`);
   return parts.join(" ");
+}
+
+/**
+ * The middle of R-7.10's hint (#870): "PAY-240 and 2 more tickets under
+ * PAY-200". The backend offers an item only on two tickets or more, so there
+ * is always at least one more.
+ */
+export function hintTickets(hint: Pick<LinkSetHint, "epic" | "tickets">): string {
+  const more = hint.tickets.length - 1;
+  return `${keyOf(hint.tickets[0] ?? "")} and ${more} more ${more === 1 ? "ticket" : "tickets"} under ${keyOf(hint.epic)}`;
 }
 
 /** A dot's tone class from a member row's state (#1008); none draws the muted dot. */

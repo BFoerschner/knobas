@@ -1,6 +1,7 @@
 /**
  * `?fake-ipc`: Link sets (#866): `link_sets`, `link_set`, `save_link_set`,
- * `delete_link_set`, `preview_link_set_rule`, `hide_link_set_member` and
+ * `delete_link_set`, `preview_link_set_rule`, `hide_link_set_member`,
+ * `link_set_hints` (#870) and
  * `job_link_sets` (#867, the job's *Also on this job* and drawer groups), over
  * a session-long list seeded with prototype-6's five sets (its `sets` array),
  * each member a fixture item by id.
@@ -23,6 +24,7 @@ import type {
   JobLinkSets,
   LinkSetDetail,
   LinkSetDraft,
+  LinkSetHint,
   LinkSetMemberKind,
   LinkSetMemberRow,
   LinkSetPattern,
@@ -354,6 +356,29 @@ export function fakeJobLinkSets(ticketId: string): JobLinkSets {
 }
 
 /** This feature's commands. */
+/**
+ * `link_set_hints` (#870, R-7.10): prototype-6's one hint, Dashboard_Build
+ * linked by hand to three tickets under PAY-200, offered to *Payout stack*
+ * while that set exists and holds no such item. Fixture-only: the real
+ * query over links is witnessed in `link_sets_ipc.rs`.
+ */
+function fakeHints(): LinkSetHint[] {
+  const set = SETS.find((entry) => entry.id === "payout-stack");
+  const build = fakePipelines().find((row) => row.name === "Dashboard_Build");
+  if (!set || !build) return [];
+  if (setItems(set).some((item) => item.entity_id === build.entity_id)) return [];
+  return [
+    {
+      set_id: set.id,
+      set_name: set.name,
+      epic: "mock:PAY-200",
+      member: { kind: "pipeline", entity_id: build.entity_id },
+      title: "Dashboard_Build",
+      tickets: ["mock:PAY-232", "mock:PAY-236", "mock:PAY-240"],
+    },
+  ];
+}
+
 export function handlers(): Record<string, Handler> {
   return {
     link_sets: () => [...SETS].sort((a, b) => a.name.toLowerCase().localeCompare(b.name.toLowerCase())).map(rowOf),
@@ -385,6 +410,7 @@ export function handlers(): Record<string, Handler> {
     preview_link_set_rule: (args) => ruleTickets([args["rule"] as LinkSetRule]),
     job_link_sets: (args) => fakeJobLinkSets(String(args["entityId"] ?? "")),
     preview_link_set_pattern: (args) => preview(args["pattern"] as LinkSetPattern),
+    link_set_hints: () => fakeHints(),
     hide_link_set_member: (args) => {
       const pair = `${String(args["ticketId"])}|${String(args["memberId"])}`;
       if (args["hidden"]) HIDDEN.add(pair);
