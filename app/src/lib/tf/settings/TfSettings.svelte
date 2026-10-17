@@ -265,6 +265,7 @@
             now={clock}
             {ports}
             {layers}
+            add={"add" in place ? place.add : undefined}
             onhealth={(next) => health.patch(next)}
             onchanged={replaceRow}
             onstarted={() => markStarted(current.id)}

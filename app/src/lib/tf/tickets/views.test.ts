@@ -12,7 +12,9 @@ import {
   drawnJiraColumns,
   groupViews,
   hiddenViews,
+  jiraKindWords,
   savedShowing,
+  sprintEnds,
   viewColumns,
 } from "./views";
 
@@ -104,6 +106,14 @@ test("Save as a view takes the text and how it shows now; Duplicate and Undo kee
   expect(draftFromFilter(null, "", savedShowing(null))).toEqual(expect.objectContaining({ group: "Mine", query: "", layout: "board" }));
   expect(draftCopy(saved)).toEqual(expect.objectContaining({ id: null, position: null, name: "Copy of pay", jira_ref: null }));
   expect(draftRestore(saved)).toEqual(expect.objectContaining({ id: "pay", position: 7, name: "pay", jira_ref: "board:3" }));
+});
+
+test("a Jira view is read from a board of its type or a saved filter, and a sprint ends on a day (#879)", () => {
+  expect(jiraKindWords({ kind: "board", board_type: "scrum" })).toBe("Scrum board");
+  expect(jiraKindWords({ kind: "board", board_type: null })).toBe("board");
+  expect(jiraKindWords({ kind: "filter", board_type: null })).toBe("saved filter");
+  expect(sprintEnds("2026-10-22T16:00:00Z")).toBe("22 Oct");
+  expect(sprintEnds("soon")).toBe("");
 });
 
 test("Jira boards and Jira filters come after every group of your own, and a Jira view is found by its JQL", () => {

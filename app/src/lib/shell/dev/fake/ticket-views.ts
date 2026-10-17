@@ -76,7 +76,7 @@ interface FakeJira {
     sprint: { id: number; name: string; end_date: string | null } | null;
     last_read: string;
     web_url: string;
-    /** #878: *Hide from the list*, *new* until opened, the tickets in projects not synced. */
+    /** #878: *Hide from the list*, *new* until opened; #879: the tickets in projects not synced. */
     hidden: boolean;
     new: boolean;
     unsynced: { project: string; count: number }[];
@@ -93,7 +93,7 @@ function jiraBoard(
   columns: View["columns"],
   lanes: string,
   member: (key: string) => boolean,
-  extra: { sub?: string; sprint?: string } = {},
+  extra: { sub?: string; sprint?: string; outside?: { project: string; count: number } } = {},
 ) {
   const ref = `jira:board-${id}`;
   JIRA.push({
@@ -110,8 +110,8 @@ function jiraBoard(
       hidden: false,
       // prototype-6's `S.vnew`: the board that turned up at the last sync.
       new: id === 21,
-      // prototype-6's `outside`: on-call reaches WEB, which is not synced.
-      unsynced: id === 40 ? [{ project: "WEB", count: 9 }] : [],
+      // prototype-6's `outside` (#879): tickets on the board in a project the source does not sync.
+      unsynced: extra.outside ? [extra.outside] : [],
     },
   });
   VIEWS.push({ ...seeded(`jira-board-${id}`, name, "Jira boards", "", "board"), columns, lanes, jira_ref: ref });
@@ -149,7 +149,7 @@ jiraBoard(31, "Customs sprint board", "scrum", "project = CUS ORDER BY Rank ASC"
   "none", (key) => key.startsWith("CUS-"), { sprint: "CUS sprint 12" });
 jiraBoard(40, "Platform on-call", "kanban", "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
   [col("Open", ["To Do"]), col("Working", ["In Progress", "In Review"], 3), col("Closed", ["Done"])],
-  "priority", (key) => key.startsWith("OPS-"));
+  "priority", (key) => key.startsWith("OPS-"), { outside: { project: "WEB", count: 9 } });
 jiraBoard(52, "Tracking", "kanban", "project = TRK ORDER BY Rank ASC", [], "none", (key) => key.startsWith("TRK-"));
 jiraFilter(10230, "My open bugs everywhere", "assignee = currentUser() AND issuetype = Bug AND resolution = Unresolved",
   (key) => keyNumber(key) % 5 === 0);

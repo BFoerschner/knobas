@@ -2781,6 +2781,39 @@ async fn the_seeded_favourite_filter_arrives_as_a_jira_view_and_the_setting_take
     );
 }
 
+/// **Why a Jira view has no quick filters (#879, R-3.24, R-3.26)**: the
+/// ticket asked to check `rest/agile/1.0/board/{id}/quickfilter` against
+/// testenv's Data Center and to leave quick filters out if it is missing.
+/// Jira Software DC 10.3.24 answers it 404 on both seeded boards, whose
+/// configuration answers 200 (the control: the board is there, the endpoint
+/// is not). If a Jira image ever answers it, this fails, and quick filters
+/// can be built against what it answers.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Jira: `just jira-live`"]
+async fn the_seeded_data_center_has_no_quick_filter_endpoint() {
+    let seeded = seeded();
+    let kanban = &seeded
+        .seed
+        .views
+        .as_ref()
+        .expect("seed-state.json records no Jira views: re-run `./seed-atlassian-content.sh jira` (#877)")
+        .kanban;
+    for board in [seeded.seed.sprint().board_id, kanban.board_id] {
+        let (config, _) = seeded
+            .get(&format!("rest/agile/1.0/board/{board}/configuration"))
+            .await;
+        assert_eq!(config, 200, "board {board} is there");
+        let (status, answer) = seeded
+            .get(&format!("rest/agile/1.0/board/{board}/quickfilter"))
+            .await;
+        println!("SEEDED board {board}: GET .../quickfilter answered {status}: {answer}");
+        assert_eq!(
+            status, 404,
+            "this Jira answers quick filters now (#879 left them out): {answer}"
+        );
+    }
+}
+
 /// A name suffix no other run shares: the clock in nanoseconds.
 fn uuid_like() -> u128 {
     std::time::SystemTime::now()

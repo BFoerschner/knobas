@@ -47,6 +47,13 @@ test("a source's page lights Sources; an unknown section is Sources, as in the p
   expect(settingsPlace(["source", "jira"])).toEqual({ section: "sources", source: "jira" });
   expect(settingsPlace(["standup"])).toEqual({ section: "standup" });
   expect(settingsPlace(["nonsense"])).toEqual({ section: "sources" });
+  // *Sync WEB too* on a Jira view (#879): the page with a value added to a list field.
+  expect(settingsPlace(["source", "jira", "add", "projects", "WEB"])).toEqual({
+    section: "sources",
+    source: "jira",
+    add: { field: "projects", value: "WEB" },
+  });
+  expect(settingsPlace(["source", "jira", "add", "projects"])).toEqual({ section: "sources", source: "jira" });
 });
 
 test("a row says Synced, Sign-in failed or what else holds it, with a dot in the matching tone", () => {

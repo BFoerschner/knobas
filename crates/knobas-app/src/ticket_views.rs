@@ -142,13 +142,15 @@ pub struct JiraSource {
     /// Turned up after its source's first sync and not opened yet (#878,
     /// R-3.20).
     pub new: bool,
-    /// The tickets on it that knobas does not mirror, by project, most first
-    /// (#878, R-13a.2): a project the source does not sync, or a ticket not
-    /// synced yet.
+    /// The tickets Jira put on it that knobas does not have, per project the
+    /// source does not sync, most first (#879, R-3.23): the Tickets warn line
+    /// and *Boards and filters*' "and 9 in WEB, not synced" (#878, R-13a.2).
+    /// A missing ticket of a project the source syncs is a sync still to come.
     pub unsynced: Vec<Unsynced>,
 }
 
-/// Tickets on a Jira view from one project that knobas does not mirror.
+/// How many tickets on a Jira view are in one project the source does not
+/// sync (#879, R-3.23).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Unsynced {
     /// The project key, read off the ticket key (`WEB-5` → `WEB`).
@@ -278,6 +280,18 @@ async fn jira_sources(
                 (select count(*) from sync.jira_view_member m
                    join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
                   where m.view_id = v.entity_id) as n,
+                -- R-3.23: the keys Jira returned minus the tickets knobas
+                -- has, per project; a project the source syncs is left
+                -- out, as a sync still to come rather than one not made.
+                -- The Jira adapter's config (`JiraConfig::projects`) is read
+                -- here and nowhere else in this crate. Only a
+                -- source that names its projects leaves any out: an empty
+                -- `projects` syncs everything the credential sees, and a
+                -- `jql_filter` source has none (the two are exclusive), so
+                -- adding a project there would narrow it or be refused.
+                -- Failure direction (ADR-0007): a `projects` that is missing,
+                -- empty or not an array counts nothing -- a warn line lost,
+                -- never a *Sync WEB too* that narrows the source.
                 (select coalesce(jsonb_agg(jsonb_build_object('project', u.project, 'count', u.n)
                                            order by u.n desc, u.project), '[]'::jsonb)
                    from (select substring(m.entity_id from ':([^:]+)-[^-]*$') as project,
@@ -288,7 +302,18 @@ async fn jira_sources(
                                              where l.entity_id = m.entity_id
                                                and l.kind = 'ticket')
                           group by 1) u
-                  where u.project is not null) as unsynced
+                  where u.project is not null
+                    and exists (
+                          select 1 from knobas.source_config c
+                           where c.id = v.source_id
+                             and jsonb_typeof(c.config->'projects') = 'array'
+                             and jsonb_array_length(c.config->'projects') > 0)
+                    and not exists (
+                          select 1 from knobas.source_config c
+                           cross join lateral jsonb_array_elements_text(
+                                 case when jsonb_typeof(c.config->'projects') = 'array'
+                                      then c.config->'projects' else '[]'::jsonb end) p(key)
+                           where c.id = v.source_id and upper(p.key) = u.project)) as unsynced
            from sync.jira_view v
            join sync.item i on i.entity_id = v.entity_id
            join knobas.ticket_view tv on tv.jira_ref = v.entity_id
@@ -824,10 +849,10 @@ mod tests {
             "export interface ViewColumn {",
             "export interface ListSort {",
             "export interface JiraSource {",
+            "export interface UnsyncedTickets {",
             "\"ticket_views\"",
             "\"save_ticket_view\"",
             "\"delete_ticket_view\"",
-            "export interface UnsyncedTickets {",
             "\"hide_jira_view\"",
             "\"open_jira_view\"",
         ] {

@@ -312,6 +312,20 @@ test("a source's page edits its adapter's config, drawn from the schema, and sen
   });
 });
 
+test("Sync WEB too opens the source's page with the project added, for the reader to save (#879)", async () => {
+  const { p } = await open(["source", "jira", "add", "projects", "WEB"]);
+  expect(field("projects").value).toBe("TW\nOPS\nWEB");
+  sectionButton("What it syncs", "Save").click();
+  await settle();
+  expect(p.updateSource).toHaveBeenCalledWith("jira", { config: { username: "mara", projects: ["TW", "OPS", "WEB"] } });
+});
+
+test("a project the source already syncs is not added twice", async () => {
+  await open(["source", "jira", "add", "projects", "OPS"]);
+  expect(field("projects").value).toBe("TW\nOPS");
+  expect(sectionButton("What it syncs", "Save").disabled).toBe(true);
+});
+
 test("a Jira source's page shows the two field ids, or says none is set (#1021)", async () => {
   const jira = summary("jira", "Jira", "ok", { config: { username: "mara", epic_link_field: "customfield_10108" } });
   await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve([jira, SOURCES[1]!])) }));

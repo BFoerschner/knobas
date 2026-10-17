@@ -434,11 +434,11 @@ export interface JiraSource {
   hidden: boolean;
   /** Turned up after its source's first sync and not opened yet (#878, R-3.20). */
   new: boolean;
-  /** The tickets on it knobas does not mirror, by project, most first (#878). */
+  /** Tickets on it knobas does not have, per project the source does not sync, most first (#879, R-3.23). */
   unsynced: UnsyncedTickets[];
 }
 
-/** Tickets on a Jira view from one project knobas does not mirror — `ticket_views::Unsynced`. */
+/** Tickets on a Jira view in one project the source does not sync — `ticket_views::Unsynced` (#879). */
 export interface UnsyncedTickets {
   project: string;
   count: number;

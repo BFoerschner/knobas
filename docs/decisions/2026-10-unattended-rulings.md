@@ -4448,3 +4448,37 @@ Ruled by the implementer (PR for #1019).
   instead of its 501 for an unserved route, which would fail every mockd sync. **Reversing:** low.
 - **The fake IPC's Jira views moved from `mock:` to `jira:` refs**, so *Choose which* opens
   `#/settings/source/jira` as in prototype-6 and that page lists them. **Reversing:** low.
+## #879 — Jira view header, sprint, unsynced warning and quick filters (2026-10-17)
+
+- **Quick filters are left out, as the ticket says to when the endpoint is missing.** Jira
+  Software DC 10.3.24 (testenv) answers `rest/agile/1.0/board/{id}/quickfilter` 404 on both
+  seeded boards while their configuration answers 200; `live_jira_seeded`'s
+  `the_seeded_data_center_has_no_quick_filter_endpoint` pins it and fails if an image ever answers
+  it. A first cut built them (Jira answering each quick filter's keys within the view, chips first
+  in the bar, all must hold); it was removed after the live run, with its migration, so nothing
+  reads an endpoint that is not there at every sync. GreenHopper's private board-config REST was
+  not used: R-3.26 names the Agile endpoint. **Reversing:** medium (that first cut is in this PR's
+  history, commits 641dcf7e and 26f04a1e).
+- **"Does not sync" means not in the source's `projects`**: a missing key of a configured project
+  is a sync still to come and gets no warn line. One warn line per unsynced project, most tickets
+  first. **Reversing:** low.
+- **A source with no `projects` or with a `jql_filter` has no unsynced project** (merge-manager,
+  PR #1078 review). The first cut counted every missing ticket when `projects` was empty, but
+  `JiraConfig` reads an empty list as "everything the credential can see", so *Sync WEB too* would
+  have turned an all-projects source into a WEB-only one; beside a `jql_filter` the config refuses
+  `projects` on save. Such a source gets no warn line. **Reversing:** low (one `exists` in
+  `ticket_views::jira_sources`; a JQL source could get a warn line without the button).
+- **One `unsynced` field, with R-3.23's meaning** (merge-manager, PR #1078 rebase over #878's
+  #1080, which had added the same field counting every unmirrored member). *Boards and filters*'
+  "and 9 in WEB, not synced" reads the narrowed field too: prototype-6 counts the same 9 in both
+  places, and a ticket of a synced project is a sync still to come in either. #878's IPC test is
+  replaced by #879's; the Rust type keeps #878's name `Unsynced`. **Reversing:** low (a second
+  field with #878's count, if *Boards and filters* ever needs it).
+- ***Sync WEB too* opens `#/settings/source/<id>/add/projects/WEB`**: the source's page with the
+  project added to the form, unsaved, so the reader saves it (R-3.23 "with the project added").
+  The settings page takes `add/<list field>/<value>` generically; only Tickets names `projects`.
+  **Reversing:** low.
+- **The source line's "last 4 min ago" uses the shell's `ago()`**, so a read over a day old shows
+  its UTC date. **Reversing:** low.
+- **Scrum views follow the active sprint by re-reading `sprint in openSprints()` at every sync**
+  (#877's query); no extra code. **Reversing:** n/a.

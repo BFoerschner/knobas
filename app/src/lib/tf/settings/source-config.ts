@@ -18,6 +18,7 @@
  */
 import { defaultValues, schemaFields, type SchemaField } from "../../sources/schema-form";
 import { IDENTITY_FIELD } from "../../sources/new-source";
+import type { ListAddition } from "./settings";
 
 /**
  * An adapter's config fields, or why there are none (`schemaFields` throws for
@@ -65,6 +66,24 @@ export function formValues(fields: SchemaField[], config: unknown): Record<strin
     }
   }
   return values;
+}
+
+/**
+ * The form's values with `add.value` added to the list field `add.field`
+ * (#879, a Jira view's *Sync WEB too*): unchanged when no such list field
+ * is drawn or it holds the value already.
+ */
+export function withAdded(
+  fields: SchemaField[],
+  values: Record<string, unknown>,
+  add: ListAddition | undefined,
+): Record<string, unknown> {
+  if (!add) return values;
+  const field = fields.find((candidate) => candidate.key === add.field && candidate.control.kind === "list");
+  const held = values[add.field];
+  const list = Array.isArray(held) ? held : [];
+  if (!field || list.includes(add.value)) return values;
+  return { ...values, [add.field]: [...list, add.value] };
 }
 
 /**
