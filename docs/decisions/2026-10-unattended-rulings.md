@@ -4748,3 +4748,15 @@ Merge-manager:
 - **A rate-limited login is `Unreachable`, not `Protocol { status: Some(429) }`.** Both wait and
   retry in the queue; nothing answered a 429, and `status` is documented as what a response
   carried. **Reversing:** trivial (`login_verdict`).
+## #1083 — Jira changelog on /search: a long history whole, the payload it adds (2026-10-17)
+
+- **No paging through `issue/{key}?expand=changelog`, and no "partial history" line.** Jira DC
+  (the testenv's 10.3) returned 123 of 123 histories on one issue from `/search`, `maxResults`
+  equal to `total`. The live test is the guard: a Jira that starts cutting fails it, and the
+  fallback is built then, against what that Jira does. **Reversing:** medium (a paged fetch in
+  `SyncRun::complete`, or a `partial` flag through the conversation answer, a §10.8 entry).
+- **The payload growth is accepted.** About 0.8 KB per status move and 2.4 KB per 1,000-char
+  description edit; the changelog is 28% of the seeded corpus's stored payload. A ticket with
+  100 moves stores about 80 KB more, and a 100-issue page of such tickets about 8 MB. Nothing
+  trims it, because the conversation reads only status items and the rest is one jsonb column.
+  **Reversing:** low (strip non-status items in `map::to_sync_item`).

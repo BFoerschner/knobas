@@ -26,7 +26,12 @@
 //!
 //! * **`expand=changelog` is sent on `/search`, and nothing else.** It puts
 //!   each issue's status history in the stored record for the conversation's
-//!   *Include changes* (#929).
+//!   *Include changes* (#929). Data Center returns the history whole there:
+//!   123 histories of 123 on one issue, `maxResults` equal to `total`
+//!   (`live_jira_seeded::a_long_history_comes_back_whole_from_search`,
+//!   #1083), so nothing pages the rest through `issue/{key}`. It costs about
+//!   0.8 KB of stored payload per status move, and a description edit's old
+//!   and new text whole.
 //! * **`expand=renderedFields` is deliberately not sent.** It returns Jira's
 //!   HTML rendering, and roadmap §4 gotcha 7 is exactly about HTML reaching
 //!   the webview. `description` and comment bodies in REST v2 are wiki markup
