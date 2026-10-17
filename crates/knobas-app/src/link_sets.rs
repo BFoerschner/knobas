@@ -1228,9 +1228,9 @@ const HINTS: &str = concat!(
           join sync.live_item i on i.entity_id = t.id and i.kind = 'ticket'
     ),
     by_hand(ticket, item) as (
-        select from_id, to_id from knobas.link where deleted_at is null and origin = 'manual'
+        select from_id, to_id from knobas.confirmed_link where origin = 'manual'
         union
-        select to_id, from_id from knobas.link where deleted_at is null and origin = 'manual'
+        select to_id, from_id from knobas.confirmed_link where origin = 'manual'
     ),
     pat as (
         select set_id, position, kind, pattern from knobas.link_set_member

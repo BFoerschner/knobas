@@ -15,7 +15,7 @@
   ```
 
   **The hint** (`knobas_app::link_sets::hints`, R-7.10): one row per set, `epic` rule and item,
-  for an item linked by hand (a live `knobas.link` row with `origin = 'manual'`, either end) to
+  for an item linked by hand (a `knobas.confirmed_link` row with `origin = 'manual'`, either end) to
   `HINT_TICKETS` (2) or more live tickets under the epic the rule names
   (`link_set_rule_tickets!`, the counts' walk), that can be a member
   (`link_set_member_fits!`: `repo`, `page`, `asset`, `monitor` by kind, a `pipeline` any kind
