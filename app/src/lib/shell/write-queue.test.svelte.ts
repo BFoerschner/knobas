@@ -616,6 +616,42 @@ test("an op this build cannot edit is still applicable and discardable", async (
   screen.done();
 });
 
+/**
+ * A write that reached its source and was never answered (#1125) is held
+ * with both possibilities stated: it may have arrived, so the reader checks
+ * the source by name, then sends it again or discards it. *Send again* is the
+ * release the backend calls `apply_held_write`.
+ */
+test("a write the source never answered says to check the source, then send again", async () => {
+  rows = [
+    held({
+      op: "create_ticket",
+      payload: { CreateTicket: { entity: "jira:PAY", title: "t", body: "b", ticket_type: "Task" } } as never,
+      held_snapshot: {
+        op: "create_ticket",
+        live: false,
+        unconfirmed: { source: "Jira (Tidewater)", detail: "unconfirmed: operation timed out" },
+      },
+    }),
+  ];
+  counts = { pending: 0, held: 1, refused: 0 };
+  const screen = await render();
+
+  const text = screen.text();
+  expect(text).toContain("Jira (Tidewater) did not answer, so it may have arrived");
+  expect(text).toContain("Check Jira (Tidewater), then send it again or discard it");
+  expect(text).toContain("unconfirmed: operation timed out");
+  expect(text).not.toContain("The target changed");
+  expect(screen.button("Send mine anyway")).toBeUndefined();
+  expect(screen.button("Discard")).toBeDefined();
+
+  calls.length = 0;
+  screen.button("Send again")!.click();
+  await vi.waitFor(() => expect(calls.some((c) => c.command === "apply_held_write")).toBe(true));
+  expect(calls.find((c) => c.command === "apply_held_write")!.args).toEqual({ id: 2 });
+  screen.done();
+});
+
 /** Story 19, on screen: what the source said, not merely that it said no. */
 test("a refused write reports what the source said and offers no retry", async () => {
   rows = [

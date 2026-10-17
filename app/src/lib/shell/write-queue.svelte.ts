@@ -193,6 +193,21 @@ export function movedFile(row: Pick<QueuedWrite, "payload" | "held_snapshot">): 
   return { path: commit.path, mine: commit.content, theirs: held.text };
 }
 
+/**
+ * A write knobas sent that its source never answered (#1125): it may have
+ * landed, so the queue holds it rather than sending it again. `source` is the
+ * source's display name, the place the reader checks; `detail` is what the
+ * transport said. `null` for every other row (the held side names no
+ * `unconfirmed`).
+ */
+export function unconfirmedSend(row: Pick<QueuedWrite, "state" | "held_snapshot">): { source: string; detail: string } | null {
+  if (row.state !== "held") return null;
+  const held = row.held_snapshot as { unconfirmed?: { source?: unknown; detail?: unknown } } | null;
+  const said = held !== null && typeof held === "object" ? held.unconfirmed : undefined;
+  if (!said || typeof said.source !== "string") return null;
+  return { source: said.source, detail: typeof said.detail === "string" ? said.detail : "" };
+}
+
 /** What a queued `log_work` write would put on a ticket, read off its payload. */
 export interface WithdrawnWorklog {
   /** The ticket the time was logged against. */
