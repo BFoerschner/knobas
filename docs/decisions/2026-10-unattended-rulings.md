@@ -4504,3 +4504,17 @@ Ruled by the implementer (PR for #1019).
 - **`ThreadChange` grew in place** (`kind`, `from`, `by`, `mine`, `number`, `repo`; `status`
   optional) rather than a second list beside `changes`, so the thread's interleaving and the
   *Include changes* filter stay one rule. **Reversing:** medium (wire shape).
+
+Ruled by the merge-manager (PR #1082).
+
+- **The two-minute window stands.** Only a knobas-sent move is ever dropped, never a changelog
+  line, and the window has no upper bound, so a real second move made in Jira always draws. A
+  knobas move is hidden wrongly only when Jira's record of it is missing while a later move to
+  the same status is present, which a whole changelog cannot produce. A duplicate shows only when
+  Jira's clock runs more than two minutes behind this machine's. **Reversing:** low.
+- **No per-issue changelog read.** The pinned Data Center WADL declares no
+  `issue/{key}/changelog` resource (that one is Cloud's); `expand=changelog` on `/search` or
+  `issue/{key}` is the only way in. Whether `/search` cuts a long history short is unwitnessed:
+  the live test holds `total == histories.len()` only for the seeded issues, which have few
+  entries. The check and the payload growth (every field's history rides along, description
+  edits included) go to a `backlog` follow-up. **Reversing:** n/a.

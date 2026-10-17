@@ -396,7 +396,6 @@ mod tests {
     /// the pinned `testenv/specs/jira-dc-rest.wadl` -- rather than over a
     /// socket, because mockd has no handler for this path and would answer a
     /// 501 that says nothing about whether the path is in the contract.
-
     #[test]
     fn the_field_table_is_a_path_the_wadl_declares() {
         let knobas_mockd::allowlist::Lookup::Allowed { query } =
