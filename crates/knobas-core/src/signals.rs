@@ -141,6 +141,10 @@ pub struct Signal {
 /// walks the reach for builds: a guard that is false is a one-time filter,
 /// and the walk it guards is never read.
 ///
+/// `prs` probes `sync.item` once a neighbour, in a `lateral ... offset 0`:
+/// with the board's few tickets on analyzed tables, the planner otherwise
+/// started from the pull requests and scanned `n1` once each (#1148).
+///
 /// Whether a `$tickets` id is a ticket is a lookup by its key, once an id:
 /// joined, the planner merged the ids with every entity sorted by id, 58 ms
 /// for the 1,200 tickets `has:failing-build` names at 22,000 items (#1148).
@@ -196,7 +200,9 @@ macro_rules! ticket_signals {
                              ",
             $crate::asked_of!($decl, $me),
             " as asked
-                        from n1 join sync.item i on i.entity_id = n1.id
+                        from n1 cross join lateral (
+                               select i.entity_id, i.source_id, i.kind, i.payload from sync.item i
+                                where i.entity_id = n1.id offset 0) i
                        where i.kind = 'pr' and ",
             $crate::live_by_key!("i"),
             ")
