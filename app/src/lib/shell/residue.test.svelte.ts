@@ -1572,6 +1572,7 @@ const CASES: Case[] = [
                 last_note_at: null,
               }),
             setNotesShown: () => Promise.reject(new Error("no write in this test")),
+            setCaptureShortcut: () => Promise.reject(new Error("no write in this test")),
             exportNotes: () => Promise.reject(new Error("no export in this test")),
             moveNotes: () => Promise.reject(new Error("no move in this test")),
             listSources: () => Promise.reject(new Error("no picker in this test")),
