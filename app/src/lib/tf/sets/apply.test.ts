@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { LinkEnd, LinkSetRow } from "../../ipc/entity";
-import { applyToast, epicAbove, epicOf,offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
+import { applyToast, epicAbove, epicOf, offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
 
 const SET: LinkSetRow = {
   id: "payout-stack",

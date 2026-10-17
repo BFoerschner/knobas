@@ -106,17 +106,18 @@ export function offered(links: readonly LinkEnd[]): Offer[] {
   return ORDER.flatMap((kind) => [...out.values()].filter((offer) => offer.kind === kind));
 }
 
+/** A ticket as the epic is read from it: its id, source and path line. */
+type Rung = Pick<EntityRow, "entity_id" | "source_id" | "path">;
+
 /**
- * The epic a ticket sits under: the top of its parent chain (its path line,
- * `PAY-200 › PAY-231`), in its own source. `null` with no parent.
+ * The top of a ticket's own path line (`PAY-200 › PAY-231`), in its own
+ * source: its epic when the payload declares one, else its parent, so
+ * `epicAbove` walks on from here. `null` with no parent.
  */
-export function epicOf(row: Pick<EntityRow, "entity_id" | "source_id" | "path">): string | null {
+export function epicOf(row: Rung): string | null {
   const top = row.path?.split(" › ")[0]?.trim();
   return top ? `${row.source_id}:${top}` : null;
 }
-
-/** A ticket as `epicAbove` reads it through `get_entity`. */
-type Rung = Pick<EntityRow, "entity_id" | "source_id" | "path">;
 
 /**
  * The epic a ticket sits under, walked up through `get_entity` (#1064). A
