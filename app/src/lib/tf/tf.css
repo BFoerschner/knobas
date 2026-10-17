@@ -5,20 +5,19 @@
   writes down what `mockups/ticket-first/prototype-6.html` draws. This file is
   the app's copy, and it grows with every UI ticket of the redesign.
 
-  Three rules hold the two UIs apart until TF5 removes the rooms UI and
-  `app.css` with it:
+  The rooms UI and its `app.css` are gone (#881), so:
 
-  - **Tokens live on `.tf`, the new shell's root, never on `:root`.** The
-    rooms UI's tokens share names (`--ok`, `--muted`, `--sans`, `--mono`)
-    with different values; `.tf` redefines them for everything inside it and
-    leaves `app.css` untouched. `.tf` paints its own paper and fills the
-    window.
-  - **Every class here starts with `tf-`.** `app.css` styles bare class
-    names globally (`.btn`, `.chip`, `.toast`, `.timer`, `.search`, `.top`),
-    and a rule there would leak onto any element of the new shell carrying
-    the same name. The prefix is the cheapest wall; `tf-css.test.ts` holds
-    it. The prototype's names follow the prefix, so `.btn.primary` is
-    `.tf-btn.tf-primary` here.
+  - **The tokens are on `:root`**, and a forced theme is `data-theme` on
+    `<html>` (`TfShell.svelte` sets it), so a dialog mounted outside `.tf`
+    reads the same tokens as the shell. `.tf` paints its own paper and fills
+    the window.
+  - **Every class here starts with `tf-`.** `src/unported.css` still styles
+    bare class names globally (`.btn`, `.inp`, `.dlg`) for the components
+    not yet ported to this design system (the launcher, the asset tree, the
+    wizard), and a rule there would leak onto any element of the new shell
+    carrying the same name. The prefix is the cheapest wall;
+    `tf-css.test.ts` holds it. The prototype's names follow the prefix, so
+    `.btn.primary` is `.tf-btn.tf-primary` here.
   - **No inline styles anywhere** (`style-src 'self'`). Prototype-6's 345
     inline `style` attributes become classes as each view is ported.
 
@@ -35,7 +34,7 @@
 @import "@fontsource/jetbrains-mono/latin-600.css";
 
 /* ---------- tokens: light, then dark by the OS unless forced light, then forced dark ---------- */
-.tf {
+:root {
   --paper: #E4E8EC; --sheet: #F7F8F9; --sheet-2: #EEF1F4; --ink: #17212B; --ink-2: #4B5663;
   --rule: #CBD2D9; --rule-2: #DDE2E7;
   --card: #F2D157; --card-2: #E8C440; --card-ink: #2A230B; --card-ink-2: #5A4D1E;
@@ -52,7 +51,7 @@
   color-scheme: light;
 }
 @media (prefers-color-scheme: dark) {
-  .tf:not([data-theme="light"]) {
+  :root:not([data-theme="light"]) {
     --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
     --rule: #323C47; --rule-2: #28313A;
     --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
@@ -63,7 +62,7 @@
     color-scheme: dark;
   }
 }
-.tf[data-theme="dark"] {
+:root[data-theme="dark"] {
   --paper: #12171C; --sheet: #1A2027; --sheet-2: #212932; --ink: #E4E9EE; --ink-2: #A0ABB7;
   --rule: #323C47; --rule-2: #28313A;
   --card: #D9B941; --card-2: #C9A930; --card-ink: #1D1806; --card-ink-2: #3F3511;
@@ -73,6 +72,17 @@
   --shadow: 0 1px 0 rgba(0,0,0,.3), 0 10px 30px -12px rgba(0,0,0,.6);
   color-scheme: dark;
 }
+
+/* ---------- the document: the reset the shell has always drawn on (it was app.css's until #881),
+   no scroll behind the window, and the paper under it ---------- */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; background: var(--paper); color: var(--ink); }
+body { font: 13px/1.45 var(--sans); -webkit-font-smoothing: antialiased; }
+button, input, select, textarea { font: inherit; color: inherit; background: none; border: 0; }
+button { cursor: pointer; }
+a { color: var(--info); text-decoration: none; }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--rule); border-radius: 2px; }
 
 /* ---------- the root: its own paper, the whole window ---------- */
 .tf {
@@ -465,7 +475,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-stg-kk { white-space: nowrap; }
 .tf-stg-r { text-align: right; }
 .tf-stg-pick { display: grid; gap: 8px; margin-top: 12px; }
-/* the rooms PublishTargetPicker inside a tf dialog: app.css strips bare fields, and --link is the rooms' dark-only blue */
+/* the unported PublishTargetPicker inside a tf dialog: the reset strips bare fields; --link is --info already since #881, kept so the picker cannot drift */
 .tf-stg-pick { --link: var(--info); }
 .tf-stg-pick select, .tf-stg-pick input {
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--sheet); color: var(--ink);

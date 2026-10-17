@@ -8,13 +8,16 @@
  * one keystroke, and a window that booted the application to take two lines
  * would spend a second of it.
  *
- * `app.css` is imported here because this document is not `index.html` and
- * shares nothing with it but the stylesheet.
+ * The stylesheets are imported here because this document is not
+ * `index.html` and shares nothing with it but them: the design system's
+ * tokens and reset (`tf.css`), and the rules the window's not-yet-ported
+ * markup draws with (`unported.css`).
  */
 import { mount } from "svelte";
 
 import CaptureWindow from "./lib/capture/CaptureWindow.svelte";
-import "./app.css";
+import "./lib/tf/tf.css";
+import "./unported.css";
 
 const target = document.getElementById("capture");
 if (!target) {

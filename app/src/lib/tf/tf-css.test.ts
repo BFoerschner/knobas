@@ -12,7 +12,8 @@ import { expect, test } from "vitest";
 
 const APP = process.cwd();
 const css = readFileSync(join(APP, "src/lib/tf/tf.css"), "utf8");
-const appCss = readFileSync(join(APP, "src/app.css"), "utf8");
+/** What the components not yet ported still draw with (#881). */
+const unportedCode = readFileSync(join(APP, "src/unported.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
 const spec = readFileSync(join(APP, "../docs/specs/2026-10-15-ticket-first-design-system.md"), "utf8");
 
 /** `css` with its comments removed, so prose about a rule cannot satisfy it. */
@@ -38,16 +39,16 @@ test("the spec's colour table was read, so the next two tests check something", 
   expect(COLOURS.length).toBeGreaterThanOrEqual(23);
 });
 
-test("light tokens are the spec's, on the shell root", () => {
-  const light = block(code, ".tf");
+test("light tokens are the spec's, on :root (#881)", () => {
+  const light = block(code, ":root");
   const wrong = COLOURS.filter(([token, value]) => !light.includes(`${token}: ${value};`));
   expect(wrong).toEqual([]);
 });
 
 test("dark tokens are the spec's, by the OS unless forced light, and when forced dark", () => {
   const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
-  const byOs = block(media, '.tf:not([data-theme="light"])');
-  const forced = block(code, '.tf[data-theme="dark"]');
+  const byOs = block(media, ':root:not([data-theme="light"])');
+  const forced = block(code, ':root[data-theme="dark"]');
   for (const dark of [byOs, forced]) {
     const wrong = COLOURS.filter(([token, , value]) => !dark.includes(`${token}: ${value};`));
     expect(wrong).toEqual([]);
@@ -57,18 +58,20 @@ test("dark tokens are the spec's, by the OS unless forced light, and when forced
 test("the two dark blocks are one set of tokens, so an edit cannot reach only one", () => {
   const media = code.slice(code.indexOf("@media (prefers-color-scheme: dark)"));
   const tokens = (body: string) => body.slice(body.indexOf("{") + 1).replace(/\s+/g, " ").trim();
-  expect(tokens(block(media, '.tf:not([data-theme="light"])'))).toBe(tokens(block(code, '.tf[data-theme="dark"]')));
+  expect(tokens(block(media, ':root:not([data-theme="light"])'))).toBe(tokens(block(code, ':root[data-theme="dark"]')));
 });
 
-test("no token is set on :root, and the old stylesheet gained no rule for the new shell", () => {
-  expect(code).not.toMatch(/:root/);
-  expect(appCss).not.toMatch(/\.tf\b|tf-/);
+test("the tokens are set once, on :root, and the unported sheet sets none of the new ones nor styles the shell", () => {
+  expect(code.match(/(^|\n)\.tf \{[^}]*--paper\s*:/), "a second token block on the shell root").toBeNull();
+  expect(unportedCode).not.toMatch(/\.tf\b|tf-/);
+  const own = [...unportedCode.matchAll(/(--[a-z0-9-]+)\s*:/g)].map((match) => match[1]!);
+  expect(own.filter((token) => COLOURS.some(([name]) => name === token))).toEqual([]);
 });
 
 test("the type scale is the spec's", () => {
   const scale = [...spec.matchAll(/^\| `(--t-[a-z0-9]+)` \| (\d+) px \|/gm)].map((row) => [row[1]!, row[2]!]);
   expect(scale.length).toBe(11);
-  const root = block(code, ".tf");
+  const root = block(code, ":root");
   expect(scale.filter(([token, px]) => !root.includes(`${token}: ${px}px;`))).toEqual([]);
 });
 
@@ -77,6 +80,49 @@ test("every class is tf- prefixed, so app.css's bare class rules cannot reach th
   const classes = [...rules.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)].map((match) => match[1]!);
   expect(classes.length).toBeGreaterThan(20);
   expect([...new Set(classes.filter((name) => name !== "tf" && !name.startsWith("tf-")))]).toEqual([]);
+});
+
+/**
+ * The window is the shell: a scrolling document would double-scroll every pane
+ * inside it (carried over from the rooms UI's `app-css.test.ts`, #881).
+ */
+test("keeps the document from scrolling behind the shell", () => {
+  expect(code).toMatch(/html,\s*body\s*\{[^}]*overflow:\s*hidden/);
+});
+
+/**
+ * Spec §14's 4.5:1 for text, computed from the spec's own table rather than
+ * asserted about. Since #881 the components not yet ported read these tokens
+ * too (through `unported.css`), on the same three surfaces.
+ */
+test("every text token clears 4.5:1 on paper, sheet and sheet-2, light and dark", () => {
+  const channel = (value: number) => {
+    const c = value / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+  const luminance = (hex: string) => {
+    const [r, g, b] = [1, 3, 5].map((at) => channel(Number.parseInt(hex.slice(at, at + 2), 16)));
+    return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+  };
+  const contrast = (a: string, b: string) => {
+    const [high, low] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+    return (high! + 0.05) / (low! + 0.05);
+  };
+  const value = (token: string, dark: boolean) => {
+    const row = COLOURS.find(([name]) => name === token);
+    expect(row, `${token} is not in the spec's table`).toBeTruthy();
+    return row![dark ? 2 : 1];
+  };
+  const failing: string[] = [];
+  for (const dark of [false, true]) {
+    for (const surface of ["--paper", "--sheet", "--sheet-2"]) {
+      for (const text of ["--ink", "--ink-2", "--muted", "--ok", "--warn", "--err", "--info"]) {
+        const ratio = contrast(value(text, dark), value(surface, dark));
+        if (ratio < 4.5) failing.push(`${text} on ${surface} (${dark ? "dark" : "light"}): ${ratio.toFixed(2)}`);
+      }
+    }
+  }
+  expect(failing).toEqual([]);
 });
 
 test("width comes from font-variation-settings only, never font-stretch", () => {

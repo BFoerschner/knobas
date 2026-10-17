@@ -1,0 +1,174 @@
+/*
+  What the components not yet ported to the design system still draw with.
+
+  The rooms UI and its stylesheet, `app.css`, went in #881. What is left here
+  are the rules of that sheet that a surviving component still reaches: the
+  launcher, the ⌘T picker, the ad-hoc dialog, the write queue, the asset tree
+  (`#/assets`) and its dialogs, the first-run wizard and Add source, the
+  booting screen and the capture window. Every rule whose class only the rooms
+  UI drew went with it. A component ported to `tf.css` takes its rules out of
+  here; when nothing reads this file it goes too.
+
+  **The palette is the design system's.** The tokens live on `:root` in
+  `lib/tf/tf.css` and follow the theme there; the old names these rules and
+  the components' own styles read are set once below, each to the token that
+  plays its part. `--ok`, `--muted`, `--sans` and `--mono` share their names
+  with the design system and so are simply its values; `tf-css.test.ts` holds
+  that nothing here sets one of the design system's own tokens.
+
+  The document's reset (`*`, `html, body`, form controls, links, scrollbars)
+  moved to `tf.css`: the new shell has always drawn on it.
+
+  **No rule here may depend on an inline style** (`style-src 'self'`; see
+  `house-rules.test.ts`).
+*/
+:root {
+  --bg: var(--paper); --panel: var(--sheet); --raised: var(--sheet-2);
+  --hair: var(--rule-2); --hair2: var(--rule);
+  --text: var(--ink); --faint: var(--ink-2);
+  --amber: var(--warn); --fail: var(--err); --link: var(--info);
+  --disp: var(--sans);
+  --row: 30px;
+}
+:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+.mono,.k{font-family:var(--mono);font-variant-numeric:tabular-nums}
+.lab{font:600 11px/1 var(--disp);text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}
+.muted{color:var(--muted)}.faint{color:var(--faint)}.amber{color:var(--amber)}.fail{color:var(--fail)}.ok{color:var(--ok)}.link{color:var(--link)}
+.hidden{display:none!important}
+/* Visually hidden, present to the accessibility tree (#258). */
+.vh{position:absolute;width:1px;height:1px;margin:-1px;padding:0;border:0;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap}
+.spacer{flex:1}
+
+/* ---- the asset tree's tabs and toolbar ---- */
+.tabs{display:flex;gap:2px;min-width:0;overflow:hidden}
+.tab{height:28px;padding:0 10px;border-radius:2px;font:500 12px var(--mono);color:var(--muted);display:flex;align-items:center;gap:6px;border-bottom:2px solid transparent;white-space:nowrap;max-width:170px;overflow:hidden;text-overflow:ellipsis;flex:none}
+.tab:hover{color:var(--text);background:var(--raised)}
+.tab.on{color:var(--text);border-bottom-color:var(--text)}
+.tab .dot{width:6px;height:6px;border-radius:50%;background:var(--amber)}
+.tb-btn{display:flex;align-items:center;gap:7px;height:30px;padding:0 9px;border-radius:2px;color:var(--muted);font-size:12px;white-space:nowrap;flex:none}
+.tb-btn:hover{background:var(--raised);color:var(--text)}
+.tb-btn.on{color:var(--text);background:var(--raised)}
+.tb-btn svg{width:15px;height:15px;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round}
+.tb-btn .k{font-size:12px}
+.mg{display:inline-flex;align-items:center;justify-content:center;width:22px;height:16px;border:1px solid var(--hair2);border-radius:2px;font:500 10px/1 var(--mono);color:var(--muted);letter-spacing:.04em;flex:none}
+
+/* ---- a view's header bar: the asset tree and the wizard ---- */
+.room-bar{display:flex;align-items:center;gap:10px;height:40px;padding:0 14px;border-bottom:1px solid var(--hair);overflow:hidden}
+.room-bar h1{font:600 22px/1.2 var(--disp);display:flex;align-items:baseline;gap:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}
+.room-bar h1 .k{font:500 14px var(--mono);color:var(--muted)}
+.room-bar .acts{margin-left:auto;display:flex;gap:4px;flex:none}
+.kind{font:600 10px/1 var(--disp);text-transform:uppercase;letter-spacing:.1em;color:var(--faint);border:1px solid var(--hair);padding:4px 5px 3px;border-radius:2px}
+.empty{padding:14px 12px;color:var(--muted);font-size:12px;line-height:1.5}
+.empty .btn{margin-top:8px}
+.view{height:100%;display:grid;grid-template-rows:auto 1fr;min-height:0;min-width:0}
+.view>*{min-width:0}
+.view-b{overflow:auto;min-height:0}
+.view .room-bar h1{font-size:22px}
+
+/* ---- rows: the link dialog and the links panel ---- */
+.row{width:100%;text-align:left;font-family:var(--sans);display:grid;grid-template-columns:34px 92px 1fr 100px 80px;align-items:center;height:var(--row);padding:0 12px 0 8px;border-bottom:1px solid var(--hair);font-size:12px;cursor:pointer;column-gap:8px;color:var(--text)}
+.row:hover{background:var(--panel)}
+.row.sel{background:var(--raised)}
+.row>*{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .k{font-size:12px}
+.row .t{color:var(--text)}
+.row .r{text-align:right;color:var(--muted);font-family:var(--mono);font-size:11px}
+.row .sub{color:var(--muted)}
+.row.g3{grid-template-columns:34px 1fr 80px}
+.row.hd{height:22px;cursor:default;color:var(--faint);font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;background:var(--bg)}
+.row.hd:hover{background:var(--bg)}
+.row svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.4;stroke-linecap:round;stroke-linejoin:round;vertical-align:-2px}
+.row.sug{grid-template-columns:34px 1fr 1.05fr 172px}
+.row.sug .acts{display:flex;gap:4px;justify-content:flex-end}
+.row.sug .why{color:var(--muted);font-size:11px}
+.col{background:var(--bg);min-width:0;display:flex;flex-direction:column}
+.col-h{display:flex;justify-content:space-between;align-items:center;height:22px;padding:0 8px;font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint);border-bottom:1px solid var(--hair)}
+.col .more{margin:0;padding:6px 8px;font:10px var(--mono);color:var(--faint)}
+.sec{padding:10px 14px;border-bottom:1px solid var(--hair)}
+.sec-h{display:flex;align-items:center;gap:8px;margin-bottom:6px}
+.sec-h .acts{margin-left:auto;display:flex;gap:4px}
+.sec p{font-size:12.5px;line-height:1.55;color:var(--text)}
+.sec p .k{font-size:11.5px;color:var(--link)}
+.sec .row{margin:0 -14px;padding-left:10px;padding-right:14px}
+.sec .row:last-of-type{border-bottom:0}
+.log{background:var(--bg);border:1px solid var(--hair);border-radius:2px;padding:8px 10px;font:400 11.5px/1.5 var(--mono);white-space:pre-wrap;color:var(--muted);overflow:auto}
+.log .fail{color:var(--fail)}
+.log .ok{color:var(--ok)}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+
+/* ---- buttons and fields ---- */
+.btn{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border:1px solid var(--hair2);border-radius:2px;font:500 12px var(--sans);color:var(--text);white-space:nowrap;background:transparent}
+.btn:hover{background:var(--raised)}
+.btn.pri{background:var(--text);color:var(--bg);border-color:var(--text)}
+.btn.pri:hover{background:var(--ink-2);border-color:var(--ink-2)}
+.btn.sm{height:20px;padding:0 6px;font-size:11px}
+.btn.ghost{border-color:transparent;color:var(--muted)}
+.btn.ghost:hover{color:var(--text);background:var(--raised)}
+.btn.danger{color:var(--fail);border-color:var(--fail)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn[aria-disabled="true"]{opacity:.4;cursor:default}
+.btn[aria-disabled="true"]:hover{background:transparent}
+.btn svg{width:13px;height:13px;stroke:currentColor;fill:none;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+.btn .k{font-size:11px}
+.sel-inline{height:22px;padding:0 4px;border:1px solid var(--hair2);border-radius:2px;background:var(--panel);font:500 12px var(--mono);color:var(--text)}
+.sel-inline option{background:var(--panel)}
+.inp{height:26px;padding:0 8px;border:1px solid var(--hair2);border-radius:2px;background:var(--bg);color:var(--text);width:100%}
+.inp:focus{border-color:var(--link);outline:0}
+.inp.k{font-family:var(--mono);font-size:12px}
+textarea.inp{height:auto;min-height:64px;padding:6px 8px;resize:vertical;line-height:1.45}
+.chips{display:flex;flex-wrap:wrap;gap:4px}
+.pill{display:inline-flex;align-items:center;height:20px;padding:0 7px;border:1px solid var(--hair2);border-radius:2px;font:500 11px var(--mono);color:var(--muted);cursor:pointer}
+.pill.on{color:var(--text);border-color:var(--text)}
+.pill:hover{background:var(--raised)}
+kbd{font:400 10px var(--mono);color:var(--faint);border:1px solid var(--hair);border-radius:2px;padding:1px 4px;white-space:nowrap}
+
+/* ---- the wizard and Add source ---- */
+.src{display:grid;grid-template-columns:34px 186px 1fr 200px 224px 152px;gap:12px;align-items:start;padding:10px 14px 10px 10px;min-height:46px;border-bottom:1px solid var(--hair);font-size:12px}
+.src .nm{font-weight:500;display:block}
+.src>span{min-width:0}
+.src .sub{display:block;font:400 10.5px var(--mono);color:var(--faint)}
+.src .url{font:400 11px var(--mono);color:var(--muted)}
+.src .st{display:block;font:400 11.5px var(--mono)}
+.src.err{background:var(--err-bg)}
+.modules{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.mod{text-align:left;padding:8px 10px;border:1px solid var(--hair2);border-radius:2px;display:grid;grid-template-columns:26px 1fr;gap:8px;align-items:center}
+.mod:hover{background:var(--raised)}
+.mod.on{border-color:var(--text)}
+.mod .nm{font-weight:500;font-size:12px;display:block}
+.mod .sub{font:400 10px var(--mono);color:var(--faint);display:block}
+.mod:hover .sub{color:var(--muted)}
+.steps{display:flex;gap:14px;margin-bottom:12px}
+.steps span{font:500 10px var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--faint)}
+.steps span.on{color:var(--text)}
+.steps span.done{color:var(--muted)}
+.radios{display:grid;gap:4px}
+.radios label{display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--hair);border-radius:2px;cursor:pointer;font-size:12px}
+.radios label.off{opacity:.45;cursor:default}
+.radios input{accent-color:var(--text)}
+.test-res{font:400 12px var(--mono);padding:8px 10px;background:var(--bg);border:1px solid var(--hair);border-radius:2px;margin-top:8px}
+/* The connection note (#326): the result line's type, quieter, hung beneath it. */
+.test-note{font:400 11px var(--mono);color:var(--muted);padding:0 10px;margin-top:4px}
+
+/* ---- overlays ---- */
+@keyframes fade{from{opacity:0}}
+.scrim{position:fixed;inset:0;background:rgba(21,23,26,.72);z-index:40;display:flex;align-items:flex-start;justify-content:center;padding-top:80px}
+.scrim.center{align-items:center;padding-top:0}
+.dlg{background:var(--panel);border:1px solid var(--hair2);border-radius:2px;width:560px;max-width:92vw;max-height:80vh;display:flex;flex-direction:column;animation:fade .12s}
+.dlg.wide{width:820px}
+.dlg-h{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px 0 14px;border-bottom:1px solid var(--hair);flex:none}
+.dlg-h h2{font:600 16px var(--disp);letter-spacing:.01em}
+.dlg-h .x{margin-left:auto}
+.dlg-b{padding:14px;overflow:auto}
+.dlg-f{display:flex;gap:6px;justify-content:flex-end;padding:10px 14px;border-top:1px solid var(--hair);flex:none;align-items:center}
+.dlg-f .l{margin-right:auto;font:400 11px var(--mono);color:var(--faint);white-space:nowrap}
+.form{display:grid;grid-template-columns:140px 1fr;gap:10px 12px;align-items:center}
+.form .l{font:400 11px var(--mono);color:var(--muted)}
+.form .chk{display:flex;gap:8px;align-items:center;font-size:12px}
+.form .chk input{accent-color:var(--text)}
+.x{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border-radius:2px;color:var(--muted)}
+.x:hover{background:var(--raised);color:var(--text)}
+.x svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.6;stroke-linecap:round}
+
+@media (max-width:1340px){.tab{max-width:132px}}
+@media (max-width:1240px){.src{grid-template-columns:34px 130px 1fr 176px 196px 118px}.tab{max-width:120px}}
+@media (prefers-reduced-motion:reduce){.dlg{animation:none}}

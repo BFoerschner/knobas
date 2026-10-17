@@ -170,7 +170,7 @@
 
 <style>
   /*
-    `.form` in `app.css` is the mockup's `140px 1fr` grid and aligns its rows
+    `.form` in `unported.css` is the mockup's `140px 1fr` grid and aligns its rows
     to the centre. A generated row can carry help and an error under its
     control, so this form's rows align to the top and the label gets the type's
     optical offset back.
