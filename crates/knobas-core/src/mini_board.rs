@@ -1087,4 +1087,105 @@ mod tests {
             vec![Some("to do"), Some("DONE"), Some("Archived")]
         );
     }
+
+    fn card(key: &str, assignee: Option<&str>) -> MiniBoardCard {
+        MiniBoardCard {
+            entity_id: format!("jira:{key}"),
+            source_id: "jira".to_owned(),
+            key: key.to_owned(),
+            title: key.to_owned(),
+            priority: None,
+            issue_type: None,
+            assignee: assignee.map(str::to_owned),
+            updated_at: None,
+            path: None,
+            parent_title: None,
+            mine: false,
+            labels: Vec::new(),
+            comment_count: None,
+            signals: Vec::new(),
+        }
+    }
+
+    /// A board put in lanes after it is read (#939, a Jira view's): each
+    /// lane's column keeps its first cards in the column's order and counts
+    /// them all, lanes rank biggest first then by key, only the first are
+    /// kept, and the columns keep their totals and only the kept cards.
+    #[test]
+    fn a_whole_board_put_in_lanes_caps_each_lanes_column_and_keeps_the_first_lanes() {
+        let board = MiniBoard {
+            columns: vec![
+                MiniBoardColumn {
+                    status: Some("To Do".to_owned()),
+                    cards: vec![
+                        card("PAY-3", Some("mara")),
+                        card("PAY-1", Some("mara")),
+                        card("PAY-2", Some("mara")),
+                        card("PAY-5", Some("omar")),
+                    ],
+                    total: 4,
+                },
+                MiniBoardColumn {
+                    status: None,
+                    cards: vec![card("PAY-9", None), card("PAY-8", Some("omar"))],
+                    total: 2,
+                },
+            ],
+            sources: Vec::new(),
+            lanes: Vec::new(),
+            more_lanes: 0,
+        };
+        let by = LaneField::Assignee;
+        let laned = in_lanes(board, Lanes { by, first: Some(2) }, Some(2));
+        let shape: Vec<(String, u32, Vec<(Option<String>, Vec<String>, u32)>)> = laned
+            .lanes
+            .iter()
+            .map(|lane| {
+                let cells = lane
+                    .columns
+                    .iter()
+                    .map(|cell| (cell.status.clone(), cell.ids.clone(), cell.total))
+                    .collect();
+                (lane.key.clone(), lane.count, cells)
+            })
+            .collect();
+        let ids = |keys: &[&str]| keys.iter().map(|key| format!("jira:{key}")).collect();
+        assert_eq!(
+            shape,
+            vec![
+                (
+                    "mara".to_owned(),
+                    3,
+                    vec![(Some("To Do".to_owned()), ids(&["PAY-3", "PAY-1"]), 3)]
+                ),
+                (
+                    "omar".to_owned(),
+                    2,
+                    vec![
+                        (Some("To Do".to_owned()), ids(&["PAY-5"]), 1),
+                        (None, ids(&["PAY-8"]), 1)
+                    ]
+                ),
+            ]
+        );
+        assert_eq!(
+            laned.more_lanes, 1,
+            "the unassigned lane is counted, not sent"
+        );
+        let kept: Vec<(u32, Vec<&str>)> = laned
+            .columns
+            .iter()
+            .map(|c| {
+                (
+                    c.total,
+                    c.cards.iter().map(|card| card.key.as_str()).collect(),
+                )
+            })
+            .collect();
+        assert_eq!(
+            kept,
+            vec![(4, vec!["PAY-3", "PAY-1", "PAY-5"]), (2, vec!["PAY-8"])]
+        );
+        assert_eq!(laned.columns[1].cards[0].lane(by), "omar");
+    }
 }

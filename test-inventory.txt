@@ -928,6 +928,7 @@ knobas-app	test/it	signals_ipc::a_card_carries_its_labels_in_the_records_order
 knobas-app	test/it	signals_ipc::a_resolved_or_unconfirmed_fact_makes_no_signal
 knobas-app	test/it	signals_ipc::an_unknown_has_value_is_reported
 knobas-app	test/it	signals_ipc::each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets
+knobas-app	test/it	signals_ipc::has_failing_build_finds_a_red_build_one_and_two_hops_back
 knobas-app	test/it	signals_ipc::the_filter_suggestions_offer_the_four_signals
 knobas-app	test/it	sources_crud::a_credential_that_is_still_wrong_does_not_release_the_backoff
 knobas-app	test/it	sources_crud::a_discovered_config_value_reaches_the_report
@@ -1299,6 +1300,7 @@ knobas-core	lib/knobas_core	markdown::tests::code_is_fenced_longer_than_any_back
 knobas-core	lib/knobas_core	markdown::tests::inline_runs_keep_their_marks
 knobas-core	lib/knobas_core	markdown::tests::markdown_goes_through_as_it_is_refs_included
 knobas-core	lib/knobas_core	mini_board::tests::a_leading_status_leads_whatever_case_it_is_spelled_in
+knobas-core	lib/knobas_core	mini_board::tests::a_whole_board_put_in_lanes_caps_each_lanes_column_and_keeps_the_first_lanes
 knobas-core	lib/knobas_core	mini_board::tests::the_four_lead_then_the_rest_alphabetically_then_the_terminal_group
 knobas-core	lib/knobas_core	note::tests::a_blank_title_becomes_a_name
 knobas-core	lib/knobas_core	note::tests::a_body_names_the_things_between_its_double_brackets
