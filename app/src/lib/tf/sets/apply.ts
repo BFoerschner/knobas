@@ -8,7 +8,7 @@
  * epic, its sub-tasks, its project or the ticket by hand (R-7.9).
  */
 import type { EntityRow, LinkEnd, LinkSetDraft, LinkSetMemberKind, LinkSetRow, LinkSetRule } from "../../ipc/entity";
-import { itemsOf } from "./sets";
+import { itemsOf, ruleLabel } from "./sets";
 
 /** A set as `save_link_set` takes it back: members, patterns and rules in their order. */
 export function draftOf(set: Pick<LinkSetRow, "id" | "name" | "description" | "members" | "patterns" | "rules">): LinkSetDraft {
@@ -43,6 +43,12 @@ export function withoutHandRule(set: LinkSetRow, ticketId: string): LinkSetDraft
  */
 export function applyToast(set: Pick<LinkSetRow, "name" | "members" | "patterns">, key: string): string {
   return `${set.name} applied to ${key}. ${itemsOf(set).length} items show on the job.`;
+}
+
+/** Prototype-6's `saveSet` toast: the set's name and the rule that now shows it. */
+export function savedToast(set: Pick<LinkSetRow, "name" | "rules">): string {
+  const rule = set.rules[0];
+  return `Saved ${set.name}.${rule ? ` ${ruleLabel(rule)} now shows it.` : ""}`;
 }
 
 /** One item *Save as a link set…* offers, ticked. */

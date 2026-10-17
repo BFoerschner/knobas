@@ -9,7 +9,7 @@
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
-  import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRule, RuleTicket } from "../../ipc/entity";
+  import type { EntityDetail, EntityRow, LinkEnd, LinkSetDetail, LinkSetDraft, LinkSetRule, LinkSetRuleKind, RuleTicket } from "../../ipc/entity";
   import type { Layers } from "../layers.svelte";
   import TfDialog from "../settings/TfDialog.svelte";
   import { epicOf, offered, projectOf, savedDraft, savedName } from "../sets/apply";
@@ -49,7 +49,7 @@
   // svelte-ignore state_referenced_locally
   let name = $state(savedName(ticket.title));
   let ticked = $state(new Set(offers.map((offer) => offer.entity_id)));
-  let applyTo = $state<"manual" | "epic" | "parent" | "project">(epic ? "epic" : "manual");
+  let applyTo = $state<LinkSetRuleKind>(epic ? "epic" : "manual");
   let epicTitle = $state<string | null>(null);
   let epicCount = $state<number | null>(null);
   let subtasks = $state<number | null>(null);

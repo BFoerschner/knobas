@@ -89,8 +89,7 @@
     type WeekReading,
   } from "./job";
   import { bridgePorts, bridgeSetPorts, type JobPorts, type JobSetPorts } from "./ports";
-  import { applyToast, withHandRule, withoutHandRule } from "../sets/apply";
-  import { ruleLabel } from "../sets/sets";
+  import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
   import { ASSET_LIMIT, reachFilter, SECTION_LIMIT, SECTION_READS } from "./sections";
@@ -379,9 +378,8 @@
     savingSet = false;
     drawer = false;
     if (detail) rereadReach(detail.row.entity_id);
-    const rule = set.rules[0];
     push({
-      text: `Saved ${set.name}.${rule ? ` ${ruleLabel(rule)} now shows it.` : ""}`,
+      text: savedToast(set),
       action: { label: "Open it", run: () => (location.hash = `#/sets/${encodeURIComponent(set.id)}`) },
     });
   }

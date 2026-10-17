@@ -4124,3 +4124,23 @@ Ruled by the implementer (PR for #1000).
 - **Both links write the scope through `TfSection`'s `onopen`, as #863 did for Pages.** The
   views read the scope on mount (`if (scope === null) scope = "all"`), so a write before the link
   is followed wins, and a later pick is kept for the session (R-2.6). **Reversing:** low.
+## #869 — Apply a link set and Save as a link set (2026-10-17)
+
+- **No new command.** *Apply* saves the whole set through `save_link_set` with one more `manual`
+  rule; *Undo* saves what that save answered without it; *Save as* saves a new set with one rule.
+  So no §10.8 entry and no fake handler are added. **Reversing:** an `apply_link_set` command if two
+  writers ever race on one set.
+- **The apply toast counts every item the set holds, assets included.** Prototype-6's `applySet`
+  sums code, builds, docs and monitors and leaves assets out, which reads as a slip: the job shows
+  them. **Reversing:** one line in `applyToast`.
+- **A linked PR, branch or commit offers its repository** in *What goes in*, from its Gitea key
+  (`owner/repo#142`, `owner/repo@…`), as prototype-6 offers the repos of the ticket's code. A
+  build run and another ticket are not offered. **Reversing:** low (`offered`).
+- **The epic is the top of the ticket's path line in its own source; the project is the key's
+  prefix.** The job has no epic field; the path line is the parent chain `link_set_rule_tickets!`
+  walks, and a Jira key's prefix is its project. The project option draws no count, as in
+  prototype-6. **Reversing:** low (`epicOf`, `projectOf`).
+- **The fake `get_entity` gives a ticket its `epic` as its path**, as Jira's declared parent chain
+  does, so *Save as* offers the epic under `?fake-ipc`. **Reversing:** one line.
+- **Both dialogs add "Link sets stay in knobas and are never written to a source."** beyond
+  prototype-6's copy, which the ticket's first criterion asks for. **Reversing:** n/a.

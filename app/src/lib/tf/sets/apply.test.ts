@@ -5,7 +5,7 @@
 import { describe, expect, test } from "vitest";
 
 import type { LinkEnd, LinkSetRow } from "../../ipc/entity";
-import { applyToast, epicOf, offered, projectOf, savedDraft, savedName, withHandRule, withoutHandRule } from "./apply";
+import { applyToast, epicOf, offered, projectOf, savedDraft, savedName, savedToast, withHandRule, withoutHandRule } from "./apply";
 
 const SET: LinkSetRow = {
   id: "payout-stack",
@@ -115,6 +115,12 @@ describe("where a saved set applies", () => {
       patterns: [],
       rules: [{ kind: "epic", value: "jira:PAY-200" }],
     });
+  });
+
+  test("the saved toast names the set and the rule that now shows it", () => {
+    expect(savedToast({ name: "Payout kit", rules: [{ kind: "project", value: "jira:PAY", title: null }] })).toBe(
+      "Saved Payout kit. Every ticket in project PAY now shows it.",
+    );
   });
 
   test("the name it suggests is the summary's last two words and kit", () => {
