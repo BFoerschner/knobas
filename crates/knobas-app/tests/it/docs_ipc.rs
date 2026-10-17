@@ -655,12 +655,18 @@ async fn ticket(pool: &sqlx::PgPool, title: &str, status: &str) -> (String, Stri
     .execute(pool)
     .await
     .unwrap();
-    let key = format!(
-        "W{}-1",
-        uuid::Uuid::new_v4().simple().to_string()[..5]
-            .to_uppercase()
-            .replace(|c: char| c.is_ascii_digit(), "Q")
-    );
+    // A Jira key is letters, then a number. Every hex digit stays distinct
+    // (0-9 become G-P, a-f stay A-F): collapsing digits to one letter left
+    // about one key in a hundred shared by two tickets of one test, and a
+    // chip resolves by key alone, so it then found the other ticket (#1060).
+    let letters: String = uuid::Uuid::new_v4().simple().to_string()[..8]
+        .chars()
+        .map(|c| match c.to_digit(10) {
+            Some(d) => char::from(b'G' + d as u8),
+            None => c.to_ascii_uppercase(),
+        })
+        .collect();
+    let key = format!("W{letters}-1");
     let id = format!("{jira}:{key}");
     item(
         pool,
