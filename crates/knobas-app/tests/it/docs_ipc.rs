@@ -167,6 +167,37 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     );
 }
 
+/// Only live pages are in the tree: not a withdrawn one, and none of a source
+/// the user turned off (#981 reads the pages without `sync.live_item`).
+#[tokio::test]
+async fn the_tree_holds_only_live_pages() {
+    let pool = pool().await;
+    let src = confluence(&pool).await;
+    let kept = page(&pool, &src, "1", "Kept", "OPS", &[], "").await;
+    let withdrawn = page(&pool, &src, "2", "Withdrawn", "OPS", &[], "").await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&withdrawn)
+        .execute(&pool)
+        .await
+        .unwrap();
+    let off = confluence(&pool).await;
+    page(&pool, &off, "1", "Turned off", "OPS", &[], "").await;
+    sqlx::query("update knobas.source_config set enabled = false where id = $1")
+        .bind(&off)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let tree = docs_tree_inner(&pool).await.unwrap();
+    let pages: Vec<&str> = tree
+        .spaces
+        .iter()
+        .filter(|s| s.source_id == src || s.source_id == off)
+        .flat_map(|s| s.pages.iter().map(|p| p.entity_id.as_str()))
+        .collect();
+    assert_eq!(pages, vec![kept.as_str()]);
+}
+
 /// #953: a parent's children are in the source's own order, the declared
 /// `position`, lowest first; a child the source gives no position follows,
 /// by title.

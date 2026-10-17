@@ -648,6 +648,7 @@ knobas-app	test/it	docs_ipc::only_a_mirrored_page_reads
 knobas-app	test/it	docs_ipc::the_page_read_last_is_the_newest_visit
 knobas-app	test/it	docs_ipc::the_space_the_grammar_and_the_empty_query
 knobas-app	test/it	docs_ipc::the_tree_hangs_each_page_under_its_declared_parent
+knobas-app	test/it	docs_ipc::the_tree_holds_only_live_pages
 knobas-app	test/it	docs_ipc::what_the_mirror_does_not_hold_stays_unresolved
 knobas-app	test/it	entity::a_birth_line_is_written_even_when_no_born_link_could_be_drawn
 knobas-app	test/it	entity::a_born_link_is_refused_for_a_bad_address_and_skipped_for_an_absent_one

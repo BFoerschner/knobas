@@ -251,6 +251,22 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     .await;
     wrong.extend(shapes("launcher_recent", &plan));
 
+    // The Docs tree's pages (#981). Never analyzed, it was planned from
+    // `sync.item_project`, one row per item of every kind, with a probe into
+    // `knobas.entity` and `sync.item` per row and the page kind a filter on
+    // that probe: 211 ms on the probe's 22,000 items for 2,000 pages, the
+    // cost growing with the mirror. The pages are found by their kind now.
+    let plan = explain(&pool, knobas_app::docs::planned_tree(), |q| {
+        q.bind(declared.clone())
+    })
+    .await;
+    wrong.extend(shapes("docs_tree", &plan));
+    wrong.extend(
+        kind_filtered_probes(&plan[0]["Plan"])
+            .into_iter()
+            .map(|f| format!("docs_tree: {f}")),
+    );
+
     // The tray's count in a project room, as the server plans it for the
     // values and as it plans it generically: PostgreSQL switched the
     // persistent statement to its generic plan at the sixth execution, and
@@ -350,6 +366,32 @@ fn shapes(name: &str, plan: &serde_json::Value) -> Vec<String> {
         .chain(knobas_db::plan_shape::driven_from(plan, "entity"))
         .map(|f| format!("{name}: {f}"))
         .collect()
+}
+
+/// Every probe into `sync.item` by key that filters the kind afterwards: the
+/// statement then reaches the items of every kind first and keeps one kind
+/// of them, a probe per item of the mirror (#981). An index condition on the
+/// kind, or a scan that filters it once, is what reading one kind costs.
+fn kind_filtered_probes(node: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let is_probe = matches!(
+        node["Node Type"].as_str(),
+        Some("Index Scan" | "Index Only Scan")
+    );
+    if is_probe
+        && node["Relation Name"] == "item"
+        && node["Filter"].as_str().is_some_and(|f| f.contains("kind"))
+    {
+        found.push(format!(
+            "probes sync.item by {} and filters the kind after ({})",
+            node["Index Name"].as_str().unwrap_or("an index"),
+            node["Filter"].as_str().unwrap_or_default()
+        ));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(kind_filtered_probes(child));
+    }
+    found
 }
 
 /// Every node type in a plan, subplans included.
