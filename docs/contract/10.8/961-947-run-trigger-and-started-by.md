@@ -35,8 +35,8 @@
   misspelled path. TeamCity omits `triggered.user` on every VCS build (100 of 100 on the public
   instance, #106), so without it the battery fails on any corpus with no person-started build,
   mockd's quiet configuration among them; with it, a misspelled `started_by` still fails wherever
-  one person-started run exists. Pinned by `TriggerAtAMissingKey`, `StartedByAtAMissingKey` and
-  the conforming `StartedByOnRunsNobodyStarted`.
+  one person-started run exists. Pinned by `TriggerAtAMissingKey`, `StartedByAtAMissingKey`,
+  `StartedByOnRunsAPersonStarted` and the conforming `StartedByOnRunsNobodyStarted`.
 
   **`RunRow`** (`commands/entity.rs`, mirrored in `app/src/lib/ipc/entity.ts`) gains:
 

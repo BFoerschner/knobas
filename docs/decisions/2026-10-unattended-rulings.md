@@ -3851,3 +3851,15 @@ Implementer, one PR for both.
   (#854, #1003); no build record carries them. Test summary: `run_tests` (#855) reads it live.
   Parameter specs, repository, default branch and triggers: #851's and #852's live
   `pipeline_settings`. **Reversing:** low; each would be a new §10.8 entry.
+- **Merge review (PR #1043): the battery's excuse holds, and the map stays `vcs`/`schedule`/`user`.**
+  The excuse only clears the evidence a change- or schedule-started record would add, so a
+  misspelled `started_by` still fails on any corpus where a person started one run. That direction
+  was claimed in the §10.8 entry but unpinned: a mutant excusing every resolved trigger survived.
+  `StartedByOnRunsAPersonStarted` now kills it. The words were checked against TeamCity's REST
+  source (`TriggeredBy.getDetails`): the core's own `type` parameter wins when set, and otherwise
+  `vcs`, `user`, `buildType`, `restarted`, `idePlugin` and `unknown` are derived; a REST-queued build
+  is `user` with a user, `request` without one. Only the person case is witnessed live (the seed
+  queues through REST); `vcs` and `schedule` rest on that source and on mockd. Every other type
+  misses and draws no trigger, and its record is not excused, which keeps the battery strict
+  rather than silent. **Reversing:** low; add a word to the map, or widen the excuse with a
+  behaviour beside the new one.
