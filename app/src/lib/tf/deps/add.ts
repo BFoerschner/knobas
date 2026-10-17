@@ -7,6 +7,7 @@
  * address when left empty), the asset that exposes it, where it lands and who
  * can reach it; editing sends one `edit_route` with only what changed.
  */
+import { ipcErrorMessage } from "../../ipc";
 import type { AssetType, Dependencies, RouteEdit, RouteRow, Visibility } from "../../ipc/assets";
 
 /** The type picker's two groups: *In this layer*, then *Any type*. */
@@ -37,6 +38,25 @@ export const routeNameOf = (url: string): string =>
     .trim()
     .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
     .replace(/\/.*/, "");
+
+/**
+ * *Link it to <key>*, the second call once the new item exists: `null` when
+ * it linked or was not asked to, else why it did not.
+ */
+export async function linkToTicket(
+  createLink: (fromId: string, toId: string) => Promise<unknown>,
+  ticket: { id: string } | null,
+  wanted: boolean,
+  itemId: string,
+): Promise<string | null> {
+  if (ticket === null || !wanted) return null;
+  try {
+    await createLink(ticket.id, itemId);
+    return null;
+  } catch (error) {
+    return ipcErrorMessage(error);
+  }
+}
 
 /** What the route dialog's fields hold. `target` `null` is *Nothing knobas knows*. */
 export interface RouteForm {

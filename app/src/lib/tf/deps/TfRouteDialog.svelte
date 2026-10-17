@@ -12,7 +12,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { Dependencies, RouteRow, Visibility } from "../../ipc/assets";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { hasScheme, routeEditsOf, routeNameOf, type RouteForm } from "./add";
+  import { hasScheme, linkToTicket, routeEditsOf, routeNameOf, type RouteForm } from "./add";
   import { assetPaths } from "./estate-paths";
   import type { AddPorts } from "./ports";
 
@@ -90,14 +90,7 @@
       }
       const name = form.name.trim() || routeNameOf(url);
       const made = await ports.createRoute(exposedBy, name, url, form.target, form.visibility);
-      let unlinked: string | null = null;
-      if (ticket !== null && link) {
-        try {
-          await ports.createLink(ticket.id, made.id);
-        } catch (error) {
-          unlinked = ipcErrorMessage(error);
-        }
-      }
+      const unlinked = await linkToTicket(ports.createLink, ticket, link, made.id);
       onsaved({ id: made.id, name: made.name, created: true, unlinked });
     } catch (error) {
       failure = ipcErrorMessage(error);
@@ -153,6 +146,7 @@
       <p class="tf-dim tf-note">The asset that exposes a route never changes; exposing it elsewhere is a new route.</p>
       {#if ticket !== null}
         <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link it to {ticket.key}</label>
+        <p class="tf-dim tf-note">Links stay in knobas and are never written to a source.</p>
       {/if}
     {/if}
     {#if failure !== null}<p class="tf-ifail" role="alert">{failure}</p>{/if}

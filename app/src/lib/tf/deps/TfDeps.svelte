@@ -598,7 +598,7 @@
             <button type="button" role="menuitem" onclick={() => pickAdd(() => (routing = { id: null }))}
               ><b>Route</b><span class="tf-dim">an address, the asset that exposes it, and where it lands</span></button
             >
-            <button type="button" role="menuitem" aria-disabled="true" title="Not built in the new shell yet: the asset tree's Import in the rooms UI does it"
+            <button type="button" role="menuitem" aria-disabled="true" title="Not built in the new shell yet"
               ><b>Import…</b><span class="tf-dim">estate file, hcloud, Docker host, with a preview</span></button
             >
             {#if scoped !== null}

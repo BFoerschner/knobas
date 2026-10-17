@@ -12,7 +12,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import type { AssetType, DepLayer, Dependencies } from "../../ipc/assets";
   import TfDialog from "../settings/TfDialog.svelte";
-  import { typeChoices, usualLine } from "./add";
+  import { linkToTicket, typeChoices, usualLine } from "./add";
   import { assetPaths } from "./estate-paths";
   import type { AddPorts } from "./ports";
 
@@ -80,14 +80,7 @@
       writing = false;
       return;
     }
-    let unlinked: string | null = null;
-    if (ticket !== null && link) {
-      try {
-        await ports.createLink(ticket.id, id);
-      } catch (error) {
-        unlinked = ipcErrorMessage(error);
-      }
-    }
+    const unlinked = await linkToTicket(ports.createLink, ticket, link, id);
     writing = false;
     oncreated({ id, name: named, unlinked });
   }
@@ -133,6 +126,7 @@
     <p class="tf-dim tf-note">{usual}</p>
     {#if ticket !== null}
       <label class="tf-ck"><input type="checkbox" bind:checked={link} /> Link it to {ticket.key}, so it is on this ticket's map</label>
+      <p class="tf-dim tf-note">Links stay in knobas and are never written to a source.</p>
     {/if}
     <p class="tf-dim tf-note">Environment and owner come from what it sits inside. Its properties are in its editor.</p>
     {#if failure !== null}<p class="tf-ifail" role="alert">{failure}</p>{/if}

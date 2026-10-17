@@ -204,6 +204,7 @@ test("from a ticket, Link it to the ticket is ticked and links after the asset e
   const box = dialog().querySelector<HTMLInputElement>("input[type=checkbox]")!;
   expect(box.checked).toBe(true);
   expect(box.parentElement!.textContent).toContain("Link it to PAY-231, so it is on this ticket's map");
+  expect(dialog().textContent).toContain("Links stay in knobas and are never written to a source.");
   type_(field("Name"), "payments-api");
   button("Create", dialog()).click();
   await settle();
