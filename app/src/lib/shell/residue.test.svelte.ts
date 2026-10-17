@@ -459,6 +459,7 @@ const MonitorsView = (await import("../assets/MonitorsView.svelte")).default;
 const MoveDialog = (await import("../assets/MoveDialog.svelte")).default;
 const RouteDialog = (await import("../assets/RouteDialog.svelte")).default;
 const ImportDialog = (await import("../assets/ImportDialog.svelte")).default;
+const TfImport = (await import("../tf/deps/TfImport.svelte")).default;
 const ProtocolPanel = (await import("../standup/ProtocolPanel.svelte")).default;
 const StandupSection = (await import("../settings/StandupSection.svelte")).default;
 const AddSource = (await import("../sources/AddSource.svelte")).default;
@@ -2245,6 +2246,30 @@ const CASES: Case[] = [
           apply: () => Promise.reject(new Error("no write in this test")),
           produce: () => Promise.reject(new Error("no importer in this test")),
           tree: () => deferred([]),
+          onclose: () => {},
+          onimported: () => {},
+        },
+      }),
+    }),
+  },
+  {
+    /**
+     * Dependencies' *Import…* (#1066): `ImportDialog`'s port, with the same one
+     * effect on the same `latestRead`, idle until `landing_needed`. The case
+     * above says why the idle dialog is the one this harness can hold.
+     */
+    name: "TfImport",
+    source: "lib/tf/deps/TfImport.svelte",
+    open: (target) => ({
+      app: mount(TfImport, {
+        target,
+        props: {
+          ports: {
+            previewEstateImport: () => Promise.reject(new Error("no preview in this test")),
+            applyEstateImport: () => Promise.reject(new Error("no write in this test")),
+            produceEstateFile: () => Promise.reject(new Error("no importer in this test")),
+            assetTree: () => deferred([]),
+          },
           onclose: () => {},
           onimported: () => {},
         },
