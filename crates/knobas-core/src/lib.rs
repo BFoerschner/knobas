@@ -9,7 +9,6 @@ pub mod inbox;
 pub mod link;
 pub mod link_set;
 mod live;
-pub mod markdown;
 pub mod mini_board;
 pub mod note;
 pub mod payload;

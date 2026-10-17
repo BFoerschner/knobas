@@ -1149,129 +1149,12 @@ pub struct DocExport {
     pub folder: String,
 }
 
-/// A page as Markdown (R-10.17), through the one converter
-/// (`knobas_core::markdown`): its title as the heading, then its blocks.
+/// A page as Markdown (R-10.17), through the one converter, which reads the
+/// frame's own blocks (`knobas_source::docs::markdown`, #952): its title as
+/// the heading, then its blocks.
 #[must_use]
 pub fn page_markdown(title: &str, blocks: &[DocBlock]) -> String {
-    use knobas_core::markdown as md;
-    let mut out = vec![md::DocBlock::Heading {
-        level: 1,
-        text: vec![md::Inline::Text {
-            text: title.to_owned(),
-        }],
-    }];
-    out.extend(blocks.iter().map(to_md_block));
-    md::to_markdown(&out)
-}
-
-fn to_md_block(block: &DocBlock) -> knobas_core::markdown::DocBlock {
-    use knobas_core::markdown as md;
-    use knobas_source::docs::PanelKind;
-    match block {
-        DocBlock::Heading { level, text } => md::DocBlock::Heading {
-            level: *level,
-            text: to_md_inlines(text),
-        },
-        DocBlock::Paragraph { text } => md::DocBlock::Paragraph {
-            text: to_md_inlines(text),
-        },
-        DocBlock::List { ordered, items } => md::DocBlock::List {
-            ordered: *ordered,
-            items: items
-                .iter()
-                .map(|item| item.iter().map(to_md_block).collect())
-                .collect(),
-        },
-        DocBlock::Code { code, language } => md::DocBlock::Code {
-            language: language.clone(),
-            text: code.clone(),
-        },
-        DocBlock::Table { rows } => {
-            let headed = rows
-                .first()
-                .is_some_and(|r| !r.is_empty() && r.iter().all(|c| c.header));
-            let cells = |row: &Vec<knobas_source::docs::TableCell>| {
-                row.iter().map(|c| to_md_inlines(&c.text)).collect()
-            };
-            md::DocBlock::Table {
-                header: if headed { cells(&rows[0]) } else { Vec::new() },
-                rows: rows.iter().skip(usize::from(headed)).map(cells).collect(),
-            }
-        }
-        DocBlock::Panel {
-            kind,
-            title,
-            blocks,
-        } => md::DocBlock::Panel {
-            kind: match kind {
-                PanelKind::Info => "info",
-                PanelKind::Note => "note",
-                PanelKind::Warning => "warning",
-                PanelKind::Tip => "tip",
-            }
-            .to_owned(),
-            title: title.clone(),
-            blocks: blocks.iter().map(to_md_block).collect(),
-        },
-        DocBlock::Placeholder { name } => md::DocBlock::Macro {
-            name: name.clone(),
-            summary: None,
-        },
-    }
-}
-
-fn to_md_inlines(text: &[Inline]) -> Vec<knobas_core::markdown::Inline> {
-    use knobas_core::markdown::Inline as Md;
-    text.iter()
-        .map(|inline| match inline {
-            Inline::Text {
-                text,
-                strong,
-                emphasis,
-                code,
-            } => {
-                if *code {
-                    return Md::Code { text: text.clone() };
-                }
-                let mut run = Md::Text { text: text.clone() };
-                if *emphasis {
-                    run = Md::Emphasis { text: vec![run] };
-                }
-                if *strong {
-                    run = Md::Strong { text: vec![run] };
-                }
-                run
-            }
-            Inline::Link { text, href } => Md::Link {
-                text: vec![Md::Text { text: text.clone() }],
-                url: href.clone(),
-            },
-            Inline::PageLink { title, .. } => Md::PageLink {
-                title: title.clone(),
-            },
-            Inline::Issue { key, .. } => Md::Text { text: key.clone() },
-            Inline::Mention { .. } => Md::Text {
-                text: mention_words(inline),
-            },
-            Inline::Break => Md::Text {
-                text: " ".to_owned(),
-            },
-        })
-        .collect()
-}
-
-/// `@` and the first word of the display name, else the account: how the
-/// reader writes a mention.
-fn mention_words(inline: &Inline) -> String {
-    let Inline::Mention { user, name, .. } = inline else {
-        return String::new();
-    };
-    let first = name
-        .as_deref()
-        .and_then(|n| n.split_whitespace().next())
-        .or(user.as_deref())
-        .unwrap_or("someone");
-    format!("@{first}")
+    knobas_source::docs::markdown::page(title, blocks)
 }
 
 /// Write one page as Markdown into `folder`.
@@ -1293,7 +1176,7 @@ pub async fn export(
             page.title
         )));
     }
-    let file = knobas_core::markdown::page_file_name(&page.title);
+    let file = knobas_source::docs::markdown::page_file_name(&page.title);
     std::fs::create_dir_all(folder).map_err(IpcError::internal)?;
     std::fs::write(folder.join(&file), page_markdown(&page.title, &page.blocks))
         .map_err(IpcError::internal)?;
@@ -1470,3 +1353,211 @@ pub async fn created_page(pool: &PgPool, write_id: i64) -> Result<Option<String>
 /// The relation *Link to <job>* and *Link it to <job>* draw from a page to a
 /// ticket: the page documents the work.
 pub const LINK_RELATION: &str = "documents";
+
+/// *Export as Markdown*'s bytes, pinned over every block and inline the frame
+/// has (#952): captured before the two block vocabularies became one, so the
+/// change of vocabulary changed no output.
+#[cfg(test)]
+mod markdown_golden {
+    use super::*;
+    use knobas_source::docs::{PanelKind, TableCell};
+
+    fn text(words: &str) -> Vec<Inline> {
+        vec![Inline::text(words)]
+    }
+
+    fn marked(words: &str, strong: bool, emphasis: bool, code: bool) -> Inline {
+        Inline::Text {
+            text: words.to_owned(),
+            strong,
+            emphasis,
+            code,
+        }
+    }
+
+    fn para(words: &str) -> DocBlock {
+        DocBlock::Paragraph { text: text(words) }
+    }
+
+    fn cell(header: bool, words: &str) -> TableCell {
+        TableCell {
+            header,
+            text: text(words),
+        }
+    }
+
+    fn panel(kind: PanelKind, title: Option<&str>, blocks: Vec<DocBlock>) -> DocBlock {
+        DocBlock::Panel {
+            kind,
+            title: title.map(str::to_owned),
+            blocks,
+        }
+    }
+
+    fn fixture() -> Vec<DocBlock> {
+        vec![
+            DocBlock::Heading {
+                level: 2,
+                text: text("Retry\npolicy"),
+            },
+            DocBlock::Heading {
+                level: 9,
+                text: text("Deep"),
+            },
+            para("# not a heading"),
+            para("12. not numbered"),
+            DocBlock::Paragraph {
+                text: vec![
+                    marked("bold", true, false, false),
+                    Inline::text(" "),
+                    marked("soft", false, true, false),
+                    Inline::text(" "),
+                    marked("both_", true, true, false),
+                    Inline::text(" "),
+                    marked("a`b", false, false, true),
+                    Inline::text(" "),
+                    marked("`x", true, false, true),
+                    Inline::Break,
+                    Inline::Link {
+                        text: "the *docs*".to_owned(),
+                        href: "https://example.test/a b".to_owned(),
+                    },
+                    Inline::text(" "),
+                    Inline::PageLink {
+                        text: "ignored".to_owned(),
+                        title: "Payout design: v2".to_owned(),
+                        space: Some("ENG".to_owned()),
+                        entity_id: Some("x".to_owned()),
+                    },
+                    Inline::text(" "),
+                    Inline::Issue {
+                        key: "PAY-231".to_owned(),
+                        entity_id: None,
+                        title: Some("t".to_owned()),
+                        status: None,
+                    },
+                    Inline::text(" "),
+                    Inline::Mention {
+                        user: Some("priya".to_owned()),
+                        name: Some("Priya Nair".to_owned()),
+                        me: true,
+                    },
+                    Inline::text(" "),
+                    Inline::Mention {
+                        user: Some("mara_k".to_owned()),
+                        name: None,
+                        me: false,
+                    },
+                    Inline::text(" "),
+                    Inline::Mention {
+                        user: None,
+                        name: None,
+                        me: false,
+                    },
+                ],
+            },
+            DocBlock::List {
+                ordered: false,
+                items: vec![
+                    vec![para("one")],
+                    vec![
+                        para("two"),
+                        DocBlock::List {
+                            ordered: true,
+                            items: vec![vec![para("a")], vec![para("b")]],
+                        },
+                        panel(PanelKind::Tip, None, vec![para("inside")]),
+                    ],
+                ],
+            },
+            DocBlock::Code {
+                code: "fn main() {}\n".to_owned(),
+                language: Some(" rust ".to_owned()),
+            },
+            DocBlock::Code {
+                code: "```\nnested\n```".to_owned(),
+                language: None,
+            },
+            DocBlock::Table {
+                rows: vec![
+                    vec![cell(true, "Service"), cell(true, "Owner")],
+                    vec![cell(false, "payouts|api"), cell(false, "Mara\nK")],
+                    vec![cell(false, "ledger")],
+                ],
+            },
+            DocBlock::Table {
+                rows: vec![
+                    vec![cell(true, "a"), cell(false, "b")],
+                    vec![cell(false, "1"), cell(false, "2"), cell(false, "3")],
+                ],
+            },
+            DocBlock::Table { rows: vec![] },
+            DocBlock::Table {
+                rows: vec![vec![], vec![cell(false, "x")]],
+            },
+            panel(
+                PanelKind::Warning,
+                Some(" Before  you deploy "),
+                vec![para("Drain the queue."), para("Then deploy.")],
+            ),
+            panel(PanelKind::Info, Some("Only a title"), vec![]),
+            panel(PanelKind::Note, None, vec![]),
+            panel(PanelKind::Note, Some(" "), vec![para("Body only")]),
+            DocBlock::Placeholder {
+                name: "jira--chart".to_owned(),
+            },
+        ]
+    }
+
+    #[test]
+    fn every_block_and_inline_exports_as_before() {
+        let md = page_markdown("Retry *budget*: [v2]", &fixture());
+        let want = concat!(
+            "# Retry \\*budget\\*: \\[v2\\]\n\n",
+            "## Retry policy\n\n",
+            "###### Deep\n\n",
+            "\\# not a heading\n\n",
+            "12\\. not numbered\n\n",
+            "**bold** *soft* ***both\\_*** ``a`b`` `` `x `` ",
+            "[the \\*docs\\*](<https://example.test/a b>) ",
+            "[Payout design: v2](payout-design-v2.md) PAY-231 @Priya @mara\\_k @someone\n\n",
+            "- one\n",
+            "- two\n\n",
+            "  1. a\n",
+            "  2. b\n\n",
+            "  > **Tip**\n",
+            "  >\n",
+            "  > inside\n\n",
+            "```rust\nfn main() {}\n```\n\n",
+            "````\n```\nnested\n```\n````\n\n",
+            "| Service | Owner |\n",
+            "| --- | --- |\n",
+            "| payouts\\|api | Mara<br>K |\n",
+            "| ledger |  |\n\n",
+            "| a | b |  |\n",
+            "| --- | --- | --- |\n",
+            "| 1 | 2 | 3 |\n\n",
+            "|  |\n",
+            "| --- |\n",
+            "| x |\n\n",
+            "> **Warning** Before you deploy\n",
+            ">\n",
+            "> Drain the queue.\n",
+            ">\n",
+            "> Then deploy.\n\n",
+            "> **Info** Only a title\n\n",
+            "> **Note**\n\n",
+            "> **Note**\n",
+            ">\n",
+            "> Body only\n\n",
+            "<!-- macro: jira- -chart -->\n",
+        );
+        assert_eq!(md, want);
+    }
+
+    #[test]
+    fn an_empty_page_is_its_title() {
+        assert_eq!(page_markdown("Empty", &[]), "# Empty\n");
+        assert_eq!(page_markdown("", &[]), "# \n");
+    }
+}

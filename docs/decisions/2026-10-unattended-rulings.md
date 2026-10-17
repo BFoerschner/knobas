@@ -5145,3 +5145,24 @@ Implementer.
   step was not excused while it resolved to no trigger, so leaving it out changes nothing the
   battery judges today; widening the excuse is a separate change to a frozen check.
   **Reversing:** low (one `matches!` arm).
+
+## #952 — one block vocabulary for the reader and the Markdown converter (2026-10-18)
+
+Implementer.
+
+- **The converter reads the frame's blocks; the core vocabulary goes.** The issue offers two ways:
+  the converter reads `knobas_source::docs::DocBlock`, or a mapping joins the two. A mapping
+  already existed (`knobas_app::docs::to_md_block`, #861) and keeps two vocabularies, so only the
+  first leaves one. The frame is frozen (ADR-0022) and crosses IPC; the core type crossed nothing.
+  So the core type and the mapping are deleted and the frame stays as it is: no IPC answer changes.
+  **Reversing:** medium (restore `knobas_core::markdown` and the mapping from git).
+- **The converter moves to `knobas_source::docs::markdown`.** `knobas-source` depends on
+  `knobas-core`, so a core module cannot read the frame's types without a cycle, and moving the
+  frame into core would move a frozen surface. Beside the vocabulary it reads is also where a
+  Markdown docs source (spec #808) will find it. **Reversing:** low (a module path).
+- **A note is `page_from_markdown(title, body)`, not a `Markdown` block.** The frame has no
+  passthrough block and adding one is a frozen-surface change the reader would have to draw.
+  **Reversing:** low.
+- **Dropped with the core type: `Macro.summary` and the header/rows split of a table.** No caller
+  set a summary, and both table branches drew the first row as the header; the golden tests,
+  committed first, hold every byte. **Reversing:** low.

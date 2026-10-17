@@ -377,7 +377,7 @@ fn plain_text(nodes: &[&Node]) -> String {
 
 /// A panel as the editor's text: a quote whose first line is the kind in
 /// bold and the title beside it, then the panel's body, as the Markdown
-/// export spells a panel (`knobas_core::markdown`).
+/// export spells a panel (`knobas_source::docs::markdown`).
 fn panel_text(node: &Node, word: &str) -> String {
     let mut first = format!("**{word}**");
     if let Some(title) = node.param("title") {
