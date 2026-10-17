@@ -5358,6 +5358,11 @@ fn announce_context<R: tauri::Runtime>(
 /// A non-blank one narrows the board to every ticket the grammar admits
 /// ([`knobas_search::Searcher::matching_ids`]); omitted or blank, it narrows
 /// nothing.
+///
+/// `jira_view` (#877) names a Jira view (`sync.jira_view`'s entity id): the
+/// board is then [`jira_view_board`]'s, the tickets Jira put on that view in
+/// Jira's order under the view's own columns, and the room dimensions are
+/// not read.
 #[tauri::command]
 pub async fn mini_board(
     lifecycle: State<'_, Lifecycle>,
@@ -5366,8 +5371,12 @@ pub async fn mini_board(
     project: Option<String>,
     per_column: Option<u32>,
     query: Option<String>,
+    jira_view: Option<String>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
     let pool = lifecycle.pool()?;
+    if let Some(view) = jira_view {
+        return jira_view_board(&pool, &view, per_column, query.as_deref()).await;
+    }
     mini_board_inner(
         &pool,
         ctx_id.as_deref(),
@@ -5421,6 +5430,117 @@ pub async fn mini_board_inner(
         per_column,
     )
     .await?)
+}
+
+/// A Jira view's board (#877, R-3.21, R-3.24): the live tickets Jira put on
+/// the view (`sync.jira_view_member`), narrowed by `query` like
+/// [`mini_board_inner`], **in Jira's order**, under the view's own columns --
+/// each holding the tickets whose status is one of its statuses, empty ones
+/// included, as on the Jira board. A status on no column does not show. A
+/// view with no columns keeps one column per status. `per_column` cuts each
+/// column after its first cards in Jira's order; `total` counts them all.
+///
+/// Keys Jira returned that knobas does not mirror (a project the source
+/// does not sync) are not on the board; they stay in the member table.
+///
+/// # Errors
+///
+/// `not_found` for a view the mirror does not hold; otherwise as
+/// [`mini_board_inner`].
+pub async fn jira_view_board(
+    pool: &PgPool,
+    view: &str,
+    per_column: Option<u32>,
+    query: Option<&str>,
+) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
+    use knobas_core::mini_board::{MiniBoard, MiniBoardCard, MiniBoardColumn};
+    let columns: Option<serde_json::Value> =
+        sqlx::query_scalar("select columns from sync.jira_view where entity_id = $1")
+            .bind(view)
+            .fetch_optional(pool)
+            .await?;
+    let Some(columns) = columns else {
+        return Err(IpcError::not_found(format!("no Jira view is called {view}")));
+    };
+    let columns: Vec<crate::ticket_views::ViewColumn> =
+        serde_json::from_value(columns).map_err(IpcError::internal)?;
+    let members: Vec<String> = sqlx::query_scalar(
+        "select entity_id from sync.jira_view_member where view_id = $1 order by rank",
+    )
+    .bind(view)
+    .fetch_all(pool)
+    .await?;
+    let rank: std::collections::HashMap<&str, usize> = members
+        .iter()
+        .enumerate()
+        .map(|(at, id)| (id.as_str(), at))
+        .collect();
+    let mut only = members.clone();
+    if let Some(query) = query.map(str::trim).filter(|query| !query.is_empty())
+        && let Some(matched) = crate::commands::search::searcher(pool)
+            .await?
+            .matching_ids(query, "ticket")
+            .await?
+    {
+        let matched: std::collections::HashSet<String> = matched.into_iter().collect();
+        only.retain(|id| matched.contains(id));
+    }
+    let declarations = declared_paths(pool).await?;
+    let identity = knobas_search::Vocabulary::load(pool, knobas_search::KindCatalog::default())
+        .await?
+        .identity;
+    let whole = knobas_core::mini_board::read_scoped(
+        pool,
+        knobas_core::mini_board::Scope {
+            only: Some(&only),
+            identity: &identity,
+            ..knobas_core::mini_board::Scope::default()
+        },
+        &declarations,
+        None,
+    )
+    .await?;
+    let in_order = |mut cards: Vec<MiniBoardCard>| -> MiniBoardColumn {
+        cards.sort_by_key(|card| rank.get(card.entity_id.as_str()).copied().unwrap_or(usize::MAX));
+        let total = u32::try_from(cards.len()).unwrap_or(u32::MAX);
+        if let Some(cap) = per_column {
+            cards.truncate(cap as usize);
+        }
+        MiniBoardColumn { status: None, cards, total }
+    };
+    let drawn: Vec<MiniBoardColumn> = if columns.is_empty() {
+        whole
+            .columns
+            .into_iter()
+            .map(|column| MiniBoardColumn {
+                status: column.status,
+                ..in_order(column.cards)
+            })
+            .collect()
+    } else {
+        let mut by_status: std::collections::HashMap<Option<String>, Vec<MiniBoardCard>> = whole
+            .columns
+            .into_iter()
+            .map(|column| (column.status, column.cards))
+            .collect();
+        columns
+            .iter()
+            .map(|column| MiniBoardColumn {
+                status: Some(column.name.clone()),
+                ..in_order(
+                    column
+                        .statuses
+                        .iter()
+                        .flat_map(|status| by_status.remove(&Some(status.clone())).unwrap_or_default())
+                        .collect(),
+                )
+            })
+            .collect()
+    };
+    Ok(MiniBoard {
+        columns: drawn,
+        sources: whole.sources,
+    })
 }
 
 /// The statuses one source's live ticket corpus shows (#760): the ticket
