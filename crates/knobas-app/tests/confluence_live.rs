@@ -1511,7 +1511,10 @@ async fn move_before(env: &Env, id: &str, before: &str) {
             .unwrap_or_else(|e| panic!("{method} movepage.action: {e}"));
         let status = response.status().as_u16();
         let text = response.text().await.unwrap_or_default();
-        println!("{method} movepage.action -> {status}: {}", &text[..text.len().min(300)]);
+        println!(
+            "{method} movepage.action -> {status}: {}",
+            &text[..text.len().min(300)]
+        );
         if (200..300).contains(&status) {
             return;
         }
