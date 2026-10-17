@@ -45,7 +45,8 @@ impl<S: Borrow<SourcesState> + Send + Sync> Steps for Queue<S> {
         // The same call the *Comment* button makes. A start-work step is not a
         // privileged write: it queues, it can be held, it can be refused, and
         // it shows up in the pending-writes panel like anything else.
-        let queued = crate::sources::write_queue::submit(self.state.borrow(), payload.clone()).await?;
+        let queued =
+            crate::sources::write_queue::submit(self.state.borrow(), payload.clone()).await?;
         // The row came back **as queued**, before the attempt -- which is the
         // honest shape for that call and says nothing about the outcome. Read
         // it again for what actually happened.
