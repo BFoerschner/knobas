@@ -3000,7 +3000,7 @@ export interface DocSpace {
   key: string;
   /** `null` where no page of it carries a name knobas can read. */
   name: string | null;
-  /** Every live page of the space, ordered by title. */
+  /** Every live page of the space, in the source's sibling order where it gives one, else by title (#953). */
   pages: DocNode[];
 }
 

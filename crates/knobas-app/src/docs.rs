@@ -61,7 +61,8 @@ pub struct DocSpace {
     /// The space's name, `None` where no page of it carries one knobas can
     /// read.
     pub name: Option<String>,
-    /// Every live page of the space, ordered by title.
+    /// Every live page of the space, in the source's sibling order where it
+    /// gives one, else by title (#953).
     pub pages: Vec<DocNode>,
 }
 
@@ -156,8 +157,12 @@ pub struct DocAncestor {
     pub entity_id: Option<String>,
 }
 
-/// The live pages with their space and their declared direct parent's name.
-/// `$1` is the declarations.
+/// The live pages with their space and their declared direct parent's name,
+/// each space's pages in the source's own sibling order (the declared
+/// `position`, #953) and by title where the source gives none. Ordering the
+/// whole space by it orders every parent's children, because the reader picks
+/// a parent's children out of the list in list order. `$1` is the
+/// declarations.
 const PAGES: &str = concat!(
     "select i.entity_id, i.title, p.source_id, p.key, p.name, \
        (select pn.name from ",
@@ -167,7 +172,9 @@ const PAGES: &str = concat!(
        join sync.item_project p on p.entity_id = i.entity_id \
        join knobas.source_config s on s.id = p.source_id and s.kind = p.adapter_kind \
       where i.kind = 'page' \
-      order by p.source_id, p.key, lower(i.title), i.entity_id"
+      order by p.source_id, p.key, ",
+    knobas_core::declared_integer!("$1", "position"),
+    " nulls last, lower(i.title), i.entity_id"
 );
 
 const LAST_READ: &str = "\

@@ -73,7 +73,7 @@ pub(crate) fn to_sync_item(
         // expand that deeply -- falls back to the page's stamp, which is the
         // miss direction and the behaviour before the expansion was asked for.
         updated_at: newest_change(raw),
-        payload: raw.raw.clone(),
+        payload: with_position(&raw.raw),
         // P5: the page Confluence itself names in `_links.webui`, on the base
         // URL the user typed -- which is the one reachable from the user's
         // machine, unlike `_links.base`, which is whatever the instance
@@ -95,6 +95,26 @@ pub(crate) fn to_sync_item(
         // tombstones what stopped coming back (contract §4.1).
         deleted: false,
     }
+}
+
+/// The key a page's payload keeps its place among its siblings at (#953),
+/// which the descriptor declares as `position`.
+pub(crate) const POSITION: &str = "position";
+
+/// The record, with Confluence's `extensions.position` beside it at
+/// [`POSITION`] where that is a whole number (#953). Confluence answers
+/// `"none"` for a page whose parent's children nobody reordered, which is
+/// title order; the key is then absent and the Docs tree orders that page by
+/// title.
+fn with_position(raw: &serde_json::Value) -> serde_json::Value {
+    let mut payload = raw.clone();
+    let position = raw
+        .pointer("/extensions/position")
+        .and_then(serde_json::Value::as_i64);
+    if let (Some(position), Some(record)) = (position, payload.as_object_mut()) {
+        record.insert(POSITION.to_owned(), position.into());
+    }
+    payload
 }
 
 /// The newest `version.when` on the record: the page's own, or a comment's
@@ -276,6 +296,24 @@ mod tests {
             Some("http://127.0.0.1:8090/display/ENG/SEPA+payout+retry+design")
         );
         assert!(!item.deleted, "a CQL search cannot report deletions");
+    }
+
+    /// #953: Confluence's `extensions.position` is kept at `position` where it
+    /// is a whole number, and nowhere where it is `"none"` or absent.
+    #[test]
+    fn a_page_keeps_its_place_among_its_siblings_where_confluence_gives_one() {
+        let position_of = |extensions: Option<serde_json::Value>| {
+            let mut raw = a_page();
+            if let Some(e) = extensions {
+                raw.raw["extensions"] = e;
+            }
+            to_sync_item("confluence", "http://x", &raw).payload["position"].clone()
+        };
+        assert_eq!(position_of(Some(json!({"position": 3}))), json!(3));
+        assert_eq!(position_of(Some(json!({"position": 0}))), json!(0));
+        assert_eq!(position_of(Some(json!({"position": "none"}))), json!(null));
+        assert_eq!(position_of(Some(json!({"position": 1.5}))), json!(null));
+        assert_eq!(position_of(None), json!(null));
     }
 
     /// The identity criterion, made a test: **the id, not the title**. A page
