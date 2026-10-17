@@ -961,6 +961,54 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 }
             }
         }
+        // The chain of projects (#1019): `at` leads to an array of objects or
+        // to nothing, and each key and name inside an element is a text path,
+        // weighed in slots of their own so a resolving `at` excuses neither.
+        for candidate in &paths.project_path {
+            let seen = evidence
+                .entry((&item.kind, field::PROJECT_PATH))
+                .or_default();
+            let found = at(&item.payload, &candidate.at);
+            if let Some(value) = found {
+                assert!(
+                    value
+                        .as_array()
+                        .is_some_and(|chain| chain.iter().all(serde_json::Value::is_object)),
+                    "descriptor.payload_paths declares project_path of kind {:?} at {:?}, which \
+                     does not lead to an array of objects on this adapter's own item {} -- a chain \
+                     of projects must be one, or nothing at all. Payload: {}",
+                    item.kind,
+                    candidate.at.segments(),
+                    item.entity,
+                    item.payload
+                );
+                seen.resolved = true;
+            }
+            seen.names_a_missing_key |= names_a_missing_key(&item.payload, &candidate.at);
+            let elements = found
+                .and_then(serde_json::Value::as_array)
+                .map_or(&[][..], Vec::as_slice);
+            for (slot, paths_in) in [
+                ("project_path keys", &candidate.key),
+                ("project_path names", &candidate.name),
+            ] {
+                let seen = evidence.entry((&item.kind, slot)).or_default();
+                for element in elements {
+                    for path in paths_in {
+                        weigh(seen, slot, element, path, Wanted::Text, "in a project of");
+                    }
+                }
+            }
+        }
+        if paths.project_path.is_empty() {
+            assert!(
+                knobas_core::payload::resolve_project_path(&item.payload, &paths.project_path)
+                    .is_empty(),
+                "kind {:?} declares no project_path, so every reader must miss on item {}",
+                item.kind,
+                item.entity
+            );
+        }
         // The state declaration (#666): each candidate's `at` leads to a
         // string or a boolean or nothing, and is weighed for clause 3 like
         // any path; and the kind, if it declares a state, must draw a chip on

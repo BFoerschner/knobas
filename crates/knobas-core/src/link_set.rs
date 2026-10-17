@@ -182,7 +182,9 @@ macro_rules! name_glob_matches {
 /// the member's query (`knobas_search::Pattern`: `sources`, `projects`,
 /// `under`, `names`, each lowercased). Each list ORs its values and the lists
 /// AND, over facts the database keeps: the item's source, its declared
-/// project in `sync.item_project` by key or name (ADR-0010), a declared parent
+/// project in `sync.item_project` by key or name (ADR-0010), or any project
+/// of the chain stored beside it (`path`, #1019: a parent project takes in its
+/// subprojects), a declared parent
 /// in `sync.item_parent` (ADR-0018, ADR-0019, `under:`'s read), and
 /// [`name_glob_matches!`]. Both stored tables count a row only while the
 /// item's source is configured with the adapter that wrote it, as `under:`
@@ -209,7 +211,13 @@ macro_rules! link_set_pattern_hits {
                                on sc.id = ip.source_id and sc.kind = ip.adapter_kind
                             where ip.entity_id = i.entity_id
                               and (lower(ip.key) in (select jsonb_array_elements_text(p.pattern->'projects'))
-                                   or lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'projects')))))
+                                   or lower(ip.name) in (select jsonb_array_elements_text(p.pattern->'projects'))
+                                   or ",
+            $crate::project_chain_has!(
+                "ip.path",
+                "array(select jsonb_array_elements_text(p.pattern->'projects'))"
+            ),
+            ")))
            and (jsonb_array_length(coalesce(p.pattern->'under', '[]')) = 0
                 or exists (select 1 from sync.item_parent ip
                              join knobas.source_config sc

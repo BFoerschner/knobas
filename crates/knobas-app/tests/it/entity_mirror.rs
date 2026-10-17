@@ -2227,6 +2227,7 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
             source_id: "teamcity".to_owned(),
             key: "Payouts".to_owned(),
             name: None,
+            path: vec!["Payments".to_owned(), "Payouts".to_owned()],
         }],
         refusal: None,
     })
@@ -2239,7 +2240,7 @@ fn the_link_set_shapes_match_their_typescript_mirror() {
     assert_shape(
         "LinkSetPatternProject",
         &preview["projects"][0],
-        &["key", "name", "source_id"],
+        &["key", "name", "path", "source_id"],
     );
     assert_shape(
         "LinkSetMember",

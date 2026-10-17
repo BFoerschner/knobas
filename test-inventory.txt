@@ -815,6 +815,7 @@ knobas-app	test/it	link_set_patterns_ipc::a_monitor_row_draws_its_type_and_dot_a
 knobas-app	test/it	link_set_patterns_ipc::a_page_pattern_is_a_space_and_a_parent_page
 knobas-app	test/it	link_set_patterns_ipc::a_pattern_brings_what_it_matches_and_a_new_match_without_a_set_edit
 knobas-app	test/it	link_set_patterns_ipc::a_pattern_knobas_cannot_read_is_refused
+knobas-app	test/it	link_set_patterns_ipc::a_pipeline_pattern_naming_a_parent_project_takes_its_subprojects
 knobas-app	test/it	link_set_patterns_ipc::the_editor_the_preview_the_job_and_the_launcher_agree
 knobas-app	test/it	link_set_patterns_ipc::the_jobs_set_group_lists_a_patterns_matches_and_hides_one
 knobas-app	test/it	link_sets_ipc::a_rules_preview_is_exactly_the_tickets_that_show_the_set
@@ -1458,6 +1459,8 @@ knobas-core	test/it	payload_paths::a_parent_resolves_the_same_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_is_each_parents_first_name_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_path_line_misses_in_both_and_reads_nothing_undeclared
 knobas-core	test/it	payload_paths::a_path_that_lands_on_no_usable_value_misses_in_both
+knobas-core	test/it	payload_paths::a_project_chain_misses_in_both
+knobas-core	test/it	payload_paths::a_project_chain_resolves_the_same_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust
 knobas-core	test/it	payload_paths::a_state_chip_misses_in_both_and_never_guesses
 knobas-core	test/it	payload_paths::an_undeclared_source_kind_or_field_misses_in_both

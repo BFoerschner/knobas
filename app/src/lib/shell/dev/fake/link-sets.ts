@@ -176,10 +176,11 @@ function memberRow(kind: LinkSetMemberKind, id: string): LinkSetMemberRow {
 /** The live items of a member kind a pattern can match, with what it reads: project, parents, name. */
 function candidates(kind: LinkSetMemberKind): { id: string; source: string; projects: string[]; under: string[]; names: string[] }[] {
   if (kind === "pipeline") {
+    // A pipeline answers to every project of its chain (#1019).
     return fakePipelines().map((row) => ({
       id: row.entity_id,
       source: row.source_id,
-      projects: [row.group ?? ""],
+      projects: row.path.length ? row.path : [row.group ?? ""],
       under: [],
       names: [row.name, row.entity_id.slice(row.entity_id.indexOf(":") + 1)],
     }));
@@ -240,12 +241,16 @@ function patternRow(pattern: LinkSetPattern): LinkSetPatternRow {
 }
 
 function preview(pattern: LinkSetPattern): LinkSetPatternPreview {
-  const projects = [...new Set(candidates(pattern.kind).flatMap((c) => c.projects.map((key) => `${c.source}|${key}`)))]
-    .map((pair) => {
-      const [source_id = "", key = ""] = pair.split("|");
-      return { source_id, key, name: key };
+  // Each project of a pipeline's chain, with the names down to it (#1019); a page's space has none.
+  const nested = pattern.kind === "pipeline";
+  const projects = [...new Set(candidates(pattern.kind).flatMap((c) => c.projects.map((_, at) => `${c.source}|${c.projects.slice(0, at + 1).join("|")}`)))]
+    .map((joined) => {
+      const [source_id = "", ...path] = joined.split("|");
+      const key = path.at(-1) ?? "";
+      return { source_id, key, name: key, path: nested ? path : [] };
     })
-    .sort((a, b) => a.key.localeCompare(b.key));
+    .filter((p, at, all) => all.findIndex((o) => o.source_id === p.source_id && o.key === p.key) === at)
+    .sort((a, b) => (a.path.join(" › ") || a.key).localeCompare(b.path.join(" › ") || b.key));
   const hits = patternHits(pattern);
   if (typeof hits === "string") return { count: 0, matches: [], projects, refusal: hits };
   return { count: hits.length, matches: hits.slice(0, 200).map((id) => memberRow(pattern.kind, id)), projects, refusal: null };

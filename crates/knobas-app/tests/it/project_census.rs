@@ -323,6 +323,7 @@ async fn the_stored_resolver_is_the_macros_expansion() {
     for expansion in [
         knobas_core::project_key_read!("dd.decl"),
         knobas_core::declared_string!("dd.decl", "project_name"),
+        knobas_core::declared_project_path!("dd.decl"),
     ] {
         assert!(
             source.contains(expansion),

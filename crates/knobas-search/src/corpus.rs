@@ -312,6 +312,10 @@ pub(crate) use list_of;
 /// `status:Done` and kept by `-status:Done`: absence, never a wrong value.
 /// Pinned by `knobas-search`'s `tests/it/ticket_keys.rs`.
 ///
+/// `project:` also matches any project of the chain stored beside the item
+/// (`sync.item_project.path`, #1019), with `under:`'s adapter check: a parent
+/// project takes in its subprojects, as a link-set pattern's does.
+///
 /// Every comparison is on `lower(...)` against values the grammar
 /// lowercased: Jira's status, type, priority and project names are
 /// case-insensitive in JQL, and so are its usernames.
@@ -325,7 +329,11 @@ pub(crate) const LIVE_ITEM_FIELDS: &[(crate::query::FieldKey, &str)] = {
                 field_of!("project_key"),
                 ") = any(fd.v) or lower(",
                 field_of!("project_name"),
-                ") = any(fd.v))"
+                ") = any(fd.v) or exists (select 1 from sync.item_project ip \
+                   join knobas.source_config s on s.id = ip.source_id and s.kind = ip.adapter_kind \
+                   where ip.entity_id = i.entity_id and ",
+                knobas_core::project_chain_has!("ip.path", "fd.v"),
+                "))"
             ),
         ),
         (

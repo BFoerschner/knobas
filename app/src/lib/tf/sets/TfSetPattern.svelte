@@ -38,7 +38,10 @@
 
   const pipelines = $derived(kind === "pipeline");
   const query = $derived(patternQuery(kind, project, typed));
-  const projects = $derived(answer?.projects ?? []);
+  /** A nested project by its path, so a parent sorts before its subprojects (#1019). */
+  const projects = $derived(
+    [...(answer?.projects ?? [])].sort((a, b) => (pipelines ? projectLabel(a).localeCompare(projectLabel(b)) : 0)),
+  );
   const addable = $derived(answer !== null && answer.refusal === null && failed === null);
   /** What the query matches now; a refused query matches nothing. */
   const matched = $derived(answer && answer.refusal === null ? answer : { count: 0, matches: [] });
@@ -60,8 +63,11 @@
     );
   });
 
-  const projectLabel = (row: { key: string; name: string | null }) =>
-    row.name && row.name !== row.key ? `${row.key} ${row.name}` : row.key;
+  /** prototype-6's `Payments › Payouts` for a project in a chain; else the key and its name. */
+  function projectLabel(row: { key: string; name: string | null; path: string[] }): string {
+    if (row.path.length) return row.path.join(" › ");
+    return row.name && row.name !== row.key ? `${row.key} ${row.name}` : row.key;
+  }
 </script>
 
 <TfDialog title="Add a pattern to {setName}" {onclose}>

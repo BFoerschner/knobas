@@ -112,7 +112,10 @@ function ports(): SetPorts {
     },
     previewLinkSetPattern: async (pattern) => {
       patternPreviews.push(pattern.query);
-      const projects = [{ source_id: "tc", key: "Payouts", name: "Payouts" }];
+      const projects = [
+        { source_id: "tc", key: "Payouts", name: "Payouts", path: ["Payments", "Payouts"] },
+        { source_id: "tc", key: "Payments", name: "Payments", path: ["Payments"] },
+      ];
       if (pattern.query.includes("bogus")) return { count: 0, matches: [], projects, refusal: "a pattern reads source:, project:, under: and name: and nothing else" };
       const matches = STACK.patterns[0]!.matches.filter((row) => !pattern.query.includes("Lint") || row.title === "Payout_Lint");
       return { count: matches.length, matches, projects, refusal: null };
@@ -326,7 +329,8 @@ test("Add a pattern… writes the fields as a query, shows what it matches now, 
   expect(dialog.querySelector("h2")?.textContent).toBe("Add a pattern to Payout stack");
   expect(patternPreviews.at(-1)).toBe("name:*");
   const project = dialog.querySelector<HTMLSelectElement>("select[aria-label='Project']")!;
-  expect([...project.options].map((option) => option.textContent)).toEqual(["Any", "Payouts"]);
+  // Each project by its path, a parent before its subprojects (#1019).
+  expect([...project.options].map((option) => option.textContent)).toEqual(["Any", "Payments", "Payments › Payouts"]);
   project.value = "Payouts";
   project.dispatchEvent(new Event("change", { bubbles: true }));
   const name = dialog.querySelector<HTMLInputElement>("input[aria-label='Name matches']")!;
