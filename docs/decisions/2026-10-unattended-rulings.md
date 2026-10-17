@@ -4055,3 +4055,28 @@ Implementer rulings, one PR for both issues.
   **Reversing:** low.
 - **`?fake-ipc`:** the fixture's `main` is protected, as prototype-6 has it, so its files' commits
   open on a new branch. **Reversing:** low.
+
+## #941 — Move to Confluence…: each note becomes a page (2026-10-17)
+
+- **One backend command, not one `docs_create_page` call per note from the webview.** The webview
+  holds no note bodies (notes are hidden, D10), and a command that builds every payload before it
+  queues the first one refuses a bad parent without leaving half the notes moved.
+  `move_notes_to_confluence(parent)` reuses #862's `docs::create_page` for each. **Reversing:** low
+  (one command).
+- **The body is the note's Markdown through the adapter's `body_from_text`, not a Markdown
+  importer.** The issue offers "the other direction, or Confluence's Markdown import". #862's
+  plain-text rule already reads Markdown's block shapes (`#` headings, `-`/`*` lists, paragraphs);
+  inline markup (`**bold**`, links, `[[refs]]`) arrives as the text the reader typed, which is how
+  the export keeps a `[[ref]]` too. A numbered list is paragraphs. **Reversing:** medium (a Markdown
+  reader in the Confluence adapter's `storage.rs`).
+- **The page picker is the standup's `PublishTargetPicker`**, the one picker that picks a page under
+  a source that declares `create_page` (prototype-6: "Opens a page picker"). The dialog opens once
+  the sources are read, so the picker's one-Confluence presumption sees them. **Reversing:** low.
+- **A title an earlier note took gets ` (2)`, ` (3)`**, compared without case, because a
+  Confluence space holds one page per title and two notes are often both *Untitled note*. A title a
+  page in the space already has is not checked: that write is refused by Confluence and shows in
+  the write queue. **Reversing:** low (`note_pages`).
+- **No link from the page to its note.** The ticket asks for pages and that notes stay; #862's
+  link-after-create pattern is not used. **Reversing:** low.
+- **The button is disabled with no notes**, and the command refuses an empty move with `invalid`.
+  **Reversing:** low.
