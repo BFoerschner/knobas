@@ -4168,3 +4168,15 @@ Ruled by the implementer (PR for #874).
 - **The fake Dependencies fixture takes its pipelines from the Builds fixture
   (`teamcity:buildType:<name>`), as the real read takes them from `pipelines`**, so a job's
   pipelines from `job_pipelines` match tiles. **Reversing:** low.
+
+Ruled by the merge-manager (PR #1063).
+
+- **The switch copy does not contradict R-11.10.** `requirements.md` itself says copy follows
+  prototype-6 word for word, and prototype-6's `dpDraw` is how it draws R-11.10: *Everything*
+  goes to the top-bar opening (R-11.10's *Show everything*), *This job <key>* comes back while a
+  job is open (*Only PAY-231*). The behaviour R-11.10 asks for is built; only its italic labels
+  differ, and the spec's own copy rule picks the prototype's. No follow-up. **Reversing:** two
+  labels in `TfDeps.svelte`.
+- **The fake fixture's pipeline ids match the real read.** `assets::dependencies::read` takes
+  its pipelines from `commands::entity::pipelines_inner`, the read behind Builds and
+  `job_pipelines`, so the fixture taking them from `fakePipelines` mirrors it. **Reversing:** low.
