@@ -168,6 +168,9 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
     sprint: null,
     last_read: "",
     web_url: null,
+    hidden: false,
+    new: false,
+    unsynced: [],
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
   const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, jira_ref: "mock:board-40", columns, lanes: "priority" });
