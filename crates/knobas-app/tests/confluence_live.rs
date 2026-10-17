@@ -1274,13 +1274,19 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
     litter.created.push(id.clone());
 
     let state = app("confluence_live_panel_section", &env).await;
-    sync_until(&state, &id, "the new page", |p| p["version"]["number"].as_i64() == Some(1)).await;
+    sync_until(&state, &id, "the new page", |p| {
+        p["version"]["number"].as_i64() == Some(1)
+    })
+    .await;
     let entity = format!("{CONFLUENCE}:{id}");
     let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
         .await
         .expect("the page reads");
     assert_eq!(page.sections.len(), 1, "{:?}", page.sections);
-    assert_eq!(page.sections[0].refusal, None, "a panel section is editable");
+    assert_eq!(
+        page.sections[0].refusal, None,
+        "a panel section is editable"
+    );
     assert_eq!(
         page.sections[0].text.as_deref(),
         Some("Lead.\n\n> **Info** Before you deploy\n>\n> Drain the queue.")
@@ -1309,7 +1315,10 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
     // What Confluence stored: an info macro, its title, the new text inside.
     let (after, version) = env.body_and_version(&id).await;
     assert_eq!(version, 2, "{after}");
-    assert!(after.contains(r#"ac:name="info""#), "no info macro: {after}");
+    assert!(
+        after.contains(r#"ac:name="info""#),
+        "no info macro: {after}"
+    );
     assert!(
         after.contains(r#"<ac:parameter ac:name="title">Before you deploy</ac:parameter>"#),
         "the title was lost: {after}"
@@ -1320,13 +1329,17 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
         .map(|(inside, _)| inside)
         .unwrap_or_else(|| panic!("the panel has no body: {after}"));
     assert!(
-        inside.contains(&format!("Drain the {word} queue.")) && inside.contains("<li>then deploy</li>"),
+        inside.contains(&format!("Drain the {word} queue."))
+            && inside.contains("<li>then deploy</li>"),
         "the new text is not inside the panel: {after}"
     );
 
     // And through knobas: the reader draws an info panel, and the section
     // opens with the text that was saved.
-    sync_until(&state, &id, "the edited body", |p| p["version"]["number"].as_i64() == Some(2)).await;
+    sync_until(&state, &id, "the edited body", |p| {
+        p["version"]["number"].as_i64() == Some(2)
+    })
+    .await;
     let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
         .await
         .expect("the page reads");

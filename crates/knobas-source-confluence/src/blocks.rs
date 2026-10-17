@@ -402,14 +402,13 @@ fn panel_text(node: &Node, word: &str) -> String {
 }
 
 /// The opening line of a panel in the editor's text: `> **Info**`, the kind
-/// in any case, then the title if any. The macro name and the title.
+/// in any case, then the title if any. Answers the panel's macro name and its
+/// title (empty when it has none).
 fn panel_opening(line: &str) -> Option<(&'static str, &str)> {
     let rest = line.trim().strip_prefix('>')?.trim_start();
     let rest = rest.strip_prefix("**")?;
     let (word, after) = rest.split_once("**")?;
-    let (name, _) = PANELS
-        .iter()
-        .find(|(_, w)| w.eq_ignore_ascii_case(word))?;
+    let (name, _) = PANELS.iter().find(|(_, w)| w.eq_ignore_ascii_case(word))?;
     if !(after.is_empty() || after.starts_with(char::is_whitespace)) {
         return None;
     }
@@ -438,18 +437,11 @@ fn from_section_text(text: &str) -> String {
             let inner = next.trim_start().strip_prefix('>').unwrap_or_default();
             body.push(inner.strip_prefix(' ').unwrap_or(inner));
         }
-        out.push_str(&format!(
-            "<ac:structured-macro ac:name=\"{name}\" ac:schema-version=\"1\">"
+        out.push_str(&crate::storage::panel(
+            name,
+            title,
+            &crate::storage::from_plain(&body.join("\n")),
         ));
-        if !title.is_empty() {
-            out.push_str(&format!(
-                "<ac:parameter ac:name=\"title\">{}</ac:parameter>",
-                crate::storage::escape(title)
-            ));
-        }
-        out.push_str("<ac:rich-text-body>");
-        out.push_str(&crate::storage::from_plain(&body.join("\n")));
-        out.push_str("</ac:rich-text-body></ac:structured-macro>");
     }
     out.push_str(&crate::storage::from_plain(&plain.join("\n")));
     out
@@ -1694,7 +1686,10 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 "<h2>Mixed</h2><p>Lead.</p>{}<p>After.</p>",
                 panel(
                     "warning",
-                    &format!("{title}{}", body("<p>Drain.</p><ul><li>a</li><li>b</li></ul>"))
+                    &format!(
+                        "{title}{}",
+                        body("<p>Drain.</p><ul><li>a</li><li>b</li></ul>")
+                    )
                 )
             ),
             format!("<h2>Bare</h2>{}", panel("tip", "")),
@@ -1703,7 +1698,10 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 "<h2>Icon</h2>{}",
                 panel(
                     "info",
-                    &format!("<ac:parameter ac:name=\"icon\">false</ac:parameter>{}", body("<p>i</p>"))
+                    &format!(
+                        "<ac:parameter ac:name=\"icon\">false</ac:parameter>{}",
+                        body("<p>i</p>")
+                    )
                 )
             ),
             format!("<h2>Generic</h2>{}", panel("panel", &body("<p>p</p>"))),
@@ -1711,8 +1709,14 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
                 "<h2>Nested</h2>{}",
                 panel("info", &body(&panel("note", &body("<p>x</p>"))))
             ),
-            format!("<h2>Bold inside</h2>{}", panel("info", &body("<p><strong>b</strong></p>"))),
-            format!("<h2>In a list</h2><ul><li>{}</li></ul>", panel("info", &body("<p>i</p>"))),
+            format!(
+                "<h2>Bold inside</h2>{}",
+                panel("info", &body("<p><strong>b</strong></p>"))
+            ),
+            format!(
+                "<h2>In a list</h2><ul><li>{}</li></ul>",
+                panel("info", &body("<p>i</p>"))
+            ),
         ]
         .concat();
         let got: Vec<(Option<String>, Option<SectionRefusal>)> = sections(&storage)
@@ -1768,7 +1772,11 @@ where amount < 0;]]></ac:plain-text-body></ac:structured-macro>"#;
         let saved = edit_section("page", &page(storage), 1, &text).unwrap().body;
         let again = sections(&saved);
         assert_eq!(again[0].text.as_deref(), Some(text.as_str()));
-        assert_eq!(blocks(&saved), blocks(storage), "the reader draws the same page");
+        assert_eq!(
+            blocks(&saved),
+            blocks(storage),
+            "the reader draws the same page"
+        );
     }
 
     #[test]
