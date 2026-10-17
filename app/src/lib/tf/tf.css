@@ -1095,7 +1095,7 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-sbseg.tf-run { fill: var(--info); }
 .tf-sbseg.tf-wait { fill: var(--rule); }
 .tf-stepsbar text { fill: var(--sheet); font-size: var(--t-2xs); pointer-events: none; }
-.tf-stepsbar .tf-sbwait text { fill: var(--ink-2); }
+.tf-sbseg.tf-wait ~ text { fill: var(--ink-2); }
 .tf-stepsbar a { cursor: pointer; }
 .tf-stepsbar a:hover .tf-sbseg, .tf-stepsbar a:focus-visible .tf-sbseg { opacity: .85; }
 .tf-stepsbar a:focus-visible { outline: none; }

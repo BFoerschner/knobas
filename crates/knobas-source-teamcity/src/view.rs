@@ -1585,7 +1585,11 @@ mod tests {
         ])));
         assert!(one_unnamed.steps.is_empty(), "{:?}", one_unnamed.steps);
 
-        assert!(pipeline_settings(&record(serde_json::json!([]))).steps.is_empty());
+        assert!(
+            pipeline_settings(&record(serde_json::json!([])))
+                .steps
+                .is_empty()
+        );
     }
 
     #[test]

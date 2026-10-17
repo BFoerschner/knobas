@@ -354,7 +354,7 @@
             onclick={() => (openStep = segment.state === "wait" ? null : { step: segment.index, seq: ++openSeq })}
           >
             <title>{segment.tip}</title>
-            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true" class:tf-sbwait={segment.state === "wait"}>
+            <svg x={`${segment.x}%`} width={`${segment.width}%`} height="100%" aria-hidden="true">
               <rect class={`tf-sbseg tf-${segment.state}`} width="100%" height="100%" />
               {#if segment.index > 0}<rect class="tf-sbgap" width="2" height="100%" />{/if}
               <text x="10" y="19">{segment.name}</text>
