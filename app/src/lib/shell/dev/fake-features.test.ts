@@ -2,7 +2,7 @@
  * The fixture's feature modules (#908): each one under `fake/` exports its
  * `handlers`, and no two of them answer the same command.
  */
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { demoHandlers } from "./fake-tauri";
 
@@ -108,6 +108,24 @@ test("with fake-timer, PAY-231's draft counts the running stretch up to now, and
   const stopped = ask();
   expect(stopped.running_since).toBeNull();
   expect(stopped.block_ids.length).toBe(open.block_ids.length + 1);
+});
+
+test("at ten past midnight the timer started yesterday, and its draft still counts the running stretch (#1031)", () => {
+  vi.useFakeTimers();
+  try {
+    vi.setSystemTime(new Date(2026, 9, 17, 0, 10, 0));
+    const h = demoHandlers(new URLSearchParams("fake-timer")) as Calls;
+    const timer = h["current_timer"]!({}) as { started_at: string };
+    expect(timer.started_at < new Date(2026, 9, 17).toISOString()).toBe(true);
+    const draft = h["worklog_draft"]!({ entityId: "mock:PAY-231", day: "2026-10-16", offsetMinutes: 0 }) as {
+      running_since: string | null;
+      seconds: number;
+    };
+    expect(draft.running_since).toBe(timer.started_at);
+    expect(draft.seconds).toBeGreaterThanOrEqual(34 * 60);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("the write queue holds the Week tab's refused worklog on PAY-228 (#828)", () => {
