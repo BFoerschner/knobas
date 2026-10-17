@@ -4,7 +4,8 @@
 //! {"v":3,
 //!  "modified_to":"2026-08-22T10:40:00Z",  // the newest lastmodified delivered
 //!  "tz_offset_secs":7200,                 // the zone that watermark was queried in
-//!  "seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}]}
+//!  "seen":[{"i":"98307","n":3,"u":"2026-08-22T10:40:00Z"}],
+//!  "positions":{"98307":0,"98311":1}}      // each placed page's place (#1138)
 //! ```
 //!
 //! `seen` is the price of correctness. **CQL resolves to the minute**, so the
@@ -60,7 +61,21 @@ pub(crate) struct ConfluenceCursor {
     pub tz_offset_secs: i32,
     /// What was delivered inside the overlap window, newest first.
     pub seen: Vec<Seen>,
+    /// Where each page with a place among its siblings sat when the mirror
+    /// last received it: content id to `extensions.position` (#1138). Pages
+    /// in title order (`"none"`) are left out, so a space nobody reordered
+    /// costs nothing here.
+    ///
+    /// `None` is a cursor written before #1138, which cannot tell a reorder
+    /// from none: its next run re-reads every placed page once. That, rather
+    /// than a version bump, is how the upgrade avoids a full sync. A map, so
+    /// the same places always encode to the same bytes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub positions: Option<Positions>,
 }
+
+/// Content id to its place among its siblings (#1138).
+pub(crate) type Positions = std::collections::BTreeMap<String, i64>;
 
 /// One version of one page, as the window last saw it.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -81,7 +96,14 @@ impl ConfluenceCursor {
             modified_to: None,
             tz_offset_secs,
             seen: Vec::new(),
+            positions: Some(Positions::new()),
         }
+    }
+
+    /// This cursor, recording `positions` as the places the mirror now holds.
+    pub(crate) fn with_positions(mut self, positions: Positions) -> Self {
+        self.positions = Some(positions);
+        self
     }
 
     /// `None` for anything this version does not recognise -- which the caller
@@ -92,8 +114,8 @@ impl ConfluenceCursor {
     }
 
     pub(crate) fn encode(&self) -> String {
-        // The one sanctioned `expect` in this crate: a cursor is four plain
-        // fields with no map keys and no non-finite numbers, so the only way
+        // The one sanctioned `expect` in this crate: a cursor is plain fields
+        // whose one map is keyed by strings, with no non-finite numbers, so the only way
         // `to_string` fails is a `Serialize` impl that cannot exist here.
         serde_json::to_string(self).expect("a cursor is plain data and always serializes")
     }
@@ -199,6 +221,7 @@ impl ConfluenceCursor {
             modified_to: Some(watermark),
             tz_offset_secs,
             seen,
+            positions: None,
         }
     }
 }

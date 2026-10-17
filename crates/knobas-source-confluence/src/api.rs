@@ -40,6 +40,11 @@ use crate::model::{ContentPage, CurrentUser, RawContent};
 /// from two shapes that have to agree.
 pub(crate) const MENTION_EXPAND: &str = "version,container";
 
+/// What the **positions sweep** asks a record to carry (#1138): its place
+/// among its siblings, and nothing else -- no body, so Data Center answers up
+/// to 200 rows a request rather than 50.
+pub(crate) const POSITIONS_EXPAND: &str = "extensions.position";
+
 /// What a page's record is asked to carry.
 ///
 /// * `body.storage` -- the storage format **verbatim**, which is what the

@@ -1528,7 +1528,9 @@ async fn move_before(env: &Env, id: &str, before: &str) {
 /// made, edited nor commented on it, so only the sync's user lookup can name
 /// them; its two children are made in title order and then the later title is
 /// moved before the earlier one, so only `extensions.position` can put them
-/// in the order Confluence shows.
+/// in the order Confluence shows. Then the earlier title is moved back, and
+/// the next **incremental** sync has to bring that too (#1138): a move makes
+/// no new version, so only the positions sweep reaches it.
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
 async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
@@ -1629,6 +1631,56 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
             format!("{CONFLUENCE}:{alpha}")
         ],
         "Zeta was moved before Alpha, and the tree says so"
+    );
+
+    // #1138: a reorder alone reaches an **incremental** run. The source has a
+    // cursor now, so the next sync is bounded by `lastmodified` -- and a move
+    // makes no new version, so only the positions sweep can see it.
+    let cursor: Option<String> =
+        sqlx::query_scalar("select cursor from knobas.source_config where id = $1")
+            .bind(CONFLUENCE)
+            .fetch_one(&state.pool)
+            .await
+            .expect("the source row is readable");
+    let cursor = cursor.expect("the first sync left a cursor, so the next one is incremental");
+    assert!(
+        cursor.contains("\"positions\""),
+        "the cursor records the places: {cursor}"
+    );
+    let before = env.content(&alpha, "version").await["version"]["number"].clone();
+    move_before(&env, &alpha, &zeta).await;
+    let after = env.content(&alpha, "version").await;
+    assert_eq!(
+        after["version"]["number"], before,
+        "a move makes no new version, which is the whole of #1138: {after}"
+    );
+    let alpha_at = sync_until(&state, &alpha, "Alpha's new place", |p| {
+        p["position"] == json!(0)
+    })
+    .await;
+    let zeta_at = mirrored(&state.pool, &zeta).await.expect("Zeta is mirrored");
+    assert_eq!(
+        (alpha_at["position"].clone(), zeta_at["position"].clone()),
+        (json!(0), json!(1)),
+        "both siblings took their new places from one incremental run"
+    );
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+        .await
+        .expect("the tree reads");
+    let children: Vec<String> = tree
+        .spaces
+        .iter()
+        .flat_map(|s| &s.pages)
+        .filter(|p| p.parent.as_deref() == Some(parent_id.as_str()))
+        .map(|p| p.entity_id.clone())
+        .collect();
+    assert_eq!(
+        children,
+        vec![
+            format!("{CONFLUENCE}:{alpha}"),
+            format!("{CONFLUENCE}:{zeta}")
+        ],
+        "Alpha was moved back before Zeta in Confluence alone, and the tree says so"
     );
 
     drop(state);
