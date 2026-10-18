@@ -1,15 +1,21 @@
 #!/usr/bin/env bash
 # The second desktop-witness driver (issue #501, ported to the ticket-first
 # shell by #1084): an application the reader added in Settings, picked from
-# the job's *Open in…* menu, runs with the checkout path.
+# repository's *Open in…* menu, runs with the checkout path.
+#
+# The repository's page and not the job's Code section, measured on
+# 2026-10-18: the demo profile's PAY-231 reaches its branch only through a
+# *proposed* link, so the job's Code section reads *Nothing connected* until a
+# reader accepts it, and accepting it would be this driver arranging another
+# feature's fixture. Both places draw the one `TfOpenIn` (`openin/TfOpenIn.svelte`).
 #
 # Why this feature is witnessed here and not in a suite. Spawning a process is
 # the one thing in knobas that leaves the application: `checkout_ipc.rs` proves
 # that `open_checkout` hands a stub the right argument, against a database and
 # a `Command`, with no window, no settings pane and no menu anywhere in it.
 # What is left over is the whole path a person takes -- set a clones root and
-# add an application in Settings › Checkouts and Open in…, open a job, pick the
-# application from the Code section's *Open in…* -- and the only witness for
+# add an application in Settings › Checkouts and Open in…, open the
+# repository, pick the application from its *Open in…* -- and the only witness for
 # that is the signed bundle on a real Mac (ADR-0016: "the spawned editor or
 # terminal observed as a process with the expected path"; ADR-0023's clones
 # root and the reader's own applications).
@@ -19,9 +25,9 @@
 #   1. a clones root and an application whose command is a stub, typed into
 #      the real Settings and stored by the real backend -- the root and the
 #      command read back off the section once its dialogs have closed;
-#   2. the job PAY-231, whose branch lives in the demo repository, with its
-#      Code section's local checkout line **on screen after the launcher's
-#      Return and not before it** (#547);
+#   2. the repository payout-service, opened from ⌘K, with its *Cloned at*
+#      line naming the clone **on screen after the launcher's Return and not
+#      before it** (#547);
 #   3. that picking the application from *Open in…* starts the stub with the
 #      checkout path as its **only** argument.
 #
@@ -63,10 +69,8 @@ readonly ADD_BUTTON='Add application'
 readonly OPEN_IN='Open in…'                            # openin/TfOpenIn.svelte
 readonly QUERY_BOX='Search or act'                     # launcher/QueryBox.svelte
 
-# The job the demo profile is asked for. Its branch `feature/PAY-231-sepa-retry`
-# lives in `payout-service`, so the job's Code section reads that repository's
-# checkout (`TfJob.svelte` asks the job's branches first, then its repos).
-readonly JOB_QUERY='PAY-231'
+# The repository the demo profile is asked for; ⌘K groups a repository above
+# its branches (`knobas_search`'s `GROUP_ORDER`).
 readonly REPO_NAME='payout-service'
 # `https://tidewater.example` is `knobas_source_mock`'s `MOCK_BASE`.
 readonly REPO_REMOTE='https://tidewater.example/tidewater/payout-service'
@@ -201,47 +205,48 @@ app_stored() { absent "$DONE" && absent "$COMMAND_FIELD" && reads "$APP_NAME" &&
 wait_until "the application was not stored: the table has no '$APP_NAME' running the stub" app_stored
 say "'$APP_NAME' is stored, and runs the stub"
 
-# --- 2. the job --------------------------------------------------------------
+# --- 2. the repository -------------------------------------------------------
 
-say "opening the launcher and asking for '$JOB_QUERY'"
+say "opening the launcher and asking for '$REPO_NAME'"
 "$ax" key "$KEY_K" command
 wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present "$QUERY_BOX"
-"$ax" type "$JOB_QUERY"
-wait_until "the launcher never answered '$JOB_QUERY' within ${SETTLE_SECONDS} s" launcher_answered
+"$ax" type "$REPO_NAME"
+wait_until "the launcher never answered '$REPO_NAME' within ${SETTLE_SECONDS} s" launcher_answered
 
-# The Code section's checkout line carries the clone's path as a value of its
-# own. Read before Return and after (#547): Settings, which is behind the
-# launcher, reads the *root* and not the clone, so the before-read is `no` on
-# a correct app, and a reading already there would witness nothing.
+# The page's *Cloned at* line carries the clone's path as a value of its own.
+# Read before Return and after (#547): Settings, behind the launcher, reads the
+# *root* and not the clone, so the before-read is `no` on a correct app, and
+# one already there witnesses nothing.
 before=$(reading_verdict "$(screen)" "$checkout")
 say "the launcher has answered; '$checkout' on screen: $before"
 "$ax" key "$KEY_RETURN"
+go=Return
 after=$(reading_verdict "$(screen)" "$checkout")
 deadline=$((SECONDS + SETTLE_SECONDS))
 while [ "$after" != yes ] && [ "$SECONDS" -lt "$deadline" ]; do
     sleep 0.2
     after=$(reading_verdict "$(screen)" "$checkout")
 done
-say "after Return; '$checkout' on screen: $after"
+say "after '$go'; '$checkout' on screen: $after"
 
 case $(waypoint_verdict "$before" "$after") in
 witnessed) ;;
 too-early)
-    die "'$checkout' was on screen before Return, so waiting for it witnesses" \
-        "nothing about the job. Whatever drew it over the launcher is where to look."
+    die "'$checkout' was on screen before '$go', so waiting for it witnesses" \
+        "nothing about the page. Whatever drew it over the launcher is where to look."
     ;;
 never-appeared)
-    die "no checkout line for $REPO_NAME on the job '$JOB_QUERY'." \
+    die "no *Cloned at* line naming the clone on the page for '$REPO_NAME'." \
         "demo.rs's the_demo_corpus_answers_the_checkout_the_desktop_driver_opens" \
         "covers the read under the window, so check that ⌘K's first hit is the" \
-        "ticket and that its Code section found the clone."
+        "repository and that its page found the clone."
     ;;
 *)
-    die "the screen could not be read either side of Return" \
+    die "the screen could not be read either side of '$go'" \
         "(before: $before, after: $after): no window, or a locked screen."
     ;;
 esac
-say "the job is open, and its Code section has the clone"
+say "the repository is open, and it is cloned at the clone"
 
 # --- 3. the spawn ------------------------------------------------------------
 

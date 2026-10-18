@@ -65,7 +65,11 @@ readonly REGISTERED_LINE='Opens a small window over whatever you are doing.'
 readonly NOT_SET='Not set'
 readonly YOUR_NOTES='Your notes'
 readonly OPEN_CODE_VIEW='Open Code view'                  # job/TfCodeSection.svelte
-readonly QUERY_BOX='Search or act'                        # launcher/QueryBox.svelte
+readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
+readonly TICKETS_FILTER='Filter by key, summary, epic or person'  # tickets/TicketsPage.svelte
+# The preview's button, worded by the ticket's state (`tickets.ts`'
+# `previewAction`); each is a link to the job.
+readonly JOB_LINKS=('Start work' 'Resume work' 'Open job')
 readonly CAPTURE_BOX='Capture'                            # capture/CaptureWindow.svelte
 # The **window**'s title (`capture.rs`'s `.title("Capture")`), a different fact
 # from the box's `aria-label` above though the same word (#548).
@@ -76,9 +80,9 @@ readonly OPEN_IN_MAIN='Open in knobas'
 readonly ACCELERATOR='CmdOrCtrl+Alt+Shift+K'
 readonly KEY_K=40
 readonly KEY_A=0
-readonly KEY_RETURN=36
 
 readonly JOB_QUERY='PAY-231'
+readonly JOB_SUMMARY='Retry failed SEPA payouts'          # fixtures/tidewater/work.json
 readonly OTHER_APP=Finder
 readonly OTHER_BUNDLE=com.apple.finder
 readonly SETTLE_SECONDS=8
@@ -147,7 +151,17 @@ is_frontmost() { [ "$(frontmost_bundle "$("$ax" frontmost 2>/dev/null || true)")
 screen() { "$ax" values "$pid" 2>/dev/null || true; }
 reads() { has_reading "$(screen)" "$1"; }
 unread() { ! reads "$1"; }
-launcher_answered() { screen | grep -q " match"; }
+
+# Tickets previews the filtered card: its summary on screen, and exactly one of
+# the preview's job links.
+job_link() {
+    local name
+    for name in "${JOB_LINKS[@]}"; do
+        if exactly_one "$name"; then printf '%s\n' "$name"; return 0; fi
+    done
+    return 1
+}
+previews_the_job() { reads "$JOB_SUMMARY" && job_link >/dev/null; }
 
 caret_in_the_box() {
     local focused
@@ -178,17 +192,35 @@ fi
 # A shortcut a previous run stored is cleared first: *Save* is disabled on a
 # field that would not change, and the row reading *Not set* before Save is
 # what makes its keys after Save mean this run's write.
-press_when "$CHANGE_SHORTCUT"
-wait_until "the shortcut dialog never opened" exactly_one "$SHORTCUT_FIELD"
-if exactly_one "$CLEAR"; then
+#
+# The field is found by the focus and not by `ax find`: measured on 2026-10-18,
+# three elements answer to '$SHORTCUT_FIELD' while the dialog is up -- the
+# dialog (`aria-labelledby` its heading), the heading, and the field -- each
+# correctly. `TfDialog` puts the caret in its first field, so the field is the
+# focused AXTextField of that name, role *and* name, like the capture box.
+caret_in_the_field() {
+    local focused
+    focused=$("$ax" focused "$pid" 2>/dev/null || true)
+    [ "$(tsv_field "$focused" role)" = AXTextField ] || return 1
+    [ "$(tsv_field "$focused" description)" = "$SHORTCUT_FIELD" ] ||
+        [ "$(tsv_field "$focused" title)" = "$SHORTCUT_FIELD" ]
+}
+#
+# And the row is read with the dialog **closed**: the dialog is `aria-modal`,
+# and while it is up the accessibility tree is the dialog and nothing behind it
+# (measured the same day: no *Not set* in `ax values` with the row on screen).
+if ! reads "$NOT_SET"; then
     say "a shortcut is already stored; clearing it"
-    "$ax" press "$pid" "$CLEAR" || die "could not press '$CLEAR'"
-    wait_until "the shortcut was not cleared: the row never read '$NOT_SET'" reads "$NOT_SET"
     press_when "$CHANGE_SHORTCUT"
+    wait_until "the shortcut dialog never opened with the caret in its field" caret_in_the_field
+    press_when "$CLEAR"
+    wait_until "the shortcut was not cleared: the row never read '$NOT_SET'" reads "$NOT_SET"
 fi
-reads "$NOT_SET" || die "the row does not read '$NOT_SET' before this run's Save"
-
-fill "$SHORTCUT_FIELD" "$ACCELERATOR"
+say "the row reads '$NOT_SET'; setting $ACCELERATOR"
+press_when "$CHANGE_SHORTCUT"
+wait_until "the shortcut dialog never opened with the caret in its field" caret_in_the_field
+"$ax" key "$KEY_A" command
+"$ax" type "$ACCELERATOR"
 press_when "$SAVE"
 registered() { absent "$SHORTCUT_FIELD" && unread "$NOT_SET" && reads "$REGISTERED_LINE"; }
 wait_until "the shortcut was not stored and registered: the row does not read '$REGISTERED_LINE'" \
@@ -201,13 +233,17 @@ say "notes before the capture: $notes_before"
 
 # --- 2. something in front of the reader -------------------------------------
 
-say "opening the job $JOB_QUERY, so the capture has a foreground"
-"$ax" key "$KEY_K" command
-wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present "$QUERY_BOX"
-"$ax" type "$JOB_QUERY"
-wait_until "the launcher never answered for '$JOB_QUERY'" launcher_answered
-"$ax" key "$KEY_RETURN"
-job_is_open() { absent "$QUERY_BOX" && present "$OPEN_CODE_VIEW"; }
+# From Tickets and not from ⌘K: on 2026-10-18 the demo profile's launcher
+# answered `PAY-231` with pages, commits and a branch and `#PAY-231` with
+# nothing. Tickets filtered by the key previews the one card, and the
+# preview's button is a link to its job.
+say "opening the job $JOB_QUERY from Tickets, so the capture has a foreground"
+press_when "$TICKETS_LINK"
+fill "$TICKETS_FILTER" "$JOB_QUERY"
+wait_until "Tickets never previewed '$JOB_QUERY' ($JOB_SUMMARY)" previews_the_job
+go=$(job_link) || die "the preview offers none of: ${JOB_LINKS[*]}"
+"$ax" press "$pid" "$go" || die "could not press '$go'"
+job_is_open() { absent "$TICKETS_FILTER" && present "$OPEN_CODE_VIEW"; }
 wait_until "no job page for '$JOB_QUERY' opened" job_is_open
 say "the job is open, so something is in front of the reader"
 

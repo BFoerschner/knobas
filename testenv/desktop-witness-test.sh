@@ -413,8 +413,10 @@ pin_label $tf/openin/TfOpenIn.svelte '}}>Open in… <span class="tf-dim" aria-hi
     "the checkout's menu button is still named Open in…, its arrow hidden"
 pin_label $tf/openin/TfOpenIn.svelte 'role="menuitem" onclick={() => run(' \
     "the menu's applications are still menu items, which the driver walks to"
-pin_label $tf/job/TfCodeSection.svelte '<span class="tf-mono">{checkout.path}</span>' \
-    "the job's Code section still draws the checkout path as a reading of its own"
+pin_label $tf/repo/TfRepo.svelte 'Cloned at <span class="tf-mono">{sentence.path}</span>' \
+    "the repository page still draws the clone's path as a reading of its own"
+pin_label $tf/repo/TfRepo.svelte '<TfOpenIn entityId={repoId}' \
+    "the repository page still offers the Open in… the driver presses"
 # **What a pin cannot say, which is #547's whole finding.** A pin of a source
 # string measures that the driver's constant is not stale; it measures nothing
 # whatever about what the accessibility API answers, and the only thing that
@@ -677,6 +679,22 @@ pin_label $tf/settings/notes.ts 'return "No notes"' "the notes line still reads 
 pin_label $tf/settings/notes.ts '`${total} notes`' "the notes line still leads with the count, which notes_total reads"
 pin_label $tf/job/TfCodeSection.svelte 'openLabel="Open Code view"' \
     "the job's Code section still has the link the driver knows a job page by"
+# The shortcut field is found by the focus, because the dialog and its heading
+# answer to its name too (measured 2026-10-18): `TfDialog` focuses its first field.
+pin_label $tf/settings/TfDialog.svelte 'querySelector<HTMLElement>("input:not(\[disabled\]):not(\[type=radio\])")' \
+    "a dialog still puts the caret in its first field, where the capture driver types"
+# The way to a job the capture driver takes, from Tickets (the demo profile's
+# launcher found no ticket on 2026-10-18).
+pin_label $tf/route.ts 'tickets: "Tickets"' "the top bar's Tickets link keeps its name"
+pin_label $tf/tickets/TicketsPage.svelte 'placeholder: "Filter by key, summary, epic or person"' \
+    "the Tickets filter keeps the name the capture driver fills"
+for go in 'label: "Start work"' 'label: "Open job"' 'label: "Resume work"'; do
+    pin_label $tf/tickets/tickets.ts "$go" "the ticket preview still words its job link $go"
+done
+pin_label $tf/tickets/TicketPreview.svelte 'href={jobHash(card.key)}>{action.label}</a>' \
+    "the ticket preview's button is still a link to the job"
+pin_label ../fixtures/tidewater/work.json '"summary": "Retry failed SEPA payouts"' \
+    "the demo's PAY-231 still has the summary the capture driver waits for"
 pin_label $tf/job/job.ts 'const NOTES_HASH = "#/settings/notes"' \
     "a note still opens Settings › Notes and capture, which is where the driver looks for it"
 

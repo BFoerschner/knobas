@@ -1603,13 +1603,19 @@ spawn: it writes a stub executable and a fake clone into a scratch directory,
 and in Settings › *Checkouts and Open in…* sets the **Clones root** to that
 directory (*Change…*, *Save*) and adds an application whose command is
 `<stub> {path}` (*Edit applications…*, *Add an application…*). It opens the
-job PAY-231 through the launcher, waits for the Code section's checkout line,
-picks the new application from *Open in…* (the menu's last application, three
-steps up from the focused default), and asserts that the stub ran with
+repository payout-service through the launcher, waits for its *Cloned at* line
+to name the clone, picks the new application from *Open in…* (the menu's last
+application, three steps up from the focused default), and asserts that the stub ran with
 **exactly one** argument and that it is the checkout path. Exactly one is the
 assertion ADR-0016 asks for: what the program received is what the disk
 answered, and nothing the mirror holds. Each run leaves its application in the
-demo profile's list.
+demo profile's list. The repository's page and not the job's Code section
+(which draws the same `TfOpenIn`): measured 2026-10-18, the demo's PAY-231
+reaches its branch only through a *proposed* link, so the job's Code section
+reads *Nothing connected* until a reader accepts it. And Tickets rather than ⌘K
+for the capture driver's job: the same day the demo profile's launcher
+answered `PAY-231` with pages, commits and a branch, and `#PAY-231` with no
+match at all.
 
 `capture` (#503, ported by #1084) is the **global** shortcut, which is the one
 keystroke in knobas that has to arrive while knobas is not the application
@@ -1617,7 +1623,8 @@ being typed at. In Settings › *Notes and capture* it turns notes on if they
 hide (the shortcut registers nothing while they do), sets the combination in
 the *Change…* dialog (#1086, clearing a stored one first) and waits for the row
 to say *Opens a small window over whatever you are doing.*, and counts the
-notes. It opens the job PAY-231 so the capture has a foreground, brings
+notes. It opens the job PAY-231 from Tickets (filter by key, the preview's
+job link) so the capture has a foreground, brings
 **Finder** to the front and asserts it is there, sends the combination,
 asserts the capture window is up with the caret in its box, types a line,
 presses *Open in knobas*, and asserts that knobas is frontmost again, the

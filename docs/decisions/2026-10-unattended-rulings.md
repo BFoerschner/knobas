@@ -5307,6 +5307,14 @@ Implementer.
   (D10, #1085), so no window draws its links; the count on Settings › Notes and capture going up by
   one is what a window can say. The link stays pinned at `capture_ipc.rs` and
   `capture.test.svelte.ts`. **Reversing:** low.
+- **open-in-editor presses *Open in…* on the repository page, not the job's Code section.**
+  Measured on the first unlocked run: the demo's PAY-231 reaches its branch only through a proposed
+  link, so the Code section reads *Nothing connected*; accepting the proposal would be the driver
+  arranging another feature's fixture. Both places draw one `TfOpenIn`. **Reversing:** low, once
+  the demo carries a confirmed link.
+- **capture reaches the job from Tickets, not ⌘K.** The demo profile's launcher found no ticket for
+  `PAY-231` or `#PAY-231` (pages, commits and a branch only). Tickets filtered by the key previews
+  the card, and its button links to the job. **Reversing:** low.
 - **Runs leave state in the demo profile** (an application per open-in-editor run; notes shown,
   the shortcut and a note per capture run). Removing an application needs a positional *Edit…*;
   neither driver depends on a clean slate. **Reversing:** low.
