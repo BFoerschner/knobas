@@ -5318,3 +5318,35 @@ Implementer.
 - **Runs leave state in the demo profile** (an application per open-in-editor run; notes shown,
   the shortcut and a note per capture run). Removing an application needs a positional *Edit…*;
   neither driver depends on a clean slate. **Reversing:** low.
+
+## #1163 — the walk's floor was the collation, and a migration of indexes removes it (2026-10-18)
+
+Implementer (PR #1171).
+
+- **The per-row floor was `strcoll`, not the number of rows.** Timed without `explain analyze`, a
+  key probe at 22k items cost about 4.7 µs. On an index ordered `collate "C"` it cost 0.75 µs.
+  Every id compares through the database's `en_US.UTF-8` collation, the app's own database
+  included. The issue's breakdown came from `explain analyze`, whose per-node timing inflated
+  per-row work. **Reversing:** n/a (a diagnosis).
+- **A migration of five indexes, not stored state.** The issue's first direction keeps a build's
+  configuration and tone at sync time. That adds a sync projection and a staleness rule for
+  declaration changes (ADR-0019's pattern), and it still leaves the walk's link and entity probes
+  at 4.7 µs. Migration `0047` adds `collate "C"` indexes beside the five keys the walk probes
+  and changes nothing stored. Only `knobas_core::signals` compares through them. The cost is one
+  more btree insert per entity, item and parent row, and two per link. **Reversing:** low (a
+  migration that drops the five indexes, and `same_key!` back to plain `=`).
+- **Every other read stays on the database's collation, and #1172 records the rest.** Making the
+  bytewise probe app-wide, or creating databases with a `C` collation, changes plans and sort
+  orders well beyond this ticket. **Reversing:** n/a.
+- **Liveness and contexts stay probes, not hashed exclusion sets.** With bytewise probes, a
+  context or tombstone test costs about 0.75 µs a row. A hashed set scans `knobas.entity` once
+  per statement (1.3 ms at 22k), which costs the board's 50 tickets more than it saves.
+  **Reversing:** low.
+- **The board's matching ids read `sync.item` by exclusion, not `sync.live_item`.** With the walk
+  cheaper, the probe's `mini_board (has:blocker)` went from 259 ms to 1.3 s. `ids_sql`'s join
+  through the view, on tables never analyzed, was planned by how costly the `has:` predicate
+  looked. Under about 44,000 the planner rescanned every live entity once per match. This had
+  already happened before #1161 (1,312 ms). `knobas_core::live_by_exclusion!` holds the view's
+  two filters, and the plan no longer depends on the walk's estimate. Only `ids_sql` changes;
+  `search_sql` and the saved-list summary still read the view. **Reversing:** low (one
+  relation and one predicate in `ids_sql`).

@@ -21,7 +21,10 @@
   **The reader.** `knobas_core::signals`' walk (`ticket_signals!`, `signal_ends!`, `err_builds!`,
   `open_prs!`) compares each key it probes `collate "C"` on both sides (`same_key!`), so these
   indexes serve it. It sorts the sets it deduplicates `collate "C"` too, and hands them back in the
-  database's collation. No other read changes. A probe written this way on a database without
+  database's collation. No other read compares through them. Separately,
+  `knobas_search::sql::ids_sql` (the board's matching ids) reads `sync.item` by
+  `live_by_exclusion!` rather than through `sync.live_item`, so its plan no longer depends on
+  how costly the walk looks. A probe written this way on a database without
   the index is a scan per row, and `knobas-app`'s `read_plans.rs` plans `has:`'s walk to catch
   that.
 
