@@ -5289,6 +5289,7 @@ async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
 
     clear_test_labels(&http, &env, &auth).await;
     println!("{name} added to #{number} through its source action");
+}
 
 /// The role data check (#1199, ADR-0028) on the seeded corpus: every role the
 /// adapter claims is filled by the records a full sync emits, each kind it

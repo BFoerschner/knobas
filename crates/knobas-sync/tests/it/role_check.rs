@@ -72,6 +72,8 @@ impl Source for Tickets {
                 ..KindPaths::default()
             }],
             roles: vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])],
+            source_actions: Vec::new(),
+            clone_from: Vec::new(),
         }
     }
 
