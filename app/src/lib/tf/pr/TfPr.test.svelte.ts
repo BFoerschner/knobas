@@ -373,6 +373,46 @@ test("Update branch queues the style picked", async () => {
   expect(writes).toEqual([{ UpdatePullRequestBranch: { entity: PR, style: "rebase" } }]);
 });
 
+test("a source action draws the dialog its source declares and queues SourceAction without the shell knowing the op (#1194)", async () => {
+  // An action no part of this shell has heard of: its id, its fields and its
+  // words are the source's, and the write it queues carries them as given.
+  const stamp = action("source_action", "Stamp release…", {
+    fields: [
+      { name: "channel", label: "Channel", kind: { type: "choice", options: [{ value: "beta", label: "Beta" }, { value: "stable", label: "Stable" }] }, value: null, required: true, placeholder: null },
+      { name: "note", label: "Note", kind: { type: "text", suggestions: [] }, value: null, required: false, placeholder: null },
+    ],
+    confirm: "Stamp this pull request for a release?",
+    values: { id: "stamp_release" },
+  });
+  await draw([PR], ports({ pr: prView([EDIT, stamp, MERGE]) }));
+  expect(buttons()).toEqual(["Edit", "Stamp release", "Merge…"]);
+  button("Stamp release")!.click();
+  flushSync();
+  const dialog = document.querySelector(".tf-dialog")!;
+  expect(dialog.textContent).toContain("Stamp this pull request for a release?");
+  document.querySelector<HTMLInputElement>(".tf-pra input[value=stable]")!.click();
+  const note = document.querySelector<HTMLInputElement>(".tf-pra input[type=text]")!;
+  note.value = "for 2.0";
+  note.dispatchEvent(new Event("input", { bubbles: true }));
+  flushSync();
+  [...document.querySelectorAll<HTMLButtonElement>(".tf-dialog footer button")].find((b) => b.textContent?.trim() === "Stamp release")!.click();
+  await settle();
+  expect(writes).toEqual([{ SourceAction: { entity: PR, id: "stamp_release", fields: { channel: "stable", note: "for 2.0" } } }]);
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+  expect(text(".tf-fhead .tf-sub")).toContain("stamp release queued");
+});
+
+test("a source action the source draws disabled says why and opens nothing", async () => {
+  const none = action("source_action", "Add label…", { values: { id: "add_label" }, disabled: "This repository has no labels." });
+  await draw([PR], ports({ pr: prView([none]) }));
+  const add = button("Add label")!;
+  expect(add.getAttribute("aria-disabled")).toBe("true");
+  expect(add.title).toBe("This repository has no labels.");
+  add.click();
+  flushSync();
+  expect(document.querySelector(".tf-dialog")).toBeNull();
+});
+
 test("Conversation: each entry's who, when and verdict, then a comment queued and drawn at once", async () => {
   await draw([PR, "conversation"]);
   const messages = () => [...target.querySelectorAll(".tf-convo .tf-msg")].map((m) => m.textContent?.replace(/\s+/g, " ").trim());

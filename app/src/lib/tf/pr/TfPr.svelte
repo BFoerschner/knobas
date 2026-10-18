@@ -74,6 +74,7 @@
   import { listSources } from "../../ipc/sources";
   import { pendingComments as sharedPending, type PendingCommentStore } from "../../detail/view/pending-comments.svelte";
   import { push } from "../../shell/toasts.svelte";
+  import { actionName } from "../../detail/view/actions";
   import { prNumber } from "../code/code";
   import { isMine, itemHash, keyOf, username } from "../job/job";
   import { toastQueued } from "../repo/queued.svelte";
@@ -270,19 +271,30 @@
     phrase: string;
     /** `update`, `edit`, `close`, `reopen`: the chip is `<verb> queued`. */
     verb: string;
+    /** What keys its button: the verb, or a source action's own id. */
+    key: string;
   }
 
-  /** *Update branch*, *Edit*, then *Close* or *Reopen*, each where the source offers it. */
+  /**
+   * *Update branch*, *Edit*, then *Close* or *Reopen*, each where the source
+   * offers it, then the source's own actions (#1194, ADR-0029) in its order:
+   * their words are the source's label, and the shell never reads their op.
+   */
   const writes = $derived.by((): Write[] => {
     const update = offered((a) => a.write_op === "update_pull_request_branch");
     const edit = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] === undefined);
     const setState = offered((a) => a.write_op === "edit_pull_request" && a.values["state"] !== undefined);
     const list: Write[] = [];
-    if (update) list.push({ action: update, label: "Update branch", phrase: "update branch of", verb: "update" });
-    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit" });
+    if (update) list.push({ action: update, label: "Update branch", phrase: "update branch of", verb: "update", key: "update" });
+    if (edit) list.push({ action: edit, label: "Edit", phrase: "edit", verb: "edit", key: "edit" });
     if (setState) {
       const verb = setState.values["state"] === "closed" ? "close" : "reopen";
-      list.push({ action: setState, label: verb === "close" ? "Close" : "Reopen", phrase: verb, verb });
+      list.push({ action: setState, label: verb === "close" ? "Close" : "Reopen", phrase: verb, verb, key: verb });
+    }
+    for (const own of actions.filter((a) => a.write_op === "source_action")) {
+      const label = actionName(own.label);
+      const verb = label.toLowerCase();
+      list.push({ action: own, label, phrase: `${verb} on`, verb, key: `source:${own.values["id"] ?? label}` });
     }
     return list;
   });
@@ -394,7 +406,7 @@
         {:else if reviewable}
           <button type="button" class="tf-btn" onclick={() => (reviewing = true)}>Review…</button>
         {/if}
-        {#each writes as write (write.verb)}
+        {#each writes as write (write.key)}
           <button
             type="button"
             class="tf-btn"

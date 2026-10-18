@@ -3563,7 +3563,14 @@ async fn a_pull_request_is_commented_on_and_reviewed_from_its_view() {
     // from the author, and the shell draws it only with comments pending.
     assert_eq!(
         labels,
-        ["Submit review…", "Comment…", "Edit…", "Close", "Merge…"],
+        [
+            "Submit review…",
+            "Comment…",
+            "Edit…",
+            "Close",
+            "Add label…",
+            "Merge…"
+        ],
         "{:#?}",
         own_view.actions
     );
@@ -5135,4 +5142,151 @@ async fn a_repository_reads_its_language_and_its_own_teams_not_owners() {
         Some(serde_json::json!([])),
         "a user's repository has no teams to have"
     );
+}
+
+// -- a source action: Add label… on a pull request (issue #1194) -------------
+
+/// Delete every label of the mutated repository named `knobas-label-…`: this
+/// test's own, and an earlier run's that panicked before it cleaned up.
+/// Nothing `testenv/seed-gitea.sh` creates is a label, let alone one named so.
+async fn clear_test_labels(http: &reqwest::Client, env: &Env, auth: &str) {
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    let labels: Vec<serde_json::Value> = http
+        .get(format!("{api}/labels?limit=50"))
+        .header("Authorization", auth)
+        .send()
+        .await
+        .expect("list the labels")
+        .json()
+        .await
+        .expect("a label list");
+    for label in labels {
+        if label["name"]
+            .as_str()
+            .is_some_and(|n| n.starts_with("knobas-label-"))
+        {
+            http.delete(format!("{api}/labels/{}", label["id"]))
+                .header("Authorization", auth)
+                .send()
+                .await
+                .expect("delete a test label");
+        }
+    }
+}
+
+/// ADR-0029's source action against the real server (ADR-0013): on a pull
+/// request this test opens, the toolbar offers *Add label…* over a label this
+/// test makes; the answer the dialog would give, handed to the adapter as the
+/// queue's flush hands a `source_action` back, puts the label on the pull
+/// request; Gitea reads it back, and the view no longer offers it.
+///
+/// Never a seeded pull request or label: both are made here, [`Litter`]
+/// removes the pull request and its branch, and the label is deleted at the
+/// end and at the start of the next run.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Gitea container"]
+async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
+    use knobas_source::WriteOp;
+
+    let env = env();
+    let mut litter = Litter::new(&env).await;
+    let source = env.one_repo();
+    let http = reqwest::Client::new();
+    let auth = format!("token {}", env.token);
+    let api = format!("{}/api/v1/repos/{}", env.url, env.full_name());
+    clear_test_labels(&http, &env, &auth).await;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let name = format!("knobas-label-{stamp}");
+    let made: serde_json::Value = http
+        .post(format!("{api}/labels"))
+        .header("Authorization", &auth)
+        .json(&serde_json::json!({ "name": name, "color": "#00aabb" }))
+        .send()
+        .await
+        .expect("make a label")
+        .json()
+        .await
+        .expect("the label made");
+    let label_id = made["id"].as_u64().expect("a label id").to_string();
+
+    let branch = format!("knobas-label-{stamp}");
+    litter.branch_off_main(&branch).await;
+    let number = litter
+        .open_pull_as(
+            &env.login().await,
+            &branch,
+            &format!("knobas label check {stamp}"),
+        )
+        .await;
+    let id = format!("gitea:{}#{number}", env.full_name());
+    let view = || async {
+        source
+            .view(&id, None)
+            .await
+            .expect("the view reads")
+            .expect("Gitea draws a pull request")
+    };
+
+    // 1. The toolbar offers the label, as a choice, with the action's id fixed.
+    let add = toolbar(&view().await, "Add label…");
+    assert_eq!(add.write_op, "source_action", "{add:#?}");
+    assert_eq!(add.disabled, None, "{add:#?}");
+    let knobas_source::view::FieldKind::Choice { options } = &add.fields[0].kind else {
+        panic!("Add label… asks for a choice: {add:#?}")
+    };
+    assert!(
+        options
+            .iter()
+            .any(|o| o.value == label_id && o.label == name),
+        "{options:#?}"
+    );
+
+    // 2. What the shell queues from that dialog -- the fixed values, the id
+    //    among them, and the answer -- and the flush hands to the adapter.
+    let mut fields = add.values.clone();
+    let action_id = fields.remove("id").expect("the action's id is fixed");
+    fields.insert(add.fields[0].name.clone(), label_id.clone());
+    source
+        .write(WriteOp::SourceAction {
+            entity: id.clone(),
+            id: action_id,
+            fields,
+        })
+        .await
+        .expect("Gitea takes the label");
+
+    // 3. Read back from the server, and from the view.
+    let pull: serde_json::Value = http
+        .get(format!("{api}/pulls/{number}"))
+        .header("Authorization", &auth)
+        .send()
+        .await
+        .expect("read the pull request back")
+        .json()
+        .await
+        .expect("a pull request record");
+    assert!(
+        pull["labels"]
+            .as_array()
+            .is_some_and(|l| l.iter().any(|l| l["name"] == name.as_str())),
+        "{}",
+        pull["labels"]
+    );
+    let again = toolbar(&view().await, "Add label…");
+    let offered_again = match &again.fields.first().map(|f| &f.kind) {
+        Some(knobas_source::view::FieldKind::Choice { options }) => {
+            options.iter().any(|o| o.value == label_id)
+        }
+        _ => false,
+    };
+    assert!(
+        !offered_again,
+        "a label it carries is offered again: {again:#?}"
+    );
+
+    clear_test_labels(&http, &env, &auth).await;
+    println!("{name} added to #{number} through its source action");
 }

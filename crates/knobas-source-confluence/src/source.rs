@@ -230,7 +230,8 @@ impl Source for ConfluenceSource {
             | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
             | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::CommitFile { .. } => Err(SourceError::protocol(format!(
+            | WriteOp::CommitFile { .. }
+            | WriteOp::SourceAction { .. } => Err(SourceError::protocol(format!(
                 "the Confluence adapter does not support {:?}",
                 op.identifier()
             ))),

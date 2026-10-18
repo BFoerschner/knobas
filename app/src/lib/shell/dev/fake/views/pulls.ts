@@ -121,6 +121,24 @@ function actions(title: string, body: string, own: boolean, open: boolean, behin
         confirm: "Close this pull request without merging it?",
       }),
     );
+  }
+  // The source's own action (#1194): a write no role's vocabulary has, its id fixed.
+  list.push(
+    action("source_action", "Add label…", {
+      values: { id: "add_label" },
+      fields: [
+        {
+          name: "label",
+          label: "Label",
+          kind: { type: "choice", options: [{ value: "7", label: "needs-qa" }, { value: "9", label: "backport" }] },
+          value: null,
+          required: true,
+          placeholder: null,
+        },
+      ],
+    }),
+  );
+  if (open) {
     if (behind) {
       list.push(
         action("update_pull_request_branch", "Update branch…", {

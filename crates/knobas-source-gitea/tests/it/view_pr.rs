@@ -70,7 +70,8 @@ fn open_pull() -> Value {
         "updated_at": "2026-08-22T10:20:00Z",
         "html_url": "https://gitea.example/tidewater/payout-service/pulls/142",
         "changed_files": 2,
-        "comments": 2
+        "comments": 2,
+        "labels": [{ "id": 3, "name": "bug" }]
     })
 }
 
@@ -202,6 +203,16 @@ async fn slow_gitea(
         .respond_with(
             ResponseTemplate::new(200)
                 .set_body_json(json!({ "login": VIEWER }))
+                .set_delay(delay),
+        )
+        .mount(&server)
+        .await;
+    // The repository's labels, which *Add label…* offers (#1194): `bug` is on
+    // the pull request already.
+    get(format!("{REPO}/labels"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(json!([{ "id": 3, "name": "bug" }, { "id": 7, "name": "needs-qa" }]))
                 .set_delay(delay),
         )
         .mount(&server)
@@ -1761,6 +1772,7 @@ async fn update_branch_is_offered_where_the_head_is_behind() {
             "Request changes…",
             "Edit…",
             "Close",
+            "Add label…",
             "Update branch…",
             "Merge…"
         ],
@@ -1824,8 +1836,9 @@ async fn a_section_read_carries_no_toolbar() {
 /// A pull request's tabs are read side by side over its one record (#703):
 /// once the record is in, the reviews, the commits, the comments, who the
 /// token is (#705), landing's three -- the base branch, the head branch,
-/// whether the head is behind (#708) -- and the head commit's statuses
-/// (#710) are in flight together. Read in turn, one is.
+/// whether the head is behind (#708) -- the head commit's statuses (#710) and
+/// the repository's labels (#1194) are in flight together. Read in turn, one
+/// is.
 #[tokio::test]
 async fn a_pull_requests_tabs_are_read_at_the_same_time() {
     // A token of its own, so who it is has not been read before (see
@@ -1839,7 +1852,7 @@ async fn a_pull_requests_tabs_are_read_at_the_same_time() {
         .expect("reads")
         .expect("a pull request draws a view");
     assert_eq!(view.sections.len(), 4);
-    assert_eq!(flight.most(), 8, "the tabs' reads in flight at once");
+    assert_eq!(flight.most(), 9, "the tabs' reads in flight at once");
 }
 
 // -- Comment… and the review actions (issue #705) ----------------------------
@@ -1929,6 +1942,7 @@ async fn an_open_pull_request_offers_an_approval_and_a_request_for_changes() {
             "Request changes…",
             "Edit…",
             "Close",
+            "Add label…",
             "Merge…"
         ],
         "{view:#?}"
@@ -1958,10 +1972,17 @@ async fn an_action_that_can_never_apply_is_not_offered() {
     for (pull, offered) in [
         (
             own,
-            &["Submit review…", "Comment…", "Edit…", "Close", "Merge…"][..],
+            &[
+                "Submit review…",
+                "Comment…",
+                "Edit…",
+                "Close",
+                "Add label…",
+                "Merge…",
+            ][..],
         ),
-        (closed, &["Comment…", "Edit…", "Reopen"][..]),
-        (merged, &["Comment…", "Edit…"][..]),
+        (closed, &["Comment…", "Edit…", "Reopen", "Add label…"][..]),
+        (merged, &["Comment…", "Edit…", "Add label…"][..]),
     ] {
         let server = gitea(pull, json!([])).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
@@ -2463,5 +2484,63 @@ async fn a_pull_request_whose_checks_cannot_be_read_still_draws_and_says_so() {
             matches!(overview.blocks[2], Block::Text { .. }),
             "the description after it: {overview:#?}"
         );
+    }
+}
+
+// -- the source action (#1194, ADR-0029) -------------------------------------
+
+/// *Add label…* is Gitea's one source action: a write no role's vocabulary
+/// has. It offers the repository's labels the pull request does not carry,
+/// in every state -- Gitea labels a closed or merged pull request too -- with
+/// the action's id fixed and the label a required choice.
+#[tokio::test]
+async fn add_label_offers_the_repositorys_labels_the_pull_request_lacks() {
+    let server = gitea(open_pull(), json!([])).await;
+    let view = source(&server).view(PR, None).await.unwrap().unwrap();
+    assert_eq!(
+        labelled(&view, "Add label…"),
+        crate::source_action::add_label_action(&[("7", "needs-qa")], None)
+    );
+}
+
+/// Where nothing can be added the action says why, disabled: the reader can
+/// make a label, or take one off, and it is enabled again (the #701 ruling).
+/// A labels read that fails costs the action, never the view.
+#[tokio::test]
+async fn add_label_with_nothing_to_add_or_no_labels_read_says_why() {
+    let mut all = open_pull();
+    all["labels"] = json!([{ "id": 3, "name": "bug" }, { "id": 7, "name": "needs-qa" }]);
+    for (pull, labels, reason) in [
+        (
+            all,
+            Some(json!(null)),
+            "Every label of this repository is on this pull request.",
+        ),
+        (
+            open_pull(),
+            Some(json!([])),
+            "This repository has no labels.",
+        ),
+        (open_pull(), None, "Could not read this repository's labels"),
+    ] {
+        let server = gitea(pull, json!([])).await;
+        match labels {
+            Some(Value::Null) => {}
+            Some(body) => answer(&server, format!("{REPO}/labels"), 200, body).await,
+            None => {
+                answer(
+                    &server,
+                    format!("{REPO}/labels"),
+                    404,
+                    json!({ "message": "The target couldn't be found." }),
+                )
+                .await
+            }
+        }
+        let view = source(&server).view(PR, None).await.unwrap().unwrap();
+        let action = labelled(&view, "Add label…");
+        let disabled = action.disabled.clone().unwrap_or_default();
+        assert!(disabled.starts_with(reason), "{reason}: {action:#?}");
+        assert!(action.fields.is_empty(), "{action:#?}");
     }
 }

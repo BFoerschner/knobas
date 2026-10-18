@@ -150,7 +150,17 @@ const ACTOR: &str = "user";
 /// thing, which is why `testenv/kuma-monitor.sh` deletes by name before it
 /// adds. That is the `title` reading two paragraphs above, not the head
 /// branch's.
-pub const UNCLAIMED_OPS: &[&str] = &["create_ticket", "create_page", "create_monitor"];
+///
+/// **`source_action` is in the list because knobas cannot say** (#1194): what
+/// it does is the adapter's alone, so whether it made something no row
+/// names is unknown, and a disclosure that turns out needless costs a line
+/// where a missing one costs an artefact nobody knows about.
+pub const UNCLAIMED_OPS: &[&str] = &[
+    "create_ticket",
+    "create_page",
+    "create_monitor",
+    "source_action",
+];
 
 /// Why a flush could not even begin.
 ///
@@ -208,7 +218,8 @@ pub fn target_entity(op: &WriteOp) -> &str {
         | WriteOp::SubmitReview { entity, .. }
         | WriteOp::DeleteBranch { entity }
         | WriteOp::EditPullRequest { entity, .. }
-        | WriteOp::UpdatePullRequestBranch { entity, .. } => entity,
+        | WriteOp::UpdatePullRequestBranch { entity, .. }
+        | WriteOp::SourceAction { entity, .. } => entity,
         // The one variant whose target is not spelled `entity`: a page is
         // created *under a parent page*, and the parent is what the queue
         // orders against and what leaving the mirror holds it on. See
@@ -309,6 +320,9 @@ pub fn resend_is_harmless(op: &WriteOp) -> bool {
         | WriteOp::RunBuild { .. }
         | WriteOp::SubmitReview { .. }
         | WriteOp::CreatePage { .. } => false,
+        // What a source action does is the adapter's alone (#1194), so
+        // knobas cannot say a second arrival changes nothing.
+        WriteOp::SourceAction { .. } => false,
     }
 }
 

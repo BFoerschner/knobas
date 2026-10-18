@@ -71,6 +71,12 @@ export interface SourceDescriptor {
    * contract battery; a surface reads the claim, never the adapter kind.
    */
   roles: RoleClaim[];
+  /**
+   * The source actions this adapter performs, by its own id (#1194,
+   * ADR-0029): writes outside every role's vocabulary, offered by its views
+   * as `source_action` actions. The shell never reads them.
+   */
+  source_actions: string[];
 }
 
 /** `knobas_source::role::RoleClaim` — one role a source claims. */
@@ -886,6 +892,13 @@ export type WriteOpPayload =
         base_sha: string;
       };
     }
+  /**
+   * A write outside every role's vocabulary (#1194, ADR-0029): `id` is the
+   * adapter's own name for the action, `fields` the answers of the dialog it
+   * declared, by field name. The shell copies both from the action and never
+   * reads them. Mirrors `knobas_source::WriteOp::SourceAction`.
+   */
+  | { SourceAction: { entity: string; id: string; fields: Record<string, string> } }
   | { TriggerBuild: { entity: string } }
   | { RerunBuild: { entity: string } }
   | {

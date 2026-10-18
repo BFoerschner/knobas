@@ -361,6 +361,7 @@ pub const PROJECTED_OPS: &[&str] = &[
     "edit_pull_request",
     "update_pull_request_branch",
     "commit_file",
+    "source_action",
 ];
 
 /// What `op` counts as its target having changed.
@@ -401,7 +402,8 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// **The whole mirrored record** -- `"transition"`, `"merge_pull_request"`,
 /// `"delete_branch"` and `"update_pull_request_branch"`, the ops that put a
 /// *judgement* onto a target whose current state is the whole reason for the
-/// judgement, and `"set_parameter"`, which overwrites a value. Any change to the target at
+/// judgement, `"set_parameter"`, which overwrites a value, and `"source_action"`
+/// (#1194), whose effect knobas cannot know. Any change to the target at
 /// all holds the write. `"edit_pull_request"` takes this shape only when it
 /// changes the pull request's state; see **Per field** below.
 ///
@@ -1546,6 +1548,9 @@ mod tests {
             // An update rewrites or extends the head as it stands at the
             // flush, so a push after the press holds it (#708).
             "update_pull_request_branch",
+            // What a source action overwrites is the adapter's alone, so any
+            // change to its target is a reason to look again (#1194).
+            "source_action",
         ] {
             assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
             assert_ne!(
