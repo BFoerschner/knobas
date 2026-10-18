@@ -226,6 +226,7 @@ pub fn descriptor_template() -> SourceDescriptor {
                 "repository_tree",
                 "file_contents",
                 "line_threads",
+                "clone_urls",
             ],
         )],
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
@@ -249,6 +250,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Writes outside every role's vocabulary (#1194, ADR-0029), each
         // drawn by the view that offers it.
         source_actions: vec![SOURCE_ACTION_ADD_LABEL.to_owned()],
+        // The code host's clone URLs (#1197): a repository is cloned from the
+        // base URL a person typed, which is what *Clone* built from before
+        // the read existed (ADR-0023).
+        clone_from: vec![knobas_source::clone_urls::CloneFrom::BaseUrl],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.

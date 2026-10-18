@@ -53,6 +53,7 @@ impl Source for Boards {
             min_sync_interval_secs: 60,
             roles: Vec::new(),
             source_actions: Vec::new(),
+            clone_from: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: vec![kind("ticket"), kind("jira_view")],
             config_schema: json!({ "type": "object", "properties": {} }),

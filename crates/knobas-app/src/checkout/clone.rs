@@ -11,10 +11,13 @@
 //!
 //! - **No shell.** git runs as an argument list built by
 //!   [`clone::clone_args`], with `--` before the URL and the folder.
-//! - **The URL is built, never taken from the mirror**: the Gitea source's
-//!   `base_url` from `knobas.source_config`, which a person typed, plus the
-//!   repository's full name, checked by [`clone::FullName::parse`]. The
-//!   repository's mirrored `web_url` never reaches git.
+//! - **The URL is built, never taken from the mirror**: an address a person
+//!   typed into the repository's source -- its `base_url`, or a config value,
+//!   whichever its adapter answers the code-host read `clone_urls` with
+//!   ([`SourceDescriptor::clone_from`](knobas_source::SourceDescriptor::clone_from),
+//!   #1197) -- plus the repository's full name, checked by
+//!   [`clone::FullName::parse`]. Any code-host source clones; Gitea answers
+//!   its `base_url`. The repository's mirrored `web_url` never reaches git.
 //! - **Only https and ssh**: the address's scheme, and git's `protocol.*`
 //!   flags. Inherited `GIT_ALLOW_PROTOCOL` and `GIT_CONFIG_*` would override
 //!   those flags, so they are removed from git's environment.
@@ -41,6 +44,7 @@ use tokio::sync::oneshot;
 
 use knobas_core::checkout::{self as core_checkout, clone};
 use knobas_core::entity::EntityRef;
+use knobas_sync::scheduler::AdapterRegistry;
 
 use crate::IpcError;
 
@@ -176,8 +180,9 @@ impl Clones {
 /// # Errors
 ///
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
-/// repo or branch, a repository not from a Gitea source, a name or address
-/// ADR-0023 refuses, no clones root (or a relative one), or no git;
+/// repo or branch, a repository whose source's adapter is not installed or
+/// answers no address to clone from, a name or address ADR-0023 refuses, no
+/// clones root (or a relative one), or no git;
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold it
 /// or its source is gone;
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the folder exists and is not
@@ -187,11 +192,12 @@ impl Clones {
 /// failure.
 pub async fn start(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     clones: &Arc<Clones>,
     events: Arc<dyn CloneEvents>,
     entity_id: &str,
 ) -> Result<CloneAnswer, IpcError> {
-    start_with(pool, clones, events, entity_id, &clone::PROTOCOLS).await
+    start_with(pool, registry, clones, events, entity_id, &clone::PROTOCOLS).await
 }
 
 /// [`start`], admitting `protocols` instead of https and ssh.
@@ -204,12 +210,13 @@ pub async fn start(
 #[cfg(feature = "test-util")]
 pub async fn start_admitting(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     clones: &Arc<Clones>,
     events: Arc<dyn CloneEvents>,
     entity_id: &str,
     protocols: &[&str],
 ) -> Result<CloneAnswer, IpcError> {
-    start_with(pool, clones, events, entity_id, protocols).await
+    start_with(pool, registry, clones, events, entity_id, protocols).await
 }
 
 /// Stop the running clone of `entity_id`'s repository and remove its folder.
@@ -272,6 +279,7 @@ async fn repo_id(pool: &PgPool, entity_id: &str) -> Result<String, IpcError> {
 
 async fn start_with(
     pool: &PgPool,
+    registry: &dyn AdapterRegistry,
     clones: &Arc<Clones>,
     events: Arc<dyn CloneEvents>,
     entity_id: &str,
@@ -279,8 +287,8 @@ async fn start_with(
 ) -> Result<CloneAnswer, IpcError> {
     let repo_id = repo_id(pool, entity_id).await?;
 
-    let source: Option<(String, String)> = sqlx::query_as(
-        "select s.kind, s.base_url
+    let source: Option<(String, String, serde_json::Value)> = sqlx::query_as(
+        "select s.kind, s.base_url, s.config
            from sync.item i join knobas.source_config s on s.id = i.source_id
           where i.entity_id = $1",
     )
@@ -288,20 +296,17 @@ async fn start_with(
     .fetch_optional(pool)
     .await
     .map_err(IpcError::internal)?;
-    let (kind, base_url) = source.ok_or_else(|| {
+    let (kind, base_url, config) = source.ok_or_else(|| {
         IpcError::not_found(format!(
             "{repo_id}'s source is no longer configured, so there is no address to clone from"
         ))
     })?;
-    if kind != "gitea" {
-        return Err(IpcError::invalid(format!(
-            "{repo_id} comes from a {kind} source, and knobas clones from Gitea sources only"
-        )));
-    }
 
     let key = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?.key;
     let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
-    let url = clone::clone_url(&base_url, &name, protocols).map_err(IpcError::invalid)?;
+    let url = resolve_clone_url(
+        registry, &repo_id, &kind, &base_url, &config, &name, protocols,
+    )?;
 
     let root = super::clones_root(pool).await?.ok_or_else(|| {
         IpcError::invalid("no clones root is set: choose where clones go in Settings › Checkouts")
@@ -366,6 +371,66 @@ async fn start_with(
             Err(error)
         }
     }
+}
+
+/// The URL git clones `name` from: the code-host read `clone_urls` (#1197).
+///
+/// The adapter's template descriptor names which of the instance's typed
+/// addresses a repository is cloned from, so this builds no adapter and asks
+/// the keychain nothing: a clone needs no credential from knobas (ADR-0023).
+/// The first address [`clone::clone_url`] admits wins; when none does, the
+/// first address's refusal is the answer.
+fn resolve_clone_url(
+    registry: &dyn AdapterRegistry,
+    repo_id: &str,
+    kind: &str,
+    base_url: &str,
+    config: &serde_json::Value,
+    name: &clone::FullName,
+    protocols: &[&str],
+) -> Result<String, IpcError> {
+    let template = registry
+        .descriptors()
+        .into_iter()
+        .find(|d| d.adapter_kind == kind)
+        .ok_or_else(|| {
+            IpcError::invalid(format!(
+                "{repo_id} comes from a {kind} source, and no {kind} adapter is installed to say \
+                 where it is cloned from"
+            ))
+        })?;
+    let addresses = knobas_source::clone_urls::addresses(&template.clone_from, base_url, config);
+    let mut refusal = None;
+    for address in &addresses {
+        match clone::clone_url(address, name, protocols) {
+            Ok(url) => return Ok(url),
+            Err(error) => {
+                refusal.get_or_insert(error);
+            }
+        }
+    }
+    if let Some(error) = refusal {
+        return Err(IpcError::invalid(error));
+    }
+    // The adapter names config keys the instance leaves empty: say which, so
+    // the person knows what to fill in. The base URL is no fallback (#1197).
+    let unset: Vec<&str> = template
+        .clone_from
+        .iter()
+        .filter_map(|from| match from {
+            knobas_source::clone_urls::CloneFrom::Config(key) => Some(key.as_str()),
+            knobas_source::clone_urls::CloneFrom::BaseUrl => None,
+        })
+        .collect();
+    Err(IpcError::invalid(if unset.is_empty() {
+        format!("{repo_id} comes from a {kind} source, which names no address to clone from")
+    } else {
+        format!(
+            "{repo_id} comes from a {kind} source with no {} set, so there is no address to \
+             clone from: fill it in with Edit source",
+            unset.join(" or ")
+        )
+    }))
 }
 
 /// Adopt the folder at `target`, or make it and start git cloning into it.

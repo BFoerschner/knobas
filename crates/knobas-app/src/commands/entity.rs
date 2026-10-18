@@ -4958,8 +4958,9 @@ pub async fn clone_repo<R: tauri::Runtime>(
     if stop.unwrap_or(false) {
         return crate::checkout::clone::stop(&pool, &clones, &entity_id).await;
     }
+    let registry = std::sync::Arc::clone(&crate::sources::state(&app)?.registry);
     let events = std::sync::Arc::new(crate::sources::events::TauriEvents::new(app));
-    crate::checkout::clone::start(&pool, &clones, events, &entity_id).await
+    crate::checkout::clone::start(&pool, registry.as_ref(), &clones, events, &entity_id).await
 }
 
 // -- the capture window and its shortcut (#503) -----------------------------

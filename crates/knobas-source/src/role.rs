@@ -20,6 +20,10 @@
 //! [`Source::view`](crate::Source::view)'s blocks (a diff, a tree, a file)
 //! and `doc_content` by the adapter's [`DocProjection`](crate::docs::DocProjection),
 //! so for those the identifier is the claim that the adapter draws them.
+//! `clone_urls` (#1197) is answered by the descriptor's
+//! [`clone_from`](SourceDescriptor::clone_from): which typed address of the
+//! instance a repository is cloned from (ADR-0023), which [`check`] holds to
+//! the claim and to the config schema.
 
 use knobas_core::payload::{Frame, KindPaths};
 
@@ -227,6 +231,7 @@ pub const MINIMUMS: &[Minimum] = &[
             "repository_tree",
             "file_contents",
             "line_threads",
+            "clone_urls",
         ],
         optional_reads: &[],
         writes: &[
@@ -337,7 +342,26 @@ pub enum ClaimError {
     MissingRead { role: String, read: String },
     #[error("role {role:?} has no read {read:?}")]
     UnknownRead { role: String, read: String },
+    #[error(
+        "role {role:?} reads \"clone_urls\", and descriptor.clone_from names no address to \
+         clone from"
+    )]
+    NoCloneAddress { role: String },
+    #[error(
+        "descriptor.clone_from names config key {key:?}, which config_schema does not declare \
+         as a string"
+    )]
+    UndeclaredCloneKey { key: String },
+    #[error(
+        "descriptor.clone_from names an address to clone from, and no \"code-host\" claim \
+         reads \"clone_urls\""
+    )]
+    UnclaimedCloneAddress,
 }
+
+/// The code-host read a descriptor answers with
+/// [`clone_from`](SourceDescriptor::clone_from) (#1197).
+pub const CLONE_URLS: &str = "clone_urls";
 
 /// Hold every role `descriptor` claims to that role's minimum, and answer the
 /// first item missing. A descriptor that claims nothing passes.
@@ -389,6 +413,32 @@ pub fn check(descriptor: &SourceDescriptor) -> Result<(), ClaimError> {
                 role,
                 read: read.clone(),
             });
+        }
+        if claim.reads.iter().any(|r| r == CLONE_URLS) && descriptor.clone_from.is_empty() {
+            return Err(ClaimError::NoCloneAddress { role });
+        }
+    }
+    check_clone_from(descriptor)
+}
+
+/// `clone_from` and a code-host claim's `clone_urls` are two signals for one
+/// fact, and a config key it names is one the Add-source form asks for.
+fn check_clone_from(d: &SourceDescriptor) -> Result<(), ClaimError> {
+    if d.clone_from.is_empty() {
+        return Ok(());
+    }
+    let claimed = d
+        .roles
+        .iter()
+        .any(|c| c.role == CODE_HOST && c.reads.iter().any(|r| r == CLONE_URLS));
+    if !claimed {
+        return Err(ClaimError::UnclaimedCloneAddress);
+    }
+    for from in &d.clone_from {
+        if let crate::clone_urls::CloneFrom::Config(key) = from
+            && !crate::clone_urls::config_declares(&d.config_schema, key)
+        {
+            return Err(ClaimError::UndeclaredCloneKey { key: key.clone() });
         }
     }
     Ok(())
@@ -488,6 +538,7 @@ mod tests {
             accepts_account: false,
             min_sync_interval_secs: 60,
             source_actions: Vec::new(),
+            clone_from: vec![crate::clone_urls::CloneFrom::BaseUrl],
             write_ops: vec![],
             entity_kinds: ["repo", "branch", "pr", "commit"].map(kind).to_vec(),
             config_schema: serde_json::json!({}),
@@ -544,9 +595,16 @@ mod tests {
         let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
         assert_eq!(back.roles, d.roles);
         let mut old = wire;
+        assert_eq!(old["clone_from"], serde_json::json!(["base_url"]));
+        assert_eq!(back.clone_from, d.clone_from);
         old.as_object_mut().unwrap().remove("roles");
+        old.as_object_mut().unwrap().remove("clone_from");
         let old: SourceDescriptor = serde_json::from_value(old).unwrap();
         assert!(old.roles.is_empty());
+        assert!(
+            old.clone_from.is_empty(),
+            "a peer from before #1197 names none"
+        );
         let bare: RoleClaim = serde_json::from_value(serde_json::json!({ "role": "ci" })).unwrap();
         assert!(bare.reads.is_empty());
     }
@@ -591,10 +649,10 @@ mod tests {
     #[test]
     fn a_custom_role_is_namespaced_to_its_adapter_and_has_no_reads() {
         let custom = |role: &str, reads: &[&str]| {
-            check(&code_host(
-                vec![RoleClaim::new(role, reads.iter().copied())],
-                "repo",
-            ))
+            let mut d = code_host(vec![RoleClaim::new(role, reads.iter().copied())], "repo");
+            // No code-host claim, so no address to clone from either.
+            d.clone_from.clear();
+            check(&d)
         };
         assert_eq!(custom("forge:dashboard-host", &[]), Ok(()));
         for role in [
@@ -630,5 +688,37 @@ mod tests {
                 })
             );
         }
+    }
+
+    /// The clone-URLs read (#1197): a code host answers it from a typed
+    /// address, a config key it names is in the schema, and an address
+    /// declared without the claim is refused.
+    #[test]
+    fn a_code_host_answers_its_clone_urls_from_a_typed_address() {
+        let mut none = code_host(vec![code_host_claim()], "repo");
+        none.clone_from.clear();
+        assert_eq!(
+            check(&none).unwrap_err().to_string(),
+            r#"role "code-host" reads "clone_urls", and descriptor.clone_from names no address to clone from"#
+        );
+
+        let mut keyed = code_host(vec![code_host_claim()], "repo");
+        keyed.clone_from = vec![crate::clone_urls::CloneFrom::Config("ssh_base".into())];
+        assert_eq!(
+            check(&keyed),
+            Err(ClaimError::UndeclaredCloneKey {
+                key: "ssh_base".into()
+            })
+        );
+        keyed.config_schema = serde_json::json!({
+            "properties": { "ssh_base": { "type": "string" } }
+        });
+        assert_eq!(check(&keyed), Ok(()));
+
+        let unclaimed = code_host(vec![], "repo");
+        assert_eq!(check(&unclaimed), Err(ClaimError::UnclaimedCloneAddress));
+        let mut nothing = unclaimed;
+        nothing.clone_from.clear();
+        assert_eq!(check(&nothing), Ok(()));
     }
 }

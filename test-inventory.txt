@@ -583,9 +583,10 @@ knobas-app	test/it	clone_ipc::a_failed_clone_says_gits_last_line_and_leaves_noth
 knobas-app	test/it	clone_ipc::a_folder_another_repository_is_cloning_into_is_refused
 knobas-app	test/it	clone_ipc::a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone
 knobas-app	test/it	clone_ipc::a_name_outside_the_pattern_is_refused_before_anything_is_made
+knobas-app	test/it	clone_ipc::a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapter_names
+knobas-app	test/it	clone_ipc::a_repository_of_any_code_host_source_clones
 knobas-app	test/it	clone_ipc::an_existing_clone_of_the_repository_is_adopted
 knobas-app	test/it	clone_ipc::git_refuses_any_other_protocol_given_the_production_flags
-knobas-app	test/it	clone_ipc::only_a_gitea_repository_is_cloned_and_only_with_a_root_set
 knobas-app	test/it	clone_ipc::stopping_kills_git_and_removes_the_half_made_folder
 knobas-app	test/it	clone_ipc::the_app_clones_over_https_and_ssh_only
 knobas-app	test/it	clone_ipc::two_starts_at_once_start_one_clone
@@ -2141,9 +2142,11 @@ knobas-secrets	lib/knobas_secrets	tests::the_envelope_round_trips_and_names_its_
 knobas-secrets	lib/knobas_secrets	tests::the_service_name_is_never_rebuilt_in_this_crate
 knobas-secrets	lib/knobas_secrets	tests::the_spawn_helpers_reach_the_store
 knobas-secrets	test/it	keyring_local::the_keyring_store_honours_the_store_contract
+knobas-source	lib/knobas_source	clone_urls::tests::a_clone_address_crosses_as_its_word_or_its_config_key
 knobas-source	lib/knobas_source	clone_urls::tests::a_clone_url_becomes_its_sources_base_url_and_nothing_else_does
 knobas-source	lib/knobas_source	clone_urls::tests::a_schema_declares_the_key_as_an_array_of_strings
 knobas-source	lib/knobas_source	clone_urls::tests::an_entry_is_a_url_or_an_scp_like_remote
+knobas-source	lib/knobas_source	clone_urls::tests::clone_addresses_are_the_instances_typed_addresses_in_declared_order
 knobas-source	lib/knobas_source	contract::tests::accepts_a_ci_claim_over_a_pipeline_and_a_run
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_current_step_absent_from_runs_not_in_flight
@@ -2160,6 +2163,7 @@ knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_wri
 knobas-source	lib/knobas_source	contract::tests::no_role_names_the_source_action
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
 knobas-source	lib/knobas_source	contract::tests::rejects_a_ci_claim_without_the_run_log_read
+knobas-source	lib/knobas_source	contract::tests::rejects_a_clone_address_without_a_code_host_claim
 knobas-source	lib/knobas_source	contract::tests::rejects_a_code_host_claim_without_a_repo_kind
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_sync
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
@@ -2252,6 +2256,7 @@ knobas-source	lib/knobas_source	instance::tests::round_trips_as_plain_json
 knobas-source	lib/knobas_source	pipeline::tests::settings_without_the_later_fields_read_as_empty
 knobas-source	lib/knobas_source	role::tests::a_child_under_a_parent_that_is_no_repo_misses_the_parent
 knobas-source	lib/knobas_source	role::tests::a_claim_round_trips_and_a_descriptor_without_roles_claims_nothing
+knobas-source	lib/knobas_source	role::tests::a_code_host_answers_its_clone_urls_from_a_typed_address
 knobas-source	lib/knobas_source	role::tests::a_code_host_that_fills_its_role_passes
 knobas-source	lib/knobas_source	role::tests::a_custom_role_is_namespaced_to_its_adapter_and_has_no_reads
 knobas-source	lib/knobas_source	role::tests::a_read_the_role_does_not_have_is_refused_by_name

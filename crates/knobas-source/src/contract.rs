@@ -436,7 +436,8 @@ where
     check_views(&*s, &sink.0).await;
     // 10. Role claims (#1193, ADR-0029): every role the descriptor claims is
     //     filled to its minimum -- its kinds declared, their paths declared
-    //     (and, by clause 6, held to the records above), its reads claimed.
+    //     (and, by clause 6, held to the records above), its reads claimed,
+    //     and a code host's clone URLs answered from a typed address (#1197).
     if let Err(error) = crate::role::check(&d) {
         panic!("descriptor.roles: {error}");
     }
@@ -1440,6 +1441,8 @@ mod tests {
         /// Claims the code-host role, emitting only tickets: no `repo` kind
         /// (#1193).
         ClaimsCodeHostWithoutItsKinds,
+        /// Names an address to clone from, and claims no code host (#1197).
+        ClonesWithoutACodeHostClaim,
         /// Claims the ticket-system role over tickets that declare every
         /// path it needs, and the read: conforming (#1193).
         ClaimsTicketSystem,
@@ -1567,6 +1570,12 @@ mod tests {
                     | Behavior::PerformsAnUndeclaredSourceAction
                     | Behavior::SourceActionsWithoutTheOp => vec!["add_label".into()],
                     Behavior::RepeatsASourceAction => vec!["add_label".into(), "add_label".into()],
+                    _ => Vec::new(),
+                },
+                clone_from: match self.behavior {
+                    Behavior::ClonesWithoutACodeHostClaim => {
+                        vec![crate::clone_urls::CloneFrom::BaseUrl]
+                    }
                     _ => Vec::new(),
                 },
                 entity_kinds: {
@@ -2733,6 +2742,17 @@ mod tests {
         rejects(
             Behavior::ClaimsCodeHostWithoutItsKinds,
             r#"descriptor.roles: role "code-host" needs kind "repo""#,
+        )
+        .await;
+    }
+
+    /// Clause 10 holds the clone-URLs read (#1197) in its other direction: an
+    /// address to clone from, declared by a source that claims no code host.
+    #[tokio::test]
+    async fn rejects_a_clone_address_without_a_code_host_claim() {
+        rejects(
+            Behavior::ClonesWithoutACodeHostClaim,
+            r#"descriptor.roles: descriptor.clone_from names an address to clone from, and no "code-host" claim reads "clone_urls""#,
         )
         .await;
     }

@@ -35,6 +35,7 @@ use knobas_app::checkout::clone::{
     CloneAnswer, CloneEvent, CloneEvents, CloneState, Clones, start, start_admitting, stop,
 };
 use knobas_app::checkout::{FoundBy, set_clones_root, view};
+use knobas_app::sources::Registry;
 use sqlx::PgPool;
 
 fn gitea_url() -> String {
@@ -129,9 +130,16 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
     let (pool, id, _dir, root) = fixture(SEEDED).await;
     let seen = Arc::new(Seen::default());
 
-    let answer = start_admitting(&pool, &Clones::global(), seen.clone(), &id, &["http"])
-        .await
-        .unwrap();
+    let answer = start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["http"],
+    )
+    .await
+    .unwrap();
     let target = root.join("payout-service");
     assert_eq!(
         answer,
@@ -160,6 +168,7 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
     assert_eq!(
         start_admitting(
             &pool,
+            &Registry::builtin(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -178,9 +187,15 @@ async fn a_seeded_repository_clones_and_the_scan_finds_it() {
 async fn the_app_itself_refuses_the_testenv_address() {
     let (pool, id, _dir, root) = fixture(SEEDED).await;
 
-    let error = start(&pool, &Clones::global(), Arc::new(Seen::default()), &id)
-        .await
-        .expect_err("the testenv Gitea is http");
+    let error = start(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        Arc::new(Seen::default()),
+        &id,
+    )
+    .await
+    .expect_err("the testenv Gitea is http");
 
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("https or ssh"), "{}", error.message);
@@ -197,6 +212,7 @@ async fn an_existing_folder_that_is_not_a_clone_is_refused() {
 
     let error = start_admitting(
         &pool,
+        &Registry::builtin(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -227,6 +243,7 @@ async fn a_bad_name_is_refused() {
 
     let error = start_admitting(
         &pool,
+        &Registry::builtin(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -251,9 +268,16 @@ async fn stopping_a_clone_leaves_nothing_behind() {
     let seen = Arc::new(Seen::default());
     let clones = Clones::global();
 
-    start_admitting(&pool, &clones, seen.clone(), &id, &["http"])
-        .await
-        .unwrap();
+    start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &clones,
+        seen.clone(),
+        &id,
+        &["http"],
+    )
+    .await
+    .unwrap();
     // Stopped once git is talking to the server, not before it has started.
     for _ in 0..200 {
         if !seen.all().is_empty() {

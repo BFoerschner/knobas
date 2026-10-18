@@ -46,6 +46,7 @@ impl Source for Recorder {
             min_sync_interval_secs: 60,
             roles: Vec::new(),
             source_actions: Vec::new(),
+            clone_from: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),

@@ -16,6 +16,7 @@ use knobas_app::checkout::clone::{
     CloneAnswer, CloneEvent, CloneEvents, CloneState, Clones, start, start_admitting, stop,
 };
 use knobas_app::checkout::set_clones_root;
+use knobas_app::sources::Registry;
 use knobas_core::checkout::clone::{PROTOCOLS, clone_args};
 use sqlx::PgPool;
 
@@ -62,14 +63,26 @@ impl Seen {
 
 /// A source of `kind` at `base_url`, and one repo of it named `full_name`.
 async fn repo(pool: &PgPool, kind: &str, base_url: &str, full_name: &str) -> String {
+    repo_with(pool, kind, base_url, &serde_json::json!({}), full_name).await
+}
+
+/// [`repo`], its source configured with `config`.
+async fn repo_with(
+    pool: &PgPool,
+    kind: &str,
+    base_url: &str,
+    config: &serde_json::Value,
+    full_name: &str,
+) -> String {
     let source = format!("{kind}-{}", unique());
     sqlx::query(
-        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
-         values ($1, $2, $1, $3, 'token')",
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, config)
+         values ($1, $2, $1, $3, 'token', $4)",
     )
     .bind(&source)
     .bind(kind)
     .bind(base_url)
+    .bind(config)
     .execute(pool)
     .await
     .unwrap();
@@ -161,9 +174,16 @@ async fn a_clone_lands_in_the_root_under_the_repository_name() {
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
 
-    let answer = start_admitting(&pool, &Clones::global(), seen.clone(), &id, &["file"])
-        .await
-        .unwrap();
+    let answer = start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["file"],
+    )
+    .await
+    .unwrap();
     let target = root.join("payout-service");
     assert_eq!(
         answer,
@@ -216,9 +236,16 @@ async fn an_existing_clone_of_the_repository_is_adopted() {
     );
     let seen = Arc::new(Seen::default());
 
-    let answer = start_admitting(&pool, &Clones::global(), seen.clone(), &id, &["file"])
-        .await
-        .unwrap();
+    let answer = start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["file"],
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         answer,
@@ -253,6 +280,7 @@ async fn a_clone_that_did_not_finish_is_not_adopted() {
 
     let error = start_admitting(
         &pool,
+        &Registry::builtin(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &id,
@@ -289,6 +317,7 @@ async fn a_folder_that_is_not_a_clone_of_it_is_refused_and_left_alone() {
 
         let error = start_admitting(
             &pool,
+            &Registry::builtin(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -324,6 +353,7 @@ async fn a_name_outside_the_pattern_is_refused_before_anything_is_made() {
 
         let error = start_admitting(
             &pool,
+            &Registry::builtin(),
             &Clones::global(),
             Arc::new(Seen::default()),
             &id,
@@ -351,9 +381,15 @@ async fn the_app_clones_over_https_and_ssh_only() {
     let id = repo(&pool, "gitea", &base, "tidewater/payout-service").await;
     let (_dir, root) = root(&pool).await;
 
-    let error = start(&pool, &Clones::global(), Arc::new(Seen::default()), &id)
-        .await
-        .expect_err("a file:// source");
+    let error = start(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        Arc::new(Seen::default()),
+        &id,
+    )
+    .await
+    .expect_err("a file:// source");
 
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(error.message.contains("https or ssh"), "{}", error.message);
@@ -383,14 +419,83 @@ fn git_refuses_any_other_protocol_given_the_production_flags() {
     assert!(!into.exists());
 }
 
+/// The built-in adapters and one more code host, `forge`, that is no Gitea:
+/// its repositories are cloned from the address its config holds under
+/// `clone_base`, not from its base URL (#1197). It builds nothing; a clone
+/// reads only the template.
+struct WithForge;
+
+impl knobas_sync::scheduler::AdapterRegistry for WithForge {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        let mut all = Registry::builtin().descriptors();
+        let mut forge = all
+            .iter()
+            .find(|d| d.adapter_kind == "gitea")
+            .expect("gitea is built in")
+            .clone();
+        forge.id = "forge".into();
+        forge.adapter_kind = "forge".into();
+        forge.clone_from = vec![knobas_source::clone_urls::CloneFrom::Config(
+            "clone_base".into(),
+        )];
+        all.push(forge);
+        all
+    }
+
+    fn build(
+        &self,
+        _: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        unreachable!("a clone reads the template and builds no adapter")
+    }
+}
+
+/// Criterion 2 of #1197: no adapter-kind check. A code host that is not
+/// Gitea clones, from the address its adapter answers `clone_urls` with.
 #[tokio::test]
-async fn only_a_gitea_repository_is_cloned_and_only_with_a_root_set() {
+async fn a_repository_of_any_code_host_source_clones() {
+    let pool = pool().await;
+    let (_server, base) = upstream("acme", "anvil");
+    let id = repo_with(
+        &pool,
+        "forge",
+        "https://api.forge.invalid",
+        &serde_json::json!({ "clone_base": base }),
+        "acme/anvil",
+    )
+    .await;
+    let (_dir, root) = root(&pool).await;
+    let seen = Arc::new(Seen::default());
+
+    start_admitting(
+        &pool,
+        &WithForge,
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["file"],
+    )
+    .await
+    .unwrap();
+
+    let end = seen.end().await;
+    assert_eq!(end.state, CloneState::Done, "{:?}", seen.all());
+    assert_eq!(
+        origin_of(&root.join("anvil")),
+        format!("{base}/acme/anvil.git"),
+        "the address the adapter named, and the full name"
+    );
+}
+
+#[tokio::test]
+async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapter_names() {
     let pool = pool().await;
     let (_server, base) = upstream("tidewater", "x");
 
     let gitea = repo(&pool, "gitea", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
+        &Registry::builtin(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &gitea,
@@ -406,19 +511,59 @@ async fn only_a_gitea_repository_is_cloned_and_only_with_a_root_set() {
     );
 
     let (_dir, _root) = root(&pool).await;
+    // The mock claims no code host, so it names no address to clone from.
     let mock = repo(&pool, "mock", &base, "tidewater/x").await;
     let error = start_admitting(
         &pool,
+        &Registry::builtin(),
         &Clones::global(),
         Arc::new(Seen::default()),
         &mock,
         &["file"],
     )
     .await
-    .expect_err("not a Gitea source");
+    .expect_err("no address to clone from");
     assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(
-        error.message.contains("Gitea sources only"),
+        error.message.contains("names no address to clone from"),
+        "{}",
+        error.message
+    );
+
+    // A forge whose config holds no `clone_base` names none either; its base
+    // URL is not a fallback.
+    let bare = repo(&pool, "forge", &base, "tidewater/x").await;
+    let error = start_admitting(
+        &pool,
+        &WithForge,
+        &Clones::global(),
+        Arc::new(Seen::default()),
+        &bare,
+        &["file"],
+    )
+    .await
+    .expect_err("no address to clone from");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(
+        error.message.contains("with no clone_base set") && error.message.contains("Edit source"),
+        "{}",
+        error.message
+    );
+
+    let gone = repo(&pool, "nowhere", &base, "tidewater/x").await;
+    let error = start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        Arc::new(Seen::default()),
+        &gone,
+        &["file"],
+    )
+    .await
+    .expect_err("no adapter of that kind");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
+    assert!(
+        error.message.contains("no nowhere adapter is installed"),
         "{}",
         error.message
     );
@@ -433,9 +578,16 @@ async fn a_failed_clone_says_gits_last_line_and_leaves_nothing() {
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
 
-    start_admitting(&pool, &Clones::global(), seen.clone(), &id, &["file"])
-        .await
-        .unwrap();
+    start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &Clones::global(),
+        seen.clone(),
+        &id,
+        &["file"],
+    )
+    .await
+    .unwrap();
     let end = seen.end().await;
 
     let CloneState::Failed {
@@ -480,16 +632,30 @@ async fn stopping_kills_git_and_removes_the_half_made_folder() {
     let seen = Arc::new(Seen::default());
     let clones = Clones::global();
 
-    start_admitting(&pool, &clones, seen.clone(), &id, &["http"])
-        .await
-        .unwrap();
+    start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &clones,
+        seen.clone(),
+        &id,
+        &["http"],
+    )
+    .await
+    .unwrap();
     let target = root.join("slow");
     assert!(target.is_dir(), "the folder is made before git starts");
     // A second start while it runs starts nothing new.
     assert_eq!(
-        start_admitting(&pool, &clones, seen.clone(), &id, &["http"])
-            .await
-            .unwrap(),
+        start_admitting(
+            &pool,
+            &Registry::builtin(),
+            &clones,
+            seen.clone(),
+            &id,
+            &["http"]
+        )
+        .await
+        .unwrap(),
         CloneAnswer::Cloning {
             path: target.to_string_lossy().into_owned()
         }
@@ -532,10 +698,11 @@ async fn two_starts_at_once_start_one_clone() {
     let (_dir, root) = root(&pool).await;
     let seen = Arc::new(Seen::default());
     let clones = Clones::global();
+    let registry = Registry::builtin();
 
     let (a, b) = tokio::join!(
-        start_admitting(&pool, &clones, seen.clone(), &id, &["http"]),
-        start_admitting(&pool, &clones, seen.clone(), &id, &["http"]),
+        start_admitting(&pool, &registry, &clones, seen.clone(), &id, &["http"]),
+        start_admitting(&pool, &registry, &clones, seen.clone(), &id, &["http"]),
     );
 
     let cloning = CloneAnswer::Cloning {
@@ -564,12 +731,26 @@ async fn a_folder_another_repository_is_cloning_into_is_refused() {
     let seen = Arc::new(Seen::default());
     let clones = Clones::global();
 
-    start_admitting(&pool, &clones, seen.clone(), &first, &["http"])
-        .await
-        .unwrap();
-    let error = start_admitting(&pool, &clones, seen.clone(), &second, &["http"])
-        .await
-        .expect_err("the folder is the first run's");
+    start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &clones,
+        seen.clone(),
+        &first,
+        &["http"],
+    )
+    .await
+    .unwrap();
+    let error = start_admitting(
+        &pool,
+        &Registry::builtin(),
+        &clones,
+        seen.clone(),
+        &second,
+        &["http"],
+    )
+    .await
+    .expect_err("the folder is the first run's");
 
     assert_eq!(error.code, IpcErrorCode::Conflict);
     assert!(

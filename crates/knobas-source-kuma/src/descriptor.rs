@@ -75,6 +75,7 @@ pub(crate) fn for_instance(id: &str, name: &str, writes: bool) -> SourceDescript
             template.capabilities.clone()
         },
         source_actions: Vec::new(),
+        clone_from: Vec::new(),
         write_ops: if writes { write_ops() } else { Vec::new() },
         ..template
     }
@@ -126,6 +127,7 @@ pub fn descriptor_template() -> SourceDescriptor {
             [],
         )],
         source_actions: Vec::new(),
+        clone_from: Vec::new(),
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),
