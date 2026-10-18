@@ -956,6 +956,7 @@ knobas-app	test/it	sources_crud::an_invalid_id_or_interval_is_refused_with_a_rea
 knobas-app	test/it	sources_crud::an_unknown_adapter_kind_is_refused_before_anything_is_written
 knobas-app	test/it	sources_crud::an_unreachable_source_does_not_blame_the_credential_or_release_the_backoff
 knobas-app	test/it	sources_crud::deleting_a_source_removes_its_secret_and_can_purge_its_items
+knobas-app	test/it	sources_crud::each_adapter_refuses_an_interval_under_its_own_floor_and_names_it
 knobas-app	test/it	sources_crud::every_stored_auth_kind_reaches_the_summary_on_both_read_paths
 knobas-app	test/it	sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back
 knobas-app	test/it	sources_crud::only_a_source_with_an_account_offers_write_ops
@@ -991,6 +992,7 @@ knobas-app	test/it	sources_registry::every_template_names_its_own_kind_and_decla
 knobas-app	test/it	sources_registry::every_username_field_is_fillable_and_says_so
 knobas-app	test/it	sources_registry::the_registry_declares_exactly_the_ratified_write_set
 knobas-app	test/it	sources_registry::the_registry_routes_on_the_kind_and_not_on_the_instance_id
+knobas-app	test/it	sources_registry::the_tick_is_far_shorter_than_the_smallest_floor_any_adapter_declares
 knobas-app	test/it	standup_ipc::a_colleagues_day_is_in_no_list
 knobas-app	test/it	standup_ipc::a_days_hours_are_still_on_the_list_under_two_hundred_mirror_lines
 knobas-app	test/it	standup_ipc::a_link_nobody_confirmed_is_not_a_blocker
@@ -2243,6 +2245,7 @@ knobas-source	lib/knobas_source	tests::descriptor_serializes_to_plain_json
 knobas-source	lib/knobas_source	tests::every_op_has_its_own_snake_case_identifier
 knobas-source	lib/knobas_source	tests::spi_types_round_trip_in_both_directions
 knobas-source	lib/knobas_source	tests::the_create_target_is_not_a_monitor_id
+knobas-source	lib/knobas_source	tests::the_interval_floor_round_trips_and_defaults_to_sixty_seconds
 knobas-source	lib/knobas_source	tests::write_op_round_trips
 knobas-source	lib/knobas_source	view::tests::a_tree_and_a_file_have_the_wire_shape_the_shell_reads
 knobas-source	lib/knobas_source	view::tests::every_block_round_trips
@@ -3402,7 +3405,6 @@ knobas-sync	lib/knobas_sync	scheduler::tests::a_failed_existence_check_purges_ra
 knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source
 knobas-sync	lib/knobas_sync	scheduler::tests::the_default_timing_is_the_production_timing
 knobas-sync	lib/knobas_sync	scheduler::tests::the_states_with_no_next_run_are_spelled_the_way_the_enum_spells_them
-knobas-sync	lib/knobas_sync	scheduler::tests::the_tick_is_far_shorter_than_the_shortest_configurable_interval
 knobas-sync	lib/knobas_sync	tests::a_full_batch_is_written_while_the_adapter_is_still_running
 knobas-sync	lib/knobas_sync	tests::a_source_id_must_be_usable_as_a_namespace
 knobas-sync	lib/knobas_sync	tests::the_report_shape_matches_its_typescript_mirror
@@ -3445,6 +3447,7 @@ knobas-sync	test/it	config::a_new_source_starts_unknown_with_no_backoff_and_is_d
 knobas-sync	test/it	config::a_run_still_in_flight_does_not_reset_the_schedule
 knobas-sync	test/it	config::a_source_needing_a_human_is_never_due
 knobas-sync	test/it	config::a_source_that_just_finished_a_run_waits_out_its_interval
+knobas-sync	test/it	config::a_twenty_second_source_is_due_twenty_seconds_after_its_last_run_and_not_before
 knobas-sync	test/it	config::a_verdict_that_says_nothing_about_expiry_keeps_what_was_known
 knobas-sync	test/it	config::an_interval_below_the_floor_is_refused_rather_than_hammering_a_source
 knobas-sync	test/it	config::deleting_a_source_can_purge_its_mirror_while_leaving_its_entities_addressable

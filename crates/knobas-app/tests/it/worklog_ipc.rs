@@ -153,6 +153,7 @@ fn descriptor() -> SourceDescriptor {
         adapter_version: "0".to_owned(),
         auth_methods: vec![AuthMethod::Pat],
         accepts_account: false,
+        min_sync_interval_secs: 60,
         write_ops: vec!["comment".to_owned(), "log_work".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "ticket".to_owned(),

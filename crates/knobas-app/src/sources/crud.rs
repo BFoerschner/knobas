@@ -209,9 +209,10 @@ pub async fn add(
     input: NewSource,
 ) -> Result<SourceSummary, SourcesError> {
     check_id(&input.id)?;
-    let interval = config::check_interval(input.sync_interval_secs)
-        .map_err(|why| SourcesError::Invalid(why.to_owned()))?;
     let template = template_for(registry, &input.adapter_kind)?;
+    let interval =
+        config::check_interval(input.sync_interval_secs, template.min_sync_interval_secs)
+            .map_err(SourcesError::Invalid)?;
     // **Before the keychain write**, not after. `put` overwrites, so an *Add*
     // that reused a live source's id would replace that source's working
     // credential with the one being rejected -- and then the cleanup below
@@ -380,7 +381,15 @@ pub async fn update(
     patch: SourcePatch,
 ) -> Result<SourceSummary, SourcesError> {
     if let Some(secs) = patch.sync_interval_secs {
-        config::check_interval(secs).map_err(|why| SourcesError::Invalid(why.to_owned()))?;
+        // The floor is the stored source's adapter's, so the row is read
+        // first. Its kind never changes (P10), so the read cannot go stale
+        // before the write below.
+        let kind = config::get(pool, id)
+            .await?
+            .ok_or_else(|| SourcesError::NotFound(id.to_owned()))?
+            .adapter_kind;
+        let floor = template_for(registry, &kind)?.min_sync_interval_secs;
+        config::check_interval(secs, floor).map_err(SourcesError::Invalid)?;
     }
     let row = config::patch(
         pool,

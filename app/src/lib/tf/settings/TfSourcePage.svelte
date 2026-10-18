@@ -41,6 +41,7 @@
   } from "../../ipc/sources";
   import { accountHalfDone, accountOf, ACCOUNT_INCOMPLETE } from "../../sources/account";
   import { connectionLine, connectionNote, failedReport } from "../../sources/connection";
+  import { DEFAULT_MIN_SYNC_INTERVAL_SECS } from "../../sources/new-source";
   import { declaresSection, validate } from "../../sources/schema-form";
   import { BOARDS_SECTION } from "./boards";
   import TfBoardsAndFilters from "./TfBoardsAndFilters.svelte";
@@ -106,6 +107,9 @@
   const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
   const acceptsAccount = $derived(adapter?.accepts_account ?? false);
+  // The adapter's floor (#1188); an adapter this build does not know offers the
+  // 60 s every source had before adapters declared one.
+  const floor = $derived(adapter?.min_sync_interval_secs ?? DEFAULT_MIN_SYNC_INTERVAL_SECS);
 
   // ---- Connection: what is typed, against what is stored ----
   // Read once: the page is keyed on the source, so a list re-read under the
@@ -403,7 +407,7 @@
           }
         }}
       >
-        {#each intervalOptions(source.sync_interval_secs) as secs (secs)}
+        {#each intervalOptions(source.sync_interval_secs, floor) as secs (secs)}
           <option value={secs}>{intervalWords(secs)}</option>
         {/each}
       </select>

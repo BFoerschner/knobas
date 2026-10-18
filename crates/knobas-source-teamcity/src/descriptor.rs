@@ -29,6 +29,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
+        // A build's state is watched while it runs, so TeamCity may be polled
+        // every 20 s (#1187): the incremental read asks only for builds
+        // changed since the cursor, which is cheap on the server.
+        min_sync_interval_secs: 20,
         // M2's ratified TeamCity set (issue #43, ADR-0006) and the parameter
         // set and custom run the source views added (issues #668, #669,
         // §10.8). The battery holds this and `Capability::Write` to each

@@ -134,12 +134,21 @@ export function intervalWords(secs: number): string {
   return `${secs} s`;
 }
 
-/** The schedules *Every* offers. The backend refuses anything below a minute. */
-export const INTERVALS: readonly number[] = [60, 300, 900, 1800, 3600];
+/**
+ * The schedules *Every* can offer (#1188). A source is offered the steps at or
+ * above its adapter's floor (`SourceDescriptor.min_sync_interval_secs`), which
+ * is also what the backend refuses under.
+ */
+export const INTERVALS: readonly number[] = [20, 30, 45, 60, 300, 900, 1800, 3600];
 
-/** *Every*'s options: the offered ones, plus the stored one if it is not among them. */
-export function intervalOptions(current: number): number[] {
-  return INTERVALS.includes(current) ? [...INTERVALS] : [...INTERVALS, current].sort((a, b) => a - b);
+/**
+ * *Every*'s options: the steps at or above `floor`, plus the stored one if it
+ * is not among them. The floor is the adapter's declaration, never a table of
+ * kinds here.
+ */
+export function intervalOptions(current: number, floor: number): number[] {
+  const offered = INTERVALS.filter((secs) => secs >= floor);
+  return offered.includes(current) ? offered : [...offered, current].sort((a, b) => a - b);
 }
 
 /**

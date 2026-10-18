@@ -401,17 +401,65 @@ async fn a_run_still_in_flight_does_not_reset_the_schedule() {
     );
 }
 
+/// A 20-second source -- TeamCity's floor since #1187 -- is due 20 s after its
+/// previous run finished, and not a second before. Nothing in the schedule
+/// rounds to the minute: the interval is P7's seconds, as stored.
+#[tokio::test]
+async fn a_twenty_second_source_is_due_twenty_seconds_after_its_last_run_and_not_before() {
+    let pool = pool().await;
+    let id = unique("cfg");
+    config::insert(
+        &pool,
+        &InsertConfig {
+            sync_interval_secs: 20,
+            ..a_source(&id)
+        },
+    )
+    .await
+    .unwrap();
+    let finished = |secs_ago: i32| {
+        sqlx::query(
+            "insert into knobas.sync_run (source_id, trigger, finished_at, outcome)
+             values ($1, 'schedule', now() - make_interval(secs => $2), 'ok')",
+        )
+        .bind(id.clone())
+        .bind(f64::from(secs_ago))
+    };
+    let is_due = |due: Vec<config::DueSource>| due.iter().any(|d| d.id == id);
+
+    finished(19).execute(&pool).await.unwrap();
+    assert!(
+        !is_due(config::due(&pool).await.unwrap()),
+        "19 s after its last run, a 20 s source is not due yet"
+    );
+
+    sqlx::query("update knobas.sync_run set finished_at = finished_at - interval '1 second' where source_id = $1")
+        .bind(&id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        is_due(config::due(&pool).await.unwrap()),
+        "20 s after its last run, a 20 s source is due"
+    );
+}
+
+/// The floor is the caller's, read off the adapter's descriptor (#1187); the
+/// refusal names it, so a form can say what would have been accepted.
 #[test]
 fn an_interval_below_the_floor_is_refused_rather_than_hammering_a_source() {
-    assert_eq!(config::check_interval(300).unwrap(), 300);
+    assert_eq!(config::check_interval(300, 60).unwrap(), 300);
+    assert_eq!(config::check_interval(60, 60).unwrap(), 60);
+    assert_eq!(config::check_interval(20, 20).unwrap(), 20);
     assert_eq!(
-        config::check_interval(config::MIN_SYNC_INTERVAL_SECS).unwrap(),
-        60
+        config::check_interval(59, 60).unwrap_err(),
+        "a sync interval below 60 seconds would hammer the source"
     );
-    assert!(config::check_interval(config::MIN_SYNC_INTERVAL_SECS - 1).is_err());
-    assert!(config::check_interval(1).is_err());
-    assert!(config::check_interval(0).is_err());
-    assert_eq!(config::MIN_SYNC_INTERVAL_SECS, 60);
+    assert_eq!(
+        config::check_interval(19, 20).unwrap_err(),
+        "a sync interval below 20 seconds would hammer the source"
+    );
+    assert!(config::check_interval(0, 20).is_err());
 }
 
 #[tokio::test]

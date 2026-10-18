@@ -364,3 +364,34 @@ fn every_username_field_is_fillable_and_says_so() {
          checking the convention it names"
     );
 }
+
+/// The ticker's period has to be well inside the shortest schedule any source
+/// can be given, or a source is late by up to one tick every time. Since #1187
+/// that shortest schedule is the smallest floor a compiled-in adapter
+/// declares, so it is read off the registry rather than off a constant: an
+/// adapter that declares under four ticks fails here, with its name.
+///
+/// The tick is read off the default, because the default is what production
+/// ticks at (5 s, so the line is 20 s: TeamCity's floor sits exactly on it).
+#[test]
+fn the_tick_is_far_shorter_than_the_smallest_floor_any_adapter_declares() {
+    let tick = knobas_sync::scheduler::SchedulerTiming::default()
+        .tick
+        .as_secs();
+    let fits = |floor: u32| tick * 4 <= u64::from(floor);
+    let templates = Registry::builtin().templates();
+    let smallest = templates
+        .iter()
+        .min_by_key(|t| t.min_sync_interval_secs)
+        .expect("the registry has adapters");
+    assert!(
+        fits(smallest.min_sync_interval_secs),
+        "a {tick}s tick against {}'s {}s floor",
+        smallest.adapter_kind,
+        smallest.min_sync_interval_secs
+    );
+    assert!(
+        !fits(19),
+        "an adapter declaring 19 s would have to fail this test at a {tick}s tick"
+    );
+}

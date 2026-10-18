@@ -36,7 +36,7 @@
   import Modal from "../shell/Modal.svelte";
   import SchemaForm from "./SchemaForm.svelte";
   import { connectionLine, connectionNote, failedReport } from "./connection";
-  import { AUTH_LABEL, DEFAULT_INTERVAL_SECS, fillFound, SOURCE_ID_PATTERN } from "./new-source";
+  import { AUTH_LABEL, DEFAULT_INTERVAL_SECS, defaultIntervalFor, fillFound, SOURCE_ID_PATTERN } from "./new-source";
   import { defaultValues, schemaFields, validate, type SchemaField } from "./schema-form";
 
   let {
@@ -97,6 +97,16 @@
     halfDone({ username: accountUser, password: accountPassword }),
   );
   let interval = $state(DEFAULT_INTERVAL_SECS);
+  /**
+   * The schedules offered: {@link INTERVALS}, led by the chosen adapter's
+   * sub-minute floor when it declares one (#1188), so the pre-filled value is
+   * one the select can show.
+   */
+  const intervalChoices = $derived(
+    INTERVALS.some((option) => option.secs === interval) || interval >= 60
+      ? INTERVALS
+      : [{ secs: interval, label: `every ${interval} seconds` }, ...INTERVALS],
+  );
   let enabled = $state(true);
 
   let configValues = $state<Record<string, unknown>>({});
@@ -150,6 +160,8 @@
 
   function choose(descriptor: SourceDescriptor) {
     chosen = descriptor;
+    // The adapter's floor when it is under a minute (#1188), else 15 minutes.
+    interval = defaultIntervalFor(descriptor);
     id = descriptor.adapter_kind;
     displayName = descriptor.name;
     // The config belongs to the adapter that declared it. Carrying values
@@ -398,7 +410,7 @@
         <label class="l" for="add-interval">Sync</label>
         <div class="cell">
           <select class="sel-inline" id="add-interval" bind:value={interval}>
-            {#each INTERVALS as option (option.secs)}
+            {#each intervalChoices as option (option.secs)}
               <option value={option.secs}>{option.label}</option>
             {/each}
           </select>

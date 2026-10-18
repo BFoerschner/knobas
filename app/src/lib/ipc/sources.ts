@@ -46,6 +46,13 @@ export interface SourceDescriptor {
    * string `"kuma"`, which is the per-adapter table §3a forbids.
    */
   accepts_account: boolean;
+  /**
+   * The shortest sync interval, in seconds, a source of this adapter may be
+   * scheduled at (#1187): Uptime Kuma 45, TeamCity 20, the rest 60. The source
+   * commands refuse anything under it, and the interval ladder offers nothing
+   * under it. Read from here, never from a per-adapter table.
+   */
+  min_sync_interval_secs: number;
   write_ops: string[];
   entity_kinds: KindInfo[];
   /** JSON Schema. The form is generated from it — never hand-built per adapter. */

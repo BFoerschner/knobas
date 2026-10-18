@@ -1309,3 +1309,89 @@ async fn adding_a_source_with_no_typed_credential_is_refused_by_name() {
     );
     assert!(f.secrets.get(&account(&f.id)).unwrap().is_none());
 }
+
+/// Each adapter declares its own sync-interval floor (#1187): Uptime Kuma 45 s,
+/// TeamCity 20 s, the rest 60 s. The numbers are the ticket's, written out,
+/// not read from the descriptors: a test that read the floor back from the
+/// template would pass through any edit to it.
+///
+/// An interval one second under the floor is refused on create **and** on
+/// edit, and the refusal names that floor; the floor itself is accepted on
+/// both paths.
+#[tokio::test]
+async fn each_adapter_refuses_an_interval_under_its_own_floor_and_names_it() {
+    let f = fixture().await;
+    for (kind, floor) in [
+        ("kuma", 45_u32),
+        ("teamcity", 20),
+        ("jira", 60),
+        ("confluence", 60),
+        ("gitea", 60),
+    ] {
+        let template = f
+            .registry
+            .templates()
+            .into_iter()
+            .find(|t| t.adapter_kind == kind)
+            .unwrap();
+        let id = format!("{}-{kind}", &f.id[..17]);
+        let source = |secs: u32| NewSource {
+            id: id.clone(),
+            adapter_kind: kind.to_owned(),
+            display_name: kind.to_owned(),
+            base_url: "https://example.invalid".to_owned(),
+            auth_kind: template.auth_methods[0],
+            config: serde_json::json!({}),
+            secret: SecretInput::of("token"),
+            sync_interval_secs: secs,
+            enabled: true,
+        };
+        let floor_named = |err: &sources::SourcesError| match err {
+            sources::SourcesError::Invalid(why) => why.contains(&format!("{floor} seconds")),
+            _ => false,
+        };
+
+        let err = sources::crud::add(&f.pool, &f.secrets, &f.registry, source(floor - 1))
+            .await
+            .unwrap_err();
+        assert!(
+            floor_named(&err),
+            "{kind} at {}s on add: {err:?}",
+            floor - 1
+        );
+
+        let added = sources::crud::add(&f.pool, &f.secrets, &f.registry, source(floor))
+            .await
+            .unwrap_or_else(|e| panic!("{kind} at its {floor}s floor on add: {e:?}"));
+        assert_eq!(added.sync_interval_secs, floor);
+
+        let edit = |secs: u32| SourcePatch {
+            sync_interval_secs: Some(secs),
+            ..SourcePatch::default()
+        };
+        let err = sources::crud::update(&f.pool, &f.registry, &id, edit(floor - 1))
+            .await
+            .unwrap_err();
+        assert!(
+            floor_named(&err),
+            "{kind} at {}s on edit: {err:?}",
+            floor - 1
+        );
+        let stored = knobas_sync::config::get(&f.pool, &id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            stored.sync_interval_secs, floor,
+            "a refused edit wrote nothing"
+        );
+
+        sources::crud::update(&f.pool, &f.registry, &id, edit(floor + 1))
+            .await
+            .unwrap();
+        let back = sources::crud::update(&f.pool, &f.registry, &id, edit(floor))
+            .await
+            .unwrap_or_else(|e| panic!("{kind} at its {floor}s floor on edit: {e:?}"));
+        assert_eq!(back.sync_interval_secs, floor);
+    }
+}

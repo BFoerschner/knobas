@@ -828,6 +828,7 @@ mod tests {
             adapter_version: "0".to_owned(),
             auth_methods: Vec::new(),
             accepts_account: false,
+            min_sync_interval_secs: 60,
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
             config_schema: serde_json::Value::Object(serde_json::Map::new()),

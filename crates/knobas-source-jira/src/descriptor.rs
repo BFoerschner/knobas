@@ -29,6 +29,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
+        min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
         // M2's ratified Jira set (issue #43, ADR-0006), plus M3.1's `log_work`
         // (issue #280). The UI renders its action bar from exactly this, so an
         // op listed here that `write` refuses is an action that 404s, and one

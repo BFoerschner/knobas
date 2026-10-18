@@ -33,6 +33,16 @@ pub mod pipeline;
 pub mod run;
 pub mod view;
 
+/// The sync-interval floor an adapter declares unless it says otherwise, and
+/// the one a descriptor without [`SourceDescriptor::min_sync_interval_secs`]
+/// decodes with. A source is a remote system with a rate limit; letting a form
+/// store `1` is how knobas gets an account blocked.
+pub const DEFAULT_MIN_SYNC_INTERVAL_SECS: u32 = 60;
+
+fn default_min_sync_interval_secs() -> u32 {
+    DEFAULT_MIN_SYNC_INTERVAL_SECS
+}
+
 /// Everything knobas needs to know about a configured adapter instance.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SourceDescriptor {
@@ -73,6 +83,19 @@ pub struct SourceDescriptor {
     /// still decodes -- as the adapter with one credential it was.
     #[serde(default)]
     pub accepts_account: bool,
+    /// The shortest sync interval, in seconds, a source of this adapter may
+    /// be scheduled at: its **floor** (#1187). The source commands refuse an
+    /// interval under it, and the settings UI offers nothing under it.
+    ///
+    /// A declaration for `accepts_account`'s reason: the alternative is a
+    /// per-adapter table of rate limits in knobas core or in a Svelte
+    /// component. Uptime Kuma declares 45 and TeamCity 20; every other
+    /// adapter [`DEFAULT_MIN_SYNC_INTERVAL_SECS`].
+    ///
+    /// `#[serde(default)]` to that constant, so a descriptor built by a peer
+    /// that predates this decodes with the floor every source had before it.
+    #[serde(default = "default_min_sync_interval_secs")]
+    pub min_sync_interval_secs: u32,
     /// Which [`WriteOp`]s this adapter supports, as the stable snake_case
     /// identifiers documented on that enum (`Comment` → `"comment"`).
     ///
@@ -1469,6 +1492,7 @@ mod tests {
             adapter_version: "0.1.0".into(),
             auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
             accepts_account: false,
+            min_sync_interval_secs: 60,
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1511,6 +1535,27 @@ mod tests {
              would leave two answers to the same question"
         );
         assert_eq!(v["config_schema"]["type"], "object");
+    }
+
+    /// The sync-interval floor (#1187) crosses the hop as declared, and a
+    /// descriptor from a peer that predates the field decodes with the 60 s
+    /// floor every source had before adapters could declare one.
+    #[test]
+    fn the_interval_floor_round_trips_and_defaults_to_sixty_seconds() {
+        let declared = SourceDescriptor {
+            min_sync_interval_secs: 20,
+            ..a_descriptor()
+        };
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        assert_eq!(wire["min_sync_interval_secs"], 20);
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(back.min_sync_interval_secs, 20);
+
+        wire.as_object_mut()
+            .unwrap()
+            .remove("min_sync_interval_secs");
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert_eq!(older.min_sync_interval_secs, 60);
     }
 
     /// Spec §3a: every type crossing the SPI is plain serde data, so an adapter
