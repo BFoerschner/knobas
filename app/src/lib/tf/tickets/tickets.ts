@@ -51,10 +51,11 @@ export function moreLine(column: MiniBoardColumn, drawn: number): string | null 
 
 /**
  * A ticket's epic as the card and the preview draw it (#894): the path line
- * and the direct parent's name, `PAY-200 Payout reliability`. A Jira path
- * is one segment, the epic's key; a deeper chain is followed by its last
- * parent's name. The path alone when the mirror holds no parent of that
- * name, and `null` with no path.
+ * and the direct parent's name, `PAY-200 Payout reliability`. A path of one
+ * segment is the parent's key (an epic's); a deeper chain is followed by its
+ * last parent's name. The path is the ticket system's declared `parent`
+ * (#1200, ADR-0029), whatever the source. The path alone when the mirror
+ * holds no parent of that name, and `null` with no path.
  */
 export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): string | null {
   if (card.path === null) return null;
@@ -333,8 +334,8 @@ export function nextSort(current: ListSort, column: SortColumn): ListSort {
 }
 
 /**
- * Priorities in the order Jira's defaults rank them, highest first, matched
- * ignoring case. Order only, never wording: a priority not here sorts after
+ * Priorities in the order ticket systems' default schemes rank them, highest
+ * first, matched ignoring case. Order only, never wording: a priority not here sorts after
  * these, ties in key order.
  */
 const PRIORITY_ORDER = ["highest", "blocker", "critical", "high", "major", "medium", "normal", "minor", "low", "trivial", "lowest"];

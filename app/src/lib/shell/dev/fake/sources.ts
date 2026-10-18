@@ -18,10 +18,15 @@ const KIND_INFO = [
 export const FIXTURE_SOURCES = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
-    // The fixture's repositories and pull requests are the mock's rows, so here
-    // it claims the code host role, which Code draws by (#1196). The real mock
-    // adapter claims nothing (#1193), and this is where the fixture diverges.
-    roles: [{ role: "code-host", reads: [] }],
+    // The fixture's repositories, pull requests and tickets are the mock's
+    // rows, so here it claims the code host role, which Code draws by (#1196),
+    // and the ticket system, which Tickets reads its board over (#1200). The
+    // real mock adapter claims nothing (#1193), and this is where the fixture
+    // diverges.
+    roles: [
+      { role: "code-host", reads: [] },
+      { role: "ticket-system", reads: ["reachable_transitions"] },
+    ],
     // Who the reader is in the mock source (#818): the assignee the corpus's
     // tickets name, so a To Do ticket of Mara's offers *Start work* on its
     // job, as `mini_board`'s `mine` already says of the same tickets.
