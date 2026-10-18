@@ -5679,3 +5679,73 @@ The merge-manager's rulings (PR #1232):
 - **Merge before #1229.** Making the mock claim `code-host` needs its live reads and the
   battery's `rejects_…` cases reworked, which is #1229's own size; it is `ready-for-agent` in
   milestone v3, so the demo regression does not reach a v3 release. **Reversing:** #1229.
+## #1198 The WIT interface, and the WASM host as a Source (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **Fork: ratify `knobas:adapter@1.0.0` as a frozen surface.** Ruling: ratified, as
+  `docs/contract/10.8/1198-wit-world-knobas-adapter.md` records it. Reasoning: ADR-0028 and spec
+  #1192 already decide that the world is frozen and versioned; the entry fixes its 1.0.0 content,
+  which only this ticket can, and nothing outside knobas builds against it yet. **Reversing:**
+  cheap until #1202 lets anyone install a component; after that, a 2.0.0.
+
+The implementer's rulings:
+
+- **Fork: transcribe every SPI type as a WIT record, or cross some as serde JSON.** Ruling:
+  records and variants for what the host branches on (error, instance, sync item, connection info,
+  receipt, run-chain step); serde JSON for the declarative trees (descriptor, write op, view,
+  pipeline and run reads). Reasoning: spec §3a made the SPI types plain serde data so they could
+  leave the process unchanged; their serde form is already frozen and round-trip tested; a
+  parallel record tree for the view vocabulary and seventeen write ops would be a second frozen
+  copy to drift, with conversions on both sides, for a Rust SDK that will hand authors the serde
+  types anyway. A new block type then needs no WIT change. **Reversing:** expensive once
+  components exist (a typedef cannot become a record in a minor); cheap before #1202.
+- **Fork: one instance per source, or one per call.** Ruling: a fresh store and instance per
+  call; the descriptor is read once at `build`. Reasoning: nothing a component keeps survives a
+  call, so a trap cannot poison the next one, and #1204's per-call deadline and memory cap get a
+  clean unit; the `Source` trait needs `Sync`, which a shared store would put behind a lock.
+  **Reversing:** low; internal to the host.
+- **Fork: host a component of a newer minor version.** Ruling: refused at load, as another major
+  is. Reasoning: a newer minor may import what this host does not provide, and failing at link
+  names nothing a reader can act on. Spec story 39 (an old build on a new host) is unaffected.
+  **Reversing:** low; one comparison in `Version::is_hosted`.
+- **Fork: WASI or no WASI.** Ruling: WASI 0.2 with an empty context. Reasoning: `wasm32-wasip2`
+  is the target an author builds a component with in one `cargo build`; its std imports WASI.
+  An empty context grants no directory, environment or socket, and the defaults refuse every
+  address and lookup. **Reversing:** medium; the fixture would need another target and a
+  componentize step.
+- **Fork: what "dev mode" is before install exists.** Ruling: a debug build reads
+  `KNOBAS_DEV_ADAPTER=<file.wasm>` once, at the first `Registry::builtin()`. Reasoning: every
+  reader of the registry calls `builtin()`, so a process-wide dev adapter is the one that shows
+  up everywhere a compiled-in row does; #1202 replaces it with the installed table.
+  **Reversing:** low.
+- **Fork: a sink error the component swallows.** Ruling: the host remembers the first refused or
+  undecodable item and fails the sync with it, whatever the component answers. Reasoning: the SPI
+  forbids swallowing it, and a cursor past items the engine never stored loses them silently.
+  **Reversing:** low.
+- **Fork: where the `wasm32-wasip2` target comes from.** Ruling: `rust-toolchain.toml`'s
+  `targets`. Reasoning: rustup installs it with the pinned toolchain, on every machine, with no
+  global step. Side effect: the first rustup call after the edit synced the 1.99 channel from
+  1.99.0 to 1.99.1, so every worktree rebuilds once. **Reversing:** low.
+
+The merge-manager's rulings (PR #1233):
+
+- **Fork: do the declarative trees crossing as serde JSON fit ADR-0028's "transcription of the
+  `Source` trait and its serde types", frozen at 1.0.0?** Ruling: yes. Reasoning: the JSON *is*
+  the serde types, field for field, so it transcribes them; and ADR-0028's own rule that a new
+  block type is a minor version can only hold this way, because wasmtime 49 type-checks variants
+  exactly (`typecheck_variant` refuses a different case count), so a typed `view` tree would make
+  every new block a major. The cost is that the serde form of `knobas-source` is frozen through
+  the entry, which the entry says. **Reversing:** a 2.0.0 once #1202 lets anyone install.
+- **Fork: the §10.8 entry listed "a new variant case nothing old sends" as additive.** Ruling:
+  corrected before the freeze; a new WIT variant case or record field is a major (or crosses as
+  JSON), and a new function on `adapter` is additive only when the host looks it up as optional,
+  which #1205's `download` will need. Reasoning: the same exact type check. **Reversing:** low
+  (text).
+- **Fork: a newer minor refused at load.** Ruling: upheld. Reasoning: ADR-0028 and spec #1192 say
+  install refuses an interface version this knobas cannot host, and spec story 39 is the other
+  direction (an old build on a new host). **Reversing:** low.
+- **Fork: the untested swallowed-sink path.** Ruling: witnessed now; the fixture gains a
+  `swallow_sink` fault and `a_sink_error_the_component_swallows_still_fails_the_sync` holds the
+  host's rule (a mutant that returns the component's answer is killed by it alone, not by the
+  battery). **Reversing:** low.
