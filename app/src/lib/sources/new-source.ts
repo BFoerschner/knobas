@@ -21,13 +21,23 @@ export const SOURCE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 export const DEFAULT_INTERVAL_SECS = 900;
 
 /**
+ * The floor of an adapter this build does not know, and the one every adapter
+ * declares unless it says otherwise: `knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`.
+ */
+export const DEFAULT_MIN_SYNC_INTERVAL_SECS = 60;
+
+/**
  * The schedule a new source of `adapter` starts with (#1188): its declared
  * floor when that is under a minute (Uptime Kuma 45 s, TeamCity 20 s), because
  * an adapter that declares one is one whose state is watched; else
  * {@link DEFAULT_INTERVAL_SECS}.
  */
-export function defaultIntervalFor(adapter: Pick<SourceDescriptor, "min_sync_interval_secs">): number {
-  return adapter.min_sync_interval_secs < 60 ? adapter.min_sync_interval_secs : DEFAULT_INTERVAL_SECS;
+export function defaultIntervalFor(
+  adapter: Pick<SourceDescriptor, "min_sync_interval_secs">,
+): number {
+  return adapter.min_sync_interval_secs < DEFAULT_MIN_SYNC_INTERVAL_SECS
+    ? adapter.min_sync_interval_secs
+    : DEFAULT_INTERVAL_SECS;
 }
 
 /**
