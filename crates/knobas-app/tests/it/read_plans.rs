@@ -526,10 +526,14 @@ fn searches_per_id(node: &serde_json::Value) -> Vec<String> {
             .as_str()
             .is_some_and(|cond| cond.contains("ANY"))
     {
-        found.push(format!(
-            "searches item_pkey once per id ({})",
-            node["Index Cond"].as_str().unwrap_or_default()
-        ));
+        // The condition names every id; its head says which.
+        let cond: String = node["Index Cond"]
+            .as_str()
+            .unwrap_or_default()
+            .chars()
+            .take(60)
+            .collect();
+        found.push(format!("searches item_pkey once per id ({cond}…)"));
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(searches_per_id(child));
