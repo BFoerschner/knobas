@@ -650,6 +650,14 @@ pub async fn member_ids(pool: &PgPool, ctx_id: &str) -> Result<Vec<String>, Core
     Ok(rows.into_iter().map(|(id,)| id).collect())
 }
 
+/// [`member_ids`]' statement, for `knobas-app`'s plan test. It binds the
+/// context id, the anchor id, and the anchor's namespace and key.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_member_ids() -> &'static str {
+    MEMBER_IDS
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
