@@ -3,7 +3,7 @@
  * and the new shell's `tf/settings/TfAddSource.svelte` (#903). The rules a
  * new source is held to, and the one fill *Test connection* applies.
  */
-import type { AuthMethod } from "../ipc/sources";
+import type { AuthMethod, SourceDescriptor } from "../ipc/sources";
 import type { SchemaField } from "./schema-form";
 
 /** How an `AuthMethod` reads to a person. */
@@ -19,6 +19,16 @@ export const SOURCE_ID_PATTERN = /^[a-z][a-z0-9-]{0,31}$/;
 
 /** A new source's schedule, unless the reader picks another: every 15 minutes. */
 export const DEFAULT_INTERVAL_SECS = 900;
+
+/**
+ * The schedule a new source of `adapter` starts with (#1188): its declared
+ * floor when that is under a minute (Uptime Kuma 45 s, TeamCity 20 s), because
+ * an adapter that declares one is one whose state is watched; else
+ * {@link DEFAULT_INTERVAL_SECS}.
+ */
+export function defaultIntervalFor(adapter: Pick<SourceDescriptor, "min_sync_interval_secs">): number {
+  return adapter.min_sync_interval_secs < 60 ? adapter.min_sync_interval_secs : DEFAULT_INTERVAL_SECS;
+}
 
 /**
  * The config property an adapter puts its identity in, by convention.

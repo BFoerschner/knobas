@@ -82,8 +82,13 @@ test("the address drops its scheme, intervals read as the prototype's", () => {
   expect(intervalWords(300)).toBe("5 min");
   expect(intervalWords(3600)).toBe("1 hour");
   expect(intervalWords(90)).toBe("90 s");
-  expect(intervalOptions(900)).toEqual([60, 300, 900, 1800, 3600]);
-  expect(intervalOptions(120)).toEqual([60, 120, 300, 900, 1800, 3600]);
+  expect(intervalWords(20)).toBe("20 s");
+  expect(intervalWords(45)).toBe("45 s");
+  // The steps at or above the adapter's floor (#1188), plus a stored value off the ladder.
+  expect(intervalOptions(900, 60)).toEqual([60, 300, 900, 1800, 3600]);
+  expect(intervalOptions(120, 60)).toEqual([60, 120, 300, 900, 1800, 3600]);
+  expect(intervalOptions(60, 20)).toEqual([20, 30, 45, 60, 300, 900, 1800, 3600]);
+  expect(intervalOptions(300, 45)).toEqual([45, 60, 300, 900, 1800, 3600]);
 });
 
 test("the line under the name says what it is, what it holds and when it syncs", () => {

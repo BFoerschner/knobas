@@ -1060,3 +1060,29 @@ test("Save sends the account beside the key", async () => {
     account: { username: "knobas", password: "knobas-dev" },
   });
 });
+
+/**
+ * The first-run dialog pre-fills a floor under a minute, as the settings one
+ * does (#1188): the floor is read off the descriptor, so the adapter here is
+ * Jira in every respect but the floor it declares.
+ */
+test("a new source starts at its adapter's floor when that is under a minute, else 15 minutes", async () => {
+  for (const [floor, secs, label] of [
+    [20, 20, "every 20 seconds"],
+    [45, 45, "every 45 seconds"],
+    [60, 900, "every 15 minutes"],
+  ] as const) {
+    adapters = [descriptor({ min_sync_interval_secs: floor })];
+    calls.addSource = [];
+    await toTested();
+    button("Next")!.click();
+    flushSync();
+    const select = target.querySelector<HTMLSelectElement>("#add-interval")!;
+    expect(select.selectedOptions[0]?.textContent?.trim(), `floor ${floor}`).toBe(label);
+    button("Save")!.click();
+    await settle();
+    expect(calls.addSource[0]?.sync_interval_secs, `floor ${floor}`).toBe(secs);
+    unmount(app!);
+    app = undefined;
+  }
+});

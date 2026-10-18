@@ -64,6 +64,7 @@ test("a run whose stamps are out of order reads as instant, not as negative", ()
 });
 
 test("formatInterval says the cadence the way the status bar does", () => {
+  expect(formatInterval(20)).toBe("every 20 s");
   expect(formatInterval(300)).toBe("every 5 min");
   expect(formatInterval(900)).toBe("every 15 min");
   expect(formatInterval(3600)).toBe("hourly");

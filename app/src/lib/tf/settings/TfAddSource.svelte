@@ -23,7 +23,7 @@
   import { defaultValues, validate } from "../../sources/schema-form";
   import type { Layers } from "../layers.svelte";
   import type { SettingsPorts } from "./ports";
-  import { AUTH_LABEL, DEFAULT_INTERVAL_SECS, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
+  import { AUTH_LABEL, defaultIntervalFor, fillFound, SOURCE_ID_PATTERN } from "../../sources/new-source";
   import { pageFields } from "./source-config";
   import TfDialog from "./TfDialog.svelte";
   import TfSchemaForm from "./TfSchemaForm.svelte";
@@ -157,7 +157,7 @@
         auth_kind: authKind,
         config: validated.config,
         secret: { value: secret, account },
-        sync_interval_secs: DEFAULT_INTERVAL_SECS,
+        sync_interval_secs: defaultIntervalFor(chosen),
         enabled: true,
       });
       secret = "";

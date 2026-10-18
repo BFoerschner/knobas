@@ -5501,3 +5501,21 @@ ADR-0025's amendment. The implementer's rulings under it:
 - **Fork: where the last sample's age is measured.** Ruling: in SQL against the transaction's
   `now()`, the instant the new row's `taken_at` carries, so one clock decides both. **Reversing:**
   low; fetch `taken_at` and compare in Rust.
+## #1187 + #1188 Each adapter declares its sync-interval floor (2026-10-18)
+
+- **`knobas_sync::config::MIN_SYNC_INTERVAL_SECS` is removed, not kept beside the declaration.**
+  `check_interval(secs, floor)` takes the adapter's floor; the 60 s default lives once, as
+  `knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS`, which the corrupted-row clamp also reads.
+  Two constants for one floor would be two truths. **Reversing:** low.
+- **The tick invariant moved from `knobas-sync`'s unit tests to `knobas-app`'s
+  `sources_registry.rs`.** `knobas-sync` never links an adapter, so only the app can read the
+  smallest floor any compiled-in adapter declares. **Reversing:** low.
+- **`update_source` reads the stored row before the edit to learn its kind.** The kind is
+  immutable (P10), so the read cannot go stale before the write; an unknown id is still
+  `NotFound`. **Reversing:** low.
+- **The first-run dialog (`sources/AddSource.svelte`) follows the floor too.** #1188 names
+  "Add-source"; both dialogs share `new-source.ts`, so both pre-fill through `defaultIntervalFor`.
+  Its own ladder (5 min to daily) is unchanged and gains the sub-minute floor as a first option
+  when the chosen adapter declares one. **Reversing:** low.
+- **`formatInterval` words sub-minute intervals as `every 20 s`.** It has no caller today but is
+  exported; it no longer says `every 0 min`. **Reversing:** n/a.

@@ -83,6 +83,8 @@ export function formatDuration(ms: number | null): string {
 /** How often a source syncs, as a sentence fragment: `every 15 min`. */
 export function formatInterval(secs: number): string {
   if (!Number.isFinite(secs) || secs <= 0) return "—";
+  // Under a minute, in seconds: a 20 s TeamCity source is not "every 0 min" (#1188).
+  if (secs < 60) return `every ${secs} s`;
   if (secs < 3600) return `every ${Math.round(secs / 60)} min`;
   if (secs < 86_400) {
     const hours = secs / 3600;

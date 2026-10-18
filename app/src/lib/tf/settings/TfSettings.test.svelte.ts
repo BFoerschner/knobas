@@ -626,3 +626,100 @@ test("a schedule the backend refuses goes back to the stored one", async () => {
   await settle();
   expect(every.value).toBe("300");
 });
+
+// ---- The adapter's sync-interval floor (#1188) ----
+
+/** An adapter template declaring `floor`, so the dropdown and the dialog read it and know no kind. */
+function floored(kind: string, name: string, floor: number) {
+  return {
+    id: kind,
+    adapter_kind: kind,
+    name,
+    capabilities: [],
+    adapter_version: "1",
+    auth_methods: ["ApiToken" as const],
+    accepts_account: false,
+    min_sync_interval_secs: floor,
+    write_ops: [],
+    entity_kinds: [ticket],
+    config_schema: { type: "object", properties: {} },
+    payload_paths: [],
+  };
+}
+
+/** The adapters as the ticket names them; the kinds are only names here, the floors are what is read. */
+const FLOORED = [
+  floored("kuma", "Uptime Kuma", 45),
+  floored("teamcity", "TeamCity", 20),
+  floored("jira", "Jira Data Center", 60),
+  floored("confluence", "Confluence", 60),
+  floored("gitea", "Gitea", 60),
+];
+
+function flooredPorts(sources: SourceSummary[], over: Partial<SettingsPorts> = {}) {
+  return ports({
+    listSources: vi.fn(() => Promise.resolve(sources)),
+    listAdapters: vi.fn(() => Promise.resolve(FLOORED)),
+    ...over,
+  });
+}
+
+function everyOptions(): string[] {
+  return [...target.querySelectorAll<HTMLOptionElement>("#tf-src-every option")].map((o) => o.textContent!.trim());
+}
+
+test("a source page's schedule starts at its adapter's floor (#1188)", async () => {
+  const expected: Record<string, string[]> = {
+    kuma: ["45 s", "1 min", "5 min", "15 min", "30 min", "1 hour"],
+    teamcity: ["20 s", "30 s", "45 s", "1 min", "5 min", "15 min", "30 min", "1 hour"],
+    jira: ["1 min", "5 min", "15 min", "30 min", "1 hour"],
+    confluence: ["1 min", "5 min", "15 min", "30 min", "1 hour"],
+    gitea: ["1 min", "5 min", "15 min", "30 min", "1 hour"],
+  };
+  const sources = FLOORED.map((a) => summary(a.adapter_kind, a.name, "ok"));
+  for (const [kind, options] of Object.entries(expected)) {
+    await open(["source", kind], flooredPorts(sources));
+    expect(everyOptions(), kind).toEqual(options);
+    unmount(view!);
+    view = null;
+  }
+});
+
+test("a stored schedule off the ladder is still offered and selected (#1188)", async () => {
+  await open(["source", "teamcity"], flooredPorts([summary("teamcity", "TeamCity", "ok", { sync_interval_secs: 25 })]));
+  expect(everyOptions()).toEqual(["20 s", "25 s", "30 s", "45 s", "1 min", "5 min", "15 min", "30 min", "1 hour"]);
+  expect(target.querySelector<HTMLSelectElement>("#tf-src-every")!.value).toBe("25");
+});
+
+test("a 20-second source reads Syncs every 20 s (#1188)", async () => {
+  await open(["source", "teamcity"], flooredPorts([summary("teamcity", "TeamCity", "ok", { sync_interval_secs: 20 })]));
+  expect(target.textContent).toContain("Syncs every 20 s");
+  expect(target.textContent).not.toMatch(/Syncs every 0 min/);
+});
+
+test("Add a source pre-fills a floor under a minute, else 15 minutes (#1188)", async () => {
+  const expected: Record<string, number> = { kuma: 45, teamcity: 20, jira: 900, confluence: 900, gitea: 900 };
+  for (const [kind, secs] of Object.entries(expected)) {
+    const p = flooredPorts([], {
+      addSource: vi.fn(() => Promise.resolve(summary(`${kind}-2`, kind, "ok"))),
+    });
+    await open([], p);
+    button("+ Add a source").click();
+    await settle();
+    const radio = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")].find((label) =>
+      label.textContent!.includes(FLOORED.find((a) => a.adapter_kind === kind)!.name),
+    )!;
+    radio.querySelector("input")!.click();
+    flushSync();
+    type("#tf-add-id", `${kind}-2`);
+    type("#tf-add-address", "https://example.invalid");
+    type("#tf-add-secret", "hunter2");
+    dialogButton("Test connection").click();
+    await settle();
+    dialogButton("Add source").click();
+    await settle();
+    expect(p.addSource, kind).toHaveBeenCalledWith(expect.objectContaining({ adapter_kind: kind, sync_interval_secs: secs }));
+    unmount(view!);
+    view = null;
+  }
+});
