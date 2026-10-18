@@ -1439,11 +1439,16 @@ async fn the_source_list_carries_the_role_claims_of_each_sources_adapter() {
         .unwrap();
     assert_eq!(added.roles, [the_claim()], "add answers the claims too");
 
-    let listed = sources::crud::list(&f.pool, &ClaimingRegistry).await.unwrap();
+    let listed = sources::crud::list(&f.pool, &ClaimingRegistry)
+        .await
+        .unwrap();
     let row = listed.iter().find(|row| row.id == f.id).unwrap();
     assert_eq!(row.roles, [the_claim()]);
 
     let builtin = sources::crud::list(&f.pool, &f.registry).await.unwrap();
     let row = builtin.iter().find(|row| row.id == f.id).unwrap();
-    assert!(row.roles.is_empty(), "the built-in mock claims nothing (#1193)");
+    assert!(
+        row.roles.is_empty(),
+        "the built-in mock claims nothing (#1193)"
+    );
 }
