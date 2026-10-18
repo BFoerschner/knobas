@@ -5542,3 +5542,46 @@ ADR-0025's amendment. The implementer's rulings under it:
   `knobas-core`'s `estate_file.rs`). A live run starts it and stops it again, so between runs it
   is not there; an asset would also ripple into the demo, the search corpus and the frontend
   fakes that read `testenv/estate.json`. **Reversing:** medium (an asset entry plus those counts).
+## #1193 A descriptor claims roles, and the battery checks each claim (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 sign-off of the role claims and the five minimums**
+  (`docs/contract/10.8/1193-role-claims-and-minimums.md`). Ruling: signed as written. It states
+  the spec's minimums with every item mapped to an existing `KindPaths` field, `Source` read or
+  `WriteOp`. Where a spec item has no SPI surface yet, the item waits for the ticket that adds
+  that surface. **Reversing:** a §10.8 amendment to the minimum.
+
+The implementer's rulings:
+
+- **A role's writes stay in `write_ops`; the claim carries the role and its reads only.** A
+  second list of the same writes would be two answers to one question, which clause 5 already
+  guards for `Capability::Write`. The minimum carries the role's write vocabulary.
+  **Reversing:** low; add `writes` to `RoleClaim`.
+- **Reads are claimed by identifier and checked statically.** The battery does not probe that a
+  claimed read answers. That matches ADR-0028's install-time check; the data check is #1199.
+  **Reversing:** medium; a probe per read in clause 10.
+- **The write vocabularies name every typed op of the domain the built-ins use**, beyond the
+  spec's list: `approve`, `edit_pull_request` and `update_pull_request_branch` for the code host,
+  `pause_monitor` and `resume_monitor` for monitoring (the spec's "monitor … edit writes"). The
+  spec's "merge" is `merge_pull_request` and "worklog" is `log_work`. Its ticket "edit" has no
+  `WriteOp` and joins when one exists. Spec: the ops of a role stay typed. **Reversing:** low.
+- **Spec items with no SPI surface yet stay out of the minimums until their tickets add them:**
+  clone URLs (#1197), saved views (#1207), `translate_query` (#1208). The minimum is short there
+  because the SPI is short, not because the adapter is. **Reversing:** each ticket adds its item.
+- **A monitor's response time: the SPI is short, not Kuma.** `KindPaths` has no duration slot
+  and the samples read `response_time_ms` by name (ADR-0007 interim). The minimum requires the
+  sampled state (`status_name`) only. Follow-up #1224 (backlog). **Reversing:** #1224.
+- **A ticket's key is not a declared path:** it is the `EntityRef` key (§4.1, migration `0048`).
+  **The minimum is wrong there as written.** **Reversing:** n/a.
+- **A pull request's base branch is not a declared path:** no `KindPaths` field holds one, and
+  the shell draws it from the PR view's `head → base` fact. **The minimum is wrong there as
+  written**, until a surface reads the base off the mirror. **Reversing:** low; add
+  `KindPaths::base` and require it.
+- **CI's kinds are named by their ADR-0022 frame, not by an id:** TeamCity's `build_config` is
+  the pipeline and `build` the run. **Reversing:** n/a.
+- **A custom role is accepted as `<adapter_kind>:<name>` with no reads and no minimum.** Any
+  other name not built in is refused. #1201 builds on it. **Reversing:** low.
+- **Clause 8 stays as it is,** although a ticket system without `transition` cannot pass both
+  clause 8 and the required `reachable_transitions` read. Jira declares `transition`, so no
+  built-in hits it. Follow-up #1225 (backlog). **Reversing:** #1225.
