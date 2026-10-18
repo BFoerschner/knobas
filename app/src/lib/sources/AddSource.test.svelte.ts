@@ -83,6 +83,7 @@ function descriptor(over: Partial<SourceDescriptor> = {}): SourceDescriptor {
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     accepts_account: false,
+    min_sync_interval_secs: 60,
     write_ops: [],
     entity_kinds: [
       { id: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", full_sync_exhaustive: false },

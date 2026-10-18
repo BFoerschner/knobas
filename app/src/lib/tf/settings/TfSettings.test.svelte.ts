@@ -104,6 +104,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
           adapter_version: "1",
           auth_methods: ["UserPassword" as const],
           accepts_account: false,
+          min_sync_interval_secs: 60,
           write_ops: [],
           entity_kinds: [ticket],
           config_schema: JIRA_SCHEMA,

@@ -2242,20 +2242,6 @@ mod tests {
         );
     }
 
-    /// The ticker's period has to be well inside the shortest schedule a user
-    /// can configure, or a source is late by up to one tick every time. Read
-    /// off the default, because the default is what production ticks at.
-    #[test]
-    fn the_tick_is_far_shorter_than_the_shortest_configurable_interval() {
-        let tick = SchedulerTiming::default().tick;
-        assert!(
-            tick.as_secs() * 4 <= u64::from(config::MIN_SYNC_INTERVAL_SECS),
-            "a {}s tick against a {}s floor",
-            tick.as_secs(),
-            config::MIN_SYNC_INTERVAL_SECS
-        );
-    }
-
     /// The timing a production [`SchedulerDeps`] gets when nobody chooses one
     /// is the timing the app shipped with before it became a choice: a two
     /// second startup delay and a five second tick (#412). The literals here

@@ -952,9 +952,10 @@ pub struct MonitorRow {
     ///
     /// Raw and not bucketed, because the bucketing is the tab's and is tested
     /// there: the backend would otherwise own a number of segments that only a
-    /// stylesheet knows. Bounded by the poll interval's own floor -- 60 s
-    /// (`knobas_sync::config::check_interval`), so at most 1 440 per monitor
-    /// per day -- which is why the window and not a `limit` is what bounds it.
+    /// stylesheet knows. Bounded by the poll interval's own floor -- Uptime
+    /// Kuma declares 45 s (`SourceDescriptor::min_sync_interval_secs`, #1187),
+    /// so at most 1 920 per monitor per day -- which is why the window and not
+    /// a `limit` is what bounds it.
     pub samples: Vec<MonitorSample>,
 }
 
@@ -1968,9 +1969,9 @@ async fn attached_monitors(
 /// *"a 24-hour bar per monitor drawn from the samples"*).
 ///
 /// Here and not in the tab, because it is what bounds the answer this module
-/// hands over: at the sync interval's own floor of 60 s
-/// (`knobas_sync::config::check_interval`) it is at most 1 440 samples per
-/// monitor, and that bound is the reason the read needs no `limit`.
+/// hands over: at Uptime Kuma's sync-interval floor of 45 s
+/// (`SourceDescriptor::min_sync_interval_secs`, #1187) it is at most 1 920
+/// samples per monitor, and that bound is the reason the read needs no `limit`.
 const BAR_WINDOW_HOURS: i32 = 24;
 
 /// Every monitor the mirror holds, tombstones included.
@@ -2047,7 +2048,7 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
 /// # Three statements, not one and not one per row
 ///
 /// The roster, its samples and its attachments are three different
-/// cardinalities over the same set of ids -- one row per monitor, up to 1 440
+/// cardinalities over the same set of ids -- one row per monitor, up to 1 920
 /// per monitor, and zero-or-more per monitor. Joined into one statement the
 /// payload would be multiplied out; asked per monitor they would be a round
 /// trip per row. So: read the monitors, then ask each of the other two once,

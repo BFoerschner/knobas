@@ -274,6 +274,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "config_schema",
             "entity_kinds",
             "id",
+            "min_sync_interval_secs",
             "name",
             "payload_paths",
             "write_ops",

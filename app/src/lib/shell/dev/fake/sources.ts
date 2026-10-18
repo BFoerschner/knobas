@@ -144,6 +144,8 @@ const FIXTURE_ADAPTERS = [
     capabilities: [],
     adapter_version: "0.1.0",
     auth_methods: ["ApiToken"],
+    // The adapter's sync-interval floor (#1187).
+    min_sync_interval_secs: 60,
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The mock needs no configuration, which is the empty-form case.
@@ -156,6 +158,7 @@ const FIXTURE_ADAPTERS = [
     capabilities: [],
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
+    min_sync_interval_secs: 60,
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The generated-form case: a select with a default, two lists, two texts.
@@ -172,6 +175,7 @@ const FIXTURE_ADAPTERS = [
     capabilities: [],
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
+    min_sync_interval_secs: 60,
     write_ops: [],
     entity_kinds: KIND_INFO,
     config_schema: GITEA_SCHEMA,
@@ -183,6 +187,7 @@ const FIXTURE_ADAPTERS = [
     capabilities: [],
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
+    min_sync_interval_secs: 20,
     write_ops: [],
     // The Builds frame (#851): the pipeline page's header names a pipeline in
     // the word the descriptor gives the kind it declares the frame on.

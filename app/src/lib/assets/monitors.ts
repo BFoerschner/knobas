@@ -11,8 +11,8 @@
  * ## The bar is bucketed, and that is not the same as one segment per sample
  *
  * The ticket asks for "one segment per sample in the last day". At Uptime
- * Kuma's own cadence — knobas' sync interval floor is 60 s
- * (`knobas_sync::config::check_interval`) — that is 1 440 rectangles per row
+ * Kuma's own cadence — 60 s, and Kuma's sync-interval floor is 45 s
+ * (`SourceDescriptor.min_sync_interval_secs`, #1187) — that is 1 440 to 1 920 rectangles per row
  * and eight rows on the estate the demo loads, which is eleven thousand
  * elements for a strip a few hundred pixels wide. The mockup brief settled the
  * question before the ticket was written (`mockups/shared/assets.md`: *"Check

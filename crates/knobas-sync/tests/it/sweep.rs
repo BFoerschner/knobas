@@ -58,6 +58,7 @@ impl Source for Shrinking {
             adapter_version: "0.1.0".into(),
             auth_methods: Vec::new(),
             accepts_account: false,
+            min_sync_interval_secs: 60,
             write_ops: Vec::new(),
             entity_kinds: self
                 .kinds

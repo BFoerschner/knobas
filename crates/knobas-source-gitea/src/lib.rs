@@ -204,6 +204,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
+        min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
         // source views added (issue #667, §10.8), the review and the edit the
         // git workstation added (issues #705, #706, §10.8), and the whole of what the

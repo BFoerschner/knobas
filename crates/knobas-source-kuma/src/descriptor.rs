@@ -114,6 +114,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         // it is a declaration for exactly the reason `config_schema` is one:
         // the alternative is a Svelte component that knows the string "kuma".
         accepts_account: true,
+        // A monitor's state is what the dashboards watch, so it is polled
+        // faster than the ticket trackers (#1187). 45 s, not lower: one
+        // `/metrics` scrape per poll, and Kuma's own default heartbeat is 60 s.
+        min_sync_interval_secs: 45,
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),

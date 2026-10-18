@@ -37,6 +37,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // Kuma's alone (issue #452), and a form that offered account
         // fields here would be asking for something nothing reads.
         accepts_account: false,
+        min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
         // Spec #272's Confluence set, ratified under ADR-0006 in one §10.8
         // entry (#286). `comment` is the SPI's existing op re-used with the
         // **page** as its container -- a reply on a page is the same act as a

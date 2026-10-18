@@ -27,11 +27,6 @@ use sqlx::PgPool;
 
 pub use crate::health::{AuthState, CredentialHealth};
 
-/// The floor on a sync interval. A source is a remote system with a rate
-/// limit; letting the Add-source form store `1` is how knobas gets an account
-/// blocked.
-pub const MIN_SYNC_INTERVAL_SECS: u32 = 60;
-
 /// P7's ladder, in seconds: 1 → 2 → 5 → 15 → 60 minutes, then flat.
 pub const BACKOFF_LADDER_SECS: [i64; 5] = [60, 120, 300, 900, 3600];
 
@@ -50,13 +45,25 @@ pub fn backoff_after(consecutive_failures: i64) -> Duration {
     Duration::from_secs(secs.unsigned_abs())
 }
 
-/// Reject an interval below the floor.
+/// Reject an interval below `floor`, the adapter's declared
+/// [`SourceDescriptor::min_sync_interval_secs`] (#1187). A source is a remote
+/// system with a rate limit; letting a form store `1` is how knobas gets an
+/// account blocked.
+///
+/// The floor is a parameter rather than a constant here because it is the
+/// adapter's to declare: Uptime Kuma's is 45 s and TeamCity's 20 s, and this
+/// crate never links an adapter.
 ///
 /// # Errors
-/// A message the IPC layer turns into `IpcErrorCode::Invalid`.
-pub fn check_interval(secs: u32) -> Result<u32, &'static str> {
-    if secs < MIN_SYNC_INTERVAL_SECS {
-        return Err("a sync interval below 60 seconds would hammer the source");
+/// A message naming the floor, which the IPC layer turns into
+/// `IpcErrorCode::Invalid`.
+///
+/// [`SourceDescriptor::min_sync_interval_secs`]: knobas_source::SourceDescriptor::min_sync_interval_secs
+pub fn check_interval(secs: u32, floor: u32) -> Result<u32, String> {
+    if secs < floor {
+        return Err(format!(
+            "a sync interval below {floor} seconds would hammer the source"
+        ));
     }
     Ok(secs)
 }
@@ -221,7 +228,7 @@ impl From<RawRow> for SourceConfigRow {
             // The column is `int` and the interval is never negative; a
             // corrupted row clamps rather than panicking a scheduler tick.
             sync_interval_secs: u32::try_from(raw.sync_interval_secs)
-                .unwrap_or(MIN_SYNC_INTERVAL_SECS),
+                .unwrap_or(knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS),
             enabled: raw.enabled,
             cursor: raw.cursor,
             backoff_until: raw.backoff_until,
