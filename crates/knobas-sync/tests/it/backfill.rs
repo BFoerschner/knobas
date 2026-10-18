@@ -72,6 +72,7 @@ impl Source for Widening {
             auth_methods: Vec::new(),
             accepts_account: false,
             min_sync_interval_secs: 60,
+            roles: Vec::new(),
             write_ops: Vec::new(),
             // Jira's `ticket` declares `true`, which is exactly what makes a
             // cursor-less run over this source a sweeping one.

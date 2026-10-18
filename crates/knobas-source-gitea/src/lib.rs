@@ -205,6 +205,19 @@ pub fn descriptor_template() -> SourceDescriptor {
         // fields here would be asking for something nothing reads.
         accepts_account: false,
         min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
+        // The code host (#1193, ADR-0029). Its views draw a pull request's
+        // diff with its line threads, a commit's diff, and a repository's tree
+        // and files. Its issues join the ticket system with #1206.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::CODE_HOST,
+            [
+                "pull_request_diff",
+                "commit_diff",
+                "repository_tree",
+                "file_contents",
+                "line_threads",
+            ],
+        )],
         // M2's ratified Gitea set (issue #43, ADR-0006) and the merge the
         // source views added (issue #667, §10.8), the review and the edit the
         // git workstation added (issues #705, #706, §10.8), and the whole of what the
@@ -543,5 +556,16 @@ mod tests {
         let back: SourceDescriptor = serde_json::from_value(json).unwrap();
         assert_eq!(back.entity_kinds.len(), 4);
         assert_eq!(back.config_schema, config::config_schema());
+    }
+
+    /// The role this adapter fills (#1193, ADR-0029), held to its minimum
+    /// on the descriptor alone: the install-time check, which the battery
+    /// repeats as its clause 10.
+    #[test]
+    fn the_template_claims_the_code_host_role_and_fills_it() {
+        let d = descriptor_template();
+        let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+        assert_eq!(roles, [knobas_source::role::CODE_HOST]);
+        assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }

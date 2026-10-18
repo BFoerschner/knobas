@@ -277,6 +277,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "min_sync_interval_secs",
             "name",
             "payload_paths",
+            "roles",
             "write_ops",
         ],
     );
@@ -341,6 +342,14 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "trigger",
         ],
     );
+}
+
+/// A role claim rides on the descriptor (#1193), read off Gitea's, which
+/// claims the code host.
+#[test]
+fn the_role_claim_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(knobas_source_gitea::descriptor_template()).unwrap();
+    assert_shape("RoleClaim", &wire["roles"][0], &["reads", "role"]);
 }
 
 /// `TriggerPath` and `TriggerValue` ride inside a `KindPaths` (#961), read

@@ -56,6 +56,7 @@ impl Source for Slow {
             auth_methods: Vec::new(),
             accepts_account: false,
             min_sync_interval_secs: 60,
+            roles: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: vec![knobas_source::KindInfo {
                 id: "ticket".into(),

@@ -422,6 +422,12 @@ where
     // 9. The source view (#661, ADR-0020): every entity this adapter emitted
     //    answers the read without failing -- with a view, or with `None`.
     check_views(&*s, &sink.0).await;
+    // 10. Role claims (#1193, ADR-0029): every role the descriptor claims is
+    //     filled to its minimum -- its kinds declared, their paths declared
+    //     (and, by clause 6, held to the records above), its reads claimed.
+    if let Err(error) = crate::role::check(&d) {
+        panic!("descriptor.roles: {error}");
+    }
 }
 
 /// Clause 9: the source view of every entity the adapter emitted is an answer,
@@ -1358,6 +1364,24 @@ mod tests {
         /// finished: runs in flight, so the absent key is a misspelled path
         /// (#1004).
         CurrentStepOnRunsInFlight,
+        /// Claims the code-host role, emitting only tickets: no `repo` kind
+        /// (#1193).
+        ClaimsCodeHostWithoutItsKinds,
+        /// Claims the ticket-system role over tickets that declare every
+        /// path it needs, and the read: conforming (#1193).
+        ClaimsTicketSystem,
+        /// The same claim over tickets that declare no priority (#1193).
+        ClaimsTicketSystemWithoutPriority,
+        /// Claims CI over a pipeline and a run kind declaring their paths,
+        /// with `run_log` and one optional read: conforming (#1193).
+        ClaimsCi,
+        /// The same claim without the `run_log` read (#1193).
+        ClaimsCiWithoutRunLog,
+        /// Claims the wiki role over pages that declare a space and no
+        /// parent (#1193).
+        ClaimsWikiWithoutParent,
+        /// Claims monitoring over monitors that declare no state (#1193).
+        ClaimsMonitoringWithoutState,
     }
 
     struct TestSource {
@@ -1410,6 +1434,27 @@ mod tests {
                 auth_methods: vec![AuthMethod::Pat],
                 accepts_account: false,
                 min_sync_interval_secs: 60,
+                roles: {
+                    use crate::role::{CI, CODE_HOST, MONITORING, RoleClaim, TICKET_SYSTEM, WIKI};
+                    match self.behavior {
+                        Behavior::ClaimsCodeHostWithoutItsKinds => {
+                            vec![RoleClaim::new(CODE_HOST, [])]
+                        }
+                        Behavior::ClaimsTicketSystem
+                        | Behavior::ClaimsTicketSystemWithoutPriority => {
+                            vec![RoleClaim::new(TICKET_SYSTEM, ["reachable_transitions"])]
+                        }
+                        Behavior::ClaimsCi => vec![RoleClaim::new(CI, ["run_log", "run_tests"])],
+                        Behavior::ClaimsCiWithoutRunLog => vec![RoleClaim::new(CI, ["run_tests"])],
+                        Behavior::ClaimsWikiWithoutParent => {
+                            vec![RoleClaim::new(WIKI, ["doc_content"])]
+                        }
+                        Behavior::ClaimsMonitoringWithoutState => {
+                            vec![RoleClaim::new(MONITORING, [])]
+                        }
+                        _ => Vec::new(),
+                    }
+                },
                 // Declares no write ops, so the battery probes `comment` and
                 // expects a refusal -- except where the behavior needs otherwise.
                 write_ops: match self.behavior {
@@ -1433,6 +1478,20 @@ mod tests {
                     // only in `entity_kinds`: clause 1 wants a declared kind
                     // to be one the adapter emits, and nothing anywhere wants
                     // it to be one the adapter's corpus happens to contain.
+                    // Kinds a role claim names (#1193), declared and never
+                    // emitted: the claim is checked on the descriptor, and
+                    // clause 6 tolerates paths of a kind the corpus lacks.
+                    match self.behavior {
+                        Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
+                            kinds.push(kind("pipeline", "Pipeline", "PI"));
+                            kinds.push(kind("run", "Run", "RU"));
+                        }
+                        Behavior::ClaimsWikiWithoutParent => kinds.push(kind("page", "Page", "PG")),
+                        Behavior::ClaimsMonitoringWithoutState => {
+                            kinds.push(kind("monitor", "Monitor", "MO"));
+                        }
+                        _ => {}
+                    }
                     if self.behavior == Behavior::WrongPathsForAKindTheCorpusNeverPopulates {
                         kinds.push(kind("gadget", "Gadget", "GA"));
                     }
@@ -1470,6 +1529,22 @@ mod tests {
                         ..KindPaths::default()
                     };
                     let good = ticket(PayloadPath::of(["fields", "status", "name"]));
+                    // Every path the ticket-system role needs (#1193), each
+                    // landing on the records below; `priority` only if asked.
+                    let ticket_system = |priority: bool| KindPaths {
+                        priority: if priority {
+                            vec![PayloadPath::of(["fields", "priority", "name"])]
+                        } else {
+                            vec![]
+                        },
+                        issue_type: vec![PayloadPath::of(["fields", "issuetype", "name"])],
+                        labels: vec![ListPath {
+                            at: PayloadPath::of(["labels"]),
+                            entry: PayloadPath::default(),
+                        }],
+                        project_key: vec![PayloadPath::of(["fields", "project", "key"])],
+                        ..good.clone()
+                    };
                     match self.behavior {
                         Behavior::PayloadPathsForAKindItDoesNotEmit => vec![KindPaths {
                             kind: "gadget".to_owned(),
@@ -1620,6 +1695,49 @@ mod tests {
                             finished: vec![PayloadPath::of(["finished"])],
                             ..good
                         }],
+                        Behavior::ClaimsTicketSystem => vec![ticket_system(true)],
+                        Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
+                        Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
+                            use knobas_core::payload::Frame;
+                            let at = |key: &str| vec![PayloadPath::of([key])];
+                            vec![
+                                good,
+                                KindPaths {
+                                    kind: "pipeline".to_owned(),
+                                    frame: Some(Frame::Pipeline),
+                                    name: at("name"),
+                                    pipeline: at("id"),
+                                    ..KindPaths::default()
+                                },
+                                KindPaths {
+                                    kind: "run".to_owned(),
+                                    frame: Some(Frame::Run),
+                                    pipeline: at("pipeline"),
+                                    state: state(&["status"], "SUCCESS"),
+                                    number: at("number"),
+                                    branch: at("branch"),
+                                    started: at("started"),
+                                    finished: at("finished"),
+                                    ..KindPaths::default()
+                                },
+                            ]
+                        }
+                        Behavior::ClaimsWikiWithoutParent => vec![
+                            good,
+                            KindPaths {
+                                kind: "page".to_owned(),
+                                project_key: vec![PayloadPath::of(["space", "key"])],
+                                ..KindPaths::default()
+                            },
+                        ],
+                        Behavior::ClaimsMonitoringWithoutState => vec![
+                            good,
+                            KindPaths {
+                                kind: "monitor".to_owned(),
+                                monitor_type: vec![PayloadPath::of(["type"])],
+                                ..KindPaths::default()
+                            },
+                        ],
                         _ => vec![good],
                     }
                 },
@@ -1700,7 +1818,10 @@ mod tests {
                             "fields": {
                                 "status": { "name": "In Progress" },
                                 "assignee": serde_json::Value::Null,
-                                "epic": { "key": "PAY-100" }
+                                "epic": { "key": "PAY-100" },
+                                "priority": { "name": "High" },
+                                "issuetype": { "name": "Bug" },
+                                "project": { "key": "PAY" }
                             },
                             "labels": ["payments"],
                             "reviewers": [{ "login": "mara.lindqvist" }]
@@ -2474,5 +2595,84 @@ mod tests {
             "must answer its own read with exactly that section",
         )
         .await;
+    }
+
+    // -- clause 10: role claims (#1193) ---------------------------------------
+
+    #[tokio::test]
+    async fn accepts_a_ticket_system_claim_its_tickets_fill() {
+        run(Behavior::ClaimsTicketSystem)
+            .await
+            .expect("a ticket-system claim the tickets fill");
+    }
+
+    /// Pins the frame lookup: CI's kinds are named by the frame they
+    /// declare, not by an id.
+    #[tokio::test]
+    async fn accepts_a_ci_claim_over_a_pipeline_and_a_run() {
+        run(Behavior::ClaimsCi)
+            .await
+            .expect("a CI claim its pipeline and run fill");
+    }
+
+    #[tokio::test]
+    async fn rejects_a_code_host_claim_without_a_repo_kind() {
+        rejects(
+            Behavior::ClaimsCodeHostWithoutItsKinds,
+            r#"descriptor.roles: role "code-host" needs kind "repo""#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_ticket_system_claim_whose_tickets_declare_no_priority() {
+        rejects(
+            Behavior::ClaimsTicketSystemWithoutPriority,
+            r#"descriptor.roles: role "ticket-system" needs kind "ticket" to declare the path priority"#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_ci_claim_without_the_run_log_read() {
+        rejects(
+            Behavior::ClaimsCiWithoutRunLog,
+            r#"descriptor.roles: role "ci" needs the read "run_log""#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_wiki_claim_whose_pages_declare_no_parent() {
+        rejects(
+            Behavior::ClaimsWikiWithoutParent,
+            r#"descriptor.roles: role "wiki" needs kind "page" to declare the path parent"#,
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_monitoring_claim_whose_monitors_declare_no_state() {
+        rejects(
+            Behavior::ClaimsMonitoringWithoutState,
+            r#"descriptor.roles: role "monitoring" needs kind "monitor" to declare the path status_name"#,
+        )
+        .await;
+    }
+
+    /// Every write a role's vocabulary names is a `WriteOp` the SPI knows, so
+    /// a typo in a minimum is a red test and not a write no source can offer.
+    #[test]
+    fn every_role_write_is_a_known_write_op() {
+        let known = super::known_write_ops("test");
+        for min in crate::role::MINIMUMS {
+            for write in min.writes {
+                assert!(
+                    known.iter().any(|(id, _)| id == write),
+                    "role {:?} names the write {write:?}, which is no WriteOp identifier",
+                    min.role
+                );
+            }
+        }
     }
 }

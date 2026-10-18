@@ -57,6 +57,7 @@ impl Source for Fake {
             auth_methods: vec![AuthMethod::Pat],
             accepts_account: false,
             min_sync_interval_secs: 60,
+            roles: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: vec![KindInfo {
                 id: "ticket".to_owned(),

@@ -30,6 +30,12 @@ pub fn descriptor_template() -> SourceDescriptor {
         // fields here would be asking for something nothing reads.
         accepts_account: false,
         min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
+        // The ticket system (#1193, ADR-0029): its tickets declare every
+        // path the role needs, and it answers the workflow read.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::TICKET_SYSTEM,
+            ["reachable_transitions"],
+        )],
         // M2's ratified Jira set (issue #43, ADR-0006), plus M3.1's `log_work`
         // (issue #280). The UI renders its action bar from exactly this, so an
         // op listed here that `write` refuses is an action that 404s, and one
@@ -509,5 +515,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The role this adapter fills (#1193, ADR-0029), held to its minimum
+    /// on the descriptor alone: the install-time check, which the battery
+    /// repeats as its clause 10.
+    #[test]
+    fn the_template_claims_the_ticket_system_role_and_fills_it() {
+        let d = descriptor_template();
+        let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+        assert_eq!(roles, [knobas_source::role::TICKET_SYSTEM]);
+        assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }

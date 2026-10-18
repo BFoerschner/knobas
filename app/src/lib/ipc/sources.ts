@@ -64,6 +64,20 @@ export interface SourceDescriptor {
    * them; a kind that declares nothing is a miss, never a guess.
    */
   payload_paths: KindPaths[];
+  /**
+   * The roles this adapter claims (#1193, ADR-0029): `code-host`,
+   * `ticket-system`, `ci`, `wiki`, `monitoring`, or a custom
+   * `<adapter_kind>:<name>`. Each claim is held to its role's minimum by the
+   * contract battery; a surface reads the claim, never the adapter kind.
+   */
+  roles: RoleClaim[];
+}
+
+/** `knobas_source::role::RoleClaim` — one role a source claims. */
+export interface RoleClaim {
+  role: string;
+  /** The live reads the source answers for the role, by identifier (`run_log`). */
+  reads: string[];
 }
 
 /**

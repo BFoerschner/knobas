@@ -101,6 +101,7 @@ mod tests {
                     auth_methods: Vec::new(),
                     accepts_account: false,
                     min_sync_interval_secs: 60,
+                    roles: Vec::new(),
                     write_ops: Vec::new(),
                     entity_kinds: Vec::new(),
                     config_schema: serde_json::json!({}),
