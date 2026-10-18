@@ -5422,3 +5422,14 @@ Merge-manager.
   background sync, not from a keystroke. A first sync of the probe's 18,500 prose items pays
   about one second more. The inbox stream is read on every open. **Reversing:** see the
   implementer's first ruling.
+
+## #1175 — the demo draws PAY-231's branch link (2026-10-18)
+
+- **A link the reader removed is drawn again on the next demo load.** Respecting a tombstone
+  needs a read of the base `knobas.link` table, and `link_reads` allows five modules to do
+  that; the first gate failed on it. A demo load means "give me the whole fixture", so
+  re-drawing is consistent. **Reversing:** small (a core fn in the exempt `link.rs` answering
+  "ever linked", checked before the insert).
+- **A proposal already made for the pair is confirmed, not replaced.** `resolve_edge` is the
+  links dialog's own door; it keeps the proposal's `suggested` provenance. The drawn link is
+  `manual` only when nothing was proposed. **Reversing:** trivial.

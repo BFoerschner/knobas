@@ -725,7 +725,8 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
 /// read "Nothing connected".
 ///
 /// Loaded twice, because the link is drawn by the load and a second load must
-/// leave exactly one active row; and a link the reader removed stays removed.
+/// leave exactly one active row; and a proposal for the pair that a suggestion
+/// pass already made is confirmed rather than left blocking the insert.
 #[tokio::test]
 async fn the_demo_job_reaches_its_branch_through_a_confirmed_link() {
     const TICKET: &str = "mock:PAY-231";
@@ -768,17 +769,29 @@ async fn the_demo_job_reaches_its_branch_through_a_confirmed_link() {
         "two loads leave one confirmed manual link"
     );
 
-    // The reader removes it; the next load does not draw it again.
-    sqlx::query("update knobas.link set deleted_at = now() where from_id = $1 and to_id = $2")
+    // A second demo start after the suggestion pass proposed the same pair:
+    // the proposal is confirmed, not left in the way of the insert.
+    sqlx::query("delete from knobas.link where from_id = $1 and to_id = $2")
         .bind(BRANCH)
         .bind(TICKET)
         .execute(&pool)
         .await
         .unwrap();
+    sqlx::query(
+        "insert into knobas.link (from_id, to_id, relation, origin, created_by, confirmed_at,
+                                  rule, rule_class, reason)
+         values ($1, $2, 'related', 'suggested', 'knobas', null, 'branch_name_key', 'exact_key',
+                 'the branch name contains PAY-231')",
+    )
+    .bind(BRANCH)
+    .bind(TICKET)
+    .execute(&pool)
+    .await
+    .unwrap();
     demo::demo_load_inner(&pool).await.unwrap();
     let reached = knobas_core::reach::reach(&pool, TICKET).await.unwrap();
     assert!(
-        !reached.iter().any(|r| r.entity_id == BRANCH),
-        "a removed link stays removed across a demo load"
+        reached.iter().any(|r| r.entity_id == BRANCH),
+        "a proposal for the pair is confirmed by the load; reached {reached:?}"
     );
 }
