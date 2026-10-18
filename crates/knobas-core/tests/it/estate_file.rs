@@ -76,8 +76,13 @@ const ENVIRONMENTS: &[&str] = &["dev", "stage", "prod", "shared"];
 /// routes to it and no monitor watches it; it is the means by which Kuma reads
 /// container state, not a thing a developer works on.
 ///
+/// `forgejo` (#1195) is the Gitea live suite's second target, behind its own
+/// profile: `just gitea-live forgejo` starts it and stops it again at the end
+/// of the run. Between runs it is not there, so the estate does not hold it;
+/// Gitea is the asset the notebook routes to and watches.
+///
 /// Every other service in that file runs somewhere and is recorded.
-const NOT_ASSETS: &[&str] = &["kuma-seed", "docker-proxy"];
+const NOT_ASSETS: &[&str] = &["kuma-seed", "docker-proxy", "forgejo"];
 
 /// The repository root, from this crate's manifest directory.
 fn root() -> PathBuf {

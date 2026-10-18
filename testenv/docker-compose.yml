@@ -79,6 +79,43 @@ services:
       start_period: 30s
     restart: unless-stopped
 
+  # Forgejo, the hard fork of Gitea (spec #1192, story 18; issue #1195): the
+  # same adapter is expected to read it, and `just gitea-live forgejo` runs the
+  # Gitea live suite against this container to find out. Opt-in (profile
+  # `forgejo`), on its own port and volume beside Gitea, so the two never
+  # share state and a Forgejo run cannot disturb a Gitea one. Same settings as
+  # Gitea above, under Forgejo's FORGEJO__ prefix. SSH is off, as there.
+  forgejo:
+    image: ${FORGEJO_IMAGE:?run testenv/pin-images.sh to generate testenv/.env}
+    container_name: knobas-forgejo
+    profiles: ["forgejo"]
+    environment:
+      FORGEJO__security__INSTALL_LOCK: "true"
+      FORGEJO__server__ROOT_URL: http://127.0.0.1:3002/
+      FORGEJO__server__SSH_DOMAIN: 127.0.0.1
+      FORGEJO__server__DISABLE_SSH: "true"
+      FORGEJO__service__DISABLE_REGISTRATION: "true"
+      FORGEJO__service__REQUIRE_SIGNIN_VIEW: "false"
+      FORGEJO__api__MAX_RESPONSE_ITEMS: "50"
+      FORGEJO__migrations__ALLOW_LOCALNETWORKS: "true"
+      # Forgejo, unlike Gitea, also refuses a migration over plain http even to
+      # an allowed local address ("unencrypted transfer protocols are
+      # disabled"); the seed's same-instance mirror (#722) is http, so this
+      # stays on. Test environment only.
+      FORGEJO__migrations__ALLOW_UNENCRYPTED: "true"
+      FORGEJO__log__LEVEL: warn
+    ports:
+      - "127.0.0.1:3002:3000"
+    volumes:
+      - forgejo-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
+    restart: unless-stopped
+
   # The Docker daemon Uptime Kuma's seeded Docker host talks to (#978), so a
   # Docker monitor created in this Kuma has a host to name.
   #
@@ -421,6 +458,7 @@ networks:
 
 volumes:
   gitea-data:
+  forgejo-data:
   kuma-data:
   tc-data:
   tc-logs:

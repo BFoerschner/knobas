@@ -5526,3 +5526,19 @@ ADR-0025's amendment. The implementer's rulings under it:
   the MSI version numerically and ignores the pre-release suffix; rc1 shipped 2.0.6, so the
   final must rise above it to upgrade in place. 2.1.0 leaves the 2.0.x milestone sequence
   behind. **Reversing:** one line, but only before the tag is cut.
+
+## #1195 Run the Gitea live suite against Forgejo (merge review, 2026-10-18)
+
+- **The web-route fallback of `compare_diff` takes only a body that is a diff.** A 200 from the
+  web route that is not empty and does not start with `diff ` (a sign-in page reached by
+  redirect, or Forgejo's HTML compare page) is a refusal, not *no changes*. **Reversing:** low.
+- **Nothing ahead on Forgejo is read from the compare's JSON.** `total_commits` 0 and no files is
+  the empty diff; the web route answers that case with HTML (measured on 17.0.0, which the
+  contract battery's `fix/PAY-228` branch hits). **Reversing:** low.
+- **Both live-test loosenings stand.** The wait for the pushed line still ends in the outdated
+  assertion, which a stale diff fails; the delete sentence is a 403 the adapter passes through
+  without reading it. **Reversing:** low.
+- **`forgejo` is a compose service the estate file does not record** (`NOT_ASSETS` in
+  `knobas-core`'s `estate_file.rs`). A live run starts it and stops it again, so between runs it
+  is not there; an asset would also ripple into the demo, the search corpus and the frontend
+  fakes that read `testenv/estate.json`. **Reversing:** medium (an asset entry plus those counts).

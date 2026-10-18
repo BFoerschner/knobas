@@ -717,7 +717,7 @@ pub(crate) struct Commit<'a> {
 ///
 /// **The race is Gitea's to see.** It compares `sha` with the blob `branch`
 /// holds and answers a stale one 422 (*sha does not match*, measured on
-/// 1.27.3). On a 422 the file is read again on `branch`, and a blob other than
+/// 1.27.3; Forgejo 17 answers 409 with the same sentence, #1195). On a 422 the file is read again on `branch`, and a blob other than
 /// `base_sha` comes back as [`SourceError::Moved`] with that blob and its
 /// text: the write queue holds it with both versions. A 422 over a file that
 /// did not move (a new branch that already exists) stays Gitea's refusal, so
@@ -790,7 +790,10 @@ pub(crate) async fn commit_file(
             let answer: serde_json::Value = response.json().await.unwrap_or_default();
             Ok(answer["commit"]["sha"].as_str().map(ToOwned::to_owned))
         }
-        Err(error) if error.status() == Some(422) => {
+        // 422 is Gitea's answer to a stale `sha`; Forgejo answers 409 (#1195).
+        // Both go on to the re-read below, which is what decides: a file that
+        // did not move stays the server's refusal whichever status carried it.
+        Err(error) if matches!(error.status(), Some(422 | 409)) => {
             // A re-send of a commit that already landed -- its answer lost,
             // or knobas gone before the settle (ADR-0012) -- finds its own
             // text where it was going: that is the write delivered, not a

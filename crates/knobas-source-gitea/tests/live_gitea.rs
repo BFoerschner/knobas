@@ -4174,7 +4174,23 @@ async fn line_comments_are_sent_with_a_review_and_drawn_on_their_lines() {
         "IyBwYXlvdXQtc2VydmljZQpyZXZpZXdlZCBhZ2FpbiBmcm9tIGtub2JhcwpSdXN0Cg==",
     )
     .await;
-    let (readme, _) = files().await;
+    // Gitea's pull request diff is current at once; Forgejo updates a pull
+    // request's head through a queue (#1195, measured on 17.0.0: a few seconds
+    // behind the push), so read until the diff holds the pushed line.
+    let mut waited = 0;
+    let (readme, _) = loop {
+        let (readme, rest) = files().await;
+        let pushed = readme
+            .hunks
+            .iter()
+            .flat_map(|h| &h.lines)
+            .any(|l| l.text == "reviewed again from knobas");
+        if pushed || waited >= 40 {
+            break (readme, rest);
+        }
+        waited += 1;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    };
     let state: Vec<(ReviewSide, bool)> = readme
         .threads
         .iter()
@@ -4565,16 +4581,19 @@ async fn a_403_refusing_the_write_is_a_refusal_and_the_token_stays_good() {
         vec![201, 201, 201],
         "the scratch repository's set-up"
     );
-    assert_eq!(
-        said,
-        vec![
-            (403, "branch protected".to_owned()),
-            (
-                403,
-                "can not delete default or pull request target branch".to_owned()
-            ),
-        ],
-        "Gitea's sentences for a protected and a default branch's delete"
+    // The second sentence is the server's own wording: Gitea says "default or
+    // pull request target branch", Forgejo 17 only "default branch" (#1195).
+    // Nothing in the adapter reads either; both are a 403 passed through.
+    assert_eq!(said.len(), 2, "{said:?}");
+    assert_eq!(said[0], (403, "branch protected".to_owned()), "{said:?}");
+    assert_eq!(said[1].0, 403, "{said:?}");
+    assert!(
+        [
+            "can not delete default or pull request target branch",
+            "can not delete default branch",
+        ]
+        .contains(&said[1].1.as_str()),
+        "Gitea's or Forgejo's sentence for a default branch's delete: {said:?}"
     );
     assert!(
         !readonly.is_empty(),

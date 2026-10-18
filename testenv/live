@@ -7,7 +7,7 @@
 #                           volumes (Jira, Confluence: 3-hour licences)
 #   ./live status           one line per product
 #
-# <product> is gitea, teamcity, jira or confluence. `up` of a JVM product
+# <product> is gitea, forgejo (#1195), teamcity, jira or confluence. `up` of a JVM product
 # waits for the machine-wide JVM lock a live run holds (issue #690), then
 # refuses a second JVM product while one is up, naming it. `just live-up` /
 # `just live-down` are these; the `just *-live` recipes do both around their
@@ -16,7 +16,7 @@ set -euo pipefail
 # shellcheck source=testenv/live-lib.sh disable=SC1091
 . "$(cd "$(dirname "$0")" && pwd)/live-lib.sh"
 
-usage() { echo "usage: testenv/live up|down <gitea|teamcity|jira|confluence> | status" >&2; exit 2; }
+usage() { echo "usage: testenv/live up|down <gitea|forgejo|teamcity|jira|confluence> | status" >&2; exit 2; }
 
 case "${1:-}" in
   up)
@@ -32,7 +32,7 @@ case "${1:-}" in
   down) [ $# -eq 2 ] || usage; live_down "$2" ;;
   status)
     [ $# -eq 1 ] || usage
-    for p in gitea teamcity jira confluence; do
+    for p in gitea forgejo teamcity jira confluence; do
       if live_is_up "$p"; then echo "$p: up"; else echo "$p: down"; fi
     done ;;
   *) usage ;;

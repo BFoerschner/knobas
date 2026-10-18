@@ -46,6 +46,7 @@ LIVE_TESTENV=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 _live_main() {
   case "$1" in
     gitea) echo knobas-gitea ;;
+    forgejo) echo knobas-forgejo ;;
     teamcity) echo knobas-teamcity ;;
     jira) echo knobas-jira ;;
     confluence) echo knobas-confluence ;;
@@ -89,7 +90,7 @@ _live_guard_shell() {
 live_guard() {
   local product=$1 other
   _live_main "$product" >/dev/null || {
-    echo "live: unknown product '$product'; one of: gitea teamcity jira confluence" >&2
+    echo "live: unknown product '$product'; one of: gitea forgejo teamcity jira confluence" >&2
     return 1
   }
   _live_guard_shell || return 1
@@ -381,6 +382,15 @@ _live_start() {
     gitea)
       _live_gitea_up || return 1
       (cd "$LIVE_TESTENV" && ./seed-gitea.sh) ;;
+    forgejo)
+      # Forgejo (#1195): opt-in profile, port 3002, its own seed state. Not a
+      # JVM, so never refused; stopped again at the end of a run that started it.
+      _live_compose --profile forgejo up -d --wait forgejo
+      curl -fsS -m 5 -o /dev/null "${KNOBAS_FORGEJO_URL:-http://127.0.0.1:3002}/api/healthz" || {
+        echo "live: forgejo: the container is up but the host does not reach it on port 3002 (stop + up heals the OrbStack port forward)" >&2
+        return 1
+      }
+      (cd "$LIVE_TESTENV" && ./seed-forgejo.sh) || return 1 ;;
     teamcity)
       _live_compose --profile real-teamcity up -d teamcity teamcity-agent
       (cd "$LIVE_TESTENV" && ./seed-teamcity.sh) ;;
@@ -413,6 +423,7 @@ live_down() {
   _live_main "$1" >/dev/null || { live_guard "$1"; return 1; }
   case $1 in
     gitea) _live_compose stop gitea ;;
+    forgejo) _live_compose --profile forgejo stop forgejo ;;
     teamcity) _live_compose --profile real-teamcity stop teamcity teamcity-agent ;;
     jira | confluence)
       # `rm` and the two named volumes, NOT `down -v`. A `down` with services
@@ -475,7 +486,9 @@ live_session() {
   # for it, not meet the refusal that run's product causes.
   if live_is_jvm "$1"; then
     live_lock_hold "${2:-live_session-$1}" || exit 1
-  elif [ "$1" = gitea ]; then
+  elif [ "$1" = gitea ] || [ "$1" = forgejo ]; then
+    # Forgejo shares the Gitea lock (#1195): the suite and its sweeps are the
+    # same, and two Gitea-suite runs at once are what #724 ended.
     live_lock_hold "${2:-live_session-$1}" gitea || exit 1
   fi
   live_guard "$1" || exit 1
@@ -483,7 +496,11 @@ live_session() {
   local need kept
   kept=$(live_left_up "$1")
   live_up "$1" || exit 1
-  eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
+  if [ "$1" = forgejo ]; then
+    eval "$(cd "$LIVE_TESTENV" && ./seed --env-forgejo)"
+  else
+    eval "$(cd "$LIVE_TESTENV" && ./seed --env)"
+  fi
   if [ -n "$LIVE_PUT_BACK" ]; then
     echo "live: $1 is up for this run; $LIVE_PUT_BACK will be stopped at its end"
   elif [[ " $kept " != *" $1 "* ]]; then

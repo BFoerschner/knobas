@@ -1418,6 +1418,14 @@ _require-live-env SOURCE +NAMES:
 
 # The Gitea adapter against the REAL pinned container in `testenv/`.
 #
+# FORGEJO (#1195, spec #1192 story 18): `just gitea-live forgejo` is the one
+# switch. It runs this same recipe -- the adapter suite, the three start-work
+# tests and the clone test -- against the pinned Forgejo container (profile
+# `forgejo`, port 3002, its own volume and seed state, `seed-forgejo.sh`)
+# instead of Gitea. Forgejo is stopped again at the end if the run started it;
+# Gitea is left alone. It takes the Gitea lock. `gitea-live-capped` and
+# `start-work-live` have no Forgejo form.
+#
 # That container is this adapter's contract source (interfaces §4.2). The
 # wiremock stand-in the rest of its suite runs against exists only so
 # `just check` and CI stay docker-free (roadmap §3) -- it encodes one person's
@@ -1493,11 +1501,12 @@ _require-live-env SOURCE +NAMES:
 # repository over http (admitted by the test-only door; the app clones over
 # https and ssh only, ADR-0023), refuses a folder that is not a clone and a bad
 # name, and stops a clone. Read-only at Gitea: nothing to take back.
-gitea-live:
+gitea-live forge="gitea":
     #!/usr/bin/env bash
     set -euo pipefail
+    case {{ quote(forge) }} in gitea | forgejo) ;; *) echo "gitea-live: forge must be gitea or forgejo, not '{{ forge }}'" >&2; exit 2 ;; esac
     . testenv/live-lib.sh
-    live_session gitea gitea-live
+    live_session {{ forge }} gitea-live
     just _require-live-env {{ quote(gitea_live_env) }} KNOBAS_GITEA_URL KNOBAS_GITEA_TOKEN
     env -u RUSTUP_TOOLCHAIN cargo test -p knobas-source-gitea --test live_gitea \
       -- --ignored --nocapture --test-threads=1

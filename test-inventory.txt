@@ -2609,9 +2609,13 @@ knobas-source-gitea	test/it	view_branch::a_branch_without_statuses_draws_no_chec
 knobas-source-gitea	test/it	view_branch::a_branchs_reads_are_made_at_the_same_time
 knobas-source-gitea	test/it	view_branch::a_branchs_tip_statuses_are_its_checks
 knobas-source-gitea	test/it	view_branch::a_feature_branch_reads_ahead_and_behind_its_default_branch
+knobas-source-gitea	test/it	view_branch::a_forgejo_compare_with_nothing_ahead_is_the_empty_diff
+knobas-source-gitea	test/it	view_branch::a_forgejo_private_repository_diff_is_refused_not_drawn_empty
 knobas-source-gitea	test/it	view_branch::a_mirrors_branch_proposes_nothing_and_says_why_it_takes_no_branch_writes
 knobas-source-gitea	test/it	view_branch::a_new_branch_from_a_branch_starts_at_it_in_its_repository
 knobas-source-gitea	test/it	view_branch::a_section_read_carries_no_toolbar
+knobas-source-gitea	test/it	view_branch::a_server_that_answers_the_compare_as_json_is_read_from_the_web_route
+knobas-source-gitea	test/it	view_branch::a_web_route_page_that_is_no_diff_is_refused_not_drawn_empty
 knobas-source-gitea	test/it	view_branch::behind_falls_back_to_the_reverse_compare_without_a_count
 knobas-source-gitea	test/it	view_branch::behind_is_read_as_a_count_not_as_the_reverse_compare
 knobas-source-gitea	test/it	view_branch::deleting_an_unmerged_branch_says_what_only_its_sha_will_reach
@@ -2691,6 +2695,7 @@ knobas-source-gitea	test/it	view_rows::a_list_that_ended_on_its_own_has_no_note
 knobas-source-gitea	test/it	view_rows::a_list_that_stopped_paging_ends_with_where_the_rest_is
 knobas-source-gitea	test/it	view_rows::one_commit_is_one_row_in_every_view_that_lists_it
 knobas-source-gitea	test/it	write::a_403_refusing_the_write_and_a_403_refusing_the_token_are_different_faults
+knobas-source-gitea	test/it	write::a_409_over_a_file_that_did_not_move_is_a_refusal
 knobas-source-gitea	test/it	write::a_422_over_a_file_that_did_not_move_is_a_refusal
 knobas-source-gitea	test/it	write::a_branch_is_created_from_the_ref_that_was_named
 knobas-source-gitea	test/it	write::a_branch_is_deleted_by_its_own_path
@@ -2716,6 +2721,7 @@ knobas-source-gitea	test/it	write::a_review_aimed_at_a_repository_is_refused_bef
 knobas-source-gitea	test/it	write::a_review_carries_its_verdict_as_gitea_event_and_its_body
 knobas-source-gitea	test/it	write::a_review_of_ones_own_pull_request_is_refused_with_gitea_sentence
 knobas-source-gitea	test/it	write::a_reviews_line_comments_land_on_the_side_they_name
+knobas-source-gitea	test/it	write::a_stale_base_answered_409_comes_back_moved_too
 knobas-source-gitea	test/it	write::a_stale_base_comes_back_moved_with_what_gitea_holds_now
 knobas-source-gitea	test/it	write::a_write_gitea_would_repeat_is_sent_once_and_a_guarded_one_is_retried
 knobas-source-gitea	test/it	write::an_approval_says_approved_rather_than_filing_a_pending_review

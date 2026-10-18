@@ -31,7 +31,13 @@ ADMIN="$ADMIN_USER:$ADMIN_PASS"
 PEOPLE_PASS=tidewater-dev
 ORG=tidewater
 FIXTURE=${FIXTURE:-../fixtures/tidewater/work.json}
-STATE=seed-state.json
+# FORGEJO (#1195): the same seed fills a Forgejo container. KNOBAS_SEED_SERVICE
+# names the compose service and KNOBAS_SEED_CLI its admin binary; the state goes
+# to KNOBAS_SEED_STATE so Gitea's token and id map in seed-state.json are never
+# touched by a Forgejo seed. All three default to Gitea.
+SERVICE=${KNOBAS_SEED_SERVICE:-gitea}
+CLI=${KNOBAS_SEED_CLI:-gitea}
+STATE=${KNOBAS_SEED_STATE:-seed-state.json}
 : "${SEED_EXACT_PR_NUMBERS:=1}"
 
 say() { echo "seed-gitea: $*"; }
@@ -77,7 +83,7 @@ jqf() { jq -r "$1" "$FIXTURE"; }
 api "$ADMIN" GET /user
 if [ "$API_STATUS" != "200" ]; then
   say "creating the admin account $ADMIN_USER"
-  docker compose exec -T -u git gitea gitea admin user create \
+  docker compose exec -T -u git "$SERVICE" "$CLI" admin user create \
     --admin --username "$ADMIN_USER" --password "$ADMIN_PASS" \
     --email "$ADMIN_USER@tidewater.test" --must-change-password=false >/dev/null 2>&1 || true
   api "$ADMIN" GET /user
