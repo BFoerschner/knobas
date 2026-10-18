@@ -20,6 +20,7 @@ mod discovered_config;
 mod flush_all_isolation;
 mod jira_views;
 mod progress;
+mod role_check;
 mod run;
 mod run_log;
 mod run_log_recovery;
