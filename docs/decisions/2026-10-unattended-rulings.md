@@ -5453,10 +5453,16 @@ Implementer (PR for #1172). ADR-0027.
   shown and sorted) stays default. **Reversing:** low (one more `alter column` per column).
 - **`0047`'s five indexes go.** The keys' own indexes are bytewise now, so the second ones only
   cost a btree insert per write. **Reversing:** low.
-- **`0050` handles a generated column of `sync.item` that reads `entity_id`, generically.** Open
-  PR #1178's `0048` makes `fts` read `entity_id`, and PostgreSQL will not change a column under a
-  generated one. Whichever PR lands first, `0048` runs before `0050`, so `0050`'s `do` block
-  drops such a column with its indexes and adds it back from the catalog's own expression. Tried
-  on a 22k clone with `0048` applied: 1.7 s, same `fts` for every row. **Reversing:** low.
+- **`0050` handles a generated column of `sync.item` that reads `entity_id`, generically.**
+  #1178's `0048` (merged while this was built) makes `fts` read `entity_id`, and PostgreSQL will
+  not change a column under a generated one. `0050`'s `do` block drops such a column with its
+  indexes and adds it back from the catalog's own expression, so it does not restate `0048`'s.
+  On a 22k clone with `0048` applied: 1.7 s, the same `fts` for every row. **Reversing:** low.
+- **A context's epic children read `sync.item`, not `sync.live_item`.** The 22k probe's stored
+  context room went from a 3 ms warm median (110 ms cold) to 26 ms. `member_ids`' third seed,
+  through the view on tables never analyzed, is planned as every entity scanned and a probe of
+  `sync.item` for each; before, the cold run paid 110 ms of that and later runs got a cheaper
+  generic plan. Reading `sync.item` by source with `live_by_key!` took 2.3 ms on a clone. The
+  same seed in `held_by_any_context!` is unchanged (not slow on the probe). **Reversing:** low.
 - **A sort by id becomes bytewise.** No user-visible sort is by id alone; ids are tiebreakers
   and walk orders. It now agrees with Rust's `str` order. **Reversing:** n/a.

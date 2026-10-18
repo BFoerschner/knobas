@@ -15,9 +15,9 @@
   - Drops and creates again `sync.live_item`, `knobas.confirmed_link` and
     `knobas.proposed_link`, column for column as they were: PostgreSQL will not change a column
     under a view.
-  - A stored generated column of `sync.item` that reads `entity_id` (none before this migration;
-    `fts` once open PR #1178's `0048` lands) is dropped with its indexes and added back with the
-    same expression and indexes, in a `do` block.
+  - A stored generated column of `sync.item` that reads `entity_id` (`fts`, since `0048`) is
+    dropped with its indexes and added back with the same expression and indexes, read from the
+    catalog in a `do` block: PostgreSQL will not change a column under a generated one.
 
   **Why.** `initdb` takes the database's collation from its environment, `en_US.UTF-8` on every
   machine measured, and a btree probe on an id calls `strcoll` at each step: about 4.7 µs a probe
@@ -27,8 +27,8 @@
 
   **Cost.** No table is rewritten for a collation change; every index on a changed column is
   rebuilt and the foreign keys are re-checked. On the 22k probe's mirror (23,500 entities,
-  42,000 parent rows) the file ran in 0.86 s, and in 1.70 s after `0048`'s generated `fts`, whose
-  drop and re-add rewrites `sync.item` (same `fts` for every row, by md5). Each write saves the
+  42,000 parent rows) the file ran in 1.70 s with `0048` applied, the drop and re-add of `fts`
+  rewriting `sync.item` (the same `fts` for every row, by md5), and in 0.86 s without it. Each write saves the
   second btree insert `0047` cost.
 
   **The readers.** `knobas_core::signals` compares with plain `=` (`same_key!` and

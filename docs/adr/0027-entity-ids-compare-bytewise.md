@@ -21,6 +21,6 @@ Decided 2026-10-18, unattended (#1172, recorded in `docs/decisions/2026-10-unatt
 
 ## Consequences
 
-- One migration: `0050` drops `0047`'s five indexes and changes 34 columns. On the probe's 22,000-item mirror it ran in 0.9 s, or 1.7 s when `sync.item` has a stored generated column that reads `entity_id`: that column is dropped and added back, which rewrites the table once. PostgreSQL will not change a column under a view or a generated column, so the three views are dropped and created again.
+- One migration: `0050` drops `0047`'s five indexes and changes 34 columns. On the probe's 22,000-item mirror it ran in 1.7 s. `sync.item`'s stored `fts` reads `entity_id` (since `0048`), so it is dropped and added back, which rewrites the table once; without that it took 0.9 s. PostgreSQL will not change a column under a view or a generated column, so the three views are dropped and created again.
 - A recursive CTE whose first term is default-collated text and whose recursive term reads an id column fails at plan time (`recursive query ... has collation "default" in non-recursive term but collation "C" overall`). The first term casts to `collate "C"`: `link_set_rule_tickets!` does.
 - An explicit `collate "default"` on an id makes that comparison use `strcoll` again and lose the key's index. No read writes one any more.

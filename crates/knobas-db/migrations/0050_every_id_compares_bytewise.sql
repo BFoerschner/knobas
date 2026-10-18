@@ -40,15 +40,16 @@
 -- ## Cost
 --
 -- Changing only the collation does not rewrite a table, but every index on a
--- changed column is rebuilt. On the probe's 22,000-item mirror this file ran
--- in well under a second (see the 10.8 entry for the measurement); the
--- foreign keys are re-checked.
+-- changed column is rebuilt and the foreign keys are re-checked. On the
+-- probe's 22,000-item mirror this file ran in 1.7 s, most of it rewriting
+-- `sync.item` for `fts` (below).
 --
 -- PostgreSQL will not change a column under a view or a stored generated
 -- column. The three views are dropped and created again, column for column as
--- `0002`, `0007` and `0012` left them. A generated column of `sync.item` that
--- reads `entity_id` is dropped with its indexes and added back with the same
--- expression and indexes (the block below), which rewrites `sync.item` once.
+-- `0002`, `0007` and `0012` left them. A stored generated column of
+-- `sync.item` that reads `entity_id` (`fts`, since `0048`) is dropped with
+-- its indexes and added back with the expression and indexes the catalog
+-- holds (the block below), which rewrites `sync.item` once.
 
 drop view sync.live_item;
 drop view knobas.confirmed_link;
