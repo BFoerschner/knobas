@@ -88,6 +88,8 @@ macro_rules! link_sets_applying {
 macro_rules! link_set_rule_tickets {
     () => {
         "rule_down(rule, id, d) as (
+        -- `collate \"C\"`: the recursive term reads `item_parent.entity_id`,
+        -- an id in `C` (ADR-0027), and both terms must agree.
         select r.rule, r.value collate \"C\", 0 from rules r where r.kind in ('epic', 'parent', 'manual')
         union
         select w.rule, ip.entity_id, w.d + 1
