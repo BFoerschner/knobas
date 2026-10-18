@@ -114,7 +114,7 @@ Each source syncs on an interval measured from the end of its previous run.
 The default is five minutes. *Sync now* returns as soon as the run is recorded.
 
 Every run holds its own database connection, outside the pools the window
-uses, and at most three runs go at once. A slow source cannot take a
+uses, and at most five runs go at once. A slow source cannot take a
 connection the UI needs. A failure backs the source off 1, 2, 5, 15, then 60
 minutes. A 401 does not retry at all: only a new credential fixes it, and
 retrying a rejected credential on a timer can lock the account.

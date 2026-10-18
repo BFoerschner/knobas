@@ -423,6 +423,68 @@ async fn concurrent_runs_never_exceed_the_cap() {
     retire(&pool, &ids).await;
 }
 
+/// Six due sources whose runs block: five run, and the sixth starts only when
+/// one of them finishes (#1189). The literal five, not `SYNC_CONCURRENCY`, so
+/// a change of the constant has to change this too.
+///
+/// Also the restated pool invariant: the five held runs take no connection from
+/// the scheduler's bookkeeping pool, so all of it is still free to acquire.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn six_blocked_runs_five_go_and_the_sixth_waits() {
+    let _serial = serially().await;
+    let (pool, sched_pool) = pools().await;
+    let ids = seed(&pool, 6).await;
+    let bookkeeping = sched_pool.clone();
+    let (deps, inside) = deps_watching_the_adapter(sched_pool, Duration::from_millis(1500)).await;
+    assert_eq!(SYNC_CONCURRENCY, 5);
+
+    let scheduler = Scheduler::start(deps).await.unwrap();
+    for id in &ids {
+        scheduler
+            .trigger(id, SyncTrigger::Manual, None)
+            .await
+            .unwrap();
+    }
+    for _ in 0..100 {
+        if inside.load(Ordering::SeqCst) == 5 {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert_eq!(
+        inside.load(Ordering::SeqCst),
+        5,
+        "five runs are in the adapter"
+    );
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(
+        inside.load(Ordering::SeqCst),
+        5,
+        "the sixth waits while five are blocked"
+    );
+
+    let mut held = Vec::new();
+    for _ in 0..knobas_sync::scheduler::SYNC_POOL_SIZE {
+        held.push(
+            tokio::time::timeout(Duration::from_secs(2), bookkeeping.acquire())
+                .await
+                .expect("the runs hold no bookkeeping connection")
+                .unwrap(),
+        );
+    }
+    drop(held);
+
+    for id in &ids {
+        await_source_idle(&pool, id).await;
+    }
+    scheduler.shutdown().await;
+    for id in &ids {
+        let row = &run_log::list(&pool, Some(id), 1).await.unwrap()[0];
+        assert!(row.finished_at.is_some(), "{id} never finished");
+    }
+    retire(&pool, &ids).await;
+}
+
 /// P3: `sync_now` returns the run id at once. A second *Sync now* while the
 /// first is still going must not start a second run of the same source -- the
 /// advisory lock would serialise them anyway, and the user would be watching
