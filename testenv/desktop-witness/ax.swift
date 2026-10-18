@@ -247,6 +247,37 @@ func press(pid: pid_t, label: String) -> Int32 {
     return 0
 }
 
+/// Close the application's one window with its close button (#1084).
+///
+/// For the window a driver made by accident of how macOS hands over the
+/// screen: `open -a Finder` on a Finder with no window open makes one, and the
+/// capture driver needs `open` because an application a background process
+/// merely activates is refused the screen. By the window's
+/// `AXCloseButton` attribute, because that button carries no name to `press`.
+///
+/// **Exactly one window or nothing**, like `single`: with a second one -- a
+/// window the reader opened meanwhile -- which to close is not this helper's
+/// guess to make.
+func closeWindow(pid: pid_t) -> Int32 {
+    let found = windows(of: pid)
+    guard found.count == 1 else {
+        FileHandle.standardError.write(
+            Data("ax: pid \(pid) has \(found.count) windows, wanted 1 to close\n".utf8))
+        return 1
+    }
+    guard let button = element(found[0], kAXCloseButtonAttribute as String) else {
+        FileHandle.standardError.write(Data("ax: the window of pid \(pid) has no close button\n".utf8))
+        return 1
+    }
+    let status = AXUIElementPerformAction(button, kAXPressAction as CFString)
+    guard status == .success else {
+        FileHandle.standardError.write(
+            Data("ax: could not press the close button (AXError \(status.rawValue))\n".utf8))
+        return 1
+    }
+    return 0
+}
+
 /// The application's windows, one per line: `window<tab><its title>`.
 ///
 /// **The question `find` cannot answer, which is the whole of #548.**
@@ -464,6 +495,8 @@ case "values" where arguments.count == 2 && integer(1) != nil:
     status = values(pid: pid_t(integer(1)!))
 case "windows" where arguments.count == 2 && integer(1) != nil:
     status = windowTitles(pid: pid_t(integer(1)!))
+case "close-window" where arguments.count == 2 && integer(1) != nil:
+    status = closeWindow(pid: pid_t(integer(1)!))
 case "frontmost" where arguments.count == 1:
     status = frontmost()
 case "dump" where arguments.count == 3 && integer(1) != nil && integer(2) != nil:
@@ -493,6 +526,7 @@ default:
                    ax find <pid> <label>
                    ax values <pid>
                    ax windows <pid>
+                   ax close-window <pid>
                    ax frontmost
                    ax dump <pid> <depth>
                    ax focus <pid> <label>

@@ -746,6 +746,14 @@ if [ "$(uname -s)" = Darwin ] && command -v swiftc >/dev/null; then
         check "the window list refuses a process with no window" yes yes
     fi
 
+    # `close-window` closes exactly one window or nothing (#1084): against a
+    # process with none it must refuse rather than report a close.
+    if "$helper/ax" close-window $$ >/dev/null 2>&1; then
+        check "close-window refuses a process with no window" yes no
+    else
+        check "close-window refuses a process with no window" yes yes
+    fi
+
     # An identifier nothing claims: the lookup must refuse rather than print a
     # path the harness would then try to launch.
     if "$helper/ax" registered-path dev.knobas.nothing-claims-this >/dev/null 2>&1; then

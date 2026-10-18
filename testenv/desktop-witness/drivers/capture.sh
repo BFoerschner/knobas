@@ -250,9 +250,23 @@ say "the job is open, so something is in front of the reader"
 # --- 3. somebody else's screen -----------------------------------------------
 
 say "bringing $OTHER_APP to the front"
-open -a "$OTHER_APP"
+# `open -a` and not `ax activate` alone: macOS refuses to hand the screen to an
+# application a background process merely activates (measured 2026-10-18:
+# *did not become frontmost*). But `open -a` on a Finder with no window open
+# makes one, and a run left it on the reader's screen the same day -- so a
+# Finder that had no window gets the one this run made closed again on exit.
 other_pid=$(pgrep -x "$OTHER_APP" | head -1 || true)
 [ -n "$other_pid" ] || die "$OTHER_APP is not running, so there is nothing to put in front"
+if ! "$ax" windows "$other_pid" >/dev/null 2>&1; then
+    close_the_window_we_made() {
+        # `ax close-window` closes exactly one window or none: with a second
+        # (one the reader opened meanwhile) nothing is closed.
+        "$ax" close-window "$other_pid" ||
+            say "could not close the $OTHER_APP window this run opened"
+    }
+    trap close_the_window_we_made EXIT
+fi
+open -a "$OTHER_APP"
 "$ax" activate "$other_pid" || die "could not bring $OTHER_APP to the front"
 wait_until "$OTHER_APP never became frontmost, so the keystroke below would not have been global" \
     is_frontmost "$OTHER_BUNDLE"
