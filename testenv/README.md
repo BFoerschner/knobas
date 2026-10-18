@@ -1598,23 +1598,39 @@ after which the box must be gone from the tree, because `Launcher.svelte`
 renders the overlay under `{#if open}` and a closed launcher takes its input
 out of the DOM.
 
-`open-in-editor` (#501) is the spawn: it writes a stub executable and a fake
-clone into a scratch directory, types that directory into the **Clones root**
-field and `<stub> {path}` into the **Open in VS Code** field in Settings,
-opens a repo detail through the launcher, presses *Open in VS Code*, and
-asserts that the stub ran with **exactly one** argument and that it is the
-checkout path. Exactly one is the assertion ADR-0016 asks for: what the
-program received is what the disk answered, and nothing the mirror holds.
+`open-in-editor` (#501, ported to the ticket-first shell by #1084) is the
+spawn: it writes a stub executable and a fake clone into a scratch directory,
+and in Settings › *Checkouts and Open in…* sets the **Clones root** to that
+directory (*Change…*, *Save*) and adds an application whose command is
+`<stub> {path}` (*Edit applications…*, *Add an application…*). It opens the
+repository payout-service through the launcher, waits for its *Cloned at* line
+to name the clone, picks the new application from *Open in…* (the menu's last
+application, three steps up from the focused default), and asserts that the stub ran with
+**exactly one** argument and that it is the checkout path. Exactly one is the
+assertion ADR-0016 asks for: what the program received is what the disk
+answered, and nothing the mirror holds. Each run leaves its application in the
+demo profile's list. The repository's page and not the job's Code section
+(which draws the same `TfOpenIn`): measured 2026-10-18, the demo's PAY-231
+reaches its branch only through a *proposed* link, so the job's Code section
+reads *Nothing connected* until a reader accepts it. And Tickets rather than ⌘K
+for the capture driver's job: the same day the demo profile's launcher
+answered `PAY-231` with pages, commits and a branch, and `#PAY-231` with no
+match at all.
 
-`capture` (#503) is the **global** shortcut, which is the one keystroke in
-knobas that has to arrive while knobas is not the application being typed at.
-It types a combination into the **Shortcut** field in Settings and waits for
-the section to say *Registered.*, opens a detail so the capture has a
-foreground, brings **Finder** to the front and asserts it is there, sends the
-combination, asserts the capture window is up with the caret in its box, types
-a line, presses *Open in knobas*, and asserts that knobas is frontmost again,
-the capture window is gone, and the note is open with `CAPTURED FROM` in its
-links panel.
+`capture` (#503, ported by #1084) is the **global** shortcut, which is the one
+keystroke in knobas that has to arrive while knobas is not the application
+being typed at. In Settings › *Notes and capture* it turns notes on if they
+hide (the shortcut registers nothing while they do), sets the combination in
+the *Change…* dialog (#1086, clearing a stored one first) and waits for the row
+to say *Opens a small window over whatever you are doing.*, and counts the
+notes. It opens the job PAY-231 from Tickets (filter by key, the preview's
+job link) so the capture has a foreground, brings
+**Finder** to the front and asserts it is there, sends the combination,
+asserts the capture window is up with the caret in its box, types a line,
+presses *Open in knobas*, and asserts that knobas is frontmost again, the
+capture window is gone, and Settings › *Notes and capture* is on screen
+counting one note more. The note's *captured from* link is no longer read off
+a window: a note has no view while notes hide (D10, #1085).
 
 **The capture window is counted as a window, on both sides of the keystroke**
 (#548). `ax windows` lists what knobas has open, one line per window with its
@@ -1629,10 +1645,10 @@ answer that could not be read is never zero.
 Every accessible name any driver acts on is pinned against the file that
 carries it by `just witness-unit`, so an edit to one reads as a stale driver
 at the gate rather than as a failed run minutes into somebody's screen. **A
-name is pinned as it is written and used as it is rendered**: WebKit names an
-element by rendered text, so a `.lab` label the stylesheet uppercases is
-`SHORTCUT` on screen and `Shortcut` in the markup. `rendered_label` is the one
-place that rule lives, and `witness-unit` pins the stylesheet rules behind it.
+name is rendered text**: WebKit names an element by what is drawn, so the rooms
+UI's uppercased `.lab` labels arrived as `SHORTCUT` where the markup said
+`Shortcut`. The ticket-first shell transforms no name a driver uses, and
+`witness-unit` pins that `tf.css` has no `text-transform` (#1084).
 
 **What a pin cannot say, and #547 is the bill for it.** A pin measures that a
 string is still in a file. It says nothing about which *attribute* the
@@ -1677,7 +1693,7 @@ merely begun, its reading of what the record says, and whether the stub's path
 can go into a command template without the quotes it may not type (#547) --
 and the four `capture` is: the title a typed paragraph gives its note, the
 whole-line match its readings are found by, the reading of `ax frontmost`'s
-answer, and the rendered-name rule above, which both drivers share. Four more
+answer, and `notes_total`, its reading of the section's note count (#1084). Four more
 belong to neither: `reading_verdict` and `waypoint_verdict`, which say whether
 a wait witnessed the step before it or was merely true on both sides of it, and
 `window_count` and `count_verdict` (#548), which read a list of windows and

@@ -1,41 +1,42 @@
 #!/usr/bin/env bash
-# The third desktop-witness driver (issue #503): the global shortcut opens the
-# capture window over another application, and what is typed there becomes a
-# note with the links the room it was captured in gives it.
+# The third desktop-witness driver (issue #503, ported to the ticket-first
+# shell by #1084): the global shortcut opens the capture window over another
+# application, and what is typed there becomes a note.
 #
 # Why this feature is witnessed here and not in a suite. A **global** shortcut
 # is the one keystroke in knobas that has to arrive while knobas is not the
 # application being typed at. `capture_ipc.rs` proves what is stored and what is
-# reported, and `capture.test.svelte.ts` proves what the window does with a
-# keystroke -- both against ports, with no window server, no key and no other
-# application anywhere in them. What is left over is the whole of the feature's
-# premise, and the only witness for it is a real Mac with something else in
-# front (ADR-0016, and the v1.5 grilling's ruling on what a witness is).
+# reported, and `capture.test.svelte.ts` what the window does with a keystroke
+# -- both against ports, with no window server, no key and no other application
+# in them. The only witness for the premise is a real Mac with something else
+# in front (ADR-0016).
 #
 # What it asserts, in order:
 #
-#   1. a shortcut typed into the real settings field and stored by the real
-#      backend, reported as **registered** rather than refused;
-#   2. a ticket opened, so the capture has a **foreground** to attach;
-#   3. **Finder frontmost**, asserted and not assumed, because a capture
-#      shortcut that only worked while knobas had the keyboard would pass every
-#      other line of this file;
+#   1. in Settings › Notes and capture, notes shown (the shortcut registers
+#      nothing while they hide, D10) and a shortcut typed into the *Change…*
+#      dialog (#1086) and stored by the real backend, reported as registered
+#      rather than refused -- and the note count as it stands;
+#   2. the job PAY-231 opened, so the capture has a foreground to attach;
+#   3. **Finder frontmost**, asserted and not assumed;
 #   4. the keystroke opening the capture window -- **a window of knobas' own
 #      that was not there one keystroke earlier** (#548) -- with the caret in
 #      its box;
-#   5. a line typed, and *Open in knobas* pressed;
-#   6. knobas frontmost again, the capture window gone, and the note open with
-#      *captured from* in its links panel.
+#   5. a line typed, *Saved as a note.*, and *Open in knobas* pressed;
+#   6. knobas frontmost again, the capture window gone, and Settings › Notes
+#      and capture on screen -- where a note opens while notes hide (#1085) --
+#      counting **one note more** than step 1 did.
 #
-# What it does **not** assert, said here rather than left to be discovered:
-# that Escape closes the window (the same exit as the button, minus the
-# reveal -- `CaptureWindow.test.svelte.ts` drives both keys); that a combination
-# the operating system refuses reads as refused (that needs an application
-# holding one, which is a machine this driver cannot arrange); **`captured-in`**,
-# which needs a stored room the `--demo` profile does not carry and which the
-# spec pins at another seam -- see step 2; and **which entity the link points
-# at** -- see the note at the foot, which says why a driver that read the whole
-# window for it would pass with no link drawn. **None of the three is a debt.**
+# What it does **not** assert: Escape closing the window
+# (`CaptureWindow.test.svelte.ts`), a combination the system refuses (needs an
+# application holding one), and the note's *captured from* link -- a note has
+# no view while notes hide, so no window draws its links; the link is pinned at
+# `capture_ipc.rs` and `capture.test.svelte.ts`, which is where spec #491's
+# stream map puts it.
+#
+# What it leaves behind on the demo profile: notes shown, this shortcut stored,
+# and one note per run. A run that finds the shortcut already stored clears it
+# first, so *Save* is never pressed on a field that would not change.
 #
 # Run by testenv/desktop-witness.sh, which passes it a compiled helper, the pid
 # of the one running instance and the bundle it launched.
@@ -48,61 +49,42 @@ cd "$(dirname "$0")/../.."
 ax=${KNOBAS_WITNESS_AX:?the harness passes this}
 pid=${KNOBAS_WITNESS_PID:?the harness passes this}
 
-# The accessible names this driver acts on. Each is pinned against the file that
-# carries it by `just witness-unit`, in the shape #500 pinned the launcher's
-# `aria-label` and #501 pinned the settings fields: nothing in the app knows a
-# driver exists, so an edit to one of these would otherwise fail a *correct* app
-# minutes into a run with no clue in the failure.
-readonly SETTINGS_BUTTON='Settings'
-# The **rendered** name, because this field is named by a `<label class="lab">`
-# and `.lab` is uppercased by the stylesheet -- see `rendered_label`, and the
-# measurement behind it. Every other name in this file is an `aria-label`,
-# which is not rendered text and arrives spelled as it is written.
-SHORTCUT_FIELD=$(rendered_label 'Shortcut')
-readonly SHORTCUT_FIELD
-readonly SAVE_SHORTCUT='Save capture shortcut'
-readonly CAPTURE_BOX='Capture'
-# The **window**'s title, which is `capture.rs`'s `.title("Capture")` and a
-# different fact from the box's `aria-label` above, even though the two are the
-# same word. Spelled twice rather than once because they are two names on two
-# things, from two files, and a rename of either must not silently re-point the
-# other: this one is what `ax windows` answers with and what step 4 waits on,
-# the one above is what the caret is checked against.
+# The accessible names this driver presses, fills and reads. Each is pinned
+# against the file that carries it by `just witness-unit`. The new shell
+# uppercases none of them.
+readonly SETTINGS_BUTTON='Settings'                       # TfTopBar.svelte
+readonly NOTES_SECTION='Notes and capture'                # settings/settings.ts
+readonly SHOW_NOTES='Show notes'                          # TfNotesSection.svelte
+readonly CHANGE_SHORTCUT='Change capture shortcut'
+readonly SHORTCUT_FIELD='Capture shortcut'
+readonly CLEAR='Clear'
+readonly SAVE='Save'
+# Readings (values, not names) the section draws.
+readonly HIDDEN_LINE='Inactive while notes are hidden.'
+readonly REGISTERED_LINE='Opens a small window over whatever you are doing.'
+readonly NOT_SET='Not set'
+readonly YOUR_NOTES='Your notes'
+readonly OPEN_CODE_VIEW='Open Code view'                  # job/TfCodeSection.svelte
+readonly TICKETS_LINK='Tickets'                           # TfTopBar.svelte's nav
+readonly TICKETS_FILTER='Filter by key, summary, epic or person'  # tickets/TicketsPage.svelte
+# The preview's button, worded by the ticket's state (`tickets.ts`'
+# `previewAction`); each is a link to the job.
+readonly JOB_LINKS=('Start work' 'Resume work' 'Open job')
+readonly CAPTURE_BOX='Capture'                            # capture/CaptureWindow.svelte
+# The **window**'s title (`capture.rs`'s `.title("Capture")`), a different fact
+# from the box's `aria-label` above though the same word (#548).
 readonly CAPTURE_WINDOW='Capture'
 readonly OPEN_IN_MAIN='Open in knobas'
-readonly QUERY_BOX='Search or act'
 
-# The reading a note's links panel groups a `captured-from` link under
-# (`detail/relations.ts`). The **note's** side of it; the other end reads
-# `captured from here`, which is why `has_reading` matches whole lines.
-# Rendered, for the reason the field above is: the panel's group heading is a
-# bare `<span>` inside `.row.hd`, which the stylesheet uppercases.
-READING_FROM=$(rendered_label 'captured from')
-readonly READING_FROM
-# The heading every detail's links panel carries, `.lab` and so uppercased.
-LINKS_PANEL=$(rendered_label 'Linked items')
-readonly LINKS_PANEL
-
-# The shortcut this run sets, and the keystroke that is the same combination.
-#
-# ⌘⌥⇧K rather than something shorter: this is registered **globally**, so it is
-# taken away from every application on the machine for the length of the run,
-# and three modifiers is the cheapest way to be sure the one it is taken from is
-# nobody. `CmdOrCtrl` is the spelling the field's own placeholder uses and the
-# one `global_hotkey` maps to ⌘ on macOS.
+# ⌘⌥⇧K: registered globally for the length of the run, so three modifiers.
 readonly ACCELERATOR='CmdOrCtrl+Alt+Shift+K'
 readonly KEY_K=40
 readonly KEY_A=0
-readonly KEY_RETURN=36
 
-# The ticket the demo profile carries, opened so the capture has a foreground.
-readonly TICKET_QUERY='PAY-231'
-
-# The application brought to the front before the keystroke. Finder, because
-# every Mac has one, it is always running, and it owns no interesting keys.
+readonly JOB_QUERY='PAY-231'
+readonly JOB_SUMMARY='Retry failed SEPA payouts'          # fixtures/tidewater/work.json
 readonly OTHER_APP=Finder
 readonly OTHER_BUNDLE=com.apple.finder
-
 readonly SETTLE_SECONDS=8
 
 say() { printf 'capture: %s\n' "$*"; }
@@ -110,11 +92,8 @@ die() {
     printf 'capture: FAILED -- %s\n' "$1" >&2
     shift
     for line in "$@"; do printf 'capture:   %s\n' "$line" >&2; done
-    # `|| true` on all three, and load-bearing rather than defensive: `ax
-    # focused` exits 1 exactly when nothing has focus, which is one of the
-    # likelier ways to arrive here, and under `pipefail` that would kill this
-    # function before the dumps -- so the one run with the diagnosis in reach
-    # would print a third of it.
+    # `|| true` on each: `ax focused` exits 1 when nothing has focus, and under
+    # `pipefail` that would kill this before the dumps.
     printf 'capture: whatever is frontmost:\n' >&2
     { "$ax" frontmost 2>&1 || true; } | sed 's/^/capture:   /' >&2
     printf 'capture: the focused element at that moment:\n' >&2
@@ -124,14 +103,10 @@ die() {
     printf 'capture: every string on knobas'"'"' windows:\n' >&2
     { "$ax" values "$pid" 2>&1 || true; } | sed 's/^/capture:   /' >&2
     printf 'capture: the windows as the accessibility tree sees them:\n' >&2
-    { "$ax" dump "$pid" 8 2>&1 || true; } | sed 's/^/capture:   /' >&2
+    { "$ax" dump "$pid" 12 2>&1 || true; } | sed 's/^/capture:   /' >&2
     exit 1
 }
 
-# wait_until <description> <predicate...> -- poll for a settled screen.
-# A keystroke is asynchronous twice over: the window server delivers it, and
-# then Svelte's `tick()` redraws. Neither is instant and neither is slow, so
-# this polls rather than sleeping a guessed amount.
 wait_until() {
     local what=$1
     shift
@@ -143,10 +118,6 @@ wait_until() {
     die "$what"
 }
 
-# How many elements carry a label, as a number and never as "whatever `ax`
-# printed". `ax find` writes nothing on stdout when it fails, and an empty
-# answer compared with `!= 0` is *true* -- so a broken helper would make every
-# "it appeared" below pass. The count is read once and matched against digits.
 count_of() {
     local answer
     answer=$("$ax" find "$pid" "$1" 2>/dev/null || true)
@@ -159,78 +130,39 @@ present() { local n; n=$(count_of "$1"); [ "$n" != x ] && [ "$n" -gt 0 ]; }
 absent() { [ "$(count_of "$1")" = 0 ]; }
 exactly_one() { [ "$(count_of "$1")" = 1 ]; }
 
-# How many of knobas' **windows** are titled '$CAPTURE_WINDOW' -- a number, or
-# `x` when the helper could see no window at all.
-#
-# A different question from the three above, and #548 is the bill for asking
-# theirs: `ax find` counts elements carrying a *name*, and the capture window
-# carries its word on three of them -- the window, the web area and the text
-# area -- each correctly. `exactly_one "$CAPTURE_BOX"` therefore counted 3 for
-# as long as the window was up, and this driver refused the window it had just
-# opened. `ax windows` answers about windows, which is what "did the capture
-# window appear?" means.
-capture_windows() { window_count "$("$ax" windows "$pid" 2>/dev/null || true)" "$CAPTURE_WINDOW"; }
+press_when() {
+    wait_until "no single '$1' within ${SETTLE_SECONDS} s (count: $(count_of "$1"))" exactly_one "$1"
+    "$ax" press "$pid" "$1" || die "could not press '$1'"
+}
 
-# The capture window has gone: knobas still answers with windows, and none of
-# them is the capture one. `= 0` and not `!= 1`, so that `x` -- no window at
-# all, which is a quit app or a screen that locked mid-run -- is a refusal here
-# rather than the closing assertion of this run passing on a dead process.
+fill() {
+    wait_until "no field called '$1' appeared within ${SETTLE_SECONDS} s" exactly_one "$1"
+    "$ax" focus "$pid" "$1" || die "could not put the keyboard in '$1'"
+    "$ax" key "$KEY_A" command
+    "$ax" type "$2"
+}
+
+# How many of knobas' windows are titled '$CAPTURE_WINDOW', or `x` (#548).
+capture_windows() { window_count "$("$ax" windows "$pid" 2>/dev/null || true)" "$CAPTURE_WINDOW"; }
 capture_window_gone() { [ "$(capture_windows)" = 0 ]; }
 
-# fill <label> <text> -- put <text> in the field called <label>, replacing
-# whatever is in it.
-#
-# ⌘A before typing, because a settings field arrives with a value and typing
-# without selecting first would append to it -- producing a shortcut string
-# nothing parses, which is a failure that looks like the feature's rather than
-# the driver's.
-fill() {
-    local label=$1 value=$2
-    wait_until "no field called '$label' appeared within ${SETTLE_SECONDS} s" exactly_one "$label"
-    "$ax" focus "$pid" "$label" || die "could not put the keyboard in '$label'"
-    "$ax" key "$KEY_A" command
-    "$ax" type "$value"
-}
+is_frontmost() { [ "$(frontmost_bundle "$("$ax" frontmost 2>/dev/null || true)")" = "$1" ]; }
 
-# is_frontmost <bundle-id> -- whether that application has the screen.
-is_frontmost() {
-    [ "$(frontmost_bundle "$("$ax" frontmost 2>/dev/null || true)")" = "$1" ]
-}
-
-# What is written on knobas' windows right now, one string per line.
-#
-# `ax values` and not `ax find`: a heading, a status line and a note's title are
-# **values**, not accessible names, and `find` counts names. The two are kept
-# apart in the helper for the reason its own docs give.
 screen() { "$ax" values "$pid" 2>/dev/null || true; }
-
-# reads <line> -- the screen carries <line> as a whole line.
 reads() { has_reading "$(screen)" "$1"; }
+unread() { ! reads "$1"; }
 
-# The settings section's own word for "the operating system handed the
-# combination over". The other branch reads *Not registered: …*, which is a
-# different whole line, so this cannot pass on a refusal.
-has_registered() { reads "Registered."; }
+# Tickets previews the filtered card: its summary on screen, and exactly one of
+# the preview's job links.
+job_link() {
+    local name
+    for name in "${JOB_LINKS[@]}"; do
+        if exactly_one "$name"; then printf '%s\n' "$name"; return 0; fi
+    done
+    return 1
+}
+previews_the_job() { reads "$JOB_SUMMARY" && job_link >/dev/null; }
 
-# A detail is open over the room: the launcher has closed and a links panel is
-# on screen, which every detail has and a room has none of.
-ticket_is_open() { absent "$QUERY_BOX" && reads "$LINKS_PANEL"; }
-
-# The launcher has finished searching for what was typed.
-#
-# Waited for rather than assumed, because the search is a round trip and Return
-# on a list that has not arrived selects nothing. Measured on 2026-09-08: a
-# driver that typed and pressed Return in the same breath left the launcher
-# open with its query in it and four matches underneath, and reported the
-# feature as broken. The line is the launcher's own count, matched loosely
-# because the timing in it changes every run.
-launcher_answered() { screen | grep -q " match"; }
-
-# The caret is in the capture window's box.
-#
-# The role **and** the name, because either alone would pass on the wrong thing:
-# the app is full of text fields, and `AXTextArea` alone would accept the note
-# editor behind the capture window.
 caret_in_the_box() {
     local focused
     focused=$("$ax" focused "$pid" 2>/dev/null || true)
@@ -239,70 +171,102 @@ caret_in_the_box() {
         [ "$(tsv_field "$focused" title)" = "$CAPTURE_BOX" ]
 }
 
-# The capture window's own report that the row exists. Its other two states
-# read *Nothing is kept until you type.* and *<a refusal>*, both different
-# whole lines.
-note_was_written() { reads "Saved as a note."; }
-
-
-# --- 1. the shortcut ---------------------------------------------------------
+# --- 1. Settings › Notes and capture -----------------------------------------
 
 say "bringing pid $pid to the front"
 "$ax" activate "$pid"
 
-say "opening Settings"
-# Waited for, and not pressed straight away. The shell finishes booting after
-# its window appears -- the harness waits for a *window*, which the boot screen
-# also is -- so a press issued the instant the app is frontmost finds nothing.
-# Measured on 2026-09-08: `ax press` answered *0 elements labelled 'Settings'*
-# on a run whose own failure dump, a second later, showed the button.
-wait_until "the top strip's '$SETTINGS_BUTTON' button never appeared" \
-    exactly_one "$SETTINGS_BUTTON"
-"$ax" press "$pid" "$SETTINGS_BUTTON" || die "could not press the '$SETTINGS_BUTTON' button"
+say "opening Settings › $NOTES_SECTION"
+press_when "$SETTINGS_BUTTON"
+press_when "$NOTES_SECTION"
+wait_until "the section never drew its '$SHOW_NOTES' switch" exactly_one "$SHOW_NOTES"
 
-fill "$SHORTCUT_FIELD" "$ACCELERATOR"
-"$ax" press "$pid" "$SAVE_SHORTCUT" || die "could not press '$SAVE_SHORTCUT'"
+# The switch's state is read from the help line under the shortcut, which is
+# the section's own word for it: hidden, it says so.
+if reads "$HIDDEN_LINE"; then
+    say "notes are hidden; turning them on"
+    "$ax" press "$pid" "$SHOW_NOTES" || die "could not press '$SHOW_NOTES'"
+    wait_until "the section still says notes are hidden after '$SHOW_NOTES'" unread "$HIDDEN_LINE"
+fi
 
-# *Registered.* is the section's own word for "the operating system handed the
-# combination over", and it is what turns the rest of this run into a witness of
-# the feature rather than of a keystroke going nowhere. A refusal is the other
-# branch and reads *Not registered: …*, which the values dump in `die` shows.
-wait_until "the shortcut was not registered: the section never said so" \
-    has_registered
+# A shortcut a previous run stored is cleared first: *Save* is disabled on a
+# field that would not change, and the row reading *Not set* before Save is
+# what makes its keys after Save mean this run's write.
+#
+# The field is found by the focus and not by `ax find`: measured on 2026-10-18,
+# three elements answer to '$SHORTCUT_FIELD' while the dialog is up -- the
+# dialog (`aria-labelledby` its heading), the heading, and the field -- each
+# correctly. `TfDialog` puts the caret in its first field, so the field is the
+# focused AXTextField of that name, role *and* name, like the capture box.
+caret_in_the_field() {
+    local focused
+    focused=$("$ax" focused "$pid" 2>/dev/null || true)
+    [ "$(tsv_field "$focused" role)" = AXTextField ] || return 1
+    [ "$(tsv_field "$focused" description)" = "$SHORTCUT_FIELD" ] ||
+        [ "$(tsv_field "$focused" title)" = "$SHORTCUT_FIELD" ]
+}
+#
+# And the row is read with the dialog **closed**: the dialog is `aria-modal`,
+# and while it is up the accessibility tree is the dialog and nothing behind it
+# (measured the same day: no *Not set* in `ax values` with the row on screen).
+if ! reads "$NOT_SET"; then
+    say "a shortcut is already stored; clearing it"
+    press_when "$CHANGE_SHORTCUT"
+    wait_until "the shortcut dialog never opened with the caret in its field" caret_in_the_field
+    press_when "$CLEAR"
+    wait_until "the shortcut was not cleared: the row never read '$NOT_SET'" reads "$NOT_SET"
+fi
+say "the row reads '$NOT_SET'; setting $ACCELERATOR"
+press_when "$CHANGE_SHORTCUT"
+wait_until "the shortcut dialog never opened with the caret in its field" caret_in_the_field
+"$ax" key "$KEY_A" command
+"$ax" type "$ACCELERATOR"
+press_when "$SAVE"
+registered() { absent "$SHORTCUT_FIELD" && unread "$NOT_SET" && reads "$REGISTERED_LINE"; }
+wait_until "the shortcut was not stored and registered: the row does not read '$REGISTERED_LINE'" \
+    registered
 say "the shortcut $ACCELERATOR is stored and registered"
 
-# --- 2. something in front of the reader -------------------------------------
-#
-# A ticket opened in *All work*, so the capture has a **foreground** to attach.
-#
-# **`captured-in` is not asserted by this run, and it is owed to nothing.** It
-# needs a *stored* room, and the `--demo` profile carries no context at all: a
-# reader makes one, and making one here would mean driving another feature's tab
-# strip to arrange this feature's fixture -- a first attempt did exactly that on
-# 2026-09-08 and the field closed under the driver before its Return.
-# **Spec #491's stream map puts the links' witness elsewhere on purpose**: row 5
-# is *"app IPC suite for the links; desktop automation for the shortcut and
-# window"*, and the links are pinned where it says -- `capture_ipc.rs` (the
-# recorded pair, over a scratch database) and `capture.test.svelte.ts` (the pair
-# becoming the links). Asserting `CAPTURED FROM` below is already one link more
-# than that row asks of this driver. See testenv/README.md, *What is still not
-# witnessed*, and the deputy's ruling of 2026-09-08 on #503, part 5.
+notes_before=$(notes_total "$(screen)")
+[ "$notes_before" != x ] || die "the section carries no single notes line to count from"
+say "notes before the capture: $notes_before"
 
-say "opening the ticket $TICKET_QUERY, so the capture has a foreground"
-"$ax" key "$KEY_K" command
-wait_until "⌘K did not open the launcher within ${SETTLE_SECONDS} s" present "$QUERY_BOX"
-"$ax" type "$TICKET_QUERY"
-wait_until "the launcher never answered for '$TICKET_QUERY'" launcher_answered
-"$ax" key "$KEY_RETURN"
-wait_until "no detail for '$TICKET_QUERY' opened" ticket_is_open
-say "a detail is open, so something is in front of the reader"
+# --- 2. something in front of the reader -------------------------------------
+
+# From Tickets and not from ⌘K: on 2026-10-18 the demo profile's launcher
+# answered `PAY-231` with pages, commits and a branch and `#PAY-231` with
+# nothing. Tickets filtered by the key previews the one card, and the
+# preview's button is a link to its job.
+say "opening the job $JOB_QUERY from Tickets, so the capture has a foreground"
+press_when "$TICKETS_LINK"
+fill "$TICKETS_FILTER" "$JOB_QUERY"
+wait_until "Tickets never previewed '$JOB_QUERY' ($JOB_SUMMARY)" previews_the_job
+go=$(job_link) || die "the preview offers none of: ${JOB_LINKS[*]}"
+"$ax" press "$pid" "$go" || die "could not press '$go'"
+job_is_open() { absent "$TICKETS_FILTER" && present "$OPEN_CODE_VIEW"; }
+wait_until "no job page for '$JOB_QUERY' opened" job_is_open
+say "the job is open, so something is in front of the reader"
 
 # --- 3. somebody else's screen -----------------------------------------------
 
 say "bringing $OTHER_APP to the front"
-open -a "$OTHER_APP"
+# `open -a` and not `ax activate` alone: macOS refuses to hand the screen to an
+# application a background process merely activates (measured 2026-10-18:
+# *did not become frontmost*). But `open -a` on a Finder with no window open
+# makes one, and a run left it on the reader's screen the same day -- so a
+# Finder that had no window gets the one this run made closed again on exit.
 other_pid=$(pgrep -x "$OTHER_APP" | head -1 || true)
 [ -n "$other_pid" ] || die "$OTHER_APP is not running, so there is nothing to put in front"
+if ! "$ax" windows "$other_pid" >/dev/null 2>&1; then
+    close_the_window_we_made() {
+        # `ax close-window` closes exactly one window or none: with a second
+        # (one the reader opened meanwhile) nothing is closed.
+        "$ax" close-window "$other_pid" ||
+            say "could not close the $OTHER_APP window this run opened"
+    }
+    trap close_the_window_we_made EXIT
+fi
+open -a "$OTHER_APP"
 "$ax" activate "$other_pid" || die "could not bring $OTHER_APP to the front"
 wait_until "$OTHER_APP never became frontmost, so the keystroke below would not have been global" \
     is_frontmost "$OTHER_BUNDLE"
@@ -310,21 +274,11 @@ say "$OTHER_APP has the screen; knobas is behind it"
 
 # --- 4. the shortcut, from somebody else's screen ----------------------------
 
-# **Counted on both sides of the keystroke, and the first count is the point
-# (#548).** A wait that could already be satisfied before the shortcut proves
-# nothing about the shortcut -- and this one could: the word `Capture` is on the
-# capture window's title, its web area and its text area at once, so the old
-# `exactly_one "$CAPTURE_BOX"` was a count of 3 on a window that was open and
-# would have been a count of 1 on anything in the main window that ever came to
-# carry that name. The count before the keystroke is what makes the count after
-# it mean the keystroke, and counting *windows* is what makes either of them
-# mean the window.
+# Windows counted on both sides of the keystroke (#548): none, then one.
 say "pressing $ACCELERATOR"
 before=$(count_verdict "$(capture_windows)")
 say "before the keystroke, windows titled '$CAPTURE_WINDOW': $before"
-
 "$ax" key "$KEY_K" command option shift
-
 count=$(capture_windows)
 after=$(count_verdict "$count")
 deadline=$((SECONDS + SETTLE_SECONDS))
@@ -339,43 +293,20 @@ case $(waypoint_verdict "$before" "$after") in
 witnessed) ;;
 too-early)
     die "a window titled '$CAPTURE_WINDOW' was already open before the shortcut," \
-        "so waiting for one witnesses nothing about the shortcut." \
-        "Either a previous run left its capture window up -- the harness quits" \
-        "the app between runs, so that would be new -- or something else in" \
-        "knobas now opens a window of that name. Until that is answered this" \
-        "step cannot say the keystroke did anything."
+        "so waiting for one witnesses nothing about the shortcut."
     ;;
 never-appeared)
     die "the capture window never appeared." \
-        "The shortcut was reported as *registered* above and $OTHER_APP had the" \
-        "screen, so what failed is between the window server and the window:" \
-        "check that the combination reached the plugin's handler and that" \
-        "capture::open_window built a window -- a build that fails is logged" \
-        "and swallowed, because its caller is a keystroke with no window to" \
-        "report into."
+        "The shortcut was reported as registered and $OTHER_APP had the screen," \
+        "so look between the window server and capture::open_window."
     ;;
 *)
     die "knobas' windows could not be read either side of the shortcut" \
-        "(before: $before, after: $after)." \
-        "'ax windows' refuses when it can see no window at all, which is a quit" \
-        "app or a screen that locked mid-run. That is not a measurement of the" \
-        "capture window in either direction, so this refuses rather than" \
-        "reading an empty answer as a window that never opened."
+        "(before: $before, after: $after): a quit app or a locked screen."
     ;;
 esac
+[ "$count" = 1 ] || die "$count windows are titled '$CAPTURE_WINDOW', and the shortcut opens one."
 
-# And exactly one of them, which the verdict above deliberately does not say:
-# `count_verdict` answers *some* or *none*, and two capture windows is its own
-# fault -- a shortcut handled twice, or an `open_window` that built a second
-# instead of focusing the one it found.
-[ "$count" = 1 ] || die \
-    "$count windows are titled '$CAPTURE_WINDOW', and the shortcut opens one." \
-    "capture::open_window focuses the window it finds rather than building a" \
-    "second, so more than one means the handler ran twice or the label changed."
-
-# The caret, and not merely the window: the whole promise is that the next
-# keystroke is the note, and a window that opened without focus would swallow
-# the sentence typed below into whatever was behind it.
 wait_until "the capture window opened without the caret in its box" caret_in_the_box
 say "the capture window is up, with the caret in it"
 
@@ -383,38 +314,28 @@ say "the capture window is up, with the caret in it"
 
 typed='Retry storm from the capture witness
 the queue backs up at 09:00'
-title=$(capture_title "$typed")
-say "typing a capture whose title will be '$title'"
+say "typing a capture whose title will be '$(capture_title "$typed")'"
 "$ax" type "$typed"
-
 wait_until "the capture never became a note: the window still says nothing is kept" \
-    note_was_written
+    reads "Saved as a note."
 
+# The page *Open in knobas* lands on, read before the press and after it: the
+# job is in the main window now, so '$YOUR_NOTES' is not on screen yet.
+landed_before=$(reading_verdict "$(screen)" "$YOUR_NOTES")
 say "pressing '$OPEN_IN_MAIN'"
 "$ax" press "$pid" "$OPEN_IN_MAIN" || die "could not press '$OPEN_IN_MAIN'"
 
-# --- 6. the note, and its two links ------------------------------------------
+# --- 6. the note -------------------------------------------------------------
 
 wait_until "knobas never came forward after '$OPEN_IN_MAIN'" is_frontmost dev.knobas.desktop
 wait_until "the capture window is still open after '$OPEN_IN_MAIN'" capture_window_gone
 say "knobas is frontmost again and the capture window has gone"
 
-# The title `capture_title` says this typing produces, on screen -- which is the
-# note view's own name field, and nothing else draws it: the capture window that
-# held those words has closed by now.
-wait_until "the note '$title' never opened in the main window" reads "$title"
-say "the note is open in the main window, titled '$title'"
+wait_until "'$OPEN_IN_MAIN' did not land on Settings › $NOTES_SECTION" reads "$YOUR_NOTES"
+landed=$(waypoint_verdict "$landed_before" yes)
+[ "$landed" = witnessed ] || die "'$YOUR_NOTES' was $landed_before before '$OPEN_IN_MAIN', so landing on it witnesses nothing."
 
-wait_until "the note's links panel does not read '$READING_FROM', so the capture attached no foreground" \
-    reads "$READING_FROM"
-say "the links panel reads '$READING_FROM': the capture attached what was in front of the reader"
-
-# **Which entity the link points at is not asserted here, and that is a decision
-# rather than an omission.** The ticket's key is on the room behind the
-# slide-over, so a driver reading the whole window for it would pass with no
-# link drawn at all -- a check measuring a representation of the thing. What the
-# ends are is `capture_ipc.rs`' (the recorded pair) and
-# `capture.test.svelte.ts`' (the pair becoming the links); what only this run
-# can say is that a keystroke sent to Finder produced a note here with one.
-
+one_more() { [ "$(notes_total "$(screen)")" = $((notes_before + 1)) ]; }
+wait_until "the section does not count one note more than $notes_before (it reads $(notes_total "$(screen)"))" one_more
+say "Settings › $NOTES_SECTION is open and counts $((notes_before + 1)) notes: the capture is stored"
 say "ok"

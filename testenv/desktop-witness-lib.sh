@@ -285,31 +285,9 @@ sole_argument() {
     printf '%s' "$1" | awk 'NF { lines[++n] = $0 } END { if (n == 1) print lines[1] }'
 }
 
-# rendered_label <visible text>
-#
-# The accessible name an element has when its text is styled `.lab` or sits in a
-# `.row.hd` -- **the uppercase form**, because both carry
-# `text-transform: uppercase` in `app/src/unported.css` and WebKit names an element
-# by what is *rendered*, not by what is in the markup.
-#
-# **Measured on the dev Mac, 2026-09-08**, in the first run of this harness that
-# got past its probe. The settings field whose markup reads
-# `<label class="lab" for="capture-shortcut">Shortcut</label>` arrives as
-# `AXTextField title=SHORTCUT`, and the links panel's group heading -- a bare
-# `<span>` inside `.row.hd` -- as `CAPTURED FROM`. An `aria-label` is **not**
-# transformed, because it is not rendered text: `Save capture shortcut` arrives
-# spelled exactly as it is written.
-#
-# Here rather than as an uppercase constant in each driver so that the rule is
-# stated once and the drivers keep the source spelling visible; `witness-unit`
-# pins both `text-transform` rules, so a stylesheet that stopped uppercasing
-# turns the gate red instead of failing a run minutes in.
-#
-# ASCII only, which every one of these labels is. A `tr` over a wider alphabet
-# would be a promise this cannot keep.
-rendered_label() {
-    printf '%s\n' "$1" | tr '[:lower:]' '[:upper:]'
-}
+# (`rendered_label`, which uppercased the rooms UI's `.lab` names the way WebKit
+# renders them, went with #1084: the ticket-first shell transforms no name a
+# driver uses, and `witness-unit` pins that `tf.css` keeps it so.)
 
 # --- the capture driver's pure parts (issue #503) ---------------------------
 #
@@ -330,6 +308,25 @@ rendered_label() {
 # with a title nobody can explain.
 capture_title() {
     printf '%s\n' "$1" | awk 'NF { sub(/^[ \t]+/, ""); sub(/[ \t]+$/, ""); print; exit }'
+}
+
+# notes_total <ax values output>
+#
+# How many notes Settings › Notes and capture says there are -- a number, or
+# `x` when the screen carries no notes line, or more than one (#1084).
+#
+# The line is `notesLine`'s (`app/src/lib/tf/settings/notes.ts`): *No notes*,
+# *1 note, from 18 October*, *37 notes, the last from 12 August*. Whole lines
+# only, so *Move 3 notes* on a button is not a count. **`x` and not 0**, for
+# `count_of`'s reason: the capture driver asserts the count went up by one,
+# and an unreadable screen read as 0 would be a count it compares against.
+notes_total() {
+    printf '%s\n' "$1" | awk '
+        { line = $0; sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line) }
+        line == "No notes" { n = 0; seen++; next }
+        line ~ /^[0-9]+ notes?(, .*)?$/ { split(line, word, " "); n = word[1] + 0; seen++ }
+        END { if (seen == 1) print n; else print "x" }
+    '
 }
 
 # has_reading <ax values output> <reading>
