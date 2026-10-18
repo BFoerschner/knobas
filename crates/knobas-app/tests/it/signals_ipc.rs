@@ -373,6 +373,55 @@ async fn a_resolved_or_unconfirmed_fact_makes_no_signal() {
     }
 }
 
+/// A room is never walked through (ADR-0008): a ticket in the same room as a
+/// red build is not two hops from it. And a withdrawn blocker blocks nothing.
+/// The walk tests both by a probe of the entity (#1163).
+#[tokio::test]
+async fn a_room_shares_no_build_and_a_withdrawn_blocker_blocks_nothing() {
+    let pool = pool().await;
+    let p = project();
+    let key = |n: u32| format!("{p}-{n}");
+    let (red, roommate, blocked, gone) = (
+        ticket(&pool, &key(1)).await,
+        ticket(&pool, &key(2)).await,
+        ticket(&pool, &key(3)).await,
+        ticket(&pool, &key(4)).await,
+    );
+    let failed = format!("teamcity:{p}-b1");
+    build(&pool, &failed, &format!("{p}-cfg"), "FAILURE", 5).await;
+    link(&pool, &red, &failed, "related", true).await;
+    let room = knobas_core::context::create_adhoc(&pool, &format!("{p} room"))
+        .await
+        .unwrap();
+    link(&pool, &room.id, &roommate, "related", true).await;
+    link(&pool, &room.id, &failed, "related", true).await;
+
+    link(&pool, &gone, &blocked, "blocks", true).await;
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&gone)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let lines: Vec<(String, Vec<String>)> = cards(&pool, &format!("project:{p}"))
+        .await
+        .iter()
+        .map(|c| (c.key.clone(), drawn(c)))
+        .collect();
+    assert_eq!(
+        lines,
+        vec![
+            (key(1), vec!["failing-build build failed err".to_owned()]),
+            (key(2), vec![]),
+            (key(3), vec![]),
+        ]
+    );
+    for (has, expected) in [("failing-build", vec![key(1)]), ("blocker", vec![])] {
+        let raw = format!("project:{p} has:{has}");
+        assert_eq!(searched(&pool, &raw).await, expected, "{raw}");
+    }
+}
+
 /// A value `has:` does not know is reported, never matched as a word.
 #[tokio::test]
 async fn an_unknown_has_value_is_reported() {
