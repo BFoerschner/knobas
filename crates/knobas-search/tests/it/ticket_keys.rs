@@ -723,7 +723,46 @@ async fn matching_ids_are_every_ticket_the_query_admits() {
         .await
         .unwrap()
         .expect("a query with keys narrows");
-    assert_eq!(sorted(matched), sorted(bugs));
+    assert_eq!(sorted(matched), sorted(bugs.clone()));
+
+    // Only live tickets (#1163, which reads the base table by exclusion):
+    // a withdrawn one, and a copy of one in a source that is switched off.
+    sqlx::query("update knobas.entity set deleted_at = now() where id = $1")
+        .bind(&bugs[0])
+        .execute(&pool)
+        .await
+        .unwrap();
+    let off = format!("{p}-off");
+    let copy = format!("{off}:{p}-99");
+    sqlx::query(
+        "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind, enabled)
+         values ($1, 'jira', 'Off', 'http://x', 'Pat', false)",
+    )
+    .bind(&off)
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $1)")
+        .bind(&copy)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         select $1, $2, kind, title, body_text, payload from sync.item where entity_id = $3",
+    )
+    .bind(&copy)
+    .bind(&off)
+    .bind(&bugs[1])
+    .execute(&pool)
+    .await
+    .unwrap();
+    let live = searcher
+        .matching_ids(&format!("project:{p} issuetype:bug"), "ticket")
+        .await
+        .unwrap()
+        .expect("a query with keys narrows");
+    assert_eq!(sorted(live), sorted(bugs[1..].to_vec()));
 
     assert_eq!(searcher.matching_ids("   ", "ticket").await.unwrap(), None);
     assert_eq!(

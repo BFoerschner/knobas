@@ -933,6 +933,7 @@ knobas-app	test/it	search_ipc::the_wire_shape_is_the_contract
 knobas-app	test/it	search_ipc::under_reads_the_parent_the_compiled_in_gitea_adapter_declares
 knobas-app	test/it	signals_ipc::a_card_carries_its_labels_in_the_records_order
 knobas-app	test/it	signals_ipc::a_resolved_or_unconfirmed_fact_makes_no_signal
+knobas-app	test/it	signals_ipc::a_room_shares_no_build_and_a_withdrawn_blocker_blocks_nothing
 knobas-app	test/it	signals_ipc::an_unknown_has_value_is_reported
 knobas-app	test/it	signals_ipc::each_signal_is_drawn_on_its_card_and_has_admits_exactly_those_tickets
 knobas-app	test/it	signals_ipc::has_failing_build_finds_a_red_build_one_and_two_hops_back

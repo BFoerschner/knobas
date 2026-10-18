@@ -327,11 +327,31 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             .bind(tickets.clone())
     })
     .await;
+    // `has:`'s walk (#1163), every kind asked: from the ends the kinds can
+    // start at, each step a probe of a key compared bytewise. Without the
+    // index `0047` gives that key, each probe is a scan.
+    const HAS: &str = concat!(
+        "select sg.tid from ",
+        knobas_core::ticket_signals!(
+            "$1",
+            "$2",
+            knobas_core::signal_ends!("$1", "$2", "$3"),
+            "$3"
+        ),
+        " sg"
+    );
+    let has = explain(&pool, HAS, |q| {
+        q.bind(declared.clone())
+            .bind(vec!["mara".to_owned()])
+            .bind(None::<Vec<String>>)
+    })
+    .await;
     sqlx::query("update knobas.link set confirmed_at = null where confirmed_at is not null")
         .execute(&pool)
         .await
         .unwrap();
     wrong.extend(shapes("mini_board signals", &plan));
+    wrong.extend(shapes("has: walk", &has));
     let plan = explain(&pool, knobas_search::home::planned_recent(), |q| {
         q.bind(vec![
             "ticket".to_owned(),

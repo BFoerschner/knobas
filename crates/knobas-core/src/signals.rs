@@ -46,6 +46,20 @@
 //! shell's tones, and reads states and reviewers only through the paths a
 //! source declares (ADR-0007): a source that declares no state contributes
 //! no build or pull-request signal, the miss direction, never a guess.
+//!
+//! # Keys compared bytewise
+//!
+//! The walk is a few thousand key probes when `has:` asks at 22,000 items,
+//! and each one compared ids through the database's collation: `en_US.UTF-8`
+//! wherever `initdb` ran, the app's own database included, so `strcoll` at
+//! every step down a btree. About 4.7 µs a probe, against 0.75 µs on an index
+//! ordered `collate "C"` (#1163). Migration `0047` adds such an index beside
+//! each key the walk probes, and the walk asks it by comparing both sides
+//! `collate "C"` ([`same_key!`]). Equality is the same either way, both
+//! collations being deterministic. The sets the walk deduplicates are sorted
+//! the same way, and handed back in the database's collation so a join
+//! outside the reader compares as before. Without its index such a probe is a
+//! scan per row, which `knobas-app`'s `read_plans.rs` would report.
 
 use serde::{Deserialize, Serialize};
 
@@ -130,11 +144,13 @@ pub struct Signal {
 /// not a walk per ticket. The board names the cards it keeps; `has:` names
 /// the link ends that can carry the kinds it wants ([`signal_ends!`]) and
 /// asks which of them carry one. The per-row parts are
-/// index probes and the declaration's own reads. `builds` keeps the reach's
-/// builds by the entity's kind before it joins `sync.item`: joined on the
-/// id alone, the planner underestimated the reach and compared every reach
-/// row with every build (1.8 million comparisons for 1,800 tickets and 500
-/// builds, 230 ms, where this reads 70 ms; PR #933's review).
+/// index probes and the declaration's own reads. `builds` probes `sync.item`
+/// once a reach row, in a `lateral ... offset 0` ([`item_by_key!`]), which
+/// is also the reach row's kind: joined on the id alone, the planner
+/// underestimated the reach and compared every reach row with every build
+/// (1.8 million comparisons for 1,800 tickets and 500 builds, 230 ms; PR
+/// #933's review), and until #1163 the reach probed each row's entity for
+/// its kind first, a second probe of every row.
 ///
 /// `$kinds` is a `text[]` of the kinds wanted, or `null` for all four
 /// (#939). Each kind's branch is guarded by it, so `has:blocker` never
@@ -153,7 +169,14 @@ pub struct Signal {
 /// tested after: in a `lateral ... offset 0`, so the planner cannot read
 /// `relation = 'blocks'` against the pair index, whose third column it is.
 /// On tables never analyzed it did, and scanned that whole index once a
-/// ticket (567 tickets, 91,000 buffers, 130 ms; #939).
+/// ticket (567 tickets, 91,000 buffers, 130 ms; #939). The blocker's entity
+/// is the same kind of lateral probe, so it cannot become a merge with every
+/// entity sorted.
+///
+/// Every probe compares bytewise ([`same_key!`], the module notes), and each
+/// set the walk deduplicates (`t`, `n1`, `reach`, the configurations in
+/// `builds`) is sorted `collate "C"`: in the database's collation, sorting
+/// `has:blocker`'s 5,000 ends took 17 ms of its plan (#1163).
 #[macro_export]
 macro_rules! ticket_signals {
     ($decl:literal, $me:literal, $tickets:expr, $kinds:literal) => {
@@ -161,38 +184,56 @@ macro_rules! ticket_signals {
             "(with state_paths as materialized (",
             $crate::state_paths!($decl),
             "),
-              t as (select distinct tk.tid from ",
+              t as (select d.tid collate \"default\" as tid
+                      from (select distinct tk.tid collate \"C\" as tid from ",
             $tickets,
-            " tk where (select te.kind from knobas.entity te where te.id = tk.tid) = 'ticket'),
-              n1 as (select x.tid, x.id from (
-                        select t.tid, l.to_id as id
-                          from t join knobas.confirmed_link l on l.from_id = t.tid
+            " tk) d
+                     where ",
+            $crate::kind_of!("d.tid"),
+            " = 'ticket'),
+              n1 as (select x.tid collate \"default\" as tid, x.id collate \"default\" as id from (
+                        select t.tid collate \"C\" as tid, l.to_id collate \"C\" as id
+                          from t join knobas.confirmed_link l on ",
+            $crate::same_key!("l.from_id", "t.tid"),
+            "
                         union
                         select t.tid, l.from_id
-                          from t join knobas.confirmed_link l on l.to_id = t.tid) x
-                      join knobas.entity e on e.id = x.id where e.kind <> 'ctx'),
-              reach as materialized (select x.tid, x.id, e.kind from (
-                        select n1.tid, n1.id from n1
+                          from t join knobas.confirmed_link l on ",
+            $crate::same_key!("l.to_id", "t.tid"),
+            ") x
+                     where ",
+            $crate::kind_of!("x.id"),
+            " <> 'ctx'),
+              reach as materialized (select x.tid collate \"default\" as tid,
+                                            x.id collate \"default\" as id from (
+                        select n1.tid collate \"C\" as tid, n1.id collate \"C\" as id from n1
                         union
                         select n1.tid, l.to_id
-                          from n1 join knobas.confirmed_link l on l.from_id = n1.id
+                          from n1 join knobas.confirmed_link l on ",
+            $crate::same_key!("l.from_id", "n1.id"),
+            "
                         union
                         select n1.tid, l.from_id
-                          from n1 join knobas.confirmed_link l on l.to_id = n1.id) x
-                      join knobas.entity e on e.id = x.id
-                     where e.kind <> 'ctx' and x.id <> x.tid),
-              builds as (select distinct on (b.tid, b.cfg) b.tid, b.tone from (
+                          from n1 join knobas.confirmed_link l on ",
+            $crate::same_key!("l.to_id", "n1.id"),
+            ") x
+                     where x.id <> x.tid),
+              builds as (select distinct on (b.tid collate \"C\", b.cfg collate \"C\") b.tid, b.tone from (
                         select r.tid,
                                coalesce((select min(p.name) from sync.item_parent p
-                                          where p.entity_id = i.entity_id), i.entity_id) as cfg,
+                                          where ",
+            $crate::same_key!("p.entity_id", "i.entity_id"),
+            "), i.entity_id) as cfg,
                                coalesce(i.item_updated_at, i.synced_at) as at,
                                ",
             $crate::resolved_state!(),
             "->>'tone' as tone
-                          from reach r join sync.item i on i.entity_id = r.id and r.kind = 'build'
+                          from reach r cross join lateral (",
+            $crate::item_by_key!("r.id"),
+            ") i
                          where i.kind = 'build' and ",
-            $crate::live_by_key!("i"),
-            ") b order by b.tid, b.cfg, b.at desc, b.tone),
+            $crate::live_by_bytes!("i"),
+            ") b order by b.tid collate \"C\", b.cfg collate \"C\", b.at desc, b.tone),
               prs as (select n1.tid, substring(i.entity_id from '#([0-9]+)$') as num,
                              ",
             $crate::resolved_state!(),
@@ -200,11 +241,11 @@ macro_rules! ticket_signals {
                              ",
             $crate::asked_of!($decl, $me),
             " as asked
-                        from n1 cross join lateral (
-                               select i.entity_id, i.source_id, i.kind, i.payload from sync.item i
-                                where i.entity_id = n1.id offset 0) i
+                        from n1 cross join lateral (",
+            $crate::item_by_key!("n1.id"),
+            ") i
                        where i.kind = 'pr' and ",
-            $crate::live_by_key!("i"),
+            $crate::live_by_bytes!("i"),
             ")
              select b.tid, 1 as ord, 'failing-build'::text as kind,
                     'build failed'::text as text, 'err'::text as tone
@@ -216,8 +257,14 @@ macro_rules! ticket_signals {
                       then substr(o.id, strpos(o.id, ':') + 1) else o.title end, 'err'
                from t cross join lateral (select l.from_id, l.relation
                                             from knobas.confirmed_link l
-                                           where l.to_id = t.tid offset 0) l
-               join knobas.entity o on o.id = l.from_id
+                                           where ",
+            $crate::same_key!("l.to_id", "t.tid"),
+            " offset 0) l
+                      cross join lateral (select o.id, o.kind, o.title, o.deleted_at
+                                            from knobas.entity o
+                                           where ",
+            $crate::same_key!("o.id", "l.from_id"),
+            " offset 0) o
               where l.relation = 'blocks' and o.kind <> 'ctx' and o.deleted_at is null and ",
             $crate::wants_signal!($kinds, "'blocker'"),
             "
@@ -231,6 +278,89 @@ macro_rules! ticket_signals {
                from prs p where p.tone = 'info' and p.asked and ",
             $crate::wants_signal!($kinds, "'review-for-me'"),
             " group by p.tid)"
+        )
+    };
+}
+
+/// `$column = $value`, compared bytewise: the probe migration `0047`'s
+/// `collate "C"` indexes serve, where the key's own index compares by the
+/// database's collation (#1163; see the module notes).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! same_key {
+    ($column:expr, $value:expr) => {
+        concat!(
+            "(",
+            $column,
+            ") collate \"C\" = (",
+            $value,
+            ") collate \"C\""
+        )
+    };
+}
+
+/// The other ends of `$id`'s confirmed links where it is the `$at` end, as
+/// `(id)`: one probe of `link_from_bytes_idx` or `link_to_bytes_idx`, kept a
+/// probe per row by `offset 0`. Joined instead, the planner hashed every
+/// confirmed link, a scan of the whole table with its proposals (40,000 rows
+/// on the probe) for each step of the walk from its starts.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! link_ends {
+    ($end:literal, $at:literal, $id:literal) => {
+        concat!(
+            "select l.",
+            $end,
+            " as id from knobas.confirmed_link l where ",
+            $crate::same_key!(concat!("l.", $at), $id),
+            " offset 0"
+        )
+    };
+}
+
+/// The kind of the entity `$id`, one probe of `entity_id_bytes_idx`.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! kind_of {
+    ($id:literal) => {
+        concat!(
+            "(select e.kind from knobas.entity e where ",
+            $crate::same_key!("e.id", $id),
+            ")"
+        )
+    };
+}
+
+/// The `sync.item` row of the entity `$id` as a lateral subquery, one probe
+/// of `item_entity_bytes_idx`: `offset 0` keeps it a probe per row, whatever
+/// the planner estimates of the rows it is probed for (#1148).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! item_by_key {
+    ($id:literal) => {
+        concat!(
+            "select i.entity_id, i.source_id, i.kind, i.payload, i.item_updated_at, i.synced_at
+               from sync.item i where ",
+            $crate::same_key!("i.entity_id", $id),
+            " offset 0"
+        )
+    };
+}
+
+/// [`crate::live_by_key!`] with the entity's probe compared bytewise
+/// ([`same_key!`]): `live_by_key!`'s probe compares through the database's
+/// collation, about 4.7 µs a row at 22,000 items against 0.75 µs (#1163).
+#[doc(hidden)]
+#[macro_export]
+macro_rules! live_by_bytes {
+    ($alias:literal) => {
+        concat!(
+            "(select e.deleted_at is null from knobas.entity e where ",
+            $crate::same_key!("e.id", concat!($alias, ".entity_id")),
+            ")
+         and coalesce((select c.enabled from knobas.source_config c where c.id = ",
+            $alias,
+            ".source_id), true)"
         )
     };
 }
@@ -268,6 +398,11 @@ macro_rules! wants_signal {
 ///
 /// A superset is safe and a subset is not: [`ticket_signals!`] decides
 /// over these, so an end here that carries no signal is dropped there.
+///
+/// Each step from a start to its link ends is a probe per row
+/// ([`link_ends!`]), and a hop is a context or not by a probe of its entity
+/// ([`kind_of!`]). Until #1163 each step was a join, which the planner hashed
+/// over every confirmed link, and the context test a hash of every entity.
 #[macro_export]
 macro_rules! signal_ends {
     ($decl:literal, $me:literal, $kinds:literal) => {
@@ -281,22 +416,36 @@ macro_rules! signal_ends {
             $crate::wants_signal!($kinds, "'failing-build'"),
             "),
               hop as materialized (
-                select l.from_id as id from eb join knobas.confirmed_link l on l.to_id = eb.id
-                union select l.to_id from eb join knobas.confirmed_link l on l.from_id = eb.id),
+                select l.id from eb cross join lateral (",
+            $crate::link_ends!("from_id", "to_id", "eb.id"),
+            ") l
+                union select l.id from eb cross join lateral (",
+            $crate::link_ends!("to_id", "from_id", "eb.id"),
+            ") l),
               op as materialized (",
             $crate::open_prs!($decl, $me, $kinds),
             ")
-             select hop.id as tid from hop
-             union select l.from_id from hop join knobas.entity e on e.id = hop.id
-               join knobas.confirmed_link l on l.to_id = hop.id where e.kind <> 'ctx'
-             union select l.to_id from hop join knobas.entity e on e.id = hop.id
-               join knobas.confirmed_link l on l.from_id = hop.id where e.kind <> 'ctx'
+             select hop.id collate \"C\" as tid from hop
+             union select l.id from hop cross join lateral (",
+            $crate::link_ends!("from_id", "to_id", "hop.id"),
+            ") l where ",
+            $crate::kind_of!("hop.id"),
+            " <> 'ctx'
+             union select l.id from hop cross join lateral (",
+            $crate::link_ends!("to_id", "from_id", "hop.id"),
+            ") l where ",
+            $crate::kind_of!("hop.id"),
+            " <> 'ctx'
              union select l.to_id from knobas.confirmed_link l
                where l.relation = 'blocks' and ",
             $crate::wants_signal!($kinds, "'blocker'"),
             "
-             union select l.from_id from op join knobas.confirmed_link l on l.to_id = op.id
-             union select l.to_id from op join knobas.confirmed_link l on l.from_id = op.id)"
+             union select l.id from op cross join lateral (",
+            $crate::link_ends!("from_id", "to_id", "op.id"),
+            ") l
+             union select l.id from op cross join lateral (",
+            $crate::link_ends!("to_id", "from_id", "op.id"),
+            ") l)"
         )
     };
 }
@@ -306,7 +455,9 @@ macro_rules! signal_ends {
 /// `failing-build`, reading `state_paths` ([`state_paths!`]). The `case` reads
 /// the state first, so only a red build is probed for being live and for its
 /// links: beside the `case`, the planner put the two liveness lookups first,
-/// two probes for each of the 5,000 builds where 600 are red (#1148).
+/// two probes for each of the 5,000 builds where 600 are red (#1148). The
+/// link tests are [`link_ends!`]' probes: as plain `exists`, the planner
+/// hashed every confirmed link twice to test the 600.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! err_builds {
@@ -317,10 +468,13 @@ macro_rules! err_builds {
             $crate::resolved_state!(),
             "->>'tone' = 'err'
                 then ",
-            $crate::live_by_key!("i"),
+            $crate::live_by_bytes!("i"),
             "
-                 and (exists (select 1 from knobas.confirmed_link l where l.from_id = i.entity_id)
-                      or exists (select 1 from knobas.confirmed_link l where l.to_id = i.entity_id))
+                 and (exists (",
+            $crate::link_ends!("to_id", "from_id", "i.entity_id"),
+            ") or exists (",
+            $crate::link_ends!("from_id", "to_id", "i.entity_id"),
+            "))
                 else false end"
         )
     };
@@ -346,7 +500,7 @@ macro_rules! open_prs {
             $crate::resolved_state!(),
             "->>'tone' = 'info'
                 then ",
-            $crate::live_by_key!("i"),
+            $crate::live_by_bytes!("i"),
             " and (",
             $crate::wants_signal!($kinds, "'open-pr'"),
             " or ",
@@ -374,21 +528,24 @@ macro_rules! asked_of {
     };
 }
 
-/// Every declared source's `state` values for builds and pull requests,
-/// flattened once a statement: `(source_id, kind, segs, ord, value, vord,
-/// text, tone)`, one row per value a candidate maps that has a tone, which
+/// Every declared source's `state` candidates for builds and pull requests,
+/// read once a statement: `(source_id, kind, segs, ord, m)`, one row per
+/// candidate, `m` its map as a jsonb object from each value's text (the value
+/// as jsonb, `"open"` or `true`) to `{text, tone}`, the first entry kept where
+/// a map names a value twice and only the values that have a tone. Which
 /// [`resolved_state!`] reads per row as the CTE `state_paths`. Through
 /// [`crate::declared_state!`] each row walked the whole declaration, about
 /// 19 µs a build on the probe (#939); through [`crate::state_of!`] over the
 /// candidates it still unnested each candidate's values once a row, about
-/// 7 µs a build at 22,000 items, and 3.5 µs over these rows (#1148).
+/// 7 µs a build at 22,000 items, and 3.5 µs over one row per value (#1148).
+/// One row per candidate, a row reads its value at each path once and looks
+/// it up, about 2.3 µs (#1163).
 #[doc(hidden)]
 #[macro_export]
 macro_rules! state_paths {
     ($decl:literal) => {
         concat!(
-            "select i.source_id, i.kind, c.segs, c.ord, v.e->'value' as value, v.vord,
-                    v.e->>'text' as text, v.e->>'tone' as tone
+            "select i.source_id, i.kind, c.segs, c.ord, m.m
                from (select d.source_id, k.kind
                        from jsonb_object_keys(case when jsonb_typeof(",
             $decl,
@@ -399,33 +556,38 @@ macro_rules! state_paths {
               cross join lateral ",
             $crate::declared_state_candidates!($decl),
             " c
-              cross join lateral jsonb_array_elements(
-                case when jsonb_typeof(c.vals) = 'array' then c.vals else '[]'::jsonb end)
-                with ordinality as v(e, vord)
-             where jsonb_typeof(v.e->'tone') = 'string'"
+              cross join lateral (
+                select jsonb_object_agg((v.e->'value')::text,
+                         jsonb_build_object('text', v.e->>'text', 'tone', v.e->>'tone')
+                         order by v.vord desc) as m
+                  from jsonb_array_elements(
+                         case when jsonb_typeof(c.vals) = 'array' then c.vals else '[]'::jsonb end)
+                       with ordinality as v(e, vord)
+                 where jsonb_typeof(v.e->'tone') = 'string' and v.e->'value' is not null) m
+             where m.m is not null"
         )
     };
 }
 
 /// The row `i`'s declared state through `state_paths` ([`state_paths!`]):
 /// [`crate::declared_state!`]'s answer, by [`crate::state_of!`]'s rule over
-/// the values flattened -- the first candidate, then the first of its values,
-/// that equals the string (trimmed, blank as none) or boolean at its path,
-/// named by its `text` or else the value. `payload_paths.rs`'s state-chip
-/// cases hold the two spellings to one answer.
+/// the maps -- the first candidate whose map holds the string (trimmed, blank
+/// as none) or boolean at its path, named by its `text` or else the value.
+/// Two jsonb values are equal exactly when their texts are, for a string or
+/// a boolean. `payload_paths.rs`'s state-chip cases hold the two spellings to
+/// one answer.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! resolved_state {
     () => {
         concat!(
-            "(select jsonb_build_object('text', coalesce(p.text, (",
+            "(select jsonb_build_object('text', coalesce(s.e->>'text', s.v #>> '{}'), 'tone', s.e->>'tone')
+               from (select p.ord, x.v, p.m -> (x.v::text) as e
+                       from state_paths p cross join lateral (select ",
             $crate::state_value_at!(),
-            ") #>> '{}'), 'tone', p.tone)
-               from state_paths p
-              where p.source_id = i.source_id and p.kind = i.kind and p.value = ",
-            $crate::state_value_at!(),
-            "
-              order by p.ord, p.vord limit 1)"
+            " as v) x
+                      where p.source_id = i.source_id and p.kind = i.kind) s
+              where s.e is not null order by s.ord limit 1)"
         )
     };
 }
