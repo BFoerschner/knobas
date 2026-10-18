@@ -95,6 +95,63 @@ check_matches "a longer path with the same prefix does not match" no \
 check_matches "a wildcard in a path is compared literally, not matched" no \
     "$built" "/Users/dev/Projects/knobas/target/debug/bundle/macos/*"
 
+# --- the copies the opt-in step unregisters (#1176) -------------------------
+#
+# A fake `lsregister -dump`, in the shape the real one prints (path before
+# identifier inside a record, records split by dashes, ` (0x..)` after the
+# path), with: the bundle under test, the root checkout's debug and release
+# bundles, a sibling worktree, an installed copy, a lookalike directory that
+# merely shares the root's name as a prefix, and a record of another app.
+root=/Users/dev/Projects/knobas
+under_test=$root/.worktrees/issue-1176/target/debug/bundle/macos/knobas.app
+fake_dump="--------------------------------------------------------------------------------
+bundle id:                  knobas (0x1)
+path:                       $root/target/debug/bundle/macos/knobas.app (0x5c24)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  knobas (0x2)
+path:                       $root/target/release/bundle/macos/knobas.app (0x5c25)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  knobas (0x3)
+path:                       $under_test (0x5c26)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  knobas (0x4)
+path:                       $root/.worktrees/issue-1084/target/debug/bundle/macos/knobas.app (0x5c27)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  knobas (0x5)
+path:                       /Applications/knobas.app (0x5c28)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  knobas (0x6)
+path:                       ${root}-old/target/knobas.app (0x5c29)
+identifier:                 dev.knobas.desktop
+--------------------------------------------------------------------------------
+bundle id:                  Other (0x7)
+path:                       $root/.worktrees/other/Other.app (0x5c2a)
+identifier:                 com.example.other
+--------------------------------------------------------------------------------
+bundle id:                  NoIdentifier (0x8)
+path:                       $root/.worktrees/x/Odd.app (0x5c2b)
+"
+
+check "only this repo's other copies are unregistered, never the bundle under test" \
+    "$root/.worktrees/issue-1084/target/debug/bundle/macos/knobas.app
+$root/target/debug/bundle/macos/knobas.app
+$root/target/release/bundle/macos/knobas.app" \
+    "$(copies_to_unregister "$fake_dump" dev.knobas.desktop "$under_test" "$root")"
+check "an installed copy and a lookalike prefix are left, and reported" \
+    "${root}-old/target/knobas.app
+/Applications/knobas.app" \
+    "$(copies_to_leave "$fake_dump" dev.knobas.desktop "$under_test" "$root" | sort -r)"
+check "a Launch Services trailing slash on the bundle under test still keeps it" \
+    "no" \
+    "$(copies_to_unregister "$fake_dump" dev.knobas.desktop "$under_test/" "$root" | grep -q issue-1176 && echo yes || echo no)"
+check "a dump with no copy of the identifier selects nothing" \
+    "" "$(copies_to_unregister "$fake_dump" dev.knobas.nothing "$under_test" "$root")"
+
 # --- classify_readiness -----------------------------------------------------
 
 granted=$'trusted\t1\npost-events\t1\nscreen-locked\t0'

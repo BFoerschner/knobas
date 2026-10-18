@@ -107,8 +107,28 @@ fi
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-desktop-witness.XXXXXX")
 app_pid=
 previous_registration=
+# Newline-separated copies this run unregistered (opt-in, #1176) and puts back
+# on the way out. A string, not an array: bash 3.2 and `set -u`.
+unregistered=
 cleanup() {
     local status=$?
+    # Before anything else that can fail: the copies this run took out of
+    # Launch Services go back, on success, failure and Ctrl-C alike, if the
+    # bundle is still on disk (one that is gone needs no putting back).
+    if [ -n "$unregistered" ]; then
+        local path
+        while IFS= read -r path; do
+            [ -n "$path" ] || continue
+            if [ ! -d "$path" ]; then
+                note "not re-registering $path: it is gone from disk"
+            elif "$LSREGISTER" -f "$path" 2>/dev/null; then
+                note "re-registered $path"
+            else
+                note "could not re-register $path"
+            fi
+        done <<<"$unregistered"
+        unregistered=
+    fi
     if [ -n "$app_pid" ] && kill -0 "$app_pid" 2>/dev/null; then
         note "quitting the app that is still running (pid $app_pid)"
         kill -TERM "$app_pid" 2>/dev/null || true
@@ -229,6 +249,33 @@ grep -q "^Authority=$SIGNING_IDENTITY$" "$scratch/codesign" \
 # the registered path while the one it was launched from waited on. So the
 # harness asks LS, and refuses rather than launching a copy LS does not name.
 # ---------------------------------------------------------------------------
+if [ "${KNOBAS_WITNESS_UNREGISTER_OTHERS:-}" = 1 ]; then
+    # Opt-in (#1176). Default stays the refusal below. Only copies inside this
+    # repo's checkouts are touched; anything else (an installed knobas in
+    # /Applications, a DMG mount) is reported and left registered, so the
+    # refusal below still names it -- ADR-0016: the harness never moves an
+    # installed knobas aside.
+    step "unregistering the other repo copies of $BUNDLE_ID (KNOBAS_WITNESS_UNREGISTER_OTHERS=1)"
+    repo_root=$(dirname "$(git -C "$repo" rev-parse --path-format=absolute --git-common-dir)")
+    dump=$("$LSREGISTER" -dump)
+    left=$(copies_to_leave "$dump" "$BUNDLE_ID" "$app" "$repo_root")
+    to_unregister=$(copies_to_unregister "$dump" "$BUNDLE_ID" "$app" "$repo_root")
+    # Record before unregistering, so a Ctrl-C half way still restores them.
+    unregistered=$to_unregister
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        if "$LSREGISTER" -u "$path" 2>/dev/null; then
+            note "unregistered $path"
+        else
+            note "could not unregister $path"
+        fi
+    done <<<"$to_unregister"
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        note "left registered (outside $repo_root): $path"
+    done <<<"$left"
+fi
+
 step "registering the bundle with Launch Services"
 previous_registration=$("$ax" registered-path "$BUNDLE_ID" 2>/dev/null || true)
 [ -n "$previous_registration" ] && note "was: $previous_registration"
