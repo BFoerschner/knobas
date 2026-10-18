@@ -1,5 +1,5 @@
 ---
-status: accepted, amended 2026-10-17 (#962)
+status: accepted, amended 2026-10-17 (#962), generalised by ADR-0029
 ---
 
 # The shell draws Builds and Docs over declared kinds

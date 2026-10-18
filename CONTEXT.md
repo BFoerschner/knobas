@@ -37,6 +37,22 @@ _Avoid_: integration, provider, connector
 The per-system implementation that speaks a source's API and emits its items.
 _Avoid_: plugin, client
 
+**External adapter**:
+An [adapter](#adapter) installed from a repository that follows the [adapter standard](#adapter-standard), pinned to one release and updated only when the reader asks. Its opposite is a **built-in adapter**, compiled into knobas. Both are held to the same [role](#role) requirements. (Added 2026-10-18, custom-sources grilling.)
+_Avoid_: plugin, extension, add-on
+
+**Adapter standard**:
+What a repository must contain and implement for knobas to install an [external adapter](#external-adapter) from it. (Added 2026-10-18, custom-sources grilling.)
+_Avoid_: plugin standard, plugin API
+
+**Source action**:
+A write an adapter declares that belongs to no [role](#role)'s vocabulary, such as *Convert to draft*. The adapter declares its dialog. Knobas queues it like any other write without knowing what it does, and hands it back to the adapter. (Added 2026-10-18, custom-sources grilling.)
+_Avoid_: custom op, plugin action
+
+**Role**:
+A domain knobas has a working surface for (code host, ticket system, CI, wiki, monitoring), stated as what a source must provide to fill it: the [kinds](#kind) it emits, the [declared paths](#declared-path) each kind carries, the live reads it answers, and the writes it may offer. A source may fill several roles (Gitea fills code host and ticket system). The shell draws a role's surface for every source that fills it, never for a named source. A source whose items fit none of these declares a **custom role** of its own, which is handled like any other role: its view opens when one of its items is opened. A custom role has no surface you can open by itself. (Added 2026-10-18, custom-sources grilling; ADR-0029.)
+_Avoid_: capability (the descriptor's search/write/webhooks/import flags), type, category, frame (the shell's drawing of a role, not the role)
+
 **Project**:
 A source's own grouping of its items, where the source has one — a Jira project, a TeamCity project, a Confluence **space** (from M3.2). Per source and in the source's own word: Gitea has no such thing, and its repository is an entity kind rather than a grouping. Scoping to one repo is what its [parent](#parent) relation is for. Where a source's projects nest (TeamCity's `Payments › Payouts`), a project takes in its subprojects: `project:Payments` and a link-set pattern naming it match what sits anywhere beneath it (#1019). The chain stays projects, never parents. Not a [Context](#context), which is a working set a person builds. (ADR-0010)
 _Avoid_: container, space (as a synonym for project; it stays as Confluence's own word, ADR-0010), workspace, board (ADR-0009)
