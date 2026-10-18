@@ -19,6 +19,14 @@
   **Tickets only:** `#` already means `kind:ticket`, and other kinds' ids (a branch's repo and
   ref, a page's number) are not names a reader types; indexing them would reorder every search
   touching a repo or page.
+  **What else reads `fts`:** `similar_text` (`0031`, `0034`) fingerprints an item by
+  `md5(title || fts::text)` and counts its lexemes. Every ticket's digest changes, so the first
+  pass after `0048` compares every ticket again, once (derived data, as `0034`'s truncate). From
+  then on a ticket's key lexemes (`pay-231`, `pay`, `231`) count among its words: a project prefix
+  held by many tickets falls under the common-word line, and a title that spells the key can now
+  match the ticket it names. Ruled acceptable by the merge-manager (PR #1178).
+  **Cost:** the rewrite is `0027`'s, which measured 6.9 s at 100,000 rows, so about a second at
+  15,000 tickets, once, at the boot that applies it.
 
   **`knobas_search`: a ticket is *named* by its key.** `Corpus` gains a crate-private `key`
   (`LIVE_ITEM`'s is the same expression, tickets only; the other corpora have none), and the

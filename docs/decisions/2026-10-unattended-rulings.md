@@ -5368,3 +5368,12 @@ Implementer.
   between equal ranks, rather than a rank tier of its own (story 26). **Reversing:** low.
 - **Migration number `0048`.** `0047` is taken by #1163 (PR #1171), still open; the two alter
   different objects and apply in either order. **Reversing:** low (renumber before merge).
+
+Merge-manager (PR #1178).
+
+- **`similar_text` reads the key too.** The rule fingerprints and counts `fts`, so `0048` makes
+  its first pass after the upgrade compare every ticket again, and a ticket's key lexemes join its
+  words from then on. Accepted: the pass is one-off derived work (`0034` truncated the same table
+  on purpose), a shared project prefix falls under the common-word line, and a title spelling the
+  key matching that ticket is what the key means. **Reversing:** low (a migration that indexes the
+  key in a separate column the launcher alone reads).
