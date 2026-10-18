@@ -5166,3 +5166,20 @@ Implementer.
 - **Dropped with the core type: `Macro.summary` and the header/rows split of a table.** No caller
   set a summary, and both table branches drew the first row as the header; the golden tests,
   committed first, hold every byte. **Reversing:** low.
+
+## #1084 — the open-in-editor and capture witnesses on the ticket-first shell (2026-10-18)
+
+Implementer.
+
+- **open-in-editor adds an application rather than editing VS Code's.** Every *Edit…*, *Make
+  default*, default radio and *Move up* is one of several controls of the same name, which `ax
+  press` refuses; *Add an application…* is one. The menu ends *…applications, Add an application…,
+  Manage applications…* and its arrows wrap, so three up from the focused default is the newest
+  application however many runs came before. **Reversing:** low (driver only).
+- **capture asserts the note count, not *captured from*.** A note has no view while notes hide
+  (D10, #1085), so no window draws its links; the count on Settings › Notes and capture going up by
+  one is what a window can say. The link stays pinned at `capture_ipc.rs` and
+  `capture.test.svelte.ts`. **Reversing:** low.
+- **Runs leave state in the demo profile** (an application per open-in-editor run; notes shown,
+  the shortcut and a note per capture run). Removing an application needs a positional *Edit…*;
+  neither driver depends on a clean slate. **Reversing:** low.
