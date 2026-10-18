@@ -2143,5 +2143,9 @@ async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
     .fetch_all(pool)
     .await
     .unwrap();
-    assert_eq!(titles, ["default", "default"], "a title sorts as the user reads");
+    assert_eq!(
+        titles,
+        ["default", "default"],
+        "a title sorts as the user reads"
+    );
 }

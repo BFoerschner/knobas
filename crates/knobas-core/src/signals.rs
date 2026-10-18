@@ -293,7 +293,11 @@ macro_rules! link_ends {
 #[macro_export]
 macro_rules! kind_of {
     ($id:literal) => {
-        concat!("(select e.kind from knobas.entity e where e.id = ", $id, ")")
+        concat!(
+            "(select e.kind from knobas.entity e where e.id = ",
+            $id,
+            ")"
+        )
     };
 }
 
