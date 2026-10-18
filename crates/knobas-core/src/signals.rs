@@ -303,7 +303,7 @@ macro_rules! same_key {
 /// `(id)`: one probe of `link_from_bytes_idx` or `link_to_bytes_idx`, kept a
 /// probe per row by `offset 0`. Joined instead, the planner hashed every
 /// confirmed link, a scan of the whole table with its proposals (40,000 rows
-/// on the probe) for each of the walk's four steps.
+/// on the probe) for each step of the walk from its starts.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! link_ends {
@@ -347,7 +347,9 @@ macro_rules! item_by_key {
     };
 }
 
-/// [`crate::live_by_key!`] with the entity's probe compared bytewise.
+/// [`crate::live_by_key!`] with the entity's probe compared bytewise
+/// ([`same_key!`]): `live_by_key!`'s probe compares through the database's
+/// collation, about 4.7 µs a row at 22,000 items against 0.75 µs (#1163).
 #[doc(hidden)]
 #[macro_export]
 macro_rules! live_by_bytes {
