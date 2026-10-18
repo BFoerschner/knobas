@@ -5821,3 +5821,40 @@ The implementer's rulings:
   settings*, the page's Jira view groups and `jiraView` port), which #1207 and #1208 take. The
   comments in `tickets.ts` and `editor.ts` that used Jira as the example are reworded.
   **Reversing:** low.
+## #1197 Clone works for any code-host source (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **Ratifying the §10.8 entry** (`docs/contract/10.8/1197-clone-urls-read.md`): one descriptor
+  field (`clone_from`), one required read in the code-host minimum (`clone_urls`) and three
+  clause-10 checks. Ruling: ratified as written. Reasoning: it is the read spec #1192 and the
+  ticket name, the field is `#[serde(default)]`, WIT `knobas:adapter@1.0.0` is untouched, and
+  nothing existing changes shape. **Reversing:** a §10.8 amendment before any external code host
+  ships against it.
+
+The implementer's rulings:
+
+- **The read is a declaration, not a `Source` method.** The adapter names which typed address of
+  its instance a repository is cloned from (`CloneFrom::BaseUrl` or `CloneFrom::Config(key)`), and
+  knobas builds the URL. Reasoning: ADR-0023 builds the URL from an address a person typed, never
+  from the mirror, and a declaration keeps that structural rather than an adapter obligation;
+  *Clone* reads the template, so it builds no adapter and asks the keychain nothing (a `Source`
+  method would need the credential Gitea's `build` demands, which a clone never did); and it
+  crosses to an external adapter inside the descriptor JSON, so no WIT minor version is needed.
+  The spec lists "Clone URLs for a repo" among the code host's declared items. Cost: an address
+  that is not a typed value plus `/<owner>/<repo>.git` cannot be expressed. **Reversing:** medium;
+  a `Source::clone_urls` method could replace the field in a later §10.8 entry, crossing WIT in a
+  minor version.
+- **How the clone-URLs read reaches an external adapter.** Inside the descriptor's JSON, as a
+  `#[serde(default)]` field: additive under the 1198 entry, no new function, no new version.
+  **Reversing:** with the ruling above.
+- **The battery holds both directions.** `clone_from` names an address exactly when a code-host
+  claim reads `clone_urls`, and a config key it names is a string property of the schema.
+  Reasoning: the two-signal precedent of clauses 5 and 11; a key outside the schema is an address
+  no form asked a person for. **Reversing:** low.
+- **No base-URL fallback.** A source whose adapter names only a config key the instance leaves
+  empty is refused, not cloned from its base URL. Reasoning: an API base URL is often not the
+  clone host, so a fallback would clone from a wrong server. **Reversing:** low.
+- **ADR-0023 gains one consequence line** saying any code-host source clones, from the address
+  its adapter names. Reasoning: its rule (a typed address plus the checked name) stands; only its
+  "Gitea" scope widened, as the spec and the ticket say. **Reversing:** low.

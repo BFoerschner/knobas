@@ -30,3 +30,4 @@ ADR-0016's concern is that a value from the mirror would reach a spawned program
 - One IPC command, `clone_repo`, runs in the background with progress events parsed from `--progress` and can be cancelled. It needs a §10.8 entry.
 - The checkout scan finds the result as it finds any clone, so the rest of the checkout panel is unchanged.
 - The witness is a live test against testenv Gitea: clone, refuse an existing folder that is not a clone, refuse a bad name, and cancel. There are unit tests on the argument list. No desktop witness is needed, because nothing is opened.
+- Since #1197 (spec #1192), any code-host source clones, not only Gitea. The address is still one a person typed: the repository's adapter names which of its instance's addresses (the base URL or a config value) it is, in the descriptor's `clone_from`, and knobas appends the checked name. Gitea names its base URL.
