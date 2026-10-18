@@ -744,6 +744,12 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
     knobas_sync::samples::set_threshold_ms(&pool, 8)
         .await
         .unwrap();
+    // A poll writes a sample only on a state change or a minute after the last
+    // one (#1190); age the first poll's rows so every monitor is due again.
+    sqlx::query("update knobas.monitor_sample set taken_at = taken_at - interval '2 minutes'")
+        .execute(&pool)
+        .await
+        .unwrap();
     let second = knobas_sync::run_once(&pool, real.as_ref(), Some(first.cursor.clone()))
         .await
         .unwrap();

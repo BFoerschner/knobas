@@ -821,9 +821,17 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         "a roster of one could not witness a rule about every monitor"
     );
     assert_eq!(
-        per_monitor,
-        vec![3; usize::try_from(live).expect("a small roster")],
-        "every one of the {live} live monitors was sampled once per run, three runs over"
+        per_monitor.len(),
+        usize::try_from(live).expect("a small roster"),
+        "all {live} live monitors were sampled by the first run"
+    );
+    // Since #1190 a run samples a monitor only on a state change or a minute
+    // after its last sample, so the monitors that stayed put hold one row (or a
+    // few, if the runs straddled a minute) and the canary, which changed state
+    // twice, holds all three.
+    assert!(
+        per_monitor.iter().all(|n| (1..=3).contains(n)),
+        "no monitor is sampled more than once per run: {per_monitor:?}"
     );
 
     state.scheduler.shutdown().await;
