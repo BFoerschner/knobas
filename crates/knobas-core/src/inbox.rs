@@ -352,7 +352,8 @@ macro_rules! review_request {
 /// holding them, none for a name nobody wrote. The names are joined on
 /// `chr(1)` and escaped together, which can only widen the alternation (a
 /// name holding a `chr(1)` becomes its two halves), so the second test --
-/// the per-name expression, the rule as it was -- decides. `cardinality`
+/// each name's own expression, #785's without its `strpos` -- decides. Both
+/// are spelled by `mention_of!`. `cardinality`
 /// keeps an empty `$1` empty: the alternation of no names matches any `@`.
 /// Pinned by `a_name_with_pattern_characters_is_matched_literally` and, for
 /// the index in both statistics states, `knobas-app`'s `read_plans.rs`.
@@ -372,16 +373,27 @@ macro_rules! mention {
             window_days!(),
             r")
                  and cardinality($1::text[]) > 0
-                 and i.body_text ~ ('(\[~|@)('
-                       || replace(regexp_replace(array_to_string($1::text[], chr(1)),
-                                                 '([\\^$.|?*+()\[\]{}])', '\\\1', 'g'),
-                                  chr(1), '|')
-                       || ')($|[^A-Za-z0-9_.-])')
-                 and i.body_text ~ any (array(
-                       select '(\[~|@)'
-                              || regexp_replace(u, '([\\^$.|?*+()\[\]{}])', '\\\1', 'g')
-                              || '($|[^A-Za-z0-9_.-])'
-                         from unnest($1::text[]) as u))"
+                 and i.body_text ~ replace(",
+            mention_of!("array_to_string($1::text[], chr(1))"),
+            r", chr(1), '|')
+                 and i.body_text ~ any (array(select ",
+            mention_of!("u"),
+            r" from unnest($1::text[]) as u))"
+        )
+    };
+}
+
+/// The expression a mention of `$names` matches: `@` or `[~`, the text of
+/// `$names` with every expression character escaped, then the end or a
+/// character no name continues with. One spelling for both of
+/// `mention!`'s tests, so the alternation cannot drift narrower than the
+/// per-name expression that decides.
+macro_rules! mention_of {
+    ($names:literal) => {
+        concat!(
+            r"('(\[~|@)(' || regexp_replace(",
+            $names,
+            r", '([\\^$.|?*+()\[\]{}])', '\\\1', 'g') || ')($|[^A-Za-z0-9_.-])')"
         )
     };
 }

@@ -23,8 +23,9 @@
 --
 -- The first extension knobas installs. It ships in the bundled PostgreSQL's
 -- contrib, which `postgresql_embedded`'s theseus archive carries on every
--- platform. Not in the backup: `pg_dump --schema knobas` takes neither the
--- extension nor this index, which is on the mirror (`sync`).
+-- platform. Not in the backup: it dumps the `knobas` schema only
+-- (`pg_dump --schema knobas`), and this index is in the mirror's `sync`
+-- schema and the extension in neither.
 --
 -- ## The partial predicate
 --
