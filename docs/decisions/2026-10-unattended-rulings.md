@@ -5609,3 +5609,18 @@ The merge-manager's rulings (PR #1226):
   holds what it can, and #1224 names the gap. **Reversing:** #1224.
 - **Custom role `<adapter_kind>:<name>`:** matches the spec's `<adapter>:<name>` and ADR-0029's
   `grafana:dashboard-host`, owned by the declaring adapter. **Reversing:** low.
+
+## #1222 Forgejo: draw a private repository's branch diff (2026-10-18)
+
+- **Fork: build a net diff for a private repository on Forgejo, or keep the refusal.** Ruling:
+  the refusal stays (`compare_diff` in `crates/knobas-source-gitea/src/client/repo.rs`, pinned by
+  `a_forgejo_private_repository_diff_is_refused_not_drawn_empty`). Reasoning: Forgejo 17.0.0
+  offers no diff route a token can read for a private compare. Folding per-commit
+  `git/commits/{sha}.diff` bodies is not a net diff: a file touched by two commits would show both
+  intermediate states, and the adapter has no diff engine to collapse them. Diffing the file
+  contents of the two refs needs a text-diff dependency plus rename, binary, mode and size-cap
+  handling that `git diff` already does for every other adapter. Either would be a second diff
+  producer to keep honest for one server's private repositories, and a wrong diff drawn silently
+  is worse than a refusal that names Forgejo. **Reversing:** medium (a new diff producer behind
+  the same fallback); revisit if Forgejo lets a token read the web route or honours
+  `output=diff`.
