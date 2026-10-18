@@ -588,6 +588,15 @@ async fn a_source_that_emits_no_monitor_kind_opens_no_alerts() {
     );
 }
 
+/// Make every sample two minutes old, so the next run sees an unchanged state
+/// past the one-minute floor (#1190) and samples it again.
+async fn age_samples(pool: &PgPool) {
+    sqlx::query("update knobas.monitor_sample set taken_at = taken_at - interval '2 minutes'")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 // --- the two structural claims ----------------------------------------------
 
 /// **A monitor that is already down the first time knobas looks opens an
@@ -611,7 +620,9 @@ async fn a_monitor_already_down_when_the_alert_table_is_empty_opens_one() {
     let canary = format!("{id}:canary");
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    age_samples(&pool).await;
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    age_samples(&pool).await;
     sqlx::query("delete from knobas.monitor_alert")
         .execute(&pool)
         .await

@@ -253,6 +253,15 @@ async fn back_date(pool: &PgPool, entity_id: &str, at: DateTime<Utc>) {
         .unwrap();
 }
 
+/// Make every sample two minutes old, so an unchanged state is past the
+/// one-minute floor (#1190) on the next run.
+async fn age_all(pool: &PgPool) {
+    sqlx::query("update knobas.monitor_sample set taken_at = taken_at - interval '2 minutes'")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+
 async fn set_setting(pool: &PgPool, key: &str, value: i64) {
     sqlx::query(
         "insert into knobas.setting (key, value) values ($1, $2)
@@ -279,6 +288,7 @@ async fn two_runs_append_one_sample_per_monitor_each() {
     );
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    age_all(&pool).await;
     corpus.lock().unwrap()[0].response_time_ms = Some(41.0);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
@@ -296,7 +306,7 @@ async fn two_runs_append_one_sample_per_monitor_each() {
             (Some("up".to_owned()), Some(120)),
             (Some("up".to_owned()), Some(120)),
         ],
-        "a monitor nothing changed about is sampled twice all the same"
+        "a monitor nothing changed about is sampled again once its last sample is a minute old"
     );
 }
 
@@ -313,6 +323,7 @@ async fn a_poll_that_emits_nothing_still_samples_every_live_monitor() {
     let first = knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert_eq!(first.upserted, 1);
 
+    age_all(&pool).await;
     *idle.lock().unwrap() = true;
     let second = knobas_sync::run_once(&pool, &src, Some(r#"{"v":1}"#.to_owned()))
         .await
@@ -347,6 +358,7 @@ async fn a_monitor_the_second_run_does_not_publish_gets_no_second_sample() {
     );
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    age_all(&pool).await;
     corpus
         .lock()
         .unwrap()
@@ -695,4 +707,107 @@ async fn both_settings_are_stored_by_one_save() {
     );
     assert_eq!(samples::retention_days(&pool).await.unwrap(), 1);
     assert_eq!(samples::threshold_ms(&pool).await.unwrap(), 0);
+}
+
+// --- a sample on a state change, otherwise at most once a minute (#1190) -----
+
+/// Same state, last sample under a minute old: nothing is written, and a
+/// response-time change alone does not force a row.
+#[tokio::test]
+async fn the_same_state_under_a_minute_after_writes_no_sample() {
+    let pool = pool("the_same_state_under_a_m").await;
+    let id = "kuma".to_owned();
+    let (src, corpus, _idle) = source(&id, &[Monitor::up("gitea", 35.0)]);
+    let gitea = format!("{id}:gitea");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    back_date(&pool, &gitea, Utc::now() - Duration::seconds(50)).await;
+    corpus.lock().unwrap()[0].response_time_ms = Some(900.0);
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    assert_eq!(
+        taken(&pool, &gitea).await,
+        vec![(Some("up".to_owned()), Some(35))],
+        "fifty seconds on, still up, a different reading: no second row"
+    );
+}
+
+/// A different state is sampled whatever the last sample's age.
+#[tokio::test]
+async fn a_different_state_is_sampled_at_once() {
+    let pool = pool("a_different_state_is_sam").await;
+    let id = "kuma".to_owned();
+    let (src, corpus, _idle) = source(&id, &[Monitor::up("gitea", 35.0)]);
+    let gitea = format!("{id}:gitea");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    corpus.lock().unwrap()[0].state = Some("down");
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    corpus.lock().unwrap()[0].state = Some("up");
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+
+    let states: Vec<Option<String>> = taken(&pool, &gitea)
+        .await
+        .into_iter()
+        .map(|(state, _)| state)
+        .collect();
+    assert_eq!(
+        states,
+        vec![
+            Some("up".to_owned()),
+            Some("down".to_owned()),
+            Some("up".to_owned())
+        ],
+        "each transition is a row, seconds after the last one"
+    );
+}
+
+/// The same state, once the last sample is a minute old, is sampled again;
+/// just short of a minute it is not.
+#[tokio::test]
+async fn the_same_state_a_minute_after_is_sampled_again() {
+    let pool = pool("the_same_state_a_minute_").await;
+    let id = "kuma".to_owned();
+    let (src, _corpus, _idle) = source(&id, &[Monitor::up("gitea", 35.0)]);
+    let gitea = format!("{id}:gitea");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    back_date(&pool, &gitea, Utc::now() - Duration::seconds(59)).await;
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(taken(&pool, &gitea).await.len(), 1, "59 seconds is not yet");
+
+    back_date(&pool, &gitea, Utc::now() - Duration::seconds(61)).await;
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(taken(&pool, &gitea).await.len(), 2, "61 seconds is");
+}
+
+/// The alert still opens and closes on the run that sees the transition, with
+/// every run inside the one-minute floor.
+#[tokio::test]
+async fn an_alert_opens_and_closes_on_the_run_that_sees_the_transition() {
+    let pool = pool("an_alert_opens_and_close").await;
+    let id = "kuma".to_owned();
+    let (src, corpus, _idle) = source(&id, &[Monitor::up("gitea", 35.0)]);
+    let gitea = format!("{id}:gitea");
+    let open = || async {
+        sqlx::query_scalar::<_, i64>(
+            "select count(*) from knobas.monitor_alert where entity_id = $1 and closed_at is null",
+        )
+        .bind(&gitea)
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+    };
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    corpus.lock().unwrap()[0].state = Some("down");
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(open().await, 1, "down opens an alert on the run that sees it");
+
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(open().await, 1, "a skipped sample leaves it standing");
+
+    corpus.lock().unwrap()[0].state = Some("up");
+    knobas_sync::run_once(&pool, &src, None).await.unwrap();
+    assert_eq!(open().await, 0, "up closes it on the run that sees it");
 }

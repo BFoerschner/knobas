@@ -1,4 +1,11 @@
-//! One sample per poll per monitor: the knobas-owned timeseries (issue #443).
+//! A sample on a state change, otherwise at most one a minute: the
+//! knobas-owned timeseries (issues #443, #1190).
+//!
+//! Since #1190 a poll is not always a sample: [`append`] writes a monitor's
+//! row only when its state differs from the last sample's or that sample is a
+//! minute old. [`crate::alerts::reconcile`] reads the newest sample and the
+//! open alert, so an unchanged state decides what it decided last run and a
+//! changed one is always sampled on the run that sees it.
 //!
 //! Spec #427: *"At the end of every run of a source that emits `monitor`, the
 //! engine appends one sample per live monitor (state, response time, taken at)
@@ -290,8 +297,47 @@ pub(crate) fn state_paths(
         })
 }
 
-/// Append one sample for every live monitor of `source_id`, inside the run's
-/// own transaction.
+/// How old a monitor's last sample must be, in seconds, before an unchanged
+/// state is sampled again (issue #1190, spec #1186): one minute.
+pub const MIN_INTERVAL_SECONDS: i64 = 60;
+
+/// One live monitor and what its newest sample says, as the run reads it.
+///
+/// `last_taken` is `None` for a monitor never sampled. `last_old` is decided by
+/// the database against the transaction's own `now()`, the instant the new row
+/// would carry, so the age is measured on one clock.
+#[derive(sqlx::FromRow)]
+struct Live {
+    entity_id: String,
+    payload: Value,
+    last_taken: bool,
+    last_state: Option<String>,
+    last_old: bool,
+}
+
+/// Every live monitor of a source with its newest sample, if any. `$3` is
+/// [`MIN_INTERVAL_SECONDS`].
+const LIVE_WITH_LAST: &str = "select i.entity_id, i.payload,
+            l.id is not null as last_taken, l.state as last_state,
+            coalesce(l.taken_at <= now() - make_interval(secs => $3::int), false) as last_old
+       from sync.live_item i
+       left join lateral (
+            select s.id, s.state, s.taken_at from knobas.monitor_sample s
+             where s.entity_id = i.entity_id
+             order by s.taken_at desc, s.id desc limit 1) l on true
+      where i.source_id = $1 and i.kind = $2";
+
+/// Whether this run writes a sample for `row`: never sampled, the *state*
+/// differs from the last sample's (a miss counts as a state of its own), or
+/// the last sample is at least [`MIN_INTERVAL_SECONDS`] old. A response-time
+/// change alone is none of these.
+fn is_due(row: &Live, state: Option<&str>) -> bool {
+    !row.last_taken || row.last_state.as_deref() != state || row.last_old
+}
+
+/// Append a sample for each live monitor of `source_id` whose state changed or
+/// whose last sample is a minute old (see [`is_due`]), inside the run's own
+/// transaction.
 ///
 /// Called from `run_locked` **after** the sweep and before the cursor update,
 /// so that a monitor this very run tombstoned is already out of
@@ -310,13 +356,12 @@ pub(crate) async fn append(
 ) -> Result<u64, sqlx::Error> {
     let threshold = THRESHOLD.read(&mut **tx).await?;
 
-    let live: Vec<(String, Value)> = sqlx::query_as(
-        "select entity_id, payload from sync.live_item where source_id = $1 and kind = $2",
-    )
-    .bind(source_id)
-    .bind(KIND)
-    .fetch_all(&mut **tx)
-    .await?;
+    let live: Vec<Live> = sqlx::query_as(LIVE_WITH_LAST)
+        .bind(source_id)
+        .bind(KIND)
+        .bind(MIN_INTERVAL_SECONDS)
+        .fetch_all(&mut **tx)
+        .await?;
     if live.is_empty() {
         return Ok(0);
     }
@@ -324,11 +369,17 @@ pub(crate) async fn append(
     let mut ids: Vec<String> = Vec::with_capacity(live.len());
     let mut states: Vec<Option<String>> = Vec::with_capacity(live.len());
     let mut readings: Vec<Option<i32>> = Vec::with_capacity(live.len());
-    for (entity_id, payload) in live {
-        let sample = sample_of(&payload, declared, threshold);
-        ids.push(entity_id);
+    for row in live {
+        let sample = sample_of(&row.payload, declared, threshold);
+        if !is_due(&row, sample.state) {
+            continue;
+        }
+        ids.push(row.entity_id);
         states.push(sample.state.map(ToOwned::to_owned));
         readings.push(sample.response_time_ms);
+    }
+    if ids.is_empty() {
+        return Ok(0);
     }
 
     // `taken_at` is left to the column default, which is `now()` -- the
