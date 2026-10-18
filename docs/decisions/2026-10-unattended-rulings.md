@@ -5749,3 +5749,40 @@ The merge-manager's rulings (PR #1233):
   `swallow_sink` fault and `a_sink_error_the_component_swallows_still_fails_the_sync` holds the
   host's rule (a mutant that returns the component's answer is killed by it alone, not by the
   battery). **Reversing:** low.
+## #1194 Source actions: a write outside every role's vocabulary (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **Ratifying the §10.8 entry** (`docs/contract/10.8/1194-source-action.md`): a `WriteOp`
+  variant, a descriptor field and four write-queue table rows. Ruling: ratified as written.
+  Reasoning: it is what spec #1192 and ADR-0029 name (`source_action { id, fields }`, one
+  variant, queued like any write), every addition is `#[serde(default)]` or a new variant, and
+  nothing existing changes shape. **Reversing:** a §10.8 amendment before any external adapter
+  ships against it.
+
+The implementer's rulings:
+
+- **Where a source action is declared.** The descriptor lists the ids it performs
+  (`source_actions: Vec<String>`); the view that offers one draws its dialog in ADR-0020's action
+  vocabulary, as every action's is. Reasoning: the battery needs the ids to probe an undeclared
+  one, and whether an action is offered right now, and with which choices, is the adapter's
+  per-entity answer (ADR-0020 rule 4). **Reversing:** low; a richer declaration can replace the
+  strings in a later §10.8 entry.
+- **How a view's action names its id.** A fixed value under `"id"`, not a new `ViewAction` field.
+  Reasoning: the block vocabulary stays as it is (the WIT transcription in #1198 follows it
+  unchanged), and fixed values already tell one op's actions apart (#705). The cost: no source
+  action's field may be named `id`. **Reversing:** low (one optional field on `ViewAction`).
+- **The queue's answers for an op it cannot read.** Hold on the whole record, resend not
+  harmless, a withdrawal in flight disclosed (`UNCLAIMED_OPS`). Reasoning: each is the cautious
+  answer where knobas cannot know what the action does; the cost of being wrong is a needless
+  hold or line, never a lost or doubled write. **Reversing:** low, per op table.
+- **`submit_write` does not check the id against `source_actions`.** Reasoning: it gates on
+  `write_ops`, as for every op; the adapter refuses an undeclared id (clause 11), and that refusal
+  lands in the queue as any refusal does. **Reversing:** low (one check in `submittable`).
+- **Gitea's witness is *Add label…*.** A required choice of the repository's labels by id, in
+  every state, disabled with the reason when none is left, there are none, or the read failed;
+  one page of fifty labels. Reasoning: Gitea takes a label on a closed or merged pull request
+  too; ids, not names, are what the endpoint takes without a lookup. **Reversing:** low.
+- **The live test makes its own label** (`knobas-label-<stamp>`) and deletes every
+  `knobas-label-` label at its start and end, rather than seeding one. Reasoning: the seed stays
+  as it is for every other suite, and a panicked run's label goes on the next. **Reversing:** low.
