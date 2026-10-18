@@ -223,10 +223,13 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                         .map(|f| format!("{name}: {f}")),
                 );
             }
-            if category == knobas_core::inbox::Category::Mention && !reads_body_index(&plan[0]["Plan"]) {
+            if category == knobas_core::inbox::Category::Mention
+                && !reads_body_index(&plan[0]["Plan"])
+            {
                 wrong.push(format!(
                     "{name}: reads every item's body, not {BODY_INDEX} (#1170)"
-                ));            }
+                ));
+            }
             if category == knobas_core::inbox::Category::NewAssignment {
                 wrong.extend(
                     item_scans_filtered_per_row(&plan[0]["Plan"])
