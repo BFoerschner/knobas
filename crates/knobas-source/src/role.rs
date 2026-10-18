@@ -508,8 +508,30 @@ mod tests {
         }
     }
 
+    fn code_host_min() -> &'static Minimum {
+        minimum(CODE_HOST).expect("code-host is a built-in role")
+    }
+
+    /// A field's name is the key `KindPaths` serializes it under, so a
+    /// refusal names the path an adapter author writes.
+    #[test]
+    fn every_required_field_is_named_as_kind_paths_serializes_it() {
+        let wire = serde_json::to_value(KindPaths::default()).unwrap();
+        for min in MINIMUMS {
+            for need in min.kinds {
+                for field in need.paths {
+                    assert!(
+                        wire.get(field.name()).is_some(),
+                        "{:?} is not a KindPaths key",
+                        field.name()
+                    );
+                }
+            }
+        }
+    }
+
     fn code_host_claim() -> RoleClaim {
-        RoleClaim::new(CODE_HOST, MINIMUMS[0].reads.iter().copied())
+        RoleClaim::new(CODE_HOST, code_host_min().reads.iter().copied())
     }
 
     #[test]
@@ -594,10 +616,10 @@ mod tests {
     /// Every required read is a read the claim is refused without.
     #[test]
     fn each_required_read_is_needed() {
-        for read in MINIMUMS[0].reads {
+        for read in code_host_min().reads {
             let claim = RoleClaim::new(
                 CODE_HOST,
-                MINIMUMS[0].reads.iter().copied().filter(|r| r != read),
+                code_host_min().reads.iter().copied().filter(|r| r != read),
             );
             assert_eq!(
                 check(&code_host(vec![claim], "repo")),

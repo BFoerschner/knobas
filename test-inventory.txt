@@ -2245,6 +2245,7 @@ knobas-source	lib/knobas_source	role::tests::a_custom_role_is_namespaced_to_its_
 knobas-source	lib/knobas_source	role::tests::a_read_the_role_does_not_have_is_refused_by_name
 knobas-source	lib/knobas_source	role::tests::a_role_claimed_twice_is_refused
 knobas-source	lib/knobas_source	role::tests::each_required_read_is_needed
+knobas-source	lib/knobas_source	role::tests::every_required_field_is_named_as_kind_paths_serializes_it
 knobas-source	lib/knobas_source	run::tests::a_download_target_is_tagged_on_kind
 knobas-source	lib/knobas_source	run::tests::a_tests_module_is_its_name_up_to_the_last_separator
 knobas-source	lib/knobas_source	run::tests::an_artifact_path_never_climbs_out_of_the_artifacts
