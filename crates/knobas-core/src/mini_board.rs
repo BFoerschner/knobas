@@ -233,6 +233,12 @@ macro_rules! priority_read {
 /// `Some` of no members is a stored room that is honestly empty, `None` is a
 /// derived room that never asked about membership at all.
 ///
+/// `$1` is tested as a set (`in (select unnest($1))`), which PostgreSQL runs
+/// as one hashed subplan probed per ticket (#1149). As `= any($1)` it did on
+/// analyzed tables too, but never analyzed the planner read the tickets
+/// through `item_pkey`, one index search per id: the scan took 32 ms for the
+/// 5,000 ids `has:blocker` matches on the 22k probe, and 11 ms hashed.
+///
 /// Live tickets only, which is what keeps a tombstoned ticket -- and, since
 /// migration `0012`, a disabled source's ticket -- off the board (story 18):
 /// `sync.item` with [`crate::live_by_exclusion!`] rather than `sync.live_item`,
@@ -287,7 +293,7 @@ const CARDS: &str = concat!(
         and ",
     crate::live_by_exclusion!("i"),
     "
-        and ($1::text[] is null or i.entity_id = any($1))
+        and ($1::text[] is null or i.entity_id in (select unnest($1::text[])))
         and ($2::text[] is null or i.source_id = any($2))
         and ($3::text is null or ",
     crate::project_key_read!("$4"),
@@ -368,12 +374,26 @@ pub fn planned_statement() -> &'static str {
     CARDS
 }
 
+/// The board's status statement, for `knobas-app`'s plan test. It binds
+/// the source ids and the declarations.
+#[doc(hidden)]
+#[must_use]
+pub fn planned_observed_statuses() -> &'static str {
+    OBSERVED_STATUSES
+}
+
 /// Every status these sources' live ticket corpora show -- the select's
 /// offer (#179), not the room's columns.
 ///
 /// Scoped to the sources the board actually drew a card from: the board
 /// answers for the tickets on it, and a source nothing in this room came from
 /// is not one the detail here can be asked about.
+///
+/// Live by [`crate::live_by_exclusion!`] over `sync.item`, as [`CARDS`] is,
+/// rather than through `sync.live_item` (#1149): on tables never analyzed the
+/// view's join probed `knobas.entity` once per ticket of the sources, 15,000
+/// probes and about 90 ms of the 22k probe's narrowed board, against about
+/// 25 ms with the tombstones read once.
 const OBSERVED_STATUSES: &str = concat!(
     "with ",
     status_paths!("$2"),
@@ -382,9 +402,12 @@ const OBSERVED_STATUSES: &str = concat!(
        select i.source_id, ",
     status_of_ticket!(),
     " as status
-         from sync.live_item i
+         from sync.item i
         where i.kind = 'ticket'
           and i.source_id = any($1)
+          and ",
+    crate::live_by_exclusion!("i"),
+    "
      )
      select distinct source_id, status
        from observed

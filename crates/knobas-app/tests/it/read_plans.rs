@@ -252,6 +252,53 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     })
     .await;
     wrong.extend(shapes("mini_board in lanes", &plan));
+    // Narrowed to a third of the tickets (#1149), as `has:blocker` narrows
+    // the probe's: the ids are a set probed per ticket, never an index
+    // search per id.
+    let matched: Vec<String> = sqlx::query_scalar(
+        "select id from knobas.entity where kind = 'ticket' and right(id, 1) in ('1', '4', '7')",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert!(matched.len() > 1_000, "{} tickets matched", matched.len());
+    let plan = explain(&pool, knobas_core::mini_board::planned_statement(), |q| {
+        q.bind(Some(matched.clone()))
+            .bind(None::<Vec<String>>)
+            .bind(None::<String>)
+            .bind(declared.clone())
+            .bind(Some(8_i64))
+            .bind(None::<String>)
+            .bind(None::<i64>)
+    })
+    .await;
+    wrong.extend(shapes("mini_board narrowed", &plan));
+    wrong.extend(
+        searches_per_id(&plan[0]["Plan"])
+            .into_iter()
+            .map(|f| format!("mini_board narrowed: {f}")),
+    );
+    // The statuses the board offers (#1149): its sources' whole corpora,
+    // live by the tombstones read once, never by a probe per ticket.
+    let plan = explain(
+        &pool,
+        knobas_core::mini_board::planned_observed_statuses(),
+        |q| {
+            q.bind(vec![
+                "jira0".to_owned(),
+                "jira1".to_owned(),
+                "jira2".to_owned(),
+            ])
+            .bind(declared.clone())
+        },
+    )
+    .await;
+    wrong.extend(shapes("mini_board statuses", &plan));
+    wrong.extend(
+        entity_probes(&plan[0]["Plan"])
+            .into_iter()
+            .map(|f| format!("mini_board statuses: {f}")),
+    );
     // The board's signals (#815), for fifty of its tickets, with a tenth of
     // the proposals confirmed for the plan so the walk has links to follow,
     // and put back so the tray's plans below see the mirror as it was.
@@ -460,6 +507,56 @@ fn unkeyed_link_reads(node: &serde_json::Value) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(unkeyed_link_reads(child));
+    }
+    found
+}
+
+/// Every index read of `sync.item` keyed by an array of ids (#1149): an
+/// index search per id, 5,000 for the probe's `has:blocker` board, where a
+/// hashed set is one probe per ticket the scan reads anyway.
+fn searches_per_id(node: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let reads = matches!(
+        node["Node Type"].as_str(),
+        Some("Index Scan" | "Index Only Scan" | "Bitmap Index Scan")
+    );
+    if reads
+        && node["Index Name"] == "item_pkey"
+        && node["Index Cond"]
+            .as_str()
+            .is_some_and(|cond| cond.contains("ANY"))
+    {
+        found.push(format!(
+            "searches item_pkey once per id ({})",
+            node["Index Cond"].as_str().unwrap_or_default()
+        ));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(searches_per_id(child));
+    }
+    found
+}
+
+/// Every index read of `knobas.entity` (#1149): liveness as a probe per row,
+/// `sync.live_item`'s join, where the tombstones read once is a hashed set.
+fn entity_probes(node: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    let probes = matches!(
+        node["Node Type"].as_str(),
+        Some("Index Scan" | "Index Only Scan" | "Bitmap Index Scan")
+    );
+    if probes
+        && node["Index Name"]
+            .as_str()
+            .is_some_and(|index| index.starts_with("entity_"))
+    {
+        found.push(format!(
+            "probes knobas.entity by {}",
+            node["Index Name"].as_str().unwrap_or_default()
+        ));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(entity_probes(child));
     }
     found
 }
