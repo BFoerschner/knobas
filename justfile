@@ -614,6 +614,15 @@ inventory-rename +CRATES:
 fmt:
     env -u RUSTUP_TOOLCHAIN cargo fmt --all --check
 
+# The fixture external adapter (#1198, ADR-0028), built to a WASM component
+# for the WASM host's tests and the registry's: `knobas-wasm-host`'s
+# `fixture_component()` reads it from here. The target comes with the toolchain
+# (`rust-toolchain.toml` lists it), so nothing is installed outside the repo's
+# pin. Release, because wasmtime compiles the component again on every load
+# and a smaller one compiles faster; `test` runs this first.
+wasm-fixture:
+    env -u RUSTUP_TOOLCHAIN cargo build -p knobas-wasm-fixture --target wasm32-wasip2 --release --quiet
+
 # The gate's lint pass. PKGS narrows it to the given cargo package selection
 # (`just clippy -p knobas-core`; `pre-gate` passes the crates a branch changed,
 # #972); with none it lints the whole workspace. The one place the flags live.
@@ -763,6 +772,11 @@ test:
     hold_gate_slot test
 
     gate=$(mktemp -d "${TMPDIR:-/tmp}/knobas-gate.XXXXXX")
+    # The fixture component the WASM host's tests load (#1198), before the
+    # test binaries that load it.
+    fixture_start=$SECONDS
+    just wasm-fixture
+    echo "test: wasm-fixture $((SECONDS - fixture_start)) s"
     build_start=$SECONDS
     just _test-executables > "$gate/executables"
     echo "test: build $((SECONDS - build_start)) s"

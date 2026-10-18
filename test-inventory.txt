@@ -240,6 +240,10 @@ knobas-app	lib/knobas_app	sources::crud::tests::only_a_working_credential_releas
 knobas-app	lib/knobas_app	sources::crud::tests::the_conflict_branch_keeps_the_winners_secret
 knobas-app	lib/knobas_app	sources::demo::tests::re_registering_refreshes_the_descriptor_columns_and_keeps_the_cursor
 knobas-app	lib/knobas_app	sources::paths::tests::every_configured_instance_gets_its_kinds_declaration
+knobas-app	lib/knobas_app	sources::registry::tests::a_debug_build_loads_the_dev_adapter_the_variable_names
+knobas-app	lib/knobas_app	sources::registry::tests::a_release_build_loads_no_dev_adapter
+knobas-app	lib/knobas_app	sources::registry::tests::an_external_adapter_joins_the_templates_once
+knobas-app	lib/knobas_app	sources::registry::tests::an_unset_or_unloadable_variable_loads_none
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_pause_is_queueable_exactly_when_the_source_has_an_account
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_payload_that_is_not_a_write_op_is_refused_before_anything_is_queued
 knobas-app	lib/knobas_app	sources::write_queue::tests::a_target_naming_no_configured_source_is_not_found_rather_than_queued
@@ -781,6 +785,7 @@ knobas-app	test/it	estate_exit::teamcitys_published_port_has_both_ends_and_the_w
 knobas-app	test/it	estate_exit::the_estate_file_imports_into_a_fresh_profile_with_its_own_ids
 knobas-app	test/it	estate_exit::the_files_monitor_names_are_kept_on_the_assets_and_resolve_to_nothing_yet
 knobas-app	test/it	estate_exit::the_machine_in_a_context_brings_the_container_into_the_rooms_assets_tile
+knobas-app	test/it	external_adapter::the_fixture_component_s_items_reach_the_mirror_and_search_finds_them
 knobas-app	test/it	inbox_ipc::a_profile_nobody_has_opted_in_on_notifies_for_nothing
 knobas-app	test/it	inbox_ipc::a_second_ack_writes_nothing_and_an_alert_that_recovered_is_refused
 knobas-app	test/it	inbox_ipc::a_wiki_mention_offers_no_source_action_and_still_records_both_answers
@@ -3666,3 +3671,11 @@ knobas-sync	test/scheduler_loop	trigger_all_skips_the_disabled_and_the_ones_need
 knobas-sync	test/scheduler_loop	triggering_a_source_that_does_not_exist_is_refused_without_a_log_row
 knobas-sync	test/scheduler_loop	triggering_after_shutdown_is_refused_rather_than_spawning_into_a_closed_pool
 knobas-sync	test/scheduler_loop	two_callers_watching_one_run_both_hear_it_end
+knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_is_refused_at_load
+knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load
+knobas-wasm-host	test/it	host::a_component_that_exports_no_source_is_refused_at_load
+knobas-wasm-host	test/it	host::a_core_module_is_not_a_component
+knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor
+knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused
+knobas-wasm-host	test/it	host::the_descriptor_template_is_the_component_s_own
+knobas-wasm-host	test/it	host::the_host_wrapping_the_fixture_passes_the_contract_battery
