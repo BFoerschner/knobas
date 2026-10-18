@@ -148,6 +148,15 @@ impl GiteaClient {
         if !text.trim_start().starts_with('{') {
             return Ok(text);
         }
+        // A compare with no commits and no files is the empty diff. Its web
+        // route answers that case with the compare page in HTML, not an empty
+        // body (measured on 17.0.0), so it is answered here.
+        let compare: serde_json::Value = serde_json::from_str(&text).unwrap_or_default();
+        if compare["total_commits"].as_u64() == Some(0)
+            && compare["files"].as_array().is_some_and(Vec::is_empty)
+        {
+            return Ok(String::new());
+        }
         // Its web route serves the diff to a token for a public repository
         // (measured on 17.0.0); for a private one it answers 404 whatever the
         // credentials, so that case is a refusal that says why, not a diff.
@@ -160,11 +169,26 @@ impl GiteaClient {
         );
         let request = self.http.request(Method::GET, &path);
         match self.http.send(request).await {
-            Ok(response) => response.text().await.map_err(|error| {
-                SourceError::protocol(format!(
-                    "gitea: {path} answered an unreadable body: {error}"
-                ))
-            }),
+            Ok(response) => {
+                let text = response.text().await.map_err(|error| {
+                    SourceError::protocol(format!(
+                        "gitea: {path} answered an unreadable body: {error}"
+                    ))
+                })?;
+                // A web route can answer 200 with a page that is no diff: a
+                // sign-in page reached by redirect (REQUIRE_SIGNIN_VIEW), or
+                // the compare page itself. Read as a diff that is no files,
+                // that is the same silent *no changes*.
+                let head = text.trim_start();
+                if head.is_empty() || head.starts_with("diff ") {
+                    Ok(text)
+                } else {
+                    Err(SourceError::protocol(format!(
+                        "gitea: {path} answered something that is not a diff \
+                         (this server ignores output=diff on a compare, as Forgejo does)"
+                    )))
+                }
+            }
             Err(error) if error.status() == Some(404) => Err(SourceError::protocol(
                 "gitea: this server ignores output=diff on a compare (Forgejo) and serves \
                  the diff of a private repository's branch to no token",

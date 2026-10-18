@@ -104,6 +104,9 @@ struct Served {
     /// `?output=diff` with the compare's JSON and serves the diff itself only
     /// on the web route, and that to a token only for a public repository.
     forgejo: Option<bool>,
+    /// Forgejo's compare JSON says no commits and no files, and its web route
+    /// answers that with the compare page in HTML (measured on 17.0.0).
+    forgejo_nothing_ahead: bool,
 }
 
 impl Default for Served {
@@ -125,6 +128,7 @@ impl Default for Served {
             protected: false,
             mirror: false,
             forgejo: None,
+            forgejo_nothing_ahead: false,
         }
     }
 }
@@ -202,7 +206,12 @@ async fn gitea(served: Served) -> MockServer {
         .await;
     // Ahead: what the branch carries over main. Two commits, three touches
     // of two files -- the count is files, not touches.
-    let compare_json = json!({"total_commits": 2, "commits": [], "files": []}).to_string();
+    let compare_json = if served.forgejo_nothing_ahead {
+        json!({"total_commits": 0, "commits": [], "files": []})
+    } else {
+        json!({"total_commits": 2, "commits": [], "files": []})
+    }
+    .to_string();
     let diff_body = if served.forgejo.is_some() {
         compare_json
     } else {
@@ -222,7 +231,9 @@ async fn gitea(served: Served) -> MockServer {
         authed(Mock::given(method("GET")).and(path(format!(
             "/tidewater/payout-service/compare/main...{FEATURE_WIRE}.diff"
         ))))
-        .respond_with(if public {
+        .respond_with(if served.forgejo_nothing_ahead {
+            ResponseTemplate::new(200).set_body_string("<!DOCTYPE html><title>Comparing</title>")
+        } else if public {
             ResponseTemplate::new(200).set_body_string(DIFF)
         } else {
             ResponseTemplate::new(404).set_body_string("Not found.")
@@ -524,6 +535,57 @@ async fn a_forgejo_private_repository_diff_is_refused_not_drawn_empty() {
         matches!(&error, SourceError::Protocol { message, .. } if message.contains("Forgejo")),
         "{error:?}"
     );
+}
+
+/// A web route that answers 200 with a page that is no diff (a sign-in page
+/// reached by redirect on a server that requires sign-in to view) is refused
+/// too: drawn, it would be the same silent *no changes*.
+#[tokio::test]
+async fn a_web_route_page_that_is_no_diff_is_refused_not_drawn_empty() {
+    let server = gitea(Served {
+        forgejo: Some(true),
+        ..Served::default()
+    })
+    .await;
+    Mock::given(method("GET"))
+        .and(path(format!(
+            "/tidewater/payout-service/compare/main...{FEATURE_WIRE}.diff"
+        )))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_string("<!DOCTYPE html><title>Sign in</title>"),
+        )
+        .with_priority(1)
+        .mount(&server)
+        .await;
+    let error = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .expect_err("no diff to draw");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. } if message.contains("not a diff")),
+        "{error:?}"
+    );
+}
+
+/// Nothing ahead on Forgejo is the empty diff, read from the compare's JSON:
+/// its web route answers that case with the compare page, which is no diff.
+#[tokio::test]
+async fn a_forgejo_compare_with_nothing_ahead_is_the_empty_diff() {
+    let server = gitea(Served {
+        forgejo: Some(true),
+        forgejo_nothing_ahead: true,
+        ..Served::default()
+    })
+    .await;
+    let view = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    assert!(files.is_empty(), "{files:#?}");
 }
 
 #[tokio::test]
