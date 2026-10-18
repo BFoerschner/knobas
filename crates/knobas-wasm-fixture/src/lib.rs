@@ -16,6 +16,9 @@
 //!   the battery's `Fault`. A faulted fixture fails `test_connection` and
 //!   `sync` with the mapped error. A config it cannot read fails every call
 //!   with a protocol error naming it.
+//! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
+//!   `sink.item` answers and returns its cursor anyway, so the host's own
+//!   hold on a refused item is witnessed.
 
 use exports::knobas::adapter::source::{Guest, GuestAdapter};
 use knobas::adapter::sink;
@@ -56,6 +59,7 @@ enum Fault {
     None,
     Unauthorized,
     Unreachable,
+    SwallowSink,
 }
 
 struct Fixture;
@@ -93,6 +97,7 @@ fn read_fault(config: &str) -> Result<Fault, String> {
         None | Some("none") => Ok(Fault::None),
         Some("unauthorized") => Ok(Fault::Unauthorized),
         Some("unreachable") => Ok(Fault::Unreachable),
+        Some("swallow_sink") => Ok(Fault::SwallowSink),
         Some(other) => Err(format!(
             "config fault {other:?} is not one the fixture knows"
         )),
@@ -104,7 +109,7 @@ impl Adapter {
     fn faulted(&self) -> Result<Option<SourceError>, SourceError> {
         match &self.fault {
             Err(message) => Err(protocol(message.clone())),
-            Ok(Fault::None) => Ok(None),
+            Ok(Fault::None | Fault::SwallowSink) => Ok(None),
             Ok(Fault::Unauthorized) => Ok(Some(SourceError::Unauthorized(Some(401)))),
             Ok(Fault::Unreachable) => Ok(Some(SourceError::Unreachable(
                 "the fixture was told to be unreachable".into(),
@@ -171,7 +176,7 @@ impl GuestAdapter for Adapter {
             "config_schema": {
                 "type": "object",
                 "properties": {
-                    "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable"] },
+                    "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable", "swallow_sink"] },
                 },
                 "additionalProperties": false,
             },
@@ -202,8 +207,12 @@ impl GuestAdapter for Adapter {
                 .filter(|n| *n <= SURVEYS.len())
                 .ok_or_else(|| protocol(format!("cursor {c:?} is not one the fixture wrote")))?,
         };
+        let swallow = matches!(self.fault, Ok(Fault::SwallowSink));
         for survey in &SURVEYS[from..] {
-            sink::item(&self.survey(*survey))?;
+            match sink::item(&self.survey(*survey)) {
+                Err(_) if swallow => {}
+                answer => answer?,
+            }
         }
         Ok(SURVEYS.len().to_string())
     }

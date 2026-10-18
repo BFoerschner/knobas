@@ -2,9 +2,9 @@
 //! `dyn Source` that wraps the fixture component, and the version check at
 //! load. Nothing here looks at how a call crosses the boundary.
 
-use knobas_source::AuthMethod;
 use knobas_source::contract::{Fault, VecSink, battery};
 use knobas_source::instance::SourceInstance;
+use knobas_source::{AuthMethod, SourceError};
 use knobas_wasm_host::{LoadError, Version, WasmAdapter, load_fixture};
 
 fn instance(id: &str, config: serde_json::Value) -> SourceInstance {
@@ -67,6 +67,42 @@ async fn a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor() {
     assert_eq!(again, "3");
     let ids: Vec<String> = rest.0.iter().map(|i| i.entity.to_string()).collect();
     assert_eq!(ids, ["surveys:survey-2", "surveys:survey-3"]);
+}
+
+/// Takes the first item and refuses the second, counting every call.
+struct RefusesTheSecond(usize);
+
+#[async_trait::async_trait]
+impl knobas_source::Sink for RefusesTheSecond {
+    async fn item(&mut self, _item: knobas_source::SyncItem) -> Result<(), SourceError> {
+        self.0 += 1;
+        if self.0 == 2 {
+            Err(SourceError::Sink("the mirror is full".into()))
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[tokio::test]
+async fn a_sink_error_the_component_swallows_still_fails_the_sync() {
+    // The `swallow_sink` fixture ignores what `sink.item` answers and hands
+    // back cursor "3", which would skip the item the engine never stored.
+    let source = match load_fixture().build(instance(
+        "surveys",
+        serde_json::json!({ "fault": "swallow_sink" }),
+    )) {
+        Ok(source) => source,
+        Err(e) => panic!("the fixture must build: {e:?}"),
+    };
+    let mut sink = RefusesTheSecond(0);
+    let answer = source.sync(None, &mut sink).await;
+    assert!(
+        matches!(&answer, Err(SourceError::Sink(m)) if m == "the mirror is full"),
+        "{answer:?}"
+    );
+    // Once refused, the host answers the third item itself.
+    assert_eq!(sink.0, 2);
 }
 
 #[test]
