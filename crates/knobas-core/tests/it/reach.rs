@@ -311,6 +311,39 @@ async fn membership_stays_adr_0008s_and_the_context_seeds_the_reach() {
     );
 }
 
+/// The downward rule holds from the first link step too: a VM the context
+/// adds by hand is a start, so the step out of it is `l1`'s, not `l2`'s. It
+/// brings its monitor and its host, never a ticket or a container that links
+/// to it.
+#[tokio::test]
+async fn a_vm_the_context_adds_only_goes_down() {
+    let pool = scratch().await;
+    let pay = ticket(&pool, "PAY-231").await;
+    let host = asset(&pool, "hypervisor", "hv-01", None).await;
+    let vm = asset(&pool, "vm", "vm-pay-01", Some(&host)).await;
+    let monitor = entity(&pool, "kuma", "monitor", "vm-pay-01-ping").await;
+    let stranger = ticket(&pool, "OPS-77").await;
+    let elsewhere = asset(&pool, "container", "flows-stage", None).await;
+    draw(&pool, &vm, &monitor, "monitored-by").await;
+    draw(&pool, &stranger, &vm, "related").await;
+    draw(&pool, &elsewhere, &vm, "runs-on").await;
+
+    let promoted = context::promote(&pool, &EntityRef::parse(&pay).unwrap())
+        .await
+        .unwrap()
+        .unwrap();
+    draw(&pool, &promoted.context.id, &vm, "related").await;
+
+    let got = reached(&pool, &pay).await;
+    for down in [&vm, &monitor, &host] {
+        assert!(got.contains_key(down), "{down} is down from the added VM");
+    }
+    for up in [&stranger, &elsewhere] {
+        assert!(!got.contains_key(up), "{up} is up from the added VM");
+    }
+    assert_eq!(got[&monitor].step, vm);
+}
+
 /// The parent's own links still count when one is a VM, and stop there: the
 /// parent's layer is one link, so nothing under, above or watching that VM
 /// comes in through it.

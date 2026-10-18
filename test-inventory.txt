@@ -1519,6 +1519,7 @@ knobas-core	test/it	proposal_evidence::shared_wording_is_quoted_from_both_ends_w
 knobas-core	test/it	reach::a_container_brings_its_vm_its_host_and_their_monitors_via_itself
 knobas-core	test/it	reach::a_parent_whose_type_cannot_be_read_brings_nothing
 knobas-core	test/it	reach::a_parents_vm_comes_in_alone
+knobas-core	test/it	reach::a_vm_the_context_adds_only_goes_down
 knobas-core	test/it	reach::an_epic_parent_brings_nothing
 knobas-core	test/it	reach::an_unknown_ticket_reaches_nothing
 knobas-core	test/it	reach::membership_stays_adr_0008s_and_the_context_seeds_the_reach

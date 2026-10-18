@@ -51,7 +51,7 @@
   context export read ADR-0008's statement exactly as before. Pinned by
   `crates/knobas-core/tests/it/reach.rs` (one hop and no further, reasons name the first step, a
   container bringing its engine, VM, host and their monitors and never the container beside it,
-  no link step up from a VM or a proxy, nothing held under a VM while a service brings its
+  no link step up from a VM or a proxy, a VM the context adds going only down, nothing held under a VM while a service brings its
   modules, a promoted sub-task's `member_ids` unchanged and the reach parting from it only above
   the VM, a parent's VM coming in alone, parent links labelled behind the switch and the
   sub-task's own link winning, an epic parent or an unreadable one bringing nothing),
