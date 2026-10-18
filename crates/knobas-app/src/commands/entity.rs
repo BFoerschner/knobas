@@ -4257,7 +4257,9 @@ async fn run_behind(
 ) -> Result<Vec<knobas_core::start_work::FlowStep>, IpcError> {
     crate::start_work::run_in_background(
         &state.pool,
-        std::sync::Arc::new(crate::start_work::queue::OwnedQueue(state.clone())),
+        std::sync::Arc::new(crate::start_work::queue::Queue {
+            state: state.clone(),
+        }),
         ticket,
     )
     .await
@@ -4278,7 +4280,7 @@ pub async fn start_work_retry<R: tauri::Runtime>(
     let state = crate::sources::state(&app)?;
     let ticket = crate::start_work::ready_retry(
         &state.pool,
-        &crate::start_work::queue::Queue { state: &state },
+        &crate::start_work::queue::Queue { state: &*state },
         step_id,
     )
     .await?;
@@ -4340,7 +4342,7 @@ pub async fn follow_merges<R: tauri::Runtime>(app: tauri::AppHandle<R>) -> Resul
         crate::sources::paths::declared_paths(&state.pool, state.registry.as_ref()).await?;
     crate::start_work::merge::follow_merges(
         &state.pool,
-        &crate::start_work::queue::Queue { state: &state },
+        &crate::start_work::queue::Queue { state: &*state },
         crate::start_work::plan::IN_REVIEW,
         &declarations,
     )

@@ -1673,7 +1673,9 @@ async fn writes(
             let ticket = flow().await?;
             knobas_app::start_work::run_in_background(
                 pool,
-                std::sync::Arc::new(knobas_app::start_work::queue::OwnedQueue(state.clone())),
+                std::sync::Arc::new(knobas_app::start_work::queue::Queue {
+                    state: state.clone(),
+                }),
                 &ticket,
             )
             .await
