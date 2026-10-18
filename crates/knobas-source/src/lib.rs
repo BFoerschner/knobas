@@ -30,6 +30,7 @@ pub mod diff;
 pub mod docs;
 pub mod instance;
 pub mod pipeline;
+pub mod role;
 pub mod run;
 pub mod view;
 
@@ -158,6 +159,18 @@ pub struct SourceDescriptor {
     /// [`KindPaths::kind`]: knobas_core::payload::KindPaths::kind
     #[serde(default)]
     pub payload_paths: Vec<knobas_core::payload::KindPaths>,
+    /// The [roles](role) this adapter claims (ADR-0029, issue #1193): which
+    /// of the shell's surfaces it fills. Each claim is held to its role's
+    /// [`role::Minimum`] by [`role::check`], which [`contract::battery`]
+    /// runs as clause 10: the kinds it names are in [`Self::entity_kinds`],
+    /// the paths it needs are in [`Self::payload_paths`], and the reads it
+    /// needs are in the claim. A role's writes are declared, one by one, in
+    /// [`Self::write_ops`] as every write is.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as an adapter that claims nothing.
+    #[serde(default)]
+    pub roles: Vec<role::RoleClaim>,
 }
 
 // The declaration types themselves live in `knobas-core`, not here: the
@@ -1493,6 +1506,7 @@ mod tests {
             auth_methods: vec![AuthMethod::Pat, AuthMethod::OAuth],
             accepts_account: false,
             min_sync_interval_secs: 60,
+            roles: Vec::new(),
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1544,6 +1558,7 @@ mod tests {
     fn the_interval_floor_round_trips_and_defaults_to_sixty_seconds() {
         let declared = SourceDescriptor {
             min_sync_interval_secs: 20,
+            roles: Vec::new(),
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();

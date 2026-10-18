@@ -38,6 +38,12 @@ pub fn descriptor_template() -> SourceDescriptor {
         // fields here would be asking for something nothing reads.
         accepts_account: false,
         min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
+        // The wiki (#1193, ADR-0029): pages in spaces under their parents,
+        // and the Docs projection the app's registry carries for this kind.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::WIKI,
+            ["doc_content"],
+        )],
         // Spec #272's Confluence set, ratified under ADR-0006 in one §10.8
         // entry (#286). `comment` is the SPI's existing op re-used with the
         // **page** as its container -- a reply on a page is the same act as a
@@ -405,5 +411,16 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The role this adapter fills (#1193, ADR-0029), held to its minimum
+    /// on the descriptor alone: the install-time check, which the battery
+    /// repeats as its clause 10.
+    #[test]
+    fn the_template_claims_the_wiki_role_and_fills_it() {
+        let d = descriptor_template();
+        let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+        assert_eq!(roles, [knobas_source::role::WIKI]);
+        assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }

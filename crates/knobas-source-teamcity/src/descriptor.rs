@@ -33,6 +33,22 @@ pub fn descriptor_template() -> SourceDescriptor {
         // every 20 s (#1187): the incremental read asks only for builds
         // changed since the cursor, which is cheap on the server.
         min_sync_interval_secs: 20,
+        // CI (#1193, ADR-0029): a build configuration is the pipeline, a
+        // build the run, and every Builds-frame read is answered.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::CI,
+            [
+                "run_log",
+                "pipeline_settings",
+                "older_runs",
+                "run_tests",
+                "test_history",
+                "run_artifacts",
+                "artifact_preview",
+                "download",
+                "run_chain",
+            ],
+        )],
         // M2's ratified TeamCity set (issue #43, ADR-0006) and the parameter
         // set and custom run the source views added (issues #668, #669,
         // §10.8). The battery holds this and `Capability::Write` to each
@@ -548,5 +564,16 @@ mod tests {
         let bare = serde_json::json!({ "id": 8, "revisions": { "count": 0 } });
         assert!(knobas_core::payload::resolve_list(&bare, &of(KIND_BUILD)).is_empty());
         assert!(of(KIND_BUILD_CONFIG).is_empty());
+    }
+
+    /// The role this adapter fills (#1193, ADR-0029), held to its minimum
+    /// on the descriptor alone: the install-time check, which the battery
+    /// repeats as its clause 10.
+    #[test]
+    fn the_template_claims_the_ci_role_and_fills_it() {
+        let d = descriptor_template();
+        let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+        assert_eq!(roles, [knobas_source::role::CI]);
+        assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }

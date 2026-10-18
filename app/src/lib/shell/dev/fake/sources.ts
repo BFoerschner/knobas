@@ -146,6 +146,7 @@ const FIXTURE_ADAPTERS = [
     auth_methods: ["ApiToken"],
     // The adapter's sync-interval floor (#1187).
     min_sync_interval_secs: 60,
+    roles: [],
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The mock needs no configuration, which is the empty-form case.
@@ -159,6 +160,8 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 60,
+    // The role it claims, as the real adapter does (#1193).
+    roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }],
     write_ops: [],
     entity_kinds: KIND_INFO,
     // The generated-form case: a select with a default, two lists, two texts.
@@ -176,6 +179,8 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
+    // The role it claims, as the real adapter does (#1193).
+    roles: [{ role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] }],
     write_ops: [],
     entity_kinds: KIND_INFO,
     config_schema: GITEA_SCHEMA,
@@ -188,6 +193,8 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["UserPassword", "Pat"],
     min_sync_interval_secs: 20,
+    // The role it claims, as the real adapter does (#1193).
+    roles: [{ role: "ci", reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "download", "run_chain"] }],
     write_ops: [],
     // The Builds frame (#851): the pipeline page's header names a pipeline in
     // the word the descriptor gives the kind it declares the frame on.

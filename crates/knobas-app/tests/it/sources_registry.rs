@@ -395,3 +395,42 @@ fn the_tick_is_far_shorter_than_the_smallest_floor_any_adapter_declares() {
         "an adapter declaring 19 s would have to fail this test at a {tick}s tick"
     );
 }
+
+/// A wiki claim's `doc_content` read is the registry's Docs projection
+/// (#1193): an adapter claims it exactly when its row carries one, so the
+/// read a claim names is one the app can make.
+#[test]
+fn an_adapter_claims_the_doc_content_read_exactly_when_it_has_a_docs_projection() {
+    let registry = Registry::builtin();
+    for t in registry.descriptors() {
+        let claims = t
+            .roles
+            .iter()
+            .any(|c| c.reads.iter().any(|r| r == "doc_content"));
+        assert_eq!(
+            claims,
+            registry.doc_projection(&t.adapter_kind).is_some(),
+            "{}: claims doc_content = {claims}, but its row's Docs projection disagrees",
+            t.adapter_kind
+        );
+    }
+}
+
+/// Every compiled-in adapter's claims fill their roles (#1193), and the five
+/// built-in roles are each claimed by one of them.
+#[test]
+fn every_built_in_role_is_claimed_and_filled_by_a_compiled_in_adapter() {
+    let templates = Registry::builtin().descriptors();
+    for t in &templates {
+        assert_eq!(knobas_source::role::check(t), Ok(()), "{}", t.adapter_kind);
+    }
+    for min in knobas_source::role::MINIMUMS {
+        assert!(
+            templates
+                .iter()
+                .any(|t| t.roles.iter().any(|c| c.role == min.role)),
+            "no compiled-in adapter claims {:?}",
+            min.role
+        );
+    }
+}

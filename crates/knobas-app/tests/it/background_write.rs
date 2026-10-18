@@ -100,6 +100,7 @@ fn descriptor() -> SourceDescriptor {
         auth_methods: vec![AuthMethod::Pat],
         accepts_account: false,
         min_sync_interval_secs: 60,
+        roles: Vec::new(),
         write_ops: vec![
             "comment".to_owned(),
             "create_branch".to_owned(),

@@ -118,6 +118,12 @@ pub fn descriptor_template() -> SourceDescriptor {
         // faster than the ticket trackers (#1187). 45 s, not lower: one
         // `/metrics` scrape per poll, and Kuma's own default heartbeat is 60 s.
         min_sync_interval_secs: 45,
+        // Monitoring (#1193, ADR-0029), with or without the account the
+        // writes need: they are optional, the read side is not.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::MONITORING,
+            [],
+        )],
         write_ops: Vec::new(),
         entity_kinds: vec![KindInfo {
             id: crate::KIND_MONITOR.to_owned(),
@@ -432,5 +438,16 @@ mod tests {
             back.payload_paths[0].status_name,
             vec![knobas_source::PayloadPath::of(["state"])]
         );
+    }
+
+    /// The role this adapter fills (#1193, ADR-0029), held to its minimum
+    /// on the descriptor alone: the install-time check, which the battery
+    /// repeats as its clause 10.
+    #[test]
+    fn the_template_claims_the_monitoring_role_and_fills_it() {
+        let d = descriptor_template();
+        let roles: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
+        assert_eq!(roles, [knobas_source::role::MONITORING]);
+        assert_eq!(knobas_source::role::check(&d), Ok(()));
     }
 }
