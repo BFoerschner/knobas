@@ -5404,3 +5404,21 @@ Implementer.
 - **The write cost is accepted.** Rewriting all 18,500 prose bodies took 2.6 s with the index
   against 1.4–1.7 s without, about 60 µs a row; an incremental sync touches a few rows.
   **Reversing:** see the first ruling.
+
+Merge-manager.
+
+- **`pg_trgm` is in the bundled PostgreSQL on all three release platforms, so `create
+  extension` needs no fallback.** The server is not built by knobas: `postgresql_embedded`
+  0.21 (`theseus`) downloads `postgresql-18.6.0-<target>.tar.gz` from
+  `theseus-rs/postgresql-binaries` (`postgresql_archive`'s `theseus/matcher.rs`). The release
+  targets are `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
+  The macOS install in `~/.theseus/postgresql/18.6.0` holds `lib/pg_trgm.dylib`; the Windows and
+  Linux archives list `lib/pg_trgm.dll` and `lib/pg_trgm.so`. All three carry the same eight
+  `share/extension/pg_trgm*` files with `default_version = '1.6'`. The migration runs as the
+  embedded superuser, and `pg_trgm` is a trusted extension anyway. **Reversing:** medium (a
+  later migration that drops the index and the extension). A bump of `PG_VERSION_REQ` should
+  check the new archives the same way.
+- **The 60 µs a row on a body rewrite is accepted.** Writes reach `sync.item` from the
+  background sync, not from a keystroke. A first sync of the probe's 18,500 prose items pays
+  about one second more. The inbox stream is read on every open. **Reversing:** see the
+  implementer's first ruling.
