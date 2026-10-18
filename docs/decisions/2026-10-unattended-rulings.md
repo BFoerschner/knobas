@@ -5858,3 +5858,21 @@ The implementer's rulings:
 - **ADR-0023 gains one consequence line** saying any code-host source clones, from the address
   its adapter names. Reasoning: its rule (a typed address plus the checked name) stands; only its
   "Gitea" scope widened, as the spec and the ticket say. **Reversing:** low.
+
+The merge-manager's rulings (PR #1237, on Opus):
+
+- **A descriptor field is a fair reading of "a code-host read each adapter answers".** Spec
+  #1192 lists "Clone URLs for a repo" beside the code host's declared paths, apart from its live
+  reads, and each adapter does answer it, in its own descriptor. Upheld. **Reversing:** as the
+  implementer's ruling above.
+- **ADR-0023's rule is unchanged.** The consequence line widens the scope only. A config value
+  is a typed address because the scheduler writes config only under its `DISCOVERABLE` keys
+  (Jira's field ids); the §10.8 entry now says a `clone_from` key must never join that list.
+  **Reversing:** low.
+- **`NotReady` before the sync engine is up is acceptable.** `clone_repo` refuses before it
+  touches the disk, the Clone row shows "the sync engine is still starting" as a failure the
+  person can retry, and the window is the scheduler's start right after migration. Stop still
+  works without the registry. **Reversing:** low.
+- **No base-URL fallback stands, and the refusal names the empty key.** "comes from a forge
+  source with no clone_base set ... fill it in with Edit source" instead of "names no address",
+  so the person knows what to fill in. **Reversing:** low.

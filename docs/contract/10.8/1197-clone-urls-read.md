@@ -24,7 +24,9 @@
   query checks are unchanged. *Clone* reads the adapter's template descriptor, so it builds no
   adapter and asks the keychain nothing, as before. An external adapter answers it inside its
   descriptor JSON, which the 1198 entry already lets grow by a `#[serde(default)]` field, so the
-  read reaches a WASM component with no new WIT function and no new interface version.
+  read reaches a WASM component with no new WIT function and no new interface version. A config
+  value is typed only while no adapter can write it: the scheduler fills config solely under its
+  `DISCOVERABLE` keys (Jira's field ids), so a key `clone_from` names must never join that list.
 
   **The battery, clause 10.** `role::check` holds three things beside the minimum: a code-host
   claim that reads `clone_urls` names at least one address (`NoCloneAddress`); a `clone_from`

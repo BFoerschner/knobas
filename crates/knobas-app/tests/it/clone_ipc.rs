@@ -543,8 +543,9 @@ async fn a_repository_clones_only_with_a_root_set_and_from_an_address_its_adapte
     )
     .await
     .expect_err("no address to clone from");
+    assert_eq!(error.code, IpcErrorCode::Invalid);
     assert!(
-        error.message.contains("names no address to clone from"),
+        error.message.contains("with no clone_base set") && error.message.contains("Edit source"),
         "{}",
         error.message
     );

@@ -409,12 +409,28 @@ fn resolve_clone_url(
             }
         }
     }
-    Err(match refusal {
-        Some(error) => IpcError::invalid(error),
-        None => IpcError::invalid(format!(
-            "{repo_id} comes from a {kind} source, which names no address to clone from"
-        )),
-    })
+    if let Some(error) = refusal {
+        return Err(IpcError::invalid(error));
+    }
+    // The adapter names config keys the instance leaves empty: say which, so
+    // the person knows what to fill in. The base URL is no fallback (#1197).
+    let unset: Vec<&str> = template
+        .clone_from
+        .iter()
+        .filter_map(|from| match from {
+            knobas_source::clone_urls::CloneFrom::Config(key) => Some(key.as_str()),
+            knobas_source::clone_urls::CloneFrom::BaseUrl => None,
+        })
+        .collect();
+    Err(IpcError::invalid(if unset.is_empty() {
+        format!("{repo_id} comes from a {kind} source, which names no address to clone from")
+    } else {
+        format!(
+            "{repo_id} comes from a {kind} source with no {} set, so there is no address to \
+             clone from: fill it in with Edit source",
+            unset.join(" or ")
+        )
+    }))
 }
 
 /// Adopt the folder at `target`, or make it and start git cloning into it.
