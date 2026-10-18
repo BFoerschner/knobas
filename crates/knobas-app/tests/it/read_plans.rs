@@ -27,7 +27,8 @@ use crate::responsiveness_probe::Synthetic;
 /// sources the user configured; `grouped`, one row per source and kind with a
 /// declared state; `status_paths`, one row per source and status candidate;
 /// `lane_paths`, `label_paths` and `state_paths` the same for a lane's field,
-/// the labels and a build's or pull request's state (#939).
+/// the labels and a build's or pull request's state (#939); `assignee_paths`
+/// the inbox's assignee candidates (#1164).
 const SMALL: &[&str] = &[
     "source_config",
     "grouped",
@@ -35,6 +36,7 @@ const SMALL: &[&str] = &[
     "lane_paths",
     "label_paths",
     "state_paths",
+    "assignee_paths",
 ];
 
 /// The inbox rules whose whole statement #778 and #785 reshaped. Not here,
@@ -217,6 +219,13 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
             if category == knobas_core::inbox::Category::FailedBuild {
                 wrong.extend(
                     unkeyed_link_reads(&plan[0]["Plan"])
+                        .into_iter()
+                        .map(|f| format!("{name}: {f}")),
+                );
+            }
+            if category == knobas_core::inbox::Category::NewAssignment {
+                wrong.extend(
+                    item_scans_filtered_per_row(&plan[0]["Plan"])
                         .into_iter()
                         .map(|f| format!("{name}: {f}")),
                 );
@@ -460,6 +469,30 @@ fn unkeyed_link_reads(node: &serde_json::Value) -> Vec<String> {
     }
     for child in node["Plans"].as_array().into_iter().flatten() {
         found.extend(unkeyed_link_reads(child));
+    }
+    found
+}
+
+/// Every scan of `sync.item` whose filter runs a subplan per row (#1164): a
+/// `SubPlan` in the filter that is not `hashed`, so not computed once. The
+/// new-assignment rule read its declared assignee that way, the whole
+/// declaration walked for every ticket in the window -- 58 ms on the probe's
+/// 15,000 for a reader who raised none of them. The assignee is resolved in
+/// the join now, for the tickets one of whose own source's paths names the
+/// reader; a hashed exclusion set (`live_by_exclusion!`) is one read.
+fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
+    let mut found = Vec::new();
+    if node["Relation Name"] == "item"
+        && let Some(filter) = node["Filter"].as_str()
+        && filter.matches("SubPlan").count() > filter.matches("hashed SubPlan").count()
+    {
+        found.push(format!(
+            "filters sync.item through a subplan per row ({} {filter})",
+            node["Node Type"].as_str().unwrap_or("?")
+        ));
+    }
+    for child in node["Plans"].as_array().into_iter().flatten() {
+        found.extend(item_scans_filtered_per_row(child));
     }
     found
 }
