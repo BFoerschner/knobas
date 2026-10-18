@@ -5572,16 +5572,40 @@ The implementer's rulings:
 - **A monitor's response time: the SPI is short, not Kuma.** `KindPaths` has no duration slot
   and the samples read `response_time_ms` by name (ADR-0007 interim). The minimum requires the
   sampled state (`status_name`) only. Follow-up #1224 (backlog). **Reversing:** #1224.
-- **A ticket's key is not a declared path:** it is the `EntityRef` key (§4.1, migration `0048`).
-  **The minimum is wrong there as written.** **Reversing:** n/a.
-- **A pull request's base branch is not a declared path:** no `KindPaths` field holds one, and
-  the shell draws it from the PR view's `head → base` fact. **The minimum is wrong there as
-  written**, until a surface reads the base off the mirror. **Reversing:** low; add
-  `KindPaths::base` and require it.
+- **A ticket's key is not a declared path:** it is the `EntityRef` key (§4.1, migration `0048`),
+  which every ticket carries by construction, so the spec's requirement is met without a path to
+  check. (Amended by the merge-manager: first recorded as "the minimum is wrong there as
+  written".) **Reversing:** n/a.
+- **A pull request's base branch: the SPI is short, not the spec.** No `KindPaths` field holds
+  one (Gitea reads `base.ref` only in its own view), so the minimum cannot hold it yet. Spec #1192
+  and ADR-0029 require it, so it joins the minimum with follow-up #1227 (backlog), which adds
+  the slot. (Amended by the merge-manager: first recorded as "the minimum is wrong there as
+  written", which contradicted the spec and the ADR with no follow-up.) **Reversing:** #1227.
 - **CI's kinds are named by their ADR-0022 frame, not by an id:** TeamCity's `build_config` is
   the pipeline and `build` the run. **Reversing:** n/a.
 - **A custom role is accepted as `<adapter_kind>:<name>` with no reads and no minimum.** Any
   other name not built in is refused. #1201 builds on it. **Reversing:** low.
-- **Clause 8 stays as it is,** although a ticket system without `transition` cannot pass both
-  clause 8 and the required `reachable_transitions` read. Jira declares `transition`, so no
-  built-in hits it. Follow-up #1225 (backlog). **Reversing:** #1225.
+- **Clause 8 stays as it is,** although a ticket system without `transition` can fill the role
+  only by claiming the required `reachable_transitions` read and then refusing it, as clause 8
+  demands. The battery passes that (clause 10 is static), but the claim would be hollow. Jira
+  declares `transition`, and so will Gitea's issues (#1206), so no built-in hits it. Follow-up
+  #1225 (backlog). **Reversing:** #1225.
+
+Reserved for Björn, ruled by the merge-manager (PR #1226) on Opus:
+
+- **The §10.8 sign-off, re-ruled over the amended entry.** The minimums stand as signed, with
+  the base-branch item moved from "not a declared path" to the list of items that wait for their
+  SPI surface (#1227). **Reversing:** a §10.8 amendment.
+
+The merge-manager's rulings (PR #1226):
+
+- **Ticket key: a legitimate reading.** The spec asks that a ticket carry its key; every item
+  carries its `EntityRef` key, so nothing is dropped. **Reversing:** n/a.
+- **PR base branch: a contradiction, fixed per the rule.** The implementer's "the minimum is
+  wrong" set aside spec #1192 and ADR-0029 with no follow-up. The documents stand, the gap is the
+  SPI's, and #1227 closes it. **Reversing:** low; #1227 may instead amend ADR-0029 if the work
+  shows the base is not needed.
+- **Monitor response time: a legitimate reading.** The SPI has no duration slot, the minimum
+  holds what it can, and #1224 names the gap. **Reversing:** #1224.
+- **Custom role `<adapter_kind>:<name>`:** matches the spec's `<adapter>:<name>` and ADR-0029's
+  `grafana:dashboard-host`, owned by the declaring adapter. **Reversing:** low.

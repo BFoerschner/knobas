@@ -30,8 +30,8 @@
   the adapter's `DocProjection`; `sources_registry.rs` holds a `doc_content` claim to the
   registry row's projection, both directions. Not in the minimums yet, each joining with the
   ticket that adds its SPI surface: clone URLs (#1197), saved views (#1207), `translate_query`
-  (#1208), a monitor's response time (#1224). Spec items that are not declared paths: a ticket's
-  key is the `EntityRef` key (§4.1), and a pull request's base branch is drawn from its view.
+  (#1208), a monitor's response time (#1224), a pull request's base branch (#1227). A ticket's key
+  is not a declared path: it is the `EntityRef` key (§4.1), which every ticket carries.
 
   **The check.** `knobas_source::role::check(&SourceDescriptor) -> Result<(), ClaimError>` reads the
   descriptor and nothing else (ADR-0028's install-time check) and answers the first item missing,
