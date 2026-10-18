@@ -222,7 +222,7 @@ pub fn search_sql(
         let named = if text.is_some() {
             let by_title = NAMED.replace("{title}", corpus.title);
             match corpus.key {
-                Some(key) => format!("({by_title}\n              or {})", KEY_NAMED.replace("{key}", key)),
+                Some(key) => format!("({by_title} or {})", KEY_NAMED.replace("{key}", key)),
                 None => by_title,
             }
         } else {

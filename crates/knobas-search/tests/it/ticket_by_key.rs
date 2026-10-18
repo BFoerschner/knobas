@@ -102,7 +102,15 @@ async fn a_jira_ticket_is_found_by_its_key_and_comes_first() {
     ticket(&pool, "PAY-2310", "Unrelated payout report", "", 1).await;
     // A row of another kind whose *id* would match, if ids of every kind were
     // read: only a ticket's key is its name.
-    item(&pool, "page", "wiki:PAY-231", "SEPA design notes", "Retries.", 1).await;
+    item(
+        &pool,
+        "page",
+        "wiki:PAY-231",
+        "SEPA design notes",
+        "Retries.",
+        1,
+    )
+    .await;
 
     let searcher = Searcher::declaring(pool.clone(), [knobas_source_jira::descriptor_template()])
         .await
