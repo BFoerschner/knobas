@@ -5285,3 +5285,11 @@ Implementer.
   one `#>>` per path, about 7 ms. Getting under 30 ms would need an index on a path that the
   source declares at runtime, or a cut in another rule (`mention` is 12 ms). Both are outside
   this ticket. **Reversing:** n/a.
+
+Merge-manager.
+
+- **#1164 closes at 36 ms; the rest is #1170 (`backlog`).** Holding the PR for the ≤ 30 ms
+  criterion would keep a 90 → 36 ms gain off main for work in a different rule (`mention`) or a
+  different mechanism (an index on runtime-declared paths). #939 and #1148 closed the same way.
+  The answers are unchanged and pinned by the new behaviour test. **Reversing:** low (reopen
+  #1164 or promote #1170).
