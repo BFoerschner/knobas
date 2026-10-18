@@ -73,7 +73,7 @@ alter table knobas.source_config
 --    scheduler needs the last outcome to compute backoff.
 --    No FK to source_config: run_once syncs unconfigured sources (tests,
 --    ad-hoc imports) and deleting a source must not rewrite its history.
---    Retention: the scheduler keeps a source's newest 200 rows or those finished in the last 24 h, whichever is more.
+--    Retention: the scheduler prunes to the newest 200 rows per source.
 create table knobas.sync_run (
   id           bigint generated always as identity primary key,
   source_id    text not null,
