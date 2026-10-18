@@ -85,6 +85,11 @@
     openView: (id: string) => Promise<void>;
   }
 
+  /** A board with nothing on it, new each time, as `$state` may take it: what no claimer, and no answer yet, draw. */
+  function emptyBoard(): MiniBoard {
+    return { columns: [], sources: [], lanes: [], more_lanes: 0 };
+  }
+
   /** One view's session: the switches over what it was saved with, and the expanded columns. */
   interface ViewSession {
     /** The *Board / List* switch, or `undefined` for the view's own. */
@@ -366,7 +371,7 @@
   ): Promise<MiniBoard> {
     const sources = untrack(() => scope);
     if (sources !== null && sources.length === 0) {
-      return Promise.resolve({ columns: [], sources: [], lanes: [], more_lanes: 0 });
+      return Promise.resolve(emptyBoard());
     }
     return ports.board(perColumn, query, jiraView, lanes, sources ?? []);
   }
@@ -582,7 +587,7 @@
   // ---- what is drawn, and the selection ----
   /** The board's bands (one, untitled, without lanes), each column with the cards it draws. */
   const bands = $derived(
-    boardLanes(board ?? { columns: [], sources: [], lanes: [], more_lanes: 0 }, laned ? showing.lanes : "none", (columns) =>
+    boardLanes(board ?? emptyBoard(), laned ? showing.lanes : "none", (columns) =>
       viewColumns(columns, ownColumns),
     ).map((lane) => ({
       lane,

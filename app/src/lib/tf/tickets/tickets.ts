@@ -54,8 +54,8 @@ export function moreLine(column: MiniBoardColumn, drawn: number): string | null 
  * and the direct parent's name, `PAY-200 Payout reliability`. A path of one
  * segment is the parent's key (an epic's); a deeper chain is followed by its
  * last parent's name. The path is the ticket system's declared `parent`
- * (#1200, ADR-0029), whatever the source. The path alone when the mirror holds no parent of that
- * name, and `null` with no path.
+ * (#1200, ADR-0029), whatever the source. The path alone when the mirror
+ * holds no parent of that name, and `null` with no path.
  */
 export function epicLine(card: Pick<MiniBoardCard, "path" | "parent_title">): string | null {
   if (card.path === null) return null;
