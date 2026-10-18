@@ -99,6 +99,7 @@ copies_to_unregister() {
         path=$(normalise_app_path "$path")
         [ "$path" = "$keep" ] && continue
         case $path in
+        */../* | */..) ;; # a `..` segment could climb out of the root: never ours
         "$root"/*) printf '%s\n' "$path" ;;
         esac
     done < <(registered_copies "$1" "$2")
@@ -113,6 +114,7 @@ copies_to_leave() {
         path=$(normalise_app_path "$path")
         [ "$path" = "$keep" ] && continue
         case $path in
+        */../* | */..) printf '%s\n' "$path" ;;
         "$root"/*) ;;
         *) printf '%s\n' "$path" ;;
         esac
