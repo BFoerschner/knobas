@@ -181,7 +181,8 @@ impl Clones {
 ///
 /// [`Invalid`](crate::IpcErrorCode::Invalid) for an address that is not a
 /// repo or branch, a repository whose source's adapter is not installed or
-/// answers no address to clone from, a name or address ADR-0023 refuses, no clones root (or a relative one), or no git;
+/// answers no address to clone from, a name or address ADR-0023 refuses, no
+/// clones root (or a relative one), or no git;
 /// [`NotFound`](crate::IpcErrorCode::NotFound) if the mirror does not hold it
 /// or its source is gone;
 /// [`Conflict`](crate::IpcErrorCode::Conflict) if the folder exists and is not
@@ -303,7 +304,7 @@ async fn start_with(
 
     let key = EntityRef::parse(&repo_id).map_err(IpcError::invalid)?.key;
     let name = clone::FullName::parse(&key).map_err(IpcError::invalid)?;
-    let url = clone_url(
+    let url = resolve_clone_url(
         registry, &repo_id, &kind, &base_url, &config, &name, protocols,
     )?;
 
@@ -379,7 +380,7 @@ async fn start_with(
 /// the keychain nothing: a clone needs no credential from knobas (ADR-0023).
 /// The first address [`clone::clone_url`] admits wins; when none does, the
 /// first address's refusal is the answer.
-fn clone_url(
+fn resolve_clone_url(
     registry: &dyn AdapterRegistry,
     repo_id: &str,
     kind: &str,

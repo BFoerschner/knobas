@@ -601,7 +601,10 @@ mod tests {
         old.as_object_mut().unwrap().remove("clone_from");
         let old: SourceDescriptor = serde_json::from_value(old).unwrap();
         assert!(old.roles.is_empty());
-        assert!(old.clone_from.is_empty(), "a peer from before #1197 names none");
+        assert!(
+            old.clone_from.is_empty(),
+            "a peer from before #1197 names none"
+        );
         let bare: RoleClaim = serde_json::from_value(serde_json::json!({ "role": "ci" })).unwrap();
         assert!(bare.reads.is_empty());
     }
