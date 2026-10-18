@@ -1132,6 +1132,60 @@ mod tests {
         );
     }
 
+    /// A server that never stops offering `_links.next` ends every walk in an
+    /// error naming what it was walking, after exactly [`MAX_PAGES`] pages --
+    /// never in a quiet `None` the engine would read as a finished corpus.
+    #[tokio::test]
+    async fn a_walk_that_never_ends_is_refused_after_max_pages() {
+        struct Endless;
+        #[async_trait::async_trait]
+        impl ConfluenceApi for Endless {
+            async fn current_user(&self) -> Result<crate::model::CurrentUser, SourceError> {
+                unimplemented!()
+            }
+            async fn search(
+                &self,
+                _cql: &str,
+                _limit: u32,
+                _expand: &str,
+            ) -> Result<crate::model::ContentPage, SourceError> {
+                Ok(envelope(Vec::new(), Some("/next".to_owned())))
+            }
+            async fn follow(&self, _p: &str) -> Result<crate::model::ContentPage, SourceError> {
+                Ok(envelope(Vec::new(), Some("/next".to_owned())))
+            }
+            async fn comments(
+                &self,
+                _id: &str,
+                _start: u32,
+                _limit: u32,
+            ) -> Result<crate::model::ContentPage, SourceError> {
+                unimplemented!()
+            }
+            async fn content(
+                &self,
+                _id: &str,
+                _expand: &str,
+            ) -> Result<crate::model::RawContent, SourceError> {
+                unimplemented!()
+            }
+            async fn user_by_key(&self, _key: &str) -> Result<Value, SourceError> {
+                unimplemented!()
+            }
+        }
+        let mut walk = Walk::new(&Endless, "type = page", 50, EXPAND, "positions");
+        let mut pages = 0;
+        let refusal = loop {
+            match walk.next_page().await {
+                Ok(Some(_)) => pages += 1,
+                Ok(None) => panic!("an endless walk ended quietly after {pages} pages"),
+                Err(e) => break e.to_string(),
+            }
+        };
+        assert_eq!(pages, MAX_PAGES);
+        assert!(refusal.contains("positions"), "{refusal}");
+    }
+
     /// A full sync walks every page of the configured scope and emits each
     /// once -- which is what the descriptor's `full_sync_exhaustive: true`
     /// claims, and what licenses the engine's sweep.
