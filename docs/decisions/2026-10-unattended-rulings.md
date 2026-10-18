@@ -5202,3 +5202,19 @@ Implementer.
   `Steps` implementation serves the borrowed and the owned state, so the six forwarding methods
   go. The ticket's other half, the detail panel's queue watch, went with the rooms UI (#1087).
   **Reversing:** low.
+
+## #1149 — the narrowed board's reads (2026-10-18)
+
+Implementer.
+
+- **The ticket's diagnosis held only in part, so the fix covers a second statement.** On the
+  22k probe's tables, never analyzed (the probe's default), `mini_board (has:blocker)` took
+  240 ms against the search's 96 ms. The parts were: `matching_ids` 94 ms, the cards 46 ms, the
+  signals 7 ms, and the statuses the board offers 90 ms. The `= any($1)` narrowing was an
+  `item_pkey` search per id, 32 ms of the cards' scan. On analyzed tables PostgreSQL already
+  hashed it. Fixing the narrowing alone leaves the board about 120 ms over the search, which
+  misses the criterion. The status read (`OBSERVED_STATUSES`) does not depend on the narrowing:
+  it went through `sync.live_item` and probed `knobas.entity` once for each of the sources'
+  15,000 tickets. It now reads `sync.item` with `live_by_exclusion!`, as the cards do since #778.
+  The view joins `knobas.entity` inner, but `sync.item.entity_id` references it, so the
+  answer is the same. **Reversing:** low (two predicates in `mini_board.rs`).
