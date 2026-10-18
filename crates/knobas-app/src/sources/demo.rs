@@ -147,7 +147,63 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
         "the demo estate is loaded"
     );
 
+    connect_demo_branch(pool).await?;
+
     Ok(report)
+}
+
+/// The ticket and the branch the demo draws a confirmed link between (#1175).
+const DEMO_LINK: (&str, &str) = (
+    "mock:PAY-231",
+    "mock:payout-service@refs/heads/feature/PAY-231-sepa-retry",
+);
+
+/// Draw the demo's one confirmed link: PAY-231 to its branch, so the job's
+/// Code section lists something on a fresh `--demo` profile (#1175).
+///
+/// Without it the branch is reached only by a *proposed* link, which a job's
+/// sections do not read, and the first impression is "Nothing connected". The
+/// link is `manual`: a person's own, which no later suggestion pass proposes
+/// again or overrides. (When a proposal for the pair is already there it is
+/// confirmed instead, keeping its suggested provenance.)
+///
+/// Idempotent: a link already there is left alone. A *proposal* for the pair
+/// (a second demo start, after the suggestion pass has run) is confirmed by the
+/// same `resolve_edge` the links dialog uses, so it cannot make the insert
+/// fail on the pair's unique index. A link the reader removed is drawn again
+/// by the next load: a demo load means "give me the whole fixture".
+async fn connect_demo_branch(pool: &PgPool) -> Result<(), DemoError> {
+    use knobas_core::CoreError;
+    use knobas_core::entity::EntityRef;
+    use knobas_core::link::{self, Origin};
+    use knobas_core::suggest::{self, Edge};
+
+    let (ticket, branch) = DEMO_LINK;
+    let parse = |id: &str| EntityRef::parse(id).map_err(crate::IpcError::internal);
+    let (from, to) = (parse(branch)?, parse(ticket)?);
+    let relation = "related";
+
+    let mut tx = pool.begin().await?;
+    let drawn = match suggest::resolve_edge(&mut tx, &from, &to, relation).await {
+        // The proposal for exactly this triple is the link now.
+        Ok(Edge::Promoted(_)) => Ok(()),
+        // Nothing, or the reverse, was proposed: draw ours.
+        Ok(Edge::Open | Edge::Superseded(_)) => {
+            link::create_with(&mut *tx, &from, &to, relation, Origin::Manual, None, "demo")
+                .await
+                .map(|_| ())
+        }
+        Err(error) => Err(error),
+    };
+    match drawn {
+        // Already linked: a second demo load.
+        Ok(()) | Err(CoreError::Duplicate) => {}
+        Err(error) => return Err(DemoError::Estate(error.into())),
+    }
+    // After a duplicate the transaction is aborted and this commit is a
+    // rollback of nothing; Postgres answers it without error.
+    tx.commit().await?;
+    Ok(())
 }
 
 /// The work half of a demo load: register `source`, sync it in full, and purge
