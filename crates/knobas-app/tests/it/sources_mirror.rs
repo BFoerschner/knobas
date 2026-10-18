@@ -782,6 +782,11 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             message: "PAY-231: say how often".to_owned(),
             base_sha: "986f74b7".to_owned(),
         },
+        knobas_source::WriteOp::SourceAction {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            id: "add_label".to_owned(),
+            fields: [("label".to_owned(), "7".to_owned())].into(),
+        },
     ];
     for op in &probes {
         let tag = match op {
@@ -807,6 +812,7 @@ fn every_write_op_variant_is_declared_in_the_mirror() {
             knobas_source::WriteOp::EditPullRequest { .. } => "EditPullRequest",
             knobas_source::WriteOp::UpdatePullRequestBranch { .. } => "UpdatePullRequestBranch",
             knobas_source::WriteOp::CommitFile { .. } => "CommitFile",
+            knobas_source::WriteOp::SourceAction { .. } => "SourceAction",
         };
         let json = serde_json::to_value(op).unwrap();
         assert!(

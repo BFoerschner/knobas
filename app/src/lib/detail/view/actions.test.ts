@@ -434,3 +434,37 @@ test("a diff takes comments only through an op the source declares and the shell
   expect(queueable("submit_review", ["comment"])).toBe(false);
   expect(queueable("launch_rocket", ["launch_rocket"])).toBe(false);
 });
+
+// -- source actions (#1194, ADR-0029) -----------------------------------------
+
+/** A source action as an adapter declares it: its id fixed, its dialog its own. */
+const ADD_LABEL = action("source_action", "Add label…", {
+  fields: [
+    field("label", { type: "choice", options: [{ value: "7", label: "needs-qa" }] }, { required: true }),
+  ],
+  values: { id: "add_label" },
+});
+
+test("a source action is queued as SourceAction with its fixed id and every answer as a field, read by nothing", () => {
+  expect(actionPayload(ADD_LABEL, "gitea:o/r#142", { label: "7" })).toEqual({
+    SourceAction: { entity: "gitea:o/r#142", id: "add_label", fields: { label: "7" } },
+  });
+  // Fields the shell has never heard of, and fixed values beside the id, go
+  // as they came; the entity the action names wins over the view's.
+  const other = action("source_action", "Convert to draft", {
+    values: { id: "convert_to_draft", wip: "true" },
+    entity: "forge:o/r#9",
+  });
+  expect(actionPayload(other, "forge:o/r#1", { colour: "teal" })).toEqual({
+    SourceAction: { entity: "forge:o/r#9", id: "convert_to_draft", fields: { wip: "true", colour: "teal" } },
+  });
+});
+
+test("a source action with no id fixed builds nothing", () => {
+  expect(actionPayload(action("source_action", "Mystery"), "gitea:o/r#1", {})).toBeNull();
+});
+
+test("a source action is offered only where the source declares source_action", () => {
+  expect(queueable("source_action", ["source_action"])).toBe(true);
+  expect(offeredActions([ADD_LABEL], ["comment"])).toEqual([]);
+});

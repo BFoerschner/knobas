@@ -171,6 +171,18 @@ pub struct SourceDescriptor {
     /// decodes as an adapter that claims nothing.
     #[serde(default)]
     pub roles: Vec<role::RoleClaim>,
+    /// The [source actions](WriteOp::SourceAction) this adapter performs, by
+    /// its own id (`"add_label"`; ADR-0029, issue #1194): writes outside
+    /// every role's vocabulary. Non-empty exactly when [`Self::write_ops`]
+    /// lists [`SOURCE_ACTION`], and an adapter refuses a source action whose
+    /// id is not here with [`SourceError::Protocol`]; [`contract::battery`]
+    /// holds both (clause 11). Each action's dialog is drawn by the view that
+    /// offers it, in ADR-0020's action vocabulary, as every action's is.
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as an adapter with none.
+    #[serde(default)]
+    pub source_actions: Vec<String>,
 }
 
 // The declaration types themselves live in `knobas-core`, not here: the
@@ -491,6 +503,7 @@ impl SourceError {
 /// | [`EditPullRequest`](Self::EditPullRequest) | `"edit_pull_request"` | git workflows, spec #701 (Gitea, #706) |
 /// | [`UpdatePullRequestBranch`](Self::UpdatePullRequestBranch) | `"update_pull_request_branch"` | git workflows, spec #701 (Gitea, #708) |
 /// | [`CommitFile`](Self::CommitFile) | `"commit_file"` | ticket-first, spec #808 (Gitea, #822) |
+/// | [`SourceAction`](Self::SourceAction) | `"source_action"` | roles, spec #1192 (Gitea, #1194) |
 ///
 /// The enum grows per milestone and **each growth is a §10.8 ratified
 /// exception** (ADR-0006); an adapter must reject every op it does not declare
@@ -970,7 +983,49 @@ pub enum WriteOp {
         message: String,
         base_sha: String,
     },
+    /// Identifier `"source_action"`. A write outside every
+    /// [role](role)'s vocabulary (ADR-0029, `CONTEXT.md`: *source action*,
+    /// issue #1194): Gitea's *Add label…* on a pull request, a *Convert to
+    /// draft*. `entity` is what the action acts on, as for every op.
+    ///
+    /// **The one variant knobas does not understand, by design.** `id` is the
+    /// adapter's own name for the action, one it declares in
+    /// [`SourceDescriptor::source_actions`]; `fields` are the answers of the
+    /// dialog the adapter drew for it (a [`view::ViewAction`] whose
+    /// `write_op` is this identifier and whose fixed `values` name the `id`),
+    /// text by field name, plus its other fixed values. The shell copies them
+    /// here and never reads them; the queue holds, refuses and retries this op
+    /// like any write and hands it back to the adapter, which performs it or
+    /// refuses an `id` it did not declare with [`SourceError::Protocol`]
+    /// (battery clause 11).
+    ///
+    /// The ops of a role stay typed variants, because the shell acts on them
+    /// itself (*Start work* creates a branch). One that the shell starts to
+    /// act on is promoted to a variant of its own, in a §10.8 entry.
+    ///
+    /// Hold detection takes the whole mirrored record: knobas cannot know
+    /// what the action overwrites, so any change to the target holds it. A
+    /// resend is not harmless for the same reason, so a write sent once and
+    /// unanswered is held for a person.
+    SourceAction {
+        entity: String,
+        id: String,
+        #[serde(default)]
+        fields: std::collections::BTreeMap<String, String>,
+    },
 }
+
+/// The identifier of [`WriteOp::SourceAction`], which a descriptor lists in
+/// [`SourceDescriptor::write_ops`] when it declares any
+/// [`source_actions`](SourceDescriptor::source_actions), and a view's action
+/// names as its `write_op`.
+pub const SOURCE_ACTION: &str = "source_action";
+
+/// The [`view::ViewAction::values`] key a source action's `id` is fixed
+/// under, which is also its field's name in [`WriteOp::SourceAction`]: so
+/// one op is many actions, told apart by a fixed value (the #705 ruling), and
+/// no dialog field of a source action may be named this.
+pub const SOURCE_ACTION_ID: &str = "id";
 
 /// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
 /// request in. Serialized as the lowercase word (`"closed"`), which is also
@@ -1199,6 +1254,7 @@ impl WriteOp {
             WriteOp::EditPullRequest { .. } => "edit_pull_request",
             WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
             WriteOp::CommitFile { .. } => "commit_file",
+            WriteOp::SourceAction { .. } => SOURCE_ACTION,
         }
     }
 }
@@ -1507,6 +1563,7 @@ mod tests {
             accepts_account: false,
             min_sync_interval_secs: 60,
             roles: Vec::new(),
+            source_actions: Vec::new(),
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1559,6 +1616,7 @@ mod tests {
         let declared = SourceDescriptor {
             min_sync_interval_secs: 20,
             roles: Vec::new(),
+            source_actions: Vec::new(),
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();
@@ -1807,6 +1865,11 @@ mod tests {
                 message: "PAY-231: say how often a payout is retried".into(),
                 base_sha: "986f74b729a686f111e61e07635d01e9bf265198".into(),
             },
+            WriteOp::SourceAction {
+                entity: "gitea:tidewater/payout-service#142".into(),
+                id: "add_label".into(),
+                fields: [("label".to_owned(), "7".to_owned())].into(),
+            },
         ];
         for op in &probes {
             match op {
@@ -1831,7 +1894,8 @@ mod tests {
                 | WriteOp::DeleteBranch { .. }
                 | WriteOp::EditPullRequest { .. }
                 | WriteOp::UpdatePullRequestBranch { .. }
-                | WriteOp::CommitFile { .. } => {}
+                | WriteOp::CommitFile { .. }
+                | WriteOp::SourceAction { .. } => {}
             }
         }
         probes
@@ -1861,6 +1925,59 @@ mod tests {
             serde_json::json!({ "Comment": { "entity": "jira:PAY-231", "body": "on it" } }),
             "the wire shape is externally tagged plain data (§3a), not Display text"
         );
+    }
+
+    /// A source action (#1194, ADR-0029) crosses as its id and its fields,
+    /// the dialog's answers by name, and nothing knobas reads: the wire shape
+    /// is pinned here because the shell builds it and the adapter reads it,
+    /// and neither may guess the other's spelling. Absent `fields` reads as
+    /// none, an action with no dialog.
+    #[test]
+    fn a_source_action_is_its_id_and_its_fields_by_name() {
+        let op = WriteOp::SourceAction {
+            entity: "gitea:o/r#1".into(),
+            id: "add_label".into(),
+            fields: [("label".to_owned(), "7".to_owned())].into(),
+        };
+        assert_eq!(op.identifier(), "source_action");
+        let wire = serde_json::to_value(&op).unwrap();
+        assert_eq!(
+            wire,
+            serde_json::json!({
+                "SourceAction": { "entity": "gitea:o/r#1", "id": "add_label", "fields": { "label": "7" } }
+            })
+        );
+        let back: WriteOp = serde_json::from_value(wire).unwrap();
+        assert_eq!(
+            serde_json::to_value(&back).unwrap()["SourceAction"]["fields"]["label"],
+            "7"
+        );
+
+        let bare: WriteOp = serde_json::from_value(serde_json::json!({
+            "SourceAction": { "entity": "gitea:o/r#1", "id": "convert_to_draft" }
+        }))
+        .unwrap();
+        let WriteOp::SourceAction { fields, .. } = bare else {
+            panic!("{bare:?}")
+        };
+        assert!(fields.is_empty());
+    }
+
+    /// A descriptor's source actions (#1194) cross the hop as declared, and
+    /// one from a peer that predates them decodes as declaring none.
+    #[test]
+    fn declared_source_actions_round_trip_and_default_to_none() {
+        let declared = SourceDescriptor {
+            source_actions: vec!["add_label".into()],
+            ..a_descriptor()
+        };
+        let mut wire = serde_json::to_value(&declared).unwrap();
+        assert_eq!(wire["source_actions"], serde_json::json!(["add_label"]));
+        let back: SourceDescriptor = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(back.source_actions, ["add_label"]);
+        wire.as_object_mut().unwrap().remove("source_actions");
+        let older: SourceDescriptor = serde_json::from_value(wire).unwrap();
+        assert!(older.source_actions.is_empty());
     }
 
     /// A merge's style crosses as the lowercase word a view's merge action
@@ -2253,7 +2370,7 @@ mod tests {
             );
             assert!(seen.insert(id), "two variants both call themselves {id:?}");
         }
-        assert_eq!(seen.len(), 22, "a variant lost its probe in every_write_op");
+        assert_eq!(seen.len(), 23, "a variant lost its probe in every_write_op");
     }
 
     /// A create's target is an entity id, and it is one no monitor can also

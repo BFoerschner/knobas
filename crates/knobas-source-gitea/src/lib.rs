@@ -186,6 +186,12 @@ pub const WRITE_OP_UPDATE_PULL_REQUEST_BRANCH: &str = "update_pull_request_branc
 /// contents API and never the checkout (spec #808 D4, issue #822).
 pub const WRITE_OP_COMMIT_FILE: &str = "commit_file";
 
+/// This adapter's one [source action](knobas_source::WriteOp::SourceAction)
+/// (#1194, ADR-0029): *Add label…* on a pull request, a write no role's
+/// vocabulary has. Declared in the descriptor's `source_actions` and
+/// dispatched by [`source`], which refuses any other id.
+pub const SOURCE_ACTION_ADD_LABEL: &str = "add_label";
+
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
 #[must_use]
@@ -234,7 +240,11 @@ pub fn descriptor_template() -> SourceDescriptor {
             WRITE_OP_EDIT_PULL_REQUEST.to_owned(),
             WRITE_OP_UPDATE_PULL_REQUEST_BRANCH.to_owned(),
             WRITE_OP_COMMIT_FILE.to_owned(),
+            knobas_source::SOURCE_ACTION.to_owned(),
         ],
+        // Writes outside every role's vocabulary (#1194, ADR-0029), each
+        // drawn by the view that offers it.
+        source_actions: vec![SOURCE_ACTION_ADD_LABEL.to_owned()],
         // Each kind carries its own `full_sync_exhaustive` -- see
         // `entity_kinds`, which is where the 2026-08-25 budget ruling and
         // ADR-0003 meet.

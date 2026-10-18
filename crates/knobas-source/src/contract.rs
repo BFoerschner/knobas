@@ -219,12 +219,24 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
         // A delete could not be taken back. The target is no branch's
         // address -- it has no `@refs/heads/` -- so an adapter that attempted
         // it anyway is refused on the id's shape before a request leaves.
+        // A source action (#1194) under an id this battery names, which no
+        // adapter declares, aimed at no entity: refused by its id.
+        crate::WriteOp::SourceAction {
+            entity: target.clone(),
+            id: UNDECLARED_SOURCE_ACTION.into(),
+            fields: std::collections::BTreeMap::new(),
+        },
         crate::WriteOp::DeleteBranch { entity: target },
     ]
     .into_iter()
     .map(|op| (op.identifier(), op))
     .collect()
 }
+
+/// The id clause 11 asks an adapter to perform as a source action, which it
+/// must not declare. Named after the battery, so no adapter's real action
+/// is called this.
+const UNDECLARED_SOURCE_ACTION: &str = "contract_battery_probe";
 
 /// Every adapter must pass. Panics with a descriptive message on violation.
 ///
@@ -428,6 +440,67 @@ where
     if let Err(error) = crate::role::check(&d) {
         panic!("descriptor.roles: {error}");
     }
+    // 11. Source actions (#1194, ADR-0029): declared exactly when
+    //     `source_action` is, each id once, and one not declared is refused.
+    check_source_actions(&*s, &d).await;
+}
+
+/// Clause 11: the source actions an adapter declares are the ones it
+/// performs.
+///
+/// `source_actions` and `write_ops`' [`SOURCE_ACTION`](crate::SOURCE_ACTION)
+/// are two signals for one fact, held to each other as `Capability::Write`
+/// and `write_ops` are in clause 5. Each id is non-blank and declared once,
+/// because a view's action names it and the queue hands it back by it.
+///
+/// **The undeclared side is probed, the declared side skipped**, for clause
+/// 5's reason: the battery runs against a live backend. An adapter that
+/// declares `source_action` is asked to perform an id it does not declare and
+/// must refuse it with [`SourceError::Protocol`](crate::SourceError); one that
+/// does not was already probed by clause 5. The skip is pinned by
+/// `accepts_a_declared_source_action_without_performing_it`.
+async fn check_source_actions(s: &dyn crate::Source, d: &crate::SourceDescriptor) {
+    let declares_op = d.write_ops.iter().any(|w| w == crate::SOURCE_ACTION);
+    assert!(
+        declares_op || d.source_actions.is_empty(),
+        "descriptor.source_actions declares {:?} but write_ops does not list {:?} -- the shell \
+         draws no source action for a source that does not offer the op",
+        d.source_actions,
+        crate::SOURCE_ACTION
+    );
+    assert!(
+        !declares_op || !d.source_actions.is_empty(),
+        "write_ops lists {:?} but descriptor.source_actions declares none -- there is no action \
+         for it to perform",
+        crate::SOURCE_ACTION
+    );
+    let mut seen = std::collections::HashSet::new();
+    for id in &d.source_actions {
+        assert!(
+            !id.trim().is_empty() && seen.insert(id.as_str()),
+            "descriptor.source_actions has a blank or repeated id {id:?} -- a view's action and \
+             the queued write name the action by it"
+        );
+    }
+    if !declares_op
+        || d.source_actions
+            .iter()
+            .any(|id| id == UNDECLARED_SOURCE_ACTION)
+    {
+        return;
+    }
+    let refused = s
+        .write(crate::WriteOp::SourceAction {
+            entity: format!("{}:contract-battery", d.id),
+            id: UNDECLARED_SOURCE_ACTION.into(),
+            fields: std::collections::BTreeMap::new(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(crate::SourceError::Protocol { .. })),
+        "{UNDECLARED_SOURCE_ACTION:?}, a source action descriptor.source_actions does not declare \
+         must be refused with SourceError::Protocol, got {refused:?}"
+    );
 }
 
 /// Clause 9: the source view of every entity the adapter emitted is an answer,
@@ -1382,6 +1455,18 @@ mod tests {
         ClaimsWikiWithoutParent,
         /// Claims monitoring over monitors that declare no state (#1193).
         ClaimsMonitoringWithoutState,
+        /// Declares the source action `add_label` and `source_action` beside
+        /// it, refuses every other id, and panics if the declared one is
+        /// performed (#1194): the conforming case of clause 11.
+        DeclaresASourceAction,
+        /// Declares `add_label` and performs any source action it is handed.
+        PerformsAnUndeclaredSourceAction,
+        /// Declares `add_label` without `source_action` in `write_ops`.
+        SourceActionsWithoutTheOp,
+        /// Lists `source_action` in `write_ops` and declares no action.
+        SourceActionOpWithoutActions,
+        /// Declares `add_label` twice.
+        RepeatsASourceAction,
     }
 
     struct TestSource {
@@ -1425,7 +1510,12 @@ mod tests {
                     Behavior::DeclaresAWriteOp
                     | Behavior::DeclaresTransition
                     | Behavior::UnknownWriteOpId
-                    | Behavior::WriteCapabilityWithoutOps => {
+                    | Behavior::WriteCapabilityWithoutOps
+                    | Behavior::DeclaresASourceAction
+                    | Behavior::PerformsAnUndeclaredSourceAction
+                    | Behavior::SourceActionsWithoutTheOp
+                    | Behavior::SourceActionOpWithoutActions
+                    | Behavior::RepeatsASourceAction => {
                         vec![Capability::Search, Capability::Write]
                     }
                     _ => vec![Capability::Search],
@@ -1463,6 +1553,20 @@ mod tests {
                         vec!["comment".into()]
                     }
                     Behavior::DeclaresTransition => vec!["transition".into()],
+                    Behavior::DeclaresASourceAction
+                    | Behavior::PerformsAnUndeclaredSourceAction
+                    | Behavior::SourceActionOpWithoutActions
+                    | Behavior::RepeatsASourceAction => vec!["source_action".into()],
+                    // Something to write, so the capability clause passes and
+                    // clause 11 is the one this fails.
+                    Behavior::SourceActionsWithoutTheOp => vec!["comment".into()],
+                    _ => Vec::new(),
+                },
+                source_actions: match self.behavior {
+                    Behavior::DeclaresASourceAction
+                    | Behavior::PerformsAnUndeclaredSourceAction
+                    | Behavior::SourceActionsWithoutTheOp => vec!["add_label".into()],
+                    Behavior::RepeatsASourceAction => vec!["add_label".into(), "add_label".into()],
                     _ => Vec::new(),
                 },
                 entity_kinds: {
@@ -1872,8 +1976,17 @@ mod tests {
                 // this adapter is otherwise required to do.
                 unreachable!("battery must not perform a write the descriptor declares");
             }
-            if self.behavior == Behavior::AcceptsUndeclaredWrite {
+            if self.behavior == Behavior::AcceptsUndeclaredWrite
+                || self.behavior == Behavior::PerformsAnUndeclaredSourceAction
+                    && matches!(op, WriteOp::SourceAction { .. })
+            {
                 return Ok(crate::WriteReceipt::none());
+            }
+            if let WriteOp::SourceAction { id, .. } = &op
+                && self.behavior == Behavior::DeclaresASourceAction
+                && self.descriptor().source_actions.contains(id)
+            {
+                unreachable!("battery must not perform a source action the descriptor declares");
             }
             Err(SourceError::protocol(format!("unsupported op: {op:?}")))
         }
@@ -2658,6 +2771,66 @@ mod tests {
             r#"descriptor.roles: role "monitoring" needs kind "monitor" to declare the path status_name"#,
         )
         .await;
+    }
+
+    // -- clause 11: source actions (#1194) --------------------------------------
+
+    /// The conforming adapter's declared action is never performed: its
+    /// `write` panics on it, as the declared-op guard of clause 5 is pinned.
+    #[tokio::test]
+    async fn accepts_a_declared_source_action_without_performing_it() {
+        run(Behavior::DeclaresASourceAction)
+            .await
+            .expect("an adapter that refuses only the actions it does not declare must pass");
+    }
+
+    #[tokio::test]
+    async fn rejects_an_adapter_that_performs_a_source_action_it_did_not_declare() {
+        rejects(
+            Behavior::PerformsAnUndeclaredSourceAction,
+            "a source action descriptor.source_actions does not declare must be refused",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_source_actions_without_the_source_action_op() {
+        rejects(
+            Behavior::SourceActionsWithoutTheOp,
+            "descriptor.source_actions declares [\"add_label\"] but write_ops does not list \"source_action\"",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_the_source_action_op_with_no_source_actions() {
+        rejects(
+            Behavior::SourceActionOpWithoutActions,
+            "write_ops lists \"source_action\" but descriptor.source_actions declares none",
+        )
+        .await;
+    }
+
+    #[tokio::test]
+    async fn rejects_a_source_action_declared_twice() {
+        rejects(
+            Behavior::RepeatsASourceAction,
+            "descriptor.source_actions has a blank or repeated id \"add_label\"",
+        )
+        .await;
+    }
+
+    /// A source action is a write outside **every** role's vocabulary
+    /// (ADR-0029), so no role's minimum may name it.
+    #[test]
+    fn no_role_names_the_source_action() {
+        for min in crate::role::MINIMUMS {
+            assert!(
+                !min.writes.contains(&crate::SOURCE_ACTION),
+                "role {:?} names source_action",
+                min.role
+            );
+        }
     }
 
     /// Every write a role's vocabulary names is a `WriteOp` the SPI knows, so

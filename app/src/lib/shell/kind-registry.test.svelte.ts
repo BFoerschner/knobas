@@ -25,6 +25,7 @@ function descriptor(adapterKind: string, kinds: SourceDescriptor["entity_kinds"]
     accepts_account: false,
     min_sync_interval_secs: 60,
     roles: [],
+    source_actions: [],
     write_ops: [],
     payload_paths: [],
     entity_kinds: kinds,

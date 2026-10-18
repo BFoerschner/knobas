@@ -53,6 +53,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // set and custom run the source views added (issues #668, #669,
         // §10.8). The battery holds this and `Capability::Write` to each
         // other in both directions.
+        source_actions: Vec::new(),
         write_ops: vec![
             WRITE_OP_TRIGGER_BUILD.to_owned(),
             WRITE_OP_RERUN_BUILD.to_owned(),

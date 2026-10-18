@@ -189,6 +189,13 @@ const PAYLOADS: Record<
   delete_branch: (entity) => ({ DeleteBranch: { entity } }),
   // Edit…, Close and Reopen (#706): one op, the state a fixed value.
   edit_pull_request: (entity, values, _settings, drawn) => editPullRequest(entity, values, drawn),
+  // A write outside every role's vocabulary (#1194, ADR-0029): the id is the
+  // action's fixed value, every other answer goes as a field, and nothing
+  // here knows what any of them mean.
+  source_action: (entity, values) => {
+    const { id, ...fields } = values;
+    return id ? { SourceAction: { entity, id, fields } } : null;
+  },
 };
 
 /**

@@ -122,6 +122,7 @@ fn descriptor(id: &str, kind: &str, write_ops: &[String]) -> SourceDescriptor {
         accepts_account: false,
         min_sync_interval_secs: 60,
         roles: Vec::new(),
+        source_actions: Vec::new(),
         write_ops: write_ops.to_vec(),
         entity_kinds: vec![KindInfo {
             id: "pr".to_owned(),

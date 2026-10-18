@@ -45,6 +45,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // `log_work` is declared **here and nowhere else**: Gitea and TeamCity
         // hold no worklogs, so the battery's clause 5 is what proves they
         // refuse it rather than a comment saying they would.
+        source_actions: Vec::new(),
         write_ops: vec![
             WRITE_OP_COMMENT.to_owned(),
             WRITE_OP_TRANSITION.to_owned(),

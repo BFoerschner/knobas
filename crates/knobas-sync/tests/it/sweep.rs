@@ -60,6 +60,7 @@ impl Source for Shrinking {
             accepts_account: false,
             min_sync_interval_secs: 60,
             roles: Vec::new(),
+            source_actions: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: self
                 .kinds

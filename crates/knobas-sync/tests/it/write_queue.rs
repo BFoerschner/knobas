@@ -236,6 +236,7 @@ fn fake_descriptor(id: &str) -> SourceDescriptor {
         accepts_account: false,
         min_sync_interval_secs: 60,
         roles: Vec::new(),
+        source_actions: Vec::new(),
         write_ops: vec!["comment".to_owned()],
         entity_kinds: vec![KindInfo {
             id: "ticket".to_owned(),
@@ -338,6 +339,11 @@ impl Harness {
                 WriteOp::CommitFile {
                     base_sha, content, ..
                 } => format!("{base_sha}: {content}"),
+                // A source action by its id and the label it carries (#1194):
+                // what the adapter is handed back is what was queued.
+                WriteOp::SourceAction { id, fields, .. } => {
+                    format!("{id}: {}", fields.get("label").map_or("", String::as_str))
+                }
                 other => panic!("this harness queues comments, edits and creates, got {other:?}"),
             })
             .collect()
@@ -907,6 +913,61 @@ async fn mirror_pull(h: &Harness, key: &str, title: &str, state: &str) -> Entity
     entity
 }
 
+/// Queue `add_label` with `label` on `pull`, as the shell's payload table
+/// builds it from a declared dialog (#1194).
+async fn add_label(h: &Harness, pull: &EntityRef, label: &str) -> store::QueuedWrite {
+    flusher::submit(
+        &h.deps,
+        &h.source,
+        WriteOp::SourceAction {
+            entity: pull.to_string(),
+            id: "add_label".to_owned(),
+            fields: [("label".to_owned(), label.to_owned())].into(),
+        },
+    )
+    .await
+    .unwrap()
+}
+
+/// A source action (#1194, ADR-0029) is a write like any other, though the
+/// queue cannot read it: held when its target moved, sent when it did not --
+/// handed back to the adapter with its id and fields as queued -- and refused,
+/// never retried, when the adapter refuses it.
+#[tokio::test]
+async fn a_source_action_is_held_sent_and_refused_as_a_typed_write_is() {
+    let h = harness().await;
+    let still = mirror_pull(&h, "o/r#7", "Bound the retry jitter", "open").await;
+    let moved = mirror_pull(&h, "o/r#8", "Bound the retry jitter", "open").await;
+
+    h.answer(Answer::Unreachable);
+    let sent = add_label(&h, &still, "7").await;
+    let held = add_label(&h, &moved, "8").await;
+    // Somebody retitles one: knobas cannot know what the action overwrites,
+    // so any change to its target holds it.
+    mirror_pull(&h, "o/r#8", "Bound the retry jitter, retitled", "open").await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.delivered(), ["add_label: 7"]);
+    assert_eq!(h.reload(sent.id).await.state, WriteState::Sent);
+    let held = h.reload(held.id).await;
+    assert_eq!(held.state, WriteState::Held);
+    assert_eq!(held.op, "source_action");
+    assert_eq!(held.payload["SourceAction"]["fields"]["label"], "8");
+
+    h.answer(Answer::Refuse);
+    let refused = add_label(&h, &still, "9").await;
+    let refused = h.reload(refused.id).await;
+    assert_eq!(refused.state, WriteState::Refused);
+    assert_eq!(
+        refused.detail.as_deref(),
+        Some("protocol: this issue type does not accept comments")
+    );
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.delivered(), ["add_label: 7"], "a refusal is not retried");
+}
+
 /// The deputy's ruling on #706 through the queue itself, not only through
 /// `project`: a title edit holds on a retitle and goes over a close. The
 /// payload has to reach the projection at the queue *and* at the flush --
@@ -1315,6 +1376,11 @@ fn write_op_probes() -> Vec<WriteOp> {
             body: None,
             state: Some(knobas_source::PullRequestState::Closed),
         },
+        WriteOp::SourceAction {
+            entity: "gitea:tidewater/payout-service#142".to_owned(),
+            id: "add_label".to_owned(),
+            fields: [("label".to_owned(), "7".to_owned())].into(),
+        },
     ]
 }
 
@@ -1351,7 +1417,8 @@ fn every_write_op_has_a_stated_projection() {
             | WriteOp::DeleteBranch { .. }
             | WriteOp::EditPullRequest { .. }
             | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::CommitFile { .. } => op.identifier(),
+            | WriteOp::CommitFile { .. }
+            | WriteOp::SourceAction { .. } => op.identifier(),
         };
         assert!(
             store::PROJECTED_OPS.contains(&identifier),
@@ -1543,7 +1610,11 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             // against somebody's estate that no knobas row claims, and the
             // name it carries is a label rather than an address -- Uptime Kuma
             // holds any number of monitors called the same thing (issue #453).
-            | WriteOp::CreateMonitor { .. } => true,
+            | WriteOp::CreateMonitor { .. }
+            // What a source action does is the adapter's alone (#1194): it
+            // may make something no row names, so a withdrawal in flight is
+            // disclosed rather than assumed harmless.
+            | WriteOp::SourceAction { .. } => true,
             // Changes to something the mirror already holds: the write simply
             // arrived, which is what the user asked for.
             WriteOp::Comment { .. }

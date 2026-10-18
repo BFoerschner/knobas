@@ -830,6 +830,7 @@ mod tests {
             accepts_account: false,
             min_sync_interval_secs: 60,
             roles: Vec::new(),
+            source_actions: Vec::new(),
             write_ops: Vec::new(),
             entity_kinds: kinds.to_vec(),
             config_schema: serde_json::Value::Object(serde_json::Map::new()),

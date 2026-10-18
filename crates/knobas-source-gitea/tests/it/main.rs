@@ -12,6 +12,7 @@ mod support;
 
 mod client;
 mod contract;
+mod source_action;
 mod sync;
 mod view;
 mod view_branch;

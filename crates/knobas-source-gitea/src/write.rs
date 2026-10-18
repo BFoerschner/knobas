@@ -26,6 +26,7 @@
 //! | branch delete | `DELETE /repos/{o}/{r}/branches/{name}` | none |
 //! | edit | `PATCH /repos/{o}/{r}/pulls/{index}` | only the given of `{"title":…,"body":…,"state":…}` |
 //! | file commit | `PUT /repos/{o}/{r}/contents/{path}` | `{"content":<base64>,"message":…,"branch":…,"sha":…}`, plus `"new_branch"` when set |
+//! | add label (source action) | `POST /repos/{o}/{r}/issues/{index}/labels` | `{"labels":[<id>]}` |
 //!
 //! The comment goes on the **issue** with the pull request's number, which is
 //! not a quirk of this adapter: Gitea keeps a pull request's discussion on the
@@ -645,6 +646,33 @@ pub(crate) async fn edit_pull_request(
     }
     client
         .patch(&path, &serde_json::Value::Object(fields))
+        .await
+        .map(|_| ())
+}
+
+// -- the add_label source action (issue #1194) --------------------------------
+
+/// Put label `label` (its id) on a pull request: Gitea keeps a pull request's
+/// labels on the issue of the same index, as its discussion. Adding a label
+/// it already carries changes nothing, so the request may be sent again.
+///
+/// # Errors
+///
+/// As [`create_branch`]: a label of another repository is Gitea's 422.
+pub(crate) async fn add_label(
+    client: &GiteaClient,
+    owner: &str,
+    repo: &str,
+    index: u64,
+    label: u64,
+) -> Result<(), SourceError> {
+    let path = format!(
+        "/repos/{}/{}/issues/{index}/labels",
+        GiteaClient::path_segment(owner)?,
+        GiteaClient::path_segment(repo)?
+    );
+    client
+        .post(&path, &json!({ "labels": [label] }))
         .await
         .map(|_| ())
 }

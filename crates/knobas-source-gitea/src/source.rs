@@ -363,6 +363,27 @@ impl Source for GiteaSource {
                 let made = write::commit_file(&self.client, &owner, &repo, &commit).await?;
                 Ok(made.map_or_else(WriteReceipt::none, WriteReceipt::id))
             }
+            WriteOp::SourceAction { entity, id, fields } => {
+                // The id first: one this adapter does not declare is refused
+                // whatever it targets (battery clause 11).
+                if id != crate::SOURCE_ACTION_ADD_LABEL {
+                    return Err(SourceError::protocol(format!(
+                        "gitea: {id:?} is not a source action this adapter declares"
+                    )));
+                }
+                let (owner, repo, index) = self.pull_of(entity)?;
+                let label = fields
+                    .get("label")
+                    .and_then(|label| label.parse::<u64>().ok())
+                    .ok_or_else(|| {
+                        SourceError::protocol(format!(
+                            "gitea: add_label needs a label id, got {:?}",
+                            fields.get("label")
+                        ))
+                    })?;
+                write::add_label(&self.client, &owner, &repo, index, label).await?;
+                Ok(WriteReceipt::none())
+            }
             WriteOp::Transition { .. }
             | WriteOp::CreateTicket { .. }
             | WriteOp::TriggerBuild { .. }

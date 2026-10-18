@@ -23,6 +23,24 @@ impl GiteaClient {
         .await
     }
 
+    /// `GET /repos/{o}/{r}/labels` -- the repository's labels, the first
+    /// page of fifty, which a pull request's *Add label…* offers (#1194). A
+    /// repository with more offers its first fifty, in Gitea's order.
+    pub(crate) async fn labels_as<T: serde::de::DeserializeOwned>(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<Vec<T>, SourceError> {
+        let (limit, page) = page_params(1);
+        let labels: Option<Vec<T>> = self
+            .get_json(
+                &format!("/repos/{}/{}/labels", segment(owner)?, segment(repo)?),
+                &[limit, page],
+            )
+            .await?;
+        Ok(labels.unwrap_or_default())
+    }
+
     /// `GET /repos/{o}/{r}/branches/{branch}` -- one branch and its tip.
     pub(crate) async fn branch_as<T: serde::de::DeserializeOwned>(
         &self,

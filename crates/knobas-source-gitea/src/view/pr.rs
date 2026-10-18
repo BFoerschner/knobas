@@ -15,6 +15,7 @@ use super::{fact, login, when_of};
 use crate::model::UserRef;
 use crate::source::GiteaSource;
 
+mod label;
 mod land;
 mod maintain;
 mod review;
@@ -50,13 +51,15 @@ pub(super) async fn draw(
             // on its own pull requests (#705). So do landing's reads (#708)
             // and the head commit's statuses (#710), which *Checks* draws and
             // landing holds against the base's required checks (#721).
-            let (reviews, commits, comments, viewer, landing, statuses) = tokio::try_join!(
+            // And the repository's labels, which *Add label…* offers (#1194).
+            let (reviews, commits, comments, viewer, landing, statuses, labels) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),
                 at.comments(),
                 at.viewer(),
                 at.landing(&pull),
                 at.statuses(&pull),
+                at.labels(),
             )?;
             let landing = landing.with_statuses(statuses.as_ref());
             let checks = statuses.as_ref().and_then(super::checks::block_of);
@@ -65,6 +68,7 @@ pub(super) async fn draw(
             // last.
             actions.extend(review::actions(&pull, viewer.as_deref()));
             actions.extend(maintain::actions(&pull));
+            actions.push(label::action(&pull, &labels));
             actions.extend(land::actions(&pull, &reviews, &landing));
             vec![
                 overview(&pull, &reviews, &landing, checks),
@@ -261,6 +265,17 @@ impl PullView<'_> {
 
     /// The login the token belongs to, or `None` where Gitea would not say
     /// ([`GiteaSource::viewer`], read once per token and server).
+    /// The repository's labels, for *Add label…* (#1194). A failed read costs
+    /// that action, which says so, and never the view.
+    async fn labels(&self) -> Result<Result<Vec<label::Label>, String>, SourceError> {
+        Ok(self
+            .source
+            .client
+            .labels_as(self.owner, self.repo)
+            .await
+            .map_err(|error| error.to_string()))
+    }
+
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
         Ok(self.source.viewer().await)
     }
@@ -571,6 +586,10 @@ struct Pull {
     changed_files: Option<u64>,
     #[serde(default)]
     html_url: Option<String>,
+    /// The labels it carries, which *Add label…* does not offer again
+    /// (#1194).
+    #[serde(default)]
+    labels: Vec<label::Label>,
 }
 
 #[derive(Debug, serde::Deserialize)]

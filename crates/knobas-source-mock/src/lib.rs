@@ -783,6 +783,7 @@ impl Source for MockSource {
             accepts_account: false,
             min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
             roles: Vec::new(),
+            source_actions: Vec::new(),
             write_ops: vec!["comment".to_owned()],
             // The UI renders this source's launcher groups and chips from these
             // alone, so every kind `sync` emits is declared here.

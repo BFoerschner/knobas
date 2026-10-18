@@ -487,6 +487,7 @@ mod tests {
             auth_methods: vec![],
             accepts_account: false,
             min_sync_interval_secs: 60,
+            source_actions: Vec::new(),
             write_ops: vec![],
             entity_kinds: ["repo", "branch", "pr", "commit"].map(kind).to_vec(),
             config_schema: serde_json::json!({}),

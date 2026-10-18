@@ -53,6 +53,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // The order is the order the action bar renders in, and it is
         // deliberate: the two a reader reaches for from a page detail come
         // first, and the one that makes a new page last.
+        source_actions: Vec::new(),
         write_ops: vec![
             "comment".to_owned(),
             "update_page".to_owned(),
