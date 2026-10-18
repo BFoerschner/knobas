@@ -489,25 +489,50 @@ macro_rules! failed_build {
 /// unchanged, and pinned by
 /// `an_assignee_the_declaration_does_not_reach_contributes_nothing` in
 /// `knobas-core/tests/it/inbox.rs`.
+///
+/// **The declaration is walked once a source, not once a ticket** (#1164).
+/// Through [`crate::declared_string!`] every ticket in the window walked the
+/// whole declaration, about 4 µs a ticket: 58 ms of the stream on the probe's
+/// 15,000 tickets for a reader who raised none of them, the realistic reader.
+/// Now the assignee candidates are the CTE `assignee_paths`, one row per
+/// source and candidate ([`crate::declared_ticket_paths!`], the mini board's
+/// own), and each ticket is joined to its own source's rows and asked one
+/// cheap question per candidate first: does the value there, trimmed, name
+/// one of my accounts? Only a ticket that passes reads
+/// [`crate::first_string_of!`], the rule itself, so a later candidate naming
+/// me still loses to an earlier one naming somebody else. Two things keep
+/// that order: the rule is correlated on `p.source_id`, the joined path's
+/// source, so it is a join filter after the hash join rather than a scan
+/// filter on every ticket; and a ticket whose candidates name me twice is two
+/// rows here and one item after `shelved!`'s `distinct on`. The arm is
+/// parenthesized because it carries its own `with`. Pinned by
+/// `the_first_declared_assignee_decides_and_only_for_its_own_source`.
 macro_rules! new_assignment {
     () => {
         concat!(
-            "select 'new_assignment', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
+            "(with assignee_paths as materialized (",
+            $crate::declared_ticket_paths!("$4", "assignee"),
+            ")
+             select 'new_assignment', i.entity_id, i.source_id, i.entity_id, i.kind, i.title,
                     'assigned to you',
                     coalesce(i.item_updated_at, i.synced_at), i.web_url
-               from sync.item i
+               from assignee_paths p
+               join sync.item i on i.source_id = p.source_id
               where ",
             $crate::live_by_exclusion!("i"),
             "
                 and i.kind = 'ticket'
-                and ",
-            $crate::declared_string!("$4", "assignee"),
-            " = any($1)
                 and coalesce(i.author, '') <> all($1)
                 and coalesce(i.item_updated_at, i.synced_at)
                       >= $2 - make_interval(days => ",
             window_days!(),
-            ")"
+            ")
+                and btrim(i.payload #>> p.segs) = any($1)
+                and ",
+            $crate::first_string_of!(
+                "(select a.segs, a.ord from assignee_paths a where a.source_id = p.source_id)"
+            ),
+            " = any($1))"
         )
     };
 }

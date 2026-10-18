@@ -1431,6 +1431,7 @@ knobas-core	test/it	inbox::an_item_says_where_it_came_from_and_what_it_is_about
 knobas-core	test/it	inbox::every_build_mine_names_what_the_per_build_statement_named
 knobas-core	test/it	inbox::one_rule_sees_only_its_own_category
 knobas-core	test/it	inbox::the_count_excludes_snoozed_items
+knobas-core	test/it	inbox::the_first_declared_assignee_decides_and_only_for_its_own_source
 knobas-core	test/it	inbox::the_five_existing_categories_are_untouched_by_the_sixth
 knobas-core	test/it	inbox::the_inbox_statements_are_never_kept_as_prepared_statements
 knobas-core	test/it	inbox::with_no_identity_only_the_rule_that_needs_none_produces_anything
