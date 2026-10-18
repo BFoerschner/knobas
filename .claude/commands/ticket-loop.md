@@ -46,7 +46,15 @@ A ruling may not contradict a ticket, spec, ADR or the glossary. Where the work 
 
 You (the orchestrator) rule only loop-level questions: order is issue number (except a live-fixture fix, which goes first; see *Step 4*), nothing is dropped, and a cap that blocks the frontier is reported, not worked around.
 
-**What stays Björn's:** closing a spec, and anything a milestone description or ticket explicitly reserves for him. Everything else, closing milestones and cutting releases included, the loop does when the exit ticket says so.
+**What stays Björn's:** closing a spec. Nothing else waits for him (Björn, 2026-10-18, after #1218 sat six hours on a sign-off while he was away: "everything that the implementer can make his own decision (except sonnet)"). Closing milestones and cutting releases the loop does when the exit ticket says so.
+
+**A step a ticket, milestone description or spec reserves for Björn** (a sign-off on a contract amendment, an approval, a choice he was to make) is ruled by an **Opus** agent on the work, never a Sonnet one:
+
+- an Opus implementer rules it while implementing;
+- an Opus merge-manager rules it when the implementer ran on Sonnet, or when the implementer left it open;
+- a Sonnet agent that meets one does everything else and names the step in its report; it never rules it. A Sonnet merge-manager stops before taking the lock. The orchestrator then dispatches an Opus merge-manager to rule it and merge.
+
+The ruling is recorded like any other, in the PR body under **Rulings** headed "Reserved for Björn, ruled by <role> on Opus", and in the unattended-rulings file, so he can reverse it. Tick the ticket's criterion and name the ruling beside it. The iteration report lists every such ruling under *rulings recorded*.
 
 ## The brief files
 
