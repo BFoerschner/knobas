@@ -409,31 +409,37 @@ test("keys typed inside the typing pause are one read of the whole word, and an 
   const h = harness();
   await open(h, null, null, 40);
   const before = h.reads.length;
-  for (const char of "sepa") type(field(), char);
-  await settle();
-  expect(h.reads.length).toBe(before);
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  await settle();
-  expect(h.reads.slice(before)).toEqual([{ perColumn: 50, query: "sepa" }]);
-  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+  // The pause is a fake clock (#1179): wall-clock time between keys, which a
+  // loaded machine stretches, can no longer end it early.
+  vi.useFakeTimers();
+  try {
+    const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
+    for (const char of "sepa") type(field(), char);
+    await advance(39);
+    expect(h.reads.length).toBe(before);
+    await advance(1);
+    expect(h.reads.slice(before)).toEqual([{ perColumn: 50, query: "sepa" }]);
+    expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
 
-  // A read already out when the next key is typed: its answer is not drawn.
-  let answer: (board: MiniBoard) => void = () => {};
-  const board = h.ports.board;
-  h.ports.board = (perColumn, query) => {
-    if (query !== "sepa x") return board(perColumn, query);
-    h.reads.push({ perColumn, query });
-    return new Promise((resolve) => (answer = resolve));
-  };
-  type(field(), " ");
-  type(field(), "x");
-  await new Promise((resolve) => setTimeout(resolve, 60));
-  await settle();
-  expect(h.reads.at(-1)!.query).toBe("sepa x");
-  type(field(), "x");
-  answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [], lanes: [], more_lanes: 0 });
-  await settle();
-  expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+    // A read already out when the next key is typed: its answer is not drawn.
+    let answer: (board: MiniBoard) => void = () => {};
+    const board = h.ports.board;
+    h.ports.board = (perColumn, query) => {
+      if (query !== "sepa x") return board(perColumn, query);
+      h.reads.push({ perColumn, query });
+      return new Promise((resolve) => (answer = resolve));
+    };
+    type(field(), " ");
+    type(field(), "x");
+    await advance(40);
+    expect(h.reads.at(-1)!.query).toBe("sepa x");
+    type(field(), "x");
+    answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [], lanes: [], more_lanes: 0 });
+    await advance(0);
+    expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 test("no match says so and offers to clear the filter", async () => {
