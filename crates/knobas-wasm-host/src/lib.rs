@@ -83,6 +83,9 @@ impl Version {
 
     /// Whether a component built against `self` can run on this host.
     #[must_use]
+    // At 1.0.0 the minor comparison is `== 0`; written as `<=` because it is
+    // the rule, and the rule holds once the host's minor grows.
+    #[allow(clippy::absurd_extreme_comparisons)]
     pub fn is_hosted(self) -> bool {
         self.major == INTERFACE_VERSION.major && self.minor <= INTERFACE_VERSION.minor
     }
@@ -98,10 +101,7 @@ impl std::fmt::Display for Version {
 #[derive(Debug, thiserror::Error)]
 pub enum LoadError {
     #[error("cannot read {path}: {error}")]
-    Read {
-        path: String,
-        error: std::io::Error,
-    },
+    Read { path: String, error: std::io::Error },
     #[error("not a WASM component: {0}")]
     NotAComponent(String),
     #[error("the component exports no {SOURCE_EXPORT}, so it is not a knobas adapter")]

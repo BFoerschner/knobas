@@ -286,7 +286,10 @@ impl Source for WasmSource {
         entity: &str,
         test: &str,
     ) -> Result<Option<Vec<run::TestOutcome>>, SourceError> {
-        Self::decode(call!(self, call_test_history, entity, test)?, "test history")
+        Self::decode(
+            call!(self, call_test_history, entity, test)?,
+            "test history",
+        )
     }
 
     async fn run_artifacts(
@@ -294,7 +297,10 @@ impl Source for WasmSource {
         entity: &str,
         path: &str,
     ) -> Result<Option<Vec<run::ArtifactEntry>>, SourceError> {
-        Self::decode(call!(self, call_run_artifacts, entity, path)?, "run artifacts")
+        Self::decode(
+            call!(self, call_run_artifacts, entity, path)?,
+            "run artifacts",
+        )
     }
 
     async fn artifact_preview(

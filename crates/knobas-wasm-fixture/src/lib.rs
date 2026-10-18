@@ -85,13 +85,17 @@ fn read_fault(config: &str) -> Result<Fault, String> {
         .as_object()
         .ok_or_else(|| format!("config must be an object, got {value}"))?;
     if let Some(key) = object.keys().find(|k| k.as_str() != "fault") {
-        return Err(format!("config has a key the fixture does not know: {key:?}"));
+        return Err(format!(
+            "config has a key the fixture does not know: {key:?}"
+        ));
     }
     match object.get("fault").and_then(serde_json::Value::as_str) {
         None | Some("none") => Ok(Fault::None),
         Some("unauthorized") => Ok(Fault::Unauthorized),
         Some("unreachable") => Ok(Fault::Unreachable),
-        Some(other) => Err(format!("config fault {other:?} is not one the fixture knows")),
+        Some(other) => Err(format!(
+            "config fault {other:?} is not one the fixture knows"
+        )),
     }
 }
 
@@ -214,7 +218,11 @@ impl GuestAdapter for Adapter {
         Err(self.no_workflow())
     }
 
-    fn view(&self, _entity: String, _section: Option<String>) -> Result<Option<String>, SourceError> {
+    fn view(
+        &self,
+        _entity: String,
+        _section: Option<String>,
+    ) -> Result<Option<String>, SourceError> {
         Ok(None)
     }
 

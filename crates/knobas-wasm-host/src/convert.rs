@@ -47,12 +47,10 @@ pub(crate) fn to_wit_error(error: &SourceError) -> wit::SourceError {
     match error {
         SourceError::Unauthorized { status } => wit::SourceError::Unauthorized(*status),
         SourceError::Unreachable(detail) => wit::SourceError::Unreachable(detail.clone()),
-        SourceError::Unconfirmed { status, message } => {
-            wit::SourceError::Unconfirmed(wit::Fault {
-                status: *status,
-                message: message.clone(),
-            })
-        }
+        SourceError::Unconfirmed { status, message } => wit::SourceError::Unconfirmed(wit::Fault {
+            status: *status,
+            message: message.clone(),
+        }),
         SourceError::Protocol { status, message } => wit::SourceError::Protocol(wit::Fault {
             status: *status,
             message: message.clone(),
@@ -81,7 +79,10 @@ fn timestamp(
 /// namespace is the battery's to check, as it is for every adapter.
 pub(crate) fn sync_item(item: wit::SyncItem) -> Result<SyncItem, SourceError> {
     let entity = EntityRef::parse(&item.entity).map_err(|e| {
-        SourceError::protocol(format!("item entity {:?} is not an entity id: {e}", item.entity))
+        SourceError::protocol(format!(
+            "item entity {:?} is not an entity id: {e}",
+            item.entity
+        ))
     })?;
     let payload = serde_json::from_str(&item.payload).map_err(|e| {
         SourceError::protocol(format!("item {} payload is not JSON: {e}", item.entity))
@@ -132,9 +133,8 @@ pub(crate) fn json<T: serde::de::DeserializeOwned>(
     text: &str,
     what: &str,
 ) -> Result<T, SourceError> {
-    serde_json::from_str(text).map_err(|e| {
-        SourceError::protocol(format!("the adapter's {what} does not decode: {e}"))
-    })
+    serde_json::from_str(text)
+        .map_err(|e| SourceError::protocol(format!("the adapter's {what} does not decode: {e}")))
 }
 
 /// Encode an SPI value as the serde JSON the component reads.

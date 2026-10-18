@@ -58,14 +58,16 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
         .unwrap();
     assert_eq!(run.upserted, 3, "the fixture serves three surveys");
 
-    let (kind, title): (String, String) = sqlx::query_as(
-        "select kind, title from sync.item where entity_id = $1",
-    )
-    .bind(format!("{id}:survey-2"))
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!((kind.as_str(), title.as_str()), ("survey", "Berth 7 fender survey"));
+    let (kind, title): (String, String) =
+        sqlx::query_as("select kind, title from sync.item where entity_id = $1")
+            .bind(format!("{id}:survey-2"))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        (kind.as_str(), title.as_str()),
+        ("survey", "Berth 7 fender survey")
+    );
 
     let found = knobas_app::commands::search::search_inner(
         &pool,
@@ -87,6 +89,10 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
     titles.sort_unstable();
     assert_eq!(
         titles,
-        ["Berth 7 fender survey", "Quay crane 4 inspection", "Reefer plug audit"]
+        [
+            "Berth 7 fender survey",
+            "Quay crane 4 inspection",
+            "Reefer plug audit"
+        ]
     );
 }

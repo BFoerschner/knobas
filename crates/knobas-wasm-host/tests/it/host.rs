@@ -32,10 +32,12 @@ fn fault_config(fault: Fault) -> serde_json::Value {
 #[tokio::test]
 async fn the_host_wrapping_the_fixture_passes_the_contract_battery() {
     let adapter = load_fixture();
-    battery(|fault| match adapter.build(instance("surveys", fault_config(fault))) {
-        Ok(source) => source,
-        Err(e) => panic!("the fixture must build: {e:?}"),
-    })
+    battery(
+        |fault| match adapter.build(instance("surveys", fault_config(fault))) {
+            Ok(source) => source,
+            Err(e) => panic!("the fixture must build: {e:?}"),
+        },
+    )
     .await;
 }
 
@@ -49,7 +51,10 @@ async fn a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor() {
     let cursor = source.sync(None, &mut sink).await.unwrap();
     assert_eq!(cursor, "3");
     let ids: Vec<String> = sink.0.iter().map(|i| i.entity.to_string()).collect();
-    assert_eq!(ids, ["surveys:survey-1", "surveys:survey-2", "surveys:survey-3"]);
+    assert_eq!(
+        ids,
+        ["surveys:survey-1", "surveys:survey-2", "surveys:survey-3"]
+    );
     assert_eq!(sink.0[1].title, "Berth 7 fender survey");
     assert_eq!(sink.0[1].payload["key"], "survey-2");
     assert_eq!(
