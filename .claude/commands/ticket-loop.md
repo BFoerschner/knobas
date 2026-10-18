@@ -46,7 +46,7 @@ A ruling may not contradict a ticket, spec, ADR or the glossary. Where the work 
 
 You (the orchestrator) rule only loop-level questions: order is issue number (except a live-fixture fix, which goes first; see *Step 4*), nothing is dropped, and a cap that blocks the frontier is reported, not worked around.
 
-**What stays Björn's:** closing a spec. Nothing else waits for him (Björn, 2026-10-18, after #1218 sat six hours on a sign-off while he was away: "everything that the implementer can make his own decision (except sonnet)"). Closing milestones and cutting releases the loop does when the exit ticket says so.
+**Nothing waits for Björn** (Björn, 2026-10-18, after #1218 sat six hours on a sign-off while he was away: "everything that the implementer can make his own decision (except sonnet)"). Closing milestones and cutting releases the loop does when the exit ticket says so, and closing specs by *Step 4b*.
 
 **A step a ticket, milestone description or spec reserves for Björn** (a sign-off on a contract amendment, an approval, a choice he was to make) is ruled by an **Opus** agent on the work, never a Sonnet one:
 
@@ -181,6 +181,10 @@ For each ticket N:
 **Pre-warm** (Björn, 2026-10-15): when a seat will free soon (an implementer's PR is open, or a merge-manager holds the merge lock), take the next ticket Step 4 would dispatch. If its work will touch Rust (its body names `crates/`, or its milestone is backend), create its worktree now, after the disk guard but without claiming it, and start `nice -n 19 env -u RUSTUP_TOOLCHAIN CARGO_BUILD_JOBS=2 cargo test --workspace --no-run` there in the background, logging to the scratchpad. Never pre-warm while a machine-holding loop ticket runs. At dispatch, the worktree is reused and the dispatch says the warm-up may still be running; cargo's build lock makes the first build wait for it.
 
 Never commit or stash in the root checkout. If a ticket needs files that are uncommitted there, copy them into the worktree and say they are Björn's text, to be committed as is.
+
+## Step 4b: close finished specs
+
+A spec is finished when no work is left on it (Björn, 2026-10-18: "You can also close specs if no work is left on it"): every sub-issue is closed, and every issue whose `## Parent` names it is closed (`gh search issues --repo BFoerschner/knobas "## Parent" "#<spec>" --state open`, then check each body's `## Parent`), and no open PR closes or names one of them. Close it yourself with a comment listing its tickets and the PRs that closed them: `gh issue close <spec> --comment …`. A spec whose milestone still has an open exit ticket closes after that exit. Specs are still never claimed or given to an implementer.
 
 ## Step 5: wake-up or stop
 
