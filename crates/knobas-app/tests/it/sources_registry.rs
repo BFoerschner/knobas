@@ -180,7 +180,9 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
             // `update_pull_request_branch` the landing's (#708), *Update
             // branch…* on a pull request whose head is behind its base;
             // `commit_file` the ticket-first redesign's (#822), *Commit
-            // change…* on a file, through Gitea and never the checkout.
+            // change…* on a file, through Gitea and never the checkout;
+            // `source_action` the roles' (#1194, ADR-0029), *Add label…* on a
+            // pull request, a write no role's vocabulary has.
             vec![
                 "create_branch",
                 "create_pull_request",
@@ -192,6 +194,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
                 "edit_pull_request",
                 "update_pull_request_branch",
                 "commit_file",
+                "source_action",
             ],
         ),
         // `set_parameter` and `run_build` are the source views' growth (#668,

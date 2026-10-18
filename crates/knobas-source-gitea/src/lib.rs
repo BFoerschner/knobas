@@ -452,7 +452,8 @@ mod tests {
                 "delete_branch",
                 "edit_pull_request",
                 "update_pull_request_branch",
-                "commit_file"
+                "commit_file",
+                "source_action"
             ],
             "the action bar is rendered from this list alone (issue #43)"
         );

@@ -485,7 +485,8 @@ mod tests {
                 "delete_branch",
                 "edit_pull_request",
                 "update_pull_request_branch",
-                "commit_file"
+                "commit_file",
+                "source_action"
             ]
         );
         // Including the 2026-08-25 budget ruling -- an instance cannot quietly

@@ -285,6 +285,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "name",
             "payload_paths",
             "roles",
+            "source_actions",
             "write_ops",
         ],
     );
