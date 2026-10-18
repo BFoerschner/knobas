@@ -5492,3 +5492,12 @@ ADR-0025's amendment. The implementer's rulings under it:
 - **Fork: which MSI version rc1 takes.** Ruling: 2.0.6, continuing the milestone sequence
   (m6 was 2.0.5; the rule is numeric and must rise). The final v2.0.0 must set it above 2.0.6
   (e.g. 2.1.0). **Reversing:** one line before the final release.
+
+## #1190 — a sample on a state change, otherwise at most once a minute (2026-10-18)
+
+- **Fork: the minute floor, constant or setting.** Ruling: a constant,
+  `MIN_INTERVAL_SECONDS` in `knobas-sync/src/samples.rs`; spec #1186 asks for no setting.
+  **Reversing:** low; read the value from a setting at `append`.
+- **Fork: where the last sample's age is measured.** Ruling: in SQL against the transaction's
+  `now()`, the instant the new row's `taken_at` carries, so one clock decides both. **Reversing:**
+  low; fetch `taken_at` and compare in Rust.
