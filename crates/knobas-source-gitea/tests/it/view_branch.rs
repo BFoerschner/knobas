@@ -203,7 +203,11 @@ async fn gitea(served: Served) -> MockServer {
     // Ahead: what the branch carries over main. Two commits, three touches
     // of two files -- the count is files, not touches.
     let compare_json = json!({"total_commits": 2, "commits": [], "files": []}).to_string();
-    let diff_body = if served.forgejo.is_some() { compare_json } else { DIFF.to_owned() };
+    let diff_body = if served.forgejo.is_some() {
+        compare_json
+    } else {
+        DIFF.to_owned()
+    };
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/compare/main...{FEATURE_WIRE}"))))
         .and(query_param("output", "diff"))
         .respond_with(
