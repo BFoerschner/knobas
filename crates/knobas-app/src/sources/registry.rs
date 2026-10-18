@@ -113,8 +113,39 @@ struct External {
 
 /// An external adapter of a kind the registry already has.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("an adapter of kind {0:?} is already {1}")]
-pub struct KindTaken(pub String, pub &'static str);
+#[error("an adapter of kind {kind:?} is already {by}")]
+pub struct KindTaken {
+    pub kind: String,
+    pub by: TakenBy,
+}
+
+/// What holds a taken kind.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TakenBy {
+    /// A compiled-in row.
+    BuiltIn,
+    /// An external adapter already loaded or installed.
+    Installed,
+}
+
+impl std::fmt::Display for TakenBy {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::BuiltIn => "built in",
+            Self::Installed => "installed",
+        })
+    }
+}
+
+impl KindTaken {
+    #[must_use]
+    pub fn new(kind: &str, by: TakenBy) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            by,
+        }
+    }
+}
 
 impl Registry {
     /// The compiled-in table and every external adapter this process has
@@ -139,18 +170,22 @@ impl Registry {
         registry
     }
 
-    /// Whether `kind` is taken: by a compiled-in row (`"built in"`) or by an
-    /// external adapter already loaded (`"installed"`).
+    /// Whether `kind` is taken: by a compiled-in row or by an external
+    /// adapter already loaded.
     ///
     /// # Errors
     ///
     /// [`KindTaken`] naming which.
     pub fn check_free(&self, kind: &str) -> Result<(), KindTaken> {
+        Self::free_in(&self.read(), kind)
+    }
+
+    fn free_in(external: &External, kind: &str) -> Result<(), KindTaken> {
         if ADAPTERS.iter().any(|a| a.kind == kind) {
-            return Err(KindTaken(kind.to_owned(), "built in"));
+            return Err(KindTaken::new(kind, TakenBy::BuiltIn));
         }
-        if self.read().loaded.iter().any(|a| a.kind() == kind) {
-            return Err(KindTaken(kind.to_owned(), "installed"));
+        if external.loaded.iter().any(|a| a.kind() == kind) {
+            return Err(KindTaken::new(kind, TakenBy::Installed));
         }
         Ok(())
     }
@@ -161,8 +196,9 @@ impl Registry {
     ///
     /// [`KindTaken`] when a row or a loaded adapter has its kind.
     pub fn add(&self, adapter: WasmAdapter) -> Result<(), KindTaken> {
-        self.check_free(adapter.kind())?;
+        // Checked under the write lock, so two adds of one kind cannot both pass.
         let mut external = self.write();
+        Self::free_in(&external, adapter.kind())?;
         external.refused.retain(|(kind, _)| kind != adapter.kind());
         external.loaded.push(adapter);
         Ok(())
@@ -181,7 +217,9 @@ impl Registry {
     }
 
     fn write(&self) -> std::sync::RwLockWriteGuard<'_, External> {
-        self.external.write().unwrap_or_else(PoisonError::into_inner)
+        self.external
+            .write()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
     /// One descriptor **template** per compiled-in kind.
@@ -290,7 +328,7 @@ mod tests {
         assert!(scheduler_copy.build(fixture_instance()).is_ok());
         assert_eq!(
             registry.add(knobas_wasm_host::load_fixture()),
-            Err(KindTaken("wasm-fixture".to_owned(), "installed"))
+            Err(KindTaken::new("wasm-fixture", TakenBy::Installed))
         );
     }
 
@@ -309,7 +347,7 @@ mod tests {
     fn a_built_in_kind_is_taken() {
         assert_eq!(
             Registry::default().check_free("jira"),
-            Err(KindTaken("jira".to_owned(), "built in"))
+            Err(KindTaken::new("jira", TakenBy::BuiltIn))
         );
     }
 }

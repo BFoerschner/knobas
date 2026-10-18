@@ -23,7 +23,7 @@ use knobas_wasm_host::manifest::{self, Manifest, Refusal};
 use sqlx::PgPool;
 
 use super::Registry;
-use super::registry::KindTaken;
+use super::registry::{KindTaken, TakenBy};
 
 /// The directory under the profile's that holds installed artifacts, each
 /// named `<sha256>.wasm`.
@@ -101,16 +101,17 @@ pub async fn install(
         .parent()
         .unwrap_or_else(|| Path::new("."))
         .join(&manifest.artifact.file);
-    let artifact = tokio::fs::read(&artifact_path)
-        .await
-        .map_err(|error| Refusal::ArtifactUnreadable {
-            file: manifest.artifact.file.clone(),
-            error,
-        })?;
+    let artifact =
+        tokio::fs::read(&artifact_path)
+            .await
+            .map_err(|error| Refusal::ArtifactUnreadable {
+                file: manifest.artifact.file.clone(),
+                error,
+            })?;
     // Compiling a component takes a while; not on a runtime worker.
     let checked = tokio::task::spawn_blocking(move || manifest::check(manifest, artifact))
         .await
-        .map_err(|e| InstallError::Store(std::io::Error::other(e.to_string())))??;
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
     registry.check_free(&checked.manifest.adapter_kind)?;
 
     store_artifact(store, &checked.manifest.artifact.sha256, &checked.artifact)
@@ -139,7 +140,7 @@ pub async fn install(
             .and_then(sqlx::error::DatabaseError::code)
             .is_some_and(|code| code == "23505");
         return Err(if unique {
-            KindTaken(m.adapter_kind.clone(), "installed").into()
+            KindTaken::new(&m.adapter_kind, TakenBy::Installed).into()
         } else {
             error.into()
         });
@@ -157,6 +158,26 @@ pub async fn install(
         hosts: m.hosts.clone(),
         template,
     })
+}
+
+/// The `install_adapter` command's body: install into the process registry
+/// (the one the scheduler's copy shares), storing under `profile_dir`.
+///
+/// # Errors
+///
+/// As [`install`].
+pub async fn install_for_profile(
+    pool: &PgPool,
+    profile_dir: &Path,
+    manifest_path: &Path,
+) -> Result<InstalledAdapter, InstallError> {
+    install(
+        pool,
+        &Registry::builtin(),
+        &store_dir(profile_dir),
+        manifest_path,
+    )
+    .await
 }
 
 /// Where the artifact of hash `sha256` is stored.

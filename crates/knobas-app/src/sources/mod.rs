@@ -83,7 +83,8 @@ pub struct SourcesState {
     pub secrets: Arc<dyn SecretStore>,
     /// **The trait, not the concrete `Registry`.**
     ///
-    /// `Registry` is a unit struct over a `const` table, so a `crud` written
+    /// `Registry` is a `const` table plus the installed adapters, which load
+    /// only from a real component, so a `crud` written
     /// against it can only ever build adapters that work -- which left the
     /// *failed*-credential path in `set_secret` untestable, and a mutation
     /// that cleared the backoff after a rejected password survived the whole

@@ -66,7 +66,7 @@
   let manifest = $state("");
   let installing = $state(false);
   /** The last install's answer: what was installed, or why it was refused. */
-  let installed = $state<{ ok: boolean; text: string } | null>(null);
+  let installNote = $state<{ ok: boolean; text: string } | null>(null);
 
   $effect(() => {
     let dead = false;
@@ -133,7 +133,7 @@
     const path = manifest.trim();
     if (path === "" || installing) return;
     installing = true;
-    installed = null;
+    installNote = null;
     try {
       const answer = await ports.installAdapter(path);
       const rows = await ports.listAdapters();
@@ -141,11 +141,11 @@
       const row = rows.find((adapter) => adapter.adapter_kind === answer.adapter_kind);
       if (row) choose(row);
       manifest = "";
-      installed = { ok: true, text: `Installed ${answer.template.name} ${answer.adapter_version}.` };
+      installNote = { ok: true, text: `Installed ${answer.template.name} ${answer.adapter_version}.` };
     } catch (cause) {
       // The backend's reason opens with knobas' own word, so only that is capitalised.
       const reason = ipcErrorMessage(cause);
-      installed = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
+      installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
     } finally {
       installing = false;
     }
@@ -233,10 +233,10 @@
         <button class="tf-btn" disabled={manifest.trim() === "" || installing} onclick={() => void install()}>Install</button>
       </div>
     </div>
-    {#if installed !== null}
+    {#if installNote !== null}
       <!-- Text: a refusal's reason quotes what the manifest and the adapter wrote. -->
-      <p class="tf-dlg-note {installed.ok ? '' : 'tf-stg-errt'}" id="tf-add-manifest-note" role={installed.ok ? "status" : "alert"}>
-        {installed.text}
+      <p class="tf-dlg-note {installNote.ok ? '' : 'tf-stg-errt'}" id="tf-add-manifest-note" role={installNote.ok ? "status" : "alert"}>
+        {installNote.text}
       </p>
     {:else}
       <p class="tf-dlg-note" id="tf-add-manifest-note">A local manifest. Install checks it before the adapter is offered.</p>

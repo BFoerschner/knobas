@@ -91,10 +91,9 @@ pub async fn install_adapter<R: tauri::Runtime>(
     manifest: String,
 ) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
     let state = crate::sources::state(&app)?;
-    crate::sources::install::install(
+    crate::sources::install::install_for_profile(
         &state.pool,
-        &crate::sources::Registry::builtin(),
-        &crate::sources::install::store_dir(&profile.dir),
+        &profile.dir,
         std::path::Path::new(&manifest),
     )
     .await

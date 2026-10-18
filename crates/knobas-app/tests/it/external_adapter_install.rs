@@ -101,7 +101,10 @@ async fn refusal_of(edit: impl FnOnce(&mut serde_json::Value)) -> String {
 }
 
 fn says(message: &str, needle: &str) {
-    assert!(message.contains(needle), "{message:?} does not say {needle:?}");
+    assert!(
+        message.contains(needle),
+        "{message:?} does not say {needle:?}"
+    );
 }
 
 #[tokio::test]
@@ -113,7 +116,10 @@ async fn a_manifest_that_is_not_json_is_refused() {
 #[tokio::test]
 async fn a_manifest_missing_a_field_is_refused_naming_it() {
     let message = refusal_of(|m| drop(m.as_object_mut().unwrap().remove("adapter_version"))).await;
-    says(&message, "the manifest is not well formed: missing field `adapter_version`");
+    says(
+        &message,
+        "the manifest is not well formed: missing field `adapter_version`",
+    );
 }
 
 #[tokio::test]
@@ -125,7 +131,10 @@ async fn a_manifest_field_it_does_not_know_is_refused_naming_it() {
 #[tokio::test]
 async fn an_artifact_outside_the_release_directory_is_refused() {
     let message = refusal_of(|m| m["artifact"]["file"] = "../fixture.wasm".into()).await;
-    says(&message, "artifact.file \"../fixture.wasm\" must be a file name beside the manifest");
+    says(
+        &message,
+        "artifact.file \"../fixture.wasm\" must be a file name beside the manifest",
+    );
 }
 
 #[tokio::test]
@@ -141,7 +150,10 @@ async fn an_interface_version_this_knobas_cannot_host_is_refused() {
 #[tokio::test]
 async fn an_artifact_whose_hash_is_not_the_manifest_s_is_refused() {
     let message = refusal_of(|m| m["artifact"]["sha256"] = "0".repeat(64).into()).await;
-    says(&message, &format!("and the manifest names {}", "0".repeat(64)));
+    says(
+        &message,
+        &format!("and the manifest names {}", "0".repeat(64)),
+    );
     says(&message, &manifest::sha256(&fixture_bytes()));
 }
 
@@ -198,7 +210,10 @@ async fn a_custom_role_not_namespaced_to_the_adapter_is_refused() {
         "wasm-fixturz:survey-desk",
     );
     let message = refusal(&artifact, &manifest_for(&artifact).to_string()).await;
-    says(&message, "the adapter's role claims are refused: role \"wasm-fixturz:survey-desk\"");
+    says(
+        &message,
+        "the adapter's role claims are refused: role \"wasm-fixturz:survey-desk\"",
+    );
 }
 
 // -- the role claims' cover: kinds, declared paths, reads ---------------------
@@ -278,11 +293,18 @@ fn a_role_whose_required_read_the_claim_does_not_declare_is_refused() {
 /// A scratch database's pool and connector, for a test that installs.
 async fn scratch(label: &str) -> (PgPool, knobas_db::embedded::Connector) {
     let connector = knobas_db::test_util::scratch_database(label).await;
-    let pool = connector.pool(2).await.expect("a pool on the scratch database");
+    let pool = connector
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
     (pool, connector)
 }
 
-async fn install_fixture(pool: &PgPool, registry: &Registry, store: &Path) -> install::InstalledAdapter {
+async fn install_fixture(
+    pool: &PgPool,
+    registry: &Registry,
+    store: &Path,
+) -> install::InstalledAdapter {
     let artifact = fixture_bytes();
     let (_dir, path) = release(&artifact, &manifest_for(&artifact).to_string());
     match install::install(pool, registry, store, &path).await {
@@ -292,7 +314,11 @@ async fn install_fixture(pool: &PgPool, registry: &Registry, store: &Path) -> in
 }
 
 fn kinds(registry: &Registry) -> Vec<String> {
-    registry.templates().into_iter().map(|t| t.adapter_kind).collect()
+    registry
+        .templates()
+        .into_iter()
+        .map(|t| t.adapter_kind)
+        .collect()
 }
 
 /// Add a source of the fixture as the Add-source dialog does, sync it, and
@@ -322,7 +348,10 @@ async fn add_and_sync(
         .await
         .unwrap();
     assert!(
-        summary.roles.iter().any(|r| r.role == "wasm-fixture:survey-desk"),
+        summary
+            .roles
+            .iter()
+            .any(|r| r.role == "wasm-fixture:survey-desk"),
         "the source claims the fixture's custom role: {:?}",
         summary.roles
     );
@@ -360,9 +389,15 @@ async fn an_installed_fixture_is_offered_syncs_and_survives_a_restart() {
         install::artifact_path(store.path(), &installed.artifact_sha256).is_file(),
         "the artifact is stored under its hash"
     );
-    assert!(kinds(&registry).contains(&"wasm-fixture".to_owned()), "Add source offers it");
+    assert!(
+        kinds(&registry).contains(&"wasm-fixture".to_owned()),
+        "Add source offers it"
+    );
 
-    assert_eq!(add_and_sync(&pool, &connector, &registry, "surveys").await, 3);
+    assert_eq!(
+        add_and_sync(&pool, &connector, &registry, "surveys").await,
+        3
+    );
 
     // A restart: a registry with nothing in it, loaded from the table.
     let restarted = Registry::default();
@@ -371,7 +406,10 @@ async fn an_installed_fixture_is_offered_syncs_and_survives_a_restart() {
         .unwrap();
     assert_eq!(loaded, [("wasm-fixture".to_owned(), Ok(()))]);
     assert!(kinds(&restarted).contains(&"wasm-fixture".to_owned()));
-    assert_eq!(add_and_sync(&pool, &connector, &restarted, "surveys-two").await, 3);
+    assert_eq!(
+        add_and_sync(&pool, &connector, &restarted, "surveys-two").await,
+        3
+    );
 }
 
 #[tokio::test]
@@ -396,10 +434,11 @@ async fn the_fixture_s_custom_role_opens_its_block_view() {
     )
     .await
     .unwrap();
-    let view = knobas_app::sources::crud::view(&pool, &secrets, &registry, "surveys:survey-2", None)
-        .await
-        .unwrap()
-        .expect("a survey has a view");
+    let view =
+        knobas_app::sources::crud::view(&pool, &secrets, &registry, "surveys:survey-2", None)
+            .await
+            .unwrap()
+            .expect("a survey has a view");
     let blocks = &view.sections[0].blocks;
     assert_eq!(view.sections[0].title, "Berth 7 fender survey");
     assert!(
@@ -421,7 +460,10 @@ async fn a_second_install_of_an_installed_kind_is_refused() {
     };
     let ipc = error.to_ipc();
     assert_eq!(ipc.code, knobas_app::IpcErrorCode::Conflict);
-    says(&ipc.message, "an adapter of kind \"wasm-fixture\" is already installed");
+    says(
+        &ipc.message,
+        "an adapter of kind \"wasm-fixture\" is already installed",
+    );
 }
 
 #[tokio::test]
@@ -443,7 +485,10 @@ async fn a_stored_artifact_whose_hash_no_longer_matches_is_refused_at_load() {
         [(kind, Err(reason))] if kind == "wasm-fixture" => reason.clone(),
         other => panic!("the tampered artifact must be refused: {other:?}"),
     };
-    says(&reason, &format!("the install pinned {}", installed.artifact_sha256));
+    says(
+        &reason,
+        &format!("the install pinned {}", installed.artifact_sha256),
+    );
     says(&reason, &manifest::sha256(&tampered));
     assert!(!kinds(&restarted).contains(&"wasm-fixture".to_owned()));
     let Err(error) = restarted.build(knobas_source::instance::SourceInstance {
