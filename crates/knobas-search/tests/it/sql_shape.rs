@@ -642,7 +642,9 @@ async fn a_half_typed_word_matches_as_a_prefix_and_a_finished_one_does_not() {
     let tag = token("d");
     seed(
         &pool,
-        &format!("sq-jira:{tag}"),
+        // A ticket's key is indexed (#1174), so it holds the half-typed word
+        // as the title does: the bare tag as a key would finish the word.
+        &format!("sq-jira:{tag}extra"),
         "ticket",
         "sq-jira",
         &format!("{tag}extra payouts"),

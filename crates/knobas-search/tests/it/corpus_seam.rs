@@ -172,7 +172,9 @@ async fn a_second_corpus_joins_the_same_pipeline_untouched() {
     let t = token("join");
     seed_item(
         &pool,
-        &format!("jira:{t}-1"),
+        // Not the search token: a ticket's key is indexed (#1174), and this
+        // ticket is the one the token must not find.
+        &format!("jira:{}", uuid::Uuid::new_v4().simple()),
         "ticket",
         "SEPA retry",
         "nothing to do with the estate",

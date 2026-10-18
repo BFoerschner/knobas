@@ -220,6 +220,51 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
     );
 }
 
+/// ⌘K finds a ticket by its key (#1174): on the demo corpus, `PAY-231` and
+/// `#PAY-231` both answer with the ticket `mock:PAY-231` as the first hit of
+/// the first group, through the launcher's own command.
+///
+/// The key is the entity id past its namespace, and the demo ticket's title
+/// and body never spell it, so this is a question about what the index reads,
+/// not about the fixture's wording. Five other demo items say `PAY-231` in
+/// their text (pages, commits, a branch); they must not stand in for it.
+#[tokio::test]
+async fn the_launcher_finds_a_demo_ticket_by_its_key() {
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    let pool = &pool;
+    knobas_db::migrate::run(pool).await.unwrap();
+    demo::demo_load_inner(pool).await.unwrap();
+
+    for raw in ["PAY-231", "#PAY-231", "pay-231"] {
+        let response = knobas_app::commands::search::search_inner(
+            pool,
+            knobas_search::SearchQuery {
+                raw: raw.to_owned(),
+                limit: 20,
+                filters: knobas_search::SearchFilters::default(),
+            },
+        )
+        .await
+        .unwrap();
+        let first = response
+            .groups
+            .first()
+            .and_then(|group| group.hits.first())
+            .map(|hit| (hit.row.kind.clone(), hit.row.entity_id.clone()));
+        assert_eq!(
+            first,
+            Some(("ticket".to_owned(), "mock:PAY-231".to_owned())),
+            "`{raw}` must list the ticket PAY-231 first; got {:?}",
+            response
+                .groups
+                .iter()
+                .flat_map(|g| g.hits.iter().map(|h| h.row.entity_id.clone()))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
 /// What the mirror holds for one entity after a demo load, read through
 /// `sync.live_item` — the view every reader in the app goes through, so a row
 /// that came back from here is both mirrored and live.

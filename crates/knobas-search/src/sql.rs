@@ -220,7 +220,11 @@ pub fn search_sql(
             (false, _) => "0::real".to_owned(),
         };
         let named = if text.is_some() {
-            NAMED.replace("{title}", corpus.title)
+            let by_title = NAMED.replace("{title}", corpus.title);
+            match corpus.key {
+                Some(key) => format!("({by_title}\n              or {})", KEY_NAMED.replace("{key}", key)),
+                None => by_title,
+            }
         } else {
             "false".to_owned()
         };
@@ -918,6 +922,14 @@ const RANK_WHOLE: &str = "case when {fts} @@ q.whole then ts_rank_cd({fts}, q.wh
 /// `split_part` returns the whole title and the second half can only repeat
 /// the first, so a planner that skips the guard changes no answer.
 const NAMED: &str = "(tsvector_to_array(to_tsvector('english', {title})) = q.words\n              or (strpos({title}, '/') > 0\n                  and tsvector_to_array(to_tsvector('english', split_part({title}, '/', -1))) = q.words))";
+
+/// Whether a match is named what was typed by its key `{key}` (#1174), lexed
+/// as [`NAMED`] lexes a title. The parser reads `PAY-231` as `pay` and the
+/// signed number `-231`, so while the last word is a prefix `PAY-231` also
+/// matches PAY-2310 at the same rank, and recency would put the newer one
+/// first. A row with no key names nothing by it.
+const KEY_NAMED: &str =
+    "({key} is not null and tsvector_to_array(to_tsvector('english', {key})) = q.words)";
 
 /// The result ordering, qualified with `prefix` (`""`, `"m."` or `"d."`).
 ///
@@ -1643,6 +1655,7 @@ mod tests {
             kind: "o.kind",
             source_id: "o.source_id",
             title: "o.title",
+            key: None,
             fts: "o.fts",
             headline_text: "o.title",
             // No author column: an author filter must exclude this corpus
