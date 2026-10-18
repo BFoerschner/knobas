@@ -350,12 +350,20 @@ pub fn ids_sql(words: &[String], filters: &EffectiveFilters) -> SearchSql {
     sql.push_str(&field_paths(&bound));
     // `with` needs at least one CTE; this one is free.
     sql.push_str("nothing as (select 1)\n");
+    // The live mirror as the base table and two hashed exclusion sets, not
+    // `sync.live_item`: this reads a whole kind, and on tables never analyzed
+    // the view's join to `knobas.entity` was planned by how costly the
+    // predicates looked. With `has:`'s walk estimated under about 44,000 the
+    // planner rescanned every live entity once per match, 1.3 s for
+    // `has:blocker`'s 5,000 tickets at 22,000 items (#1163, and #1161 before
+    // it). The exclusion sets are the view's two filters (`0002`, `0012`).
     let _ = write!(
         sql,
-        "select {} as entity_id from {}",
-        corpus.entity_id, corpus.relation
+        "select {} as entity_id from sync.item i",
+        corpus.entity_id
     );
-    let mut predicates = corpus_predicates(corpus, None, &bound);
+    let mut predicates = vec![knobas_core::live_by_exclusion!("i").to_owned()];
+    predicates.extend(corpus_predicates(corpus, None, &bound));
     if let Some((words, declarations)) = &typed {
         let _ = write!(sql, " cross join (select {declarations}::jsonb as d) pd");
         // The key and the title first, each on its own, so a word either
