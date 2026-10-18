@@ -280,6 +280,51 @@ function fakeRuns(args: Record<string, unknown>) {
   return typeof sourceId === "string" ? runs.filter((run) => run.source_id === sourceId) : runs;
 }
 
+/**
+ * The fixture external adapter (#1202) as `install_adapter` answers it: a
+ * path ending in `knobas-adapter.json` installs it, and `list_adapters`
+ * offers it from then on; any other path is refused with a reason.
+ */
+const FIXTURE_EXTERNAL = {
+  id: "wasm-fixture",
+  adapter_kind: "wasm-fixture",
+  name: "Harbour surveys",
+  capabilities: [],
+  adapter_version: "0.1.0",
+  auth_methods: ["Pat"],
+  min_sync_interval_secs: 60,
+  roles: [{ role: "wasm-fixture:survey-desk", reads: [] as string[] }],
+  write_ops: [],
+  entity_kinds: [{ id: "survey", label: "Survey", plural: "Surveys", monogram: "SV", full_sync_exhaustive: true }],
+  config_schema: {
+    type: "object",
+    properties: { fault: { type: "string", enum: ["none", "unauthorized", "unreachable", "swallow_sink"] } },
+    additionalProperties: false,
+  },
+};
+
+function installAdapter(args: Record<string, unknown>) {
+  const manifest = String(args["manifest"] ?? "");
+  if (!manifest.endsWith("knobas-adapter.json")) {
+    throw { code: "invalid", message: `cannot read the manifest ${manifest}: No such file or directory (os error 2)`, source_id: null };
+  }
+  if (FIXTURE_ADAPTERS.some((adapter) => adapter.adapter_kind === FIXTURE_EXTERNAL.adapter_kind)) {
+    throw { code: "conflict", message: 'install refused: an adapter of kind "wasm-fixture" is already installed', source_id: null };
+  }
+  // Widened: the fixture rows are literal types, and this one is not among them.
+  (FIXTURE_ADAPTERS as unknown[]).push(FIXTURE_EXTERNAL);
+  return {
+    adapter_kind: FIXTURE_EXTERNAL.adapter_kind,
+    adapter_version: FIXTURE_EXTERNAL.adapter_version,
+    interface_version: "1.0.0",
+    source_url: manifest,
+    tag: null,
+    artifact_sha256: "5".repeat(64),
+    hosts: ["{base_url}"],
+    template: FIXTURE_EXTERNAL,
+  };
+}
+
 /** This feature's commands. */
 export function handlers(): Record<string, Handler> {
   return {
@@ -289,6 +334,7 @@ export function handlers(): Record<string, Handler> {
     // able to show.
     list_sources: () => FIXTURE_SOURCES,
     list_adapters: () => FIXTURE_ADAPTERS,
+    install_adapter: (args) => installAdapter(args),
     credential_health: () => FIXTURE_SOURCES.map((source) => source.health),
     sync_status: () => FIXTURE_SOURCES.map((source) => fakeStatus(source)),
     list_sync_runs: (args) => fakeRuns(args),

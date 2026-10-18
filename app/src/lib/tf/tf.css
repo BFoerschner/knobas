@@ -540,6 +540,9 @@ a.tf-r:hover { background: var(--sheet-2); }
   border: 1px solid var(--rule); border-radius: 4px; padding: 5px 8px; background: var(--paper); color: var(--ink);
 }
 .tf-formgrid input[type="text"] { width: 100%; }
+/* Add a source's *Install an adapter* row (#1202): the path, then its button. */
+.tf-add-inst { display: flex; gap: 8px; align-items: center; }
+.tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 
 /* ---------- time: the Day tab (#827) ----------
    The strip is SVG, so its geometry is attributes rather than inline style.

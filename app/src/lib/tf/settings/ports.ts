@@ -44,6 +44,7 @@ import {
   dbStats,
   reindexFts,
   deleteSource,
+  installAdapter,
   listAdapters,
   listSources,
   listSyncRuns,
@@ -55,6 +56,7 @@ import {
   updateSource,
   type ConnectionReport,
   type DbStats,
+  type InstalledAdapter,
   type CredentialHealth,
   type NewSource,
   type SecretInput,
@@ -80,6 +82,8 @@ export interface SettingsPorts {
   syncAll: () => Promise<number[]>;
   /** *Add a source* (#903): the secret and the row in one call, as `AddSource` sends it. */
   addSource: (input: NewSource) => Promise<SourceSummary>;
+  /** *Install an adapter* in Add a source (#1202): a local `knobas-adapter.json`. */
+  installAdapter: (manifest: string) => Promise<InstalledAdapter>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   /** Every ticket view (#812): a Jira source's page lists its Jira views (#878). */
   ticketViews: () => Promise<TicketViewRow[]>;
@@ -105,6 +109,7 @@ export const realSettingsPorts: SettingsPorts = {
   syncNow: (sourceId) => syncNow(sourceId),
   syncAll: () => syncAll(),
   addSource: (input) => addSource(input),
+  installAdapter: (manifest) => installAdapter(manifest),
   listen: (event, handler) => tauriListen(event, handler),
   ticketViews: () => ticketViews(),
   hideJiraView: (id, hidden) => hideJiraView(id, hidden),

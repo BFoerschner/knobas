@@ -862,3 +862,32 @@ fn the_mirror_invokes_the_write_queue_commands_by_their_registered_names() {
 }
 
 const SOURCES_COMMANDS: &str = include_str!("../../src/commands/sources.rs");
+
+/// `install_adapter`'s answer (#1202): the record and the template.
+#[test]
+fn installed_adapter_matches_the_mirror() {
+    let installed = knobas_app::sources::install::InstalledAdapter {
+        adapter_kind: "wasm-fixture".to_owned(),
+        adapter_version: "0.1.0".to_owned(),
+        interface_version: "1.0.0".to_owned(),
+        source_url: "/releases/knobas-adapter.json".to_owned(),
+        tag: None,
+        artifact_sha256: "0".repeat(64),
+        hosts: vec!["{base_url}".to_owned()],
+        template: knobas_source_mock::descriptor_template(),
+    };
+    assert_shape(
+        "InstalledAdapter",
+        &serde_json::to_value(&installed).unwrap(),
+        &[
+            "adapter_kind",
+            "adapter_version",
+            "artifact_sha256",
+            "hosts",
+            "interface_version",
+            "source_url",
+            "tag",
+            "template",
+        ],
+    );
+}

@@ -57,6 +57,7 @@ const sourcePorts: SettingsPorts = {
   syncNow: () => Promise.resolve(0),
   syncAll: () => Promise.resolve([]),
   addSource: () => Promise.reject(new Error("unused")),
+  installAdapter: () => Promise.reject(new Error("unused")),
   listen: () => Promise.resolve(() => {}),
   ticketViews: () => Promise.resolve([]),
   hideJiraView: () => Promise.resolve(),
