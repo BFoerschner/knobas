@@ -5433,3 +5433,36 @@ Merge-manager.
 - **A proposal already made for the pair is confirmed, not replaced.** `resolve_edge` is the
   links dialog's own door; it keeps the proposal's `suggested` provenance. The drawn link is
   `manual` only when nothing was proposed. **Reversing:** trivial.
+
+## #1172 — every entity id compares bytewise, by its column's collation (2026-10-18)
+
+Implementer (PR for #1172). ADR-0027.
+
+- **The id columns go `C`; the database's collation stays.** The issue named two directions:
+  `same_key!` read by read, or databases created in `C`. On the 2.5k probe, a database made with
+  `LC_ALL=C` and one with only the id columns in `C` gained about the same on every read that
+  probes ids (`list_entities` tiles 10–12 ms to 3–4 ms, every search keystroke about 14 ms to
+  7 ms), so the ids are where the time goes. A `C` database cannot be had for an existing install
+  without a dump and restore, and it would sort every title bytewise. `same_key!` read by read
+  leaves every future read one forgotten cast from `strcoll`, silently. Changing the columns
+  serves every read, old and new, with one migration and no macro. **Reversing:** medium (a
+  migration back to `collate "default"` and `0047`'s indexes back).
+- **Which columns: `entity.id`, its foreign-key closure, and 13 named unkeyed columns.** Ids of
+  other things (`source_config`, `context`, `smart_list`, `link_set`) stay default: small tables,
+  and comparing one with a `C` column resolves to `C` anyway. `item_parent.name` (a parent's key,
+  shown and sorted) stays default. **Reversing:** low (one more `alter column` per column).
+- **`0047`'s five indexes go.** The keys' own indexes are bytewise now, so the second ones only
+  cost a btree insert per write. **Reversing:** low.
+- **`0050` handles a generated column of `sync.item` that reads `entity_id`, generically.**
+  #1178's `0048` (merged while this was built) makes `fts` read `entity_id`, and PostgreSQL will
+  not change a column under a generated one. `0050`'s `do` block drops such a column with its
+  indexes and adds it back from the catalog's own expression, so it does not restate `0048`'s.
+  On a 22k clone with `0048` applied: 1.7 s, the same `fts` for every row. **Reversing:** low.
+- **A context's epic children read `sync.item`, not `sync.live_item`.** The 22k probe's stored
+  context room went from a 3 ms warm median (110 ms cold) to 26 ms. `member_ids`' third seed,
+  through the view on tables never analyzed, is planned as every entity scanned and a probe of
+  `sync.item` for each; before, the cold run paid 110 ms of that and later runs got a cheaper
+  generic plan. Reading `sync.item` by source with `live_by_key!` took 2.3 ms on a clone. The
+  same seed in `held_by_any_context!` is unchanged (not slow on the probe). **Reversing:** low.
+- **A sort by id becomes bytewise.** No user-visible sort is by id alone; ids are tiebreakers
+  and walk orders. It now agrees with Rust's `str` order. **Reversing:** n/a.
