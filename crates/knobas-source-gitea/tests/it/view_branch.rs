@@ -100,6 +100,10 @@ struct Served {
     protected: bool,
     /// Whether the repository is a pull mirror.
     mirror: bool,
+    /// `None` for Gitea; `Some(public)` for Forgejo (#1195), which answers
+    /// `?output=diff` with the compare's JSON and serves the diff itself only
+    /// on the web route, and that to a token only for a public repository.
+    forgejo: Option<bool>,
 }
 
 impl Default for Served {
@@ -120,6 +124,7 @@ impl Default for Served {
             flight: None,
             protected: false,
             mirror: false,
+            forgejo: None,
         }
     }
 }
@@ -197,16 +202,30 @@ async fn gitea(served: Served) -> MockServer {
         .await;
     // Ahead: what the branch carries over main. Two commits, three touches
     // of two files -- the count is files, not touches.
+    let compare_json = json!({"total_commits": 2, "commits": [], "files": []}).to_string();
+    let diff_body = if served.forgejo.is_some() { compare_json } else { DIFF.to_owned() };
     authed(Mock::given(method("GET")).and(path(format!("{REPO}/compare/main...{FEATURE_WIRE}"))))
         .and(query_param("output", "diff"))
         .respond_with(
             ResponseTemplate::new(200)
-                .set_body_string(DIFF)
+                .set_body_string(diff_body)
                 .set_delay(delay),
         )
         .with_priority(1)
         .mount(&server)
         .await;
+    if let Some(public) = served.forgejo {
+        authed(Mock::given(method("GET")).and(path(format!(
+            "/tidewater/payout-service/compare/main...{FEATURE_WIRE}.diff"
+        ))))
+        .respond_with(if public {
+            ResponseTemplate::new(200).set_body_string(DIFF)
+        } else {
+            ResponseTemplate::new(404).set_body_string("Not found.")
+        })
+        .mount(&server)
+        .await;
+    }
     authed(Mock::given(method("GET")).and(path(format!(
         "{REPO}/compare/main...{FEATURE_WIRE}"
     ))))
@@ -459,6 +478,48 @@ async fn the_diff_tab_reads_the_compares_diff() {
         ]
     );
     assert_eq!(diff.count, Some(2));
+}
+
+/// Forgejo (#1195) ignores `?output=diff` and answers the compare as JSON;
+/// read as a diff that is no files, *no changes* over a branch with some. The
+/// diff is then read from the web route, which serves it to a token for a
+/// public repository.
+#[tokio::test]
+async fn a_server_that_answers_the_compare_as_json_is_read_from_the_web_route() {
+    let server = gitea(Served {
+        forgejo: Some(true),
+        ..Served::default()
+    })
+    .await;
+    let view = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .unwrap()
+        .expect("drawn");
+    let Block::Diff { files, .. } = &view.sections[0].blocks[0] else {
+        panic!("a diff: {view:#?}");
+    };
+    let paths: Vec<_> = files.iter().map(|f| f.path.as_str()).collect();
+    assert_eq!(paths, ["src/retry.rs", "CHANGELOG.md"]);
+}
+
+/// Where that web route refuses (Forgejo serves it to no token for a private
+/// repository), the read says why; it never draws the JSON as an empty diff.
+#[tokio::test]
+async fn a_forgejo_private_repository_diff_is_refused_not_drawn_empty() {
+    let server = gitea(Served {
+        forgejo: Some(false),
+        ..Served::default()
+    })
+    .await;
+    let error = source(&server)
+        .view(FEATURE, Some("diff"))
+        .await
+        .expect_err("no diff to draw");
+    assert!(
+        matches!(&error, SourceError::Protocol { message, .. } if message.contains("Forgejo")),
+        "{error:?}"
+    );
 }
 
 #[tokio::test]

@@ -38,6 +38,7 @@ runs it, so the table and the file cannot drift.
 | 8200 | mockd — health + `/__mock/*` admin API | default |
 | 8210 | mockd — Jira Data Center REST v2 | default |
 | 8212 | mockd — TeamCity REST | default |
+| 3002 | Forgejo (#1195) | `--profile forgejo` |
 | 8111 | real TeamCity server | `--profile real-teamcity` |
 | 8080 | real Jira Software | `--profile real-atlassian` |
 | 8090 | real Confluence | `--profile real-atlassian` |
@@ -131,6 +132,7 @@ just jira-live              # Jira + its PostgreSQL, wizard, content, three suit
 just confluence-live        # the same for Confluence
 just atlassian-live         # jira-live, then confluence-live -- never the two at once
 just gitea-live             # also gitea-live-capped and start-work-live
+just gitea-live forgejo     # the same suite against Forgejo (below)
 ```
 
 For a session of several runs, start the product once and the recipes leave
@@ -209,6 +211,21 @@ needs none of the VM's memory, and queueing a two-minute Gitea suite behind an
 Atlassian run would serialise what never collided. A TeamCity run starts and
 seeds Gitea without it (the seed writes nothing to a seeded Gitea), and so
 does `live-up gitea`.
+
+**Forgejo, as a Gitea source (#1195, spec #1192 story 18).** Forgejo is the hard
+fork of Gitea and is expected to work through the same adapter. `just
+gitea-live forgejo` is the one switch: it starts the pinned Forgejo image
+(`FORGEJO_IMAGE` in `.env`, version 17.0.0 and its digest; profile `forgejo`, port
+3002, volume `forgejo-data`), seeds it with `seed-forgejo.sh` (the Gitea
+seed, `KNOBAS_SEED_SERVICE=forgejo`, its state in the git-ignored
+`seed-state-forgejo.json` so Gitea's token and id map are never touched), prints
+the `KNOBAS_GITEA_*` variables from `./seed --env-forgejo` (plus
+`KNOBAS_GITEA_SEED_STATE`), runs the same four suites as `just gitea-live`, and
+stops Forgejo again if the run started it. It takes the Gitea lock. By hand:
+`just live-up forgejo`, `just live-down forgejo`. Settings differ from Gitea's in
+one place: `FORGEJO__migrations__ALLOW_UNENCRYPTED`, because Forgejo refuses the
+seed's http pull mirror otherwise. `gitea-live-capped` and `start-work-live`
+have no Forgejo form.
 
 **Teams and languages (#1045).** The seed puts each repository of
 `fixtures/tidewater/work.json` in its `team` (an organization team with no

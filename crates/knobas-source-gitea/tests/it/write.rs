@@ -1334,6 +1334,40 @@ async fn a_stale_base_comes_back_moved_with_what_gitea_holds_now() {
     );
 }
 
+/// Forgejo (#1195) answers the same stale `sha` with a 409 where Gitea says
+/// 422, same sentence. The read-again decides, not the status: moved is moved.
+#[tokio::test]
+async fn a_stale_base_answered_409_comes_back_moved_too() {
+    let server = holding_file(
+        false,
+        MOVED_TO,
+        409,
+        &format!("sha does not match [given: {READ_AT}, expected: {MOVED_TO}]"),
+    )
+    .await;
+    let error = source(&server)
+        .write(commit_file(None))
+        .await
+        .expect_err("a moved file is not overwritten");
+    assert!(
+        matches!(&error, SourceError::Moved { base, current }
+            if base == MOVED_TO && current == "Retry twice.\n"),
+        "{error:?}"
+    );
+}
+
+/// A 409 over a file that did not move stays the server's refusal, as the 422
+/// does: the status alone never makes a commit "moved".
+#[tokio::test]
+async fn a_409_over_a_file_that_did_not_move_is_a_refusal() {
+    let server = holding_file(false, READ_AT, 409, "branch already exists").await;
+    let error = source(&server)
+        .write(commit_file(Some("feature/PAY-231-retry-doc")))
+        .await
+        .expect_err("the server refused");
+    assert_eq!(error.status(), Some(409), "{error:?}");
+}
+
 /// A re-send of a commit that already landed (ADR-0012: its answer was lost,
 /// or knobas stopped before the settle) meets Gitea's 422 on the stale
 /// `sha`, and the file already holds this commit's text: delivered, with the

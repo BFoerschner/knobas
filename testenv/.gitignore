@@ -3,6 +3,8 @@
 kuma-api-key
 seed-state.json
 seed-state.json.lock
+seed-state-forgejo.json
+seed-state-forgejo.json.tmp
 
 # Written by the retired hetzner/provision.sh: the decommissioned servers'
 # addresses, one person's account. Kept ignored after #634 so a checkout that

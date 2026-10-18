@@ -5,6 +5,7 @@
 #   ./seed             seed Gitea and Uptime Kuma, then print the adapter env vars
 #   ./seed --env       print the env vars for an already-seeded environment
 #   ./seed --env-kuma  print just Uptime Kuma's two, which need no Gitea seed
+#   ./seed --env-forgejo  the KNOBAS_GITEA_* variables for the Forgejo container
 #   ./seed --atlassian set up the opt-in real Jira and Confluence containers,
 #                      then seed the Tidewater content into both
 #   ./seed --teamcity  set up the opt-in real TeamCity server and its agent,
@@ -97,6 +98,19 @@ print_env_kuma() {
 }
 
 if [ "${1:-}" = "--env" ]; then print_env; exit 0; fi
+# The Forgejo container's seed (#1195) lives in its own state file, so a Forgejo
+# run never reads or rewrites Gitea's token. Printed under the same KNOBAS_GITEA_*
+# names: Forgejo is read through the Gitea adapter, and that is the point.
+if [ "${1:-}" = "--env-forgejo" ]; then
+  FSTATE=seed-state-forgejo.json
+  [ -r "$FSTATE" ] || { echo "seed: $FSTATE not found -- run ./seed-forgejo.sh first" >&2; exit 1; }
+  echo "export KNOBAS_GITEA_URL=$(jq -r '.gitea.url' "$FSTATE")"
+  echo "export KNOBAS_GITEA_TOKEN=$(jq -r '.gitea.token' "$FSTATE")"
+  echo "export KNOBAS_GITEA_OWNER=$(jq -r '.gitea.org' "$FSTATE")"
+  echo "export KNOBAS_GITEA_REPO=payout-service"
+  echo "export KNOBAS_GITEA_SEED_STATE=$(pwd)/$FSTATE"
+  exit 0
+fi
 if [ "${1:-}" = "--env-kuma" ]; then print_env_kuma; exit 0; fi
 # Two statements, not `a && exec b`: under `set -e` a failing left side of `&&`
 # is exempt from errexit and would fall through to the usage error below.

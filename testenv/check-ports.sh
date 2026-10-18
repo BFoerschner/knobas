@@ -48,7 +48,7 @@ resolved() {
 # mutation MP-4, which deleted a `ports:` entry and got exactly that.)
 docker compose config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (default profile); fix that first" >&2; exit 1; }
-docker compose --profile seed --profile real-teamcity --profile real-atlassian config -q 2>&1 \
+docker compose --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo config -q 2>&1 \
   || { echo "check-ports: docker-compose.yml is not a valid compose file (with all profiles enabled); fix that first" >&2; exit 1; }
 docker compose -f docker-compose.yml -f docker-compose.capped.yml config -q 2>&1 \
   || { echo "check-ports: docker-compose.capped.yml does not overlay docker-compose.yml cleanly; fix that first" >&2; exit 1; }
@@ -74,6 +74,7 @@ fi
 #    §5 map and collide with the defaults if anyone gets one wrong.
 # ---------------------------------------------------------------------------
 expected_all='confluence|127.0.0.1|8090|8090|tcp
+forgejo|127.0.0.1|3002|3000|tcp
 gitea|127.0.0.1|3000|3000|tcp
 jira|127.0.0.1|8080|8080|tcp
 mockd|127.0.0.1|8200|8200|tcp
@@ -82,7 +83,7 @@ mockd|127.0.0.1|8212|8212|tcp
 teamcity|127.0.0.1|8111|8111|tcp
 uptime-kuma|127.0.0.1|3001|3001|tcp'
 
-actual_all=$(resolved --profile seed --profile real-teamcity --profile real-atlassian)
+actual_all=$(resolved --profile seed --profile real-teamcity --profile real-atlassian --profile forgejo)
 if [ "$actual_all" != "$expected_all" ]; then
   note "all-profiles port map does not match interfaces §5:"
   show_diff "$expected_all" "$actual_all"
