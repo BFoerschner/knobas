@@ -932,6 +932,23 @@ fn state_declarations() -> Declarations {
                 ..KindPaths::default()
             }],
         )
+        // One map naming a value twice: the first entry is the one drawn,
+        // which the signals' spelling keeps when it folds a map into an
+        // object keyed by value (#1163).
+        .with(
+            "drone",
+            vec![KindPaths {
+                kind: "build".to_owned(),
+                state: vec![StatePath {
+                    at: PayloadPath::of(["status"]),
+                    values: vec![
+                        StateValue::of("FAILURE", Tone::Err).shown_as("failed"),
+                        StateValue::of("FAILURE", Tone::Ok).shown_as("fine"),
+                    ],
+                }],
+                ..KindPaths::default()
+            }],
+        )
 }
 
 /// One item's chip, through the database and in Rust.
@@ -1064,6 +1081,13 @@ async fn a_state_chip_is_the_first_mapped_value_in_sql_and_in_rust() {
             "8",
             serde_json::json!({ "state": "running", "status": "FAILURE" }),
             chip("broken", Tone::Muted),
+        ),
+        (
+            "drone",
+            "build",
+            "9",
+            serde_json::json!({ "status": "FAILURE" }),
+            chip("failed", Tone::Err),
         ),
     ];
     for (source, kind, key, payload, expected) in cases {
