@@ -5377,3 +5377,48 @@ Merge-manager (PR #1178).
   on purpose), a shared project prefix falls under the common-word line, and a title spelling the
   key matching that ticket is what the key means. **Reversing:** low (a migration that indexes the
   key in a separate column the launcher alone reads).
+## #1170 — the inbox's mention rule reads through a trigram index (2026-10-18)
+
+Implementer.
+
+- **An index, not a cheaper scan.** Without one, the best reshape of `mention` (both tests as
+  scan filters, no per-item `unnest`) read 10 ms against 12, and the stream stayed at 34–35 ms
+  for `nobody`: the seq scan of the prose kinds alone is about 7 ms. The ≤ 30 ms target needs the
+  rule to stop reading every body. **Reversing:** low (drop the index in a later migration; the
+  rule still answers the same without it, at the old cost).
+- **Trigrams (`pg_trgm`), not `item_fts_idx`.** The full-text index stems English and drops
+  stop words, so an account called `will` is in no body's lexemes and a filter on it would lose
+  mentions. Trigrams keep every body that holds the name, and the rule's own expression decides.
+  It is knobas's first extension; it ships in the bundled PostgreSQL's contrib.
+  **Reversing:** medium (a migration that drops the index and the extension).
+- **One alternation of every name as the indexed test, the per-name expression as the decider.**
+  `any (array(select …))` puts the pattern in an InitPlan the planner cannot see, and at
+  `read_plans`'s third-of-the-probe size it costed the index above a seq scan. The alternation is
+  built from `$1` with no subquery, so a plan made for the bound names (the inbox never keeps a
+  prepared statement) costs it by its trigrams. Names joined on `chr(1)` can only widen it, so
+  the old per-name expression stays as the decider. Checked old against new over 614,010 body ×
+  name-set pairs (special characters, empty and null names, `chr(1)`, prefixes): 0 differ.
+  **Reversing:** low (one arm in `inbox.rs`).
+- **The index is partial on the rule's kinds.** Builds' bodies are never read by the rule.
+  **Reversing:** low.
+- **The write cost is accepted.** Rewriting all 18,500 prose bodies took 2.6 s with the index
+  against 1.4–1.7 s without, about 60 µs a row; an incremental sync touches a few rows.
+  **Reversing:** see the first ruling.
+
+Merge-manager.
+
+- **`pg_trgm` is in the bundled PostgreSQL on all three release platforms, so `create
+  extension` needs no fallback.** The server is not built by knobas: `postgresql_embedded`
+  0.21 (`theseus`) downloads `postgresql-18.6.0-<target>.tar.gz` from
+  `theseus-rs/postgresql-binaries` (`postgresql_archive`'s `theseus/matcher.rs`). The release
+  targets are `aarch64-apple-darwin`, `x86_64-pc-windows-msvc` and `x86_64-unknown-linux-gnu`.
+  The macOS install in `~/.theseus/postgresql/18.6.0` holds `lib/pg_trgm.dylib`; the Windows and
+  Linux archives list `lib/pg_trgm.dll` and `lib/pg_trgm.so`. All three carry the same eight
+  `share/extension/pg_trgm*` files with `default_version = '1.6'`. The migration runs as the
+  embedded superuser, and `pg_trgm` is a trusted extension anyway. **Reversing:** medium (a
+  later migration that drops the index and the extension). A bump of `PG_VERSION_REQ` should
+  check the new archives the same way.
+- **The 60 µs a row on a body rewrite is accepted.** Writes reach `sync.item` from the
+  background sync, not from a keystroke. A first sync of the probe's 18,500 prose items pays
+  about one second more. The inbox stream is read on every open. **Reversing:** see the
+  implementer's first ruling.

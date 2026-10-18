@@ -585,6 +585,85 @@ async fn a_mention_of_a_longer_name_is_not_a_mention_of_its_prefix() {
     );
 }
 
+/// **A name is matched as the characters it is** (#1170). The rule looks for
+/// every name at once in one expression built from all of them, and a name
+/// can carry the expression's own syntax: unescaped, a domain-style account
+/// `corp\mara_l` reads `\m` as a word boundary and misses its own mention.
+/// Two names, so the alternation has two branches; the negative control is
+/// another character where the `_` is, which is somebody else.
+#[tokio::test]
+async fn a_name_with_pattern_characters_is_matched_literally() {
+    let pool = &scratch().await;
+    let mine = ticket(
+        pool,
+        "PAY-1",
+        Some(THEM),
+        None,
+        r"@corp\mara_l ping?",
+        days_ago(1),
+    )
+    .await;
+    let theirs = ticket(
+        pool,
+        "PAY-2",
+        Some(THEM),
+        None,
+        r"@corp\maraXl ping?",
+        days_ago(1),
+    )
+    .await;
+
+    let items = inbox::items(
+        pool,
+        &[r"corp\mara_l".to_owned(), "50%".to_owned()],
+        now(),
+        Shelf::Stream,
+        &declarations(),
+    )
+    .await
+    .unwrap();
+    let keys = keys(&items);
+    assert!(keys.contains(&format!("mention:{mine}")), "{keys:?}");
+    assert!(
+        !keys.contains(&format!("mention:{theirs}")),
+        "an underscore in a name is not a wildcard: {keys:?}"
+    );
+}
+
+/// The names are joined on `chr(1)` to be looked for at once (#1170), so a
+/// name holding that character is looked for as its two halves. What decides
+/// is still the whole name: a mention of one half is nobody's.
+#[tokio::test]
+async fn a_name_holding_the_joining_character_is_still_one_name() {
+    let pool = &scratch().await;
+    let half = ticket(pool, "PAY-1", Some(THEM), None, "@ab ping?", days_ago(1)).await;
+    let whole = ticket(
+        pool,
+        "PAY-2",
+        Some(THEM),
+        None,
+        "@ab\u{1}cd ping?",
+        days_ago(1),
+    )
+    .await;
+
+    let items = inbox::items(
+        pool,
+        &["ab\u{1}cd".to_owned()],
+        now(),
+        Shelf::Stream,
+        &declarations(),
+    )
+    .await
+    .unwrap();
+    let keys = keys(&items);
+    assert!(keys.contains(&format!("mention:{whole}")), "{keys:?}");
+    assert!(
+        !keys.contains(&format!("mention:{half}")),
+        "half a name is not the name: {keys:?}"
+    );
+}
+
 /// Story 4, first arm of "on my work": a build I triggered. The negative
 /// control is the same configuration going green, which is what a rule keyed
 /// on "is a build" would also return.
