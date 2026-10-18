@@ -891,10 +891,10 @@ async fn an_assignee_the_declaration_does_not_reach_contributes_nothing() {
 }
 
 /// The assignee is the **first** declared candidate that holds a non-blank
-/// string, and only that one decides (#1164). Since #1164 the rule first asks
-/// whether any of a ticket's own source's candidates names me and reads the
-/// first-string rule only for the tickets that pass, so each case below is
-/// one way that shortcut could answer differently from the rule:
+/// string, and only that one decides. The rule first asks whether any of a
+/// ticket's own source's candidates names me, and reads the first-string rule
+/// only for the tickets that pass (#1164), so each case below is one way that
+/// shortcut could answer differently from the rule:
 ///
 /// * `name` names somebody else and `key` names me: `key` passes the first
 ///   question, and the ticket is still not mine;

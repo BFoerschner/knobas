@@ -81,18 +81,9 @@ macro_rules! status_paths {
     ($decl:literal) => {
         concat!(
             "status_paths as materialized (",
-            ticket_paths!($decl, "status_name"),
+            $crate::declared_ticket_paths!($decl, "status_name"),
             ")"
         )
-    };
-}
-
-/// Every declared source's ticket candidates for one string field, as
-/// `(source_id, segs, ord)`: [`status_paths!`]' body, for any field. The
-/// inbox's new-assignment rule reads its assignee the same way (#1164).
-macro_rules! ticket_paths {
-    ($decl:literal, $field:literal) => {
-        $crate::declared_ticket_paths!($decl, $field)
     };
 }
 
@@ -149,13 +140,13 @@ macro_rules! lane_paths {
         concat!(
             "lane_paths as materialized (
                select * from (",
-            ticket_paths!($decl, "assignee"),
+            $crate::declared_ticket_paths!($decl, "assignee"),
             ") a where $6::text = 'assignee'
                union all select * from (",
-            ticket_paths!($decl, "priority"),
+            $crate::declared_ticket_paths!($decl, "priority"),
             ") p where $6::text = 'priority'
                union all select * from (",
-            ticket_paths!($decl, "issue_type"),
+            $crate::declared_ticket_paths!($decl, "issue_type"),
             ") t where $6::text = 'issuetype'),
              label_paths as materialized (
                select i.source_id, c.at_segs, c.entry_segs, c.ord from ",
