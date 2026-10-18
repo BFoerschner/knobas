@@ -610,3 +610,23 @@ test("Docs lists the spaces of the sources that claim wiki, whatever their adapt
   const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
   expect([...select.options].map((o) => o.textContent)).toEqual(["All spaces (1)", "HB Handbook (1)"]);
 });
+
+test("Docs' search hits drop the pages of a source that does not claim wiki (#1196)", async () => {
+  sourceRoles.take([
+    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: ["doc_content"] }] },
+    { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
+  ]);
+  const tree: DocsTree = {
+    ...TREE,
+    spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
+  };
+  const onNotes = { ...HITS.hits[0]!, entity_id: "notes:1", title: "Welcome", space: { key: "HB", name: "Handbook" }, path: null };
+  const answer: DocsHits = { ...HITS, total: 3, hits: [...HITS.hits, onNotes] };
+  await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree), docsSearch: vi.fn(async () => answer) }));
+
+  type("ledger");
+  await settle();
+  const hits = [...target.querySelectorAll<HTMLAnchorElement>("a.tf-dl-hit")];
+  expect(hits.map((h) => h.getAttribute("href"))).toEqual(["#/page/notes%3A1"]);
+  expect(target.querySelector(".tf-dl-meta")?.textContent).toContain("1 page in");
+});

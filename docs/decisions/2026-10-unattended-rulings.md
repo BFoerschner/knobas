@@ -5658,4 +5658,24 @@ The implementer's rulings:
 - **Out of this ticket:** the job page's sections still read by kind (its Builds section reads
   TeamCity's `build` kind), and Docs' search hits are not narrowed. Follow-up #1230 (backlog).
   The job page's stale-builds warning does move to the `ci` claim, as it picked sources by the
-  presence of a kind. **Reversing:** #1230.
+  presence of a kind. **Reversing:** #1230. (Docs' hits were folded in by the merge-manager, below.)
+
+The merge-manager's rulings (PR #1232):
+
+- **Criterion 2 ("no surface outside Tickets reads an adapter kind to decide what to draw") is
+  met, with Docs' search hits folded in.** No surface under `tf/` outside Tickets and Settings
+  compares an `adapter_kind` to pick rows; what is left reads a descriptor for a label
+  (`pipelineWord`, `kindRegistry`). Docs' hits are on the Docs surface, which the ticket's *What
+  to build* names, and they drew pages of a source that does not claim `wiki`, so leaving them
+  would leave Docs drawn by kind: they are narrowed here, frontend only, by dropping a hit on a
+  page of a space the tree dropped (a hit carries no `source_id`). The job page is not one of the
+  role surfaces (spec #1192 story 1: Code, Tickets, Builds, Docs, Monitors) and reads entity
+  kinds, not adapter kinds; its sections and the CI run kind stay #1230. **Reversing:** low; a
+  `source_id` on `DocHit` would be a §10.8 entry.
+- **No narrowing before the source list answers is safe.** It can never hide a claimed source: a
+  source is dropped only when the list names it and it lacks the claim. The cost is that a
+  non-claimer's rows can draw until the list answers; among the built-ins only the mock claims
+  nothing, so only `--demo` can show it. **Reversing:** one line in `draws`.
+- **Merge before #1229.** Making the mock claim `code-host` needs its live reads and the
+  battery's `rejects_…` cases reworked, which is #1229's own size; it is `ready-for-agent` in
+  milestone v3, so the demo regression does not reach a v3 release. **Reversing:** #1229.

@@ -288,11 +288,28 @@
     );
   });
 
-  /** The hits, kept to the job's pages while *This job* is on. */
+  /**
+   * The pages of the spaces the tree dropped, whose sources do not claim the
+   * wiki role (#1196). A hit names no source, so it is matched to its space's
+   * page here. `null` while nothing is dropped.
+   */
+  const unclaimed = $derived.by((): Set<string> | null => {
+    if (answered === null || tree === null || tree === answered) return null;
+    const drawn = new Set(tree.spaces);
+    return new Set(answered.spaces.filter((s) => !drawn.has(s)).flatMap((s) => s.pages.map((p) => p.entity_id)));
+  });
+
+  /** The hits on the wiki sources' pages, kept to the job's pages while *This job* is on. */
   const hits = $derived.by((): DocsHits | null => {
-    if (found === null || !jobOn) return found;
-    const kept = found.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
-    return { ...found, total: kept.length, hits: kept };
+    if (found === null) return found;
+    let wiki = found;
+    if (unclaimed !== null) {
+      const onWiki = found.hits.filter((h) => !unclaimed.has(h.entity_id));
+      wiki = { ...found, total: found.total - (found.hits.length - onWiki.length), hits: onWiki };
+    }
+    if (!jobOn) return wiki;
+    const kept = wiki.hits.filter((h) => jobIds?.has(h.entity_id) ?? false);
+    return { ...wiki, total: kept.length, hits: kept };
   });
   const searchScope = $derived(jobOn ? `${job}'s pages` : scopeName(shownSpace));
 
