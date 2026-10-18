@@ -5350,3 +5350,30 @@ Implementer (PR #1171).
   two filters, and the plan no longer depends on the walk's estimate. Only `ids_sql` changes;
   `search_sql` and the saved-list summary still read the view. **Reversing:** low (one
   relation and one predicate in `ids_sql`).
+## #1174 — ⌘K finds a ticket by its key (2026-10-18)
+
+Implementer.
+
+- **The index, not the demo data.** The demo ticket's title and body never spell `PAY-231`, and
+  neither does any Jira ticket's: the key is only in the entity id. Migration `0048` lexes a
+  ticket's key into `sync.item.fts` at A rather than an adapter writing it into the title or
+  body, so no stored value changes and every mirrored ticket is found without a re-sync.
+  **Reversing:** low (a migration setting `0027`'s expression back).
+- **Tickets only.** Other kinds' ids are not names a reader types, and indexing them would
+  reorder every repo and page search. A commit found by its sha is a separate ask. **Reversing:**
+  low (drop the `kind = 'ticket'` guard in a later migration and in `LIVE_ITEM.key`).
+- **The key names a ticket, as its title does.** `PAY-231` half-typed matches PAY-2310 at the
+  same rank (the parser reads `-231` as a signed number, and the prefix reaches `-2310`), so the
+  ticket would lose to a newer key on recency. The exact key counts for `named`, the tiebreak
+  between equal ranks, rather than a rank tier of its own (story 26). **Reversing:** low.
+- **Migration number `0048`.** `0047` is taken by #1163 (PR #1171), still open; the two alter
+  different objects and apply in either order. **Reversing:** low (renumber before merge).
+
+Merge-manager (PR #1178).
+
+- **`similar_text` reads the key too.** The rule fingerprints and counts `fts`, so `0048` makes
+  its first pass after the upgrade compare every ticket again, and a ticket's key lexemes join its
+  words from then on. Accepted: the pass is one-off derived work (`0034` truncated the same table
+  on purpose), a shared project prefix falls under the common-word line, and a title spelling the
+  key matching that ticket is what the key means. **Reversing:** low (a migration that indexes the
+  key in a separate column the launcher alone reads).

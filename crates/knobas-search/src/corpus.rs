@@ -114,6 +114,13 @@ pub struct Corpus {
     pub(crate) source_id: &'static str,
     /// The row's title (`"i.title"`).
     pub(crate) title: &'static str,
+    /// The second name a row goes by, if the corpus has one: a ticket's key
+    /// (#1174). A row is *named* what was typed when its title or this is the
+    /// typed words, so `PAY-231` ranks the ticket PAY-231 above PAY-2310,
+    /// which matches the same words with its last one as a prefix. Null for a
+    /// row with no key, which then names nothing by it. The index has to hold
+    /// it too (migration `0048`), or the row is never matched to be named.
+    pub(crate) key: Option<&'static str>,
     /// The indexed `tsvector`. **Matched against, never selected** -- reading
     /// one into a `FromRow` struct panics at runtime (interfaces §1).
     pub(crate) fts: &'static str,
@@ -445,6 +452,12 @@ pub const LIVE_ITEM: Corpus = Corpus {
     kind: "i.kind",
     source_id: "i.source_id",
     title: "i.title",
+    // The id past its namespace, as `0048` indexes it and `sql::ids_sql`
+    // reads it: `jira:PAY-231` is `PAY-231`. Tickets only, as in `0048`.
+    key: Some(
+        "case when i.kind = 'ticket' \
+         then substr(i.entity_id, strpos(i.entity_id, ':') + 1) end",
+    ),
     fts: "i.fts",
     // The words alone: a page's Docs-search marks never reach an excerpt (#860).
     headline_text: concat!(
@@ -494,6 +507,7 @@ pub const NOTE: Corpus = Corpus {
     kind: "'note'",
     source_id: "'note'",
     title: "n.title",
+    key: None,
     fts: "n.fts",
     headline_text: "n.title || ' — ' || n.body_md",
     // A note is the user's own; there is no author column and no author to
@@ -558,6 +572,7 @@ pub const ASSET: Corpus = Corpus {
     kind: "'asset'",
     source_id: "'asset'",
     title: "a.name",
+    key: None,
     fts: "a.fts",
     headline_text: "a.name || ' — ' || a.path_text || ' — ' || a.props_text",
     author: None,
@@ -640,6 +655,7 @@ pub const ROUTE: Corpus = Corpus {
     kind: "'route'",
     source_id: "'route'",
     title: "r.name",
+    key: None,
     fts: "r.fts",
     headline_text: "r.name || ' — ' || r.url",
     author: None,
