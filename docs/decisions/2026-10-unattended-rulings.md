@@ -5467,6 +5467,26 @@ Implementer (PR for #1172). ADR-0027.
 - **A sort by id becomes bytewise.** No user-visible sort is by id alone; ids are tiebreakers
   and walk orders. It now agrees with Rust's `str` order. **Reversing:** n/a.
 
+## #942 The job's reach walks per R-4.17 (2026-10-18)
+
+The decision itself is Björn's (2026-10-18, on #942: "the spec's walk wins"), recorded as
+ADR-0025's amendment. The implementer's rulings under it:
+
+- **A job linked to a VM does not show the containers on it.** The dispatch's test list said "VM →
+  its containers appear"; Björn's ruling says to restore #937's walk at `912036a3`, which brings
+  nothing held under a VM, proxy or host, and #942's body lists "a job linked to a VM shows every
+  container on it" as the symptom to fix. R-4.17's example (the flows-stage route, which runs on
+  the shared proxy, is "not reached") reads "down" as toward the hardware. The ruling and the
+  ticket win over the dispatch's paraphrase. **Reversing:** low; drop the `where` clause of
+  `held` and the third `DOWNWARD_ONLY` spelling.
+- **The parent's own links and a link set's members stay one layer.** Neither climbs to an
+  ancestor nor adds a monitor, as at `912036a3` and ADR-0025's "never takes a hop from it": a
+  parent's linked VM comes in alone. **Reversing:** low; read `parent` and `set_applies` rows
+  into `under`.
+- **No new perf budget.** No bench or perf test runs `reach:`; the added terms are primary-key
+  probes of `knobas.asset` and the indexed `knobas.link` ends, over rows already reached.
+  **Reversing:** n/a.
+
 ## v2.0.0-rc1 — the release candidate's MSI version (2026-10-18)
 
 - **Fork: which MSI version rc1 takes.** Ruling: 2.0.6, continuing the milestone sequence

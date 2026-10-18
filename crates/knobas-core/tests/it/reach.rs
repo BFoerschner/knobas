@@ -133,13 +133,13 @@ async fn reasons_name_the_first_step_and_the_walk_stops_at_one_hop() {
     assert!(got.values().all(|row| row.origin == Origin::Own));
 }
 
-/// ADR-0025: the job's read is membership, so containment goes down from
-/// whatever the walk reached, a VM included, and never up to an ancestor; and
-/// a link layer out of a VM is taken both ways, as ADR-0008 takes it. The
-/// spec's R-4.17 rule ("from a VM, proxy or host only further down") is not
-/// this read's: it is a follow-up against the ADR.
+/// R-4.17, ADR-0025 as amended on #942: from a VM, a proxy or a host the walk
+/// only goes further down. A ticket linked to a container reaches the engine,
+/// the VM and the host it runs on, and the monitors of each, all via the
+/// container -- and never the other service on the same machine, nor what
+/// links to the VM.
 #[tokio::test]
-async fn a_vm_brings_what_it_holds_and_nothing_brings_its_ancestors() {
+async fn a_container_brings_its_vm_its_host_and_their_monitors_via_itself() {
     let pool = scratch().await;
     let pay = ticket(&pool, "PAY-231").await;
     let host = asset(&pool, "hypervisor", "hv-01", None).await;
@@ -147,35 +147,97 @@ async fn a_vm_brings_what_it_holds_and_nothing_brings_its_ancestors() {
     let engine = asset(&pool, "container_engine", "docker-pay", Some(&vm)).await;
     let mine = asset(&pool, "container", "payout-service", Some(&engine)).await;
     let other = asset(&pool, "container", "ledger-api", Some(&engine)).await;
-    let monitor = entity(&pool, "kuma", "monitor", "vm-pay-01-ping").await;
-    let nas = asset(&pool, "vm", "nas-01", None).await;
-    let on_nas = asset(&pool, "container", "backup", Some(&nas)).await;
+    let vm_ping = entity(&pool, "kuma", "monitor", "vm-pay-01-ping").await;
+    let host_ping = entity(&pool, "kuma", "monitor", "hv-01-ping").await;
+    let other_ping = entity(&pool, "kuma", "monitor", "ledger-api-http").await;
     let stranger = ticket(&pool, "OPS-77").await;
     draw(&pool, &pay, &mine, "deploys").await;
-    draw(&pool, &vm, &monitor, "monitored-by").await;
-    draw(&pool, &pay, &nas, "related").await;
-    draw(&pool, &stranger, &nas, "related").await;
+    draw(&pool, &vm, &vm_ping, "monitored-by").await;
+    draw(&pool, &host, &host_ping, "monitored-by").await;
+    draw(&pool, &other, &other_ping, "monitored-by").await;
+    draw(&pool, &stranger, &vm, "related").await;
 
     let got = reached(&pool, &pay).await;
-    for ancestor in [&engine, &vm, &host, &monitor, &other] {
+    for down in [&mine, &engine, &vm, &host, &vm_ping, &host_ping] {
+        assert!(got.contains_key(down), "{down} is down from the ticket");
+        assert_eq!(got[down].step, mine, "{down} came via the container");
+        assert_eq!(got[down].origin, Origin::Own);
+    }
+    for beside in [&other, &other_ping, &stranger] {
         assert!(
-            !got.contains_key(ancestor),
-            "{ancestor} is above or beside the container, not held under it"
+            !got.contains_key(beside),
+            "{beside} is beside the container or up from its VM"
         );
     }
-    assert_eq!(got[&mine].step, mine);
-    assert_eq!(got[&on_nas].step, nas, "held under the linked VM");
-    assert_eq!(
-        got[&stranger].step, nas,
-        "one link out of the VM, either way"
-    );
 }
 
-/// The reach is ADR-0025's sentence exactly: a promoted sub-task's
-/// membership (ADR-0008, the same statement the room reads), then the
-/// parent's own links, and nothing else.
+/// The same rule at the link layers: with a VM and a proxy one link from the
+/// ticket, the next link step out of them is taken only toward what they
+/// stand on and toward their monitors -- never to a ticket that links to the
+/// VM, a container that runs on it or a route the proxy serves.
 #[tokio::test]
-async fn the_reach_is_membership_plus_the_parents_links() {
+async fn the_walk_never_goes_up_from_a_vm_a_proxy_or_a_host() {
+    let pool = scratch().await;
+    let pay = ticket(&pool, "PAY-231").await;
+    let host = asset(&pool, "hypervisor", "hv-01", None).await;
+    let vm = asset(&pool, "vm", "vm-pay-01", Some(&host)).await;
+    let on_vm = asset(&pool, "container", "ledger-api", Some(&vm)).await;
+    let nas = asset(&pool, "vm", "nas-01", None).await;
+    let monitor = entity(&pool, "kuma", "monitor", "vm-pay-01-ping").await;
+    let stranger = ticket(&pool, "OPS-77").await;
+    let proxy = asset(&pool, "reverse_proxy", "traefik", None).await;
+    let elsewhere = asset(&pool, "container", "flows-stage", None).await;
+    let hosted = asset(&pool, "vm", "vm-ops-01", Some(&host)).await;
+
+    draw(&pool, &pay, &vm, "related").await;
+    draw(&pool, &pay, &proxy, "related").await;
+    // Down from the VM: its monitor, and what it depends on.
+    draw(&pool, &vm, &monitor, "monitored-by").await;
+    draw(&pool, &vm, &nas, "depends-on").await;
+    // Up from the VM and the proxy: another ticket that links to the VM, and a
+    // container that runs on it and is served by the proxy.
+    draw(&pool, &stranger, &vm, "related").await;
+    draw(&pool, &elsewhere, &vm, "runs-on").await;
+    draw(&pool, &elsewhere, &proxy, "served-by").await;
+
+    let got = reached(&pool, &pay).await;
+    for down in [&vm, &proxy, &monitor, &nas, &host] {
+        assert!(got.contains_key(down), "{down} is down from the ticket");
+    }
+    for up in [&stranger, &elsewhere, &on_vm, &hosted] {
+        assert!(!got.contains_key(up), "{up} is up from a VM, proxy or host");
+    }
+    assert_eq!(got[&monitor].step, vm);
+    assert_eq!(got[&host].step, vm, "the host is under the VM");
+}
+
+/// The downward rule also stops containment: a VM linked to the ticket does
+/// not bring in what runs on it, while an ordinary asset still brings in what
+/// it holds, as membership does.
+#[tokio::test]
+async fn nothing_held_under_a_vm_comes_in_but_a_service_brings_its_modules() {
+    let pool = scratch().await;
+    let pay = ticket(&pool, "PAY-231").await;
+    let vm = asset(&pool, "vm", "vm-pay-01", None).await;
+    let on_it = asset(&pool, "container", "payout-service", Some(&vm)).await;
+    let service = asset(&pool, "service", "ledger", None).await;
+    let module = asset(&pool, "module", "ledger-core", Some(&service)).await;
+    draw(&pool, &pay, &vm, "related").await;
+    draw(&pool, &pay, &service, "related").await;
+
+    let got = reached(&pool, &pay).await;
+    assert!(got.contains_key(&vm));
+    assert!(!got.contains_key(&on_it), "up from the VM");
+    assert_eq!(got[&module].step, service, "held under an ordinary asset");
+}
+
+/// Membership is unchanged by this read (ADR-0025, ADR-0008): a promoted
+/// ticket's context still holds what runs on a linked VM and what links to
+/// it, while the reach leaves both out; the context's explicit adds seed the
+/// reach, and with no VM, proxy or host on the way the reach is membership
+/// plus the parent's own links.
+#[tokio::test]
+async fn membership_stays_adr_0008s_and_the_context_seeds_the_reach() {
     let pool = scratch().await;
     let parent = mirrored(
         &pool,
@@ -203,7 +265,7 @@ async fn the_reach_is_membership_plus_the_parents_links() {
     draw(&pool, &sub, &pr, "implements").await;
     draw(&pool, &pr, &build, "built-by").await;
     draw(&pool, &build, &past, "triggers").await;
-    draw(&pool, &pr, &vm, "deploys").await;
+    draw(&pool, &sub, &vm, "deploys").await;
     draw(&pool, &beside, &vm, "related").await;
     draw(&pool, &parent, &repo, "works-in").await;
     draw(&pool, &repo, &repo_build, "built-by").await;
@@ -214,28 +276,30 @@ async fn the_reach_is_membership_plus_the_parents_links() {
         .unwrap();
     draw(&pool, &promoted.context.id, &added, "related").await;
 
-    let mut want: Vec<String> = context::member_ids(&pool, &promoted.context.id)
+    let members = context::member_ids(&pool, &promoted.context.id)
         .await
-        .unwrap()
+        .unwrap();
+    for id in [&pr, &build, &vm, &on_it, &beside, &added] {
+        assert!(members.contains(id), "membership still holds {id}");
+    }
+    assert!(!members.contains(&past) && !members.contains(&repo));
+
+    let got = reached(&pool, &sub).await;
+    for up in [&on_it, &beside] {
+        assert!(
+            !got.contains_key(up),
+            "{up} is in the context, but up from the VM"
+        );
+    }
+    let mut want: Vec<String> = members
         .into_iter()
-        .filter(|id| *id != sub)
+        .filter(|id| *id != sub && *id != on_it && *id != beside)
         .collect();
     want.push(repo.clone());
     want.sort();
     want.dedup();
-
-    let got = reached(&pool, &sub).await;
     assert_eq!(got.keys().cloned().collect::<Vec<_>>(), want);
-    assert!(
-        got.contains_key(&on_it),
-        "membership counts through ancestors"
-    );
-    assert!(
-        !got.contains_key(&beside),
-        "two link layers out, then it stops"
-    );
     assert!(!got.contains_key(&past) && !got.contains_key(&repo_build));
-    assert_eq!(got[&on_it].step, pr);
     assert_eq!(
         got[&added].step, added,
         "an explicit add is its own first step"
@@ -245,6 +309,37 @@ async fn the_reach_is_membership_plus_the_parents_links() {
         !got.contains_key(&promoted.context.id),
         "a context is never reached"
     );
+}
+
+/// The parent's own links still count when one is a VM, and stop there: the
+/// parent's layer is one link, so nothing under, above or watching that VM
+/// comes in through it.
+#[tokio::test]
+async fn a_parents_vm_comes_in_alone() {
+    let pool = scratch().await;
+    let parent = mirrored(
+        &pool,
+        "ticket",
+        "PAY-231",
+        serde_json::json!({ "key": "PAY-231", "fields": { "issuetype": { "name": "Story" } } }),
+    )
+    .await;
+    let sub = mirrored(
+        &pool,
+        "ticket",
+        "PAY-232",
+        serde_json::json!({ "key": "PAY-232", "fields": { "parent": { "key": "PAY-231" } } }),
+    )
+    .await;
+    let host = asset(&pool, "hypervisor", "hv-01", None).await;
+    let vm = asset(&pool, "vm", "vm-pay-01", Some(&host)).await;
+    let monitor = entity(&pool, "kuma", "monitor", "vm-pay-01-ping").await;
+    draw(&pool, &parent, &vm, "deploys").await;
+    draw(&pool, &vm, &monitor, "monitored-by").await;
+
+    let got = reached(&pool, &sub).await;
+    assert_eq!(got.keys().cloned().collect::<Vec<_>>(), vec![vm.clone()]);
+    assert_eq!(got[&vm].origin, Origin::Parent { ticket: parent });
 }
 
 /// R-7.3: a sub-task reaches its parent's own links, labelled with the

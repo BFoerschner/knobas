@@ -12,7 +12,7 @@ ADR-0008 fixes context membership as seed, direct links and one hop over confirm
 
 Decided 2026-10-15 (Björn, D3): **no. A link set is a separate term, read beside membership, and never part of it.**
 
-- **A job shows** its context's members (ADR-0008, unchanged), then the members of every set whose rule matches the ticket, then the parent ticket's own links. An item shows once, with the first reason it came in.
+- **A job shows** (amended 2026-10-18, see the amendment below) its context's members (ADR-0008, unchanged), then the members of every set whose rule matches the ticket, then the parent ticket's own links. An item shows once, with the first reason it came in.
 - **Computed when read, never stored as links.** Nothing is copied onto the ticket. Editing a set changes every job it applies to at once, and a new ticket under the epic shows the set the moment it syncs.
 - **Sets never feed the membership walk.** Membership, the proposal tray's scope, the per-context inbox and the share export of a context read ADR-0008's statement and nothing else. An item a set brings in is not a seed, and the walk never takes a hop from it.
 - **Hiding is per ticket.** *Hide here* stores an exclusion for one ticket and one member. It never edits the set.
@@ -29,3 +29,12 @@ Decided 2026-10-15 (Björn, D3): **no. A link set is a separate term, read besid
 - Two reads exist where there was one: membership, and what a job shows. Each surface names which one it uses. *This job* on the Code, Monitors, Docs and Dependencies views uses the second (requirements R-2.8).
 - Sets join the share export beside contexts and smart lists.
 - `CONTEXT.md` gains **Link set**.
+
+## Amendment: what a job shows is walked per R-4.17 and R-4.18
+
+Decided 2026-10-18 (Björn, on #942): **the spec's walk wins.** The first bullet above read "a job shows its context's members (ADR-0008, unchanged)". Spec #808 and requirement R-2.8 said the job's read is walked as R-4.18 describes, from a VM, proxy or host only further down, with "the VM under a container included". The two disagreed, and the spec's reading stands.
+
+- **What a job shows** starts where membership starts (the ticket, its context's explicit adds, an epic's children) and takes membership's two link layers and what is held under what they reach. From an asset typed `vm`, `reverse_proxy`, `hypervisor`, `site` or `network` it only goes down: a link step out of one follows its `monitored-by` monitors and its own `runs-on` and `depends-on`, and nothing held under it comes in. Then it adds every ancestor of a reached asset and every `monitored-by` monitor of one. So a job linked to a container shows that container's VM, host and their monitors, and a job linked to a VM shows neither the containers on it nor what else links to it.
+- **The members of every matching set and the parent ticket's own links** still count as above, one layer each, with an item shown once with its first reason.
+- **Membership is unchanged** and keeps its consumers: the proposal tray, the per-context inbox and the context export read ADR-0008's statement and nothing else.
+- The walk is one text, `knobas_core::reach_walk!`, read by the job-reach read and by the `reach:` search key alike.
