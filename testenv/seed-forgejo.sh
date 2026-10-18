@@ -10,7 +10,7 @@
 # `just gitea-live forgejo` does all three and runs the suite.
 set -eu
 cd "$(dirname "$0")"
-export KNOBAS_GITEA_URL=${KNOBAS_FORGEJO_URL:-http://127.0.0.1:3002}
+export KNOBAS_GITEA_URL="${KNOBAS_FORGEJO_URL:-http://127.0.0.1:3002}"
 export KNOBAS_SEED_SERVICE=forgejo
 export KNOBAS_SEED_CLI=forgejo
 export KNOBAS_SEED_STATE=seed-state-forgejo.json

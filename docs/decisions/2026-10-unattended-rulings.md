@@ -5538,3 +5538,7 @@ ADR-0025's amendment. The implementer's rulings under it:
 - **Both live-test loosenings stand.** The wait for the pushed line still ends in the outdated
   assertion, which a stale diff fails; the delete sentence is a 403 the adapter passes through
   without reading it. **Reversing:** low.
+- **`forgejo` is a compose service the estate file does not record** (`NOT_ASSETS` in
+  `knobas-core`'s `estate_file.rs`). A live run starts it and stops it again, so between runs it
+  is not there; an asset would also ripple into the demo, the search corpus and the frontend
+  fakes that read `testenv/estate.json`. **Reversing:** medium (an asset entry plus those counts).
