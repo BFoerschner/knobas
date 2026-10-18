@@ -7,8 +7,12 @@
   reserved-steps rule; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
 
   **What is frozen.** The file, from 1.0.0 on. A knobas release hosts one major version. A minor
-  version only adds (a new function on `adapter`, a new interface, a new variant case nothing
-  old sends), and each minor is a §10.8 entry of its own, as this one is. Changing or removing
+  version only adds (a new interface the host provides or reads, a new function on `adapter`
+  that the host looks up as optional, a new JSON shape inside a `json` value), and each minor is
+  a §10.8 entry of its own, as this one is. **A new case in a WIT variant or a new field in a WIT
+  record is not additive**: wasmtime type-checks a component's functions against the host's
+  bindings exactly (case count and names), so a component built against the old type no longer
+  links. Such a change is a new major version, or it travels as JSON. Changing or removing
   anything in it is a new major version, which every external adapter has to be rebuilt for.
 
   **The world.** `world adapter { import sink; import log; export source; }`.

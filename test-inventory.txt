@@ -3675,6 +3675,7 @@ knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_i
 knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_that_exports_no_source_is_refused_at_load
 knobas-wasm-host	test/it	host::a_core_module_is_not_a_component
+knobas-wasm-host	test/it	host::a_sink_error_the_component_swallows_still_fails_the_sync
 knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_its_cursor
 knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused
 knobas-wasm-host	test/it	host::the_descriptor_template_is_the_component_s_own

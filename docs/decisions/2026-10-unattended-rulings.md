@@ -5727,3 +5727,25 @@ The implementer's rulings:
   `targets`. Reasoning: rustup installs it with the pinned toolchain, on every machine, with no
   global step. Side effect: the first rustup call after the edit synced the 1.99 channel from
   1.99.0 to 1.99.1, so every worktree rebuilds once. **Reversing:** low.
+
+The merge-manager's rulings (PR #1233):
+
+- **Fork: do the declarative trees crossing as serde JSON fit ADR-0028's "transcription of the
+  `Source` trait and its serde types", frozen at 1.0.0?** Ruling: yes. Reasoning: the JSON *is*
+  the serde types, field for field, so it transcribes them; and ADR-0028's own rule that a new
+  block type is a minor version can only hold this way, because wasmtime 49 type-checks variants
+  exactly (`typecheck_variant` refuses a different case count), so a typed `view` tree would make
+  every new block a major. The cost is that the serde form of `knobas-source` is frozen through
+  the entry, which the entry says. **Reversing:** a 2.0.0 once #1202 lets anyone install.
+- **Fork: the §10.8 entry listed "a new variant case nothing old sends" as additive.** Ruling:
+  corrected before the freeze; a new WIT variant case or record field is a major (or crosses as
+  JSON), and a new function on `adapter` is additive only when the host looks it up as optional,
+  which #1205's `download` will need. Reasoning: the same exact type check. **Reversing:** low
+  (text).
+- **Fork: a newer minor refused at load.** Ruling: upheld. Reasoning: ADR-0028 and spec #1192 say
+  install refuses an interface version this knobas cannot host, and spec story 39 is the other
+  direction (an old build on a new host). **Reversing:** low.
+- **Fork: the untested swallowed-sink path.** Ruling: witnessed now; the fixture gains a
+  `swallow_sink` fault and `a_sink_error_the_component_swallows_still_fails_the_sync` holds the
+  host's rule (a mutant that returns the component's answer is killed by it alone, not by the
+  battery). **Reversing:** low.
