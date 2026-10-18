@@ -56,6 +56,69 @@ paths_match() {
     [[ $(normalise_app_path "$1") == "$(normalise_app_path "$2")" ]]
 }
 
+# registered_copies <lsregister -dump text> <bundle id>
+#
+# Every path the dump records for a bundle carrying <bundle id>, one per line,
+# sorted and unique. A dump is records separated by a line of dashes; a record
+# prints `path:` before `identifier:`, so the path is remembered until the
+# identifier line says whether it counts. The ` (0x...)` Launch Services
+# appends to a path is dropped. A stale entry whose bundle is gone is still
+# listed: it is Launch Services' record, and the caller decides about disk.
+registered_copies() {
+    printf '%s\n' "$1" | awk -v id="$2" '
+        /^-+$/ { path = ""; next }
+        /^path:/ {
+            path = $0
+            sub(/^path:[ \t]*/, "", path)
+            sub(/ \(0x[0-9a-f]+\)$/, "", path)
+            next
+        }
+        /^identifier:/ {
+            val = $0
+            sub(/^identifier:[ \t]*/, "", val)
+            if (val == id && path != "") print path
+        }' | sort -u
+}
+
+# copies_to_unregister <dump> <bundle id> <keep> <repo root>
+# copies_to_leave      <dump> <bundle id> <keep> <repo root>
+#
+# The opt-in step's decision (#1176). Of the copies Launch Services knows,
+# <keep> (the bundle under test) is neither; a copy inside <repo root> (the
+# root checkout and its .worktrees/) is ours to unregister for the length of
+# the run; anything else -- /Applications, a DMG mount, somebody's scratch
+# directory -- is not this repo's to touch, is reported, and stays registered.
+# The root test is on whole path components, so `/x/knobas-old/...` is not
+# inside `/x/knobas`.
+copies_to_unregister() {
+    local keep root path
+    keep=$(normalise_app_path "$3")
+    root=$(normalise_app_path "$4")
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        path=$(normalise_app_path "$path")
+        [ "$path" = "$keep" ] && continue
+        case $path in
+        "$root"/*) printf '%s\n' "$path" ;;
+        esac
+    done < <(registered_copies "$1" "$2")
+}
+
+copies_to_leave() {
+    local keep root path
+    keep=$(normalise_app_path "$3")
+    root=$(normalise_app_path "$4")
+    while IFS= read -r path; do
+        [ -n "$path" ] || continue
+        path=$(normalise_app_path "$path")
+        [ "$path" = "$keep" ] && continue
+        case $path in
+        "$root"/*) ;;
+        *) printf '%s\n' "$path" ;;
+        esac
+    done < <(registered_copies "$1" "$2")
+}
+
 # classify_readiness <probe output>
 #
 # Turn `ax probe`'s three lines into the one word the harness acts on. The

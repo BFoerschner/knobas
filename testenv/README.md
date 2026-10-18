@@ -1773,6 +1773,20 @@ from the gate because its *run* is.
    Launch Services database, and a path whose bundle is gone needs no putting
    back.
 
+   **Opt-in, since #1176: `KNOBAS_WITNESS_UNREGISTER_OTHERS=1 just
+   desktop-witness <driver>` does that by hand-step for you.** After the build
+   and before registering the new bundle, the harness reads `lsregister
+   -dump`, unregisters every other copy of `dev.knobas.desktop` that lives
+   *inside this repo's checkouts* (the root checkout and its `.worktrees/`),
+   and on exit -- success, failure, Ctrl-C or SIGTERM, from the same `trap` as
+   the rest of the cleanup -- registers again each of those that is still on
+   disk. A copy anywhere else (`/Applications/knobas.app`, a DMG mount, a
+   scratch directory) is **never touched**: the run lists it as *left
+   registered*, and the refusal above still names it if it wins. The default,
+   with the variable unset, is unchanged: the harness refuses and moves
+   nothing. The selection is `copies_to_unregister` in
+   `desktop-witness-lib.sh`, unit-tested over a fake dump.
+
 5. **`swiftc`**, from the Command Line Tools. The accessibility helper is one
    Swift file compiled into a scratch directory on each run (about 2 s);
    nothing is committed as a binary.
@@ -2017,8 +2031,10 @@ criterion (the deputy's ruling of 2026-09-08 on #525, condition (d)).
   is where the stale entries come from. **A merge-manager
   re-running these recipes has to do the same**, or the harness will refuse with
   *Launch Services still resolves `dev.knobas.desktop` to another copy* and name
-  the winner. **The harness is not going to do it for you, and that is ruled
-  rather than unfinished**: ADR-0016's dated consequence of 2026-09-08 makes a
+  the winner. **By default the harness is not going to do it for you, and that is ruled
+  rather than unfinished** (#1176 added an opt-in,
+  `KNOBAS_WITNESS_UNREGISTER_OTHERS=1`, that does it for this repo's own
+  checkouts only; see precondition 4): ADR-0016's dated consequence of 2026-09-08 makes a
   clear registration one of three preconditions *"a person meets once and the
   harness probes on every run"*, and says in as many words that *"the harness
   never moves an installed knobas aside to win the registration; that is the
