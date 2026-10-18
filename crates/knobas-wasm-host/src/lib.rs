@@ -383,8 +383,8 @@ fn new_store(adapter: &WasmAdapter, source_id: &str, sink: source::SinkSlot) -> 
 
 /// Where `just wasm-fixture` writes the fixture component, or
 /// `KNOBAS_WASM_FIXTURE` when that names another file. For tests: the
-/// fixture is a test adapter and nothing ships it.
-#[doc(hidden)]
+/// fixture is a test adapter and nothing ships it, hence `test-util`.
+#[cfg(feature = "test-util")]
 #[must_use]
 pub fn fixture_component() -> std::path::PathBuf {
     std::env::var_os("KNOBAS_WASM_FIXTURE").map_or_else(
@@ -397,7 +397,7 @@ pub fn fixture_component() -> std::path::PathBuf {
 }
 
 /// The fixture component, loaded; panics naming the recipe that builds it.
-#[doc(hidden)]
+#[cfg(feature = "test-util")]
 #[must_use]
 pub fn load_fixture() -> WasmAdapter {
     let path = fixture_component();

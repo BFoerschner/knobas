@@ -7,6 +7,11 @@ version.workspace = true
 # built against `wit/adapter.wit`, run under wasmtime and handed to the rest of
 # knobas as a `dyn Source`. The engine, the write queue, IPC and the shell see
 # that and nothing else.
+[features]
+# `fixture_component` and `load_fixture`, for the tests that load the fixture
+# component: this crate's own and `knobas-app`'s. Off in every shipped build.
+test-util = []
+
 [dependencies]
 async-trait.workspace = true
 chrono.workspace = true
@@ -31,6 +36,9 @@ wasmtime = { version = "=49.0.2", default-features = false, features = ["async",
 wasmtime-wasi = { version = "=49.0.2", default-features = false, features = ["p2"] }
 
 [dev-dependencies]
+# Self-dev-dependency, so this crate's own integration tests see `test-util`
+# (the `knobas-db` and `knobas-app` convention).
+knobas-wasm-host = { path = ".", features = ["test-util"] }
 tokio.workspace = true
 # Components written as text for the version check: one that exports a source
 # at an unsupported major version, one that exports none. Pinned to the copy
