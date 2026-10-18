@@ -459,6 +459,11 @@ macro_rules! context_expansion {
 /// parent, so a context cannot enter through it. Those three steps read
 /// `knobas.confirmed_link` at every step -- see the module note for why that
 /// is load-bearing and not a style choice.
+///
+/// The epic's children are read from `sync.item` by source, live by
+/// [`crate::live_by_key!`], not through `sync.live_item` (#1172): on tables
+/// never analyzed the view was planned as every entity scanned and a probe of
+/// `sync.item` for each, 26 ms at 22,000 items against 2.3 ms.
 const MEMBER_IDS: &str = concat!(
     "
     with recursive seed(id) as (
@@ -477,12 +482,15 @@ const MEMBER_IDS: &str = concat!(
          where $2::text is not null and e.id = $2::text and e.kind <> 'ctx'
         union
         select i.entity_id
-          from sync.live_item i
+          from sync.item i
          where $3::text is not null
            and i.source_id = $3::text
            and ",
     crate::recorded_parent_key!(),
     " = $4::text
+           and ",
+    crate::live_by_key!("i"),
+    "
     ),
 ",
     crate::context_expansion!(),

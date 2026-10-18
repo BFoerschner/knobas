@@ -335,8 +335,9 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
     })
     .await;
     // `has:`'s walk (#1163), every kind asked: from the ends the kinds can
-    // start at, each step a probe of a key compared bytewise. Without the
-    // index `0047` gives that key, each probe is a scan.
+    // start at, each step a probe of a key compared bytewise (`0050`). A
+    // probe that compares an id in another collation than its column's
+    // cannot use the key's index, and is a scan.
     const HAS: &str = concat!(
         "select sg.tid from ",
         knobas_core::ticket_signals!(
