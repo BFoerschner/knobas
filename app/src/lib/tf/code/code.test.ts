@@ -11,6 +11,7 @@ import {
   compareHash,
   factsById,
   headerLine,
+  keptPage,
   openPrsOf,
   prLines,
   repoTeams,
@@ -231,4 +232,27 @@ test("the header names the one host the repositories come from", () => {
   );
   expect(headerLine(2, [repo("a"), { ...repo("b"), source_id: "gitea-eu" }], [])).toBe("2 repositories, what asks for you first.");
   expect(headerLine(1, [repo("a")], [{ id: "gitea", base_url: "not a url" }])).toBe("1 repository, what asks for you first.");
+});
+
+test("a page kept to the code hosts counts each attention group again over the rows it keeps (#1196)", () => {
+  const other = (id: string): EntityRow => ({ ...pr(id, "open"), entity_id: `mock:x#${id}`, source_id: "mock" });
+  const attention = page([pr("144", "open"), other("1"), other("2"), pr("150", "open")], [
+    { group: "review_requested", count: 1 },
+    { group: "my_pull_requests", count: 2 },
+    { group: "open_pull_requests", count: 1 },
+  ]);
+
+  const kept = keptPage(attention, (sourceId) => sourceId === "gitea");
+
+  expect(kept.rows.map((row) => row.entity_id)).toEqual([pr("144", "open").entity_id, pr("150", "open").entity_id]);
+  expect(kept.total).toBe(2);
+  expect(kept.groups).toEqual([
+    { group: "review_requested", count: 1 },
+    { group: "open_pull_requests", count: 1 },
+  ]);
+  expect(prLines(kept, page([]), NOW).map((line) => [line.number, line.group])).toEqual([
+    ["#144", "review"],
+    ["#150", "others"],
+  ]);
+  expect(keptPage(attention, () => true)).toBe(attention);
 });

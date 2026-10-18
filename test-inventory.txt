@@ -964,6 +964,7 @@ knobas-app	test/it	sources_crud::re_entering_a_secret_overwrites_it_tests_it_and
 knobas-app	test/it	sources_crud::re_entering_the_key_keeps_the_stored_account
 knobas-app	test/it	sources_crud::testing_a_draft_writes_nothing_at_all
 knobas-app	test/it	sources_crud::testing_a_saved_source_uses_its_stored_configuration
+knobas-app	test/it	sources_crud::the_source_list_carries_the_role_claims_of_each_sources_adapter
 knobas-app	test/it	sources_crud::the_summary_counts_the_items_a_source_actually_mirrors
 knobas-app	test/it	sources_crud::updating_a_source_cannot_change_its_id_or_its_kind
 knobas-app	test/it	sources_mirror::every_write_op_variant_is_declared_in_the_mirror

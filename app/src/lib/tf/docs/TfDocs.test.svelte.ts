@@ -10,6 +10,7 @@ import type { QueuedWrite } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
+import { sourceRoles } from "../roles.svelte";
 
 const TREE: DocsTree = {
   spaces: [
@@ -593,4 +594,19 @@ test("the choice is kept for the session, and without a job there is no switch",
   await draw(["confluence:2"]);
   expect(scope()).toHaveLength(0);
   expect(target.querySelector("select[aria-label='Space']")).not.toBeNull();
+});
+
+test("Docs lists the spaces of the sources that claim wiki, whatever their adapter kind, and no other (#1196)", async () => {
+  sourceRoles.take([
+    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: ["doc_content"] }] },
+    { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
+  ]);
+  const tree: DocsTree = {
+    ...TREE,
+    spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
+  };
+  await draw(["notes:1"], ports({ docsTree: vi.fn(async () => tree) }));
+
+  const select = target.querySelector<HTMLSelectElement>("select[aria-label='Space']")!;
+  expect([...select.options].map((o) => o.textContent)).toEqual(["All spaces (1)", "HB Handbook (1)"]);
 });

@@ -423,6 +423,16 @@ export interface SourceSummary {
   auth_kind: AuthMethod | null;
   /** From the adapter's descriptor, so the view needs no per-adapter table. */
   kinds: KindInfo[];
+  /**
+   * The roles the source's adapter claims, from its descriptor template like
+   * {@link kinds} (#1196, ADR-0029): what Code, Builds, Docs and Monitors draw
+   * it for (`tf/roles.svelte.ts`). Empty for an adapter that claims none and
+   * for a source whose adapter is no longer compiled in.
+   *
+   * Always sent. Optional here only so a stand-in summary written before
+   * #1196 still type-checks; a summary without it claims nothing.
+   */
+  roles?: RoleClaim[];
 }
 
 /**

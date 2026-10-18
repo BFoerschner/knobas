@@ -58,6 +58,7 @@
   import { resolveTicket } from "../job/job";
   import TfLinkTo from "../job/TfLinkTo.svelte";
   import type { JobPorts } from "../job/ports";
+  import { WIKI, sourceRoles } from "../roles.svelte";
   import { jobHash } from "../route";
   import { initials, when } from "../tickets/tickets";
   import TfDocBlocks from "./TfDocBlocks.svelte";
@@ -140,7 +141,13 @@
       copy: (text) => navigator.clipboard.writeText(text),
     },
   );
-  let tree = $state<DocsTree | null>(null);
+  let answered = $state<DocsTree | null>(null);
+  /** The spaces of the sources that claim the wiki role, never by adapter kind (#1196, ADR-0029). */
+  const tree = $derived.by((): DocsTree | null => {
+    if (answered === null) return null;
+    const spaces = sourceRoles.keep(WIKI, answered.spaces);
+    return spaces === answered.spaces ? answered : { ...answered, spaces };
+  });
   let treeError = $state<string | null>(null);
   let page = $state<DocPage | null>(null);
   let pageError = $state<string | null>(null);
@@ -210,7 +217,7 @@
 
   async function readTree() {
     try {
-      tree = await io.docsTree();
+      answered = await io.docsTree();
       treeError = null;
     } catch (cause) {
       treeError = ipcErrorMessage(cause);

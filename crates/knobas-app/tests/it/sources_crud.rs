@@ -785,6 +785,7 @@ fn nothing_in_the_ipc_surface_reads_a_secret_back() {
         item_count: 0,
         auth_kind: Some(AuthMethod::Pat),
         kinds: Vec::new(),
+        roles: Vec::new(),
     })
     .unwrap();
     let keys: Vec<&str> = summary
@@ -1394,4 +1395,55 @@ async fn each_adapter_refuses_an_interval_under_its_own_floor_and_names_it() {
             .unwrap_or_else(|e| panic!("{kind} at its {floor}s floor on edit: {e:?}"));
         assert_eq!(back.sync_interval_secs, floor);
     }
+}
+
+/// A registry whose mock template claims a role, as a built-in adapter's does.
+struct ClaimingRegistry;
+
+/// The claim `ClaimingRegistry`'s template makes: a custom role, the one kind
+/// of claim the mock can make without filling a built-in role's minimum.
+fn the_claim() -> knobas_source::role::RoleClaim {
+    knobas_source::role::RoleClaim::new("mock:demo-host", [])
+}
+
+impl AdapterRegistry for ClaimingRegistry {
+    fn descriptors(&self) -> Vec<SourceDescriptor> {
+        Registry::builtin()
+            .descriptors()
+            .into_iter()
+            .map(|template| {
+                if template.adapter_kind == "mock" {
+                    SourceDescriptor {
+                        roles: vec![the_claim()],
+                        ..template
+                    }
+                } else {
+                    template
+                }
+            })
+            .collect()
+    }
+    fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
+        Registry::builtin().build(instance)
+    }
+}
+
+/// The source list carries each source's role claims, read from its adapter's
+/// template like its kinds (#1196): the shell picks each surface's sources by
+/// them, never by adapter kind.
+#[tokio::test]
+async fn the_source_list_carries_the_role_claims_of_each_sources_adapter() {
+    let f = fixture().await;
+    let added = sources::crud::add(&f.pool, &f.secrets, &ClaimingRegistry, a_new_source(&f.id))
+        .await
+        .unwrap();
+    assert_eq!(added.roles, [the_claim()], "add answers the claims too");
+
+    let listed = sources::crud::list(&f.pool, &ClaimingRegistry).await.unwrap();
+    let row = listed.iter().find(|row| row.id == f.id).unwrap();
+    assert_eq!(row.roles, [the_claim()]);
+
+    let builtin = sources::crud::list(&f.pool, &f.registry).await.unwrap();
+    let row = builtin.iter().find(|row| row.id == f.id).unwrap();
+    assert!(row.roles.is_empty(), "the built-in mock claims nothing (#1193)");
 }

@@ -6,13 +6,14 @@
 import { flushSync, mount, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import type { CredentialHealth, SourceSyncStatus } from "../ipc/sources";
+import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
 import type { RunningTimer } from "../ipc/time";
 import { writeQueuePanel, type WriteQueue } from "../shell/write-queue.svelte";
 import { push, toasts } from "../shell/toasts.svelte";
 import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
+import { sourceRoles } from "./roles.svelte";
 import TfShell from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
 
@@ -138,6 +139,7 @@ function start(
     monitorsDown?: number;
     onstarttimer?: (entityId: string, title: string) => void;
     nav?: { back: () => void; forward: () => void };
+    sources?: { id: string; display_name: string; roles?: RoleClaim[] }[];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -164,10 +166,12 @@ function start(
       queue,
       ports: {
         listSources: () =>
-          Promise.resolve([
-            { id: "jira", display_name: "Jira" },
-            { id: "teamcity", display_name: "TeamCity" },
-          ]),
+          Promise.resolve(
+            over.sources ?? [
+              { id: "jira", display_name: "Jira" },
+              { id: "teamcity", display_name: "TeamCity" },
+            ],
+          ),
         syncStatus: () => Promise.resolve(sync),
         listen: () => Promise.resolve(() => {}),
       },
@@ -550,4 +554,17 @@ test("with no job and no timer, the Day tab's open rows offer Assign… only (#1
   await at("#/time/2026-08-22");
   expect(addToButton()).toBeUndefined();
   expect([...target.querySelectorAll("button")].some((b) => b.textContent?.trim() === "Assign…")).toBe(true);
+});
+
+test("the shell hands the source list's role claims to the surfaces (#1196)", async () => {
+  start({
+    sources: [
+      { id: "forge", display_name: "Acme Forge", roles: [{ role: "code-host", reads: [] }] },
+      { id: "jira", display_name: "Jira", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
+    ],
+  });
+  await at("#/tickets");
+
+  expect(sourceRoles.draws("code-host", "forge")).toBe(true);
+  expect(sourceRoles.draws("code-host", "jira")).toBe(false);
 });

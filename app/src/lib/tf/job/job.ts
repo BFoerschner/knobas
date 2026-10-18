@@ -17,8 +17,12 @@ export interface SourceFacts {
   display_name?: string;
   config?: unknown;
   kinds?: { id: string }[];
+  /** The roles it claims (#1196): what the shell draws it for, never its adapter kind. */
+  roles?: readonly RoleClaim[];
 }
 import type { Week } from "../../ipc/time";
+import type { RoleClaim } from "../../ipc/sources";
+import { CI, claims } from "../roles.svelte";
 
 /** Whether an address segment is an entity id (`jira:PAY-231`) rather than a key. */
 export function isEntityId(segment: string): boolean {
@@ -395,7 +399,7 @@ export interface Staleness {
 
 /**
  * The Builds section's warnings (R-4.7): every source that holds builds --
- * one whose descriptor declares the `build` kind, or that a drawn row came
+ * one that claims the CI role (#1196, ADR-0029), or that a drawn row came
  * from -- whose credential the reader has to fix. "TeamCity data is 38 min
  * old: sign-in failing." The age is since the sign-in started failing, the
  * moment the status bar dates the failure from. The fix is *Re-enter
@@ -409,7 +413,7 @@ export function staleBuilds(
   now: Date,
 ): Staleness[] {
   const holders = sources.filter(
-    (source) => (source.kinds ?? []).some((kind) => kind.id === "build") || rows.some((row) => row.source_id === source.id),
+    (source) => claims(source, CI) || rows.some((row) => row.source_id === source.id),
   );
   const out: Staleness[] = [];
   for (const source of holders) {

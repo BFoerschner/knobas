@@ -54,6 +54,7 @@
   import { ackAlert, editAsset, editRoute, getAsset, getRoute, monitorRoster, unmonitoredAssets } from "../../ipc/assets";
   import { getEntity, jobReach, listContexts, submitWrite } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
+  import { MONITORING, sourceRoles } from "../roles.svelte";
   import { followWrite } from "../../shell/follow-write";
   import { ago } from "../../shell/time";
   import { push } from "../../shell/toasts.svelte";
@@ -114,7 +115,9 @@
   const now = $derived(fixedNow ?? new Date());
   const tab = $derived<"all" | "unmonitored">(rest[0] === "unmonitored" ? "unmonitored" : "all");
 
-  let roster = $state<MonitorRow[] | null>(null);
+  let read = $state<MonitorRow[] | null>(null);
+  /** The monitors of the sources that claim the monitoring role, never by adapter kind (#1196, ADR-0029). */
+  const roster = $derived(read === null ? null : sourceRoles.keep(MONITORING, read));
   let unwatched = $state<UnmonitoredAsset[] | null>(null);
   let sourceNames = $state<Record<string, string>>({});
   let failed = $state<string | null>(null);
@@ -138,7 +141,7 @@
       if (live) failed = ipcErrorMessage(error);
     };
     ports.monitorRoster().then((rows) => {
-      if (live) roster = rows;
+      if (live) read = rows;
     }, fail);
     ports.unmonitoredAssets().then((rows) => {
       if (live) unwatched = gaps(rows);

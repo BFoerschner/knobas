@@ -26,7 +26,8 @@
 
   /** The reads the status bar needs, injectable so a test needs no bridge. */
   export interface TfShellPorts {
-    listSources: () => Promise<Pick<Summary, "id" | "display_name">[]>;
+    /** The source list: the status bar's names, and each source's role claims (#1196). */
+    listSources: () => Promise<(Pick<Summary, "id" | "display_name"> & Partial<Pick<Summary, "roles">>)[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   }
@@ -57,6 +58,7 @@
   import { parseTfHash, sectionOf } from "./route";
   import { theme as sharedTheme, type Theme } from "./theme.svelte";
   import { sourceReadings } from "./status";
+  import { sourceRoles } from "./roles.svelte";
   import { entityAddress, legacyAddress } from "./address";
   import { isEntityId, keyOf, resolveTicket } from "./job/job";
   import { bridgePorts, type JobPorts } from "./job/ports";
@@ -226,7 +228,10 @@
       void ports
         .listSources()
         .then((rows) => {
-          if (!dead) sources = rows;
+          if (dead) return;
+          sources = rows;
+          // Which sources each surface draws (#1196): the ones claiming its role.
+          sourceRoles.take(rows);
         })
         .catch(() => {});
     readSources();

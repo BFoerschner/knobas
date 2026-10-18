@@ -278,6 +278,11 @@ pub struct SourceSummary {
     /// From the adapter's descriptor template, so the sources view labels a
     /// source's kinds without a hardcoded table (§3a).
     pub kinds: Vec<knobas_source::KindInfo>,
+    /// The roles the adapter claims, from its descriptor template like
+    /// `kinds` (#1196, ADR-0029): what the shell draws each surface for.
+    /// Empty for an adapter that claims none, and for a row whose adapter is
+    /// no longer compiled in.
+    pub roles: Vec<knobas_source::role::RoleClaim>,
 }
 
 /// What *Test connection* found.

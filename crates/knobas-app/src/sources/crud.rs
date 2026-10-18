@@ -342,6 +342,10 @@ pub async fn list(
                 .find(|s| s.source_id == id)
                 .and_then(|s| s.next_run_at),
             last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
+            roles: template
+                .as_ref()
+                .map(|t| t.roles.clone())
+                .unwrap_or_default(),
             kinds: template.map(|t| t.entity_kinds).unwrap_or_default(),
             auth_kind: row.auth_kind.method(),
             id: row.id,
@@ -1153,6 +1157,7 @@ async fn summarize(
             .and_then(|s| s.next_run_at),
         last_run: knobas_sync::run_log::last_finished(pool, &id).await?,
         kinds: template.entity_kinds.clone(),
+        roles: template.roles.clone(),
         auth_kind: row.auth_kind.method(),
         id: row.id,
         adapter_kind: row.adapter_kind,
