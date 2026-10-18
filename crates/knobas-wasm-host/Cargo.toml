@@ -1,0 +1,38 @@
+[package]
+name = "knobas-wasm-host"
+edition.workspace = true
+version.workspace = true
+
+# The WASM host (issue #1198, ADR-0028): one external adapter, a component
+# built against `wit/adapter.wit`, run under wasmtime and handed to the rest of
+# knobas as a `dyn Source`. The engine, the write queue, IPC and the shell see
+# that and nothing else.
+[dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+knobas-core = { path = "../knobas-core" }
+knobas-source = { path = "../knobas-source" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+# The sink pump: `sync` runs the component and hands its items to the engine's
+# sink at once, through a channel of one, so a sink failure reaches the
+# component as the answer to the item it refused.
+tokio = { workspace = true, features = ["sync"] }
+tracing = "0.1"
+# Pinned exactly: 49.0.2 is the newest release older than two weeks
+# (2026-10-02). Without its defaults: the component model, a compiler, and
+# async host calls, which is what the host uses. The two crates are one
+# release and move together.
+wasmtime = { version = "=49.0.2", default-features = false, features = ["async", "component-model", "cranelift", "parallel-compilation", "runtime", "std"] }
+# WASI 0.2 with nothing in it: a component built for `wasm32-wasip2` imports
+# it through Rust's std. No directory is opened, no environment passed, and
+# the context's defaults refuse every socket and every name lookup.
+wasmtime-wasi = { version = "=49.0.2", default-features = false, features = ["p2"] }
+
+[dev-dependencies]
+tokio.workspace = true
+# Components written as text for the version check: one that exports a source
+# at an unsupported major version, one that exports none. Pinned to the copy
+# wasmtime's own tree resolves.
+wat = "=1.258.3"
