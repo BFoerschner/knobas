@@ -2044,3 +2044,104 @@ async fn scratch_databases_are_migrated_copies_of_one_template_and_stay_apart() 
         "the run keeps a migrated template on the server: {templates:?}"
     );
 }
+
+/// The columns that hold an entity id and reach `knobas.entity` by no foreign
+/// key, spelled out: the catalog cannot tell an id from any other text.
+const UNKEYED_ENTITY_IDS: [&str; 13] = [
+    "knobas.activity.entity_id",
+    "knobas.block.entity_id",
+    "knobas.heartbeat.entity_id",
+    "knobas.link_set_hidden.member_id",
+    "knobas.link_set_hidden.ticket_id",
+    "knobas.link_set_member.entity_id",
+    "knobas.start_work_step.ticket_id",
+    "knobas.timer.entity_id",
+    "knobas.worklog.entity_id",
+    "knobas.write_queue.entity_id",
+    "sync.jira_view_member.entity_id",
+    "sync.similar_text_counted.entity_id",
+    "sync.similar_text_top.other_id",
+];
+
+/// Migration `0050` (#1172): every column that holds an entity id compares
+/// bytewise (`collate "C"`), so a probe by id walks its btree with `memcmp`
+/// rather than the database's `strcoll` -- about 0.75 us against 4.7 us on
+/// the responsiveness probe's mirror. "Every" is `knobas.entity.id`, each
+/// column a chain of single-column foreign keys leads from to it, and
+/// [`UNKEYED_ENTITY_IDS`]. A text column a user reads sorted, a title, keeps
+/// the database's collation.
+#[tokio::test]
+async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let keyed: Vec<(String, String)> = sqlx::query_as(
+        "with recursive ids(rel, att) as (
+           select 'knobas.entity'::regclass::oid, a.attnum
+             from pg_attribute a
+            where a.attrelid = 'knobas.entity'::regclass and a.attname = 'id'
+           union
+           select c.conrelid, c.conkey[1]
+             from pg_constraint c
+             join ids on c.confrelid = ids.rel and c.confkey[1] = ids.att
+            where c.contype = 'f' and cardinality(c.conkey) = 1
+         )
+         select n.nspname || '.' || r.relname || '.' || a.attname, co.collname::text
+           from ids
+           join pg_class r on r.oid = ids.rel
+           join pg_namespace n on n.oid = r.relnamespace
+           join pg_attribute a on a.attrelid = ids.rel and a.attnum = ids.att
+           join pg_collation co on co.oid = a.attcollation
+          order by 1",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    // The chain reaches past `entity`: `sync.item`, and the tables keyed by it.
+    for reached in ["knobas.link.to_id", "sync.item_parent.entity_id"] {
+        assert!(
+            keyed.iter().any(|(column, _)| column == reached),
+            "the foreign keys reach {reached}: {keyed:?}"
+        );
+    }
+
+    let unkeyed: Vec<(String, String)> = sqlx::query_as(
+        "select n.nspname || '.' || r.relname || '.' || a.attname, co.collname::text
+           from pg_attribute a
+           join pg_class r on r.oid = a.attrelid
+           join pg_namespace n on n.oid = r.relnamespace
+           join pg_collation co on co.oid = a.attcollation
+          where n.nspname || '.' || r.relname || '.' || a.attname = any($1)
+          order by 1",
+    )
+    .bind(UNKEYED_ENTITY_IDS)
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        unkeyed.len(),
+        UNKEYED_ENTITY_IDS.len(),
+        "every named column exists: {unkeyed:?}"
+    );
+
+    let not_bytewise: Vec<_> = keyed
+        .iter()
+        .chain(&unkeyed)
+        .filter(|(_, collation)| collation != "C")
+        .collect();
+    assert!(
+        not_bytewise.is_empty(),
+        "these hold entity ids and compare by another collation: {not_bytewise:?}"
+    );
+
+    let titles: Vec<String> = sqlx::query_scalar(
+        "select co.collname::text
+           from pg_attribute a join pg_collation co on co.oid = a.attcollation
+          where (a.attrelid, a.attname) in (('sync.item'::regclass, 'title'),
+                                            ('knobas.context'::regclass, 'title'))",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(titles, ["default", "default"], "a title sorts as the user reads");
+}

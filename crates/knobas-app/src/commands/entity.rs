@@ -683,7 +683,7 @@ named as materialized (
      and ip.source_id in (select g.source_id from grouped g)
 ),
 keyed as (
-  select u.entity_id collate "C" as entity_id,
+  select u.entity_id,
          max(u.source_id) as source_id, max(u.kind) as kind,
          max(u.item_updated_at) as item_updated_at, bool_or(u.ruled) as ruled,
          string_agg(u.parent_kind || E'\x1f' || u.name, E'\x1e'
@@ -694,11 +694,11 @@ keyed as (
           union all
           select n.entity_id, null, null, null, false, n.kind, n.name
             from named n) u
-   group by u.entity_id collate "C"
+   group by u.entity_id
 ),
 latest as (
   select distinct on (g.grp) g.entity_id
-    from (select k.entity_id collate "default" as entity_id, k.item_updated_at,
+    from (select k.entity_id, k.item_updated_at,
                  coalesce(case when ((k.source_id, k.kind) in (select g.source_id, g.kind from grouped g)) is true
                                then k.source_id || E'\x1d' || k.kind || E'\x1d' || k.parent_key end,
                           E'\x1c' || k.entity_id) collate "C" as grp
