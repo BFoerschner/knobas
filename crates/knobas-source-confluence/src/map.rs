@@ -108,13 +108,18 @@ pub(crate) const POSITION: &str = "position";
 /// title.
 fn with_position(raw: &serde_json::Value) -> serde_json::Value {
     let mut payload = raw.clone();
-    let position = raw
-        .pointer("/extensions/position")
-        .and_then(serde_json::Value::as_i64);
-    if let (Some(position), Some(record)) = (position, payload.as_object_mut()) {
+    if let (Some(position), Some(record)) = (position_of(raw), payload.as_object_mut()) {
         record.insert(POSITION.to_owned(), position.into());
     }
     payload
+}
+
+/// A record's `extensions.position` where it is a whole number, and `None`
+/// for title order (`"none"`) or a record that carries none. The one reading
+/// of it, shared by the payload and the positions sweep (#1138).
+pub(crate) fn position_of(raw: &serde_json::Value) -> Option<i64> {
+    raw.pointer("/extensions/position")
+        .and_then(serde_json::Value::as_i64)
 }
 
 /// The newest `version.when` on the record: the page's own, or a comment's

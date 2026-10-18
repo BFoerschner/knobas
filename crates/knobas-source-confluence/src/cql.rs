@@ -85,6 +85,49 @@ pub(crate) fn build_mention_cql(
     )
 }
 
+/// `type = page [AND space in (…)] order by created asc` -- the **positions
+/// sweep** (#1138), which reads where every page sits among its siblings.
+///
+/// A drag in Confluence's page tree changes `extensions.position` and nothing
+/// else: no new version, no new `lastmodified` (measured on Data Center 9.2),
+/// so no time bound can reach it and this query has none. It is ordered by
+/// `created` rather than `lastmodified` because it pages by offset, and
+/// `created` is the one order an edit made mid-sweep cannot shift a row in.
+pub(crate) fn build_positions_cql(cfg: &ConfluenceConfig) -> String {
+    format!(
+        "{} order by created asc",
+        scoped("type = page", cfg).join(" AND ")
+    )
+}
+
+/// `type = page AND id in (…)` -- the pages the positions sweep found moved,
+/// read again whole. The ids come from the server's own answer; any that is
+/// not all digits is dropped rather than written into a query.
+pub(crate) fn build_ids_cql(ids: &[&str]) -> String {
+    let list = ids
+        .iter()
+        .filter(|id| !id.is_empty() && id.bytes().all(|b| b.is_ascii_digit()))
+        .copied()
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("type = page AND id in ({list})")
+}
+
+/// The scope, then the space list when one is configured.
+fn scoped(scope: &str, cfg: &ConfluenceConfig) -> Vec<String> {
+    let mut clauses = vec![scope.to_owned()];
+    if !cfg.spaces.is_empty() {
+        let list = cfg
+            .spaces
+            .iter()
+            .map(|s| format!("\"{s}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        clauses.push(format!("space in ({list})"));
+    }
+    clauses
+}
+
 /// One CQL string: the scope, then the two clauses every walk shares, then the
 /// ordering.
 ///
@@ -98,16 +141,7 @@ fn render_query(
     offset_secs: i32,
     order: Order,
 ) -> String {
-    let mut clauses = vec![scope.to_owned()];
-    if !cfg.spaces.is_empty() {
-        let list = cfg
-            .spaces
-            .iter()
-            .map(|s| format!("\"{s}\""))
-            .collect::<Vec<_>>()
-            .join(", ");
-        clauses.push(format!("space in ({list})"));
-    }
+    let mut clauses = scoped(scope, cfg);
     if let Some(since) = since {
         clauses.push(format!(
             "lastmodified >= \"{}\"",
@@ -243,6 +277,34 @@ mod tests {
             build_mention_cql(&cfg(json!({})), Some(since), 0),
             "mention = currentUser() AND type in (page, comment) AND lastmodified >= \
              \"2026-08-22 10:38\" order by lastmodified asc"
+        );
+    }
+
+    /// The positions sweep (#1138): the page walk's scope, no time bound, and
+    /// ordered by the field no edit moves.
+    #[test]
+    fn the_positions_sweep_is_the_scope_unbounded_in_creation_order() {
+        assert_eq!(
+            build_positions_cql(&cfg(json!({ "spaces": ["ENG", "OPS"] }))),
+            "type = page AND space in (\"ENG\", \"OPS\") order by created asc"
+        );
+        assert_eq!(
+            build_positions_cql(&cfg(json!({}))),
+            "type = page order by created asc"
+        );
+    }
+
+    /// The re-read names its pages by id, and only ids that are numbers reach
+    /// the query.
+    #[test]
+    fn the_re_read_names_its_pages_by_numeric_id() {
+        assert_eq!(
+            build_ids_cql(&["360460", "360461"]),
+            "type = page AND id in (360460, 360461)"
+        );
+        assert_eq!(
+            build_ids_cql(&["360460", "1) OR (type = blogpost", ""]),
+            "type = page AND id in (360460)"
         );
     }
 

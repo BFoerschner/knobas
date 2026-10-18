@@ -13,15 +13,21 @@
 //!    corpus was when the run started (the ceiling), and which UTC offset this
 //!    instance renders timestamps in (the zone every CQL literal is read in).
 //! 3. Read the cursor. Unreadable or absent ⇒ full sync (contract §4.1).
-//! 4. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
+//! 4. **The positions sweep** ([`SyncRun::positions_sweep`], incremental runs
+//!    only): every page's place among its siblings (#1138). A reorder makes
+//!    no new version, so step 5 never sees it. Sent before the walk, so the
+//!    places the cursor records are never newer than what the mirror holds.
+//! 5. Query `lastmodified >= watermark − 2 minutes order by lastmodified asc`,
 //!    following `_links.next` until there is none.
-//! 5. Drop what the overlap re-delivered, complete the comments the server did
+//! 6. Drop what the overlap re-delivered, complete the comments the server did
 //!    not expand, look up the users their mentions name ([`crate::users`]),
 //!    push the rest into the sink.
-//! 6. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
+//! 7. **The mention walk** ([`SyncRun::mentions`]): one more query, `mention =
 //!    currentUser() AND type in (page, comment)` over the same window, whose
-//!    results are resolved to the pages they are on and pushed too.
-//! 7. If nothing was pushed, hand back the cursor byte-identically. Otherwise
+//!    results are resolved to the pages they are on and pushed too. Then the
+//!    pages whose swept place differs from the cursor's record, less those
+//!    already pushed, are read again whole and pushed.
+//! 8. If nothing was pushed, hand back the cursor byte-identically. Otherwise
 //!    advance the watermark to `min(max(previous, newest emitted), ceiling)`.
 //!
 //! # Why the mention walk is a second query and not a wider first one
@@ -93,9 +99,9 @@ use chrono::{DateTime, Utc};
 use knobas_source::{Sink, SourceError};
 
 use crate::ConfluenceConfig;
-use crate::api::{ConfluenceApi, EXPAND, MENTION_EXPAND};
-use crate::cql::{Order, build_cql, build_mention_cql};
-use crate::cursor::{ConfluenceCursor, Seen};
+use crate::api::{ConfluenceApi, EXPAND, MENTION_EXPAND, POSITIONS_EXPAND};
+use crate::cql::{Order, build_cql, build_ids_cql, build_mention_cql, build_positions_cql};
+use crate::cursor::{ConfluenceCursor, Positions, Seen};
 use crate::map;
 use crate::model::RawContent;
 use crate::storage::Account;
@@ -123,6 +129,11 @@ const MAX_PAGES: u32 = 5_000;
 /// not body-expanded content, and the cap that forces fifty on a search does
 /// not apply. A page with a long discussion then costs one request, not four.
 const COMMENT_PAGE_SIZE: u32 = 100;
+
+/// How many rows one request of the positions sweep asks for: Data Center
+/// 9.2's own cap on a content search that expands no body (it answers
+/// `"limit": 200` to a request for 1000, measured for #1138).
+const SWEEP_PAGE_SIZE: u32 = 200;
 
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn ConfluenceApi + 'a),
@@ -197,6 +208,16 @@ impl SyncRun<'_> {
         let previous = cursor.as_deref().and_then(ConfluenceCursor::parse);
         let since = previous.as_ref().and_then(|c| c.since(offset));
         let cql = build_cql(self.cfg, since, offset, Order::Ascending);
+        // The positions sweep goes **before** the walk, so the places the
+        // cursor records are never newer than the ones the mirror received.
+        // Swept after, a drag made once the walk had delivered a page would be
+        // recorded as delivered, and that page is not re-read: the mirror
+        // would keep the old place for good. Swept before, the same drag only
+        // shows up as a difference on the next run, which re-reads the page.
+        let swept = match previous {
+            Some(_) => Some(self.positions_sweep().await?),
+            None => None,
+        };
 
         let mut emitted: usize = 0;
         // The entity ids this run has already handed to the sink, so the
@@ -210,6 +231,9 @@ impl SyncRun<'_> {
         // Seeded from the previous position, which is what makes the new one
         // `max(previous, newest emitted)` rather than "newest emitted".
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.modified_to);
+        // Every walked page's place among its siblings. A full sync walks
+        // every page, so this is the whole map and it needs no sweep (#1138).
+        let mut walked_positions = Positions::new();
 
         let mut next: Option<String> = None;
         let mut pages: u32 = 0;
@@ -230,6 +254,9 @@ impl SyncRun<'_> {
                         n: number,
                         u,
                     });
+                }
+                if let Some(position) = map::position_of(&raw.raw) {
+                    walked_positions.insert(raw.content.id.clone(), position);
                 }
                 // The overlap exists so nothing is missed; this is what keeps
                 // it from also meaning "everything arrives twice".
@@ -281,14 +308,44 @@ impl SyncRun<'_> {
             )
             .await?;
 
+        // The places among siblings (#1138). A full sync read them off the
+        // walk; an incremental run sweeps them, because a reorder makes no
+        // new version and no `lastmodified` bound reaches it.
+        let positions = match swept {
+            None => walked_positions,
+            Some(swept) => {
+                let known = previous.as_ref().and_then(|c| c.positions.as_ref());
+                let moved = ids_to_reread(known, &swept, &delivered);
+                emitted += self
+                    .reread(&moved, me, &mut delivered, &mut users, sink)
+                    .await?;
+                swept
+                    .into_iter()
+                    .filter_map(|(id, position)| position.map(|p| (id, p)))
+                    .collect()
+            }
+        };
+
         match (emitted, watermark) {
             // Battery clause 2: nothing happened, so the position did not
             // move. Returning the *input string* rather than a re-encoded
-            // struct makes that byte-identical by construction.
-            (0, _) => Ok(cursor.unwrap_or_else(|| ConfluenceCursor::empty(offset).encode())),
+            // struct makes that byte-identical by construction. A placed page
+            // deleted since stays in the input's `positions` until the next
+            // run that delivers something; it costs a few bytes, never a
+            // request.
+            (0, _) => Ok(cursor.unwrap_or_else(|| {
+                ConfluenceCursor::empty(offset)
+                    .with_positions(positions)
+                    .encode()
+            })),
             // Items arrived, but neither they nor the previous cursor carry a
             // readable `version.when`; advancing to anything would be a guess.
-            (_, None) => Ok(cursor.unwrap_or_else(|| ConfluenceCursor::empty(offset).encode())),
+            // The places are recorded all the same, or the pages just re-read
+            // would be re-read on every run.
+            (_, None) => Ok(previous
+                .unwrap_or_else(|| ConfluenceCursor::empty(offset))
+                .with_positions(positions)
+                .encode()),
             (_, Some(w)) => {
                 // The ceiling clamp. An edit made *during* the walk carries a
                 // stamp later than anything the run saw at its start;
@@ -308,9 +365,101 @@ impl SyncRun<'_> {
                 // recent history on every poll and never settles.
                 let floor = previous.as_ref().and_then(|c| c.modified_to);
                 let clamped = floor.map_or(clamped, |previous| clamped.max(previous));
-                Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window).encode())
+                Ok(ConfluenceCursor::advanced(clamped, offset, &seen_in_window)
+                    .with_positions(positions)
+                    .encode())
             }
         }
+    }
+
+    /// The positions sweep (#1138): every page in scope, with its place among
+    /// its siblings (`None` for title order) and nothing else.
+    ///
+    /// **Why every run reads it.** Moving a page among its siblings changes
+    /// `extensions.position` and nothing else on Data Center 9.2: not the
+    /// page's version, not its `lastmodified`, not its parent's. No bounded
+    /// query reaches it and the instance offers no change feed an ordinary
+    /// account may read (`rest/api/audit` is an administrator's). So the
+    /// bound on a reorder reaching the Docs tree is one sync interval, and the
+    /// price is `ceil(pages / 200)` body-less requests per incremental run.
+    async fn positions_sweep(&self) -> Result<Vec<(String, Option<i64>)>, SourceError> {
+        let cql = build_positions_cql(self.cfg);
+        let mut swept = Vec::new();
+        let mut next: Option<String> = None;
+        let mut requests: u32 = 0;
+        loop {
+            let page = match &next {
+                None => {
+                    self.api
+                        .search(&cql, SWEEP_PAGE_SIZE, POSITIONS_EXPAND)
+                        .await?
+                }
+                Some(link) => self.api.follow(link).await?,
+            };
+            for raw in &page.results {
+                swept.push((raw.content.id.clone(), map::position_of(&raw.raw)));
+            }
+            let Some(link) = page.links.next else { break };
+            requests += 1;
+            if requests >= MAX_PAGES {
+                return Err(SourceError::protocol(format!(
+                    "Confluence kept offering another page of positions after {MAX_PAGES}; \
+                     refusing to report a partial walk as a completed sync."
+                )));
+            }
+            next = Some(link);
+        }
+        Ok(swept)
+    }
+
+    /// Read the pages the sweep found moved again, whole, and push them.
+    /// Answers how many it pushed.
+    ///
+    /// Through a search by id rather than one request per page: a reorder
+    /// renumbers every sibling, so the pages come in groups. They do not move
+    /// the watermark -- a reorder is not an edit, and their `version.when` is
+    /// as old as it was -- and they are not `seen`, for the same reason.
+    async fn reread(
+        &self,
+        moved: &[&str],
+        me: Option<Account<'_>>,
+        delivered: &mut std::collections::BTreeSet<String>,
+        users: &mut Directory,
+        sink: &mut (dyn Sink + Send),
+    ) -> Result<usize, SourceError> {
+        let mut emitted = 0;
+        let size = usize::try_from(self.cfg.page_size).unwrap_or(1).max(1);
+        for group in moved.chunks(size) {
+            let cql = build_ids_cql(group);
+            let mut next: Option<String> = None;
+            let mut requests: u32 = 0;
+            loop {
+                let page = match &next {
+                    None => self.api.search(&cql, self.cfg.page_size, EXPAND).await?,
+                    Some(link) => self.api.follow(link).await?,
+                };
+                for mut raw in page.results {
+                    if !delivered.insert(raw.content.id.clone()) {
+                        continue;
+                    }
+                    self.complete(&mut raw).await?;
+                    users.annotate(self.api, &mut raw).await;
+                    let item = map::to_sync_item(self.source_id, self.base_url, &raw, me);
+                    sink.item(item).await?;
+                    emitted += 1;
+                }
+                let Some(link) = page.links.next else { break };
+                requests += 1;
+                if requests >= MAX_PAGES {
+                    return Err(SourceError::protocol(format!(
+                        "Confluence kept offering another page of re-read pages after \
+                         {MAX_PAGES}; refusing to report a partial walk as a completed sync."
+                    )));
+                }
+                next = Some(link);
+            }
+        }
+        Ok(emitted)
     }
 
     /// The mention walk: every page and comment that names this account since
@@ -476,6 +625,27 @@ impl SyncRun<'_> {
     }
 }
 
+/// The swept pages whose place differs from the one the mirror last received,
+/// less the ones this run already delivered fresh (#1138).
+///
+/// With no recorded places at all -- a cursor from before #1138 -- every
+/// placed page counts as moved, since nothing says it did not.
+fn ids_to_reread<'s>(
+    known: Option<&Positions>,
+    swept: &'s [(String, Option<i64>)],
+    delivered: &std::collections::BTreeSet<String>,
+) -> Vec<&'s str> {
+    swept
+        .iter()
+        .filter(|(id, position)| match known {
+            Some(known) => known.get(id).copied() != *position,
+            None => position.is_some(),
+        })
+        .map(|(id, _)| id.as_str())
+        .filter(|id| !delivered.contains(*id))
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -519,6 +689,10 @@ mod tests {
         /// Pages whose `version.when` moves forward the moment the walk asks
         /// for its second page -- the mid-run edit the ceiling exists for.
         edit_mid_walk: Mutex<Option<(String, String)>>,
+        /// Places among siblings that change the moment the mention walk is
+        /// asked for: a drag made after the page walk has delivered the page
+        /// (#1138).
+        reorder_on_mention: Mutex<Option<Vec<(String, i64)>>>,
         /// The users `rest/api/user?key=` knows, by key (#953); any other key
         /// answers `404`.
         users: std::collections::BTreeMap<String, Value>,
@@ -536,6 +710,7 @@ mod tests {
                 fault: None,
                 identity_fault: None,
                 edit_mid_walk: Mutex::new(None),
+                reorder_on_mention: Mutex::new(None),
                 users: std::collections::BTreeMap::new(),
                 user_fault: None,
             }
@@ -576,8 +751,22 @@ mod tests {
             let bound = cql
                 .split_once("lastmodified >= \"")
                 .map(|(_, rest)| rest.split('"').next().unwrap_or_default().to_owned());
+            // The re-read of reordered pages (#1138) names them by id.
+            let named: Option<Vec<String>> = cql.split_once("id in (").map(|(_, rest)| {
+                rest.split(')')
+                    .next()
+                    .unwrap_or_default()
+                    .split(',')
+                    .map(|id| id.trim().to_owned())
+                    .collect()
+            });
             let mut rows: Vec<Value> = pages
                 .into_iter()
+                .filter(|p| {
+                    named
+                        .as_ref()
+                        .is_none_or(|ids| ids.iter().any(|id| p["id"] == json!(id)))
+                })
                 .filter(|p| match &bound {
                     // The fake reads the literal as UTC, which is the zone
                     // every timestamp in these tests is written in.
@@ -658,6 +847,16 @@ mod tests {
                 cql.contains("type = page") || is_mention_query(cql),
                 "every query this adapter sends is the page walk's or the mention walk's: {cql}"
             );
+            if is_mention_query(cql)
+                && let Some(places) = self.reorder_on_mention.lock().unwrap().take()
+            {
+                let mut pages = self.pages.lock().unwrap();
+                for (id, position) in places {
+                    if let Some(p) = pages.iter_mut().find(|p| p["id"] == json!(id)) {
+                        p["extensions"] = json!({ "position": position });
+                    }
+                }
+            }
             let (rows, more) = self.matching(cql, expand, 0, limit as usize);
             Ok(envelope(
                 rows,
@@ -983,6 +1182,144 @@ mod tests {
             .unwrap();
         assert!(idle.is_empty(), "{:?}", ids(&idle));
         assert_eq!(third, second, "byte-identical");
+    }
+
+    /// A drag in Confluence's page tree, as the server records it: the
+    /// siblings gain `extensions.position` and nothing else -- no new version,
+    /// no new `lastmodified` (measured on Data Center 9.2, #1138).
+    fn reorder(fake: &Fake, positions: &[(&str, i64)]) {
+        let mut pages = fake.pages.lock().unwrap();
+        for (id, position) in positions {
+            let page = pages
+                .iter_mut()
+                .find(|p| p["id"] == json!(id))
+                .expect("a page the corpus holds");
+            page["extensions"] = json!({ "position": position });
+        }
+    }
+
+    fn sorted(mut ids: Vec<String>) -> Vec<String> {
+        ids.sort();
+        ids
+    }
+
+    /// **A reorder alone reaches the next incremental run** (#1138). Moving a
+    /// page among its siblings makes no new version, so the page walk's
+    /// `lastmodified` bound never returns the siblings; the positions sweep
+    /// does, and the siblings whose place changed are delivered again, whole,
+    /// with their new `position`. An idle poll after that is idle.
+    #[tokio::test]
+    async fn a_reorder_alone_reaches_the_next_incremental_run() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+
+        reorder(&fake, &[("102", 0), ("101", 1)]);
+        let (items, second) = run(&fake, &cfg(json!({})), Some(first.clone()))
+            .await
+            .unwrap();
+        assert_eq!(sorted(ids(&items)), vec!["101", "102"]);
+        for item in &items {
+            let expected = if item.entity.key == "102" { 0 } else { 1 };
+            assert_eq!(
+                item.payload["position"],
+                json!(expected),
+                "{}",
+                item.entity.key
+            );
+            assert!(
+                item.payload["body"]["storage"]["value"].is_string(),
+                "the page is delivered whole, not as a positions row"
+            );
+        }
+        assert_eq!(
+            watermark(&second),
+            watermark(&first),
+            "a reorder is not an edit, and does not move the watermark"
+        );
+
+        let (idle, third) = run(&fake, &cfg(json!({})), Some(second.clone()))
+            .await
+            .unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert_eq!(third, second, "byte-identical");
+
+        // A second drag, among siblings that already had places.
+        reorder(&fake, &[("101", 0), ("102", 1)]);
+        let (items, _) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
+        assert_eq!(sorted(ids(&items)), vec!["101", "102"]);
+    }
+
+    /// A page the walk delivers and that is dragged before the run ends still
+    /// reaches its new place on the next run. The cursor has to record the
+    /// place the mirror received, never a newer one: a sweep sent after the
+    /// walk would record the drag as already delivered, and the delivered
+    /// page is not re-read, so the mirror would keep the old place for good.
+    #[tokio::test]
+    async fn a_drag_after_the_walk_delivered_the_page_reaches_the_next_run() {
+        let fake = Fake::new(a_corpus());
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+
+        for p in fake.pages.lock().unwrap().iter_mut() {
+            if p["id"] == json!("104") {
+                p["version"]["when"] = json!("2026-08-22T10:50:00.000Z");
+                p["version"]["number"] = json!(4);
+            }
+        }
+        *fake.reorder_on_mention.lock().unwrap() = Some(vec![("104".to_owned(), 0)]);
+        let (edited, second) = run(&fake, &cfg(json!({})), Some(first)).await.unwrap();
+        assert_eq!(ids(&edited), vec!["104"]);
+        assert_eq!(
+            edited[0].payload["position"],
+            json!(null),
+            "delivered before the drag"
+        );
+
+        let (items, _) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
+        assert_eq!(
+            ids(&items),
+            vec!["104"],
+            "the drag is re-read on the next run"
+        );
+        assert_eq!(items[0].payload["position"], json!(0));
+    }
+
+    /// A full sync reads every page's place off the walk itself, so it sends
+    /// no positions sweep and re-reads nothing; the next idle poll's sweep
+    /// finds the places it recorded.
+    #[tokio::test]
+    async fn a_full_sync_records_the_places_without_a_sweep() {
+        let fake = Fake::new(a_corpus());
+        reorder(&fake, &[("102", 0), ("101", 1)]);
+        let (items, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        assert_eq!(items.len(), 5);
+        assert!(
+            !fake.calls().iter().any(|c| c.contains("order by created")),
+            "{:?}",
+            fake.calls()
+        );
+        let (idle, again) = run(&fake, &cfg(json!({})), Some(first.clone()))
+            .await
+            .unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
+        assert_eq!(again, first);
+    }
+
+    /// A cursor written before #1138 carries no places. Its first run cannot
+    /// tell a reorder from none, so it re-reads every page that has a place,
+    /// once, rather than leaving them as stale as they may already be.
+    #[tokio::test]
+    async fn a_cursor_without_places_re_reads_the_placed_pages_once() {
+        let fake = Fake::new(a_corpus());
+        reorder(&fake, &[("102", 0), ("101", 1)]);
+        let (_, first) = run(&fake, &cfg(json!({})), None).await.unwrap();
+        let mut old: Value = serde_json::from_str(&first).unwrap();
+        old.as_object_mut().unwrap().remove("positions");
+        let (items, second) = run(&fake, &cfg(json!({})), Some(old.to_string()))
+            .await
+            .unwrap();
+        assert_eq!(sorted(ids(&items)), vec!["101", "102"]);
+        let (idle, _) = run(&fake, &cfg(json!({})), Some(second)).await.unwrap();
+        assert!(idle.is_empty(), "{:?}", ids(&idle));
     }
 
     /// **The ceiling.** The watermark may never pass the newest position the
@@ -1334,9 +1671,10 @@ mod tests {
     #[tokio::test]
     async fn the_configured_space_list_reaches_every_query_the_run_sends() {
         let fake = Fake::new(a_corpus());
-        run(&fake, &cfg(json!({ "spaces": ["ENG"] })), None)
-            .await
-            .unwrap();
+        let scoped = cfg(json!({ "spaces": ["ENG"] }));
+        let (_, cursor) = run(&fake, &scoped, None).await.unwrap();
+        // An incremental run adds the positions sweep (#1138).
+        run(&fake, &scoped, Some(cursor)).await.unwrap();
         let searches: Vec<String> = fake
             .calls()
             .into_iter()
@@ -1344,8 +1682,9 @@ mod tests {
             .collect();
         assert_eq!(
             searches.len(),
-            3,
-            "the probe, the page walk and the mention walk: {searches:?}"
+            7,
+            "the probe, the page walk and the mention walk, twice, and one positions sweep: \
+             {searches:?}"
         );
         for search in &searches {
             assert!(
