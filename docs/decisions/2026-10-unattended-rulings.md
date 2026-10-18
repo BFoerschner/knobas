@@ -5466,3 +5466,9 @@ Implementer (PR for #1172). ADR-0027.
   same seed in `held_by_any_context!` is unchanged (not slow on the probe). **Reversing:** low.
 - **A sort by id becomes bytewise.** No user-visible sort is by id alone; ids are tiebreakers
   and walk orders. It now agrees with Rust's `str` order. **Reversing:** n/a.
+
+## v2.0.0-rc1 — the release candidate's MSI version (2026-10-18)
+
+- **Fork: which MSI version rc1 takes.** Ruling: 2.0.6, continuing the milestone sequence
+  (m6 was 2.0.5; the rule is numeric and must rise). The final v2.0.0 must set it above 2.0.6
+  (e.g. 2.1.0). **Reversing:** one line before the final release.
