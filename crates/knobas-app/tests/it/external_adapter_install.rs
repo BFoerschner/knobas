@@ -137,6 +137,26 @@ async fn an_artifact_outside_the_release_directory_is_refused() {
     );
 }
 
+/// Every other way out of the release directory, or into a stream of a
+/// file: an absolute path, a subdirectory, a Windows drive-relative path,
+/// a backslash, an NTFS stream, and the directory names.
+#[tokio::test]
+async fn an_artifact_file_that_is_not_a_bare_name_is_refused() {
+    for file in [
+        "/etc/fixture.wasm",
+        "sub/fixture.wasm",
+        "C:fixture.wasm",
+        "..\\fixture.wasm",
+        "fixture.wasm:stream",
+        ".",
+        "..",
+        "",
+    ] {
+        let message = refusal_of(|m| m["artifact"]["file"] = file.into()).await;
+        says(&message, "must be a file name beside the manifest");
+    }
+}
+
 #[tokio::test]
 async fn an_interface_version_this_knobas_cannot_host_is_refused() {
     let message = refusal_of(|m| m["interface_version"] = "2.0.0".into()).await;
@@ -410,6 +430,55 @@ async fn an_installed_fixture_is_offered_syncs_and_survives_a_restart() {
         add_and_sync(&pool, &connector, &restarted, "surveys-two").await,
         3
     );
+}
+
+/// The restart through the app's own bring-up (`sources::bring_up`, the body
+/// of `sources::start` below the database handle), not a hand-made call to
+/// `load_installed`: a bring-up that skipped the load would leave an
+/// installed adapter missing after every restart.
+#[tokio::test(flavor = "multi_thread")]
+async fn bring_up_loads_the_installed_adapters_before_the_scheduler_starts() {
+    let (pool, connector) = scratch("install-bring-up").await;
+    let store = tempfile::tempdir().unwrap();
+    install_fixture(&pool, &Registry::default(), store.path()).await;
+
+    let app = tauri::test::mock_builder()
+        .build(tauri::test::mock_context(tauri::test::noop_assets()))
+        .expect("a mock app");
+    let handle = app.handle().clone();
+    let sync_pool = connector.pool(2).await.unwrap();
+    let deps = knobas_app::sources::BringUp {
+        pool,
+        sync_pool,
+        connections: connector,
+        secrets: std::sync::Arc::new(knobas_secrets::MemoryStore::new()),
+        registry: Registry::default(),
+        store: store.path().to_path_buf(),
+    };
+    // `block_in_place` first: `block_on` from inside the test's runtime panics.
+    tokio::task::block_in_place(|| {
+        tauri::async_runtime::block_on(async move {
+            let state = knobas_app::sources::bring_up(&handle, deps)
+                .await
+                .expect("bring-up over the scratch database");
+            let built = state
+                .registry
+                .build(knobas_source::instance::SourceInstance {
+                    id: "surveys".to_owned(),
+                    kind: "wasm-fixture".to_owned(),
+                    display_name: "Harbour surveys".to_owned(),
+                    base_url: "https://surveys.example".to_owned(),
+                    auth: Some(knobas_source::AuthMethod::Pat),
+                    secret: None,
+                    account: None,
+                    config: serde_json::json!({ "fault": "none" }),
+                });
+            state.scheduler.shutdown().await;
+            if let Err(error) = built {
+                panic!("the scheduler's registry must hold the installed fixture: {error}");
+            }
+        });
+    });
 }
 
 #[tokio::test]

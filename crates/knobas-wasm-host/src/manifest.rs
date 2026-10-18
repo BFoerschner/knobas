@@ -151,7 +151,10 @@ impl Manifest {
         }
         manifest.interface()?;
         let file = &manifest.artifact.file;
-        if file.is_empty() || file.contains(['/', '\\']) || file == "." || file == ".." {
+        // One normal component, and no `:`: on Windows `C:x.wasm` is a
+        // drive-relative path, which `Path::join` would follow off the release.
+        let bare = std::path::Path::new(file).file_name() == Some(std::ffi::OsStr::new(file));
+        if !bare || file.contains(['/', '\\', ':', '\0']) {
             return Err(Refusal::Manifest(format!(
                 "artifact.file {file:?} must be a file name beside the manifest"
             )));
