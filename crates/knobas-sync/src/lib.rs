@@ -1213,7 +1213,7 @@ mod tests {
         let mut tx = pool.begin().await.unwrap();
         let mid_run = {
             let kinds = HashSet::from(["ticket".to_owned()]);
-            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds);
+            let mut sink = PgSink::new(&mut tx, source_id.clone(), kinds, None);
             for n in 0..BATCH {
                 sink.item(unit_item(&source_id, n)).await.unwrap();
             }
