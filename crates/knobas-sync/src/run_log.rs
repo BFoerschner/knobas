@@ -305,12 +305,18 @@ pub async fn finish(
     Ok(())
 }
 
-/// How many runs per source the log keeps.
+/// How many runs per source the log keeps, at least.
 ///
-/// Older ones are pruned after a finished run: the log is a diagnostic, not an
-/// archive, and a five-minute schedule would otherwise reach 288 rows per
-/// source per day for ever.
+/// Older ones are pruned after a finished run, unless they finished inside
+/// [`KEEP_WINDOW_SECS`]: the log is a diagnostic, not an archive, and a
+/// five-minute schedule would otherwise reach 288 rows per source per day for
+/// ever.
 pub const KEEP_RUNS: i64 = 200;
+
+/// A run that finished this recently is kept whatever the count says: a source
+/// polled every 20 s makes 4,320 runs a day, and yesterday's are the ones
+/// diagnosis wants. Whichever of this and [`KEEP_RUNS`] keeps more wins.
+pub const KEEP_WINDOW_SECS: i64 = 24 * 60 * 60;
 
 /// One row of the sync log, as the diagnostics view reads it.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -504,7 +510,8 @@ pub async fn failures_since_last_ok(
     Ok(n)
 }
 
-/// Keep the newest `keep` runs for one source; return how many went.
+/// Keep one source's newest `keep` runs **or** those finished within the last
+/// `window_secs` seconds, whichever keeps more; return how many went.
 ///
 /// A `not in` over a bounded subquery rather than an id-arithmetic trick: the
 /// keep set is at most a few hundred ids, `sync_run_source_idx` serves the
@@ -512,10 +519,16 @@ pub async fn failures_since_last_ok(
 ///
 /// # Errors
 /// [`sqlx::Error`] if the delete fails.
-pub async fn prune(pool: &sqlx::PgPool, source_id: &str, keep: i64) -> Result<u64, sqlx::Error> {
+pub async fn prune(
+    pool: &sqlx::PgPool,
+    source_id: &str,
+    keep: i64,
+    window_secs: i64,
+) -> Result<u64, sqlx::Error> {
     let done = sqlx::query(
         "delete from knobas.sync_run
           where source_id = $1
+            and not (finished_at > now() - $3 * interval '1 second')
             and id not in (
                   select id from knobas.sync_run
                    where source_id = $1
@@ -524,6 +537,7 @@ pub async fn prune(pool: &sqlx::PgPool, source_id: &str, keep: i64) -> Result<u6
     )
     .bind(source_id)
     .bind(keep)
+    .bind(window_secs)
     .execute(pool)
     .await?;
     Ok(done.rows_affected())

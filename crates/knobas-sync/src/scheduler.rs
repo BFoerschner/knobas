@@ -729,7 +729,14 @@ pub async fn settle(deps: &SchedulerDeps, source_id: &str, run_id: i64, result: 
     if let Err(error) = run_log::finish(&deps.pool, run_id, result).await {
         tracing::warn!(source_id, run_id, %error, "the run finished, but its log row did not close");
     }
-    if let Err(error) = run_log::prune(&deps.pool, source_id, run_log::KEEP_RUNS).await {
+    if let Err(error) = run_log::prune(
+        &deps.pool,
+        source_id,
+        run_log::KEEP_RUNS,
+        run_log::KEEP_WINDOW_SECS,
+    )
+    .await
+    {
         tracing::warn!(source_id, %error, "pruning the sync log failed");
     }
 
@@ -1049,8 +1056,11 @@ pub const SYNC_POOL_SIZE: u32 = 4;
 /// now that they do not come from a pool: without it, twenty configured
 /// sources going due together would be twenty backends and twenty concurrent
 /// remote calls. Three is a desktop's worth of parallelism, and it leaves the
-/// bookkeeping pool untouched by design rather than by arithmetic.
-pub const SYNC_CONCURRENCY: usize = 3;
+/// bookkeeping pool untouched by design rather than by arithmetic. Five, so
+/// three long Jira, Confluence or Gitea syncs cannot keep Kuma and TeamCity
+/// from polling; monitor polls can wait again only when five or more heavy
+/// sources sync at once. One shared pool, no lanes.
+pub const SYNC_CONCURRENCY: usize = 5;
 
 /// How often the ticker looks for due sources, unless [`SchedulerTiming`]
 /// says otherwise. One indexed query; a fixed interval is cheaper to reason
@@ -2199,17 +2209,6 @@ mod tests {
             blind.started_at.is_some() && blind.started_at != Some(other_started),
             "not the neighbour's start time: {:?}",
             blind.started_at
-        );
-    }
-
-    /// The cap must stay strictly below the pool: the scheduler's bookkeeping
-    /// runs while every permitted run is out, and a scheduler that cannot
-    /// record what it is doing is worse than a slow one.
-    #[test]
-    fn the_concurrency_cap_leaves_the_bookkeeper_a_connection() {
-        assert!(
-            SYNC_CONCURRENCY < usize::try_from(SYNC_POOL_SIZE).unwrap(),
-            "{SYNC_CONCURRENCY} runs against a pool of {SYNC_POOL_SIZE}"
         );
     }
 

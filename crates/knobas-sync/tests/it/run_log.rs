@@ -213,7 +213,7 @@ async fn the_log_is_pruned_to_the_newest_runs_per_source() {
         .unwrap();
     finish_ok(&pool, keeper, 0).await;
 
-    let removed = run_log::prune(&pool, &id, 3).await.unwrap();
+    let removed = run_log::prune(&pool, &id, 3, 0).await.unwrap();
     assert_eq!(removed, 4);
     let left = run_log::list(&pool, Some(&id), 100).await.unwrap();
     let surviving: Vec<i64> = left.iter().map(|r| r.id).collect();
@@ -230,10 +230,97 @@ async fn the_log_is_pruned_to_the_newest_runs_per_source() {
     );
 
     // Idempotent: pruning again removes nothing.
-    assert_eq!(run_log::prune(&pool, &id, 3).await.unwrap(), 0);
+    assert_eq!(run_log::prune(&pool, &id, 3, 0).await.unwrap(), 0);
     // And a keep larger than the history is not a delete-everything.
-    assert_eq!(run_log::prune(&pool, &id, 100).await.unwrap(), 0);
+    assert_eq!(run_log::prune(&pool, &id, 100, 0).await.unwrap(), 0);
     assert_eq!(run_log::list(&pool, Some(&id), 100).await.unwrap().len(), 3);
+}
+
+/// `n` finished runs for `id`, the first `old` of them backdated to `age_hours`
+/// ago (oldest first, a minute apart), the rest finished just now. Returns the
+/// ids oldest first.
+async fn seed_runs(pool: &PgPool, id: &str, old: usize, recent: usize, age_hours: i64) -> Vec<i64> {
+    let mut runs = Vec::new();
+    for i in 0..(old + recent) {
+        let r = run_log::start(pool, id, SyncTrigger::Schedule)
+            .await
+            .unwrap();
+        finish_ok(pool, r, 0).await;
+        if i < old {
+            let back = age_hours * 60 + i64::try_from(old - i).unwrap();
+            sqlx::query(
+                "update knobas.sync_run
+                    set started_at = now() - $2 * interval '1 minute',
+                        finished_at = now() - $2 * interval '1 minute'
+                  where id = $1",
+            )
+            .bind(r)
+            .bind(back)
+            .execute(pool)
+            .await
+            .unwrap();
+        }
+        runs.push(r);
+    }
+    runs
+}
+
+async fn surviving(pool: &PgPool, id: &str) -> Vec<i64> {
+    let mut ids: Vec<i64> = run_log::list(pool, Some(id), 10_000)
+        .await
+        .unwrap()
+        .iter()
+        .map(|r| r.id)
+        .collect();
+    ids.reverse();
+    ids
+}
+
+#[tokio::test]
+async fn a_busy_source_keeps_every_run_of_the_last_day() {
+    let pool = pool().await;
+    let id = unique("run");
+    let runs = seed_runs(&pool, &id, 0, 205, 0).await;
+    let removed = run_log::prune(&pool, &id, run_log::KEEP_RUNS, run_log::KEEP_WINDOW_SECS)
+        .await
+        .unwrap();
+    assert_eq!(removed, 0, "205 runs inside 24 h all stay");
+    assert_eq!(surviving(&pool, &id).await, runs);
+}
+
+#[tokio::test]
+async fn a_quiet_source_keeps_exactly_its_newest_200() {
+    let pool = pool().await;
+    let id = unique("run");
+    let runs = seed_runs(&pool, &id, 210, 0, 25).await;
+    let removed = run_log::prune(&pool, &id, run_log::KEEP_RUNS, run_log::KEEP_WINDOW_SECS)
+        .await
+        .unwrap();
+    assert_eq!(removed, 10);
+    assert_eq!(surviving(&pool, &id).await, runs[10..].to_vec());
+}
+
+#[tokio::test]
+async fn a_mix_keeps_the_last_day_and_old_runs_up_to_200() {
+    let pool = pool().await;
+    let id = unique("run");
+    // 50 old runs then 30 recent: the 30 recent are in the window, and the
+    // count keeps the newest 200, which is all 80.
+    let runs = seed_runs(&pool, &id, 250, 30, 30).await;
+    let removed = run_log::prune(&pool, &id, run_log::KEEP_RUNS, run_log::KEEP_WINDOW_SECS)
+        .await
+        .unwrap();
+    assert_eq!(removed, 80, "280 runs, 200 kept by count");
+    assert_eq!(surviving(&pool, &id).await, runs[80..].to_vec());
+
+    // The window wins when it keeps more: 250 recent, 40 old.
+    let busy = unique("run");
+    let runs = seed_runs(&pool, &busy, 40, 250, 30).await;
+    let removed = run_log::prune(&pool, &busy, run_log::KEEP_RUNS, run_log::KEEP_WINDOW_SECS)
+        .await
+        .unwrap();
+    assert_eq!(removed, 40, "every old run goes; all 250 recent stay");
+    assert_eq!(surviving(&pool, &busy).await, runs[40..].to_vec());
 }
 
 #[tokio::test]

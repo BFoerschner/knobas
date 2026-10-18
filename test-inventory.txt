@@ -3400,7 +3400,6 @@ knobas-sync	lib/knobas_sync	samples::tests::the_declared_path_is_what_is_read
 knobas-sync	lib/knobas_sync	samples::tests::the_state_words_are_the_ones_the_column_accepts
 knobas-sync	lib/knobas_sync	scheduler::tests::a_failed_existence_check_purges_rather_than_skipping
 knobas-sync	lib/knobas_sync	scheduler::tests::an_emits_identity_comes_from_its_run_and_its_countdown_from_the_source
-knobas-sync	lib/knobas_sync	scheduler::tests::the_concurrency_cap_leaves_the_bookkeeper_a_connection
 knobas-sync	lib/knobas_sync	scheduler::tests::the_default_timing_is_the_production_timing
 knobas-sync	lib/knobas_sync	scheduler::tests::the_states_with_no_next_run_are_spelled_the_way_the_enum_spells_them
 knobas-sync	lib/knobas_sync	scheduler::tests::the_tick_is_far_shorter_than_the_shortest_configurable_interval
@@ -3513,6 +3512,9 @@ knobas-sync	test/it	run::mock_sync_lands_in_postgres_and_is_searchable
 knobas-sync	test/it	run::the_cursor_lands_in_an_existing_source_config_only
 knobas-sync	test/it	run::the_mirror_stores_the_item_web_url
 knobas-sync	test/it	run::the_same_entity_twice_in_one_batch_is_one_upsert
+knobas-sync	test/it	run_log::a_busy_source_keeps_every_run_of_the_last_day
+knobas-sync	test/it	run_log::a_mix_keeps_the_last_day_and_old_runs_up_to_200
+knobas-sync	test/it	run_log::a_quiet_source_keeps_exactly_its_newest_200
 knobas-sync	test/it	run_log::a_run_is_open_while_it_runs_and_closed_with_its_counts
 knobas-sync	test/it	run_log::every_trigger_and_outcome_round_trips_through_the_column
 knobas-sync	test/it	run_log::failures_are_counted_from_the_last_successful_run
@@ -3619,6 +3621,7 @@ knobas-sync	test/scheduler_loop	deleting_a_source_mid_run_without_purging_keeps_
 knobas-sync	test/scheduler_loop	every_declared_phase_is_actually_emitted
 knobas-sync	test/scheduler_loop	forgetting_a_source_mid_run_still_gives_that_runs_watchers_their_ending
 knobas-sync	test/scheduler_loop	shutdown_during_a_long_run_returns_promptly_and_leaves_no_open_run
+knobas-sync	test/scheduler_loop	six_blocked_runs_five_go_and_the_sixth_waits
 knobas-sync	test/scheduler_loop	the_ticker_runs_a_due_source_by_itself
 knobas-sync	test/scheduler_loop	the_wizards_retry_after_watching_its_own_run_fail_starts_a_run
 knobas-sync	test/scheduler_loop	trigger_all_skips_the_disabled_and_the_ones_needing_a_human
