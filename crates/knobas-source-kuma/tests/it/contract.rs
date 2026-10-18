@@ -351,3 +351,12 @@ async fn the_declared_ops_are_the_spis_own_identifiers() {
         "the descriptor must declare the SPI's identifiers, not Kuma's event names"
     );
 }
+
+/// The role data check (#1199) on the recording: monitoring, the role the
+/// adapter claims, is filled by the monitors a full sync emits.
+/// `tests/live_kuma.rs` holds it to the real server.
+#[tokio::test]
+async fn fills_every_role_it_claims() {
+    let fake = Fake::start().await;
+    knobas_source::contract::fills_its_roles(&*adapter(fake.base_url(), KEY)).await;
+}

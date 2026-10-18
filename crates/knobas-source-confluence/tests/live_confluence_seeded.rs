@@ -1724,3 +1724,12 @@ async fn an_empty_space_list_means_every_space_the_account_can_see() {
         seeded.seed.space
     );
 }
+
+/// The role data check (#1199, ADR-0028) on the seeded corpus: the wiki the
+/// adapter claims is filled by the pages a full sync emits.
+#[tokio::test]
+#[ignore = "needs testenv's seeded Confluence: `just atlassian-live`"]
+async fn fills_every_role_it_claims_on_the_seeded_corpus() {
+    let seeded = seeded();
+    knobas_source::contract::fills_its_roles(&*seeded.source(seeded.scoped())).await;
+}

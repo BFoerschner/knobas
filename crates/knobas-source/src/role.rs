@@ -29,6 +29,8 @@ use knobas_core::payload::{Frame, KindPaths};
 
 use crate::SourceDescriptor;
 
+pub mod data;
+
 /// The code host: repositories, branches, pull requests and commits.
 pub const CODE_HOST: &str = "code-host";
 /// The ticket system: tickets and their workflow.
