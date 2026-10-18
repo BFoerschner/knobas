@@ -890,6 +890,113 @@ async fn an_assignee_the_declaration_does_not_reach_contributes_nothing() {
     );
 }
 
+/// The assignee is the **first** declared candidate that holds a non-blank
+/// string, and only that one decides (#1164). Since #1164 the rule first asks
+/// whether any of a ticket's own source's candidates names me and reads the
+/// first-string rule only for the tickets that pass, so each case below is
+/// one way that shortcut could answer differently from the rule:
+///
+/// * `name` names somebody else and `key` names me: `key` passes the first
+///   question, and the ticket is still not mine;
+/// * `name` is blank, or not a string, and `key` names me: `name` is skipped,
+///   so the assignee is me;
+/// * `name` names me padded with spaces: the rule trims, so it is me;
+/// * `name` and `key` both name me: one item, not one per candidate;
+/// * a ticket of another source that spells me only at a path *this* source
+///   declares and its own does not: each source's own paths, never another's.
+#[tokio::test]
+async fn the_first_declared_assignee_decides_and_only_for_its_own_source() {
+    let pool = &scratch().await;
+    let assigned = |key: &'static str, assignee: serde_json::Value| Mirrored {
+        source: "jira",
+        kind: "ticket",
+        key,
+        author: Some(THEM),
+        body: "",
+        payload: serde_json::json!({ "fields": { "assignee": assignee } }),
+        updated: days_ago(1),
+    };
+    let overruled = item(
+        pool,
+        assigned("PAY-270", serde_json::json!({ "name": THEM, "key": ME })),
+    )
+    .await;
+    let blank_name = item(
+        pool,
+        assigned("PAY-271", serde_json::json!({ "name": "  ", "key": ME })),
+    )
+    .await;
+    let numeric_name = item(
+        pool,
+        assigned("PAY-272", serde_json::json!({ "name": 42, "key": ME })),
+    )
+    .await;
+    let padded = item(
+        pool,
+        assigned("PAY-273", serde_json::json!({ "name": format!(" {ME} ") })),
+    )
+    .await;
+    let twice = item(
+        pool,
+        assigned("PAY-274", serde_json::json!({ "name": ME, "key": ME })),
+    )
+    .await;
+    let foreign_path = item(
+        pool,
+        Mirrored {
+            source: "jira-eu",
+            ..assigned("EU-1", serde_json::json!({ "key": ME }))
+        },
+    )
+    .await;
+    let declared = declarations().with(
+        "jira-eu",
+        vec![knobas_core::payload::KindPaths {
+            kind: "ticket".to_owned(),
+            assignee: vec![knobas_core::payload::PayloadPath::of([
+                "fields", "assignee", "name",
+            ])],
+            ..knobas_core::payload::KindPaths::default()
+        }],
+    );
+
+    let items = inbox::items(pool, &me(), now(), Shelf::Stream, &declared)
+        .await
+        .unwrap();
+    let keys = keys(&items);
+    let has = |subject: &str| keys.contains(&format!("new_assignment:{subject}"));
+    assert!(
+        !has(&overruled),
+        "the first candidate names somebody else, so a later one naming me does not count: {keys:?}"
+    );
+    assert!(
+        has(&blank_name),
+        "a blank first candidate is skipped: {keys:?}"
+    );
+    assert!(
+        has(&numeric_name),
+        "a first candidate that is not a string is skipped: {keys:?}"
+    );
+    assert!(has(&padded), "the assignee is read trimmed: {keys:?}");
+    assert_eq!(
+        keys.iter()
+            .filter(|key| **key == format!("new_assignment:{twice}"))
+            .count(),
+        1,
+        "two candidates naming me are one assignment: {keys:?}"
+    );
+    assert!(
+        !has(&foreign_path),
+        "jira-eu declares only `name`; `key` is another source's path: {keys:?}"
+    );
+    let count = inbox::count(pool, &me(), now(), &declared).await.unwrap();
+    assert_eq!(
+        usize::try_from(count).unwrap(),
+        items.len(),
+        "the count is the stream's own rows"
+    );
+}
+
 /// Story 6. The negative controls are an expiry far enough out that it is not
 /// yet news, and a source the user switched off.
 #[tokio::test]

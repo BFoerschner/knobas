@@ -88,31 +88,11 @@ macro_rules! status_paths {
 }
 
 /// Every declared source's ticket candidates for one string field, as
-/// `(source_id, segs, ord)`: [`status_paths!`]' body, for any field.
+/// `(source_id, segs, ord)`: [`status_paths!`]' body, for any field. The
+/// inbox's new-assignment rule reads its assignee the same way (#1164).
 macro_rules! ticket_paths {
     ($decl:literal, $field:literal) => {
-        concat!(
-            "select i.source_id, c.segs, c.ord from ",
-            declared_tickets!($decl),
-            " i cross join lateral ",
-            $crate::declared_candidates!($decl, $field),
-            " c"
-        )
-    };
-}
-
-/// One row per source the declarations name, aliased as a ticket row
-/// (`source_id`, `kind`), which is what the declaration macros read.
-macro_rules! declared_tickets {
-    ($decl:literal) => {
-        concat!(
-            "(select d.source_id, 'ticket'::text as kind
-                from jsonb_object_keys(case when jsonb_typeof(",
-            $decl,
-            "::jsonb) = 'object' then ",
-            $decl,
-            "::jsonb else '{}'::jsonb end) as d(source_id))"
-        )
+        $crate::declared_ticket_paths!($decl, $field)
     };
 }
 
@@ -179,7 +159,7 @@ macro_rules! lane_paths {
             ") t where $6::text = 'issuetype'),
              label_paths as materialized (
                select i.source_id, c.at_segs, c.entry_segs, c.ord from ",
-            declared_tickets!($decl),
+            $crate::declared_tickets!($decl),
             " i cross join lateral (select ",
             $crate::declared_segments!("cand->'at'"),
             " as at_segs, ",
