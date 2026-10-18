@@ -347,7 +347,7 @@ macro_rules! review_request {
 /// every reader. Now the first test is **one expression for every name at
 /// once**, an alternation built from `$1` with no subquery, so a plan made
 /// for the bound names sees it as a constant: `item_body_trgm_idx` (migration
-/// `0048`, trigrams of the prose kinds' bodies) answers it and the planner
+/// `0049`, trigrams of the prose kinds' bodies) answers it and the planner
 /// costs it by the names' own trigrams. The rule then reads only the bodies
 /// holding them, none for a name nobody wrote. The names are joined on
 /// `chr(1)` and escaped together, which can only widen the alternation (a

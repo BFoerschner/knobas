@@ -625,7 +625,7 @@ fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
     found
 }
 
-/// The trigram index over the prose kinds' bodies (migration `0048`).
+/// The trigram index over the prose kinds' bodies (migration `0049`).
 const BODY_INDEX: &str = "item_body_trgm_idx";
 
 /// Whether the plan finds its items through [`BODY_INDEX`] (#1170). The

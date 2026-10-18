@@ -1,4 +1,4 @@
-- **Migration `0048` — issue #1170 (2026-10-18): a trigram index over the prose kinds' bodies,
+- **Migration `0049` — issue #1170 (2026-10-18): a trigram index over the prose kinds' bodies,
   and `pg_trgm`, the first extension knobas installs.** Follow-up of #1164. No new command, no
   IPC schema change, no event, no `WriteOp`, no grammar key, no new module in either barrel or in
   `commands/`.

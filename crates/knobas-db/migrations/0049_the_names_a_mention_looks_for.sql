@@ -1,11 +1,11 @@
--- 0048_the_names_a_mention_looks_for.sql -- a trigram index over the prose
+-- 0049_the_names_a_mention_looks_for.sql -- a trigram index over the prose
 -- kinds' bodies, so the inbox's mention rule reads the items that can name
 -- the reader and not every one (#1170).
 --
 -- Single-writer, like every migration: a ticket that needs more schema takes
 -- the next number and never edits this file or its predecessors. Recorded in
 -- `docs/contract.md` section 10.8
--- (`docs/contract/10.8/1170-migration-0048-body-trigram-index.md`).
+-- (`docs/contract/10.8/1170-migration-0049-body-trigram-index.md`).
 --
 -- ## Why an index
 --
