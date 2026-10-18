@@ -91,7 +91,7 @@ const FAILED: Partial<Record<CredentialHealth["state"], string>> = {
 };
 
 export function sourceState(
-  source: Pick<SourceSummary, "enabled" | "last_run">,
+  source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses">,
   health: CredentialHealth | null,
   status: SourceSyncStatus | null,
   now: Date = new Date(),
@@ -107,7 +107,54 @@ export function sourceState(
   }
   const outcome = status?.last_outcome ?? source.last_run?.outcome ?? null;
   if (outcome === "error") return { tone: "warn", text: `Failed ${ago(finished, now)}`, failed: false };
+  const misses = source.role_misses ?? [];
+  if (misses.length > 0) {
+    const [first] = misses;
+    const more = misses.length > 1 ? ` and ${misses.length - 1} more` : "";
+    return {
+      tone: "warn",
+      text: `Synced ${ago(finished, now)}, ${roleWord(first!.role)} not drawn (${first!.path})${more}`,
+      failed: false,
+    };
+  }
   return { tone: "ok", text: `Synced ${ago(finished, now)}`, failed: false };
+}
+
+/** A role as the health line says it: *ticket system*, *CI*. A custom role keeps its own name. */
+export function roleWord(role: string): string {
+  const words: Record<string, string> = {
+    "code-host": "code host",
+    "ticket-system": "ticket system",
+    ci: "CI",
+    wiki: "wiki",
+    monitoring: "monitoring",
+  };
+  return words[role] ?? role;
+}
+
+/** How *Not drawn …* names each built-in role. */
+const ROLE_AS: Record<string, string> = {
+  "code-host": "as a code host",
+  "ticket-system": "as a ticket system",
+  ci: "as CI",
+  wiki: "as a wiki",
+  monitoring: "for monitoring",
+};
+
+/**
+ * The lines on top of a source's page for the roles its records did not fill
+ * (#1199, ADR-0028): which surface leaves it out, and the declared path that
+ * missed. *Not drawn as a ticket system: no ticket resolves priority at
+ * fields.priority.name. Its tickets stay searchable and linkable.*
+ */
+export function roleMissLines(source: Pick<SourceSummary, "kinds" | "role_misses">): string[] {
+  return (source.role_misses ?? []).map((miss) => {
+    const kind = source.kinds.find((info) => info.id === miss.kind);
+    const one = (kind?.label ?? miss.kind).toLowerCase();
+    const many = (kind?.plural ?? miss.kind).toLowerCase();
+    const as = ROLE_AS[miss.role] ?? `as ${miss.role}`;
+    return `Not drawn ${as}: no ${one} resolves ${miss.field} at ${miss.path}. Its ${many} stay searchable and linkable.`;
+  });
 }
 
 /**

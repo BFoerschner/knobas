@@ -26,8 +26,8 @@
 
   /** The reads the status bar needs, injectable so a test needs no bridge. */
   export interface TfShellPorts {
-    /** The source list: the status bar's names, and each source's role claims (#1196). */
-    listSources: () => Promise<(Pick<Summary, "id" | "display_name"> & Partial<Pick<Summary, "roles">>)[]>;
+    /** The source list: the status bar's names, and each source's role claims (#1196) and misses (#1199). */
+    listSources: () => Promise<(Pick<Summary, "id" | "display_name"> & Partial<Pick<Summary, "roles" | "role_misses">>)[]>;
     syncStatus: () => Promise<SyncRow[]>;
     listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   }
@@ -248,7 +248,11 @@
     hold(
       ports.listen(EVENTS.syncState, ({ payload }) => {
         const row = payload as SourceSyncStatus;
+        const was = sync.find((other) => other.source_id === row.source_id);
         sync = [...sync.filter((other) => other.source_id !== row.source_id), row];
+        // A finished run may have judged the source's roles (#1199): a role its
+        // records missed, or filled again, changes what the surfaces draw.
+        if (was?.running === true && !row.running) readSources();
       }),
     );
     // A source added or removed changes its health reading first.

@@ -8,6 +8,7 @@ import {
   holdings,
   intervalOptions,
   intervalWords,
+  roleMissLines,
   runRow,
   settingsPlace,
   sourceLine,
@@ -146,4 +147,26 @@ test("the user is the config's username, and only an adapter that declares one g
   expect(declaresUser(null)).toBe(false);
   expect(userOf({ username: "mara" })).toBe("mara");
   expect(userOf({ username: null })).toBe("");
+});
+
+const priorityMiss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
+
+test("a source whose records missed a role's path says which role and which path (#1199)", () => {
+  const source = { enabled: true, last_run: null, role_misses: [priorityMiss] };
+  expect(sourceState(source, health("ok"), status(), NOW)).toEqual({
+    tone: "warn",
+    text: "Synced 4 min ago, ticket system not drawn (fields.priority.name)",
+    failed: false,
+  });
+  const two = [...source.role_misses, { role: "code-host", kind: "pr", field: "merged", path: "merged" }];
+  expect(sourceState({ ...source, role_misses: two }, health("ok"), status(), NOW).text).toBe(
+    "Synced 4 min ago, ticket system not drawn (fields.priority.name) and 1 more",
+  );
+  // A credential failure still says itself first.
+  expect(sourceState(source, health("unauthorized"), status(), NOW).text).toBe("Sign-in failed");
+
+  expect(roleMissLines({ kinds: [ticket, pr], role_misses: [priorityMiss] })).toEqual([
+    "Not drawn as a ticket system: no ticket resolves priority at fields.priority.name. Its tickets stay searchable and linkable.",
+  ]);
+  expect(roleMissLines({ kinds: [ticket], role_misses: [] })).toEqual([]);
 });

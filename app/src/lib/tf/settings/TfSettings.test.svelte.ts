@@ -819,3 +819,17 @@ test("Add a source pre-fills a floor under a minute, else 15 minutes (#1188)", a
     view = null;
   }
 });
+
+test("a source whose records missed a role's path says so on its row and its page (#1199)", async () => {
+  const miss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
+  const missing = [summary("jira", "Jira", "ok", { role_misses: [miss] })];
+  await open([], ports({ listSources: vi.fn(() => Promise.resolve(missing)) }));
+  expect(target.querySelector(".tf-stg-src")?.textContent).toContain("ticket system not drawn (fields.priority.name)");
+  unmount(view!);
+  view = null;
+
+  await open(["source", "jira"], ports({ listSources: vi.fn(() => Promise.resolve(missing)) }));
+  expect(target.querySelector('.tf-stg-alert[role="status"]')?.textContent).toBe(
+    "Not drawn as a ticket system: no ticket resolves priority at fields.priority.name. Its tickets stay searchable and linkable.",
+  );
+});

@@ -5289,7 +5289,6 @@ async fn a_label_is_added_to_a_pull_request_through_its_source_action() {
 
     clear_test_labels(&http, &env, &auth).await;
     println!("{name} added to #{number} through its source action");
-||||||| parent of 9ccb1e1c (Hold a role's declared paths to the records a sync emitted (#1199))
 
 /// The role data check (#1199, ADR-0028) on the seeded corpus: every role the
 /// adapter claims is filled by the records a full sync emits, each kind it

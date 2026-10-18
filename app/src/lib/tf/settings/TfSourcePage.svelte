@@ -53,6 +53,7 @@
   import {
     IDENTITY_FIELD,
     credentialAlert,
+    roleMissLines,
     declaresUser,
     intervalOptions,
     intervalWords,
@@ -103,6 +104,8 @@
   const name = $derived(source.display_name || source.id);
   const reading = $derived(sourceState(source, health, status, now));
   const alert = $derived(credentialAlert(name, secretWord(source.auth_kind), health, status, now));
+  // The roles its records did not fill (#1199): the surfaces that leave it out.
+  const missLines = $derived(roleMissLines(source));
   const word = $derived(secretWord(source.auth_kind));
   const keychain = /Mac/.test(navigator.userAgent) ? "the macOS keychain" : "the system keychain";
   const showsUser = $derived(adapter !== null && declaresUser(adapter.config_schema));
@@ -345,6 +348,11 @@
     <button class="tf-btn tf-sm tf-primary" onclick={openReenter}>Re-enter password</button>
   </div>
 {/if}
+{#each missLines as line (line)}
+  <div class="tf-stg-alert" role="status">
+    <span class="tf-dot tf-warn"></span><span>{line}</span>
+  </div>
+{/each}
 
 <section class="tf-stg-sec">
   <h2>Connection</h2>

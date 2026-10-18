@@ -53,3 +53,26 @@ test("a read the server narrows asks for the claimers only once a listed source 
   roles.take([{ id: "forge", roles: [{ role: "code-host", reads: [] }] }]);
   expect(roles.scope("ticket-system")).toEqual([]);
 });
+
+test("a source whose records missed a path of a role it claims is not drawn for that role (#1199)", () => {
+  const roles = createSourceRoles();
+  roles.take([
+    {
+      id: "forge",
+      roles: [
+        { role: "code-host", reads: [] },
+        { role: "ticket-system", reads: [] },
+      ],
+      role_misses: [{ role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" }],
+    },
+  ]);
+  expect(roles.draws("ticket-system", "forge")).toBe(false);
+  expect(roles.draws("code-host", "forge")).toBe(true);
+  // Tickets' server-narrowed read (#1200) asks for fillers only.
+  expect(roles.scope("ticket-system")).toEqual([]);
+
+  // The next list read, after a sync whose records resolve the path, draws it again.
+  roles.take([{ id: "forge", roles: [{ role: "ticket-system", reads: [] }], role_misses: [] }]);
+  expect(roles.draws("ticket-system", "forge")).toBe(true);
+  expect(roles.scope("ticket-system")).toBeNull();
+});

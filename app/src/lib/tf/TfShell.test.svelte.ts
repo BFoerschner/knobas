@@ -3,7 +3,7 @@
  * toggle, the badges, the timer chip and the status bar, against a shell
  * mounted with stand-ins for every store and read.
  */
-import { flushSync, mount, unmount } from "svelte";
+import { flushSync, mount, tick, unmount } from "svelte";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import type { CredentialHealth, RoleClaim, SourceSyncStatus } from "../ipc/sources";
@@ -14,7 +14,7 @@ import { createBadges } from "./badges.svelte";
 import { createLayers, type Layers } from "./layers.svelte";
 import type { JobPorts } from "./job/ports";
 import { sourceRoles } from "./roles.svelte";
-import TfShell from "./TfShell.svelte";
+import TfShell, { type TfShellPorts } from "./TfShell.svelte";
 import { createTheme, type Theme } from "./theme.svelte";
 
 // The Day tab reads the real bridge; its one read here is an open stretch.
@@ -140,6 +140,8 @@ function start(
     onstarttimer?: (entityId: string, title: string) => void;
     nav?: { back: () => void; forward: () => void };
     sources?: { id: string; display_name: string; roles?: RoleClaim[] }[];
+    listSources?: TfShellPorts["listSources"];
+    listen?: TfShellPorts["listen"];
   } = {},
 ) {
   const finished = new Date(Date.now() - 4 * 60_000).toISOString();
@@ -165,15 +167,17 @@ function start(
       theme: over.theme ?? createTheme(),
       queue,
       ports: {
-        listSources: () =>
-          Promise.resolve(
-            over.sources ?? [
-              { id: "jira", display_name: "Jira" },
-              { id: "teamcity", display_name: "TeamCity" },
-            ],
-          ),
+        listSources:
+          over.listSources ??
+          (() =>
+            Promise.resolve(
+              over.sources ?? [
+                { id: "jira", display_name: "Jira" },
+                { id: "teamcity", display_name: "TeamCity" },
+              ],
+            )),
         syncStatus: () => Promise.resolve(sync),
-        listen: () => Promise.resolve(() => {}),
+        listen: over.listen ?? (() => Promise.resolve(() => {})),
       },
       prefersDark: over.prefersDark ?? (() => false),
       onstarttimer: over.onstarttimer ?? (() => {}),
@@ -567,4 +571,27 @@ test("the shell hands the source list's role claims to the surfaces (#1196)", as
 
   expect(sourceRoles.draws("code-host", "forge")).toBe(true);
   expect(sourceRoles.draws("code-host", "jira")).toBe(false);
+});
+
+test("a finished sync reads the source list again, so a role its records missed stops drawing (#1199)", async () => {
+  const claim = [{ role: "ticket-system", reads: ["reachable_transitions"] }];
+  const miss = { role: "ticket-system", kind: "ticket", field: "priority", path: "fields.priority.name" };
+  let answer: Awaited<ReturnType<TfShellPorts["listSources"]>> = [{ id: "jira", display_name: "Jira", roles: claim }];
+  const handlers = new Map<string, (event: { payload: unknown }) => void>();
+  start({
+    listSources: () => Promise.resolve(answer),
+    listen: (event, handler) => (handlers.set(event, handler), Promise.resolve(() => {})),
+  });
+  await tick();
+  expect(sourceRoles.draws("ticket-system", "jira")).toBe(true);
+
+  const row = (running: boolean) => ({
+    source_id: "jira", running, run_id: 2, started_at: null, last_finished_at: null,
+    last_outcome: "ok", next_run_at: null, backoff_until: null, last_changed: null,
+  });
+  answer = [{ id: "jira", display_name: "Jira", roles: claim, role_misses: [miss] }];
+  handlers.get("sync:state")!({ payload: row(true) });
+  handlers.get("sync:state")!({ payload: row(false) });
+  await tick();
+  expect(sourceRoles.draws("ticket-system", "jira")).toBe(false);
 });
