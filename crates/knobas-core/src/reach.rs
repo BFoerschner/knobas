@@ -8,10 +8,10 @@
 //!
 //! ## The walk
 //!
-//! ADR-0025: a job shows its context's members, ADR-0008's rule unchanged,
-//! then the members of every link set whose rule matches the ticket, then the
-//! parent ticket's own links. So the walk is membership's, with each row's
-//! path kept for the reason label:
+//! ADR-0025, as amended by Björn's ruling of 2026-10-18 on #942: what a job
+//! shows is walked per R-4.17 and R-4.18. It starts where membership starts
+//! and takes membership's layers, with each row's path kept for the reason
+//! label:
 //!
 //! * **the start** -- the ticket itself, and when it anchors an unarchived
 //!   context, that context's explicit adds and, for an epic, its children (the
@@ -19,15 +19,24 @@
 //! * **one link out** from each of those, then **one more**, over
 //!   `knobas.confirmed_link` (never proposals, for ADR-0008's second reason)
 //!   and never through a context -- the ticket's pull request, then its builds;
-//! * **what is held** under anything reached, at any depth, over
-//!   `knobas.asset.parent_id`.
+//! * **what is held** under anything reached, over `knobas.asset.parent_id`;
+//! * then, beyond membership, **what it runs on**: every ancestor of a reached
+//!   asset (a container's VM, the VM's host), and every monitor attached to a
+//!   reached asset by a `monitored-by` link. R-2.8 asks for both: "every
+//!   monitor watching an asset the ticket reaches, the VM under a container
+//!   included".
 //!
-//! Then it stops, as membership does. Spec #808 and requirement R-2.8 ask for
-//! more (R-4.17's "from a VM, proxy or host the walk only goes down", and the
-//! VM under a container with its monitors); ADR-0025 fixes the job's read as
-//! membership, so that difference is a follow-up against the ADR, not a fork
-//! this read takes. `the_reach_is_membership_plus_the_parents_links` pins the
-//! two together.
+//! **From a VM, a proxy or a host the walk only goes further down** (R-4.17).
+//! Things link *to* a VM because they run on it, so a link walk out of one
+//! would climb back up into every other service on the machine, and from there
+//! into every ticket that touches them. So from an asset whose type is in
+//! [`DOWNWARD_ONLY`], a link step is taken only toward what it stands on (its
+//! own `runs-on` and `depends-on`, read from the `from` end) and toward its
+//! monitors, and nothing held under it is brought in.
+//!
+//! Membership itself is unchanged and keeps its consumers;
+//! `membership_stays_adr_0008s_and_the_context_seeds_the_reach` pins where the
+//! two now part.
 //!
 //! ## The parent
 //!
@@ -88,6 +97,13 @@ pub const PARENT_LINKS_SETTING: &str = "job.parent_links";
 /// The one value of [`PARENT_LINKS_SETTING`] that switches the parent off.
 pub const PARENT_LINKS_OFF: &str = "off";
 
+/// The asset types the walk only goes further down from (R-4.17): a VM, a
+/// reverse proxy, a host, and the two kinds of thing below a host.
+///
+/// Ids from [`crate::asset`]'s type table, which are wire values that never
+/// change. Pinned against it by `every_downward_type_is_a_built_in_type`.
+pub const DOWNWARD_ONLY: [&str; 5] = ["vm", "reverse_proxy", "hypervisor", "site", "network"];
+
 /// The walk after its start, as SQL text.
 ///
 /// It expects a CTE `start(t)` before it, one row per ticket id to walk from,
@@ -103,10 +119,13 @@ pub const PARENT_LINKS_OFF: &str = "off";
 /// come to different answers. A macro because both build it into a statement
 /// at compile time or by `format!`, as [`crate::context_expansion!`] is.
 ///
-/// The link layers and the `held` recursion are spelled as
+/// The link layers and the `held` recursion start as
 /// [`crate::context_expansion!`] spells them, with the path's first step
-/// carried along; `the_reach_is_membership_plus_the_parents_links` holds the
-/// two to the same answer.
+/// carried along and the downward rule added; `under` then climbs to every
+/// ancestor and `watched` adds every `monitored-by` monitor. The asset types
+/// in the downward rule are a literal list, which
+/// `the_walk_names_every_downward_type` pins to [`DOWNWARD_ONLY`]; the
+/// relations are pinned to [`crate::link`]'s constants the same way.
 #[doc(hidden)]
 #[macro_export]
 macro_rules! reach_walk {
@@ -145,6 +164,11 @@ macro_rules! reach_walk {
           join knobas.entity o
             on o.id = case when l.from_id = w.id then l.to_id else l.from_id end
          where o.kind <> 'ctx'
+           and (l.relation = 'monitored-by'
+                or (l.from_id = w.id and l.relation in ('runs-on', 'depends-on'))
+                or not exists (select 1 from knobas.asset x
+                                where x.id = w.id
+                                  and x.type_id in ('vm', 'reverse_proxy', 'hypervisor', 'site', 'network')))
     ),
     l2(t, id, step, d) as (
         select t, id, step, d from l1
@@ -155,13 +179,40 @@ macro_rules! reach_walk {
           join knobas.entity o
             on o.id = case when l.from_id = w.id then l.to_id else l.from_id end
          where o.kind <> 'ctx'
+           and (l.relation = 'monitored-by'
+                or (l.from_id = w.id and l.relation in ('runs-on', 'depends-on'))
+                or not exists (select 1 from knobas.asset x
+                                where x.id = w.id
+                                  and x.type_id in ('vm', 'reverse_proxy', 'hypervisor', 'site', 'network')))
     ),
     held(t, id, step, d) as (
         select t, id, step, d from l2
         union
         select h.t, c.id, h.step, h.d + 1
           from held h
+          join knobas.asset p on p.id = h.id
           join knobas.asset c on c.parent_id = h.id
+         where p.type_id not in ('vm', 'reverse_proxy', 'hypervisor', 'site', 'network')
+    ),
+    under(t, id, step, d) as (
+        select t, id, step, d from held
+        union
+        select w.t, a.parent_id, w.step, w.d + 1
+          from under w
+          join knobas.asset a on a.id = w.id
+         where a.parent_id is not null
+    ),
+    watched(t, id, step, d) as (
+        select t, id, step, d from under
+        union
+        select w.t, o.id, w.step, w.d + 1
+          from under w
+          join knobas.asset a on a.id = w.id
+          join knobas.confirmed_link l
+            on (l.from_id = w.id or l.to_id = w.id) and l.relation = 'monitored-by'
+          join knobas.entity o
+            on o.id = case when l.from_id = w.id then l.to_id else l.from_id end
+         where o.kind <> 'ctx'
     ),
     parent(t, p) as (
         select s.t, pe.id
@@ -189,7 +240,7 @@ macro_rules! reach_walk {
             "
     ),
     reached(t, id, step, origin, rank, via) as (
-        select t, id, step, 'own', d, null::text from held where id <> t and step is not null
+        select t, id, step, 'own', d, null::text from watched where id <> t and step is not null
         union all
         select a.t, m.entity_id, m.entity_id, 'link_set', 500, a.set_id
           from set_applies a
@@ -361,9 +412,43 @@ pub async fn set_parent_links(pool: &PgPool, on: bool) -> Result<bool, CoreError
 mod tests {
     use super::*;
 
+    /// The walk spells the downward types as a literal; this holds the
+    /// literal to the constant, and the constant to the type table.
     #[test]
-    fn the_walk_reads_the_setting_by_its_constants() {
+    fn the_walk_names_every_downward_type() {
         let walk = crate::reach_walk!();
+        let list = DOWNWARD_ONLY
+            .iter()
+            .map(|id| format!("'{id}'"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        assert_eq!(
+            walk.matches(&format!("({list})")).count(),
+            3,
+            "the two link steps and the held step each name the downward types"
+        );
+    }
+
+    #[test]
+    fn every_downward_type_is_a_built_in_type() {
+        for id in DOWNWARD_ONLY {
+            assert!(
+                crate::asset::TYPES.iter().any(|t| t.id == id),
+                "{id} is not an asset type"
+            );
+        }
+    }
+
+    #[test]
+    fn the_walk_reads_the_relations_and_the_setting_by_their_constants() {
+        let walk = crate::reach_walk!();
+        for relation in [
+            crate::link::MONITORED_BY,
+            crate::link::RUNS_ON,
+            crate::link::DEPENDS_ON,
+        ] {
+            assert!(walk.contains(&format!("'{relation}'")), "{relation}");
+        }
         assert!(walk.contains(&format!("st.key = '{PARENT_LINKS_SETTING}'")));
         assert!(walk.contains(&format!("to_jsonb('{PARENT_LINKS_OFF}'::text)")));
     }

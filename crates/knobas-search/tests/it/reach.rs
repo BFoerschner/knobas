@@ -104,8 +104,9 @@ async fn search(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
 
 /// `reach:<key>` and `reach:<id>` return exactly the ids the read returns, on
 /// a graph with every edge the walk treats differently: a hop, a second hop it
-/// stops before, what a VM holds, an ancestor it never climbs to, and a
-/// sub-task's parent's links.
+/// stops before, a container's VM, host and the VM's monitor it climbs to
+/// (R-4.17, ADR-0025 as amended on #942), the container beside it and what a
+/// linked VM holds it never brings, and a sub-task's parent's links.
 #[tokio::test]
 async fn reach_returns_the_same_ids_as_the_read() {
     let pool = pool().await;
@@ -143,12 +144,18 @@ async fn reach_returns_the_same_ids_as_the_read() {
     let host = asset(&pool, "hypervisor", &format!("hv-{tag}"), None).await;
     let vm = asset(&pool, "vm", &format!("vm-{tag}"), Some(&host)).await;
     let container = asset(&pool, "container", &format!("svc-{tag}"), Some(&vm)).await;
+    let sibling = asset(&pool, "container", &format!("db-{tag}"), Some(&vm)).await;
+    let watch = item(&pool, "kuma", "monitor", &format!("vm-{tag}-ping")).await;
+    let other_vm = asset(&pool, "vm", &format!("vm2-{tag}"), None).await;
+    let on_other_vm = asset(&pool, "container", &format!("app-{tag}"), Some(&other_vm)).await;
 
     draw(&pool, &sub, &pr, "implements").await;
     draw(&pool, &pr, &build, "built-by").await;
     draw(&pool, &build, &beyond, "triggers").await;
     draw(&pool, &page, &sub, "documents").await;
-    draw(&pool, &sub, &vm, "deploys").await;
+    draw(&pool, &sub, &container, "deploys").await;
+    draw(&pool, &vm, &watch, "monitored-by").await;
+    draw(&pool, &sub, &other_vm, "deploys").await;
     draw(&pool, &parent, &repo, "works-in").await;
 
     let mut read: Vec<String> = knobas_core::reach::reach(&pool, &sub)
@@ -158,10 +165,12 @@ async fn reach_returns_the_same_ids_as_the_read() {
         .map(|row| row.entity_id)
         .collect();
     read.sort();
-    let mut want = vec![pr, build, page, repo, vm, container];
+    let mut want = vec![pr, build, page, repo, container, vm, host, watch, other_vm];
     want.sort();
     assert_eq!(read, want, "the read itself, before comparing");
-    assert!(!read.contains(&beyond) && !read.contains(&host));
+    for out in [&beyond, &sibling, &on_other_vm] {
+        assert!(!read.contains(out), "{out} is past the walk's edge");
+    }
 
     assert_eq!(search(&pool, &format!("reach:{key}")).await, read);
     assert_eq!(
