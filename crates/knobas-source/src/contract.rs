@@ -216,9 +216,6 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             message: "contract battery probe".into(),
             base_sha: "contract-battery".into(),
         },
-        // A delete could not be taken back. The target is no branch's
-        // address -- it has no `@refs/heads/` -- so an adapter that attempted
-        // it anyway is refused on the id's shape before a request leaves.
         // A source action (#1194) under an id this battery names, which no
         // adapter declares, aimed at no entity: refused by its id.
         crate::WriteOp::SourceAction {
@@ -226,6 +223,9 @@ fn known_write_ops(src_id: &str) -> Vec<(&'static str, crate::WriteOp)> {
             id: UNDECLARED_SOURCE_ACTION.into(),
             fields: std::collections::BTreeMap::new(),
         },
+        // A delete could not be taken back. The target is no branch's
+        // address -- it has no `@refs/heads/` -- so an adapter that attempted
+        // it anyway is refused on the id's shape before a request leaves.
         crate::WriteOp::DeleteBranch { entity: target },
     ]
     .into_iter()

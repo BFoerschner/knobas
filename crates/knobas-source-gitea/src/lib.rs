@@ -192,6 +192,10 @@ pub const WRITE_OP_COMMIT_FILE: &str = "commit_file";
 /// dispatched by [`source`], which refuses any other id.
 pub const SOURCE_ACTION_ADD_LABEL: &str = "add_label";
 
+/// The field *Add label…*'s dialog asks under and its dispatch reads: the
+/// picked label's id.
+pub(crate) const ADD_LABEL_FIELD: &str = "label";
+
 /// The descriptor `list_adapters` serves before any instance exists
 /// (interfaces §2.2): `id == adapter_kind`, name = the product name.
 #[must_use]

@@ -372,13 +372,12 @@ impl Source for GiteaSource {
                     )));
                 }
                 let (owner, repo, index) = self.pull_of(entity)?;
-                let label = fields
-                    .get("label")
+                let given = fields.get(crate::ADD_LABEL_FIELD);
+                let label = given
                     .and_then(|label| label.parse::<u64>().ok())
                     .ok_or_else(|| {
                         SourceError::protocol(format!(
-                            "gitea: add_label needs a label id, got {:?}",
-                            fields.get("label")
+                            "gitea: {id} needs a label id, got {given:?}"
                         ))
                     })?;
                 write::add_label(&self.client, &owner, &repo, index, label).await?;

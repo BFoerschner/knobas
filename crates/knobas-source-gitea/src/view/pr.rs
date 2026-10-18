@@ -263,8 +263,6 @@ impl PullView<'_> {
         })
     }
 
-    /// The login the token belongs to, or `None` where Gitea would not say
-    /// ([`GiteaSource::viewer`], read once per token and server).
     /// The repository's labels, for *Add label…* (#1194). A failed read costs
     /// that action, which says so, and never the view.
     async fn labels(&self) -> Result<Result<Vec<label::Label>, String>, SourceError> {
@@ -276,6 +274,8 @@ impl PullView<'_> {
             .map_err(|error| error.to_string()))
     }
 
+    /// The login the token belongs to, or `None` where Gitea would not say
+    /// ([`GiteaSource::viewer`], read once per token and server).
     async fn viewer(&self) -> Result<Option<String>, SourceError> {
         Ok(self.source.viewer().await)
     }

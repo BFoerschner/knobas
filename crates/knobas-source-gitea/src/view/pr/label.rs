@@ -51,7 +51,11 @@ pub(super) fn action(pull: &Pull, labels: &Result<Vec<Label>, String>) -> ViewAc
     ViewAction {
         fields: vec![ActionField {
             required: true,
-            ..ActionField::new("label", "Label", FieldKind::Choice { options })
+            ..ActionField::new(
+                crate::ADD_LABEL_FIELD,
+                "Label",
+                FieldKind::Choice { options },
+            )
         }],
         ..base
     }
