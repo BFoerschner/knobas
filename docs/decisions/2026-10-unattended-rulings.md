@@ -5263,3 +5263,33 @@ Implementer.
   15,000 tickets. It now reads `sync.item` with `live_by_exclusion!`, as the cards do since #778.
   The view joins `knobas.entity` inner, but `sync.item.entity_id` references it, so the
   answer is the same. **Reversing:** low (two predicates in `mini_board.rs`).
+## #1164 — the inbox's new-assignment rule (2026-10-18)
+
+Implementer.
+
+- **The rule joins tickets to their source's assignee paths and filters on the joined value
+  first. It does not resolve one row per ticket.** The issue suggested the mini board's per-row
+  `first_string_of!` over a per-source CTE. That shape was 32 ms on the 22k snapshot, against 58
+  ms before. The join asks whether the trimmed value at any of the ticket's own source's paths
+  names the reader. Only the tickets that pass read the first-string rule, so the rule comes to
+  14.5 ms. The rule is correlated on the joined path's source, which keeps it a join filter. A
+  ticket that names the reader at two paths makes two rows here, and `shelved!`'s
+  `distinct on` folds them into one item. **Reversing:** low (one arm in `inbox.rs`).
+- **The arm is parenthesized with its own `with`, and `shelved!` is unchanged.** The CTE stays
+  inside the one rule that reads it. `declared_ticket_paths!` and `declared_tickets!` moved from
+  `mini_board.rs` to `payload.rs` and are exported, so both modules use the one spelling.
+  **Reversing:** low.
+- **The ≤ 30 ms criterion is not met. The stream for an identity that owns nothing reads 36 ms
+  analyzed, down from 90.** The rule still reads every ticket in the window, and the stream for
+  an identity that owns every ticket is 28.5 ms. What is left over that floor is the join and
+  one `#>>` per path, about 7 ms. Getting under 30 ms would need an index on a path that the
+  source declares at runtime, or a cut in another rule (`mention` is 12 ms). Both are outside
+  this ticket. **Reversing:** n/a.
+
+Merge-manager.
+
+- **#1164 closes at 36 ms; the rest is #1170 (`backlog`).** Holding the PR for the ≤ 30 ms
+  criterion would keep a 90 → 36 ms gain off main for work in a different rule (`mention`) or a
+  different mechanism (an index on runtime-declared paths). #939 and #1148 closed the same way.
+  The answers are unchanged and pinned by the new behaviour test. **Reversing:** low (reopen
+  #1164 or promote #1170).

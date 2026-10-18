@@ -1557,10 +1557,47 @@ macro_rules! declared_names_as_parent {
     };
 }
 
+/// Every declared source's ticket candidates for one field, as
+/// `(source_id, segs, ord)`: [`declared_candidates!`] walked once a source
+/// rather than once a row (#753), for a statement that reads the field over
+/// many tickets and resolves each row against its own source's few paths
+/// with [`first_string_of!`]. The mini board's status and lanes and the
+/// inbox's new-assignment rule (#1164) read through it.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! declared_ticket_paths {
+    ($decl:literal, $field:literal) => {
+        concat!(
+            "select i.source_id, c.segs, c.ord from ",
+            $crate::declared_tickets!($decl),
+            " i cross join lateral ",
+            $crate::declared_candidates!($decl, $field),
+            " c"
+        )
+    };
+}
+
+/// One row per source the declarations name, aliased as a ticket row
+/// (`source_id`, `kind`), which is what the declaration macros read.
+#[doc(hidden)]
+#[macro_export]
+macro_rules! declared_tickets {
+    ($decl:literal) => {
+        concat!(
+            "(select d.source_id, 'ticket'::text as kind
+                from jsonb_object_keys(case when jsonb_typeof(",
+            $decl,
+            "::jsonb) = 'object' then ",
+            $decl,
+            "::jsonb else '{}'::jsonb end) as d(source_id))"
+        )
+    };
+}
+
 /// The declared candidates for one field as a numbered relation of `text[]`
 /// paths: `(segs, ord)`, in declaration order.
 ///
-/// An implementation detail of the three macros above, exported only because
+/// An implementation detail of the macros above, exported only because
 /// they are.
 #[doc(hidden)]
 #[macro_export]

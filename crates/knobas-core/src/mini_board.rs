@@ -81,37 +81,8 @@ macro_rules! status_paths {
     ($decl:literal) => {
         concat!(
             "status_paths as materialized (",
-            ticket_paths!($decl, "status_name"),
+            $crate::declared_ticket_paths!($decl, "status_name"),
             ")"
-        )
-    };
-}
-
-/// Every declared source's ticket candidates for one string field, as
-/// `(source_id, segs, ord)`: [`status_paths!`]' body, for any field.
-macro_rules! ticket_paths {
-    ($decl:literal, $field:literal) => {
-        concat!(
-            "select i.source_id, c.segs, c.ord from ",
-            declared_tickets!($decl),
-            " i cross join lateral ",
-            $crate::declared_candidates!($decl, $field),
-            " c"
-        )
-    };
-}
-
-/// One row per source the declarations name, aliased as a ticket row
-/// (`source_id`, `kind`), which is what the declaration macros read.
-macro_rules! declared_tickets {
-    ($decl:literal) => {
-        concat!(
-            "(select d.source_id, 'ticket'::text as kind
-                from jsonb_object_keys(case when jsonb_typeof(",
-            $decl,
-            "::jsonb) = 'object' then ",
-            $decl,
-            "::jsonb else '{}'::jsonb end) as d(source_id))"
         )
     };
 }
@@ -169,17 +140,17 @@ macro_rules! lane_paths {
         concat!(
             "lane_paths as materialized (
                select * from (",
-            ticket_paths!($decl, "assignee"),
+            $crate::declared_ticket_paths!($decl, "assignee"),
             ") a where $6::text = 'assignee'
                union all select * from (",
-            ticket_paths!($decl, "priority"),
+            $crate::declared_ticket_paths!($decl, "priority"),
             ") p where $6::text = 'priority'
                union all select * from (",
-            ticket_paths!($decl, "issue_type"),
+            $crate::declared_ticket_paths!($decl, "issue_type"),
             ") t where $6::text = 'issuetype'),
              label_paths as materialized (
                select i.source_id, c.at_segs, c.entry_segs, c.ord from ",
-            declared_tickets!($decl),
+            $crate::declared_tickets!($decl),
             " i cross join lateral (select ",
             $crate::declared_segments!("cand->'at'"),
             " as at_segs, ",
