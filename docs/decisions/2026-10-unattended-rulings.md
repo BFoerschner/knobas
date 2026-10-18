@@ -5519,3 +5519,10 @@ ADR-0025's amendment. The implementer's rulings under it:
   when the chosen adapter declares one. **Reversing:** low.
 - **`formatInterval` words sub-minute intervals as `every 20 s`.** It has no caller today but is
   exported; it no longer says `every 0 min`. **Reversing:** n/a.
+
+## v2.0.0 — the final release's MSI version (2026-10-18)
+
+- **Fork: which MSI version the final v2.0.0 takes.** Ruling: 2.1.0. Windows Installer compares
+  the MSI version numerically and ignores the pre-release suffix; rc1 shipped 2.0.6, so the
+  final must rise above it to upgrade in place. 2.1.0 leaves the 2.0.x milestone sequence
+  behind. **Reversing:** one line, but only before the tag is cut.
