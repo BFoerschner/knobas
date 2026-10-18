@@ -88,6 +88,13 @@ fn summary_fixture() -> knobas_app::sources::SourceSummary {
             knobas_source::role::CI,
             ["run_log"],
         )],
+        // One miss, for the same reason (#1199).
+        role_misses: vec![knobas_source::role::data::RoleMiss {
+            role: knobas_source::role::CI.to_owned(),
+            kind: "build".to_owned(),
+            field: "branch".to_owned(),
+            path: "branchName".to_owned(),
+        }],
     }
 }
 
@@ -109,6 +116,7 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
             "kinds",
             "last_run",
             "next_run_at",
+            "role_misses",
             "roles",
             "sync_interval_secs",
         ],
@@ -359,6 +367,17 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
 fn the_role_claim_shape_matches_its_typescript_mirror() {
     let wire = serde_json::to_value(knobas_source_gitea::descriptor_template()).unwrap();
     assert_shape("RoleClaim", &wire["roles"][0], &["reads", "role"]);
+}
+
+/// A role miss rides on the source summary (#1199).
+#[test]
+fn the_role_miss_shape_matches_its_typescript_mirror() {
+    let wire = serde_json::to_value(summary_fixture()).unwrap();
+    assert_shape(
+        "RoleMiss",
+        &wire["role_misses"][0],
+        &["field", "kind", "path", "role"],
+    );
 }
 
 /// `TriggerPath` and `TriggerValue` ride inside a `KindPaths` (#961), read
