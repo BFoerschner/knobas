@@ -5951,7 +5951,7 @@ The implementer's rulings:
 - **When it runs.** On a source's first sync, and on later runs only while a claimed role is not
   judged yet or stands missed. A role seen filled is not judged again: an incremental run's few
   records are no corpus, and one parentless Jira ticket in one would take Tickets away. A miss is
-  cleared by a run whose records of the missed kind pass. **Reversing:** low (`role_check::next`
+  cleared by a run whose records of the missed kind pass. **Reversing:** low (`role_check::change`
   and `wanted`).
 - **Filled needs every kind.** A first sync that emitted nothing of a role's kinds leaves it not
   judged (still drawn), so the next run with records judges it. **Reversing:** low.

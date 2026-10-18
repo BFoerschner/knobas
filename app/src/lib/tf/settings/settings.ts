@@ -8,6 +8,7 @@
  */
 import type { AuthMethod, CredentialHealth, SourceSummary, SourceSyncStatus, SyncRunRow } from "../../ipc/sources";
 import { ago } from "../../shell/time";
+import { CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI } from "../roles.svelte";
 import { IDENTITY_FIELD } from "../../sources/new-source";
 
 /** A section of Settings, in prototype-6's order (`STG`). */
@@ -120,26 +121,19 @@ export function sourceState(
   return { tone: "ok", text: `Synced ${ago(finished, now)}`, failed: false };
 }
 
+/** How the health line names each built-in role: on the row, and in *Not drawn …*. */
+const ROLE_WORDS: Record<string, { word: string; as: string }> = {
+  [CODE_HOST]: { word: "code host", as: "as a code host" },
+  [TICKET_SYSTEM]: { word: "ticket system", as: "as a ticket system" },
+  [CI]: { word: "CI", as: "as CI" },
+  [WIKI]: { word: "wiki", as: "as a wiki" },
+  [MONITORING]: { word: "monitoring", as: "for monitoring" },
+};
+
 /** A role as the health line says it: *ticket system*, *CI*. A custom role keeps its own name. */
 export function roleWord(role: string): string {
-  const words: Record<string, string> = {
-    "code-host": "code host",
-    "ticket-system": "ticket system",
-    ci: "CI",
-    wiki: "wiki",
-    monitoring: "monitoring",
-  };
-  return words[role] ?? role;
+  return ROLE_WORDS[role]?.word ?? role;
 }
-
-/** How *Not drawn …* names each built-in role. */
-const ROLE_AS: Record<string, string> = {
-  "code-host": "as a code host",
-  "ticket-system": "as a ticket system",
-  ci: "as CI",
-  wiki: "as a wiki",
-  monitoring: "for monitoring",
-};
 
 /**
  * The lines on top of a source's page for the roles its records did not fill
@@ -152,7 +146,7 @@ export function roleMissLines(source: Pick<SourceSummary, "kinds" | "role_misses
     const kind = source.kinds.find((info) => info.id === miss.kind);
     const one = (kind?.label ?? miss.kind).toLowerCase();
     const many = (kind?.plural ?? miss.kind).toLowerCase();
-    const as = ROLE_AS[miss.role] ?? `as ${miss.role}`;
+    const as = ROLE_WORDS[miss.role]?.as ?? `as ${miss.role}`;
     return `Not drawn ${as}: no ${one} resolves ${miss.field} at ${miss.path}. Its ${many} stay searchable and linkable.`;
   });
 }

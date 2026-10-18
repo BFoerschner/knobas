@@ -235,6 +235,10 @@ async fn removing_the_source_takes_its_misses_with_it() {
     let pool = pool().await;
     let source = configured(&pool).await;
     run(&pool, &source, vec![ticket("prio")]).await;
-    assert!(knobas_sync::config::delete(&pool, &source.id, false).await.unwrap());
+    assert!(
+        knobas_sync::config::delete(&pool, &source.id, false)
+            .await
+            .unwrap()
+    );
     assert_eq!(misses(&pool, &source).await, []);
 }

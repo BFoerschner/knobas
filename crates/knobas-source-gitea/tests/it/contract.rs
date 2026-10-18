@@ -31,7 +31,8 @@ async fn passes_the_contract_battery() {
 #[tokio::test]
 async fn fills_every_role_it_claims() {
     let fake = Fake::start(&State::tidewater()).await;
-    let source = knobas_source_gitea::build(instance(fake.base_url(), TOKEN, serde_json::json!({})))
-        .expect("the adapter builds");
+    let source =
+        knobas_source_gitea::build(instance(fake.base_url(), TOKEN, serde_json::json!({})))
+            .expect("the adapter builds");
     knobas_source::contract::fills_its_roles(&*source).await;
 }

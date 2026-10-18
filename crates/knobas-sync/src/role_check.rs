@@ -49,7 +49,7 @@ pub enum Change {
 /// * Otherwise nothing changes: a run that saw nothing of a kind is no
 ///   evidence about it.
 #[must_use]
-pub fn next(kept: Option<&Judged>, verdict: &RoleVerdict) -> Change {
+pub fn change(kept: Option<&Judged>, verdict: &RoleVerdict) -> Change {
     if let Some(miss) = &verdict.miss {
         return match kept {
             Some(Judged::Missed(old)) if old == miss => Change::Keep,
@@ -127,7 +127,7 @@ pub async fn record(
     verdicts: &[RoleVerdict],
 ) -> Result<(), sqlx::Error> {
     for verdict in verdicts {
-        let miss = match next(kept.get(&verdict.role), verdict) {
+        let miss = match change(kept.get(&verdict.role), verdict) {
             Change::Keep => continue,
             Change::Clear => {
                 sqlx::query("delete from sync.role_check where source_id = $1 and role = $2")

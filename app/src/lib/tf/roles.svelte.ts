@@ -32,6 +32,7 @@ import type { RoleClaim, RoleMiss } from "../ipc/sources";
 
 /** The built-in roles a surface is drawn for, as `knobas_source::role` spells them. */
 export const CODE_HOST = "code-host";
+export const TICKET_SYSTEM = "ticket-system";
 export const CI = "ci";
 export const WIKI = "wiki";
 export const MONITORING = "monitoring";

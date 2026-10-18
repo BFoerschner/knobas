@@ -59,7 +59,7 @@ pub struct RoleVerdict {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum Shape {
+pub(super) enum Shape {
     Text,
     Instant,
     Flag,
@@ -115,7 +115,10 @@ fn dotted(path: &PayloadPath) -> String {
     path.segments().join(".")
 }
 
-fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPath>) {
+/// Where `paths` declares `field`, and what it must lead to: the one map from
+/// a [`Field`] to its [`KindPaths`] candidates, which
+/// [`Field::declared_in`] reads too.
+pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPath>) {
     let plain = |v: &Vec<PayloadPath>| v.clone();
     let lists = |v: &Vec<knobas_core::payload::ListPath>| v.iter().map(|l| l.at.clone()).collect();
     match field {
@@ -159,7 +162,7 @@ fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPath>) {
 /// The kind a minimum's [`KindOf`] names on this descriptor, and its paths:
 /// by id, or the first emitted kind declaring the frame, as
 /// [`check`](super::check) picks it.
-fn kind_paths<'d>(d: &'d SourceDescriptor, of: KindOf) -> Option<&'d KindPaths> {
+fn kind_paths(d: &SourceDescriptor, of: KindOf) -> Option<&KindPaths> {
     let emitted = |id: &str| d.entity_kinds.iter().any(|k| k.id == id);
     match of {
         KindOf::Id(id) => d.payload_paths.iter().find(|p| p.kind == id),
@@ -354,7 +357,9 @@ mod tests {
     #[test]
     fn records_that_resolve_every_required_path_fill_the_role() {
         let d = tickets(&["fields", "priority", "name"]);
-        let [v] = verdicts(&d, &[ticket(json!({ "name": "mara" }))]).try_into().unwrap();
+        let [v] = verdicts(&d, &[ticket(json!({ "name": "mara" }))])
+            .try_into()
+            .unwrap();
         assert_eq!(v.role, TICKET_SYSTEM);
         assert_eq!(v.miss, None);
         assert!(v.complete);
@@ -391,7 +396,10 @@ mod tests {
     fn one_record_that_resolves_settles_the_kind() {
         let d = tickets(&["fields", "priority", "name"]);
         let mut parentless = ticket(Value::Null);
-        parentless["fields"].as_object_mut().unwrap().remove("parent");
+        parentless["fields"]
+            .as_object_mut()
+            .unwrap()
+            .remove("parent");
         let [v] = verdicts(&d, &[parentless.clone(), ticket(Value::Null)])
             .try_into()
             .unwrap();

@@ -1496,5 +1496,8 @@ async fn the_source_list_carries_the_misses_of_the_roles_still_claimed() {
     )
     .await
     .unwrap();
-    assert_eq!(updated.role_misses, row.role_misses, "update answers them too");
+    assert_eq!(
+        updated.role_misses, row.role_misses,
+        "update answers them too"
+    );
 }

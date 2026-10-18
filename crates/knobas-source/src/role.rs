@@ -136,28 +136,7 @@ impl Field {
     /// [`Field::ParentOf`] one whose parent is of that kind.
     #[must_use]
     pub fn declared_in(self, paths: &KindPaths) -> bool {
-        match self {
-            Field::StatusName => !paths.status_name.is_empty(),
-            Field::Priority => !paths.priority.is_empty(),
-            Field::Assignee => !paths.assignee.is_empty(),
-            Field::IssueType => !paths.issue_type.is_empty(),
-            Field::Labels => !paths.labels.is_empty(),
-            Field::ProjectKey => !paths.project_key.is_empty(),
-            Field::Parent => !paths.parent.is_empty(),
-            Field::ParentOf(kind) => paths.parent.iter().any(|p| p.kind == kind),
-            Field::State => !paths.state.is_empty(),
-            Field::Reviewers => !paths.reviewers.is_empty(),
-            Field::Merged => !paths.merged.is_empty(),
-            Field::Head => !paths.head.is_empty(),
-            Field::Commit => !paths.commit.is_empty(),
-            Field::DefaultBranch => !paths.default_branch.is_empty(),
-            Field::Name => !paths.name.is_empty(),
-            Field::Pipeline => !paths.pipeline.is_empty(),
-            Field::Number => !paths.number.is_empty(),
-            Field::Branch => !paths.branch.is_empty(),
-            Field::Started => !paths.started.is_empty(),
-            Field::Finished => !paths.finished.is_empty(),
-        }
+        !data::needs_of(self, paths).1.is_empty()
     }
 
     fn describe(self) -> String {

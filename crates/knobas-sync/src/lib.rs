@@ -452,9 +452,6 @@ async fn run_inner(
     // emits no monitors"; `Some(paths)` carries the declaration a sample's
     // state is read through (#277, ADR-0007).
     let monitor_paths = samples::state_paths(&descriptor);
-    // The role data check (#1199): built from the descriptor the run syncs
-    // under, so an external adapter's claims are held as a built-in's are.
-    let role_check = knobas_source::role::data::DataCheck::new(&descriptor);
     let source_id = descriptor.id;
     // Two sets out of one list: everything the sink will accept, and the
     // subset the sweep may act on. Both are read here, before `entity_kinds`
@@ -494,7 +491,6 @@ async fn run_inner(
         kinds,
         exhaustive,
         monitor_paths.as_deref(),
-        role_check,
         from,
     )
     .await;
@@ -589,7 +585,6 @@ async fn run_locked(
     kinds: HashSet<String>,
     exhaustive: HashSet<String>,
     monitor_paths: Option<&[knobas_core::payload::PayloadPath]>,
-    role_check: knobas_source::role::data::DataCheck,
     from: CursorSource,
 ) -> Result<Locked, SyncError> {
     // Held until this transaction ends, however it ends. Two runs of one source
@@ -646,9 +641,12 @@ async fn run_locked(
     // What is kept of the source's roles, and whether this run judges them:
     // its first sync does, and a later one while a role is unjudged or missed
     // (`role_check`).
+    // Built from the descriptor the run syncs under, so an external adapter's
+    // claims are held as a built-in's are.
+    let role_check = knobas_source::role::data::DataCheck::new(&source.descriptor());
     let kept_roles = role_check::load(tx, source_id).await?;
-    let role_check =
-        (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles)).then_some(role_check);
+    let role_check = (!role_check.is_empty() && role_check::wanted(&role_check, &kept_roles))
+        .then_some(role_check);
 
     let (cursor, upserted, deleted, emitted, role_check) = {
         let mut sink = PgSink::new(tx, source_id.to_owned(), kinds, role_check);
