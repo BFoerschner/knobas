@@ -32,6 +32,7 @@ use wasmtime::{Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
 mod convert;
+pub mod manifest;
 mod source;
 
 pub use source::WasmSource;

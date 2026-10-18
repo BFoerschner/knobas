@@ -79,6 +79,28 @@ pub fn list_adapters() -> Vec<knobas_source::SourceDescriptor> {
     crate::sources::Registry::builtin().templates()
 }
 
+/// Install an external adapter from a local `knobas-adapter.json` (#1202,
+/// ADR-0028): every static check, then the artifact stored under its hash,
+/// the install recorded, and the adapter in `list_adapters` from then on.
+/// A refusal is `invalid` with the check's reason; a kind already taken is
+/// `conflict`.
+#[tauri::command]
+pub async fn install_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    manifest: String,
+) -> Result<crate::sources::install::InstalledAdapter, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::install::install(
+        &state.pool,
+        &crate::sources::Registry::builtin(),
+        &crate::sources::install::store_dir(&profile.dir),
+        std::path::Path::new(&manifest),
+    )
+    .await
+    .map_err(|error| error.to_ipc())
+}
+
 #[tauri::command]
 pub async fn list_sources<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

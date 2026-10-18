@@ -1,12 +1,10 @@
 //! **An external adapter, through the registry and the sync engine, into the
 //! mirror, and out through the launcher's search** (ADR-0028, #1198).
 //!
-//! The fixture component is built by `just wasm-fixture`. It goes in as the
-//! dev adapter does: a [`WasmAdapter`] beside the compiled-in rows, which
-//! `Registry::builtin` adds in a debug build when `KNOBAS_DEV_ADAPTER` names
-//! it. That variable is read once per process, so this test hands the
-//! registry the adapter directly rather than setting it; `registry.rs`'s own
-//! tests cover reading it. Every assertion is on a stored row or a search
+//! The fixture component is built by `just wasm-fixture`, and goes in as an
+//! installed adapter does: a [`WasmAdapter`] beside the compiled-in rows.
+//! Install itself, from a manifest, is `external_adapter_install`. Every
+//! assertion is on a stored row or a search
 //! answer, never on a parsed item.
 
 use knobas_app::sources::Registry;

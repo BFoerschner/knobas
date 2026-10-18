@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod install;
 pub mod paths;
 pub mod progress;
 pub mod registry;
@@ -420,7 +421,12 @@ pub async fn start<R: tauri::Runtime>(
     let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
     let profile = app.state::<crate::Profile>().inner().clone();
     let secrets = secret_store(&profile);
-    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::builtin());
+    // The installed external adapters (#1202), before the scheduler builds
+    // its first source. A refused one is logged and recorded on the registry;
+    // it does not fail bring-up.
+    let installed = Registry::builtin();
+    install::load_installed(db.pool(), &installed, &install::store_dir(&profile.dir)).await?;
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(installed);
 
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: sync_pool,

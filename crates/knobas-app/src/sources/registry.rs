@@ -17,13 +17,17 @@
 //!
 //! **External adapters sit beside the table** (ADR-0028, #1198): a
 //! [`WasmAdapter`] builds a `dyn Source` as a row does, and the rest of
-//! knobas cannot tell the two apart. Until install lands (#1202) the only
-//! external adapter is the **dev adapter**: in a debug build,
-//! `KNOBAS_DEV_ADAPTER=<file.wasm>` loads one component at the first
-//! [`Registry::builtin`] and keeps it for the life of the process.
+//! knobas cannot tell the two apart. They are the installed ones (#1202):
+//! bring-up loads each row of `knobas.external_adapter` into
+//! [`Registry::builtin`]'s list (`sources::install::load_installed`), and an
+//! install adds to it while the app runs. Every clone of a registry shares
+//! its list, so the scheduler's copy sees an adapter installed after it
+//! started.
 
 use knobas_source::instance::SourceInstance;
 use knobas_source::{Source, SourceDescriptor, SourceError};
+use std::sync::{Arc, PoisonError, RwLock};
+
 use knobas_wasm_host::WasmAdapter;
 
 /// One compiled-in adapter kind.
@@ -90,49 +94,94 @@ const ADAPTERS: &[Adapter] = &[
     },
 ];
 
-/// The variable that names the dev adapter's component.
-pub const DEV_ADAPTER_VAR: &str = "KNOBAS_DEV_ADAPTER";
-
 /// Turns stored configurations into live adapters.
 #[derive(Debug, Default, Clone)]
 pub struct Registry {
-    /// External adapters, after every compiled-in row. Never of a kind a
-    /// row has: [`Registry::with_external`] drops such a one.
-    external: Vec<WasmAdapter>,
+    /// External adapters, after every compiled-in row, shared by every clone.
+    external: Arc<RwLock<External>>,
 }
 
+#[derive(Debug, Default)]
+struct External {
+    /// Never of a kind a row has, and one per kind: [`Registry::add`]
+    /// refuses a taken kind.
+    loaded: Vec<WasmAdapter>,
+    /// Installed adapters refused at load, by kind, with the reason; a
+    /// source of one fails to build with it.
+    refused: Vec<(String, String)>,
+}
+
+/// An external adapter of a kind the registry already has.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[error("an adapter of kind {0:?} is already {1}")]
+pub struct KindTaken(pub String, pub &'static str);
+
 impl Registry {
-    /// The compiled-in table, and in a debug build the dev adapter, if
-    /// [`DEV_ADAPTER_VAR`] names one that loads.
+    /// The compiled-in table and every external adapter this process has
+    /// loaded or installed: one list for the process, which bring-up fills.
     #[must_use]
     pub fn builtin() -> Registry {
-        static DEV: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
-        DEV.get_or_init(|| {
-            let var = std::env::var_os(DEV_ADAPTER_VAR);
-            Registry::with_external(dev_adapter(cfg!(debug_assertions), var.as_deref()))
-        })
-        .clone()
+        static PROCESS: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();
+        PROCESS.get_or_init(Registry::default).clone()
     }
 
     /// The compiled-in table and `external`, minus any external adapter of
     /// a kind already taken: a row's kind, or an earlier adapter's. Each
-    /// dropped one is logged.
+    /// dropped one is logged. A list of its own, shared with nothing.
     #[must_use]
     pub fn with_external(external: Vec<WasmAdapter>) -> Registry {
-        let mut kept: Vec<WasmAdapter> = Vec::new();
+        let registry = Registry::default();
         for adapter in external {
-            let taken = ADAPTERS.iter().any(|a| a.kind == adapter.kind())
-                || kept.iter().any(|k| k.kind() == adapter.kind());
-            if taken {
-                tracing::error!(
-                    kind = adapter.kind(),
-                    "an external adapter of a kind knobas already has is not loaded"
-                );
-            } else {
-                kept.push(adapter);
+            if let Err(error) = registry.add(adapter) {
+                tracing::error!(%error, "an external adapter is not loaded");
             }
         }
-        Registry { external: kept }
+        registry
+    }
+
+    /// Whether `kind` is taken: by a compiled-in row (`"built in"`) or by an
+    /// external adapter already loaded (`"installed"`).
+    ///
+    /// # Errors
+    ///
+    /// [`KindTaken`] naming which.
+    pub fn check_free(&self, kind: &str) -> Result<(), KindTaken> {
+        if ADAPTERS.iter().any(|a| a.kind == kind) {
+            return Err(KindTaken(kind.to_owned(), "built in"));
+        }
+        if self.read().loaded.iter().any(|a| a.kind() == kind) {
+            return Err(KindTaken(kind.to_owned(), "installed"));
+        }
+        Ok(())
+    }
+
+    /// Add an external adapter to every clone of this registry.
+    ///
+    /// # Errors
+    ///
+    /// [`KindTaken`] when a row or a loaded adapter has its kind.
+    pub fn add(&self, adapter: WasmAdapter) -> Result<(), KindTaken> {
+        self.check_free(adapter.kind())?;
+        let mut external = self.write();
+        external.refused.retain(|(kind, _)| kind != adapter.kind());
+        external.loaded.push(adapter);
+        Ok(())
+    }
+
+    /// Record that the installed adapter of `kind` was refused at load, so a
+    /// source of it fails to build with `reason` rather than as unknown.
+    pub fn refuse(&self, kind: &str, reason: String) {
+        let mut external = self.write();
+        external.refused.retain(|(k, _)| k != kind);
+        external.refused.push((kind.to_owned(), reason));
+    }
+
+    fn read(&self) -> std::sync::RwLockReadGuard<'_, External> {
+        self.external.read().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn write(&self) -> std::sync::RwLockWriteGuard<'_, External> {
+        self.external.write().unwrap_or_else(PoisonError::into_inner)
     }
 
     /// One descriptor **template** per compiled-in kind.
@@ -147,7 +196,7 @@ impl Registry {
         ADAPTERS
             .iter()
             .map(|a| (a.template)())
-            .chain(self.external.iter().map(WasmAdapter::template))
+            .chain(self.read().loaded.iter().map(WasmAdapter::template))
             .collect()
     }
 
@@ -185,8 +234,17 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
         if let Some(adapter) = ADAPTERS.iter().find(|a| a.kind == instance.kind) {
             return (adapter.build)(instance);
         }
-        if let Some(adapter) = self.external.iter().find(|a| a.kind() == instance.kind) {
+        let external = self.read();
+        if let Some(adapter) = external.loaded.iter().find(|a| a.kind() == instance.kind) {
+            let adapter = adapter.clone();
+            drop(external);
             return adapter.build(instance);
+        }
+        if let Some((_, reason)) = external.refused.iter().find(|(k, _)| *k == instance.kind) {
+            return Err(SourceError::protocol(format!(
+                "the external adapter {:?} was refused at load: {reason}",
+                instance.kind
+            )));
         }
         Err(SourceError::protocol(format!(
             "no adapter of kind {:?} is compiled in",
@@ -195,54 +253,9 @@ impl knobas_sync::scheduler::AdapterRegistry for Registry {
     }
 }
 
-/// The dev adapter [`DEV_ADAPTER_VAR`] names: none in a release build, none
-/// when the variable is unset or empty, and none, with the reason logged,
-/// when the file does not load.
-fn dev_adapter(debug: bool, var: Option<&std::ffi::OsStr>) -> Vec<WasmAdapter> {
-    let Some(path) = var.filter(|v| debug && !v.is_empty()) else {
-        return Vec::new();
-    };
-    let path = std::path::Path::new(path);
-    match WasmAdapter::load(path) {
-        Ok(adapter) => {
-            tracing::info!(kind = adapter.kind(), path = %path.display(), "dev adapter loaded");
-            vec![adapter]
-        }
-        Err(error) => {
-            tracing::error!(path = %path.display(), %error, "the dev adapter does not load");
-            Vec::new()
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn fixture() -> std::ffi::OsString {
-        knobas_wasm_host::fixture_component().into_os_string()
-    }
-
-    #[test]
-    fn a_debug_build_loads_the_dev_adapter_the_variable_names() {
-        let kinds: Vec<String> = dev_adapter(true, Some(&fixture()))
-            .iter()
-            .map(|a| a.kind().to_owned())
-            .collect();
-        assert_eq!(kinds, ["wasm-fixture"]);
-    }
-
-    #[test]
-    fn a_release_build_loads_no_dev_adapter() {
-        assert!(dev_adapter(false, Some(&fixture())).is_empty());
-    }
-
-    #[test]
-    fn an_unset_or_unloadable_variable_loads_none() {
-        assert!(dev_adapter(true, None).is_empty());
-        assert!(dev_adapter(true, Some(std::ffi::OsStr::new(""))).is_empty());
-        assert!(dev_adapter(true, Some(std::ffi::OsStr::new("/nonexistent/x.wasm"))).is_empty());
-    }
 
     #[test]
     fn an_external_adapter_joins_the_templates_once() {
@@ -251,5 +264,52 @@ mod tests {
         let kinds: Vec<String> = registry.templates().into_iter().map(|t| t.id).collect();
         assert_eq!(kinds.iter().filter(|k| *k == "wasm-fixture").count(), 1);
         assert_eq!(kinds.len(), ADAPTERS.len() + 1);
+    }
+
+    fn fixture_instance() -> SourceInstance {
+        SourceInstance {
+            id: "surveys".to_owned(),
+            kind: "wasm-fixture".to_owned(),
+            display_name: "Harbour surveys".to_owned(),
+            base_url: String::new(),
+            auth: None,
+            secret: None,
+            account: None,
+            config: serde_json::json!({}),
+        }
+    }
+
+    /// The scheduler holds a clone made at bring-up; an install after that
+    /// must still reach it.
+    #[test]
+    fn a_clone_made_before_an_install_builds_the_installed_adapter() {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        let registry = Registry::default();
+        let scheduler_copy = registry.clone();
+        registry.add(knobas_wasm_host::load_fixture()).unwrap();
+        assert!(scheduler_copy.build(fixture_instance()).is_ok());
+        assert_eq!(
+            registry.add(knobas_wasm_host::load_fixture()),
+            Err(KindTaken("wasm-fixture".to_owned(), "installed"))
+        );
+    }
+
+    #[test]
+    fn a_source_of_an_adapter_refused_at_load_fails_with_the_reason() {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        let registry = Registry::default();
+        registry.refuse("wasm-fixture", "its hash changed".to_owned());
+        let Err(error) = registry.build(fixture_instance()) else {
+            panic!("a refused adapter must not build");
+        };
+        assert!(error.to_string().contains("its hash changed"), "{error}");
+    }
+
+    #[test]
+    fn a_built_in_kind_is_taken() {
+        assert_eq!(
+            Registry::default().check_free("jira"),
+            Err(KindTaken("jira".to_owned(), "built in"))
+        );
     }
 }

@@ -36,6 +36,7 @@ mod entity_mirror;
 mod entity_view;
 mod estate_exit;
 mod external_adapter;
+mod external_adapter_install;
 mod inbox_ipc;
 mod ipc;
 mod jira_views_ipc;

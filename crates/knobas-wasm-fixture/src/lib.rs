@@ -16,6 +16,8 @@
 //!   the battery's `Fault`. A faulted fixture fails `test_connection` and
 //!   `sync` with the mapped error. A config it cannot read fails every call
 //!   with a protocol error naming it.
+//! * **The role** is the custom role [`ROLE`], and a survey's view is two
+//!   blocks: who surveyed it, and its body (#1202).
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
 //!   hold on a refused item is witnessed.
@@ -33,6 +35,13 @@ wit_bindgen::generate!({
 
 /// The adapter kind this fixture is. A source's id is its own.
 pub const KIND: &str = "wasm-fixture";
+
+/// The custom role the fixture claims (ADR-0029): its surveys fit no built-in
+/// role, so a survey opens the view `view` answers, and nothing else draws
+/// them. Written out whole, not formatted from [`KIND`], so a test can find
+/// the claim in the component's bytes (#1202's refusal of a role that is not
+/// namespaced to the adapter).
+pub const ROLE: &str = "wasm-fixture:survey-desk";
 
 /// `(key, title, body)` per survey. The kind is `survey`, not `note`: a note
 /// is knobas' own (quick capture), and the launcher hides those on a setting.
@@ -162,7 +171,9 @@ impl GuestAdapter for Adapter {
             "name": self.name,
             "capabilities": [],
             "adapter_version": "0.1.0",
-            "auth_methods": [],
+            // A token, which the fixture never reads: every source takes a
+            // credential at Add source, and the host attaches it (#1203).
+            "auth_methods": ["Pat"],
             "accepts_account": false,
             "min_sync_interval_secs": 60,
             "write_ops": [],
@@ -181,7 +192,7 @@ impl GuestAdapter for Adapter {
                 "additionalProperties": false,
             },
             "payload_paths": [],
-            "roles": [],
+            "roles": [{ "role": ROLE, "reads": [] }],
         })
         .to_string()
     }
@@ -227,12 +238,36 @@ impl GuestAdapter for Adapter {
         Err(self.no_workflow())
     }
 
+    /// A survey's block view, the custom role's whole surface (ADR-0029):
+    /// the surveyor as a fact and the body as text. `None` for an entity
+    /// that is not one of the fixture's surveys.
     fn view(
         &self,
-        _entity: String,
+        entity: String,
         _section: Option<String>,
     ) -> Result<Option<String>, SourceError> {
-        Ok(None)
+        let key = entity.strip_prefix(&format!("{}:", self.id));
+        let Some((_, title, body)) = SURVEYS.iter().find(|(k, _, _)| Some(*k) == key) else {
+            return Ok(None);
+        };
+        Ok(Some(
+            serde_json::json!({
+                "sections": [{
+                    "id": "survey",
+                    "title": title,
+                    "count": null,
+                    "deferred": false,
+                    "blocks": [
+                        { "type": "facts", "facts": [
+                            { "label": "Surveyor", "value": "harbourmaster", "tone": null },
+                        ] },
+                        { "type": "text", "text": body, "markdown": false },
+                    ],
+                }],
+                "actions": [],
+            })
+            .to_string(),
+        ))
     }
 
     fn pipeline_settings(&self, _entity: String) -> Result<Option<String>, SourceError> {
