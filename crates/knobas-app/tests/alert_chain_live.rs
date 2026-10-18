@@ -833,6 +833,11 @@ async fn the_canary_falls_the_alert_reaches_the_inbox_is_acked_and_recovery_clos
         per_monitor.iter().all(|n| (1..=3).contains(n)),
         "no monitor is sampled more than once per run: {per_monitor:?}"
     );
+    assert_eq!(
+        per_monitor.iter().max(),
+        Some(&3),
+        "the canary changed state on every run, so it was sampled on every run: {per_monitor:?}"
+    );
 
     state.scheduler.shutdown().await;
 }
