@@ -304,8 +304,8 @@ async fn a_quiet_source_keeps_exactly_its_newest_200() {
 async fn a_mix_keeps_the_last_day_and_old_runs_up_to_200() {
     let pool = pool().await;
     let id = unique("run");
-    // 50 old runs then 30 recent: the 30 recent are in the window, and the
-    // count keeps the newest 200, which is all 80.
+    // 250 old runs then 30 recent: the 30 recent are in the window and among
+    // the newest 200, so the count wins and keeps 170 old ones beside them.
     let runs = seed_runs(&pool, &id, 250, 30, 30).await;
     let removed = run_log::prune(&pool, &id, run_log::KEEP_RUNS, run_log::KEEP_WINDOW_SECS)
         .await

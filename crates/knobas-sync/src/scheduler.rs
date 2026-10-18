@@ -1055,11 +1055,11 @@ pub const SYNC_POOL_SIZE: u32 = 4;
 /// The only thing bounding how many connections the scheduler's runs hold,
 /// now that they do not come from a pool: without it, twenty configured
 /// sources going due together would be twenty backends and twenty concurrent
-/// remote calls. Three is a desktop's worth of parallelism, and it leaves the
-/// bookkeeping pool untouched by design rather than by arithmetic. Five, so
-/// three long Jira, Confluence or Gitea syncs cannot keep Kuma and TeamCity
-/// from polling; monitor polls can wait again only when five or more heavy
-/// sources sync at once. One shared pool, no lanes.
+/// remote calls. Five, so three long Jira, Confluence or Gitea syncs cannot
+/// keep Kuma and TeamCity from polling; monitor polls can wait again only when
+/// five or more heavy sources sync at once (#1189). One shared pool, no lanes.
+/// It is not bounded by [`SYNC_POOL_SIZE`]: runs hold their own connections and
+/// leave the bookkeeping pool untouched by design rather than by arithmetic.
 pub const SYNC_CONCURRENCY: usize = 5;
 
 /// How often the ticker looks for due sources, unless [`SchedulerTiming`]
