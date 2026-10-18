@@ -3523,6 +3523,7 @@ knobas-sync	test/it	run_log::the_diagnostics_read_can_span_every_source_or_one
 knobas-sync	test/it	run_log::the_last_finished_run_ignores_one_still_in_flight
 knobas-sync	test/it	run_log::the_log_is_pruned_to_the_newest_runs_per_source
 knobas-sync	test/it	run_log_recovery::a_run_abandoned_by_a_quit_is_closed_at_the_next_start
+knobas-sync	test/it	samples::a_different_state_is_sampled_at_once
 knobas-sync	test/it	samples::a_down_monitor_is_never_softened_to_warn
 knobas-sync	test/it	samples::a_monitor_over_the_threshold_samples_as_warn
 knobas-sync	test/it	samples::a_monitor_the_second_run_does_not_publish_gets_no_second_sample
@@ -3532,7 +3533,10 @@ knobas-sync	test/it	samples::a_source_declaring_no_state_path_samples_no_state
 knobas-sync	test/it	samples::a_source_that_emits_no_monitor_kind_writes_no_samples
 knobas-sync	test/it	samples::a_source_that_emits_two_kinds_samples_only_its_monitors
 knobas-sync	test/it	samples::a_sweep_with_nothing_past_the_horizon_takes_nothing
+knobas-sync	test/it	samples::an_alert_opens_and_closes_on_the_run_that_sees_the_transition
 knobas-sync	test/it	samples::both_settings_are_stored_by_one_save
+knobas-sync	test/it	samples::the_same_state_a_minute_after_is_sampled_again
+knobas-sync	test/it	samples::the_same_state_under_a_minute_after_writes_no_sample
 knobas-sync	test/it	samples::the_settings_default_and_survive_a_round_trip
 knobas-sync	test/it	samples::the_stored_retention_is_what_the_sweep_reaches_back_to
 knobas-sync	test/it	samples::the_stored_threshold_is_what_decides_warn

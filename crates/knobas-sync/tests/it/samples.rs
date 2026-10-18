@@ -802,7 +802,11 @@ async fn an_alert_opens_and_closes_on_the_run_that_sees_the_transition() {
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     corpus.lock().unwrap()[0].state = Some("down");
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
-    assert_eq!(open().await, 1, "down opens an alert on the run that sees it");
+    assert_eq!(
+        open().await,
+        1,
+        "down opens an alert on the run that sees it"
+    );
 
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     assert_eq!(open().await, 1, "a skipped sample leaves it standing");
