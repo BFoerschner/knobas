@@ -718,3 +718,67 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
     );
     assert_eq!(branch.path, answer.path);
 }
+
+/// PAY-231's Code section on a fresh demo profile (#1175): the job reaches its
+/// branch through a **confirmed** link, the read every section of a job goes
+/// through. Before, the branch was reached only by a proposal, and the section
+/// read "Nothing connected".
+///
+/// Loaded twice, because the link is drawn by the load and a second load must
+/// leave exactly one active row; and a link the reader removed stays removed.
+#[tokio::test]
+async fn the_demo_job_reaches_its_branch_through_a_confirmed_link() {
+    const TICKET: &str = "mock:PAY-231";
+    const BRANCH: &str = "mock:payout-service@refs/heads/feature/PAY-231-sepa-retry";
+
+    let _guard = MOCK.lock().await;
+    let pool = knobas_db::test_util::test_pool().await;
+    knobas_db::migrate::run(&pool).await.unwrap();
+    // The shared database may carry a previous run's link; start from none.
+    sqlx::query("delete from knobas.link where from_id = $1 and to_id = $2")
+        .bind(BRANCH)
+        .bind(TICKET)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    demo::demo_load_inner(&pool).await.unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+
+    let reached = knobas_core::reach::reach(&pool, TICKET).await.unwrap();
+    assert!(
+        reached
+            .iter()
+            .any(|r| r.entity_id == BRANCH && r.kind == "branch"),
+        "PAY-231 must reach its branch; reached {reached:?}"
+    );
+
+    let rows: Vec<(String, bool)> = sqlx::query_as(
+        "select origin, confirmed_at is not null from knobas.link
+          where from_id = $1 and to_id = $2 and deleted_at is null",
+    )
+    .bind(BRANCH)
+    .bind(TICKET)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        rows,
+        vec![("manual".to_owned(), true)],
+        "two loads leave one confirmed manual link"
+    );
+
+    // The reader removes it; the next load does not draw it again.
+    sqlx::query("update knobas.link set deleted_at = now() where from_id = $1 and to_id = $2")
+        .bind(BRANCH)
+        .bind(TICKET)
+        .execute(&pool)
+        .await
+        .unwrap();
+    demo::demo_load_inner(&pool).await.unwrap();
+    let reached = knobas_core::reach::reach(&pool, TICKET).await.unwrap();
+    assert!(
+        !reached.iter().any(|r| r.entity_id == BRANCH),
+        "a removed link stays removed across a demo load"
+    );
+}

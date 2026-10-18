@@ -624,6 +624,7 @@ knobas-app	test/it	demo::an_unconfigured_source_cannot_be_reached
 knobas-app	test/it	demo::demo_load_registers_once_and_syncs_the_same_rows_every_time
 knobas-app	test/it	demo::the_demo_corpus_answers_the_checkout_the_desktop_driver_opens
 knobas-app	test/it	demo::the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names
+knobas-app	test/it	demo::the_demo_job_reaches_its_branch_through_a_confirmed_link
 knobas-app	test/it	demo::the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 knobas-app	test/it	demo::the_launcher_finds_a_demo_ticket_by_its_key
 knobas-app	test/it	demo::the_loaded_fixture_is_searchable_the_way_the_readme_promises

@@ -3013,19 +3013,20 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     let pool = seeded().await;
 
     // The empty state is half the criterion, so it is asserted rather than
-    // assumed: the demo fixture ships no links, and this is the only test in
-    // this file that links `mock:PAY-231` -- every other link test uses
+    // assumed: the demo ticket `mock:PAY-240` has no links, and this is the
+    // only test in this file that links it -- every other link test uses
     // `linkable_pair`'s run-unique ids for at least one end. A second test
     // linking this entity would fail here, deliberately and not by ordering:
-    // the criterion is "Nothing linked yet" being *replaced*.
-    let before = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
+    // the criterion is "Nothing linked yet" being *replaced*. (PAY-231 is not
+    // the subject since #1175: the demo load draws its branch link.)
+    let before = get_entity_inner(&pool, "mock:PAY-240").await.unwrap().links;
     assert!(
         before.is_empty(),
         "the demo profile's panel says \"Nothing linked yet\" before the write: {before:?}"
     );
     let written = create_link_inner(
         &pool,
-        "mock:PAY-231",
+        "mock:PAY-240",
         "mock:PAY-228",
         Some("documents"),
         Some("the retry storm postmortem"),
@@ -3033,7 +3034,7 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     .await
     .unwrap();
 
-    let after = get_entity_inner(&pool, "mock:PAY-231").await.unwrap().links;
+    let after = get_entity_inner(&pool, "mock:PAY-240").await.unwrap().links;
     assert_eq!(
         after.len(),
         before.len() + 1,

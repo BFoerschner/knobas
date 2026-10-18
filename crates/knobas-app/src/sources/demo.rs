@@ -147,7 +147,53 @@ pub async fn demo_load_inner(pool: &PgPool) -> Result<SyncReport, DemoError> {
         "the demo estate is loaded"
     );
 
+    connect_demo_branch(pool).await?;
+
     Ok(report)
+}
+
+/// The ticket and the branch the demo draws a confirmed link between (#1175).
+const DEMO_LINK: (&str, &str) = (
+    "mock:PAY-231",
+    "mock:payout-service@refs/heads/feature/PAY-231-sepa-retry",
+);
+
+/// Draw the demo's one confirmed link: PAY-231 to its branch, so the job's
+/// Code section lists something on a fresh `--demo` profile (#1175).
+///
+/// Without it the branch is reached only by a *proposed* link, which a job's
+/// sections do not read, and the first impression is "Nothing connected". The
+/// link is `manual`: a person's own, which no later suggestion pass proposes
+/// again or overrides.
+///
+/// Idempotent, and it respects the reader: a link already there (this one, or
+/// the one a suggestion was confirmed into) is left alone, and a link the
+/// reader removed (a tombstone for the pair) is not drawn again by the next
+/// demo load.
+async fn connect_demo_branch(pool: &PgPool) -> Result<(), DemoError> {
+    use knobas_core::entity::EntityRef;
+    use knobas_core::link::{self, Origin};
+
+    let (ticket, branch) = DEMO_LINK;
+    let known: bool = sqlx::query_scalar(
+        "select exists (select 1 from knobas.link
+                         where deleted_at is not null
+                           and ((from_id = $1 and to_id = $2) or (from_id = $2 and to_id = $1)))",
+    )
+    .bind(branch)
+    .bind(ticket)
+    .fetch_one(pool)
+    .await?;
+    if known {
+        return Ok(());
+    }
+    let parse = |id: &str| EntityRef::parse(id).map_err(crate::IpcError::internal);
+    let (from, to) = (parse(branch)?, parse(ticket)?);
+    match link::create(pool, &from, &to, "related", Origin::Manual, None, "demo").await {
+        // Already linked: a second demo load.
+        Ok(_) | Err(knobas_core::CoreError::Duplicate) => Ok(()),
+        Err(error) => Err(DemoError::Estate(error.into())),
+    }
 }
 
 /// The work half of a demo load: register `source`, sync it in full, and purge
