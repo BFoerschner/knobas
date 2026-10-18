@@ -223,6 +223,10 @@ async fn assert_every_read_plans_without_estimates(analyzed: bool) {
                         .map(|f| format!("{name}: {f}")),
                 );
             }
+            if category == knobas_core::inbox::Category::Mention && !reads_body_index(&plan[0]["Plan"]) {
+                wrong.push(format!(
+                    "{name}: reads every item's body, not {BODY_INDEX} (#1170)"
+                ));            }
             if category == knobas_core::inbox::Category::NewAssignment {
                 wrong.extend(
                     item_scans_filtered_per_row(&plan[0]["Plan"])
@@ -616,6 +620,23 @@ fn item_scans_filtered_per_row(node: &serde_json::Value) -> Vec<String> {
         found.extend(item_scans_filtered_per_row(child));
     }
     found
+}
+
+/// The trigram index over the prose kinds' bodies (migration `0048`).
+const BODY_INDEX: &str = "item_body_trgm_idx";
+
+/// Whether the plan finds its items through [`BODY_INDEX`] (#1170). The
+/// mention rule read every prose item's body for the reader's name: 12 ms of
+/// the stream on the probe's 18,500, for every reader, the one rule left that
+/// cost the same whoever reads it. Through the index it reads the bodies that
+/// hold the name's trigrams, which for a name nobody wrote is none.
+fn reads_body_index(node: &serde_json::Value) -> bool {
+    node["Node Type"] == "Bitmap Index Scan" && node["Index Name"] == BODY_INDEX
+        || node["Plans"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .any(reads_body_index)
 }
 
 /// Every node type in a plan, subplans included.

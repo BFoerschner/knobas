@@ -341,10 +341,21 @@ macro_rules! review_request {
 /// limit, and *done* is what clears an older one -- and lets it come back when
 /// somebody says something new.
 ///
-/// **The name is looked for before it is matched** (#785): a `strpos` of the
-/// username, which every match contains, ahead of the expression. On the
-/// probe's 17,000 prose items, read for an identity they never name, the
-/// expression alone was 16 of the rule's 24 ms.
+/// **The names are looked for through an index** (#1170). Read item by item
+/// (#785's `strpos` ahead of the expression, per name in an `exists`), the
+/// rule read all 18,500 of the probe's prose bodies: 12 ms of the stream for
+/// every reader. Now the first test is **one expression for every name at
+/// once**, an alternation built from `$1` with no subquery, so a plan made
+/// for the bound names sees it as a constant: `item_body_trgm_idx` (migration
+/// `0048`, trigrams of the prose kinds' bodies) answers it and the planner
+/// costs it by the names' own trigrams. The rule then reads only the bodies
+/// holding them, none for a name nobody wrote. The names are joined on
+/// `chr(1)` and escaped together, which can only widen the alternation (a
+/// name holding a `chr(1)` becomes its two halves), so the second test --
+/// the per-name expression, the rule as it was -- decides. `cardinality`
+/// keeps an empty `$1` empty: the alternation of no names matches any `@`.
+/// Pinned by `a_name_with_pattern_characters_is_matched_literally` and, for
+/// the index in both statistics states, `knobas-app`'s `read_plans.rs`.
 macro_rules! mention {
     () => {
         concat!(
@@ -360,13 +371,17 @@ macro_rules! mention {
                        >= $2 - make_interval(days => ",
             window_days!(),
             r")
-                 and exists (
-                       select 1
-                         from unnest($1::text[]) as u
-                        where strpos(i.body_text, u) > 0
-                          and i.body_text ~ ('(\[~|@)'
+                 and cardinality($1::text[]) > 0
+                 and i.body_text ~ ('(\[~|@)('
+                       || replace(regexp_replace(array_to_string($1::text[], chr(1)),
+                                                 '([\\^$.|?*+()\[\]{}])', '\\\1', 'g'),
+                                  chr(1), '|')
+                       || ')($|[^A-Za-z0-9_.-])')
+                 and i.body_text ~ any (array(
+                       select '(\[~|@)'
                               || regexp_replace(u, '([\\^$.|?*+()\[\]{}])', '\\\1', 'g')
-                              || '($|[^A-Za-z0-9_.-])'))"
+                              || '($|[^A-Za-z0-9_.-])'
+                         from unnest($1::text[]) as u))"
         )
     };
 }
