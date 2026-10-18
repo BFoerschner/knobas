@@ -54,6 +54,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // §10.8). The battery holds this and `Capability::Write` to each
         // other in both directions.
         source_actions: Vec::new(),
+        clone_from: Vec::new(),
         write_ops: vec![
             WRITE_OP_TRIGGER_BUILD.to_owned(),
             WRITE_OP_RERUN_BUILD.to_owned(),

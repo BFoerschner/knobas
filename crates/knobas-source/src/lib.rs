@@ -183,6 +183,18 @@ pub struct SourceDescriptor {
     /// decodes as an adapter with none.
     #[serde(default)]
     pub source_actions: Vec<String>,
+    /// Which of an instance's typed addresses a repository is cloned from,
+    /// in order of preference: the code-host read `clone_urls` (#1197,
+    /// [`clone_urls::CloneFrom`]). *Clone* appends the checked
+    /// `owner/repo.git` to the first that ADR-0023's rules admit. Non-empty
+    /// exactly when a [`role::CODE_HOST`] claim reads `clone_urls`, and a
+    /// config key named here is a string property of
+    /// [`Self::config_schema`]; [`role::check`] holds both (clause 10).
+    ///
+    /// `#[serde(default)]`, so a descriptor from a peer that predates this
+    /// decodes as an adapter that names no address to clone from.
+    #[serde(default)]
+    pub clone_from: Vec<clone_urls::CloneFrom>,
 }
 
 // The declaration types themselves live in `knobas-core`, not here: the
@@ -1564,6 +1576,7 @@ mod tests {
             min_sync_interval_secs: 60,
             roles: Vec::new(),
             source_actions: Vec::new(),
+            clone_from: Vec::new(),
             write_ops: vec!["comment".into()],
             entity_kinds: vec![KindInfo {
                 id: "ticket".into(),
@@ -1617,6 +1630,7 @@ mod tests {
             min_sync_interval_secs: 20,
             roles: Vec::new(),
             source_actions: Vec::new(),
+            clone_from: Vec::new(),
             ..a_descriptor()
         };
         let mut wire = serde_json::to_value(&declared).unwrap();

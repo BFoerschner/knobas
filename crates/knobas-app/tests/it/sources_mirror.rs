@@ -278,6 +278,7 @@ fn the_descriptor_shape_matches_its_typescript_mirror() {
             "adapter_version",
             "auth_methods",
             "capabilities",
+            "clone_from",
             "config_schema",
             "entity_kinds",
             "id",

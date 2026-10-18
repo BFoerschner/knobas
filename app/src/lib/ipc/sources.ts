@@ -77,7 +77,16 @@ export interface SourceDescriptor {
    * as `source_action` actions. The shell never reads them.
    */
   source_actions: string[];
+  /**
+   * Which typed address of a source a repository is cloned from (#1197): the
+   * code-host read `clone_urls`. Clone reads it on the Rust side; the shell
+   * never does.
+   */
+  clone_from: CloneFrom[];
 }
+
+/** `knobas_source::clone_urls::CloneFrom`: the base URL, or a config key. */
+export type CloneFrom = "base_url" | { config: string };
 
 /** `knobas_source::role::RoleClaim` — one role a source claims. */
 export interface RoleClaim {

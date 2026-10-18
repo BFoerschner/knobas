@@ -54,6 +54,7 @@ pub fn descriptor_template() -> SourceDescriptor {
         // deliberate: the two a reader reaches for from a page detail come
         // first, and the one that makes a new page last.
         source_actions: Vec::new(),
+        clone_from: Vec::new(),
         write_ops: vec![
             "comment".to_owned(),
             "update_page".to_owned(),

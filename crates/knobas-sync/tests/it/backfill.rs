@@ -74,6 +74,7 @@ impl Source for Widening {
             min_sync_interval_secs: 60,
             roles: Vec::new(),
             source_actions: Vec::new(),
+            clone_from: Vec::new(),
             write_ops: Vec::new(),
             // Jira's `ticket` declares `true`, which is exactly what makes a
             // cursor-less run over this source a sweeping one.

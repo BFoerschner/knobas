@@ -86,6 +86,7 @@ function descriptor(over: Partial<SourceDescriptor> = {}): SourceDescriptor {
     min_sync_interval_secs: 60,
     roles: [],
     source_actions: [],
+    clone_from: [],
     write_ops: [],
     entity_kinds: [
       { id: "ticket", label: "Ticket", plural: "Tickets", monogram: "TK", full_sync_exhaustive: false },

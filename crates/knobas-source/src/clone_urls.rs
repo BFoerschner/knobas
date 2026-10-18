@@ -16,6 +16,19 @@
 //!
 //! Exact otherwise: an address nobody configured is matched as written, and
 //! the same owner/repo on another host is another repository (#665).
+//!
+//! # Where a repository is cloned from (#1197)
+//!
+//! The other half of the module: the code-host read `clone_urls`
+//! ([`role::CODE_HOST`](crate::role::CODE_HOST)'s minimum). *Clone* runs git
+//! itself (ADR-0023), and ADR-0023 builds the URL from an address a person
+//! typed, never from the mirror. So an adapter does not hand back a URL: it
+//! declares, in [`SourceDescriptor::clone_from`](crate::SourceDescriptor::clone_from),
+//! **which of its instance's typed addresses** a repository is cloned from --
+//! the base URL, or a string its config holds under a key -- and the app
+//! resolves them with [`addresses`] and appends the checked `owner/repo.git`.
+//! Gitea declares [`CloneFrom::BaseUrl`], which is what the app built from
+//! before the read existed.
 
 /// The config key under which a source lists the other addresses its host
 /// is cloned from: `["http://gitea:3000", "git@gitea:"]`.
@@ -58,6 +71,49 @@ pub fn is_entry(entry: &str) -> bool {
             !bare.is_empty() && !host.contains('/') && !scheme
         }
     }
+}
+
+/// Which typed address of an instance a repository is cloned from: the
+/// answer an adapter gives to the code-host read `clone_urls` (#1197).
+///
+/// Plain serde data, as everything crossing the SPI: `"base_url"`, or
+/// `{"config": "<key>"}`.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CloneFrom {
+    /// The instance's base URL.
+    BaseUrl,
+    /// The string the instance's config holds under this key, which the
+    /// adapter's `config_schema` declares as a string property
+    /// ([`config_declares`]).
+    Config(String),
+}
+
+/// Whether `config_schema` declares `key` as a string property: what a
+/// [`CloneFrom::Config`] must name, so the address it reads is one the
+/// Add-source form asked a person for.
+#[must_use]
+pub fn config_declares(config_schema: &serde_json::Value, key: &str) -> bool {
+    config_schema
+        .get("properties")
+        .and_then(|p| p.get(key))
+        .is_some_and(|p| p["type"] == "string")
+}
+
+/// The addresses `from` names on one instance, in the order declared: its
+/// `base_url`, and the non-blank strings its `config` holds under the keys
+/// named. A key the config does not hold as a string names nothing.
+#[must_use]
+pub fn addresses(from: &[CloneFrom], base_url: &str, config: &serde_json::Value) -> Vec<String> {
+    from.iter()
+        .filter_map(|from| match from {
+            CloneFrom::BaseUrl => Some(base_url),
+            CloneFrom::Config(key) => config.get(key).and_then(serde_json::Value::as_str),
+        })
+        .map(str::trim)
+        .filter(|address| !address.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// One source's other address: the base URL its pages carry, and one
@@ -232,5 +288,36 @@ mod tests {
         )));
         assert!(!declared(&schema(serde_json::json!({ "type": "string" }))));
         assert!(!declared(&serde_json::json!({ "properties": {} })));
+    }
+
+    /// The addresses come from what a person typed, in the order the adapter
+    /// declared them; a key the config does not fill names nothing.
+    #[test]
+    fn clone_addresses_are_the_instances_typed_addresses_in_declared_order() {
+        let config =
+            serde_json::json!({ "ssh_base": "ssh://git@forge.example", "port": 22, "blank": " " });
+        let from = [
+            CloneFrom::Config("ssh_base".into()),
+            CloneFrom::BaseUrl,
+            CloneFrom::Config("port".into()),
+            CloneFrom::Config("blank".into()),
+            CloneFrom::Config("absent".into()),
+        ];
+        assert_eq!(
+            addresses(&from, "https://forge.example/", &config),
+            ["ssh://git@forge.example", "https://forge.example/"]
+        );
+        assert!(addresses(&[], "https://forge.example", &config).is_empty());
+    }
+
+    #[test]
+    fn a_clone_address_crosses_as_its_word_or_its_config_key() {
+        let wire =
+            serde_json::to_value([CloneFrom::BaseUrl, CloneFrom::Config("k".into())]).unwrap();
+        assert_eq!(wire, serde_json::json!(["base_url", { "config": "k" }]));
+        let schema = serde_json::json!({ "properties": { "k": { "type": "string" }, "n": { "type": "integer" } } });
+        assert!(config_declares(&schema, "k"));
+        assert!(!config_declares(&schema, "n"));
+        assert!(!config_declares(&schema, "absent"));
     }
 }
