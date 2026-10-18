@@ -135,6 +135,77 @@ const COMMENT_PAGE_SIZE: u32 = 100;
 /// `"limit": 200` to a request for 1000, measured for #1138).
 const SWEEP_PAGE_SIZE: u32 = 200;
 
+/// One search and every page `_links.next` leads on to, with the
+/// [`MAX_PAGES`] refusal in the one place it lives.
+///
+/// Every walk in this module (the page walk, the mention walk, the positions
+/// sweep, the re-read of moved pages) is this loop: ask for a page, handle its
+/// rows, follow the link, refuse past the stop. The caller owns the rows;
+/// this owns the paging and the refusal.
+struct Walk<'a> {
+    api: &'a (dyn ConfluenceApi + 'a),
+    cql: &'a str,
+    limit: u32,
+    expand: &'a str,
+    /// What the rows are, for the refusal message ("positions", "mention
+    /// results").
+    noun: &'a str,
+    /// The link the previous page offered, still to be followed.
+    pending: Option<String>,
+    started: bool,
+    requests: u32,
+}
+
+impl<'a> Walk<'a> {
+    fn new(
+        api: &'a (dyn ConfluenceApi + 'a),
+        cql: &'a str,
+        limit: u32,
+        expand: &'a str,
+        noun: &'a str,
+    ) -> Self {
+        Self {
+            api,
+            cql,
+            limit,
+            expand,
+            noun,
+            pending: None,
+            started: false,
+            requests: 0,
+        }
+    }
+
+    /// The next page, or `None` once the last one has been handed out.
+    ///
+    /// The refusal is raised when the walk is about to *follow* a link past
+    /// the stop, never as a quiet `None`: a truncated walk reported as
+    /// finished is what [`MAX_PAGES`] exists to prevent. Because it is raised
+    /// on the call after a page, the caller has handled that page's rows
+    /// first.
+    async fn next_page(&mut self) -> Result<Option<crate::model::ContentPage>, SourceError> {
+        let page = if !self.started {
+            self.started = true;
+            self.api.search(self.cql, self.limit, self.expand).await?
+        } else if let Some(link) = self.pending.take() {
+            self.requests += 1;
+            if self.requests >= MAX_PAGES {
+                return Err(SourceError::protocol(format!(
+                    "Confluence kept offering another page of {} after {MAX_PAGES} requests of \
+                     {}; refusing to report a partial walk as a completed sync. Narrow this \
+                     source with a space list.",
+                    self.noun, self.limit
+                )));
+            }
+            self.api.follow(&link).await?
+        } else {
+            return Ok(None);
+        };
+        self.pending.clone_from(&page.links.next);
+        Ok(Some(page))
+    }
+}
+
 pub(crate) struct SyncRun<'a> {
     pub api: &'a (dyn ConfluenceApi + 'a),
     pub cfg: &'a ConfluenceConfig,
@@ -235,13 +306,8 @@ impl SyncRun<'_> {
         // every page, so this is the whole map and it needs no sweep (#1138).
         let mut walked_positions = Positions::new();
 
-        let mut next: Option<String> = None;
-        let mut pages: u32 = 0;
-        loop {
-            let page = match &next {
-                None => self.api.search(&cql, self.cfg.page_size, EXPAND).await?,
-                Some(link) => self.api.follow(link).await?,
-            };
+        let mut walk = Walk::new(self.api, &cql, self.cfg.page_size, EXPAND, "results");
+        while let Some(page) = walk.next_page().await? {
             for mut raw in page.results {
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
@@ -277,20 +343,6 @@ impl SyncRun<'_> {
                     watermark = Some(watermark.map_or(u, |w| w.max(u)));
                 }
             }
-            let Some(link) = page.links.next else { break };
-            pages += 1;
-            if pages >= MAX_PAGES {
-                // Not a `break`: leaving the loop here and returning `Ok`
-                // would hand the engine a partial walk wearing a completed
-                // one's clothes, and the sweep would tombstone the rest.
-                return Err(SourceError::protocol(format!(
-                    "Confluence kept offering another page of results after {MAX_PAGES} of \
-                     {}; refusing to report a partial walk as a completed sync. Narrow this \
-                     source with a space list.",
-                    self.cfg.page_size
-                )));
-            }
-            next = Some(link);
         }
 
         emitted += self
@@ -385,29 +437,17 @@ impl SyncRun<'_> {
     async fn positions_sweep(&self) -> Result<Vec<(String, Option<i64>)>, SourceError> {
         let cql = build_positions_cql(self.cfg);
         let mut swept = Vec::new();
-        let mut next: Option<String> = None;
-        let mut requests: u32 = 0;
-        loop {
-            let page = match &next {
-                None => {
-                    self.api
-                        .search(&cql, SWEEP_PAGE_SIZE, POSITIONS_EXPAND)
-                        .await?
-                }
-                Some(link) => self.api.follow(link).await?,
-            };
+        let mut walk = Walk::new(
+            self.api,
+            &cql,
+            SWEEP_PAGE_SIZE,
+            POSITIONS_EXPAND,
+            "positions",
+        );
+        while let Some(page) = walk.next_page().await? {
             for raw in &page.results {
                 swept.push((raw.content.id.clone(), map::position_of(&raw.raw)));
             }
-            let Some(link) = page.links.next else { break };
-            requests += 1;
-            if requests >= MAX_PAGES {
-                return Err(SourceError::protocol(format!(
-                    "Confluence kept offering another page of positions after {MAX_PAGES}; \
-                     refusing to report a partial walk as a completed sync."
-                )));
-            }
-            next = Some(link);
         }
         Ok(swept)
     }
@@ -431,13 +471,8 @@ impl SyncRun<'_> {
         let size = usize::try_from(self.cfg.page_size).unwrap_or(1).max(1);
         for group in moved.chunks(size) {
             let cql = build_ids_cql(group);
-            let mut next: Option<String> = None;
-            let mut requests: u32 = 0;
-            loop {
-                let page = match &next {
-                    None => self.api.search(&cql, self.cfg.page_size, EXPAND).await?,
-                    Some(link) => self.api.follow(link).await?,
-                };
+            let mut walk = Walk::new(self.api, &cql, self.cfg.page_size, EXPAND, "re-read pages");
+            while let Some(page) = walk.next_page().await? {
                 for mut raw in page.results {
                     if !delivered.insert(raw.content.id.clone()) {
                         continue;
@@ -448,15 +483,6 @@ impl SyncRun<'_> {
                     sink.item(item).await?;
                     emitted += 1;
                 }
-                let Some(link) = page.links.next else { break };
-                requests += 1;
-                if requests >= MAX_PAGES {
-                    return Err(SourceError::protocol(format!(
-                        "Confluence kept offering another page of re-read pages after \
-                         {MAX_PAGES}; refusing to report a partial walk as a completed sync."
-                    )));
-                }
-                next = Some(link);
             }
         }
         Ok(emitted)
@@ -501,17 +527,14 @@ impl SyncRun<'_> {
     ) -> Result<usize, SourceError> {
         let cql = build_mention_cql(self.cfg, window.since, window.offset_secs);
         let mut emitted: usize = 0;
-        let mut next: Option<String> = None;
-        let mut requests: u32 = 0;
-        loop {
-            let page = match &next {
-                None => {
-                    self.api
-                        .search(&cql, self.cfg.page_size, MENTION_EXPAND)
-                        .await?
-                }
-                Some(link) => self.api.follow(link).await?,
-            };
+        let mut walk = Walk::new(
+            self.api,
+            &cql,
+            self.cfg.page_size,
+            MENTION_EXPAND,
+            "mention results",
+        );
+        while let Some(page) = walk.next_page().await? {
             for raw in &page.results {
                 let version = raw.content.version.as_ref();
                 let number = version.and_then(|v| v.number);
@@ -544,15 +567,6 @@ impl SyncRun<'_> {
                 sink.item(item).await?;
                 emitted += 1;
             }
-            let Some(link) = page.links.next else { break };
-            requests += 1;
-            if requests >= MAX_PAGES {
-                return Err(SourceError::protocol(format!(
-                    "Confluence kept offering another page of mention results after \
-                     {MAX_PAGES}; refusing to report a partial walk as a completed sync."
-                )));
-            }
-            next = Some(link);
         }
         Ok(emitted)
     }
