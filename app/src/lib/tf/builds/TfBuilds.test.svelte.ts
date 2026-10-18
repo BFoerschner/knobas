@@ -9,6 +9,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfBuilds, { forgetFolds, type BuildsPorts } from "./TfBuilds.svelte";
+import { sourceRoles } from "../roles.svelte";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -336,4 +337,26 @@ test("a job with no pipelines says so and offers to search all of them", async (
   [...target.querySelectorAll<HTMLButtonElement>(".tf-pl-note button")][0]!.click();
   flushSync();
   expect(target.querySelectorAll(".tf-pl-fold").length).toBeGreaterThan(0);
+});
+
+test("Builds lists the sources that claim ci, whatever their adapter kind, and no other (#1196)", async () => {
+  sourceRoles.take([
+    // An adapter kind the shell has never seen.
+    { id: "relay", adapter_kind: "acme-ci", roles: [{ role: "ci", reads: ["run_log"] }] },
+    { id: "teamcity", adapter_kind: "teamcity", roles: [{ role: "wiki", reads: [] }] },
+  ]);
+  const relay: PipelineRow = {
+    ...pipeline("Rocket_Build", "Rocket_Build", [run("relay:run:7", "ok")]),
+    entity_id: "relay:pipeline:Rocket_Build",
+    source_id: "relay",
+    source_name: "Relay CI",
+  };
+  const ports: BuildsPorts = {
+    pipelines: () => Promise.resolve([...LIST, relay]),
+    runs: (id) => Promise.resolve([...LIST, relay].find((p) => p.entity_id === id)?.recent ?? []),
+  };
+  page = mount(TfBuilds, { target, props: { ready: true, head: "builds", rest: [], job: null, ports } });
+  await settle();
+
+  expect(names()).toEqual(["Rocket_Build"]);
 });

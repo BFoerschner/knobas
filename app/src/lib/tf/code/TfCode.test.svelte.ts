@@ -12,6 +12,7 @@ import type { CheckoutView, CodeFacts, EntityFilter, EntityPage, EntityRow, Grou
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { CodePorts } from "./TfCode.svelte";
 import TfCode from "./TfCode.svelte";
+import { sourceRoles } from "../roles.svelte";
 
 const NOW = new Date(2026, 7, 22, 14, 32);
 
@@ -249,4 +250,32 @@ test("New pull request opens the compare page for the job's branch; with no job 
   const button = [...target.querySelectorAll("button")].find((b) => text(b) === "New pull request");
   expect(button?.getAttribute("aria-disabled")).toBe("true");
   expect(target.querySelector(".tf-chip-job")).toBeNull();
+});
+
+test("Code draws the sources that claim code-host, whatever their adapter kind, and no other (#1196)", async () => {
+  sourceRoles.take([
+    // An adapter kind the shell has never seen.
+    { id: "forge", adapter_kind: "acme-forge", roles: [{ role: "code-host", reads: [] }] },
+    { id: "gitea", adapter_kind: "gitea", roles: [{ role: "ticket-system", reads: [] }] },
+  ]);
+  const rocket = row("forge:acme/rocket", "repo", "acme/rocket", { source_id: "forge", updated_at: "2026-08-22T11:00:00Z" });
+  const launch = row("forge:acme/rocket#1", "pr", "Launch window", {
+    source_id: "forge",
+    path: "acme/rocket",
+    state: { text: "open", tone: "info" },
+  });
+  await draw(
+    [],
+    null,
+    ports({
+      listEntities: async (filter) => {
+        if (filter.kinds.includes("repo")) return page([...REPOS, rocket]);
+        if (filter.kinds.includes("branch")) return page([]);
+        return page([...OPEN, launch]);
+      },
+    }),
+  );
+
+  expect([...target.querySelectorAll("tbody tr")].map((tr) => cells(tr)[0])).toEqual(["acme/rocket"]);
+  expect([...target.querySelectorAll(".tf-tabs a")].map(text)).toEqual(["Repositories 1", "Pull requests 1"]);
 });

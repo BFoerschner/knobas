@@ -5624,3 +5624,58 @@ The merge-manager's rulings (PR #1226):
   is worse than a refusal that names Forgejo. **Reversing:** medium (a new diff producer behind
   the same fallback); revisit if Forgejo lets a token read the web route or honours
   `output=diff`.
+
+## #1196 The shell picks each surface's sources by role claim (2026-10-18)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 sign-off** (`docs/contract/10.8/1196-source-list-carries-role-claims.md`):
+  `SourceSummary` gains `roles`, from the adapter's template like `kinds`. Signed: it adds one
+  field, changes no minimum and no command, and the shape test holds the mirror. **Reversing:** a
+  §10.8 amendment.
+
+The implementer's rulings:
+
+- **Where the shell narrows.** In the shell, over what each surface already reads
+  (`tf/roles.svelte.ts`, filled by `TfShell.svelte` from every `list_sources` answer), not in
+  the backend reads (`pipelines`, `docs_tree`, `monitor_roster`), which stay as they were. The
+  ticket asks for the claims on the source list the shell reads. **Reversing:** low.
+- **What is not narrowed:** the time before the list is read, and a row whose source the list
+  does not name (the items a removed source left). The shell knows no claims for either, and
+  hiding a removed source's items is a retention question, not this ticket's. It is also what
+  keeps the existing surface tests green unchanged: they mount without the shell. **Reversing:**
+  one line in `draws`.
+- **The demo loses its Code rows.** The mock claims no role (#1193), so under `--demo` Code no
+  longer lists the mock's repositories and pull requests. That follows ADR-0029. Follow-up #1229
+  (ready-for-agent). **Reversing:** #1229.
+- **The `?fake-ipc` mock claims `code-host`,** because the fixture's repositories and pull
+  requests are the mock's rows. The real mock claims nothing; the fixture says where it differs.
+  **Reversing:** low.
+- **`SourceSummary.roles` is optional in the TypeScript mirror** (always sent), so the stand-in
+  summaries in existing tests still type-check, as the ticket's "unchanged" asks. A summary
+  without it claims nothing. **Reversing:** low (make it required and add `roles: []` to the
+  stand-ins).
+- **Out of this ticket:** the job page's sections still read by kind (its Builds section reads
+  TeamCity's `build` kind), and Docs' search hits are not narrowed. Follow-up #1230 (backlog).
+  The job page's stale-builds warning does move to the `ci` claim, as it picked sources by the
+  presence of a kind. **Reversing:** #1230. (Docs' hits were folded in by the merge-manager, below.)
+
+The merge-manager's rulings (PR #1232):
+
+- **Criterion 2 ("no surface outside Tickets reads an adapter kind to decide what to draw") is
+  met, with Docs' search hits folded in.** No surface under `tf/` outside Tickets and Settings
+  compares an `adapter_kind` to pick rows; what is left reads a descriptor for a label
+  (`pipelineWord`, `kindRegistry`). Docs' hits are on the Docs surface, which the ticket's *What
+  to build* names, and they drew pages of a source that does not claim `wiki`, so leaving them
+  would leave Docs drawn by kind: they are narrowed here, frontend only, by dropping a hit on a
+  page of a space the tree dropped (a hit carries no `source_id`). The job page is not one of the
+  role surfaces (spec #1192 story 1: Code, Tickets, Builds, Docs, Monitors) and reads entity
+  kinds, not adapter kinds; its sections and the CI run kind stay #1230. **Reversing:** low; a
+  `source_id` on `DocHit` would be a §10.8 entry.
+- **No narrowing before the source list answers is safe.** It can never hide a claimed source: a
+  source is dropped only when the list names it and it lacks the claim. The cost is that a
+  non-claimer's rows can draw until the list answers; among the built-ins only the mock claims
+  nothing, so only `--demo` can show it. **Reversing:** one line in `draws`.
+- **Merge before #1229.** Making the mock claim `code-host` needs its live reads and the
+  battery's `rejects_…` cases reworked, which is #1229's own size; it is `ready-for-agent` in
+  milestone v3, so the demo regression does not reach a v3 release. **Reversing:** #1229.

@@ -82,6 +82,12 @@ fn summary_fixture() -> knobas_app::sources::SourceSummary {
             ..knobas_source_mock::descriptor_template()
         }
         .entity_kinds,
+        // One claim, not none: an empty list says nothing about how a claim
+        // is spelled on the wire.
+        roles: vec![knobas_source::role::RoleClaim::new(
+            knobas_source::role::CI,
+            ["run_log"],
+        )],
     }
 }
 
@@ -103,6 +109,7 @@ fn the_source_summary_shape_matches_its_typescript_mirror() {
             "kinds",
             "last_run",
             "next_run_at",
+            "roles",
             "sync_interval_secs",
         ],
     );

@@ -18,14 +18,22 @@ const KIND_INFO = [
 export const FIXTURE_SOURCES = [
   {
     ...fixtureSource("mock", "mock", "Tidewater (mock)", "https://mock.tidewater.example", "ok", 21, 90, null),
+    // The fixture's repositories and pull requests are the mock's rows, so here
+    // it claims the code host role, which Code draws by (#1196). The real mock
+    // adapter claims nothing (#1193), and this is where the fixture diverges.
+    roles: [{ role: "code-host", reads: [] }],
     // Who the reader is in the mock source (#818): the assignee the corpus's
     // tickets name, so a To Do ticket of Mara's offers *Start work* on its
     // job, as `mini_board`'s `mine` already says of the same tickets.
     config: { username: "mara" } as Record<string, unknown>,
   },
-  fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
+  {
+    ...fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
+    roles: [{ role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] }],
+  },
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
+    roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }],
     // What its page edits (#904, #1021): prototype-6's four projects, and a
     // Sprint field id the sync recorded beside an Epic Link id nobody set.
     config: { username: "mara.oyelaran", projects: ["PAY", "OPS", "CUS", "TRK"], sprint_field: "customfield_10107" } as Record<
@@ -46,6 +54,12 @@ export const FIXTURE_SOURCES = [
   // can be photographed at the prototype's own address (#830).
   {
     ...fixtureSource("teamcity", "teamcity", "Tidewater TeamCity", "https://ci.tidewater.example", "unauthorized", 96, 89, "UserPassword"),
+    roles: [
+      {
+        role: "ci",
+        reads: ["run_log", "pipeline_settings", "older_runs", "run_tests", "test_history", "run_artifacts", "artifact_preview", "download", "run_chain"],
+      },
+    ],
     health: {
       source_id: "teamcity",
       state: "unauthorized",
@@ -58,7 +72,7 @@ export const FIXTURE_SOURCES = [
   // The monitor roster's rows name `kuma` (#977): without this source the
   // Monitors header read the bare id, and with no account the roster would not
   // offer Pause and Resume. Kuma's descriptor declares an API token.
-  fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "ok", 6, 95, "ApiToken"),
+  { ...fixtureSource("kuma", "kuma", "Uptime Kuma", "https://status.tidewater.example", "ok", 6, 95, "ApiToken"), roles: [{ role: "monitoring", reads: [] }] },
 ];
 
 /**
@@ -132,6 +146,8 @@ function fixtureSource(
     next_run_at: "2026-08-22T14:45:00Z",
     item_count: itemCount,
     kinds: KIND_INFO,
+    // The roles the source's adapter claims (#1196); each fixture names its own.
+    roles: [] as { role: string; reads: string[] }[],
   };
 }
 
@@ -327,6 +343,8 @@ export function handlers(): Record<string, Handler> {
         // person just described, or the QA harness disagrees with itself one
         // render apart.
         auth_kind: input["auth_kind"] ?? null,
+        // The adapter's claims, as `list_sources` takes them from its template.
+        roles: FIXTURE_ADAPTERS.find((adapter) => adapter.adapter_kind === input["adapter_kind"])?.roles ?? [],
         item_count: 0,
         last_run: null,
       };

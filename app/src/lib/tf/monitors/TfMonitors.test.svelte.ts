@@ -13,6 +13,7 @@ import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import type { MonitorPorts } from "./TfMonitors.svelte";
 import TfMonitors from "./TfMonitors.svelte";
+import { sourceRoles } from "../roles.svelte";
 
 const NOW = new Date("2026-10-16T14:00:00Z");
 
@@ -268,4 +269,16 @@ test("a create the backend refuses stays open and says why", async () => {
   [...dialog.querySelectorAll<HTMLButtonElement>("footer button")].find((b) => text(b) === "Create monitor")!.click();
   await settle();
   expect(text(document.querySelector(".tf-dialog [role='alert']"))).toContain("no Docker host");
+});
+
+test("Monitors draws the sources that claim monitoring, whatever their adapter kind, and no other (#1196)", async () => {
+  sourceRoles.take([
+    { id: "pulse", adapter_kind: "acme-pulse", roles: [{ role: "monitoring", reads: [] }] },
+    { id: "kuma", adapter_kind: "kuma", roles: [] },
+  ]);
+  const beacon = monitor("pulse:9", "beacon /ping", { source_id: "pulse" });
+  await draw([], "PAY-231", ports({ monitorRoster: async () => [...ROSTER, beacon] }));
+
+  expect(rows().map((tr) => text(tr.querySelector("td")))).toEqual(["beacon /ping HTTP"]);
+  expect(text(target.querySelector(".tf-tabs a"))).toBe("Monitors 1");
 });
