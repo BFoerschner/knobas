@@ -630,6 +630,40 @@ async fn a_name_with_pattern_characters_is_matched_literally() {
     );
 }
 
+/// The names are joined on `chr(1)` to be looked for at once (#1170), so a
+/// name holding that character is looked for as its two halves. What decides
+/// is still the whole name: a mention of one half is nobody's.
+#[tokio::test]
+async fn a_name_holding_the_joining_character_is_still_one_name() {
+    let pool = &scratch().await;
+    let half = ticket(pool, "PAY-1", Some(THEM), None, "@ab ping?", days_ago(1)).await;
+    let whole = ticket(
+        pool,
+        "PAY-2",
+        Some(THEM),
+        None,
+        "@ab\u{1}cd ping?",
+        days_ago(1),
+    )
+    .await;
+
+    let items = inbox::items(
+        pool,
+        &["ab\u{1}cd".to_owned()],
+        now(),
+        Shelf::Stream,
+        &declarations(),
+    )
+    .await
+    .unwrap();
+    let keys = keys(&items);
+    assert!(keys.contains(&format!("mention:{whole}")), "{keys:?}");
+    assert!(
+        !keys.contains(&format!("mention:{half}")),
+        "half a name is not the name: {keys:?}"
+    );
+}
+
 /// Story 4, first arm of "on my work": a build I triggered. The negative
 /// control is the same configuration going green, which is what a rule keyed
 /// on "is a build" would also return.

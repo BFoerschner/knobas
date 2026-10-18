@@ -1412,6 +1412,7 @@ knobas-core	test/it	inbox::a_failed_build_reaches_me_through_a_confirmed_link_an
 knobas-core	test/it	inbox::a_failed_build_reaches_me_through_a_link_from_my_work
 knobas-core	test/it	inbox::a_mention_is_the_marked_name_and_not_every_appearance_of_it
 knobas-core	test/it	inbox::a_mention_of_a_longer_name_is_not_a_mention_of_its_prefix
+knobas-core	test/it	inbox::a_name_holding_the_joining_character_is_still_one_name
 knobas-core	test/it	inbox::a_name_with_pattern_characters_is_matched_literally
 knobas-core	test/it	inbox::a_review_request_names_me_and_not_merely_somebody
 knobas-core	test/it	inbox::a_review_request_on_a_closed_pull_request_has_left_the_stream
