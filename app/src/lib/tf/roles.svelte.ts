@@ -8,6 +8,10 @@
  * appears on every surface it claims. A source that claims none of them (the
  * compiled-in mock claims nothing, #1193) gets none of those surfaces.
  *
+ * Tickets (#1200) draws `ticket-system`, but its board is counted on the
+ * server, so it narrows its read rather than the rows: {@link SourceRoles.scope}
+ * names the sources to read, and a dropped row would leave a count wrong.
+ *
  * The claims ride on `list_sources` (`SourceSummary.roles`, §10.8), which the
  * shell reads once the database answers and again when a source is added or
  * removed (`TfShell.svelte`); it hands each answer to {@link sourceRoles}.
@@ -26,6 +30,7 @@ export const CODE_HOST = "code-host";
 export const CI = "ci";
 export const WIKI = "wiki";
 export const MONITORING = "monitoring";
+export const TICKET_SYSTEM = "ticket-system";
 
 /** What a surface needs to know of one source: its id and the roles it claims. */
 export interface ClaimingSource {
@@ -49,6 +54,14 @@ export interface SourceRoles {
   draws(role: string, sourceId: string): boolean;
   /** `rows` as a surface of `role` draws them: the same array when nothing is dropped. */
   keep<T extends { source_id: string }>(role: string, rows: T[]): T[];
+  /**
+   * The sources a read that the server narrows and counts asks for, for a
+   * surface of `role` (Tickets' board, #1200): `null` to narrow nothing, as
+   * {@link keep} does while the list is unread or when every listed source
+   * claims `role`; else the ids of the listed sources that claim it, which
+   * may be none.
+   */
+  scope(role: string): string[] | null;
 }
 
 export function createSourceRoles(): SourceRoles {
@@ -71,6 +84,11 @@ export function createSourceRoles(): SourceRoles {
     keep(role, rows) {
       const kept = rows.filter((row) => draws(role, row.source_id));
       return kept.length === rows.length ? rows : kept;
+    },
+    scope(role) {
+      if (state.sources === null) return null;
+      const claimers = state.sources.filter((source) => claims(source, role)).map((source) => source.id);
+      return claimers.length === state.sources.length ? null : claimers;
     },
   };
 }

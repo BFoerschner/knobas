@@ -54,15 +54,16 @@
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface TicketsPorts {
     /**
-     * `mini_board` over every source: capped per column or not, narrowed by a
-     * query or not; or a Jira view's board, when `jiraView` names one (#877);
-     * in lanes or not (#939).
+     * `mini_board` over `sources`, every source when empty: capped per column
+     * or not, narrowed by a query or not; or a Jira view's board, when
+     * `jiraView` names one (#877); in lanes or not (#939).
      */
     board: (
       perColumn: number | null,
       query: string | null,
       jiraView?: string | null,
       lanes?: LanesAsked | null,
+      sources?: string[],
     ) => Promise<MiniBoard>;
     /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
     openExternal?: (url: string) => Promise<void>;
@@ -142,6 +143,7 @@
   import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
+  import { sourceRoles, TICKET_SYSTEM } from "../roles.svelte";
   import JiraSourceLine from "./JiraSourceLine.svelte";
   import TicketCard from "./TicketCard.svelte";
   import Signals from "./Signals.svelte";
@@ -191,8 +193,8 @@
     ready,
     timedTicket,
     ports = {
-      board: (perColumn, query, jiraView, lanes) =>
-        miniBoard({ sources: [], context: null, project: null }, perColumn, query, jiraView, lanes),
+      board: (perColumn, query, jiraView, lanes, sources) =>
+        miniBoard({ sources: sources ?? [], context: null, project: null }, perColumn, query, jiraView, lanes),
       openExternal,
       detail: getEntity,
       contexts: listContexts,
@@ -344,6 +346,31 @@
   $effect(() => () => clearTimeout(pausing));
 
   const typing = $derived(filter.text.trim() !== "");
+  /**
+   * The sources the board is read over (#1200, ADR-0029): those that claim
+   * the ticket system, whatever their adapter kind. `null` reads every
+   * source, as `sourceRoles.keep` narrows nothing: the list is unread, or
+   * every source on it claims the role. Narrowed on the server, so every
+   * count is the claimers' own.
+   */
+  const scope = $derived(sourceRoles.scope(TICKET_SYSTEM));
+  /** {@link scope} as a value, so the board is read again only when it changes. */
+  const scopeKey = $derived(JSON.stringify(scope));
+
+  /** `ports.board` over {@link scope}; with no source claiming the role, an empty board unread. */
+  function readBoard(
+    perColumn: number | null,
+    query: string | null,
+    jiraView: string | null,
+    lanes?: LanesAsked | null,
+  ): Promise<MiniBoard> {
+    const sources = untrack(() => scope);
+    if (sources !== null && sources.length === 0) {
+      return Promise.resolve({ columns: [], sources: [], lanes: [], more_lanes: 0 });
+    }
+    return ports.board(perColumn, query, jiraView, lanes, sources ?? []);
+  }
+
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
   const columnKey = (column: Pick<MiniBoardColumn, "status">) => column.status ?? "";
   const isExpanded = (column: MiniBoardColumn) => expanded.includes(columnKey(column));
@@ -403,8 +430,7 @@
     if (base === null) return;
     const query = toQuery(config, filter);
     const mine = ++reading;
-    ports
-      .board(capFor(), query === "" ? null : query, jiraRef, lanesAsked())
+    readBoard(capFor(), query === "" ? null : query, jiraRef, lanesAsked())
       .then((answer) => {
         if (mine !== reading) return;
         board = answer;
@@ -417,8 +443,7 @@
     // A session that comes back to a filter has not counted the whole yet.
     if (query !== base && total === null) {
       const at = epoch;
-      ports
-        .board(1, base === "" ? null : base, jiraRef)
+      readBoard(1, base === "" ? null : base, jiraRef)
         .then((answer) => {
           if (at === epoch) total ??= sum(answer);
         })
@@ -634,6 +659,7 @@
   $effect(() => {
     if (!ready) return;
     void sessionKey;
+    void scopeKey;
     const text = base;
     untrack(() => {
       board = null;
@@ -875,7 +901,7 @@
         <button type="button" class="tf-btn tf-sm" onclick={clearFilter}>Clear the filter</button>
       </div>
     {:else if shown === 0}
-      <div class="tf-empty"><p>No tickets synced yet. Add a Jira source in Settings and they appear here.</p></div>
+      <div class="tf-empty"><p>No tickets synced yet. Add a ticket system in Settings and they appear here.</p></div>
     {:else if showing.layout === "board"}
       {#each bands as { lane, drawn } (lane.key ?? "")}
         <div class="tf-lane">
@@ -998,7 +1024,7 @@
       jira={editing?.jira ?? null}
       copiedFrom={drafting.from ?? null}
       oncopy={editing?.jira ? () => copyView(editing) : undefined}
-      board={(perColumn, query) => ports.board(perColumn, query, editing?.jira ? editing.jira_ref : null)}
+      board={(perColumn, query) => readBoard(perColumn, query, editing?.jira ? editing.jira_ref : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}

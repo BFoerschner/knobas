@@ -20,7 +20,8 @@ import type { TicketView, TicketViewDraft, TicketViewRow } from "../../ipc/searc
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TicketsPage, { forgetTicketsSession, type TicketsPorts } from "./TicketsPage.svelte";
-import { laneOf } from "./tickets";
+import { sourceRoles } from "../roles.svelte";
+import { LANE_FIELDS, laneOf } from "./tickets";
 
 // Every command that reaches the bridge past the page's ports, by name: the
 // page takes its reads through `ports`, so the list stays empty unless a read
@@ -1570,4 +1571,127 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
   input(dialog()!.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]')!, "priority");
   await previewed();
   expect(dialog()!.querySelector(".tf-vw-pnote")!.textContent!.trim()).toBe("In 1 lane by priority.");
+});
+
+/**
+ * Two sources besides Jira (#1200): `tracker`, of an adapter kind the shell
+ * has never seen, claims the ticket system; `notes` claims only the wiki,
+ * though it has ticket-kind items. TRK-2 is a ticket whose source declares
+ * none of the lane and column paths.
+ */
+const TRACKER_CORPUS: { status: string; card: MiniBoardCard }[] = [
+  {
+    status: "To Do",
+    card: card("TRK-1", "Rotate the relay keys", {
+      entity_id: "tracker:TRK-1",
+      source_id: "tracker",
+      path: "TRK-9",
+      parent_title: "Relay hardening",
+      assignee: "ada.byron",
+      priority: "P1",
+      issue_type: "Chore",
+      labels: ["infra"],
+      updated_at: "2026-08-21T10:00:00Z",
+    }),
+  },
+  {
+    status: "In Progress",
+    card: card("TRK-2", "Undeclared fields", { entity_id: "tracker:TRK-2", source_id: "tracker" }),
+  },
+  { status: "To Do", card: card("NOTE-1", "A page's to-do", { entity_id: "notes:NOTE-1", source_id: "notes" }) },
+];
+
+/** {@link harness} over {@link TRACKER_CORPUS}, its board narrowed by `sources` as `mini_board` narrows a room. */
+function trackerHarness() {
+  const h = harness([], [], TRACKER_CORPUS);
+  const whole = h.ports.board;
+  const scopes: (string[] | undefined)[] = [];
+  h.ports.board = async (perColumn, query, jiraView, lanes, sources) => {
+    scopes.push(sources);
+    const board = await whole(perColumn, query, jiraView, lanes);
+    if (!sources?.length) return board;
+    const kept = (column: MiniBoard["columns"][number]) => column.cards.filter((c) => sources.includes(c.source_id));
+    const columns = board.columns
+      .map((column) => ({ ...column, cards: kept(column), total: kept(column).length }))
+      .filter((column) => column.total > 0);
+    const ids = new Set(columns.flatMap((column) => column.cards.map((c) => c.entity_id)));
+    const laned = board.lanes
+      .map((lane) => ({ ...lane, columns: lane.columns.map((cell) => ({ ...cell, ids: cell.ids.filter((id) => ids.has(id)) })) }))
+      .map((lane) => ({ ...lane, columns: lane.columns.map((cell) => ({ ...cell, total: cell.ids.length })) }))
+      .map((lane) => ({ ...lane, count: lane.columns.reduce((all, cell) => all + cell.total, 0) }))
+      .filter((lane) => lane.count > 0);
+    return { ...board, columns, lanes: laned };
+  };
+  return { h, scopes };
+}
+
+const keysOnBoard = () => [...target.querySelectorAll(".tf-tcard")].map((el) => el.textContent!.match(/[A-Z]+-\d+/)![0]);
+
+test("a source of any adapter kind that claims the ticket system has its tickets on the board, the list and every lane (#1200)", async () => {
+  sourceRoles.take([
+    { id: "tracker", adapter_kind: "acme-tracker", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
+    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: [] }] },
+  ]);
+  const { h, scopes } = trackerHarness();
+  await open(h);
+
+  expect(scopes[0]).toEqual(["tracker"]);
+  expect(keysOnBoard().sort()).toEqual(["TRK-1", "TRK-2"]);
+  expect(count()).toBe("2 tickets");
+
+  // Every lane option: TRK-1 under its value, TRK-2, which declares none of them, under none.
+  const expected: Record<string, string[]> = {
+    epic: ["No epic 1", "TRK-9 1"],
+    assignee: ["Unassigned 1", "ada.byron 1"],
+    priority: ["No priority 1", "P1 1"],
+    issuetype: ["Chore 1", "No type 1"],
+    label: ["infra 1", "No label 1"],
+  };
+  for (const [field] of LANE_FIELDS.filter(([field]) => field !== "none")) {
+    chooseLanes(field);
+    await settle();
+    expect(scopes.at(-1)).toEqual(["tracker"]);
+    expect(target.querySelector(".tf-empty")).toBeNull();
+    const heads = [...target.querySelectorAll(".tf-lane h2")].map((h2) => h2.textContent!.replace(/\s+/g, " ").trim());
+    expect(heads.sort()).toEqual(expected[field]!.slice().sort());
+    expect(keysOnBoard().sort()).toEqual(["TRK-1", "TRK-2"]);
+  }
+  chooseLanes("none");
+  await settle();
+
+  [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === "List")!.click();
+  await settle();
+  const listed = [...target.querySelectorAll<HTMLElement>(".tf-tbl tbody tr")].map((tr) =>
+    [...tr.querySelectorAll("td")].map((td) => td.textContent!.trim()),
+  );
+  expect(listed.map((cells) => cells[0]).sort()).toEqual(["TRK-1", "TRK-2"]);
+  const bare = listed.find((cells) => cells[0] === "TRK-2")!;
+  // Key, Summary, Status, Priority, Signals, Assignee, Updated: nothing declared, nothing drawn.
+  expect(bare).toEqual(["TRK-2", "Undeclared fields", "In Progress", "", "", "Unassigned", "never"]);
+});
+
+test("the board reads every source while the source list is unread or every listed source claims the ticket system (#1200)", async () => {
+  const { h, scopes } = trackerHarness();
+  await open(h);
+  expect(scopes[0]).toEqual([]);
+  expect(keysOnBoard()).toContain("NOTE-1");
+
+  // The list answers after the board: the board is read again, narrowed.
+  sourceRoles.take([
+    { id: "tracker", roles: [{ role: "ticket-system", reads: [] }] },
+    { id: "notes", roles: [] },
+  ]);
+  await settle();
+  expect(scopes.at(-1)).toEqual(["tracker"]);
+  expect(keysOnBoard()).not.toContain("NOTE-1");
+});
+
+test("with no source claiming the ticket system the board reads nothing and says how to add one (#1200)", async () => {
+  sourceRoles.take([{ id: "notes", roles: [{ role: "wiki", reads: [] }] }]);
+  const { h, scopes } = trackerHarness();
+  await open(h);
+  expect(scopes).toEqual([]);
+  expect(target.querySelector(".tf-empty")!.textContent).toBe(
+    "No tickets synced yet. Add a ticket system in Settings and they appear here.",
+  );
 });

@@ -6,7 +6,7 @@
  * The stored text is the truth (R-3.3). The editor reads it into conditions
  * when it opens and writes text from them on save. Every key of #811 and the
  * two built keys the editor offers (`under:` as Epic, `updated:`) is a
- * condition; any other token (`is:mine`, `/jira`, a quoted phrase) stays in
+ * condition; any other token (`is:mine`, a `/source` scope, a quoted phrase) stays in
  * the words as typed, so nothing a reader typed is lost.
  */
 import type { MiniBoardColumn } from "../../ipc/entity";
@@ -250,7 +250,7 @@ export interface PreviewColumn {
 /**
  * The preview's ticket board: how many tickets the view holds now, each
  * column gathering its statuses' tickets, and how many sit in a status on no
- * column (which do not show, as on a Jira board).
+ * column (which do not show, as on a source's own board).
  */
 export function previewBoard(
   board: MiniBoardColumn[],
@@ -268,7 +268,7 @@ export function previewBoard(
     columns: columns.map((column) => {
       const held = board.filter((status) => status.status !== null && column.statuses.includes(status.status));
       const total = held.reduce((all, status) => all + status.total, 0);
-      // One status keeps the order the read gave it (a Jira view's is Jira's, #877).
+      // One status keeps the order the read gave it (a synced view's is its source's, #877).
       const cards = held.flatMap((status) => status.cards);
       if (held.length > 1) cards.sort((a, b) => (b.updated_at ?? "").localeCompare(a.updated_at ?? ""));
       cards.splice(cap);

@@ -5786,3 +5786,38 @@ The implementer's rulings:
 - **The live test makes its own label** (`knobas-label-<stamp>`) and deletes every
   `knobas-label-` label at its start and end, rather than seeding one. Reasoning: the seed stays
   as it is for every other suite, and a panicked run's label goes on the next. **Reversing:** low.
+
+## #1200 The Tickets screen draws every ticket-system source (2026-10-18)
+
+Reserved for Björn: nothing in #1200, its milestone or spec #1192's part of it.
+
+The implementer's rulings:
+
+- **Tickets narrows its read, not its rows.** The board's column, lane and *All tickets* counts
+  are the server's, so dropping a non-claimer's cards in the shell (`sourceRoles.keep`) would
+  leave every count wrong. The page passes `sourceRoles.scope("ticket-system")` as
+  `mini_board`'s existing `sources` argument instead; no command changes. **Reversing:** low.
+- **When the read narrows.** `scope` is `null` (every source, as before) while the list is unread
+  and when every listed source claims the role, so a source the list does not name is drawn as
+  #1196's convention says. Once a listed source lacks the claim the read names the claimers, and
+  an unnamed source's tickets then drop too: `mini_board` takes an inclusion list only.
+  **Reversing:** an exclusion argument on `mini_board`, a §10.8 entry.
+- **No claimer is an empty board, not a read.** `sources: []` means every source to
+  `mini_board`, so the page reads nothing and draws the empty state, reworded from *Add a Jira
+  source* to *Add a ticket system* (knobas' own sentence, not prototype-6's). **Reversing:** low.
+- **The views' counts are not narrowed.** `ticket_views` counts on the server over every ticket;
+  only a non-claimer with ticket-kind items (the real mock, under `--demo`) can make them differ
+  from the board. Left to #1229, which brings the demo back, and noted there. **Reversing:** a
+  `sources` argument on `ticket_views`.
+- **The `?fake-ipc` mock claims `ticket-system` too,** because the fixture's tickets are the
+  mock's rows. The real mock claims nothing. **Reversing:** low.
+- **Lanes, card fields and list columns needed no shell change.** `mini_board` already reads
+  each of them at the source's declared path (#277, #810, #939) and the shell reads only
+  `MiniBoardCard`; the new tests witness it with a non-Jira source. The stored lane value
+  `issuetype` is knobas' identifier, not a read of Jira's field, and stays. **Reversing:** none
+  needed.
+- **What "names the Jira adapter" leaves.** Every remaining mention under `tf/tickets/` is the
+  Jira-views feature (`views.ts`, `jql.ts`, `JiraSourceLine`, `ViewMenu`, `ViewEditor`'s *View
+  settings*, the page's Jira view groups and `jiraView` port), which #1207 and #1208 take. The
+  comments in `tickets.ts` and `editor.ts` that used Jira as the example are reworded.
+  **Reversing:** low.
