@@ -1354,7 +1354,7 @@ pub async fn create_page(
 /// `None` while there is nothing to link yet.
 ///
 /// The look-up *Link it to <job>* resolves through
-/// (`sources::write_queue::link_on_arrival`, #1121), by [`LINK_RELATION`].
+/// (`sources::write_queue::link_on_arrival`, #1121).
 ///
 /// # Errors
 ///
@@ -1375,10 +1375,6 @@ pub async fn created_page(pool: &PgPool, write_id: i64) -> Result<Option<String>
         .await?;
     Ok(mirrored)
 }
-
-/// The relation *Link to <job>* and *Link it to <job>* draw from a page to a
-/// ticket: the page documents the work.
-pub const LINK_RELATION: &str = "documents";
 
 /// *Export as Markdown*'s bytes, pinned over every block and inline the frame
 /// has (#952): captured before the two block vocabularies became one, so the
