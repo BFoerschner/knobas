@@ -8,12 +8,15 @@
  */
 import type { EntityDetail, JobLinkSets, LinkEntry, LinkSetRuleRow, SuggestionEntry } from "../../ipc/entity";
 import { matchesAll } from "../filter/filter";
-import { itemHash, keyOf } from "./job";
+import { kindRegistry } from "../../shell/kind-registry.svelte";
+import { itemHash, keyOf, runKindsOf } from "./job";
 
 /**
  * The job section a kind belongs to, in prototype-6's words (its `SECL`), so a
  * row says where on the job it shows. A kind no section draws says its own
- * name, capitalised, rather than nothing.
+ * name, capitalised, rather than nothing. A run of a kind the CI adapters claim
+ * (`workflow_run`) is a build, read from the shared registry as `itemHash`
+ * reads it (#1282).
  */
 const SECTION: Record<string, string> = {
   pr: "Code",
@@ -29,7 +32,8 @@ const SECTION: Record<string, string> = {
   route: "Assets",
 };
 
-export function sectionOf(kind: string): string {
+export function sectionOf(kind: string, runKinds: readonly string[] = runKindsOf(kindRegistry)): string {
+  if (runKinds.includes(kind)) return SECTION.build!;
   return SECTION[kind] ?? kind.charAt(0).toUpperCase() + kind.slice(1);
 }
 
@@ -99,11 +103,11 @@ export interface JobGroup {
 /**
  * A group row's link: a pipeline (a `pipeline` member, or a far end the Builds
  * section holds that is not a run) to its page under Builds, the rest as a job
- * row links.
+ * row links. `sectionOf` is asked without run kinds so a run stays `itemHash`'s.
  */
 function rowHash(id: string, kind: string | null, memberKind: string | null): string | null {
   if (kind === null) return null;
-  if (memberKind === "pipeline" || (sectionOf(kind) === "Builds" && kind !== "build")) {
+  if (memberKind === "pipeline" || (sectionOf(kind, []) === "Builds" && kind !== "build")) {
     return `#/builds/${encodeURIComponent(id)}`;
   }
   return itemHash({ entity_id: id, kind });
