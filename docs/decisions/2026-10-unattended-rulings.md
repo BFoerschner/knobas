@@ -6119,3 +6119,21 @@ The review's rulings (Standards axis, the implementer on Opus):
   1.1.0 bump instead.
 - **Redaction also takes the lower-cased form-encoding and the JSON escaping of the secret.**
   Upper-casing and HTML entities stay accepted residual. **Reversing:** low.
+
+The merge-manager's rulings (PR #1243, on Opus):
+
+- **The §10.8 sign-off stands.** Witnessed, not only argued: the pre-#1203 fixture (built from
+  `origin/main`, no `wasi:http` import) passes `knobas-wasm-host`'s `host` tests under this host,
+  so a 1.0.0 component that does not import `wasi:http` still links. #1198's amended minor rule
+  agrees with this entry. **Reversing:** as the implementer's ruling.
+- **The transformed-echo gap is accepted, no follow-up.** It needs the reader's own instance to
+  reflect the credential re-encoded or sliced (a `Range` on an echo endpoint); Jira-, Gitea- and
+  GitLab-shaped APIs do not echo `Authorization`, and every literal spelling the host sent is
+  redacted. Closing it fully is not possible by pattern. **Reversing:** strip `Range` on instance
+  requests, one line in `net::Policy::attach`.
+- **The system proxy may see the credential of an `http://` source.** Over `https://` it sees only
+  a CONNECT. The built-in adapters behave the same, so no change. **Reversing:** `.no_proxy()` on
+  the client.
+- **A fixed host that resolves to a local address is a follow-up (#1244, backlog).** The allowlist
+  holds names, so a declared name can be pointed at loopback or the LAN. No credential goes there.
+  **Reversing:** n/a.
