@@ -895,3 +895,11 @@ test("the fixture's mini_board reads a saved view by its savedView argument (#12
   // The board's own columns, as `saved_view_board` answers, not one per status.
   expect(board.columns.map((column) => column.status)).toEqual(["Ready", "In flight", "Shipped"]);
 });
+
+test("the fixture's ticket_views carries a saved view's facts under source_view, and none on a view of your own (#1273)", () => {
+  const rows = demoHandlers()["ticket_views"]!({}) as { id: string; saved_view: string | null; source_view: { kind: string; source_query: string } | null }[];
+  const board = rows.find((row) => row.saved_view === "jira:board-21")!;
+  expect(board.source_view).toMatchObject({ kind: "board", source_query: "project in (PAY, OPS) AND labels != tech-debt ORDER BY Rank ASC" });
+  expect(rows.find((row) => row.saved_view === null)!.source_view).toBeNull();
+  expect(rows.every((row) => !("jira" in row))).toBe(true);
+});

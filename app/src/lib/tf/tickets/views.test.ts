@@ -126,6 +126,8 @@ test("Jira boards and Jira filters come after every group of your own, and a Jir
   ];
   expect(groupViews(views, "").map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
   expect(groupViews(views, "cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
+  // "project" is only in the source's query, so this finds it by that and not by its name (#1273).
+  expect(groupViews(views, "project = cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
 });
 
 function savedViewOf(jql: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
