@@ -76,7 +76,7 @@ Fill free seats in this order. A **direct request from Björn** runs beside the 
 1. **Loop tickets** (`Loop:`), before anything else, a waiting PR's merge-manager included. While one is free or in progress no non-loop implementer starts; merge-managers still fill spare seats. A loop ticket that measures time **holds the machine**: dispatch it alone and start no implementer beside it until it reports.
 2. **Live-fixture fixes** (`Live fixture:`; a failure every run of a live suite hits).
 3. **Milestone tickets**, milestone first (TF1 before TF2 …), then issue number.
-4. **No-milestone tickets**, by issue number.
+4. **No-milestone tickets**, by issue number. In 3 and 4, a ticket without a `refactor<N>` label goes before every ticket with one (Björn, 2026-10-19).
 5. **Backlog:** promote the oldest open `backlog` issue yourself (`gh issue edit N --remove-label backlog --add-label ready-for-agent`, one-line comment "promoted: frontier empty") and dispatch it. Never leave a seat empty or ask Björn to promote while backlog exists. Close an overtaken backlog issue with a comment saying what overtook it.
 
 **Bundle** up to three tickets that edit the same screen (same prototype-6 route or view component) or the same files: one implementer, worktree `issue-<lowest>`, one PR with one `Closes #N` per ticket, all claimed. A ticket joins when free or blocked only by the bundle. A free ticket whose screen a running agent is editing waits for that merge.
