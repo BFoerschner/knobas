@@ -752,8 +752,8 @@ mod tests {
         assert_eq!(refusal.code, crate::IpcErrorCode::Invalid);
     }
 
-    /// The wire spelling of the target, which the mirror and the picker both
-    /// depend on. The TypeScript is generated from the same `#[serde]`
+    /// The wire spelling of the target, which the generated TypeScript and
+    /// the picker both depend on. The TypeScript is generated from the same `#[serde]`
     /// attributes (`app/src/lib/ipc/generated/time.ts`); this pins the JSON
     /// those attributes produce, which is what crosses the bridge.
     #[test]

@@ -205,6 +205,7 @@ pub struct Draft {
     pub started_at: DateTime<Utc>,
     /// The last block's end, or now while the clock runs on this ticket;
     /// RFC 3339, UTC.
+    ///
     /// **Not** `started_at + seconds`: it is the far edge of the window, and
     /// the difference between the two is the gaps.
     pub ended_at: DateTime<Utc>,

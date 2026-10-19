@@ -174,10 +174,6 @@ blocks: Array<DayBlock>,
 /**
  * Whether the day reaches back past the observation horizon.
  *
- * knobas keeps a month of observations, and `#/time/<date>` takes any
- * date, so a day older than that draws exactly the strip a day nobody had
- * the app open on draws. This is what tells the two apart.
- *
  * The same question [`passive::materialize`](super::passive::materialize)
  * refuses to reconcile on, asked through the same
  * [`Horizon`](super::passive::Horizon), so the day the strip calls absent
@@ -261,6 +257,7 @@ started_at: string,
 /**
  * The last block's end, or now while the clock runs on this ticket;
  * RFC 3339, UTC.
+ *
  * **Not** `started_at + seconds`: it is the far edge of the window, and
  * the difference between the two is the gaps.
  */
