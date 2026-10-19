@@ -25,7 +25,7 @@ pub async fn docs_tree(lifecycle: State<'_, Lifecycle>) -> Result<crate::docs::D
     docs_tree_inner(&pool, lifecycle.registry()).await
 }
 
-/// [`docs_tree`] with the pool handed in, for a test.
+/// [`docs_tree`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///
@@ -70,7 +70,7 @@ pub async fn docs_page(
     docs_page_inner(&pool, lifecycle.registry(), &entity_id).await
 }
 
-/// [`docs_page`] with the pool handed in, for a test.
+/// [`docs_page`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///
@@ -117,7 +117,7 @@ pub async fn docs_search(
     docs_search_inner(&pool, lifecycle.registry(), &query, space.as_ref()).await
 }
 
-/// [`docs_search`] with the pool handed in, for a test.
+/// [`docs_search`] with the pool and the registry handed in, for a test.
 ///
 /// # Errors
 ///

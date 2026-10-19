@@ -16,7 +16,7 @@
 //! only place a behaviour lives is a behaviour no test can reach. Each command
 //! here is therefore two lines (resolve the pool, call the inner function) and
 //! everything worth asserting is in the `_inner`, which takes a `&PgPool` and
-//! is exercised by `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
+//! the lifecycle's `&dyn AdapterRegistry` (#1322) and is exercised by `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
 
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
@@ -364,7 +364,7 @@ pub async fn searcher(
     )
 }
 
-/// [`search`], against a pool.
+/// [`search`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -377,7 +377,7 @@ pub async fn search_inner(
     Ok(searcher(pool, registry).await?.search(query).await?)
 }
 
-/// [`launcher_home`], against a pool.
+/// [`launcher_home`], against a pool and a registry.
 ///
 /// Three reads, deliberately not one: the board is `knobas-search`'s, the
 /// health is stream F's and the queue depth is `knobas-core`'s, and no one of
@@ -407,7 +407,7 @@ pub async fn launcher_home_inner(
     })
 }
 
-/// [`filter_suggestions`], against a pool.
+/// [`filter_suggestions`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -426,7 +426,7 @@ pub async fn filter_suggestions_inner(
     })
 }
 
-/// [`smart_lists`], against a pool.
+/// [`smart_lists`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -438,7 +438,7 @@ pub async fn smart_lists_inner(
     Ok(searcher(pool, registry).await?.smart_lists().await?)
 }
 
-/// [`smart_list_items`], against a pool.
+/// [`smart_list_items`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -455,7 +455,7 @@ pub async fn smart_list_items_inner(
         .await?)
 }
 
-/// [`create_smart_list`], against a pool.
+/// [`create_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -472,7 +472,7 @@ pub async fn create_smart_list_inner(
         .await?)
 }
 
-/// [`rename_smart_list`], against a pool.
+/// [`rename_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
@@ -489,7 +489,7 @@ pub async fn rename_smart_list_inner(
         .await?)
 }
 
-/// [`delete_smart_list`], against a pool.
+/// [`delete_smart_list`], against a pool and a registry.
 ///
 /// # Errors
 ///
