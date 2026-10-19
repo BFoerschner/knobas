@@ -6742,3 +6742,47 @@ The merge-manager's rulings (Opus):
   authority `wasi:http` admits the two are equal: a percent-encoded host is refused by
   `set_authority` before `send` (probe on `57e8ac50`), and non-ASCII never reaches `http::Uri`.
   *Reversing:* low.
+## #1273: a ticket view's saved-view facts take the role's names (Opus implementer, 2026-10-19)
+
+- **The words.** *Fork:* what replaces `TicketViewRow.jira: Option<JiraSource>`. *Ruling:* the
+  ticket's example, `source_view: Option<SavedViewSource>` (`source_view: SavedViewSource | null`
+  in `search.ts`). The type says what it is: what a ticket system says about one of its saved
+  views. The field sits beside #1245's `saved_view` (the saved view's id), and the two read as a
+  pair: which saved view, and what its source says about it. *Reasoning:* ADR-0029's *saved
+  view* and #1245's word for it; the ticket named it. *Reversing:* low (one §10.8 entry and a
+  mechanical rename).
+- **The `jql` field (the question the ticket left open).** *Fork:* keep `jql` on the wire,
+  rename it on the wire only, or rename it with its storage column. *Ruling:* rename it on the
+  wire to `source_query`, and keep the column `sync.saved_view.jql` and the adapter's payload
+  key `jql`. *Reasoning:* the field holds the saved view's query in the source's own language,
+  and #1192 says *"JQL is Jira's answer"* to that, not the only answer, so a second ticket
+  system's saved view would arrive with its query under Jira's name. The criterion asks that the
+  facts name no adapter. `source_query` rather than `query` because the row already carries the
+  view's own `query` (search text in knobas' grammar), and `view.source_view.query` next to
+  `view.query` would mean two different languages under one word. The payload key is the
+  adapter's own frame path (ADR-0007), which `knobas-sync` reads in one place. The column is
+  storage, and a rename there is a migration the ticket does not ask for. It is filed with the
+  shell-side names as #1285 (`backlog`). *Reversing:* low.
+- **Scope.** *Fork:* how far into the shell to follow the type. *Ruling:* the wire field and its
+  type, their mirrors, `sub`-field `jql`, the helpers the ticket names (`jiraOf` in the fake and
+  in `views.test.ts`, `jiraSourceId`), and every read of `.jira` on a row. Left for #1285: the
+  component `JiraSourceLine.svelte`, `jiraKindWords`, `draftJiraCopy`, the `jira` props and
+  locals that hold a `SavedViewSource`, the CSS class `.tf-vw-jql`, and every user-facing word
+  ("JQL", "Open in Jira"), which would change what the app draws. The fake's Jira fixture
+  (`FakeJira`, `jiraBoard`, `fakeJiraBoard`) keeps its name because it is Jira's data. *Reasoning:*
+  #1245's scope ruling: the ticket's names and what has to follow them. Names that are not on
+  the wire are a separate tidy with no §10.8 weight. *Reversing:* low.
+- **Nothing stored carries the old names.** *Fork:* #1245's review found a pre-rename backup
+  that would not restore. Does this rename reach anything stored? *Ruling:* no shim needed.
+  `TicketViewRow` and its facts are computed at read time from `knobas.ticket_view` and
+  `sync.saved_view`, and no column of either changes. A backup or share export dumps only the
+  `knobas` schema (`--schema=knobas`). The row is never written to a setting, `localStorage`
+  (the app's one store is pending comments) or an event payload. *Reversing:* n/a.
+- **The mirror test checks both directions for the facts.** *Fork:* the mirror test checked only
+  Rust → TS (every key the wire sends appears somewhere in `search.ts`), so a `search.ts` that
+  kept `jql` beside `source_query` would pass. *Ruling:* the test also checks that every field
+  `TicketViewRow` and `SavedViewSource` declare in `search.ts` is one the wire sends. *Reversing:*
+  low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the Rust ↔
+  TS mirror test, the IPC body (`jira_views_ipc.rs`), the fake's `ticket_views` answer
+  (`fake-tauri.test.ts`) and `groupViews` (`views.test.ts`). *Reversing:* n/a.
