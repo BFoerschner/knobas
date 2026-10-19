@@ -56,113 +56,6 @@ use crate::scheduler::{RunFailure, SchedulerDeps};
 /// comment impersonate the source's last sync.
 const ACTOR: &str = "user";
 
-/// The ops a withdrawal can leave an **unclaimed write** behind at the source
-/// (`CONTEXT.md`, issue #336).
-///
-/// The question each op has to answer is not "did the write land after the
-/// user withdrew it" -- that is true of any op, and the branch in [`attempt`]
-/// knows it without asking. It is narrower: *did the source make something new
-/// that knobas cannot name?* A `comment` and an `update_page` change a thing
-/// the mirror already holds, a `transition` and an `approve` change a field, a
-/// build is not an artefact -- for all of those the write simply arrived,
-/// which is what the user asked for. These two make something that exists only
-/// at the source until the next sync, with nothing linking it to what asked
-/// for it, and ADR-0012 singles out the first as the op a duplicate files
-/// twice.
-///
-/// **`create_branch` and `create_pull_request` are deliberately not here, and
-/// the reason is the withdrawn row rather than the 409** (issue #353, which
-/// made the decision #336 left open; #333's table had only the *re-send*
-/// answer, which is a different question).
-///
-/// Both open something against a ref the caller named -- `create_branch`'s
-/// `name`, `create_pull_request`'s `head` -- and the withdrawal keeps it:
-/// `knobas_core::write_queue::discard` keeps the row *with its payload*, "so
-/// what was withdrawn is still answerable". That ref is an address and not
-/// merely a label. A branch's name **is** its identity at the source, and
-/// Gitea holds at most one open pull request per `head`/`base` pair (`an open
-/// pull request already exists for this pair` is among the refusals
-/// `knobas_source_gitea::write::create_pull_request` documents). So the next
-/// sync mirrors an artefact the withdrawn row can still be matched to -- and
-/// knobas already owns both reads and already depends on them:
-/// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
-/// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
-/// and how its link step finds a pull request at all. Retrying a
-/// `create_pull_request` step whose write was withdrawn in flight reads
-/// *every* pull request the mirror holds from that head, settles the step
-/// "already open" against the one it read as open, and the link step then
-/// draws the edge back to the ticket that asked for it. The Gitea guarantee
-/// above is what makes the head an address at all, and what it promises is
-/// **at most one open** pull request per `head`/`base` pair rather than one
-/// per head. That is why `queue::pick_open` reads a record's state instead of
-/// taking a head's word for it (#359), and why this list's address and that
-/// rule cannot disagree: neither claims more than the forge promises. The
-/// artefact is reclaimable while it is open, which is the state a withdrawal
-/// in flight leaves it in, so a line saying nothing claims it would be false.
-///
-/// **The reclaiming is start-work's; the address is the op's.** A
-/// `create_pull_request` submitted straight through `submit_write` has no flow
-/// to retry it, so nothing walks that path on its own. What is true of the op
-/// either way is the part this list turns on -- the row still names where to
-/// look, and the read that looks is already written -- and start-work is the
-/// caller that has one, which is the caller this op exists for (#44).
-///
-/// **The address is not a perfect key, and it does not have to be.**
-/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which holds closed and
-/// merged pull requests as deliberately as open ones, so a repository that
-/// re-used a head branch matches more than one. That ambiguity belongs to the
-/// look-before-write and the withdrawal adds nothing to it -- and since #359
-/// the look-before-write resolves it rather than taking whichever sorted
-/// first: it settles a step "already open" only against a record it read as
-/// open, and where it cannot tell, nothing is settled and the create goes to
-/// the source to refuse. Neither reading changes what this list needs from the
-/// row, which is narrower still: name one repository's pull requests from one
-/// named branch, which is a set a person can look at.
-/// `base` narrows it further; a `title` does not narrow to one artefact at
-/// all, since any number of them can carry the same one -- which is exactly
-/// why `create_ticket`, whose row carries a title and no address, needs the
-/// line. The tree already draws that same line, in the read direction:
-/// `knobas_app::commands::entity::ticket_titled` is the read-back for a
-/// created ticket, and its own doc says why it is the weaker one --
-/// "`start_work`'s precedent matched a head branch, and this matches free
-/// prose".
-///
-/// **The property is the address, not "the server named nothing".** Gitea
-/// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
-/// pull request's server-assigned number is nothing the withdrawal took away
-/// -- knobas never has it, and reads it back out of the mirror either way.
-/// `create_ticket` is in the list because after the withdrawal nothing
-/// recovers *which* ticket: "the next sync cannot tell a ticket it made from
-/// one a colleague made" (`unclaimed`, below), and a title is not an address
-/// the way a head branch is.
-///
-/// Stated as a list, and guarded by
-/// `every_write_op_says_whether_a_withdrawal_can_leave_one`, which
-/// matches on `WriteOp` with no wildcard arm, so growing the enum stops that
-/// test compiling until somebody writes down the answer for the new variant.
-/// **`create_monitor` is in the list, and the receipt is not what decides
-/// it** (issue #453). Uptime Kuma answers `add` with the `monitorID` it
-/// minted, so the disclosure line can point at the monitor -- exactly
-/// `create_page`'s shape, which is also in this list and also answers an id.
-/// What puts an op here is the artefact, not the silence: a monitor made and
-/// then withdrawn from is a check running against somebody's estate that no
-/// knobas row claims, and the *name* it was made under is a label rather than
-/// an address -- Uptime Kuma holds any number of monitors called the same
-/// thing, which is why `testenv/kuma-monitor.sh` deletes by name before it
-/// adds. That is the `title` reading two paragraphs above, not the head
-/// branch's.
-///
-/// **`source_action` is in the list because knobas cannot say** (#1194): what
-/// it does is the adapter's alone, so whether it made something no row
-/// names is unknown, and a disclosure that turns out needless costs a line
-/// where a missing one costs an artefact nobody knows about.
-pub const UNCLAIMED_OPS: &[&str] = &[
-    "create_ticket",
-    "create_page",
-    "create_monitor",
-    "source_action",
-];
-
 /// Why a flush could not even begin.
 ///
 /// Deliberately **not** a new `SyncError` variant: `From<SyncError> for
@@ -180,59 +73,6 @@ pub enum FlushError {
     Db(#[from] sqlx::Error),
 }
 
-/// The entity a write op targets.
-///
-/// Public because the desktop shell needs it to hold an *edited* write to the
-/// target the original named: an amendment that repointed a queued comment at
-/// another ticket would inherit that ticket's place in the queue and the
-/// snapshot taken of the first one.
-///
-/// **No wildcard arm, deliberately** -- the same device, for the same reason,
-/// as `WriteOp::identifier`. `WriteOp` grows per milestone (ADR-0006), and a
-/// wildcard here would let a new variant reach the queue with no target: it
-/// would be ordered against nothing and hold against nothing, silently. The
-/// compiler is the reminder.
-///
-/// Most variants spell their target `entity` and share one or-pattern;
-/// `CreatePage` spells it `parent` and gets an arm of its own, which is the
-/// shape this function is meant to have when a variant's target has a better
-/// name than "entity" -- not a licence to leave one unbound.
-#[must_use]
-pub fn target_entity(op: &WriteOp) -> &str {
-    match op {
-        WriteOp::Comment { entity, .. }
-        | WriteOp::Transition { entity, .. }
-        | WriteOp::CreateTicket { entity, .. }
-        | WriteOp::CreateBranch { entity, .. }
-        | WriteOp::CreatePullRequest { entity, .. }
-        | WriteOp::Approve { entity, .. }
-        | WriteOp::TriggerBuild { entity }
-        | WriteOp::RerunBuild { entity }
-        | WriteOp::LogWork { entity, .. }
-        | WriteOp::UpdatePage { entity, .. }
-        | WriteOp::PauseMonitor { entity }
-        | WriteOp::ResumeMonitor { entity }
-        | WriteOp::CreateMonitor { entity, .. }
-        | WriteOp::MergePullRequest { entity, .. }
-        | WriteOp::SetParameter { entity, .. }
-        | WriteOp::RunBuild { entity, .. }
-        | WriteOp::SubmitReview { entity, .. }
-        | WriteOp::DeleteBranch { entity }
-        | WriteOp::EditPullRequest { entity, .. }
-        | WriteOp::UpdatePullRequestBranch { entity, .. }
-        | WriteOp::SourceAction { entity, .. } => entity,
-        // The one variant whose target is not spelled `entity`: a page is
-        // created *under a parent page*, and the parent is what the queue
-        // orders against and what leaving the mirror holds it on. See
-        // `WriteOp::CreatePage` for why the field is named for what it is.
-        WriteOp::CreatePage { parent, .. } => parent,
-        // The second: a commit goes into a repository, on a branch, at a
-        // path, and the repository is what the queue orders against and
-        // holds on leaving the mirror (#822). See `WriteOp::CommitFile`.
-        WriteOp::CommitFile { repo, .. } => repo,
-    }
-}
-
 /// Whether a fault will pass on its own, and under which name it waits.
 ///
 /// This is ADR-0004's distinction put to work, and it is the difference
@@ -248,8 +88,9 @@ pub fn target_entity(op: &WriteOp) -> &str {
 ///   right. A write sent once (`Request::no_retry`, #1122) was asked once,
 ///   and a `503` or `429` says the source turned it away, so it too waits.
 /// * `Unconfirmed` -- a write sent once reached the source and was never
-///   answered (#1125). [`attempt`] holds it before it asks here, unless
-///   [`resend_is_harmless`]; for those, and for an adapter [`build`] that
+///   answered (#1125). [`attempt`] holds it before it asks here, unless its
+///   delivery says a resend is harmless; for those, and for an adapter
+///   [`build`] that
 ///   failed with it, it is `Unreachable`.
 /// * anything else -- the source refused *this write*. A 400, a 404, a 422, or
 ///   a fault knobas raised itself. Retrying it forever would be pretending a
@@ -268,62 +109,6 @@ fn retryable(error: &SourceError) -> Option<WaitReason> {
             ..
         } if *status == 408 || *status == 429 || *status >= 500 => Some(WaitReason::Unreachable),
         SourceError::Protocol { .. } | SourceError::Sink(_) | SourceError::Moved { .. } => None,
-    }
-}
-
-/// Whether a write that may already have landed can be sent again without a
-/// person looking first (issue #1125).
-///
-/// `true` where a second arrival changes nothing or is refused by the source,
-/// which is the #1122 audit's "retried" column plus Kuma's pause and resume
-/// (setting a state that is already set). Such a write answered
-/// [`SourceError::Unconfirmed`] waits as `Unreachable` and goes on a later
-/// tick. `false` where the source would make a second one: a second comment,
-/// ticket, page, worklog, monitor, approval, review or build. Those are held,
-/// and the reader checks the source, then sends again or discards.
-///
-/// A transition is `false`: Jira usually refuses the repeat, but not on a
-/// workflow that loops back to its own status.
-///
-/// **No look-before-write is tried.** The queue holds no read that finds a
-/// created thing by a marker the payload carries: Jira answers a create with
-/// no id the queue keeps, a comment carries no knobas marker, and a title is
-/// not an address (see [`UNCLAIMED_OPS`]). Holding is the honest answer
-/// until one exists.
-///
-/// **No wildcard arm, deliberately**, as in [`target_entity`]: a new
-/// `WriteOp` variant does not compile until somebody writes the answer down.
-#[must_use]
-pub fn resend_is_harmless(op: &WriteOp) -> bool {
-    match op {
-        // The source refuses the repeat (409, 405, a stale `version` or
-        // `sha`), or the write is idempotent.
-        WriteOp::CreateBranch { .. }
-        | WriteOp::CreatePullRequest { .. }
-        | WriteOp::MergePullRequest { .. }
-        | WriteOp::UpdatePage { .. }
-        | WriteOp::SetParameter { .. }
-        | WriteOp::DeleteBranch { .. }
-        | WriteOp::EditPullRequest { .. }
-        | WriteOp::UpdatePullRequestBranch { .. }
-        | WriteOp::CommitFile { .. }
-        | WriteOp::PauseMonitor { .. }
-        | WriteOp::ResumeMonitor { .. } => true,
-        // A second arrival makes a second one.
-        WriteOp::Comment { .. }
-        | WriteOp::Transition { .. }
-        | WriteOp::CreateTicket { .. }
-        | WriteOp::Approve { .. }
-        | WriteOp::TriggerBuild { .. }
-        | WriteOp::RerunBuild { .. }
-        | WriteOp::LogWork { .. }
-        | WriteOp::CreateMonitor { .. }
-        | WriteOp::RunBuild { .. }
-        | WriteOp::SubmitReview { .. }
-        | WriteOp::CreatePage { .. } => false,
-        // What a source action does is the adapter's alone (#1194), so
-        // knobas cannot say a second arrival changes nothing.
-        WriteOp::SourceAction { .. } => false,
     }
 }
 
@@ -394,24 +179,20 @@ pub async fn queue(
     source_id: &str,
     op: WriteOp,
 ) -> Result<QueuedWrite, FlushError> {
-    let entity = EntityRef::parse(target_entity(&op)).map_err(|e| {
+    let entity = EntityRef::parse(op.target()).map_err(|e| {
         // An op whose target is not an entity id cannot be ordered or held
         // against anything. It is knobas' own bug, not a source fault.
         FlushError::NotConfigured(e.to_string())
     })?;
-    let identifier = op.identifier().to_owned();
-    let shape = op.delivery().projection;
-    let target = store::target_of(&deps.pool, &entity).await?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
-    let snapshot = store::project(&identifier, shape, &payload, target.as_ref(), &state);
+    let snapshot = project_now(deps, &op, &entity, &payload).await?;
 
     let queued = store::queue(
         &deps.pool,
         source_id,
         &entity,
-        &identifier,
+        op.identifier(),
         payload,
         snapshot,
     )
@@ -569,14 +350,11 @@ pub async fn amend(
     id: i64,
     op: WriteOp,
 ) -> Result<Option<QueuedWrite>, FlushError> {
-    let entity = EntityRef::parse(target_entity(&op))
-        .map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let target = store::target_of(&deps.pool, &entity).await?;
+    let entity =
+        EntityRef::parse(op.target()).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
     let payload =
         serde_json::to_value(&op).map_err(|e| FlushError::NotConfigured(e.to_string()))?;
-    let shape = op.delivery().projection;
-    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
-    let snapshot = store::project(op.identifier(), shape, &payload, target.as_ref(), &state);
+    let snapshot = project_now(deps, &op, &entity, &payload).await?;
 
     let Some(amended) = store::amend(&deps.pool, id, payload, snapshot).await? else {
         return Ok(None);
@@ -643,17 +421,68 @@ async fn declared_state(
         .unwrap_or_default())
 }
 
+/// The op's target as the mirror holds it now, projected by the shape its
+/// delivery states: the snapshot a queued write is taken with and the value a
+/// held one is compared against.
+async fn project_now(
+    deps: &SchedulerDeps,
+    op: &WriteOp,
+    entity: &EntityRef,
+    payload: &serde_json::Value,
+) -> Result<serde_json::Value, FlushError> {
+    let shape = op.delivery().projection;
+    let target = store::target_of(&deps.pool, entity).await?;
+    let state = declared_state(deps, entity, shape, target.as_ref()).await?;
+    Ok(store::project(op.identifier(), shape, payload, target.as_ref(), &state))
+}
+
 /// Attempt one write. `Ok(true)` if it was delivered, so the caller knows the
 /// entity's queue moved and its next write may be tried.
 ///
 /// The order inside is load-bearing: **hold detection comes first**, so a
 /// write over a moved target never reaches the network at all.
+///
+/// It is the one decider of how a write is delivered, and it reads every
+/// answer off [`WriteOp::delivery`] (ADR-0006, amended 2026-10-19): the
+/// target it projects, the projection a hold compares, whether a send that
+/// got no answer may go again, and, through [`unclaimed`], whether a
+/// withdrawal in flight is disclosed.
+///
+/// # Resending a send that got no answer (#1125)
+///
+/// [`Delivery::resend_harmless`](knobas_core::delivery::Delivery) is `true`
+/// where a second arrival changes nothing or is refused by the source,
+/// which is the #1122 audit's "retried" column plus Kuma's pause and resume
+/// (setting a state that is already set). Such a write answered
+/// [`SourceError::Unconfirmed`] waits as `Unreachable` and goes on a later
+/// tick. `false` where the source would make a second one: a second comment,
+/// ticket, page, worklog, monitor, approval, review or build. Those are held,
+/// and the reader checks the source, then sends again or discards.
+///
+/// A transition is `false`: Jira usually refuses the repeat, but not on a
+/// workflow that loops back to its own status.
+///
+/// **No look-before-write is tried.** The queue holds no read that finds a
+/// created thing by a marker the payload carries: Jira answers a create with
+/// no id the queue keeps, a comment carries no knobas marker, and a title is
+/// not an address (see [`unclaimed`]). Holding is the honest answer
+/// until one exists.
 async fn attempt(
     deps: &SchedulerDeps,
     source: &dyn Source,
     write: &QueuedWrite,
 ) -> Result<bool, FlushError> {
-    let entity = match EntityRef::parse(&write.entity_id) {
+    // Decoded before hold detection, which reads the op's delivery: a row
+    // nothing decodes is refused at once rather than held first.
+    let op: WriteOp = match serde_json::from_value(write.payload.clone()) {
+        Ok(op) => op,
+        Err(error) => {
+            refused(deps, write, &format!("undecodable write: {error}")).await?;
+            return Ok(false);
+        }
+    };
+    let delivery = op.delivery();
+    let entity = match EntityRef::parse(op.target()) {
         Ok(entity) => entity,
         Err(error) => {
             // Unqueueable rather than undeliverable: nothing will make this
@@ -663,22 +492,9 @@ async fn attempt(
         }
     };
 
-    // Decoded before hold detection, which reads the op's stated shape: a
-    // row nothing decodes is refused at once rather than held first.
-    let op: WriteOp = match serde_json::from_value(write.payload.clone()) {
-        Ok(op) => op,
-        Err(error) => {
-            refused(deps, write, &format!("undecodable write: {error}")).await?;
-            return Ok(false);
-        }
-    };
-
     // Hold detection: the target as it stands *now*, against the snapshot
     // taken when the write was queued.
-    let shape = op.delivery().projection;
-    let target = store::target_of(&deps.pool, &entity).await?;
-    let state = declared_state(deps, &entity, shape, target.as_ref()).await?;
-    let current = store::project(&write.op, shape, &write.payload, target.as_ref(), &state);
+    let current = project_now(deps, &op, &entity, &write.payload).await?;
     if current != write.target_snapshot {
         if let Some(held) = store::hold(&deps.pool, write.id, current).await? {
             announce(deps, "held", &held).await;
@@ -701,7 +517,6 @@ async fn attempt(
     // source may have acted, and a write a second arrival would duplicate is
     // held for the reader rather than re-sent. See the `Unconfirmed` arm.
     // ---------------------------------------------------------------------
-    let resend = resend_is_harmless(&op);
     match source.write(op).await {
         Ok(receipt) => {
             // The receipt, and the settle, in one statement: `sent` is where
@@ -719,7 +534,7 @@ async fn attempt(
             // in flight. The write landed anyway, and this is the only moment
             // knobas can know that, so it says so rather than returning
             // quietly (issue #336).
-            unclaimed(deps, write, &receipt).await;
+            unclaimed(deps, write, delivery.can_leave_unclaimed, &receipt).await;
             Ok(false)
         }
         // The source says the target moved under the write (#822): a held
@@ -739,7 +554,7 @@ async fn attempt(
         // ticket or comment, minutes after the first: the double-apply #1122
         // took out of the transport. So it is held, with the source to check
         // named, and *Send again* (`apply_anyway`) is the reader's.
-        Err(error @ SourceError::Unconfirmed { .. }) if !resend => {
+        Err(error @ SourceError::Unconfirmed { .. }) if !delivery.resend_harmless => {
             let source = config::get(&deps.pool, &write.source_id)
                 .await?
                 .map_or_else(|| write.source_id.clone(), |cfg| cfg.display_name);
@@ -906,10 +721,105 @@ async fn waited(
 ///
 /// # Which ops
 ///
-/// [`UNCLAIMED_OPS`], and its doc comment is where that choice is argued. The
-/// op is checked before the row is re-read, so an ordinary write that landed
-/// under a withdrawal costs nothing and says nothing: it arrived, which is
-/// what was asked for.
+/// Those whose delivery says
+/// [`can_leave_unclaimed`](knobas_core::delivery::Delivery), which the
+/// caller passes in as `can_leave`: `create_ticket`, `create_page`,
+/// `create_monitor` and `source_action`. The op is checked before the row is
+/// re-read, so an ordinary write that landed under a withdrawal costs nothing
+/// and says nothing: it arrived, which is what was asked for.
+///
+/// The question each op has to answer is not "did the write land after the
+/// user withdrew it" -- that is true of any op, and the branch in [`attempt`]
+/// knows it without asking. It is narrower: *did the source make something new
+/// that knobas cannot name?* A `comment` and an `update_page` change a thing
+/// the mirror already holds, a `transition` and an `approve` change a field, a
+/// build is not an artefact -- for all of those the write simply arrived,
+/// which is what the user asked for. These two make something that exists only
+/// at the source until the next sync, with nothing linking it to what asked
+/// for it, and ADR-0012 singles out the first as the op a duplicate files
+/// twice.
+///
+/// **`create_branch` and `create_pull_request` are deliberately not here, and
+/// the reason is the withdrawn row rather than the 409** (issue #353, which
+/// made the decision #336 left open; #333's table had only the *re-send*
+/// answer, which is a different question).
+///
+/// Both open something against a ref the caller named -- `create_branch`'s
+/// `name`, `create_pull_request`'s `head` -- and the withdrawal keeps it:
+/// `knobas_core::write_queue::discard` keeps the row *with its payload*, "so
+/// what was withdrawn is still answerable". That ref is an address and not
+/// merely a label. A branch's name **is** its identity at the source, and
+/// Gitea holds at most one open pull request per `head`/`base` pair (`an open
+/// pull request already exists for this pair` is among the refusals
+/// `knobas_source_gitea::write::create_pull_request` documents). So the next
+/// sync mirrors an artefact the withdrawn row can still be matched to -- and
+/// knobas already owns both reads and already depends on them:
+/// `knobas_app::start_work::queue`'s `BRANCH_BY_NAME` and
+/// `PULL_REQUEST_BY_HEAD` are how the start-work flow looks before it writes,
+/// and how its link step finds a pull request at all. Retrying a
+/// `create_pull_request` step whose write was withdrawn in flight reads
+/// *every* pull request the mirror holds from that head, settles the step
+/// "already open" against the one it read as open, and the link step then
+/// draws the edge back to the ticket that asked for it. The Gitea guarantee
+/// above is what makes the head an address at all, and what it promises is
+/// **at most one open** pull request per `head`/`base` pair rather than one
+/// per head. That is why `queue::pick_open` reads a record's state instead of
+/// taking a head's word for it (#359), and why this list's address and that
+/// rule cannot disagree: neither claims more than the forge promises. The
+/// artefact is reclaimable while it is open, which is the state a withdrawal
+/// in flight leaves it in, so a line saying nothing claims it would be false.
+///
+/// **The reclaiming is start-work's; the address is the op's.** A
+/// `create_pull_request` submitted straight through `submit_write` has no flow
+/// to retry it, so nothing walks that path on its own. What is true of the op
+/// either way is the part this list turns on -- the row still names where to
+/// look, and the read that looks is already written -- and start-work is the
+/// caller that has one, which is the caller this op exists for (#44).
+///
+/// **The address is not a perfect key, and it does not have to be.**
+/// `PULL_REQUEST_BY_HEAD` reads `sync.live_item`, which holds closed and
+/// merged pull requests as deliberately as open ones, so a repository that
+/// re-used a head branch matches more than one. That ambiguity belongs to the
+/// look-before-write and the withdrawal adds nothing to it -- and since #359
+/// the look-before-write resolves it rather than taking whichever sorted
+/// first: it settles a step "already open" only against a record it read as
+/// open, and where it cannot tell, nothing is settled and the create goes to
+/// the source to refuse. Neither reading changes what this list needs from the
+/// row, which is narrower still: name one repository's pull requests from one
+/// named branch, which is a set a person can look at.
+/// `base` narrows it further; a `title` does not narrow to one artefact at
+/// all, since any number of them can carry the same one -- which is exactly
+/// why `create_ticket`, whose row carries a title and no address, needs the
+/// line. The tree already draws that same line, in the read direction:
+/// `knobas_app::commands::entity::ticket_titled` is the read-back for a
+/// created ticket, and its own doc says why it is the weaker one --
+/// "`start_work`'s precedent matched a head branch, and this matches free
+/// prose".
+///
+/// **The property is the address, not "the server named nothing".** Gitea
+/// answers `WriteReceipt::none()` for both ops on the *success* path too, so a
+/// pull request's server-assigned number is nothing the withdrawal took away
+/// -- knobas never has it, and reads it back out of the mirror either way.
+/// `create_ticket` is in the list because after the withdrawal nothing
+/// recovers *which* ticket: "the next sync cannot tell a ticket it made from
+/// one a colleague made" (below), and a title is not an address
+/// the way a head branch is.
+///
+/// **`create_monitor` can leave one, and the receipt is not what decides
+/// it** (issue #453). Uptime Kuma answers `add` with the `monitorID` it
+/// minted, so the disclosure line can point at the monitor -- exactly
+/// `create_page`'s shape, which can also leave one and also answers an id.
+/// What decides is the artefact, not the silence: a monitor made and then
+/// withdrawn from is a check running against somebody's estate that no
+/// knobas row claims, and the *name* it was made under is a label rather than
+/// an address -- Uptime Kuma holds any number of monitors called the same
+/// thing, which is why `testenv/kuma-monitor.sh` deletes by name before it
+/// adds. That is the `title` reading above, not the head branch's.
+///
+/// **A source action can leave one because knobas cannot say** (#1194): what
+/// it does is the adapter's alone, so whether it made something no row
+/// names is unknown, and a disclosure that turns out needless costs a line
+/// where a missing one costs an artefact nobody knows about.
 ///
 /// `remote_id` rides along **only when the source named what it made**. That
 /// is `WriteReceipt`'s own rule and it splits the two ops this exists for:
@@ -939,8 +849,13 @@ async fn waited(
 /// not turn a delivered write into a failed flush. Nothing downstream branches
 /// on it -- [`attempt`] returns `Ok(false)` either way, because the queue did
 /// not move.
-async fn unclaimed(deps: &SchedulerDeps, write: &QueuedWrite, receipt: &WriteReceipt) {
-    if !UNCLAIMED_OPS.contains(&write.op.as_str()) {
+async fn unclaimed(
+    deps: &SchedulerDeps,
+    write: &QueuedWrite,
+    can_leave: bool,
+    receipt: &WriteReceipt,
+) {
+    if !can_leave {
         return;
     }
     let settled = match store::get(&deps.pool, write.id).await {
@@ -972,165 +887,6 @@ async fn refused(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// Every op's target is the field it says it is.
-    ///
-    /// The match in [`target_entity`] binds `entity` through an or-pattern, so
-    /// every arm reads the same name -- and a variant whose fields were
-    /// re-ordered or renamed into that binding would still compile while
-    /// pointing the queue at a branch name or a status. Ordering and hold
-    /// detection both key on the answer, so being wrong here is silent.
-    #[test]
-    fn every_op_points_at_the_entity_it_names() {
-        for (op, expected) in [
-            (
-                WriteOp::Comment {
-                    entity: "jira:PAY-231".to_owned(),
-                    body: "b".to_owned(),
-                },
-                "jira:PAY-231",
-            ),
-            (
-                WriteOp::Transition {
-                    entity: "jira:PAY-232".to_owned(),
-                    status: "Done".to_owned(),
-                },
-                "jira:PAY-232",
-            ),
-            (
-                WriteOp::CreateTicket {
-                    entity: "jira:PAY".to_owned(),
-                    title: "t".to_owned(),
-                    body: "b".to_owned(),
-                    ticket_type: "Task".to_owned(),
-                },
-                "jira:PAY",
-            ),
-            (
-                WriteOp::CreateBranch {
-                    entity: "gitea:tidewater/payout-service".to_owned(),
-                    name: "feature/x".to_owned(),
-                    from_ref: "main".to_owned(),
-                },
-                "gitea:tidewater/payout-service",
-            ),
-            (
-                WriteOp::CreatePullRequest {
-                    entity: "gitea:tidewater/ledger".to_owned(),
-                    title: "t".to_owned(),
-                    body: "b".to_owned(),
-                    head: "feature/x".to_owned(),
-                    base: "main".to_owned(),
-                },
-                "gitea:tidewater/ledger",
-            ),
-            (
-                WriteOp::Approve {
-                    entity: "gitea:tidewater/ledger#142".to_owned(),
-                    body: String::new(),
-                },
-                "gitea:tidewater/ledger#142",
-            ),
-            (
-                WriteOp::TriggerBuild {
-                    entity: "teamcity:buildType:Payout_Build".to_owned(),
-                },
-                "teamcity:buildType:Payout_Build",
-            ),
-            (
-                WriteOp::RerunBuild {
-                    entity: "teamcity:build:1187".to_owned(),
-                },
-                "teamcity:build:1187",
-            ),
-            (
-                WriteOp::PauseMonitor {
-                    entity: "kuma:8".to_owned(),
-                },
-                "kuma:8",
-            ),
-            (
-                WriteOp::ResumeMonitor {
-                    entity: "kuma:8".to_owned(),
-                },
-                "kuma:8",
-            ),
-            (
-                WriteOp::MergePullRequest {
-                    entity: "gitea:tidewater/ledger#142".to_owned(),
-                    style: knobas_source::MergeStyle::Merge,
-                    delete_branch: true,
-                    message: None,
-                },
-                "gitea:tidewater/ledger#142",
-            ),
-            (
-                WriteOp::UpdatePullRequestBranch {
-                    entity: "gitea:tidewater/ledger#144".to_owned(),
-                    style: knobas_source::UpdateStyle::Rebase,
-                },
-                "gitea:tidewater/ledger#144",
-            ),
-            (
-                WriteOp::SetParameter {
-                    entity: "teamcity:buildType:Payout_Build".to_owned(),
-                    name: "env.SEPA_RETRIES".to_owned(),
-                    value: "7".to_owned(),
-                    base: Some("5".to_owned()),
-                },
-                "teamcity:buildType:Payout_Build",
-            ),
-            (
-                WriteOp::RunBuild {
-                    entity: "teamcity:buildType:Payout_Build".to_owned(),
-                    branch: Some("feature/PAY-231-sepa-retry".to_owned()),
-                    parameters: Vec::new(),
-                    clean_checkout: false,
-                    first_in_queue: false,
-                },
-                "teamcity:buildType:Payout_Build",
-            ),
-            (
-                WriteOp::SubmitReview {
-                    entity: "gitea:tidewater/ledger#143".to_owned(),
-                    verdict: knobas_source::ReviewVerdict::Approve,
-                    body: "b".to_owned(),
-                    comments: vec![],
-                },
-                "gitea:tidewater/ledger#143",
-            ),
-            (
-                WriteOp::DeleteBranch {
-                    entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
-                        .to_owned(),
-                },
-                "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry",
-            ),
-            (
-                WriteOp::EditPullRequest {
-                    entity: "gitea:tidewater/ledger#144".to_owned(),
-                    title: None,
-                    body: None,
-                    state: Some(knobas_source::PullRequestState::Closed),
-                },
-                "gitea:tidewater/ledger#144",
-            ),
-            (
-                WriteOp::CommitFile {
-                    repo: "gitea:tidewater/ledger".to_owned(),
-                    branch: "main".to_owned(),
-                    new_branch: None,
-                    path: "README.md".to_owned(),
-                    content: "c".to_owned(),
-                    message: "m".to_owned(),
-                    base_sha: "b".to_owned(),
-                },
-                "gitea:tidewater/ledger",
-            ),
-        ] {
-            assert_eq!(target_entity(&op), expected, "{op:?}");
-        }
-    }
 
     /// ADR-0004's distinction is the one this feature rests on, so it is
     /// pinned rather than left to the reader of a `match`: a credential and a

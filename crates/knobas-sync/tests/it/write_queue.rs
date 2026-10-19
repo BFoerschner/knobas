@@ -325,7 +325,7 @@ impl Harness {
                     title.clone()
                 }
                 // Except this one, which is looked for by the head branch it
-                // was opened from rather than by its title -- `UNCLAIMED_OPS`
+                // was opened from rather than by its title -- sync's `unclaimed`
                 // argues why that difference matters (#353).
                 WriteOp::CreatePullRequest { head, .. } => head.clone(),
                 // A pull request edit by the title it gives, else the state
@@ -1305,141 +1305,6 @@ async fn a_source_with_no_credential_keeps_the_write() {
     assert!(h.delivered().is_empty());
 }
 
-/// One probe value per `WriteOp` variant, shared by the two tests below that
-/// each ask the enum a question of its own.
-///
-/// The list itself forces nothing -- a `vec!` does not go non-exhaustive when
-/// an enum grows. The no-wildcard `match` in each test is the forcing
-/// function, and the length assertion beside it is what catches a variant
-/// given an arm there but never a probe here.
-fn write_op_probes() -> Vec<WriteOp> {
-    vec![
-        WriteOp::Comment {
-            entity: "jira:PAY-231".to_owned(),
-            body: "probe".to_owned(),
-        },
-        WriteOp::Transition {
-            entity: "jira:PAY-231".to_owned(),
-            status: "In Progress".to_owned(),
-        },
-        WriteOp::CreateTicket {
-            entity: "jira:PAY".to_owned(),
-            title: "probe".to_owned(),
-            body: "probe".to_owned(),
-            ticket_type: "Task".to_owned(),
-        },
-        WriteOp::CreateBranch {
-            entity: "gitea:tidewater/payout-service".to_owned(),
-            name: "probe".to_owned(),
-            from_ref: "main".to_owned(),
-        },
-        WriteOp::CreatePullRequest {
-            entity: "gitea:tidewater/payout-service".to_owned(),
-            title: "probe".to_owned(),
-            body: "probe".to_owned(),
-            head: "probe".to_owned(),
-            base: "main".to_owned(),
-        },
-        WriteOp::Approve {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            body: String::new(),
-        },
-        WriteOp::TriggerBuild {
-            entity: "teamcity:buildType:Payout_Build".to_owned(),
-        },
-        WriteOp::RerunBuild {
-            entity: "teamcity:build:1187".to_owned(),
-        },
-        WriteOp::LogWork {
-            entity: "jira:PAY-231".to_owned(),
-            // Fixed, like `contract.rs`'s probe: a payload that moves between
-            // runs is one whose failures cannot be compared.
-            started: chrono::DateTime::from_timestamp(1_788_000_000, 0).expect("a fixed instant"),
-            seconds: 2_700,
-            comment: "SEPA retry".to_owned(),
-        },
-        WriteOp::CreatePage {
-            parent: "confluence:98400".to_owned(),
-            space: "ENG".to_owned(),
-            title: "Standup 2026-09-03".to_owned(),
-            body: "<p>nothing blocked</p>".to_owned(),
-        },
-        WriteOp::UpdatePage {
-            entity: "confluence:98307".to_owned(),
-            base_version: 3,
-            body: "<h2>Backoff policy</h2><p>base 30 s.</p>".to_owned(),
-        },
-        WriteOp::PauseMonitor {
-            entity: "kuma:8".to_owned(),
-        },
-        WriteOp::ResumeMonitor {
-            entity: "kuma:8".to_owned(),
-        },
-        WriteOp::CreateMonitor {
-            entity: knobas_source::monitor_target("kuma"),
-            name: "gitea".to_owned(),
-            url: "http://gitea:3000/api/healthz".to_owned(),
-            kind: knobas_source::MonitorKind::Http,
-        },
-        WriteOp::MergePullRequest {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            style: knobas_source::MergeStyle::Merge,
-            delete_branch: true,
-            message: None,
-        },
-        WriteOp::UpdatePullRequestBranch {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            style: knobas_source::UpdateStyle::Merge,
-        },
-        WriteOp::CommitFile {
-            repo: "gitea:tidewater/payout-service".to_owned(),
-            branch: "main".to_owned(),
-            new_branch: Some("feature/PAY-231-retry-doc".to_owned()),
-            path: "docs/retry.md".to_owned(),
-            content: "Three times.\n".to_owned(),
-            message: "PAY-231: say how often".to_owned(),
-            base_sha: "986f74b7".to_owned(),
-        },
-        WriteOp::SetParameter {
-            entity: "teamcity:buildType:Payout_Build".to_owned(),
-            name: "env.SEPA_RETRIES".to_owned(),
-            value: "7".to_owned(),
-            base: Some("5".to_owned()),
-        },
-        WriteOp::RunBuild {
-            entity: "teamcity:buildType:Payout_Build".to_owned(),
-            branch: Some("feature/PAY-231-sepa-retry".to_owned()),
-            parameters: vec![knobas_source::BuildParameter {
-                name: "env.SEPA_RETRIES".to_owned(),
-                value: "9".to_owned(),
-            }],
-            clean_checkout: true,
-            first_in_queue: true,
-        },
-        WriteOp::SubmitReview {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            verdict: knobas_source::ReviewVerdict::RequestChanges,
-            body: "bound the jitter".to_owned(),
-            comments: vec![],
-        },
-        WriteOp::DeleteBranch {
-            entity: "gitea:tidewater/payout-service@refs/heads/feature/PAY-231-sepa-retry"
-                .to_owned(),
-        },
-        WriteOp::EditPullRequest {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            title: Some("Bound the retry jitter".to_owned()),
-            body: None,
-            state: Some(knobas_source::PullRequestState::Closed),
-        },
-        WriteOp::SourceAction {
-            entity: "gitea:tidewater/payout-service#142".to_owned(),
-            id: "add_label".to_owned(),
-            fields: [("label".to_owned(), "7".to_owned())].into(),
-        },
-    ]
-}
-
 /// Two flushers, one write, one delivery.
 ///
 /// `submit` flushes at once and the scheduler's tick flushes every five
@@ -1597,102 +1462,6 @@ async fn a_row_that_settled_some_other_way_is_not_called_withdrawn() {
     );
 }
 
-/// The forcing function ADR-0006 relies on, applied to the residue a
-/// withdrawal can leave: a new `WriteOp` variant must say whether withdrawing
-/// it in flight can leave something at the source that knobas cannot name.
-///
-/// The match has no wildcard arm, so a new variant stops this test compiling
-/// until somebody answers -- and the answer is written here, next to the op,
-/// rather than inferred from a list that would grow by omission.
-#[test]
-fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
-    let probes = write_op_probes();
-    for op in &probes {
-        let leaves_one = match op {
-            // Both make something new that lives only at the source until the
-            // next sync, with nothing linking it to what asked for it.
-            WriteOp::CreateTicket { .. }
-            | WriteOp::CreatePage { .. }
-            // A monitor made and then withdrawn from is a check running
-            // against somebody's estate that no knobas row claims, and the
-            // name it carries is a label rather than an address -- Uptime Kuma
-            // holds any number of monitors called the same thing (issue #453).
-            | WriteOp::CreateMonitor { .. }
-            // What a source action does is the adapter's alone (#1194): it
-            // may make something no row names, so a withdrawal in flight is
-            // disclosed rather than assumed harmless.
-            | WriteOp::SourceAction { .. } => true,
-            // Changes to something the mirror already holds: the write simply
-            // arrived, which is what the user asked for.
-            WriteOp::Comment { .. }
-            | WriteOp::Transition { .. }
-            | WriteOp::Approve { .. }
-            | WriteOp::UpdatePage { .. }
-            // A merge changes a pull request the mirror holds: what is left
-            // is that pull request, merged, which the next sync reads back.
-            | WriteOp::MergePullRequest { .. }
-            // A review lands on a pull request the mirror holds: what is left
-            // is the review on it, which the next sync and the view read back.
-            | WriteOp::SubmitReview { .. }
-            // A delete removes a branch the mirror holds: what is left is
-            // nothing new, and the next sync reads the branch gone (#707).
-            // Like a merge it is not taken back once sent.
-            | WriteOp::DeleteBranch { .. }
-            // An edit, a close or a reopen changes a pull request the mirror
-            // holds: what is left is that pull request as edited, which the
-            // next sync reads back.
-            | WriteOp::EditPullRequest { .. }
-            // An update moves the head of a pull request the mirror holds:
-            // what is left is that head, up to date with its base, which the
-            // next sync reads back (#708). Nothing new exists to claim.
-            | WriteOp::UpdatePullRequestBranch { .. }
-            // A commit lands on a branch the withdrawn row names, at a path it
-            // names (#822): the next sync reads the branch's tip back, and the
-            // row is the address to look at -- `create_branch`'s reading, not
-            // `create_ticket`'s. A new branch is named in the row too.
-            | WriteOp::CommitFile { .. }
-            // A parameter set changes a value on a configuration the mirror
-            // holds: what is left is that value, at the source, and nothing
-            // new exists that knobas cannot name.
-            | WriteOp::SetParameter { .. }
-            // A build is not an artefact, and knobas never claimed one.
-            | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. }
-            | WriteOp::RunBuild { .. }
-            // The hour is at Jira and #328 owns that gap; the worklog's own
-            // copy, not this line, is where it is answered.
-            | WriteOp::LogWork { .. }
-            // Opened against a ref the withdrawn row still carries, which
-            // is the address the artefact is found by. #353 decided it and
-            // `UNCLAIMED_OPS`'s doc argues it.
-            | WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. }
-            // A monitor's own state, changed at the source: pausing a check
-            // leaves a *paused check*, which is the thing the reader asked
-            // for and which the next poll reads back. Nothing new exists that
-            // knobas cannot name -- and withdrawing one that never went
-            // leaves the monitor exactly as it was.
-            | WriteOp::PauseMonitor { .. }
-            | WriteOp::ResumeMonitor { .. } => false,
-        };
-        assert_eq!(
-            flusher::UNCLAIMED_OPS.contains(&op.identifier()),
-            leaves_one,
-            "{:?} and UNCLAIMED_OPS disagree about what a withdrawal leaves",
-            op.identifier()
-        );
-    }
-    // And the other direction, which iterating the probes cannot reach: an
-    // entry in `UNCLAIMED_OPS` that names no variant at all would never be
-    // compared against one, so it would sit there inert and unfalsifiable.
-    for op in flusher::UNCLAIMED_OPS {
-        assert!(
-            probes.iter().any(|probe| probe.identifier() == *op),
-            "UNCLAIMED_OPS names {op:?}, which is not a `WriteOp`"
-        );
-    }
-}
-
 /// The op is what the line is about, not the race. A `comment` that landed
 /// after the user withdrew it left nothing unclaimed: the reply is on a ticket
 /// the mirror names, and it is the write that was asked for.
@@ -1726,7 +1495,7 @@ async fn a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed() {
 /// the row is why.
 ///
 /// The number Gitea assigns is server-assigned exactly as a Jira key is, which
-/// is what made this op look like `create_ticket`. `UNCLAIMED_OPS`'s doc is
+/// is what made this op look like `create_ticket`. `unclaimed`'s doc is
 /// where that is argued and not repeated here; what this drives is the claim
 /// itself, against a real withdrawal landing inside a real write.
 ///

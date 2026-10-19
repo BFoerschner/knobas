@@ -3053,8 +3053,9 @@ mod tests {
     }
 
     /// Every probe answers a delivery whose target field the op really has
-    /// (ADR-0006, amended 2026-10-19): a `TargetField::Parent` on a variant
-    /// with no `parent` would order and hold the write against nothing. That
+    /// (ADR-0006, amended 2026-10-19), and `WriteOp::target` reads that
+    /// field: a `TargetField::Parent` on a variant with no `parent` would
+    /// order and hold the write against nothing. That
     /// every variant has a probe and a delivery at all is the compiler's to
     /// say, through the no-wildcard matches; this test cannot see a missing
     /// variant, only a duplicated probe.
@@ -3078,6 +3079,11 @@ mod tests {
             assert!(
                 fields[field].as_str().is_some_and(|t| !t.is_empty()),
                 "{id}: its delivery names `{field}` as the target, which it does not carry"
+            );
+            assert_eq!(
+                Some(op.target()),
+                fields[field].as_str(),
+                "{id}: `target` reads another field than its delivery names"
             );
         }
     }
