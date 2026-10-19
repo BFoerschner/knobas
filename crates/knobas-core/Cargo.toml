@@ -5,6 +5,10 @@ version.workspace = true
 
 [dependencies]
 chrono.workspace = true
+# The SPI's shared types, re-exported as `payload`, `entity` and `tone`
+# (#1234). `sqlx` turns on `Declarations::as_param`, the bind every
+# path-driven statement here shares.
+knobas-spi-types = { path = "../knobas-spi-types", features = ["sqlx"] }
 serde.workspace = true
 serde_json.workspace = true
 sqlx.workspace = true

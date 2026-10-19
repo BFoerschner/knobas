@@ -2,7 +2,6 @@ pub mod activity;
 pub mod asset;
 pub mod checkout;
 pub mod context;
-pub mod entity;
 mod error;
 pub mod evidence;
 pub mod inbox;
@@ -11,17 +10,29 @@ pub mod link_set;
 mod live;
 pub mod mini_board;
 pub mod note;
-pub mod payload;
 pub mod project;
 pub mod reach;
 pub mod signals;
 pub mod start_work;
 pub mod suggest;
-pub mod tone;
 pub mod web_url;
 pub mod write_queue;
 
 pub use error::CoreError;
+
+// The types the source SPI shares with the core moved to `knobas-spi-types`
+// (#1234), which builds for `wasm32-wasip2`; these keep their old paths. The
+// payload SQL macros moved with the module (`#[macro_export]` puts them at
+// that crate's root), so they are re-exported here by name.
+pub use knobas_spi_types::{
+    body_text_shown, declared_array, declared_candidates, declared_flag, declared_integer,
+    declared_list, declared_list_candidates, declared_names_as_parent, declared_parent_names,
+    declared_parent_path, declared_parents, declared_project_path, declared_segments,
+    declared_state, declared_state_candidates, declared_string, declared_ticket_paths,
+    declared_tickets, declared_trigger, declares_field, first_string_of, list_values_of,
+    path_line_read, project_path_part, state_of,
+};
+pub use knobas_spi_types::{entity, payload, tone};
 
 /// Declare an enum whose variants are a **closed vocabulary shared with the
 /// database**: each one has a stored spelling, and a CHECK constraint in the

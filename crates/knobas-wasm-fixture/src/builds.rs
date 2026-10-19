@@ -13,6 +13,9 @@
 //!   artifact set is `download_mib` MiB of them (config, default 1), which
 //!   the component never holds more than one chunk of.
 
+use knobas_source::KindInfo;
+use knobas_source::role::{CI, RoleClaim};
+use knobas_source::{Frame, KindPaths, PayloadPath, StatePath, StateValue, Tone};
 use serde_json::{Value, json};
 
 pub const PIPELINE: &str = "pipeline-1";
@@ -50,37 +53,68 @@ pub fn run_payload(key: &str, number: &str) -> Value {
     })
 }
 
-/// The kinds the descriptor declares for the frame, and their paths.
-pub fn kinds() -> [Value; 2] {
+/// The kinds the descriptor declares for the frame.
+pub fn kinds() -> [KindInfo; 2] {
+    let kind = |id: &str, label: &str, plural: &str, monogram: &str| KindInfo {
+        id: id.into(),
+        label: label.into(),
+        plural: plural.into(),
+        monogram: monogram.into(),
+        full_sync_exhaustive: true,
+    };
     [
-        json!({ "id": "pipeline", "label": "Pipeline", "plural": "Pipelines", "monogram": "PL",
-                "full_sync_exhaustive": true }),
-        json!({ "id": "run", "label": "Run", "plural": "Runs", "monogram": "RN",
-                "full_sync_exhaustive": true }),
+        kind("pipeline", "Pipeline", "Pipelines", "PL"),
+        kind("run", "Run", "Runs", "RN"),
     ]
 }
 
-pub fn payload_paths() -> [Value; 2] {
+/// Where the frame's kinds keep what the Builds frame reads.
+pub fn payload_paths() -> [KindPaths; 2] {
+    let at = |key: &str| vec![PayloadPath::of([key])];
     [
-        json!({ "kind": "pipeline", "frame": "pipeline", "name": [["name"]], "pipeline": [["id"]] }),
-        json!({
-            "kind": "run", "frame": "run",
-            "pipeline": [["pipeline"]], "number": [["number"]], "branch": [["branch"]],
-            "started": [["started"]], "finished": [["finished"]],
-            "state": [{ "at": ["state"], "values": [
-                { "value": "failed", "tone": "err" },
-                { "value": "passed", "tone": "ok" },
-            ] }],
-        }),
+        KindPaths {
+            kind: "pipeline".into(),
+            frame: Some(Frame::Pipeline),
+            name: at("name"),
+            pipeline: at("id"),
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "run".into(),
+            frame: Some(Frame::Run),
+            pipeline: at("pipeline"),
+            number: at("number"),
+            branch: at("branch"),
+            started: at("started"),
+            finished: at("finished"),
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("failed", Tone::Err),
+                    StateValue::of("passed", Tone::Ok),
+                ],
+            }],
+            ..KindPaths::default()
+        },
     ]
 }
 
 /// The CI claim: `run_log` and every optional read.
-pub fn role() -> Value {
-    json!({ "role": "ci", "reads": [
-        "run_log", "pipeline_settings", "older_runs", "run_tests", "test_history",
-        "run_artifacts", "artifact_preview", "download", "run_chain",
-    ] })
+pub fn role() -> RoleClaim {
+    RoleClaim::new(
+        CI,
+        [
+            "run_log",
+            "pipeline_settings",
+            "older_runs",
+            "run_tests",
+            "test_history",
+            "run_artifacts",
+            "artifact_preview",
+            "download",
+            "run_chain",
+        ],
+    )
 }
 
 pub fn pipeline_settings() -> Value {

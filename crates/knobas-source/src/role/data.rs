@@ -29,7 +29,7 @@
 
 use std::collections::BTreeSet;
 
-use knobas_core::payload::{KindPaths, PayloadPath, at, names_a_missing_key};
+use knobas_spi_types::payload::{KindPaths, PayloadPath, at, names_a_missing_key};
 use serde_json::Value;
 
 use super::{Field, KindOf, minimum};
@@ -82,7 +82,7 @@ impl Shape {
             Shape::Text => value.is_string(),
             Shape::Instant => value
                 .as_str()
-                .is_some_and(|t| knobas_core::payload::parse_instant(t).is_some()),
+                .is_some_and(|t| knobas_spi_types::payload::parse_instant(t).is_some()),
             Shape::Flag => value.is_boolean(),
             Shape::Number => value.is_number(),
             Shape::TextOrFlag => value.is_string() || value.is_boolean(),
@@ -130,7 +130,8 @@ fn dotted(path: &PayloadPath) -> String {
 /// [`Field::declared_in`] reads too.
 pub(super) fn needs_of(field: Field, paths: &KindPaths) -> (Shape, Vec<PayloadPath>) {
     let plain = |v: &Vec<PayloadPath>| v.clone();
-    let lists = |v: &Vec<knobas_core::payload::ListPath>| v.iter().map(|l| l.at.clone()).collect();
+    let lists =
+        |v: &Vec<knobas_spi_types::payload::ListPath>| v.iter().map(|l| l.at.clone()).collect();
     match field {
         Field::StatusName => (Shape::Text, plain(&paths.status_name)),
         Field::Priority => (Shape::Text, plain(&paths.priority)),
@@ -304,7 +305,7 @@ mod tests {
     use super::*;
     use crate::role::{RoleClaim, TICKET_SYSTEM};
     use crate::{KindInfo, ParentPath};
-    use knobas_core::payload::ListPath;
+    use knobas_spi_types::payload::ListPath;
     use serde_json::json;
 
     /// A Jira-shaped ticket system whose priority sits at `priority_at`.

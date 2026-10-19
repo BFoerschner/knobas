@@ -38,7 +38,7 @@
 //! than hoped: `crates/knobas-core/tests/it/payload_paths.rs` runs the same
 //! payload/declaration pairs through both and asserts they agree, so a change
 //! to either that the other does not make turns a test red. A declared state
-//! has a third spelling, the signals' [`crate::resolved_state!`], held to the
+//! has a third spelling, the signals' `knobas_core::resolved_state!`, held to the
 //! same cases there.
 //!
 //! # What a declaration may say, and what it may not
@@ -773,6 +773,7 @@ impl Declarations {
     /// them across two crates, and a `bind` that forgot the `Json` wrapper
     /// would bind a JSON *string* -- which `#>` reads as no declaration at
     /// all, so every path-driven read would quietly miss.
+    #[cfg(feature = "sqlx")]
     #[must_use]
     pub fn as_param(&self) -> sqlx::types::Json<serde_json::Value> {
         sqlx::types::Json(self.as_json())

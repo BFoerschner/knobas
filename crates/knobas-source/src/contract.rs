@@ -1,6 +1,6 @@
 //! The contract battery: the shared test suite every adapter must pass.
 
-use knobas_core::entity::EntityRef;
+use knobas_spi_types::entity::EntityRef;
 
 /// Which failure an adapter under test should simulate.
 ///
@@ -255,11 +255,11 @@ where
         "descriptor.id must not be blank -- it is the namespace of every item this source emits"
     );
     assert!(
-        !knobas_core::entity::is_reserved_namespace(&src_id),
+        !knobas_spi_types::entity::is_reserved_namespace(&src_id),
         "descriptor.id {src_id:?} is a namespace knobas keeps for its own entities \
          ({:?}) -- the sync engine refuses such a source outright, so an adapter named this \
          certifies here and then fails every real run",
-        knobas_core::entity::RESERVED_NAMESPACES
+        knobas_spi_types::entity::RESERVED_NAMESPACES
     );
     // §4.1: the id is the entity namespace, immutable once chosen, and typed
     // by a human into the Add-source form -- so it is a slug, not free text.
@@ -694,7 +694,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 ///    carrying the value settles the question for the whole kind, and where
 ///    *no* item does, a record whose object simply lacks the key is the
 ///    adapter having named a key its own records do not have. See
-///    [`names_a_missing_key`](knobas_core::payload::names_a_missing_key).
+///    [`names_a_missing_key`](knobas_spi_types::payload::names_a_missing_key).
 /// 4. **A field a kind does not declare resolves to nothing.** Narrow and
 ///    worth having: it says nothing about the *declaration*, but it is what a
 ///    resolver that grew a knobas-side fallback for an undeclared field dies
@@ -715,7 +715,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 /// **A parent kind's own records answer to the names declared for it.**
 /// `under:` returns a mirrored parent by reading the children's declared
 /// `names` off the parent's own record root
-/// ([`resolve_names_as_parent`](knobas_core::payload::resolve_names_as_parent)),
+/// ([`resolve_names_as_parent`](knobas_spi_types::payload::resolve_names_as_parent)),
 /// which works only if a source names a parent in the parent's own shape. So
 /// on every record of a declared parent `kind`, each of those names is held to
 /// clause 2 (it leads to a string or to nothing) and clause 3 (where none
@@ -766,7 +766,7 @@ async fn check_reachable_transitions(s: &dyn crate::Source, d: &crate::SourceDes
 ///   *inside* its elements, which is a different question from one candidate
 ///   excusing another.
 fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
-    use knobas_core::payload::{
+    use knobas_spi_types::payload::{
         KindPaths, PayloadPath, at, field, names_a_missing_key, resolve_flag, resolve_list,
         resolve_parents, resolve_state, resolve_string, resolve_trigger,
     };
@@ -811,7 +811,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // view (#1207) is no part of it.
         if let Some(frame) = paths
             .frame
-            .filter(|f| *f != knobas_core::payload::Frame::SavedView)
+            .filter(|f| *f != knobas_spi_types::payload::Frame::SavedView)
         {
             assert!(
                 !paths.pipeline.is_empty(),
@@ -820,7 +820,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                  without it this kind is a frame row nothing can place",
                 paths.kind
             );
-            if frame == knobas_core::payload::Frame::Pipeline {
+            if frame == knobas_spi_types::payload::Frame::Pipeline {
                 assert!(
                     !paths.name.is_empty(),
                     "descriptor.payload_paths declares kind {:?} a pipeline but no `name` path -- \
@@ -871,7 +871,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
                 Wanted::Number => value.is_number(),
                 Wanted::Instant => value
                     .as_str()
-                    .is_some_and(|t| knobas_core::payload::parse_instant(t).is_some()),
+                    .is_some_and(|t| knobas_spi_types::payload::parse_instant(t).is_some()),
             }
         }
 
@@ -964,7 +964,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // on (#710), a ticket's labels and its sprints' states (#811), a
         // pipeline's chain of groups (#849), a repository's teams (#966). One
         // rule for all six.
-        let lists: [(&str, &Vec<knobas_core::payload::ListPath>); 6] = [
+        let lists: [(&str, &Vec<knobas_spi_types::payload::ListPath>); 6] = [
             (field::REVIEWERS, &paths.reviewers),
             (field::REVISION, &paths.revision),
             (field::LABELS, &paths.labels),
@@ -1012,7 +1012,10 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         // a key the declaration invented. Type-checked still, never evidence.
         let nobody_started = matches!(
             resolve_trigger(&item.payload, &paths.trigger),
-            Some(knobas_core::payload::Trigger::Change | knobas_core::payload::Trigger::Schedule)
+            Some(
+                knobas_spi_types::payload::Trigger::Change
+                    | knobas_spi_types::payload::Trigger::Schedule
+            )
         );
         // Only a run in flight is doing something now (#1004): its declared
         // `started` reads and its `finished` does not. TeamCity serves
@@ -1162,7 +1165,7 @@ fn check_payload_paths(d: &crate::SourceDescriptor, items: &[crate::SyncItem]) {
         }
         if paths.project_path.is_empty() {
             assert!(
-                knobas_core::payload::resolve_project_path(&item.payload, &paths.project_path)
+                knobas_spi_types::payload::resolve_project_path(&item.payload, &paths.project_path)
                     .is_empty(),
                 "kind {:?} declares no project_path, so every reader must miss on item {}",
                 item.kind,
@@ -1324,7 +1327,7 @@ mod tests {
         AuthMethod, Capability, ConnectionInfo, Cursor, KindInfo, Sink, Source, SourceDescriptor,
         SourceError, SyncItem, WriteOp,
     };
-    use knobas_core::entity::EntityRef;
+    use knobas_spi_types::entity::EntityRef;
 
     /// How the adapter under test misbehaves -- one variant per battery
     /// assertion, so an assertion that stops being enforced turns exactly one
@@ -1833,26 +1836,26 @@ mod tests {
                             ..good
                         }],
                         Behavior::FrameWithoutPipeline => vec![KindPaths {
-                            frame: Some(knobas_core::payload::Frame::Run),
+                            frame: Some(knobas_spi_types::payload::Frame::Run),
                             ..good
                         }],
                         Behavior::PipelineWithoutName => vec![KindPaths {
-                            frame: Some(knobas_core::payload::Frame::Pipeline),
+                            frame: Some(knobas_spi_types::payload::Frame::Pipeline),
                             pipeline: vec![PayloadPath::of(["key"])],
                             ..good
                         }],
                         Behavior::StartedThatIsNoInstant => vec![KindPaths {
-                            frame: Some(knobas_core::payload::Frame::Run),
+                            frame: Some(knobas_spi_types::payload::Frame::Run),
                             pipeline: vec![PayloadPath::of(["key"])],
                             started: vec![PayloadPath::of(["key"])],
                             ..good
                         }],
                         Behavior::TriggerAtAMissingKey => vec![KindPaths {
-                            trigger: vec![knobas_core::payload::TriggerPath {
+                            trigger: vec![knobas_spi_types::payload::TriggerPath {
                                 at: PayloadPath::of(["triggerd"]),
-                                values: vec![knobas_core::payload::TriggerValue::of(
+                                values: vec![knobas_spi_types::payload::TriggerValue::of(
                                     "vcs",
-                                    knobas_core::payload::Trigger::Change,
+                                    knobas_spi_types::payload::Trigger::Change,
                                 )],
                             }],
                             ..good
@@ -1863,22 +1866,22 @@ mod tests {
                         }],
                         Behavior::StartedByOnRunsNobodyStarted => vec![KindPaths {
                             started_by: vec![PayloadPath::of(["startedBy"])],
-                            trigger: vec![knobas_core::payload::TriggerPath {
+                            trigger: vec![knobas_spi_types::payload::TriggerPath {
                                 at: PayloadPath::of(["fields", "status", "name"]),
-                                values: vec![knobas_core::payload::TriggerValue::of(
+                                values: vec![knobas_spi_types::payload::TriggerValue::of(
                                     "In Progress",
-                                    knobas_core::payload::Trigger::Change,
+                                    knobas_spi_types::payload::Trigger::Change,
                                 )],
                             }],
                             ..good
                         }],
                         Behavior::StartedByOnRunsAPersonStarted => vec![KindPaths {
                             started_by: vec![PayloadPath::of(["startedBy"])],
-                            trigger: vec![knobas_core::payload::TriggerPath {
+                            trigger: vec![knobas_spi_types::payload::TriggerPath {
                                 at: PayloadPath::of(["fields", "status", "name"]),
-                                values: vec![knobas_core::payload::TriggerValue::of(
+                                values: vec![knobas_spi_types::payload::TriggerValue::of(
                                     "In Progress",
-                                    knobas_core::payload::Trigger::Person,
+                                    knobas_spi_types::payload::Trigger::Person,
                                 )],
                             }],
                             ..good
@@ -1917,7 +1920,7 @@ mod tests {
                         }
                         Behavior::ClaimsTicketSystemWithoutPriority => vec![ticket_system(false)],
                         Behavior::ClaimsCi | Behavior::ClaimsCiWithoutRunLog => {
-                            use knobas_core::payload::Frame;
+                            use knobas_spi_types::payload::Frame;
                             let at = |key: &str| vec![PayloadPath::of([key])];
                             vec![
                                 good,

@@ -25,7 +25,7 @@
 //! instance a repository is cloned from (ADR-0023), which [`check`] holds to
 //! the claim and to the config schema.
 
-use knobas_core::payload::{Frame, KindPaths};
+use knobas_spi_types::payload::{Frame, KindPaths};
 
 use crate::SourceDescriptor;
 
