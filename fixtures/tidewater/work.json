@@ -284,6 +284,17 @@
       "body": null,
       "note": "parent of daily protocol pages",
       "comments": []
+    },
+    {
+      "id": "daily-protocol-2026-08-21",
+      "title": "Daily protocol 2026-08-21",
+      "space": "ENG",
+      "edited": "2026-08-21T00:00:00Z",
+      "section": null,
+      "by": "mara",
+      "body": null,
+      "parent": "standup-protocols",
+      "comments": []
     }
   ],
   "notes": [
@@ -347,5 +358,9 @@
     { "name": "payout-service", "lang": "Rust", "team": "Payments", "clone": "~/code/payout-service", "default_branch": "main", "commit_count": 312 },
     { "name": "ledger-api", "lang": "Kotlin", "team": "Payments", "clone": "~/code/ledger-api", "default_branch": null, "commit_count": null },
     { "name": "ops-runbooks", "lang": "Markdown", "team": "Platform", "clone": null, "default_branch": null, "commit_count": null }
+  ],
+  "monitors": [
+    { "id": "payout-service-health", "name": "payout-service health", "type": "http", "state": "up", "response_time_ms": 38.0, "url": "https://payout.tidewater.example/health" },
+    { "id": "ledger-api-health", "name": "ledger-api health", "type": "http", "state": "up", "response_time_ms": 112.0, "url": "https://ledger.tidewater.example/health" }
   ]
 }

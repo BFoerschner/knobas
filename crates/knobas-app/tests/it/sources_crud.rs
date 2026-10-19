@@ -1451,8 +1451,8 @@ async fn the_source_list_carries_the_role_claims_of_each_sources_adapter() {
     let claimed: Vec<&str> = row.roles.iter().map(|c| c.role.as_str()).collect();
     assert_eq!(
         claimed,
-        ["code-host", "ticket-system"],
-        "the built-in mock claims the roles its corpus fills (#1229)"
+        ["code-host", "ticket-system", "ci", "wiki", "monitoring"],
+        "the built-in mock claims the roles its corpus fills (#1229, #1240)"
     );
 }
 

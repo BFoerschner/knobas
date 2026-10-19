@@ -54,7 +54,7 @@ const ADAPTERS: &[Adapter] = &[
         kind: "mock",
         template: knobas_source_mock::descriptor_template,
         build: knobas_source_mock::build,
-        doc: None,
+        doc: Some(knobas_source_mock::doc_content),
         doc_writes: None,
     },
     Adapter {

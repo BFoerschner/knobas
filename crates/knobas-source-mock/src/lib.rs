@@ -69,8 +69,9 @@ const FIXTURE_JSON: &str = include_str!("../../../fixtures/tidewater/work.json")
 /// and showed no project rooms with nothing in the app able to repair it.
 /// `v3` is #537 paying the same debt: the corpus gained the fixture's repos
 /// and branches, and a demo profile stored at `v2` has to be re-sent the
-/// corpus to get them.
-const CURSOR: &str = "tidewater-v3";
+/// corpus to get them. `v4` is #1240: the corpus gained a pipeline per build
+/// configuration, a daily protocol page and two monitors.
+const CURSOR: &str = "tidewater-v4";
 
 /// Where the fictional company's systems live. Nothing is served from here --
 /// it exists so *Open in browser* has a shape to render and a stream building
@@ -102,6 +103,9 @@ pub struct Fixture {
     pub commits: Vec<Commit>,
     pub branches: Vec<Branch>,
     pub repos: Vec<Repo>,
+    /// The health checks of the two services the dataset gives a repository
+    /// (#1240); see [`Monitor`].
+    pub monitors: Vec<Monitor>,
 }
 
 impl Fixture {
@@ -283,7 +287,31 @@ pub struct Page {
     pub body: Option<String>,
     #[serde(default)]
     pub note: Option<String>,
+    /// [`Page::id`] of the page above this one, where the dataset names one
+    /// (#1240: *Standup protocols*, "parent of daily protocol pages").
+    #[serde(default)]
+    pub parent: Option<String>,
     pub comments: Vec<Comment>,
+}
+
+/// A health check on one of the dataset's services. The dataset has none: this
+/// is the one record kind the fixture adds for a role (#1240, monitoring), one
+/// per repository the dataset gives a runtime (`payout-service`, `ledger-api`;
+/// `ops-runbooks` is Markdown and runs nothing), both healthy so the demo
+/// invents no outage. The URLs are `{MOCK_BASE}`-style addresses nothing
+/// serves.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Monitor {
+    pub id: String,
+    pub name: String,
+    /// `http`, as Uptime Kuma names the check.
+    #[serde(rename = "type")]
+    pub kind: String,
+    /// `up` | `down` | `pending` | `maintenance`.
+    pub state: String,
+    pub response_time_ms: f64,
+    pub url: String,
 }
 
 /// A knobas-local note -- not synced from anywhere, which is why the mock does
@@ -576,6 +604,123 @@ fn ticket_payload(t: &Ticket) -> serde_json::Value {
     payload
 }
 
+/// A build's payload: the record, as the Builds frame's *run* (#1240). The
+/// dataset's build is a TeamCity build of a build configuration, which is a run
+/// of a pipeline, so the record gains the keys the run's declared paths read:
+/// the configuration as its `pipeline`, the number as text, and `finished`
+/// only for a build the dataset gives a duration (`4 m 12 s`) -- a running
+/// build has not finished, and a success with no duration is not guessed at.
+/// `when` is the start, as the dataset's own running build says ("started
+/// today 11:45").
+fn run_payload(b: &Build) -> serde_json::Value {
+    let mut payload = serde_json::to_value(b).expect("a fixture record must serialize");
+    payload["pipeline"] = serde_json::Value::from(b.cfg.as_str());
+    payload["number"] = serde_json::Value::from(b.num.to_string());
+    payload["started"] = serde_json::to_value(b.when).expect("an instant must serialize");
+    if let Some(secs) = b.duration.as_deref().and_then(duration_secs) {
+        payload["finished"] = serde_json::to_value(b.when + chrono::Duration::seconds(secs))
+            .expect("an instant must serialize");
+    }
+    payload
+}
+
+/// `4 m 12 s` as seconds; `None` for any other shape.
+fn duration_secs(text: &str) -> Option<i64> {
+    let mut words = text.split_whitespace();
+    let (m, unit_m, s, unit_s) = (words.next()?, words.next()?, words.next()?, words.next()?);
+    (unit_m == "m" && unit_s == "s" && words.next().is_none())
+        .then(|| Some(m.parse::<i64>().ok()? * 60 + s.parse::<i64>().ok()?))
+        .flatten()
+}
+
+/// A build configuration's pipeline (#1240): derived from the `cfg` the
+/// dataset's builds name, nothing else.
+fn pipeline_payload(cfg: &str) -> serde_json::Value {
+    serde_json::json!({ "key": cfg, "id": cfg, "name": cfg })
+}
+
+/// The Docs projection (#1240, `knobas_source::docs::DocProjection`): the
+/// page the wiki role draws. The dataset gives a page body as one line of
+/// `## Heading — text` runs, so each run becomes a heading and a paragraph;
+/// the comments are the page's own, as plain paragraphs. No version, labels
+/// or history: the dataset records none, and none is invented.
+#[must_use]
+pub fn doc_content(
+    kind: &str,
+    payload: &serde_json::Value,
+) -> Option<knobas_source::docs::DocContent> {
+    use knobas_source::docs::{DocBlock, DocComment, DocContent, Inline};
+    if kind != knobas_source::docs::PAGE_KIND {
+        return None;
+    }
+    let text = |text: &str| {
+        vec![Inline::Text {
+            text: text.trim().to_owned(),
+            strong: false,
+            emphasis: false,
+            code: false,
+        }]
+    };
+    let mut blocks = Vec::new();
+    for run in payload["body"].as_str().unwrap_or_default().split("## ") {
+        let (head, rest) = run.split_once(" \u{2014} ").unwrap_or((run, ""));
+        if head.trim().is_empty() {
+            continue;
+        }
+        blocks.push(DocBlock::Heading {
+            level: 2,
+            text: text(head),
+        });
+        if !rest.trim().is_empty() {
+            blocks.push(DocBlock::Paragraph { text: text(rest) });
+        }
+    }
+    let comments = payload["comments"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| DocComment {
+            author: c["who"].as_str().map(str::to_owned),
+            author_name: None,
+            at: c["when"].as_str().map(str::to_owned),
+            blocks: vec![DocBlock::Paragraph {
+                text: text(c["text"].as_str().unwrap_or_default()),
+            }],
+        })
+        .collect();
+    Some(DocContent {
+        version: None,
+        editor_name: None,
+        labels: Vec::new(),
+        blocks,
+        comments,
+        sections: Vec::new(),
+        history: Vec::new(),
+    })
+}
+
+/// A page's payload: the record, with the page above it as a parent object
+/// (`{"title"}`, which is what the docs tree matches a parent on) where the
+/// dataset names one.
+fn page_payload(p: &Page) -> serde_json::Value {
+    let mut payload = serde_json::to_value(p).expect("a fixture record must serialize");
+    payload.as_object_mut().expect("an object").remove("parent");
+    // The space is the project (#1240): the dataset names `ENG` as
+    // *Engineering*, the one space it has.
+    payload["project"] = serde_json::json!({
+        "key": p.space,
+        "name": if p.space == "ENG" { serde_json::json!("Engineering") } else { serde_json::Value::Null },
+    });
+    if let Some(parent) = p
+        .parent
+        .as_deref()
+        .and_then(|id| fixture().pages.iter().find(|q| q.id == id))
+    {
+        payload["parent"] = serde_json::json!({ "id": parent.id, "title": parent.title });
+    }
+    payload
+}
+
 /// The newest commit the fixture records on `branch` of `repo`: the head a
 /// branch or a pull request from it stands at.
 fn head_commit(repo: &str, branch: &str) -> Option<&'static str> {
@@ -684,11 +829,43 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             ),
             b.triggered_by.clone(),
             Some(b.when),
-            b,
+            &run_payload(b),
             Some(format!(
                 "{MOCK_BASE}/teamcity/viewLog.html?buildId={}",
                 b.num
             )),
+        ));
+    }
+    // One pipeline per build configuration the builds name, ahead of its runs.
+    let mut pipelines: Vec<&str> = f.builds.iter().map(|b| b.cfg.as_str()).collect();
+    pipelines.sort_unstable();
+    pipelines.dedup();
+    for cfg in pipelines {
+        out.push(item(
+            source_id,
+            "pipeline",
+            cfg.to_owned(),
+            cfg.to_owned(),
+            body_text([cfg.to_owned()]),
+            None,
+            None,
+            &pipeline_payload(cfg),
+            Some(format!(
+                "{MOCK_BASE}/teamcity/viewType.html?buildTypeId={cfg}"
+            )),
+        ));
+    }
+    for m in &f.monitors {
+        out.push(item(
+            source_id,
+            "monitor",
+            m.id.clone(),
+            m.name.clone(),
+            body_text([m.name.clone(), m.url.clone()]),
+            None,
+            None,
+            m,
+            Some(m.url.clone()),
         ));
     }
     for p in &f.pages {
@@ -705,7 +882,7 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             ),
             Some(p.by.clone()),
             Some(p.edited),
-            p,
+            &page_payload(p),
             Some(format!("{MOCK_BASE}/wiki/{}/{}", p.space, p.id)),
         ));
     }
@@ -825,7 +1002,7 @@ fn branch_key(repo: &str, branch: &str) -> String {
 /// [`Person::username`]: Person::username
 fn payload_paths() -> Vec<knobas_source::KindPaths> {
     use knobas_source::{
-        KindPaths, ListPath, ParentPath, PayloadPath, StatePath, StateValue, Tone,
+        Frame, KindPaths, ListPath, ParentPath, PayloadPath, StatePath, StateValue, Tone,
     };
     let in_repo = || {
         vec![ParentPath {
@@ -888,6 +1065,62 @@ fn payload_paths() -> Vec<knobas_source::KindPaths> {
             commit: vec![PayloadPath::of(["sha"])],
             ..KindPaths::default()
         },
+        // The Builds frame (#1240): the dataset's build is a run of the
+        // pipeline its build configuration names.
+        KindPaths {
+            kind: "pipeline".to_owned(),
+            frame: Some(Frame::Pipeline),
+            name: vec![PayloadPath::of(["name"])],
+            pipeline: vec![PayloadPath::of(["id"])],
+            ..KindPaths::default()
+        },
+        KindPaths {
+            kind: "build".to_owned(),
+            frame: Some(Frame::Run),
+            pipeline: vec![PayloadPath::of(["pipeline"])],
+            number: vec![PayloadPath::of(["number"])],
+            branch: vec![PayloadPath::of(["branch"])],
+            started: vec![PayloadPath::of(["started"])],
+            finished: vec![PayloadPath::of(["finished"])],
+            state: vec![StatePath {
+                at: PayloadPath::of(["status"]),
+                values: vec![
+                    StateValue::of("running", Tone::Info),
+                    StateValue::of("failed", Tone::Err),
+                    StateValue::of("success", Tone::Ok),
+                ],
+            }],
+            ..KindPaths::default()
+        },
+        // The Docs role (#1240): the space is the project, and a page's parent
+        // is the page above it, named by title as the docs tree matches it.
+        KindPaths {
+            kind: "page".to_owned(),
+            project_key: vec![PayloadPath::of(["project", "key"])],
+            project_name: vec![PayloadPath::of(["project", "name"])],
+            parent: vec![ParentPath {
+                kind: "page".to_owned(),
+                at: PayloadPath::of(["parent"]),
+                names: vec![PayloadPath::of(["title"])],
+            }],
+            ..KindPaths::default()
+        },
+        // The Monitors role (#1240), in Uptime Kuma's own words.
+        KindPaths {
+            kind: "monitor".to_owned(),
+            status_name: vec![PayloadPath::of(["state"])],
+            state: vec![StatePath {
+                at: PayloadPath::of(["state"]),
+                values: vec![
+                    StateValue::of("up", Tone::Ok),
+                    StateValue::of("down", Tone::Err),
+                    StateValue::of("pending", Tone::Warn),
+                ],
+            }],
+            monitor_type: vec![PayloadPath::of(["type"])],
+            response_time: vec![PayloadPath::of(["response_time_ms"])],
+            ..KindPaths::default()
+        },
     ]
 }
 
@@ -910,11 +1143,11 @@ impl Source for MockSource {
             auth_methods: Vec::new(),
             accepts_account: false,
             min_sync_interval_secs: knobas_source::DEFAULT_MIN_SYNC_INTERVAL_SECS,
-            // The two roles the fixture's corpus fills (#1229): the shell
-            // draws Code and Tickets from the sources that claim them, and
-            // the demo's only source is this one. Builds, Docs and Monitors
-            // are not claimed: the mock's `build` is no pipeline-and-run pair,
-            // its pages name no parent, and it has no monitor.
+            // The roles the fixture's corpus fills (#1229, #1240): the shell
+            // draws each surface from the sources that claim its role, and
+            // the demo's only source is this one. Builds read the `build`
+            // records as runs of a pipeline per build configuration, Docs the
+            // pages under their parent, Monitors the two health checks.
             //
             // A claim states the role's minimum, reads included, and the
             // minimum is the same for a real adapter and a fixture. The mock
@@ -923,8 +1156,10 @@ impl Source for MockSource {
             // "my records fill the role", which `payload_paths` and the
             // battery's clauses 6 and 10 hold it to.
             roles: {
-                use knobas_source::role::{CODE_HOST, RoleClaim, TICKET_SYSTEM, minimum};
-                [CODE_HOST, TICKET_SYSTEM]
+                use knobas_source::role::{
+                    CI, CODE_HOST, MONITORING, RoleClaim, TICKET_SYSTEM, WIKI, minimum,
+                };
+                [CODE_HOST, TICKET_SYSTEM, CI, WIKI, MONITORING]
                     .map(|role| {
                         let reads = minimum(role).map_or(&[][..], |m| m.reads);
                         RoleClaim::new(role, reads.iter().copied())
@@ -996,6 +1231,21 @@ impl Source for MockSource {
                     label: "Branch".to_owned(),
                     plural: "Branches".to_owned(),
                     monogram: "BR".to_owned(),
+                    full_sync_exhaustive: true,
+                },
+                // The Builds frame's pipeline (#1240); a `build` is its run.
+                KindInfo {
+                    id: "pipeline".to_owned(),
+                    label: "Pipeline".to_owned(),
+                    plural: "Pipelines".to_owned(),
+                    monogram: "PL".to_owned(),
+                    full_sync_exhaustive: true,
+                },
+                KindInfo {
+                    id: "monitor".to_owned(),
+                    label: "Monitor".to_owned(),
+                    plural: "Monitors".to_owned(),
+                    monogram: "MO".to_owned(),
                     full_sync_exhaustive: true,
                 },
             ],
