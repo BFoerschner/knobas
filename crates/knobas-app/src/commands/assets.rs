@@ -835,7 +835,8 @@ pub async fn produce_estate_file<R: tauri::Runtime>(
 /// `knobas_sync::samples` on the way in and on the way out -- a settings
 /// dialog and a hand-edited `knobas.setting` row are both places a number
 /// arrives from, and only one of them has a spinner on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitoringSettings {
     /// How many days of samples knobas keeps. Default ninety.
     pub sample_retention_days: u32,

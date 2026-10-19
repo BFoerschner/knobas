@@ -328,8 +328,9 @@ const MONITOR_KIND: &str = "monitor";
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
 /// [`tests::every_status_is_one_the_schema_accepts`] reads the migration to
 /// keep the two lists in step.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum AssetStatus {
     Up,
     Warn,
@@ -408,8 +409,9 @@ impl AssetStatus {
 /// sets it -- that walk is #431's. The four spellings are `0017`'s
 /// `asset_environment_chk`, kept in step with this list by
 /// [`tests::every_environment_is_one_the_schema_accepts`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum Environment {
     Dev,
     Stage,
@@ -454,8 +456,9 @@ impl Environment {
 /// nobody has classified, and `0018`'s `route_visibility_chk` is the same two
 /// spellings, kept in step by
 /// [`tests::every_visibility_is_one_the_schema_accepts`].
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum Visibility {
     #[default]
     Internal,
@@ -489,8 +492,9 @@ impl Visibility {
 /// *and* in the `properties` jsonb. A bare JSON scalar would make `"8080"` and
 /// `8080` the same property and would leave a date indistinguishable from a
 /// string, which is the whole of what story 6's four kinds are for.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum PropertyValue {
     Text { value: String },
     Number { value: f64 },
@@ -577,7 +581,8 @@ impl PropertyValue {
 /// Tree that there is a next column to open. It is computed by the read rather
 /// than stored: a stored count is a second copy of the parent field, and the
 /// two would disagree the first time a move failed halfway.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AssetRow {
     /// `asset:<uuid>`, and also the id of this asset's `knobas.entity` row.
     pub id: String,
@@ -640,7 +645,8 @@ pub struct AssetRow {
 /// meant to have an IP. Custom keys follow, in key order, and carry
 /// `custom: true` so the pane can rule a line between the two groups without
 /// keeping its own copy of the schema.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AssetProperty {
     pub key: String,
     /// What the pane calls it: the type's label for a typed key, the key
@@ -661,7 +667,8 @@ pub struct AssetProperty {
 /// click to that ancestor is exactly what story 10 asks for. Whether it was
 /// set *here* is [`source_id`](Self::source_id) equalling the asset's own id,
 /// which the pane compares rather than being told twice.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct Inherited<T> {
     /// The value in force -- an [`Environment`] for one field of
     /// [`AssetDetail`], an owner's name for the other.
@@ -673,7 +680,8 @@ pub struct Inherited<T> {
 }
 
 /// Everything the fixed right pane draws for one asset.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AssetDetail {
     pub asset: AssetRow,
     /// Known keys first, custom after. See [`AssetProperty`].
@@ -781,7 +789,8 @@ pub struct AssetDetail {
 /// the SPI's to spell ([`knobas_source::monitor_target`]), and a frontend that
 /// composed `` `${id}:monitors` `` would be a per-adapter table in a Svelte
 /// component.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitorTarget {
     /// The configured source's id, which is also its entities' namespace.
     pub source_id: String,
@@ -798,7 +807,8 @@ pub struct MonitorTarget {
 /// paused is a tombstone with neither (#442, `knobas_source_kuma::map`), and a
 /// monitor whose source the reader disabled leaves the mirror without leaving
 /// the link.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AttachedMonitor {
     /// The monitor's entity id -- `<source>:<monitor id in Kuma>`, and the
     /// address the *Linked* panel opens.
@@ -853,7 +863,8 @@ pub struct AttachedMonitor {
 /// [`cert_days_remaining`]: MonitorRow::cert_days_remaining
 /// [`state`]: MonitorRow::state
 /// [`samples`]: MonitorRow::samples
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitorRow {
     /// `<source>:<monitor id in Kuma>` -- the entity id, and the address a
     /// detail slide-over opens at.
@@ -962,7 +973,8 @@ pub struct MonitorRow {
 }
 
 /// One uptime ratio, at the window Kuma computed it over.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct UptimeRatio {
     /// Kuma's own label: `1d`, `30d`, `365d`.
     pub window: String,
@@ -975,7 +987,8 @@ pub struct UptimeRatio {
 /// Not a [`MemberAsset`]: a roster row needs a name, an address and a path,
 /// and a tile's row carries a whole [`AssetRow`] with a health rollup behind
 /// it -- a read per asset per monitor for facts this column does not draw.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitoredAsset {
     /// `asset:<uuid>` -- and the `#/asset/<id>` address the name links to.
     pub id: String,
@@ -996,7 +1009,8 @@ pub struct MonitoredAsset {
 /// does not draw (spec #427, *Out of scope*: "charts beyond the 24-hour
 /// bar"). The reading the tab does show is [`MonitorRow::response_time_ms`],
 /// the latest one.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitorSample {
     pub taken_at: chrono::DateTime<chrono::Utc>,
     /// `up`, `warn`, `down`, `pending`, `maintenance`, or `null` for a poll
@@ -1016,6 +1030,8 @@ knobas_core::closed_vocabulary! {
     /// can be, and an alert that could be `none` would be a row saying nothing
     /// is wrong. [`tests::the_alert_states_are_the_ones_the_engine_opens`]
     /// holds the two lists together.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "assets.ts")]
     pub enum AlertState {
         /// The monitor did not answer.
         Down => "down",
@@ -1056,7 +1072,8 @@ impl AlertState {
 /// Three fields and not an [`AssetRow`]: this is a line in a list, and an
 /// `AssetRow` would drag the rollup and the linked-work count through a read
 /// whose whole answer is *which machine, and where it lives*.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AlertAsset {
     /// `asset:<uuid>` -- the address the list opens.
     pub id: String,
@@ -1073,7 +1090,8 @@ pub struct AlertAsset {
 /// words: the id here is the row's `bigint`, what [`state`](Self::state) is
 /// about is the monitor, and what a reader opens is the asset. #446's ack and
 /// #449's cards address the row by this id.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct OpenAlert {
     /// The alert row's id. A number and not a string, because it is not an
     /// address -- see the type's own note.
@@ -1108,7 +1126,8 @@ pub struct OpenAlert {
 /// shape per direction would be two things to keep in step for no fact gained.
 /// Both names are resolved by the read, so neither end has to fetch the other
 /// to draw a line.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct RouteRow {
     /// `route:<uuid>`, and also the id of this route's `knobas.entity` row --
     /// which is what makes `#/route/<id>` an address (spec §2).
@@ -1140,7 +1159,8 @@ pub struct RouteRow {
 /// exposes it, and [`RouteRow::asset_id`] is where the Tree opens -- which is
 /// what makes `#/route/<id>` land at the exposing asset with the route
 /// selected rather than in a surface of its own.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct RouteDetail {
     pub route: RouteRow,
     /// This route's own lines from the activity stream, newest first.
@@ -1166,8 +1186,9 @@ pub struct RouteDetail {
 /// the log. That variant argues the exception where it is declared; this is
 /// the header saying it exists, so a reader does not take the rule above for a
 /// rule the enum keeps.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "field", rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum AssetEdit {
     Name {
         value: String,
@@ -1220,8 +1241,9 @@ pub enum AssetEdit {
 /// history line each with a `from` and a `to`, and `null` on the two nullable
 /// fields is an unambiguous **clear**. The asset that exposes a route is not
 /// among them -- see the module docs.
-#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "field", rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum RouteEdit {
     Name {
         value: String,
@@ -2234,7 +2256,8 @@ pub const CREATE_MONITOR: &str = "create_monitor";
 /// the **path**, which `AssetRow` does not, because that is what tells two
 /// containers called `postgres` apart -- and it is the field the criterion
 /// asks for by name.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct UnmonitoredAsset {
     /// `asset:<uuid>` -- the `#/asset/<id>` address the name opens.
     pub id: String,
@@ -2648,7 +2671,8 @@ pub fn properties_of(type_id: &str, stored: &serde_json::Value) -> Vec<AssetProp
 /// same move [`Written`] makes -- the thing, and the one extra fact this
 /// caller needs about it -- so the tile reads `asset.name` and `path` and
 /// nothing in this module keeps a second copy of a type table or a rollup.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MemberAsset {
     pub asset: AssetRow,
     /// The ancestors' names, outermost first, `" / "` between them; `null` for
@@ -2825,7 +2849,8 @@ async fn tile_rows(
 /// exactly -- `path_text` is not on a Miller column's read and `relation` is
 /// true of this *answer* and not of the asset, which is on somebody else's
 /// list under a different word.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DependsOnRow {
     pub asset: AssetRow,
     /// The ancestors' names, outermost first, `" / "` between them; `null` for
@@ -2855,7 +2880,8 @@ pub struct DependsOnRow {
 ///
 /// Two lists and no count: the count the panel draws is `assets.len()`, and a
 /// number beside a list it can be read off is a fact on the wire twice.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DependsOnThis {
     /// Every asset that breaks, nearest first -- the whole closure, each with
     /// its path and the edge it was reached by.
@@ -4353,8 +4379,9 @@ impl Token {
 /// asked for -- so the names stand, said here so the next reader does not take
 /// the narrowness for a claim. What the *dialog* draws is producer-neutral,
 /// because the rendered sentence is nobody's frozen surface.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum Produced {
     /// Nothing is stored under this importer's keychain account and the caller
     /// sent no token. **Answered before any request is made**, so a reader who
@@ -4479,8 +4506,9 @@ async fn new_asset_ids(
 /// asset since #439. `testenv/estate.json` has exactly one parentless
 /// asset. An importer that refused the one answer the Import accepts would be
 /// the *"second set of rules"* spec #491's story 69 forbids.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export_to = "assets.ts")]
 pub struct Landing {
     /// The asset the new servers go under, or `None` for the top of the estate.
     ///
@@ -4601,7 +4629,8 @@ struct FileRoute {
 /// a group answers is about the **file** -- what of it does knobas already
 /// hold -- and a reader counting what is new counts entries rather than two
 /// populations. Which of the two an entry is, is [`kind`](Self::kind).
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct ImportEntry {
     /// The file's own id, which is the id the asset or route carries.
     pub id: String,
@@ -4621,8 +4650,9 @@ pub struct ImportEntry {
 /// Two values and no third, because there are two ways a file's value can meet
 /// a stored one: nobody has claimed the property, so the file wins, or
 /// somebody has, so they do.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum PropertyPlan {
     /// The stored value is replaced by the file's.
     Set,
@@ -4639,7 +4669,8 @@ pub enum PropertyPlan {
 /// group's own name. A key the file does not mention is not here either -- the
 /// file is authoritative over what it says and silent about the rest, so an
 /// import never removes a property.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct PropertyChange {
     pub key: String,
     /// The type's label for a declared key, the key itself for a custom one --
@@ -4658,7 +4689,8 @@ pub struct PropertyChange {
 /// [`ImportPreview::known`] with the rest -- so this list is the third group
 /// the Import dialog draws and its length is the honest answer to *what would
 /// this do*.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AssetChange {
     pub id: String,
     /// The name the asset carries **in the tree**, which is what the reader is
@@ -4686,7 +4718,8 @@ pub struct AssetChange {
 /// that does not look identical in the file. A name the mirror does not hold
 /// is not here: it is kept on the asset (`0020`) and resolved by the next
 /// import or by the M4.1 sync, which is spec #427's own sentence.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct MonitorLink {
     pub asset_id: String,
     pub asset_name: String,
@@ -4709,7 +4742,8 @@ pub struct MonitorLink {
 /// of an unchanged file has an empty `changes`, an empty `monitor_links` and
 /// every unresolved name still unresolved. Reported on every preview, then,
 /// and not only on the one that first kept the name.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct UnresolvedMonitor {
     pub asset_id: String,
     pub asset_name: String,
@@ -4726,7 +4760,8 @@ pub struct UnresolvedMonitor {
 /// would change -- plus the monitor links, which are a write and therefore
 /// have to be announced by the same read that announces the others, and the
 /// names that found no monitor, which are the same announcement's other half.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct ImportPreview {
     /// What the file calls the estate.
     pub name: String,
@@ -4756,7 +4791,8 @@ pub struct ImportPreview {
 /// Counted rather than listed: the preview is where a reader looks at the
 /// detail, and this is what the summary line says and what the dialog reports
 /// when it is over.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct ImportOutcome {
     pub assets_created: i64,
     pub routes_created: i64,

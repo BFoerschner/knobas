@@ -80,7 +80,8 @@ const OTHER_KINDS: &[(&str, &str, &str)] = &[
 ];
 
 /// One kind Dependencies places in a layer.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DepKind {
     pub id: String,
     /// The built-in label (*Hypervisor*, ruling D15).
@@ -109,7 +110,8 @@ pub fn kinds() -> Vec<DepKind> {
 }
 
 /// One shared layer: its name and the kinds it holds, in order.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts", rename = "DepLayer")]
 pub struct Layer {
     pub id: String,
     pub name: String,
@@ -117,7 +119,8 @@ pub struct Layer {
 }
 
 /// One thing Dependencies can draw as a tile.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DepItem {
     /// The entity id: `asset:…`, `route:…`, `jira:PAY-231`.
     pub id: String,
@@ -142,7 +145,8 @@ pub struct DepItem {
 }
 
 /// One known relation between two items of the read.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DepRelation {
     pub from: String,
     pub to: String,
@@ -152,7 +156,8 @@ pub struct DepRelation {
 }
 
 /// Everything the top-bar opening draws.
-#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct Dependencies {
     pub layers: Vec<Layer>,
     pub kinds: Vec<DepKind>,
@@ -655,8 +660,9 @@ pub async fn place_kind(
 // -- The saved views (#873) ---------------------------------------------------
 
 /// How a layer's tiles group in a view (prototype-6's *Group by*).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts", rename = "DepGroup")]
 pub enum Group {
     /// *No groups*.
     #[default]
@@ -674,8 +680,9 @@ pub enum Group {
 }
 
 /// The tile size (prototype-6's *Tiles*).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts", rename = "DepTiles")]
 pub enum Tiles {
     /// Small when a layer holds more than 30.
     #[default]
@@ -687,8 +694,9 @@ pub enum Tiles {
 }
 
 /// What a view keeps for one layer.
-#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export_to = "assets.ts")]
 pub struct LayerInView {
     pub hidden: bool,
     pub folded: bool,
@@ -699,8 +707,9 @@ pub struct LayerInView {
 pub const FOLD_AT: i32 = 24;
 
 /// Everything a view keeps, and nothing else (R-11.13).
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(deny_unknown_fields)]
+#[ts(export_to = "assets.ts")]
 pub struct DepViewSettings {
     /// By layer id. A layer not named here shows, unfolded and ungrouped.
     pub layers: std::collections::BTreeMap<String, LayerInView>,
@@ -726,7 +735,8 @@ impl Default for DepViewSettings {
 }
 
 /// One saved view.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DepView {
     pub id: String,
     pub name: String,
@@ -735,7 +745,8 @@ pub struct DepView {
 
 /// Every view, in order, and which opens first from a ticket and from the top
 /// bar.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct DepViews {
     pub views: Vec<DepView>,
     pub opens_from_ticket: String,
