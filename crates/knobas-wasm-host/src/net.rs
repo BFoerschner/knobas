@@ -26,7 +26,8 @@
 //! proxy's side, which is the reader's loopback when the proxy runs on the
 //! reader's machine. No credential goes there. A name knobas cannot resolve
 //! goes on to the proxy too: a network whose only way out is the proxy may
-//! answer no outside name. The check also runs on a direct connection,
+//! answer no outside name, or none at all, so the lookup waits a few seconds
+//! at most (#1290) and a silent one counts as unresolved. The check also runs on a direct connection,
 //! where the resolver's check is still the one that holds against
 //! rebinding.
 //!

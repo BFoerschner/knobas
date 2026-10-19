@@ -6930,3 +6930,14 @@ The merge-manager's rulings (Opus):
   (`OWNED_SCHEMA`), share exports dump named `knobas` tables, and no SQL outside
   `knobas_sync::saved_views` and `ticket_views` names the column; the remaining `jql`s are the
   adapter's payload key. *Reversing:* n/a.
+
+## #1290 — bound the lookup before hand-off
+
+- **Which bound.** *Fork:* `Bounds::head` alone, or a fixed cap. *Ruling:* the shorter of
+  `Bounds::head` and a 2 s cap (`LOOKUP_WAIT`). `head` is `None` when the component sets no
+  timeouts, so it cannot be the only bound; a long `head` (tens of seconds) would still stall a
+  proxy-only reader far past what a lookup is worth. A timed-out lookup is a failed one: the
+  request goes to the proxy. *Reversing:* low (one constant).
+- **Test seam.** `fake_dns_hangs(name)` under `test-util`, beside `fake_dns`: its lookup never
+  answers. No machine DNS or network setting is touched. The test allows 10 s against a 2 s bound.
+  *Reversing:* n/a.
