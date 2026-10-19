@@ -4,8 +4,8 @@
  * The types are generated from the Rust (`./generated/backup.ts`, contract
  * §2.6 as amended by #1325, switched by #1331): a field is explained in its
  * Rust doc comment and nowhere else. The `invoke` functions stay hand-written,
- * pinned to the Rust by a test in that module which `include_str!`s this file,
- * and so does {@link shareDefaults}, a value rather than a type.
+ * pinned to the Rust by a test in that module which `include_str!`s this file.
+ * {@link shareDefaults} stays hand-written too: it is a value, not a type.
  *
  * A backup is everything in the `knobas` schema, notes included; the synced
  * mirror is left out because it re-syncs (design §16.12, ratified).
@@ -15,7 +15,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { ArchiveFile, BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
+import type { BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
 
 export type { ArchiveFile, BackupRecord, BackupSchedule, BackupStatus, ShareParts } from "./generated/backup";
 

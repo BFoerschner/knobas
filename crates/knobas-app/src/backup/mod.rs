@@ -94,7 +94,7 @@ const STARTUP_DELAY: Duration = Duration::from_secs(30);
 pub struct BackupRecord {
     /// RFC 3339, UTC.
     pub taken_at: DateTime<Utc>,
-    /// The file name inside `BackupStatus::directory`, not a path: the directory
+    /// The file name inside `BackupStatus.directory`, not a path: the directory
     /// moves with the profile, and a stored absolute path would outlive it.
     pub file: String,
     pub bytes: i64,

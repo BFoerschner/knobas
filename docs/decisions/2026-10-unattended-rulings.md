@@ -8324,8 +8324,8 @@ taken afresh from `time.ts` at f9fc1bf1.
   *Reversing:* `#[ts(optional)]` per field.
 - **Which tests are fixture pins.** Deleted: the four `commands::backup` tests that compared
   serialised key sets with key names read out of `backup.ts`. Their other assertions are held
-  elsewhere: the ratified share defaults and a partial payload's decoding by `backup::share`'s
-  tests, the schedule's and the parts' decoding from the dialog's JSON by
+  elsewhere: the ratified share defaults and the parts' decoding (partial and all nine keys) by
+  `backup::share`'s tests, the schedule's decoding from the dialog's JSON by
   `tests/it/backup_ipc.rs::every_backup_command_is_registered_and_its_arguments_decode`. Kept:
   `the_mirror_invokes_the_commands_by_their_registered_names`. *Reversing:* restore from git.
 - **A §10.8 entry.** Added, on #1328's merge-time ruling: `1331-the-backup-barrel-is-generated.md`

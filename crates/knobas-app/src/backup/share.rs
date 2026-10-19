@@ -100,10 +100,10 @@
 /// docs say why "the time settings" could not be one of them.
 ///
 /// The defaults are the spec's: links, assets, contexts and sources on; notes
-/// and time off. `#[serde(default)]` on the struct means a caller may send
-/// only the toggles it wants to change and get the ratified answer for the
-/// rest -- and a knobas built before a future part still decodes a payload
-/// that names it.
+/// and time off. The shell sends every toggle; the backend still decodes a
+/// payload that leaves some out (`#[serde(default)]`), giving the ratified
+/// answer for the rest, so a knobas built before a future part still decodes
+/// a payload that names it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(default)]
 #[ts(export_to = "backup.ts")]
@@ -128,11 +128,9 @@ pub struct ShareParts {
     /// `knobas.smart_list` -- the launcher searches somebody saved (#506).
     /// **On by default**, with links: a saved list is a query over the link
     /// map, not a private note about it. The built-in lists are code and are
-    /// rows nowhere, so a knobas nobody has saved a list on carries an empty
-    /// table here -- which is why the dialog offers no toggle for it until a
-    /// saved one exists, and sends the part off while there is none, so the
-    /// archive of a knobas nobody has saved a list on carries no list table
-    /// at all (#507).
+    /// rows nowhere, so the dialog offers no toggle for it until a saved one
+    /// exists, and sends the part off while there is none: the archive of a
+    /// knobas nobody has saved a list on carries no list table at all (#507).
     ///
     /// The query crosses exactly as it was typed: nothing on either side of an
     /// archive rewrites a stored query to a newer grammar.
