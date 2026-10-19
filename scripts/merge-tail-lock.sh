@@ -7,6 +7,7 @@
 #        scripts/merge-tail-lock.sh partner <PR>   (the holder asks: oldest other ready, waiting PR)
 #        scripts/merge-tail-lock.sh merged <PR> <merge SHA>   (the holder merged it in a batch)
 #        scripts/merge-tail-lock.sh release <PR>
+#        scripts/merge-tail-lock.sh assert <PR>    (exit 1 unless <PR> holds the lock; run right before gh pr merge)
 #
 # Batching (Björn, 2026-10-15): the holder may stack one ready waiter on its own
 # head, gate the pair once and merge both. `ready` records the head SHA a
@@ -16,9 +17,14 @@
 # A waiter registers in the queue dir and touches its entry every poll. The lock
 # goes to the lowest-numbered live waiter, since every merge makes the others
 # rebase and an older branch has the most to rebase. An entry not touched for
-# 120 s is a dead waiter and is ignored. A holder whose PR is merged or closed
-# is taken over.
+# 120 s is a dead waiter and is ignored. A holder whose PR has been merged or
+# closed for longer than the grace period is dead and is taken over; a live
+# holder's own `gh pr merge` makes its PR MERGED seconds before its `release`
+# (and a batch holder merges its partner after its own PR), so MERGED alone
+# proves nothing.
 set -u
+POLL="${KNOBAS_MERGE_TAIL_POLL:-30}"     # seconds between polls
+GRACE="${KNOBAS_MERGE_TAIL_GRACE:-600}"  # seconds a merged/closed holder may still hold
 LOCK="${TMPDIR:-/tmp}/knobas-merge-tail.lock"
 QUEUE="${TMPDIR:-/tmp}/knobas-merge-tail.queue"
 READY="${TMPDIR:-/tmp}/knobas-merge-tail.ready"
@@ -34,6 +40,7 @@ oldest_live_waiter() {
   done
   echo "${best:-}"
 }
+epoch() { [ -n "$1" ] || { echo 0; return; }; date -j -u -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null || date -u -d "$1" +%s 2>/dev/null || echo 0; }
 case "$cmd" in
 ready)
   [ -n "$arg" ] || { echo "usage: $0 ready <PR> <head SHA>"; exit 2; }
@@ -70,19 +77,41 @@ take)
     first=$(oldest_live_waiter)
     if [ "$first" = "$pr" ] && mkdir "$LOCK" 2>/dev/null; then break; fi
     holder=$(cat "$LOCK/holder" 2>/dev/null || true)
+    if [ "$holder" = "$pr" ]; then
+      rm -f "$QUEUE/$pr"; echo "merge-tail: already held by PR #$pr"; exit 0
+    fi
     if [ -n "$holder" ]; then
-      state=$(gh pr view "$holder" --json state --jq .state 2>/dev/null || echo UNKNOWN)
-      if [ "$state" = MERGED ] || [ "$state" = CLOSED ]; then
-        echo "merge-tail: PR #$holder is $state but still holds the lock; taking it over"
-        rm -rf "$LOCK"; continue
+      read -r state closed < <(gh pr view "$holder" --json state,closedAt --jq '.state+" "+(.closedAt // "")' 2>/dev/null || echo UNKNOWN)
+      since=$(epoch "${closed:-}")
+      if { [ "$state" = MERGED ] || [ "$state" = CLOSED ]; } && [ "$since" -gt 0 ] && [ $(( $(date +%s) - since )) -ge "$GRACE" ]; then
+        # One waiter at a time decides a takeover, and only if the holder it
+        # found stale is still the holder (another waiter may have taken over
+        # and acquired since we read it). A guard older than 60 s was left by
+        # a waiter killed mid-takeover and would block every takeover for good.
+        if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(stat -f %m "$LOCK.takeover" 2>/dev/null || date +%s) )) -gt 60 ]; then
+          rmdir "$LOCK.takeover" 2>/dev/null
+        fi
+        if mkdir "$LOCK.takeover" 2>/dev/null; then
+          if [ "$(cat "$LOCK/holder" 2>/dev/null)" = "$holder" ]; then
+            echo "merge-tail: PR #$holder is $state since $closed but still holds the lock; taking it over"
+            rm -rf "$LOCK"
+          fi
+          rmdir "$LOCK.takeover"
+        fi
+        continue
       fi
     fi
     [ -z "$said" ] && { echo "merge-tail: waiting (holder #${holder:-none}, first in queue #${first:-?})"; said=1; }
-    sleep 30
+    sleep "$POLL"
   done
   rm -f "$QUEUE/$pr"
   echo "$pr" > "$LOCK/holder"
   echo "merge-tail: held by PR #$pr"
+  ;;
+assert)
+  holder=$(cat "$LOCK/holder" 2>/dev/null || true)
+  if [ "$holder" = "$pr" ]; then echo "merge-tail: PR #$pr holds the lock"
+  else echo "merge-tail: PR #$pr does NOT hold the lock (holder: ${holder:-none}); not merging"; exit 1; fi
   ;;
 release)
   rm -f "$QUEUE/$pr" "$READY/$pr" "$READY/$pr.merged"
@@ -90,5 +119,5 @@ release)
   if [ "$holder" = "$pr" ]; then rm -rf "$LOCK"; echo "merge-tail: released by PR #$pr"
   else echo "merge-tail: PR #$pr does not hold the lock (holder: ${holder:-none})"; fi
   ;;
-*) echo "usage: $0 ready|take|partner|merged|release <PR> [SHA]"; exit 2 ;;
+*) echo "usage: $0 ready|take|partner|merged|assert|release <PR> [SHA]"; exit 2 ;;
 esac
