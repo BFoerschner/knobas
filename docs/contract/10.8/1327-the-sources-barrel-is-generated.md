@@ -13,16 +13,16 @@
   `MonitorKind`, `clone_urls::CloneFrom`, `role::RoleClaim`, `role::data::RoleMiss`) and the
   payload declarations in `knobas-spi-types` (`PayloadPath`, `ListPath`, `ParentPath`,
   `ProjectPath`, `KindPaths`, `TriggerPath`, `TriggerValue`, `Frame`, `StatePath`, `StateValue`)
-  derive `ts_rs::TS`. `Trigger`, `BuildParameter`, `ReviewSide`, `KindInfo` and `Tone` derive it
-  as #1326 ruled. Attributes only change the TypeScript: `SourceDescriptor::capabilities` is
+  derive `ts_rs::TS`, and so do `Trigger`, `BuildParameter`, `ReviewSide`, `KindInfo` and `Tone`,
+  with the same lines #1326's open PR adds (`KindInfo` and `Tone` export to `entity.ts`). Attributes only change the TypeScript: `SourceDescriptor::capabilities` is
   `#[ts(as = "Vec<String>")]` (the shell reads `string[]`), `config_schema` is `unknown`,
   `StateValue::value` is `#[ts(type = "string | boolean")]`, and `WriteOp`'s
   `CreateMonitor::kind`, `RunBuild::clean_checkout` and `RunBuild::first_in_queue` are optional
   (`#[serde(default)]` beside them). Doc comments grew by the rules the TypeScript carried:
-  `WriteOp`'s payload rules on its variants' fields, and the variant docs of nine enums
+  `WriteOp`'s payload rules on its variants' fields, and the variant docs of fourteen enums
   (`Trigger`, `Frame`, `MergeStyle`, `UpdateStyle`, `ReviewVerdict`, `MonitorKind`, `CloneFrom`,
-  and in the other crates `SyncPhase`, `IpcErrorCode`) moved into the enums' docs (#1325's
-  convention). `WriteOp`'s variants keep their own docs; its enum doc says where the shell's half
+  and in the other crates `AuthState`, `SyncTrigger`, `SyncPhase`, `WriteState`, `WaitReason`,
+  `UpdateCheck`, `IpcErrorCode`) moved into the enums' docs (#1325's convention). `WriteOp`'s variants keep their own docs; its enum doc says where the shell's half
   is. No item, field, variant, serde attribute or behaviour changed; the contract battery is
   untouched.
 
@@ -49,5 +49,17 @@
   crate root). `knobas-sync`'s `every_declared_phase_is_actually_emitted` stays and reads
   `SyncPhase` from the generated file. The handler-list pin in `commands::sources` stays.
 
+  **The write choke point.** `knobas-sync`'s `write_choke_point` flags any production file
+  that names `WriteOp`. It now matches the name as a whole identifier, so the TypeScript spelling
+  `WriteOpPayload` in `QueuedWrite::payload`'s `#[ts(type)]` is not the op, and it exempts
+  `knobas-app/src/ipc_mirror.rs`, which names the op to export its TypeScript, under the rule
+  every exemption keeps: no `.write(` or `::write(` call (its two `fs::write` became
+  `File::create` and `write_all`). The rule test gains four assertions for both.
+
   **Module layout.** `app/src/lib/ipc/generated/sources.ts`, booked by #1325's entry, now
-  holds the whole barrel's types.
+  holds the whole barrel's types. And `generated/entity.ts`, booked there for #1326, arrives
+  early holding `KindInfo` and `Tone`, which `SourceDescriptor`, `SourceSummary` and
+  `StateValue` reach and which are the entity barrel's (#1325's convention for a shared type):
+  the hand-written `entity.ts` keeps its declarations and `entity_mirror.rs` its pins until #1326
+  switches it, and the two spellings are structurally one type. Whichever of #1326 and #1327
+  merges second regenerates both files.

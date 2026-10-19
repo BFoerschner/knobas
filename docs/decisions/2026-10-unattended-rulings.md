@@ -8127,7 +8127,7 @@ reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is
   which the generator carries, and say so in the enum's doc. Its table already names every
   variant with its identifier and ticket. *Reasoning:* moving 400 lines into one doc comment would
   bury the SPI's per-variant rules for adapter authors, who read the variants in rustdoc. The
-  other nine enums with variant docs follow the convention. *Reversing:* move the docs; mechanical.
+  other fourteen enums with variant docs follow the convention. *Reversing:* move the docs; mechanical.
 - **`PayloadPath`'s `#[serde(transparent)]`.** `ts-rs` 12.0.1 does not parse it and prints a
   note on every build of `knobas-spi-types` ("failed to parse serde attribute"). The generated
   type is right regardless (`Array<string>`, a newtype is its field), and the note is not a lint,
@@ -8147,5 +8147,20 @@ reserved-steps rule. The entry is `docs/contract/10.8/1327-the-sources-barrel-is
 - **Docs moved and how.** Every TypeScript doc rule the Rust lacked moved onto the Rust: the
   render-as-text rule on `QueuedWrite::detail`, miss and `null` semantics, ADR and ticket
   references, the shell-never-reads rules on the descriptor. A type's pointer to its own Rust
-  path did not. Doc references to the deleted suite in `config_schema_mirror.rs`,
-  `assets_ipc.rs` and `commands::time` are reworded, not left dangling.
+  path did not. Variant docs moved into the enum's doc for fourteen enums (all but `WriteOp`).
+  Doc references to the deleted suite in `config_schema_mirror.rs`, `assets_ipc.rs`,
+  `commands::time` and `knobas_sync::mirror` are reworded; those in `entity_mirror.rs` are left
+  for #1326, which deletes that file.
+- **The write choke point and the generator.** *Fork:* `write_choke_point` flagged
+  `knobas-core/src/write_queue.rs` (`#[ts(type = "WriteOpPayload")]`) and `ipc_mirror.rs`
+  (`knobas_source::WriteOp::export_all`) as second write paths. Add both to `HANDS_TO_THE_QUEUE`,
+  or teach the rule what they are. *Ruling:* the needle matches a whole identifier, so a longer
+  name is not the op; `ipc_mirror.rs` gets its own list, `GENERATES_ITS_TYPESCRIPT`, held to the
+  no-dispatch rule, which meant its two `fs::write` calls became `File::create` + `write_all`.
+  *Reasoning:* neither file hands anything to the queue, so that list would misdescribe them; a
+  substring match that fires on a TypeScript name is a false positive, and the identifier match
+  loses nothing in the direction the test guards (a dispatch has to name `WriteOp` itself).
+  *Reversing:* small; the rule test pins both.
+- **`generated/entity.ts` arrives early.** `KindInfo` and `Tone` are the entity barrel's and
+  are reached from sources types; exported to `entity.ts` with the derive lines #1326's PR adds,
+  so the two PRs merge as one. *Reversing:* none; #1326 extends the file.

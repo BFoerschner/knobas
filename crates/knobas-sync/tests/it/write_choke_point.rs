@@ -90,6 +90,28 @@ const HANDS_TO_THE_QUEUE: &[&str] = &[
     "knobas-app/src/time/worklog.rs",
 ];
 
+/// Files that name the write op only to generate its TypeScript.
+///
+/// `knobas-app`'s `ipc_mirror` (#1325, #1327) is a `#[cfg(test)]` module that
+/// exports the op's type into `app/src/lib/ipc/generated/sources.ts`; it never
+/// has a value of it. Held to the same rule as [`HANDS_TO_THE_QUEUE`]: an
+/// entry may not contain a `.write(` or `::write(` call of any kind.
+const GENERATES_ITS_TYPESCRIPT: &[&str] = &["knobas-app/src/ipc_mirror.rs"];
+
+/// Whether `code` names the op as an identifier of its own.
+///
+/// A longer identifier that starts with it is another name: the TypeScript
+/// spelling `WriteOpPayload` in a `#[ts(type = ..)]` string (#1327) names a
+/// generated type, not the Rust enum.
+fn names_the_op(code: &str, needle: &str) -> bool {
+    let ident = |c: char| c.is_alphanumeric() || c == '_';
+    code.match_indices(needle).any(|(at, _)| {
+        let before = code[..at].chars().next_back();
+        let after = code[at + needle.len()..].chars().next();
+        !before.is_some_and(ident) && !after.is_some_and(ident)
+    })
+}
+
 /// A call spelled on a `Source` -- method syntax or UFCS (`Source::write(..)`),
 /// so an exempt file cannot dodge the rule by fully qualifying the call.
 /// Assembled so this file does not match itself.
@@ -128,13 +150,13 @@ fn implements_the_trait(source: &str) -> bool {
 /// exist in the tree -- see `the_rule_actually_rejects_a_second_call_site`.
 fn offends(relative: &str, source: &str, needle: &str) -> bool {
     let code = code_only(source);
-    if !code.contains(needle) {
+    if !names_the_op(&code, needle) {
         return false;
     }
     if relative == CHOKE_POINT || relative == BATTERY {
         return false;
     }
-    if HANDS_TO_THE_QUEUE.contains(&relative) {
+    if HANDS_TO_THE_QUEUE.contains(&relative) || GENERATES_ITS_TYPESCRIPT.contains(&relative) {
         // Exempt from naming the op, never from dispatching one.
         return dispatches_a_write(&code);
     }
@@ -159,7 +181,7 @@ fn only_the_write_queue_may_send_to_a_source() {
             .replace('\\', "/");
         scanned += 1;
         let source = std::fs::read_to_string(&path).expect("a readable source file");
-        if code_only(&source).contains(needle) {
+        if names_the_op(&code_only(&source), needle) {
             named_it.push(relative.clone());
         }
         if offends(&relative, &source, needle) {
@@ -258,6 +280,35 @@ fn the_rule_actually_rejects_a_second_call_site() {
             needle,
         ),
         "documenting the op is not calling it"
+    );
+    assert!(
+        !offends(
+            "knobas-core/src/write_queue.rs",
+            "#[ts(type = \"WriteOpPayload\")]\npub payload: serde_json::Value,",
+            needle,
+        ),
+        "a longer name that starts with the op's is not the op"
+    );
+    assert!(
+        offends(
+            "knobas-core/src/write_queue.rs",
+            "let op: knobas_source::WriteOp = decode()?;",
+            needle,
+        ),
+        "the op named by its path is still the op"
+    );
+    let generator = GENERATES_ITS_TYPESCRIPT[0];
+    assert!(
+        !offends(
+            generator,
+            "knobas_source::WriteOp::export_all(cfg)?;",
+            needle
+        ),
+        "exporting the op's TypeScript is not dispatching it"
+    );
+    assert!(
+        offends(generator, calls_it, needle),
+        "the generator that grows a dispatch is a second write path"
     );
 }
 

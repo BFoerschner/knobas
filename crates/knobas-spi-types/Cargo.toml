@@ -16,7 +16,8 @@ chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 # The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
-# #1325): `Tone`, which the entity (#1326) and assets (#1328) barrels' types carry.
+# #1325): `Tone`, which the entity (#1326) and assets (#1328) barrels' types
+# carry, and the write payloads the sources barrel's `WriteOpPayload` carries (#1327).
 ts-rs.workspace = true
 # Only for `Declarations::as_param`, the one bind the core's statements
 # share. `knobas-core` turns it on; a wasm build never does.

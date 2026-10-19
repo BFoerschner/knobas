@@ -1233,9 +1233,6 @@ pub struct BuildParameter {
 /// service, TCP for a database, Docker for a container, Ping for a VM. A
 /// closed set, so a payload naming a check no adapter makes fails to decode at
 /// `submit_write` rather than reaching a source.
-#[derive(
-    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
-)]
 ///
 /// - `http`: an http(s) URL fetched and expected to answer 2xx.
 /// - `tcp`: a TCP connection to `host:port`.
@@ -1246,6 +1243,9 @@ pub struct BuildParameter {
 /// The kinds are documented here and not on each variant because the
 /// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
 /// type's and a field's doc but not a variant's (#1325).
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum MonitorKind {
