@@ -2285,3 +2285,89 @@ async fn zero_fifty_three_keeps_the_saved_views_an_install_already_had() {
             .unwrap();
     assert_eq!(shows.as_deref(), Some("jira:board-53"));
 }
+
+/// Migration `0054` (#1285): a saved view's query is stored under the role's
+/// word. `sync.saved_view.jql` is `source_query`, the name the ticket-view
+/// facts carry it under (#1273), and no constraint on the table says `jql`.
+#[tokio::test]
+async fn zero_fifty_four_names_the_saved_views_query_for_the_role() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let columns: Vec<String> = sqlx::query_scalar(
+        "select column_name::text from information_schema.columns
+          where table_schema = 'sync' and table_name = 'saved_view'
+            and column_name in ('jql', 'source_query')",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, ["source_query"]);
+
+    let named_for_jql: Vec<String> = sqlx::query_scalar(
+        "select conname::text from pg_constraint
+          where conrelid = 'sync.saved_view'::regclass and conname like '%jql%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        named_for_jql.is_empty(),
+        "still named for JQL: {named_for_jql:?}"
+    );
+}
+
+/// An existing install (#1285): a saved view's query written under `0044`'s
+/// column name reads back under `0054`'s, so the rename asks no sync to run
+/// again. Its own database, because the wind-back renames the column back.
+#[tokio::test]
+async fn zero_fifty_four_keeps_the_query_an_install_already_had() {
+    let pool = knobas_db::test_util::scratch_database("saved-view-query-54")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    // Wind back to an install that predates 0054: the old column and its
+    // not-null constraint's old name, and the runner's record of 0054 gone.
+    sqlx::raw_sql(
+        "do $$
+         declare r record;
+         begin
+           for r in
+             select conname::text as name from pg_constraint
+              where conrelid = 'sync.saved_view'::regclass and conname like '%source\\_query%'
+           loop
+             execute format('alter table sync.saved_view rename constraint %I to %I',
+                            r.name, replace(r.name, 'source_query', 'jql'));
+           end loop;
+         end
+         $$;
+         alter table sync.saved_view rename column source_query to jql;
+         delete from public._sqlx_migrations where version = 54;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::raw_sql(
+        "insert into knobas.entity (id, kind, title) values ('jira:board-54', 'jira_view', 'PAY board');
+         insert into sync.item (entity_id, source_id, kind, payload)
+           values ('jira:board-54', 'jira', 'jira_view', '{}');
+         insert into sync.saved_view (entity_id, source_id, ref_kind, ref_id, name, jql)
+           values ('jira:board-54', 'jira', 'board', '54', 'PAY board', 'project = PAY ORDER BY Rank ASC');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    migrate::run(&pool).await.unwrap();
+
+    let query: String = sqlx::query_scalar(
+        "select source_query from sync.saved_view where entity_id = 'jira:board-54'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(query, "project = PAY ORDER BY Rank ASC");
+}

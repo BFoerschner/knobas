@@ -104,7 +104,7 @@ with held as (
      for key share
 )
 insert into sync.saved_view
-       (entity_id, source_id, ref_kind, ref_id, board_type, name, jql, sub_query, query,
+       (entity_id, source_id, ref_kind, ref_id, board_type, name, source_query, sub_query, query,
         columns, sprint, last_read)
 select i.entity_id, i.source_id,
        case i.payload->>'kind' when 'filter' then 'filter' else 'board' end,
@@ -121,7 +121,7 @@ select i.entity_id, i.source_id,
  where i.source_id = $1 and i.kind = any($2)
     on conflict (entity_id) do update set
        ref_kind = excluded.ref_kind, ref_id = excluded.ref_id,
-       board_type = excluded.board_type, name = excluded.name, jql = excluded.jql,
+       board_type = excluded.board_type, name = excluded.name, source_query = excluded.source_query,
        sub_query = excluded.sub_query, query = excluded.query, columns = excluded.columns,
        sprint = excluded.sprint, last_read = excluded.last_read";
 
