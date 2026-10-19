@@ -3863,13 +3863,17 @@ knobas-wasm-host	test/it	limits::a_request_s_first_byte_timeout_is_honoured_insi
 knobas-wasm-host	test/it	limits::an_outgoing_body_past_the_memory_cap_is_refused
 knobas-wasm-host	test/it	network::a_base_url_on_loopback_still_works
 knobas-wasm-host	test/it	network::a_declared_host_that_is_not_the_instance_gets_no_credential
+knobas-wasm-host	test/it	network::a_fixed_host_knobas_cannot_resolve_still_goes_through_the_proxy
 knobas-wasm-host	test/it	network::a_fixed_host_that_resolves_to_loopback_is_refused_and_nothing_reaches_it
+knobas-wasm-host	test/it	network::a_fixed_host_that_resolves_to_loopback_is_refused_through_a_proxy
 knobas-wasm-host	test/it	network::a_fixed_host_with_one_public_and_one_loopback_answer_is_refused
 knobas-wasm-host	test/it	network::a_fixed_loopback_address_or_localhost_still_works
 knobas-wasm-host	test/it	network::a_fixed_name_the_system_resolves_to_loopback_is_refused
+knobas-wasm-host	test/it	network::a_fixed_public_host_still_goes_through_the_proxy
 knobas-wasm-host	test/it	network::a_header_token_reaches_the_instance_and_never_the_component
 knobas-wasm-host	test/it	network::a_redirect_to_an_undeclared_host_is_refused
 knobas-wasm-host	test/it	network::a_request_to_an_undeclared_host_is_refused_before_it_leaves
+knobas-wasm-host	test/it	network::a_templated_host_that_resolves_to_loopback_goes_through_the_proxy
 knobas-wasm-host	test/it	network::a_templated_host_that_resolves_to_loopback_still_works
 knobas-wasm-host	test/it	network::basic_auth_reaches_the_instance_and_never_the_component
 knobas-wasm-host	test/it	network::the_secret_is_in_nothing_the_component_receives
