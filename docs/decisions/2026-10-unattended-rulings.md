@@ -6594,3 +6594,20 @@ The merge-manager's rulings (Opus):
   name, stay for now** and are #1271 (backlog): the case is rare, `ChoiceOption` has no second
   line to tell them apart with, and the wrong pick is a label the reader can take off again.
   **Reversing:** low.
+
+## #1274 The merge lock is taken over from a holder whose PR just merged (Opus implementer, 2026-10-19)
+
+- **A takeover guard older than 60 s is removed before the next takeover attempt.** The patched
+  script's `$LOCK.takeover` guard, left behind by a waiter killed between its `mkdir` and its
+  `rmdir`, would block every later takeover of a dead holder, and the loop would wait for good. A
+  takeover takes well under a second, so 60 s cannot remove a live guard. **Reversing:** low.
+- **An empty `closedAt` counts as "never closed".** `epoch ""` returns 0 before calling `date`:
+  GNU `date -d ""` returns today's midnight, which would make a missing `closedAt` look hours old
+  and let a waiter take over at once. **Reversing:** low.
+- **The batch partner's `gh pr merge` also runs behind `assert`** (merge-manager brief, *Merge
+  tail* 3.4), not only the holder's own merge. The batch minute is the case the ticket calls
+  dangerous. **Reversing:** low.
+- **The race test runs in `just witness-unit`**, beside the other script tests, and adds about
+  15 s to the scripts half of the gate, which runs beside the cargo half. It runs a private copy
+  of the lock script under a private `TMPDIR`, so its cleanup and its 90 s watchdog can
+  `pkill` its own `take`s without touching a merge-manager's. **Reversing:** low.
