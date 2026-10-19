@@ -35,7 +35,10 @@ export const FIXTURE_SOURCES = [
   },
   {
     ...fixtureSource("gitea", "gitea", "Tidewater Gitea", "https://git.tidewater.example", "ok", 48, 91, "Pat"),
-    roles: [{ role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] }],
+    roles: [
+      { role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] },
+      { role: "ticket-system", reads: ["reachable_transitions"] },
+    ],
   },
   {
     ...fixtureSource("jira", "jira", "Tidewater Jira", "https://jira.tidewater.example", "ok", 213, 92, "UserPassword"),
@@ -201,8 +204,11 @@ const FIXTURE_ADAPTERS = [
     adapter_version: "0.1.0",
     auth_methods: ["Pat"],
     min_sync_interval_secs: 60,
-    // The role it claims, as the real adapter does (#1193).
-    roles: [{ role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] }],
+    // The roles it claims, as the real adapter does (#1193, #1206).
+    roles: [
+      { role: "code-host", reads: ["pull_request_diff", "commit_diff", "repository_tree", "file_contents", "line_threads"] },
+      { role: "ticket-system", reads: ["reachable_transitions"] },
+    ],
     write_ops: [],
     entity_kinds: KIND_INFO,
     config_schema: GITEA_SCHEMA,
