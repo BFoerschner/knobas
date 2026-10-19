@@ -1205,7 +1205,11 @@ mod walk {
         let (read, end) = drain(walk).await;
         assert_eq!(read, vec![vec![1, 2], vec![3], vec![4, 5]]);
         assert_eq!(end, "end");
-        assert_eq!(*asked.borrow(), vec![1, 2, 3, 4], "one request for the empty page");
+        assert_eq!(
+            *asked.borrow(),
+            vec![1, 2, 3, 4],
+            "one request for the empty page"
+        );
     }
 
     /// The cap: the walk hands out at most `cap` pages, and when it would ask
@@ -1227,7 +1231,11 @@ mod walk {
         let exact = PageWalk::new(PageNumber, 2, |page: u32| async move {
             Ok(if page <= 2 { rows(&[page]) } else { rows(&[]) })
         });
-        assert_eq!(drain(exact).await.1, "capped", "a full last page is not proof of the end");
+        assert_eq!(
+            drain(exact).await.1,
+            "capped",
+            "a full last page is not proof of the end"
+        );
 
         let total = PageWalk::new(PageNumber, 2, |page: u32| async move {
             Ok(Page {
@@ -1235,7 +1243,10 @@ mod walk {
                 ..rows(&[page])
             })
         });
-        assert_eq!(drain(total).await, (vec![vec![1], vec![2]], "end".to_owned()));
+        assert_eq!(
+            drain(total).await,
+            (vec![vec![1], vec![2]], "end".to_owned())
+        );
     }
 
     /// Offset plus total (Jira): each request starts where the records read so

@@ -104,7 +104,12 @@ impl Protocol for PageNumber {
     fn first(&self) -> u32 {
         1
     }
-    fn after(&self, pages: u32, rows: usize, page: &impl Paged) -> Result<Option<u32>, SourceError> {
+    fn after(
+        &self,
+        pages: u32,
+        rows: usize,
+        page: &impl Paged,
+    ) -> Result<Option<u32>, SourceError> {
         Ok((!reached(rows, page)).then_some(pages.saturating_add(1)))
     }
 }
@@ -121,7 +126,12 @@ impl Protocol for Offset {
     fn first(&self) -> u32 {
         0
     }
-    fn after(&self, _pages: u32, rows: usize, page: &impl Paged) -> Result<Option<u32>, SourceError> {
+    fn after(
+        &self,
+        _pages: u32,
+        rows: usize,
+        page: &impl Paged,
+    ) -> Result<Option<u32>, SourceError> {
         Ok((!reached(rows, page)).then(|| u32::try_from(rows).unwrap_or(u32::MAX)))
     }
 }

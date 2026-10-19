@@ -160,8 +160,7 @@ impl SyncRun<'_> {
         let mut watermark: Option<DateTime<Utc>> = previous.as_ref().and_then(|c| c.updated_to);
 
         let mut walk = PageWalk::new(Offset, MAX_PAGES, |start_at| {
-            self.api
-                .search(&jql, start_at, self.cfg.page_size, &fields)
+            self.api.search(&jql, start_at, self.cfg.page_size, &fields)
         });
         // The last page's own total, which the refusal quotes.
         let mut total = 0;

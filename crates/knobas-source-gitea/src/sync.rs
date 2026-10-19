@@ -1250,7 +1250,9 @@ async fn commits(
     'branches: for branch in walk_order(repo.default_branch.as_deref(), moved) {
         // A reached cap ends this branch quietly: see the note on the caps.
         let mut walk = PageWalk::new(PageNumber, MAX_COMMIT_PAGES, |page| {
-            source.client.commits(at.owner, at.name, &branch, since, page)
+            source
+                .client
+                .commits(at.owner, at.name, &branch, since, page)
         });
         loop {
             let batch = match walk.next().await {
