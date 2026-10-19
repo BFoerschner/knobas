@@ -28,6 +28,17 @@ fn corpus_size(f: &knobas_source_mock::Fixture) -> usize {
         + f.commits.len()
         + f.repos.len()
         + f.branches.len()
+        + f.monitors.len()
+        + pipelines(f)
+}
+
+/// The pipelines (#1240): one per build configuration the builds name.
+fn pipelines(f: &knobas_source_mock::Fixture) -> usize {
+    f.builds
+        .iter()
+        .map(|b| b.cfg.as_str())
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
 }
 
 #[tokio::test]
@@ -121,7 +132,8 @@ async fn fixture_carries_the_whole_dataset() {
     assert_eq!(nums, [142, 144, 139]);
     let nums: Vec<u32> = f.builds.iter().map(|b| b.num).collect();
     assert_eq!(nums, [1188, 1187, 412]);
-    assert_eq!(f.pages.len(), 5);
+    assert_eq!(f.pages.len(), 6);
+    assert_eq!(f.monitors.len(), 2);
     assert_eq!(f.notes.len(), 3);
     let shas: Vec<&str> = f.commits.iter().map(|c| c.sha.as_str()).collect();
     assert_eq!(shas, ["c90d11", "a41f2c", "7be0e4"]);
@@ -229,7 +241,9 @@ async fn descriptor_declares_write_only_and_seven_kinds() {
     let kinds: Vec<&str> = d.entity_kinds.iter().map(|k| k.id.as_str()).collect();
     assert_eq!(
         kinds,
-        ["ticket", "pr", "build", "page", "commit", "repo", "branch"]
+        [
+            "ticket", "pr", "build", "page", "commit", "repo", "branch", "pipeline", "monitor"
+        ]
     );
     for k in &d.entity_kinds {
         assert!(!k.label.is_empty() && !k.plural.is_empty());
@@ -249,7 +263,7 @@ async fn full_sync_emits_every_work_item() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s.sync(None, &mut sink).await.expect("full sync");
-    assert_eq!(cursor, "tidewater-v3");
+    assert_eq!(cursor, "tidewater-v4");
     assert_eq!(sink.0.len(), corpus_size(f));
 
     let ticket = sink
@@ -307,11 +321,11 @@ async fn incremental_sync_is_empty_and_keeps_the_cursor() {
     let s = MockSource::new();
     let mut sink = VecSink(Vec::new());
     let cursor = s
-        .sync(Some("tidewater-v3".into()), &mut sink)
+        .sync(Some("tidewater-v4".into()), &mut sink)
         .await
         .expect("incremental sync");
     assert!(sink.0.is_empty());
-    assert_eq!(cursor, "tidewater-v3");
+    assert_eq!(cursor, "tidewater-v4");
 }
 
 /// The upgrade path the cursor's versioning exists to provide (#234): a
@@ -869,16 +883,16 @@ async fn the_first_run_subtitle_names_the_size_of_the_corpus_it_loads() {
     );
 }
 
-/// #1229: the demo's only source is the mock, and the shell draws Code and
-/// Tickets from the sources that claim those roles (#1196, #1200). So the mock
-/// claims exactly the two its corpus fills, and the claim passes the static
+/// #1229, #1240: the demo's only source is the mock, and the shell draws each
+/// surface from the sources that claim its role (#1196, #1200). So the mock
+/// claims all five, each filled by its corpus, and the claim passes the static
 /// check the battery's clause 10 runs.
 #[test]
-fn the_mock_claims_the_code_host_and_the_ticket_system() {
-    use knobas_source::role::{CODE_HOST, TICKET_SYSTEM, check, minimum};
+fn the_mock_claims_all_five_roles() {
+    use knobas_source::role::{CI, CODE_HOST, MONITORING, TICKET_SYSTEM, WIKI, check, minimum};
     let d = MockSource::new().descriptor();
     let claimed: Vec<&str> = d.roles.iter().map(|c| c.role.as_str()).collect();
-    assert_eq!(claimed, [CODE_HOST, TICKET_SYSTEM]);
+    assert_eq!(claimed, [CODE_HOST, TICKET_SYSTEM, CI, WIKI, MONITORING]);
     for claim in &d.roles {
         let min = minimum(&claim.role).expect("a built-in role");
         let reads: Vec<&str> = claim.reads.iter().map(String::as_str).collect();
@@ -950,4 +964,85 @@ async fn every_path_the_claimed_roles_require_resolves_on_the_corpus() {
 #[tokio::test]
 async fn the_first_sync_check_shows_both_claimed_roles_filled_on_the_corpus() {
     knobas_source::contract::fills_its_roles(&MockSource::new()).await;
+}
+
+/// #1240: the shaping the three newly claimed roles read, on the records that
+/// carry it. A run joins the pipeline its build configuration names, finishes
+/// only where the dataset gives a duration, and a page's parent is the page
+/// above it, named by title.
+#[tokio::test]
+async fn the_builds_docs_and_monitors_records_carry_what_their_roles_read() {
+    let mut sink = VecSink(Vec::new());
+    MockSource::new().sync(None, &mut sink).await.expect("sync");
+    let one = |kind: &str, key: &str| {
+        sink.0
+            .iter()
+            .find(|i| i.kind == kind && i.entity.key == key)
+            .unwrap_or_else(|| panic!("{kind} {key} emitted"))
+    };
+    let failed = one("build", "Payout_IntegrationTests#1187");
+    assert_eq!(failed.payload["pipeline"], "Payout_IntegrationTests");
+    assert_eq!(failed.payload["number"], "1187");
+    assert_eq!(failed.payload["started"], "2026-08-22T10:10:00Z");
+    assert_eq!(failed.payload["finished"], "2026-08-22T10:14:12Z");
+    assert!(
+        one("build", "Payout_Build#1188")
+            .payload
+            .get("finished")
+            .is_none(),
+        "a running build has not finished"
+    );
+    assert!(
+        one("build", "Ledger_Deploy_Staging#412")
+            .payload
+            .get("finished")
+            .is_none(),
+        "no duration in the dataset, no finish time"
+    );
+    assert_eq!(
+        one("pipeline", "Payout_IntegrationTests").payload["id"],
+        "Payout_IntegrationTests"
+    );
+    let child = one("page", "daily-protocol-2026-08-21");
+    assert_eq!(child.payload["parent"]["title"], "Standup protocols");
+    assert!(
+        one("page", "standup-protocols")
+            .payload
+            .get("parent")
+            .is_none(),
+        "a page the dataset puts under nothing has no parent"
+    );
+    let monitor = one("monitor", "payout-service-health");
+    assert_eq!(monitor.payload["state"], "up");
+    assert_eq!(monitor.payload["response_time_ms"], 38.0);
+}
+
+/// #1240: the wiki claim's `doc_content` read is answered from the page's own
+/// record: a heading and a paragraph per `## ` run of the body, and the
+/// comments the dataset gives, with nothing the dataset lacks (no version).
+#[tokio::test]
+async fn a_page_opens_as_the_headings_and_comments_its_record_holds() {
+    use knobas_source::docs::{DocBlock, Inline};
+    let mut sink = VecSink(Vec::new());
+    MockSource::new().sync(None, &mut sink).await.expect("sync");
+    let page = |key: &str| {
+        let item = sink.0.iter().find(|i| i.entity.key == key).expect("page");
+        knobas_source_mock::doc_content(&item.kind, &item.payload).expect("a page projects")
+    };
+    let design = page("sepa-design");
+    let words = |block: &DocBlock| match block {
+        DocBlock::Heading { text, .. } | DocBlock::Paragraph { text } => match &text[0] {
+            Inline::Text { text, .. } => text.clone(),
+            other => panic!("plain text, got {other:?}"),
+        },
+        other => panic!("a heading or paragraph, got {other:?}"),
+    };
+    assert_eq!(words(&design.blocks[0]), "Backoff policy");
+    assert!(words(&design.blocks[1]).starts_with("base 30 s"));
+    assert_eq!(words(&design.blocks[2]), "Manual review queue");
+    assert_eq!(design.comments.len(), 1);
+    assert_eq!(design.comments[0].author.as_deref(), Some("priya"));
+    assert_eq!(design.version, None);
+    assert!(page("on-call-handbook").blocks.is_empty(), "no body, no blocks");
+    assert!(knobas_source_mock::doc_content("ticket", &serde_json::json!({})).is_none());
 }

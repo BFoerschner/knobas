@@ -635,7 +635,7 @@ knobas-app	test/it	demo::a_profile_stored_at_an_older_fixture_version_re_syncs_a
 knobas-app	test/it	demo::an_unconfigured_source_cannot_be_reached
 knobas-app	test/it	demo::demo_load_registers_once_and_syncs_the_same_rows_every_time
 knobas-app	test/it	demo::the_demo_corpus_answers_the_checkout_the_desktop_driver_opens
-knobas-app	test/it	demo::the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names
+knobas-app	test/it	demo::the_demo_corpus_shows_exactly_the_three_projects_its_fixture_names
 knobas-app	test/it	demo::the_demo_job_reaches_its_branch_through_a_confirmed_link
 knobas-app	test/it	demo::the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 knobas-app	test/it	demo::the_launcher_finds_a_demo_ticket_by_its_key
@@ -3210,6 +3210,7 @@ knobas-source-kuma	test/live_kuma	only_a_source_with_an_account_offers_the_write
 knobas-source-kuma	test/live_kuma	test_connection_reports_the_real_kumas_version_and_roster
 knobas-source-mock	test/it	contract::a_build_item_names_its_triggerer_as_the_author
 knobas-source-mock	test/it	contract::a_cursor_from_an_older_fixture_re_syncs_the_whole_corpus
+knobas-source-mock	test/it	contract::a_page_opens_as_the_headings_and_comments_its_record_holds
 knobas-source-mock	test/it	contract::build_honours_the_fault_and_tombstone_in_its_config
 knobas-source-mock	test/it	contract::build_honours_the_instance_id
 knobas-source-mock	test/it	contract::build_refuses_a_config_it_cannot_read
@@ -3226,11 +3227,12 @@ knobas-source-mock	test/it	contract::full_sync_emits_the_fixtures_repos_and_bran
 knobas-source-mock	test/it	contract::incremental_sync_is_empty_and_keeps_the_cursor
 knobas-source-mock	test/it	contract::passes_the_contract_battery
 knobas-source-mock	test/it	contract::test_connection_reports_what_it_reached
+knobas-source-mock	test/it	contract::the_builds_docs_and_monitors_records_carry_what_their_roles_read
 knobas-source-mock	test/it	contract::the_dataset_records_who_triggered_build_1188
 knobas-source-mock	test/it	contract::the_descriptor_template_is_the_default_instance
 knobas-source-mock	test/it	contract::the_first_run_subtitle_names_the_size_of_the_corpus_it_loads
 knobas-source-mock	test/it	contract::the_first_sync_check_shows_both_claimed_roles_filled_on_the_corpus
-knobas-source-mock	test/it	contract::the_mock_claims_the_code_host_and_the_ticket_system
+knobas-source-mock	test/it	contract::the_mock_claims_all_five_roles
 knobas-source-mock	test/it	contract::the_opt_in_tombstone_reports_one_deterministic_deletion
 knobas-source-mock	test/it	contract::the_tombstoning_mock_passes_the_contract_battery
 knobas-source-mock	test/it	contract::write_records_the_comment

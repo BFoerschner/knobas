@@ -187,9 +187,10 @@ async fn the_loaded_fixture_is_searchable_the_way_the_readme_promises() {
 
     let report = demo::demo_load_inner(pool).await.unwrap();
     assert_eq!(
-        report.upserted, 27,
+        report.upserted, 33,
         "every item the Tidewater fixture holds: 7 tickets, 3 PRs, 3 builds, \
-         5 pages, 3 commits, and -- since #537 -- 3 repos and 3 branches"
+         6 pages, 3 commits, 3 repos and 3 branches (#537), and -- since #1240 -- \
+         3 pipelines and 2 monitors"
     );
 
     let response = knobas_search::Searcher::new(pool.clone())
@@ -454,7 +455,7 @@ async fn a_demo_ticket_with_no_project_syncs_and_its_payload_names_none() {
 /// the demo dataset rather than about whatever a later test in this file
 /// happens to mirror beside it.
 #[tokio::test]
-async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
+async fn the_demo_corpus_shows_exactly_the_three_projects_its_fixture_names() {
     let _guard = MOCK.lock().await;
     let pool = knobas_db::test_util::test_pool().await;
     knobas_db::migrate::run(&pool).await.unwrap();
@@ -481,6 +482,7 @@ async fn the_demo_corpus_shows_exactly_the_two_projects_its_fixture_names() {
     assert_eq!(
         shown,
         vec![
+            ("ENG".to_owned(), Some("Engineering".to_owned())),
             ("OPS".to_owned(), Some("Operations".to_owned())),
             ("PAY".to_owned(), Some("Payments Platform".to_owned())),
         ],
@@ -525,7 +527,7 @@ async fn the_demo_load_brings_the_real_estate_and_a_second_start_changes_nothing
 
     let report = demo::demo_load_inner(&pool).await.unwrap();
     assert_eq!(
-        report.upserted, 27,
+        report.upserted, 33,
         "the work half is the whole fixture: the estate rides beside it, not instead of it"
     );
 
