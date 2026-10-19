@@ -9,6 +9,16 @@
 //! itself (the transport follows none), so a redirect to an undeclared host
 //! is refused the same way.
 //!
+//! **A fixed name may not lead home** (#1244). A request the allowlist
+//! [guards](Allowlist::guards) leaves through a client of its own, whose
+//! resolver refuses the name when any address it resolves to [is
+//! local](crate::allow::is_local). The check is on the addresses the
+//! connection is then made to, so a name that answers public once and
+//! local the next time (DNS rebinding) cannot slip between a check and the
+//! connect. The refusal reaches the component as `connection-refused`.
+//! Through a system proxy the proxy resolves the name, and the guard sees
+//! only the proxy's own name, which it lets through.
+//!
 //! **The credential.** It is attached only to a request whose origin
 //! (scheme, host and port) is the source's address: `Authorization: Bearer
 //! <secret>` for a token method (`Pat`, `ApiToken`), `Authorization: Basic`
@@ -33,8 +43,10 @@
 //! no redirect and keeps no cookie. A transport error reaches the component
 //! as a bare `wasi:http` error code, with no text that could quote a request.
 
+use std::collections::HashSet;
+use std::net::SocketAddr;
 use std::pin::Pin;
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::task::{Context, Poll};
 use std::time::Duration;
 
@@ -45,7 +57,7 @@ use knobas_source::instance::SourceInstance;
 use knobas_source::{AuthMethod, SourceError};
 use wasmtime_wasi_http::{Error as HttpError, RequestOptions, WasiBody, WasiHttpHooks};
 
-use crate::allow::{Allowlist, HostPattern, Target, declared_keys};
+use crate::allow::{Allowlist, HostPattern, Target, declared_keys, is_local};
 use crate::limits::Limits;
 use crate::redact::{self, Needles, RedactedBody};
 
@@ -184,6 +196,9 @@ enum Verdict {
     Allowed {
         /// The request is for the source's own address.
         for_instance: bool,
+        /// The request may not reach a local address
+        /// ([`Allowlist::guards`]).
+        guarded: bool,
     },
 }
 
@@ -198,6 +213,7 @@ impl Policy {
             )),
             Some(target) => Verdict::Allowed {
                 for_instance: self.instance.as_ref() == Some(&target),
+                guarded: self.allowlist.guards(&target),
             },
         }
     }
@@ -268,13 +284,19 @@ impl Bounds {
 }
 
 async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>) -> SendResult {
-    let for_instance = match policy.judge(request.uri()) {
+    let (for_instance, guarded) = match policy.judge(request.uri()) {
         Verdict::Refused(why) => {
             tracing::warn!(source = %policy.source_id, "an external adapter's request is refused: {why}");
             return Err(HttpError::ConnectionRefused);
         }
-        Verdict::Allowed { for_instance } => for_instance,
+        Verdict::Allowed {
+            for_instance,
+            guarded,
+        } => (for_instance, guarded),
     };
+    if guarded && let Some(name) = request.uri().host() {
+        register_guarded(name);
+    }
     let (mut parts, body) = request.into_parts();
     if for_instance {
         policy.attach(&mut parts.headers);
@@ -289,7 +311,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         .to_bytes();
     let request = reqwest::Request::try_from(http::Request::from_parts(parts, body))
         .map_err(|_| HttpError::HttpRequestUriInvalid)?;
-    let sent = client()?.execute(request);
+    let sent = client(guarded)?.execute(request);
     let sent = match bounds.head {
         None => sent.await,
         Some(wait) => tokio::time::timeout(wait, sent)
@@ -400,22 +422,105 @@ fn transport_error(error: &reqwest::Error) -> HttpError {
     }
 }
 
-/// The process's one client for external adapters.
-fn client() -> Result<&'static reqwest::Client, HttpError> {
-    static CLIENT: OnceLock<Option<reqwest::Client>> = OnceLock::new();
-    CLIENT
-        .get_or_init(|| {
-            reqwest::Client::builder()
-                // Explicit, for `knobas-http`'s reason: the platform verifier.
-                .use_rustls_tls()
-                .redirect(reqwest::redirect::Policy::none())
-                .connect_timeout(std::time::Duration::from_secs(30))
-                .build()
-                .inspect_err(|error| tracing::error!(%error, "the external adapters' http client"))
-                .ok()
+/// The process's two clients for external adapters: one for guarded
+/// requests, one for the rest. Two, so a connection the second pooled to a
+/// name the reader typed never carries a guarded request.
+fn client(guarded: bool) -> Result<&'static reqwest::Client, HttpError> {
+    static PLAIN: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    static GUARDED: OnceLock<Option<reqwest::Client>> = OnceLock::new();
+    let cell = if guarded { &GUARDED } else { &PLAIN };
+    cell.get_or_init(|| {
+        reqwest::Client::builder()
+            // Explicit, for `knobas-http`'s reason: the platform verifier.
+            .use_rustls_tls()
+            .redirect(reqwest::redirect::Policy::none())
+            .connect_timeout(std::time::Duration::from_secs(30))
+            .dns_resolver(Resolver { guarded })
+            .build()
+            .inspect_err(|error| tracing::error!(%error, "the external adapters' http client"))
+            .ok()
+    })
+    .as_ref()
+    .ok_or(HttpError::ConfigurationError)
+}
+
+/// The names a guarded request went to. The guarded client's resolver
+/// refuses only these when they resolve home: the other names it is asked
+/// for are the system proxy's, which may well be on the reader's network.
+fn guarded_names() -> &'static Mutex<HashSet<String>> {
+    static NAMES: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    NAMES.get_or_init(Mutex::default)
+}
+
+/// Add `name` to the [guarded names](guarded_names).
+fn register_guarded(name: &str) {
+    locked(guarded_names()).insert(name.to_ascii_lowercase());
+}
+
+fn is_guarded(name: &str) -> bool {
+    locked(guarded_names()).contains(&name.to_ascii_lowercase())
+}
+
+/// A lock a panic elsewhere left poisoned still holds whole values.
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// The clients' name lookup: the system's, and on the guarded client a
+/// refusal of a [guarded](register_guarded) name any of whose addresses is local. An
+/// address in the URL never comes here; the connector reads it as it is.
+struct Resolver {
+    guarded: bool,
+}
+
+impl reqwest::dns::Resolve for Resolver {
+    fn resolve(&self, name: reqwest::dns::Name) -> reqwest::dns::Resolving {
+        let guarded = self.guarded;
+        let name = name.as_str().to_owned();
+        Box::pin(async move {
+            let addrs = lookup(&name).await?;
+            if guarded
+                && is_guarded(&name)
+                && let Some(local) = addrs.iter().find(|addr| is_local(addr.ip()))
+            {
+                tracing::warn!(
+                    "an external adapter's request is refused: {name}, a host its manifest \
+                     fixes, resolves to the local address {}",
+                    local.ip()
+                );
+                return Err(format!("{name} resolves to a local address").into());
+            }
+            Ok(Box::new(addrs.into_iter()) as reqwest::dns::Addrs)
         })
-        .as_ref()
-        .ok_or(HttpError::ConfigurationError)
+    }
+}
+
+async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
+    #[cfg(feature = "test-util")]
+    if let Some(ips) = locked(fake_answers()).get(&name.to_ascii_lowercase()) {
+        return Ok(ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect());
+    }
+    // Port 0: the connector sets the request's.
+    Ok(tokio::net::lookup_host((name, 0)).await?.collect())
+}
+
+#[cfg(feature = "test-util")]
+type FakeAnswers = Mutex<std::collections::HashMap<String, Vec<std::net::IpAddr>>>;
+
+#[cfg(feature = "test-util")]
+fn fake_answers() -> &'static FakeAnswers {
+    static ANSWERS: OnceLock<FakeAnswers> = OnceLock::new();
+    ANSWERS.get_or_init(Mutex::default)
+}
+
+/// Answer every later lookup of `name` by the external adapters' clients
+/// with `ips`, in order, in place of the system's. For tests: a name the
+/// test points at its own server.
+#[cfg(feature = "test-util")]
+pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
+    locked(fake_answers()).insert(name.to_ascii_lowercase(), ips.to_vec());
 }
 
 #[cfg(test)]

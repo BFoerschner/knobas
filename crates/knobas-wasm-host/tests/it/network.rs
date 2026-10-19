@@ -301,3 +301,124 @@ async fn the_secret_is_in_nothing_the_component_receives() {
             .any(|s| s.header("authorization").is_some_and(|a| a.contains(TOKEN)))
     );
 }
+
+/// The port a local server listens on.
+fn port(server: &Server) -> u16 {
+    server.url.rsplit(':').next().unwrap().parse().unwrap()
+}
+
+/// A source whose only reach is `entries`, fetching `fetch`, its address
+/// somewhere no test listens.
+fn fetching(entries: &[&str], fetch: &str, config: serde_json::Value) -> Box<dyn Source> {
+    let mut config = config;
+    config["fetch"] = serde_json::json!(fetch);
+    build(
+        entries,
+        instance("https://instance.invalid", AuthMethod::Pat, config),
+    )
+}
+
+const LOOPBACK: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+/// TEST-NET-3 (RFC 5737): public as far as the guard can tell, and routed
+/// nowhere.
+const PUBLIC: std::net::IpAddr = std::net::IpAddr::V4(std::net::Ipv4Addr::new(203, 0, 113, 7));
+
+/// DNS rebinding (#1244): a name the manifest fixed, which its owner points
+/// at the reader's own machine, is refused before a socket opens.
+#[tokio::test]
+async fn a_fixed_host_that_resolves_to_loopback_is_refused_and_nothing_reaches_it() {
+    let local = Server::start(None).await;
+    knobas_wasm_host::fake_dns("rebound-1244.test", &[LOOPBACK]);
+    let source = fetching(
+        &[&format!("rebound-1244.test:{}", port(&local))],
+        &format!("http://rebound-1244.test:{}/data", port(&local)),
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// Every answer counts, not the first: a name that resolves to a public
+/// address and to loopback is refused whole.
+#[tokio::test]
+async fn a_fixed_host_with_one_public_and_one_loopback_answer_is_refused() {
+    let local = Server::start(None).await;
+    knobas_wasm_host::fake_dns("split-1244.test", &[PUBLIC, LOOPBACK]);
+    let source = fetching(
+        &[&format!("split-1244.test:{}", port(&local))],
+        &format!("http://split-1244.test:{}/data", port(&local)),
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// The same through the system's own lookup, not `fake_dns`: `localhost.`
+/// is a name other than `localhost`, and resolves to loopback.
+#[tokio::test]
+async fn a_fixed_name_the_system_resolves_to_loopback_is_refused() {
+    let local = Server::start(None).await;
+    let entry = format!("localhost.:{}", port(&local));
+    let source = fetching(
+        &[&entry],
+        &format!("http://{entry}/data"),
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// The control for the refusals above: the same name, resolving the same way,
+/// reaches the server when the reader typed it (a template's value).
+#[tokio::test]
+async fn a_templated_host_that_resolves_to_loopback_still_works() {
+    let local = Server::start(None).await;
+    knobas_wasm_host::fake_dns("typed-1244.test", &[LOOPBACK]);
+    let url = format!("http://typed-1244.test:{}", port(&local));
+    let source = fetching(
+        &["{mirror}"],
+        &format!("{url}/data"),
+        serde_json::json!({ "mirror": url }),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
+}
+
+/// The source's own address is one the reader typed, local or not.
+#[tokio::test]
+async fn a_base_url_on_loopback_still_works() {
+    let local = Server::start(None).await;
+    let source = build(
+        &["{base_url}"],
+        instance(
+            &local.url,
+            AuthMethod::Pat,
+            serde_json::json!({ "fetch": format!("{}/data", local.url) }),
+        ),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(ok, "{text}");
+    assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
+}
+
+/// The manifest's author wrote the local address itself: the install list
+/// showed it to the reader.
+#[tokio::test]
+async fn a_fixed_loopback_address_or_localhost_still_works() {
+    let local = Server::start(None).await;
+    for host in ["127.0.0.1", "localhost"] {
+        let entry = format!("{host}:{}", port(&local));
+        let source = fetching(
+            &[&entry],
+            &format!("http://{entry}/data"),
+            serde_json::json!({}),
+        );
+        let (ok, text) = answer(&*source).await;
+        assert!(ok, "{host}: {text}");
+    }
+    assert_eq!(local.seen().len(), 2, "{:?}", local.seen());
+}
