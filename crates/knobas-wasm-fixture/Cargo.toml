@@ -25,3 +25,6 @@ serde_json.workspace = true
 # (2026-09-10). The bindings it generates are the guest half of
 # `crates/knobas-wasm-host/wit/adapter.wit`.
 wit-bindgen = { version = "=0.62.0", default-features = false, features = ["macros", "realloc", "std"] }
+# The guest half of `wasi:http` 0.2, for the fixture's one network read
+# (#1203). Pinned to the copy Rust's own std for `wasm32-wasip2` resolves.
+wasip2 = "=1.0.4"

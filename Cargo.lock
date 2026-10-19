@@ -3387,6 +3387,7 @@ name = "knobas-wasm-fixture"
 version = "2.0.0"
 dependencies = [
  "serde_json",
+ "wasip2",
  "wit-bindgen 0.62.0",
 ]
 
@@ -3395,18 +3396,26 @@ name = "knobas-wasm-host"
 version = "2.0.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
+ "bytes",
  "chrono",
+ "http",
+ "http-body",
+ "http-body-util",
  "knobas-core",
  "knobas-source",
  "knobas-wasm-host",
+ "reqwest",
  "serde",
  "serde_json",
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
  "tracing",
+ "url",
  "wasmtime",
  "wasmtime-wasi",
+ "wasmtime-wasi-http",
  "wat",
 ]
 
@@ -7493,6 +7502,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "wasmtime-wasi-http"
+version = "49.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f4cd327c70de1309b0c04d49df3633a2ffeae9b29b526d421320b565e198175"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures",
+ "http",
+ "http-body",
+ "http-body-util",
+ "hyper",
+ "pin-project-lite",
+ "tokio",
+ "tracing",
+ "wasmtime",
+ "wasmtime-wasi",
+ "wasmtime-wasi-io",
+]
+
+[[package]]
 name = "wasmtime-wasi-io"
 version = "49.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8197,6 +8227,9 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
+dependencies = [
+ "bitflags 2.13.1",
+]
 
 [[package]]
 name = "wit-bindgen"

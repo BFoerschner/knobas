@@ -4,12 +4,14 @@ use knobas_source::{
     ConnectionInfo, Cursor, Sink, Source, SourceDescriptor, SourceError, SyncItem, WriteOp,
     WriteReceipt, pipeline, run, view,
 };
+use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 use wasmtime::Store;
+
 use wasmtime::component::ResourceAny;
 
 use crate::bindings::knobas::adapter::{log, sink};
-use crate::{HostState, WasmAdapter, bindings, convert, new_store, wit};
+use crate::{HostState, WasmAdapter, bindings, convert, net, new_store, wit};
 
 /// One item on its way from the component to the engine's sink, with the
 /// channel the sink's answer goes back on.
@@ -97,8 +99,9 @@ async fn open(
     adapter: &WasmAdapter,
     instance: &wit::Instance,
     sink: SinkSlot,
+    policy: Arc<net::Policy>,
 ) -> Result<(Store<HostState>, bindings::Adapter, ResourceAny), SourceError> {
-    let mut store = new_store(adapter, &instance.id, sink);
+    let mut store = new_store(adapter, &instance.id, sink, policy);
     let bindings = adapter
         .inner
         .pre
@@ -119,7 +122,7 @@ async fn open(
 macro_rules! call {
     ($self:expr, $method:ident $(, $arg:expr)*) => {{
         let (mut store, bindings, resource) =
-            open(&$self.adapter, &$self.instance, SinkSlot::none()).await?;
+            open(&$self.adapter, &$self.instance, SinkSlot::none(), Arc::clone(&$self.policy)).await?;
         bindings
             .knobas_adapter_source()
             .adapter()
@@ -134,8 +137,10 @@ macro_rules! call {
 pub(crate) async fn descriptor(
     adapter: &WasmAdapter,
     instance: wit::Instance,
+    policy: Arc<net::Policy>,
 ) -> Result<SourceDescriptor, SourceError> {
-    let (mut store, bindings, resource) = open(adapter, &instance, SinkSlot::none()).await?;
+    let (mut store, bindings, resource) =
+        open(adapter, &instance, SinkSlot::none(), policy).await?;
     let text = bindings
         .knobas_adapter_source()
         .adapter()
@@ -150,6 +155,8 @@ pub struct WasmSource {
     adapter: WasmAdapter,
     instance: wit::Instance,
     descriptor: SourceDescriptor,
+    /// What its calls may reach, and the credential the host attaches.
+    policy: Arc<net::Policy>,
 }
 
 impl WasmSource {
@@ -157,11 +164,13 @@ impl WasmSource {
         adapter: WasmAdapter,
         instance: wit::Instance,
         descriptor: SourceDescriptor,
+        policy: Arc<net::Policy>,
     ) -> Self {
         Self {
             adapter,
             instance,
             descriptor,
+            policy,
         }
     }
 
@@ -197,7 +206,13 @@ impl Source for WasmSource {
                 items: Some(items),
                 failure: None,
             };
-            let (mut store, bindings, resource) = open(&self.adapter, &self.instance, slot).await?;
+            let (mut store, bindings, resource) = open(
+                &self.adapter,
+                &self.instance,
+                slot,
+                Arc::clone(&self.policy),
+            )
+            .await?;
             let answer = bindings
                 .knobas_adapter_source()
                 .adapter()

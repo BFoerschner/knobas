@@ -179,7 +179,9 @@ interface source {
 
 /// What an external adapter is: it exports `source` and may call `sink` and
 /// `log`. Nothing else is granted beyond WASI with nothing in it (no
-/// directory, no environment, no socket).
+/// directory, no environment, no socket) and `wasi:http` 0.2's outgoing
+/// handler, which the host holds to the hosts the adapter's manifest
+/// declares and attaches the source's credential to (#1203).
 ///
 /// `download` is not here yet: its stream is a host-owned stream, which #1205
 /// adds as a minor version.

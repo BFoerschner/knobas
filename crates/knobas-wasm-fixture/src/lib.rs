@@ -21,6 +21,15 @@
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
 //!   hold on a refused item is witnessed.
+//! * **`"fetch": "<url>"`** makes `test_connection` `GET` that URL through
+//!   `wasi:http`, following redirects itself, and answer everything it was
+//!   handed (its instance record, every hop's status, headers and body, the
+//!   error that ended the walk) as JSON: in `detail` when the walk ended on
+//!   a response, in an `Unreachable` error when it did not (#1203). `mirror`
+//!   and `username` are config keys it declares and never reads, for a
+//!   manifest's host template and the host's basic auth.
+
+mod fetch;
 
 use exports::knobas::adapter::source::{Guest, GuestAdapter};
 use knobas::adapter::sink;
@@ -82,6 +91,10 @@ pub struct Adapter {
     id: String,
     name: String,
     fault: Result<Fault, String>,
+    /// The URL `test_connection` reads, when the config names one.
+    fetch: Option<String>,
+    /// The instance record as the host handed it over, for the fetch answer.
+    received: serde_json::Value,
 }
 
 fn protocol(message: String) -> SourceError {
@@ -97,7 +110,10 @@ fn read_fault(config: &str) -> Result<Fault, String> {
     let object = value
         .as_object()
         .ok_or_else(|| format!("config must be an object, got {value}"))?;
-    if let Some(key) = object.keys().find(|k| k.as_str() != "fault") {
+    if let Some(key) = object
+        .keys()
+        .find(|k| !["fault", "fetch", "mirror", "username"].contains(&k.as_str()))
+    {
         return Err(format!(
             "config has a key the fixture does not know: {key:?}"
         ));
@@ -157,8 +173,19 @@ impl Adapter {
 
 impl GuestAdapter for Adapter {
     fn new(instance: Instance) -> Self {
+        let fetch = serde_json::from_str::<serde_json::Value>(&instance.config)
+            .ok()
+            .and_then(|config| config.get("fetch")?.as_str().map(str::to_owned));
         Self {
             fault: read_fault(&instance.config),
+            fetch,
+            received: serde_json::json!({
+                "id": instance.id,
+                "kind": instance.kind,
+                "display_name": instance.display_name,
+                "base_url": instance.base_url,
+                "config": instance.config,
+            }),
             id: instance.id,
             name: instance.display_name,
         }
@@ -188,6 +215,9 @@ impl GuestAdapter for Adapter {
                 "type": "object",
                 "properties": {
                     "fault": { "type": "string", "enum": ["none", "unauthorized", "unreachable", "swallow_sink"] },
+                    "fetch": { "type": "string" },
+                    "mirror": { "type": "string" },
+                    "username": { "type": "string" },
                 },
                 "additionalProperties": false,
             },
@@ -199,6 +229,21 @@ impl GuestAdapter for Adapter {
 
     fn test_connection(&self) -> Result<ConnectionInfo, SourceError> {
         self.healthy()?;
+        if let Some(url) = &self.fetch {
+            let trace = fetch::get(url);
+            let mut answer = trace.to_json();
+            answer["instance"] = self.received.clone();
+            if trace.error.is_some() {
+                return Err(SourceError::Unreachable(answer.to_string()));
+            }
+            return Ok(ConnectionInfo {
+                account: None,
+                server_version: None,
+                secret_expires_at: None,
+                detail: Some(answer.to_string()),
+                discovered: Vec::new(),
+            });
+        }
         Ok(ConnectionInfo {
             account: Some("harbourmaster".into()),
             server_version: Some(format!("{KIND} 0.1.0")),

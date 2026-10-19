@@ -14,8 +14,9 @@
   *Install an adapter* (#1202, ADR-0028) takes the path of a local
   `knobas-adapter.json`. Install runs the static checks; a refusal is shown
   with its reason, and an installed adapter joins the radios, chosen, so its
-  generated form is there to fill. A manifest URL is #1209, and the hosts it
-  may reach are shown from #1203.
+  generated form is there to fill. A manifest URL is #1209. The install note
+  names every host the adapter may reach (#1203): a fixed host as written, a
+  template by the setting it is read from, since no source exists yet.
 
   The rooms dialog's five steps are one page here, as prototype-6 draws it.
   Its *Schedule* step is not drawn: a new source syncs every 15 minutes, its
@@ -129,6 +130,18 @@
     tested = null;
   }
 
+  /** The manifest's hosts in words: what the adapter may reach, and only that. */
+  function reach(hosts: string[]): string {
+    if (hosts.length === 0) return "It may reach no host.";
+    const words = hosts.map((host) => {
+      const key = /^\{(.+)\}$/.exec(host)?.[1];
+      if (key === undefined) return host;
+      return key === "base_url" ? "this source's address" : `the host in its ${key} setting`;
+    });
+    const list = words.length === 1 ? words[0] : `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`;
+    return `It may reach ${list}, and no other host.`;
+  }
+
   async function install() {
     const path = manifest.trim();
     if (path === "" || installing) return;
@@ -141,7 +154,10 @@
       const row = rows.find((adapter) => adapter.adapter_kind === answer.adapter_kind);
       if (row) choose(row);
       manifest = "";
-      installNote = { ok: true, text: `Installed ${answer.template.name} ${answer.adapter_version}.` };
+      installNote = {
+        ok: true,
+        text: `Installed ${answer.template.name} ${answer.adapter_version}. ${reach(answer.hosts)}`,
+      };
     } catch (cause) {
       // The backend's reason opens with knobas' own word, so only that is capitalised.
       const reason = ipcErrorMessage(cause);
