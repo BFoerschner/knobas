@@ -28,6 +28,9 @@ knobas-secrets = { path = "../knobas-secrets" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
+# #1325): the sources barrel's sync types are declared here (#1327).
+ts-rs.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 # The scheduler's runs live on tasks and are cancelled at shutdown; `sync` for

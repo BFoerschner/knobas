@@ -44,7 +44,8 @@ pub fn store_dir(profile_dir: &Path) -> PathBuf {
 
 /// What an install recorded, and the adapter's descriptor template: what
 /// the Add-source dialog chooses once the install answers.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct InstalledAdapter {
     pub adapter_kind: String,
     pub adapter_version: String,

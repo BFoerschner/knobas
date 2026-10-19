@@ -77,7 +77,8 @@ pub const BATCH: usize = 500;
 /// `upserted` -- every item is written to both tables and `deleted` says how
 /// many of them ended the run tombstoned -- so after a full sync,
 /// `upserted == count(sync.item where source_id = <id>)`.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SyncReport {
     pub source_id: String,
     /// Distinct entities written this run.

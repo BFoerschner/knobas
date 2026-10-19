@@ -29,7 +29,8 @@
 use knobas_source::{Cursor, Sink, Source, SourceError, SyncItem};
 
 /// One progress message.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SyncProgress {
     /// `knobas.sync_run.id` -- on every message, so a UI watching two runs can
     /// tell them apart.
@@ -43,8 +44,9 @@ pub struct SyncProgress {
 }
 
 /// Where a run is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum SyncPhase {
     Started,
     /// Waiting on the remote system.

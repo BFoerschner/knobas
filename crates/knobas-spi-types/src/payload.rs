@@ -79,8 +79,9 @@ use serde::{Deserialize, Serialize};
 /// no escaping rules to get wrong (a Jira custom field is `customfield_10008`,
 /// but a source is free to name a key `a/b`), no syntax that can fail to
 /// parse at run time, and it is what PostgreSQL's `#>` operator takes.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(transparent)]
+#[ts(export_to = "sources.ts")]
 pub struct PayloadPath(pub Vec<String>);
 
 impl PayloadPath {
@@ -107,7 +108,8 @@ impl PayloadPath {
 /// object whose `login` is the account -- so `at` is `["requested_reviewers"]`
 /// and `entry` is `["login"]`. An empty `entry` says the elements are the
 /// strings themselves.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ListPath {
     /// Where the array is.
     pub at: PayloadPath,
@@ -141,7 +143,8 @@ pub struct ListPath {
 ///
 /// A declaration whose `at` leads nowhere, or to neither shape, is a miss: the
 /// item has no parent as far as knobas knows, which is never a guess.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ParentPath {
     /// The parent's entity kind.
     pub kind: String,
@@ -166,7 +169,8 @@ pub struct ParentPath {
 /// * `key` and `name` are candidate paths inside each object, read as
 ///   [`KindPaths::project_key`] is: the first non-blank string wins. A
 ///   project with no readable key is left out of the chain.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ProjectPath {
     /// Where the array of project objects is.
     pub at: PayloadPath,
@@ -204,7 +208,8 @@ pub struct ChainProject {
 /// macros look the declaration up by, as string literals. `the_field_names_the_sql_macros_use_are_the_serialized_ones`
 /// pins the two together, so a rename here turns a test red instead of turning
 /// every path-driven read into a silent miss.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct KindPaths {
     /// Which entity kind this describes -- one of the descriptor's
     /// `entity_kinds`, which the contract battery enforces.
@@ -493,7 +498,8 @@ pub enum Trigger {
 }
 
 /// Where a run's [`Trigger`] sits, and the source's words for each (#961).
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct TriggerPath {
     /// Where the source's word is: a string.
     pub at: PayloadPath,
@@ -503,7 +509,8 @@ pub struct TriggerPath {
 }
 
 /// One source word a [`TriggerPath`] reads, and the trigger it is.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct TriggerValue {
     /// The word as the source writes it (`vcs`).
     pub value: String,
@@ -523,8 +530,9 @@ impl TriggerValue {
 
 /// Which part of a shell-owned frame a kind is: the Builds frame (ADR-0022,
 /// #848), or a ticket system's saved views (ADR-0029, #1207).
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "sources.ts")]
 pub enum Frame {
     /// What a CI source runs: a TeamCity build configuration.
     Pipeline,
@@ -556,7 +564,8 @@ pub fn parse_instant(raw: &str) -> Option<chrono::DateTime<chrono::Utc>> {
 /// this candidate, and the next one is tried. So a TeamCity build declares
 /// its `state` with only `running` and `queued` mapped, and a finished build
 /// falls through to its `status`.
-#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct StatePath {
     /// Where the value is.
     pub at: PayloadPath,
@@ -567,12 +576,14 @@ pub struct StatePath {
 }
 
 /// One value a [`StatePath`] draws, and how.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct StateValue {
     /// The value as the source writes it: a JSON string (`"open"`,
     /// `"FAILURE"`) or a JSON boolean (`true`). Typed, so a source writing
     /// the word `"true"` is not taken for a flag (the refusal
     /// [`resolve_flag`] makes). A string is matched after trimming.
+    #[ts(type = "string | boolean")]
     pub value: serde_json::Value,
     /// How loud the chip is.
     pub tone: crate::tone::Tone,

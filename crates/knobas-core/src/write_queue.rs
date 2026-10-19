@@ -87,6 +87,8 @@ crate::closed_vocabulary! {
     /// [`WriteState::Refused`]; `write_queue_reason_state_chk` in migration
     /// 0005 is what keeps a held or refused row from also claiming to be
     /// waiting on a network.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "sources.ts")]
     pub enum WaitReason {
         /// The server did not answer.
         Unreachable => "unreachable",
@@ -182,7 +184,8 @@ macro_rules! queue_columns {
 ///
 /// The vocabulary is `CONTEXT.md`'s: a row in [`WriteState::Pending`] is a
 /// **pending write**, one in [`WriteState::Held`] is a **held write**.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct QueuedWrite {
     /// Identity and queue order in one value -- see migration `0005`.
     pub id: i64,
@@ -193,8 +196,10 @@ pub struct QueuedWrite {
     /// `knobas_source::WriteOp::identifier()`.
     pub op: String,
     /// The serialized `WriteOp`.
+    #[ts(type = "WriteOpPayload")]
     pub payload: serde_json::Value,
     /// The target as it was when the write was queued -- [`project`]'s output.
+    #[ts(type = "unknown")]
     pub target_snapshot: serde_json::Value,
     pub state: WriteState,
     /// Why a pending write is waiting; `None` while nothing has been tried.
@@ -206,6 +211,7 @@ pub struct QueuedWrite {
     pub attempts: i32,
     /// The target as it stood when the write was held -- the other half of
     /// "both versions side by side".
+    #[ts(type = "unknown | null")]
     pub held_snapshot: Option<serde_json::Value>,
     pub settled_at: Option<chrono::DateTime<chrono::Utc>>,
     /// Whether the user has this write's source turned on, **as of this read**
@@ -722,7 +728,8 @@ pub async fn open(pool: &PgPool) -> Result<Vec<QueuedWrite>, CoreError> {
 /// One statement rather than three, and separate numbers rather than a total:
 /// the shell has to say that something needs a *decision* rather than
 /// patience, so "3 waiting" may never absorb a held write.
-#[derive(Clone, Copy, Debug, Default, Serialize, sqlx::FromRow)]
+#[derive(Clone, Copy, Debug, Default, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct QueueCounts {
     pub pending: i64,
     pub held: i64,

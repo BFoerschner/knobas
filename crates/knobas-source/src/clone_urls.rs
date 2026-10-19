@@ -78,8 +78,9 @@ pub fn is_entry(entry: &str) -> bool {
 ///
 /// Plain serde data, as everything crossing the SPI: `"base_url"`, or
 /// `{"config": "<key>"}`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum CloneFrom {
     /// The instance's base URL.
     BaseUrl,

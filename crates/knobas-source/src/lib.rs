@@ -47,7 +47,8 @@ fn default_min_sync_interval_secs() -> u32 {
 }
 
 /// Everything knobas needs to know about a configured adapter instance.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourceDescriptor {
     /// Instance id, e.g. `"jira"`. Doubles as the [`EntityRef`] namespace for
     /// every item this instance emits, so it must be non-blank and free of `:`.
@@ -59,6 +60,7 @@ pub struct SourceDescriptor {
     pub adapter_kind: String,
     /// Human-readable name for the source list.
     pub name: String,
+    #[ts(as = "Vec<String>")]
     pub capabilities: Vec<Capability>,
     pub adapter_version: String,
     /// How this adapter can authenticate (spec §3, §3a). The Add-source form
@@ -126,6 +128,7 @@ pub struct SourceDescriptor {
     /// generated from it (spec §3a). Never holds secrets -- those live in the
     /// OS keychain, keyed by the chosen [`AuthMethod`]. M0: the mock declares
     /// an empty object schema.
+    #[ts(type = "unknown")]
     pub config_schema: serde_json::Value,
     /// Where this adapter's records keep the things knobas reads but §4.1 does
     /// not normalize: a status, a priority, an assignee, requested reviewers,
@@ -325,7 +328,8 @@ pub enum Capability {
 ///
 /// The descriptor declares which of these it accepts; the secret itself is
 /// stored in the OS keychain, never in the source's configuration.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub enum AuthMethod {
     UserPassword,
     Pat,
@@ -550,7 +554,8 @@ impl SourceError {
 /// rather than an error.
 ///
 /// [`EntityRef`]: knobas_spi_types::entity::EntityRef
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts", rename = "WriteOpPayload")]
 pub enum WriteOp {
     /// Identifier `"comment"`. Reply on a ticket or a pull request.
     Comment { entity: String, body: String },
@@ -748,6 +753,7 @@ pub enum WriteOp {
         name: String,
         url: String,
         #[serde(default)]
+        #[ts(as = "Option<MonitorKind>", optional)]
         kind: MonitorKind,
     },
     /// Identifier `"merge_pull_request"`. Merge a pull request into its base
@@ -858,8 +864,10 @@ pub enum WriteOp {
         branch: Option<String>,
         parameters: Vec<BuildParameter>,
         #[serde(default)]
+        #[ts(as = "Option<bool>", optional)]
         clean_checkout: bool,
         #[serde(default)]
+        #[ts(as = "Option<bool>", optional)]
         first_in_queue: bool,
     },
     /// Identifier `"submit_review"`. Review a pull request: approve it,
@@ -1049,8 +1057,9 @@ pub const SOURCE_ACTION_ID: &str = "id";
 /// The state an [`EditPullRequest`](WriteOp::EditPullRequest) puts a pull
 /// request in. Serialized as the lowercase word (`"closed"`), which is also
 /// Gitea's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum PullRequestState {
     Open,
     Closed,
@@ -1071,8 +1080,9 @@ impl PullRequestState {
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
 /// Serialized as the snake_case word (`"request_changes"`); each adapter
 /// spells it its own way (Gitea's `event`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum ReviewVerdict {
     /// The change may land.
     Approve,
@@ -1084,7 +1094,8 @@ pub enum ReviewVerdict {
 
 /// One line comment of a [`SubmitReview`](WriteOp::SubmitReview): the file's
 /// path in the change, the line number on `side`, and what it says.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct ReviewComment {
     pub path: String,
     pub line: u64,
@@ -1122,8 +1133,9 @@ pub struct BuildParameter {
 /// service, TCP for a database, Docker for a container, Ping for a VM. A
 /// closed set, so a payload naming a check no adapter makes fails to decode at
 /// `submit_write` rather than reaching a source.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum MonitorKind {
     /// An http(s) URL fetched and expected to answer 2xx.
     #[default]
@@ -1152,8 +1164,9 @@ impl MonitorKind {
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
 /// the base branch. Serialized as the lowercase word (`"squash"`), which is
 /// also what a source view's merge action offers as its options.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum MergeStyle {
     /// A merge commit joining head into base.
     Merge,
@@ -1183,8 +1196,9 @@ impl MergeStyle {
 /// brings the head up to date with its base. Serialized as the lowercase
 /// word, which is also what the view's *Update branch…* offers as its options
 /// and what Gitea's `?style=` takes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum UpdateStyle {
     /// The base merged into the head: a merge commit on the head.
     Merge,

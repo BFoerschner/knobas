@@ -23,8 +23,9 @@ pub struct IpcError {
 }
 
 /// The failure classes the frontend branches on.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum IpcErrorCode {
     /// The remote system refused the credential (401/403). A human must act.
     Unauthorized,

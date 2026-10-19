@@ -14,6 +14,8 @@ knobas_core::closed_vocabulary! {
     /// Stored in `knobas.sync_run.trigger`, whose `sync_run_trigger_chk`
     /// allows exactly these spellings -- as last defined, which is 0004 for
     /// this vocabulary and 0002 for `SyncOutcome`.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "sources.ts")]
     pub enum SyncTrigger {
         /// The scheduler's interval elapsed.
         Schedule => "schedule",
@@ -42,6 +44,8 @@ knobas_core::closed_vocabulary! {
     /// so a variant the constraint does not know about is not a display bug:
     /// the `UPDATE` that closes the run is refused, `settle` logs and swallows
     /// that (it must not mask the run's own failure), and the row never closes.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "sources.ts")]
     pub enum SyncOutcome {
         Ok => "ok",
         Unauthorized => "unauthorized",
@@ -94,7 +98,8 @@ impl SyncOutcome {
 /// Lives here rather than in [`scheduler`](crate::scheduler) because the log is
 /// what it is read out of: `status_for` builds one from `knobas.sync_run` plus
 /// `knobas.source_config`, and the scheduler re-exports it.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SourceSyncStatus {
     pub source_id: String,
     /// Whether a run is in flight right now.
@@ -319,7 +324,8 @@ pub const KEEP_RUNS: i64 = 200;
 pub const KEEP_WINDOW_SECS: i64 = 24 * 60 * 60;
 
 /// One row of the sync log, as the diagnostics view reads it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct SyncRunRow {
     pub id: i64,
     pub source_id: String,

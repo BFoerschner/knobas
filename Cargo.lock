@@ -3398,6 +3398,7 @@ dependencies = [
  "tokio",
  "tokio-util",
  "tracing",
+ "ts-rs",
  "uuid",
 ]
 

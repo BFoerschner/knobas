@@ -12,6 +12,8 @@ knobas_core::closed_vocabulary! {
     /// The wire spellings are the same five literals
     /// `source_config_auth_state_chk` allows -- one list, two places, pinned
     /// by tests on both sides.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "sources.ts")]
     pub enum AuthState {
         /// The credential worked.
         Ok => "ok",
@@ -31,7 +33,8 @@ knobas_core::closed_vocabulary! {
 
 /// One source's credential health -- the cheap poll the top strip's sync
 /// monograms render from, and the payload of the `source:health` event.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct CredentialHealth {
     pub source_id: String,
     pub state: AuthState,

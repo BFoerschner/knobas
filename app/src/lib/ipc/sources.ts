@@ -2,306 +2,95 @@
  * Sources, secrets, credential health, sync and diagnostics — one function per
  * `#[tauri::command]` in `crates/knobas-app/src/commands/sources.rs`.
  *
- * Hand-written, as in M0: `tauri-specta` is still an RC. Argument names are
- * camelCase because Tauri renames command *arguments*; **struct fields keep
- * their Rust snake_case spelling**, which is why the interfaces below are
- * snake_case and the functions are not.
+ * The types are generated from the Rust (`./generated/sources.ts`, contract
+ * §2.6 as amended by #1325): a field is explained in its Rust doc comment and
+ * nowhere else. The `invoke` functions stay hand-written, pinned to the Rust
+ * by `commands::sources`'s barrel test. Argument names are camelCase because
+ * Tauri renames command *arguments*; **struct fields keep their Rust
+ * snake_case spelling**, which is why the types are snake_case and the
+ * functions are not.
  *
  * There is deliberately no function here that reads a secret back. There is no
  * command behind one either — `sources_crud::nothing_in_the_ipc_surface_reads_a_secret_back`
  * scans the Rust side to keep it that way.
  */
 import { Channel, invoke } from "@tauri-apps/api/core";
-// Declared once, by the modules that own them. `KindInfo` is `entity.ts`'s and
-// `IpcErrorCode` is the barrel's; re-declaring either here would put a second
-// copy of a frozen shape in the tree, and the barrel's `export *` would refuse
-// to re-export both. Type-only, so nothing is imported at run time and the
-// cycle through `./index` is erased.
-import type { KindInfo, Tone } from "./entity";
-import type { IpcErrorCode } from "./index";
+import type {
+  AdapterStatus,
+  ConnectionReport,
+  CredentialHealth,
+  DbStats,
+  InstalledAdapter,
+  NewSource,
+  QueueCounts,
+  QueuedWrite,
+  Removal,
+  SecretInput,
+  SourceDescriptor,
+  SourceDraft,
+  SourcePatch,
+  SourceSummary,
+  SourceSyncStatus,
+  SyncProgress,
+  SyncReport,
+  SyncRunRow,
+  WriteOpPayload,
+} from "./generated/sources";
 
-/** `knobas_source::AuthMethod` — PascalCase, unchanged since M0. */
-export type AuthMethod = "UserPassword" | "Pat" | "ApiToken" | "OAuth";
-
-/**
- * `knobas_source::SourceDescriptor` — what the Add-source form is generated
- * from. A *template* has `id === adapter_kind`; a configured instance's
- * descriptor carries the instance id instead.
- */
-export interface SourceDescriptor {
-  id: string;
-  adapter_kind: string;
-  name: string;
-  capabilities: string[];
-  adapter_version: string;
-  auth_methods: AuthMethod[];
-  /**
-   * Whether this adapter can use a **second** credential beside the one
-   * {@link auth_methods} names: an optional username and password, stored in
-   * the same keychain item (#452).
-   *
-   * What the Add-source and re-enter forms draw the optional account fields
-   * from. A declaration and not a fact a form could work out, for
-   * `config_schema`'s reason: the alternative is a component that knows the
-   * string `"kuma"`, which is the per-adapter table §3a forbids.
-   */
-  accepts_account: boolean;
-  /**
-   * The shortest sync interval, in seconds, a source of this adapter may be
-   * scheduled at (#1187): Uptime Kuma 45, TeamCity 20, the rest 60. The source
-   * commands refuse anything under it, and the interval ladder offers nothing
-   * under it. Read from here, never from a per-adapter table.
-   */
-  min_sync_interval_secs: number;
-  write_ops: string[];
-  entity_kinds: KindInfo[];
-  /** JSON Schema. The form is generated from it — never hand-built per adapter. */
-  config_schema: unknown;
-  /**
-   * Where this adapter's records keep what knobas reads but the contract does
-   * not normalize — a status, a priority, an assignee, requested reviewers, a
-   * merged flag, a project (#277). One entry per entity kind that has any of
-   * them; a kind that declares nothing is a miss, never a guess.
-   */
-  payload_paths: KindPaths[];
-  /**
-   * The roles this adapter claims (#1193, ADR-0029): `code-host`,
-   * `ticket-system`, `ci`, `wiki`, `monitoring`, or a custom
-   * `<adapter_kind>:<name>`. Each claim is held to its role's minimum by the
-   * contract battery; a surface reads the claim, never the adapter kind.
-   */
-  roles: RoleClaim[];
-  /**
-   * The source actions this adapter performs, by its own id (#1194,
-   * ADR-0029): writes outside every role's vocabulary, offered by its views
-   * as `source_action` actions. The shell never reads them.
-   */
-  source_actions: string[];
-  /**
-   * Which typed address of a source a repository is cloned from (#1197): the
-   * code-host read `clone_urls`. Clone reads it on the Rust side; the shell
-   * never does.
-   */
-  clone_from: CloneFrom[];
-}
-
-/** `knobas_source::clone_urls::CloneFrom`: the base URL, or a config key. */
-export type CloneFrom = "base_url" | { config: string };
-
-/** `knobas_source::role::RoleClaim` — one role a source claims. */
-export interface RoleClaim {
-  role: string;
-  /** The live reads the source answers for the role, by identifier (`run_log`). */
-  reads: string[];
-}
-
-/**
- * `knobas_source::role::data::RoleMiss` (#1199, ADR-0028): a declared path of
- * a claimed role that missed on the records the source's syncs emitted, so the
- * shell does not draw that role for the source.
- */
-export interface RoleMiss {
-  role: string;
-  /** The kind whose records missed (`ticket`). */
-  kind: string;
-  /** The declared field (`priority`). */
-  field: string;
-  /** The declared path, its segments joined by `.` (`fields.priority.name`). */
-  path: string;
-}
-
-/**
- * `knobas_core::payload::PayloadPath` — the object keys to walk, in order.
- * `["fields", "status", "name"]`.
- */
-export type PayloadPath = string[];
-
-/** `knobas_core::payload::ListPath` — where a list of strings lives. */
-export interface ListPath {
-  /** Where the array is. */
-  at: PayloadPath;
-  /** Where the string is inside each element; empty means the element itself. */
-  entry: PayloadPath;
-}
-
-/**
- * `knobas_core::payload::KindPaths` — one entity kind's declared paths.
- *
- * Every path field is a list of *candidates*, most specific first: one
- * adapter's alternative spellings of its own field, never knobas guessing.
- */
-export interface KindPaths {
-  /** One of the descriptor's `entity_kinds`. */
-  kind: string;
-  status_name: PayloadPath[];
-  priority: PayloadPath[];
-  assignee: PayloadPath[];
-  reviewers: ListPath[];
-  /** A boolean in the payload — a merge timestamp is a different fact. */
-  merged: PayloadPath[];
-  project_key: PayloadPath[];
-  project_name: PayloadPath[];
-  /** The chain of projects the item sits in, outermost first (#1019). */
-  project_path: ProjectPath[];
-  /** Status names this source considers blocked-like, in its own spelling. */
-  blocked_statuses: string[];
-  /** Where this item's parent is and what it answers to (ADR-0018). */
-  parent: ParentPath[];
-  /** Where a row's state chip is read, and what each value means (#666). */
-  state: StatePath[];
-  /** The branch a pull request is opened from, by its name (#712). */
-  head: PayloadPath[];
-  /** The branch a pull request is opened into, by its name (#1227). */
-  base: PayloadPath[];
-  /** The commit a record of code stands at, by full sha (#710). */
-  commit: PayloadPath[];
-  /** The commits a build ran on, one per VCS root (#710). */
-  revision: ListPath[];
-  /** The repo a pull request is opened from, a fork's for a fork (#718). */
-  head_repo: PayloadPath[];
-  /** A branch's repo's default branch, never drawn as wanting a PR (#718). */
-  default_branch: PayloadPath[];
-  /** A ticket's type in the source's spelling, what `issuetype:` reads (#811). */
-  issue_type: PayloadPath[];
-  /** The labels an item carries, what `label:` reads (#811). */
-  labels: ListPath[];
-  /** The states of the sprints an item is in, what `sprint:current` reads (#811). */
-  sprint_state: ListPath[];
-  /** A ticket's original estimate in seconds, a whole number (#816). */
-  estimate: PayloadPath[];
-  /** How many comments a ticket has, a whole number (#894). */
-  comment_count: PayloadPath[];
-  /** Where a page sits among its siblings in the source's order, a whole number, lowest first (#953). */
-  position: PayloadPath[];
-  /** Which part of a shell-owned frame this kind is, or `null` (ADR-0022, #848, #1207). */
-  frame: Frame | null;
-  /** The ticket system a saved-view kind's views are listed under: `Jira` (#1207). */
-  system_name: string | null;
-  /** What a pipeline is called (#848). */
-  name: PayloadPath[];
-  /** The group a pipeline sits in, in the source's word (#848). */
-  group: PayloadPath[];
-  /** The chain of groups a pipeline sits in, outermost first (#849). */
-  group_path: ListPath[];
-  /** The pipeline's identity, as a pipeline and its runs both spell it (#848). */
-  pipeline: PayloadPath[];
-  /** A run's number, a string (#848). */
-  number: PayloadPath[];
-  /** The branch a run built (#848). */
-  branch: PayloadPath[];
-  /** When a run started, ISO 8601 basic or extended (#848). */
-  started: PayloadPath[];
-  /** When a run finished, as `started` (#848). */
-  finished: PayloadPath[];
-  /** How a run was started, the source's word mapped onto the shell's (#961). */
-  trigger: TriggerPath[];
-  /** Who started a run, as the source spells the account (#961). */
-  started_by: PayloadPath[];
-  /** The machine a run ran on, by the source's name for it (#1004). */
-  agent: PayloadPath[];
-  /** What a run in flight is doing now, in the source's words (#1004). */
-  current_step: PayloadPath[];
-  /** The language a repository is written in, in the source's word (#966). */
-  language: PayloadPath[];
-  /** The teams a repository belongs to, by name (#966). */
-  teams: ListPath[];
-  /** Who owns a repository, by the account's name (#1020). */
-  owner: PayloadPath[];
-  /** How a monitor checks, in the source's word: `http`, `ping` (#1020). */
-  monitor_type: PayloadPath[];
-  /** When a pull request was opened, ISO 8601 (#929). */
-  opened: PayloadPath[];
-  /** When a pull request was merged, ISO 8601; absent until it is (#929). */
-  merged_at: PayloadPath[];
-  /** A monitor's last check, in milliseconds: a JSON number (#1224). */
-  response_time: PayloadPath[];
-}
-
-/** `knobas_core::payload::Trigger` — how a run was started, in the shell's words (#961, #1146). */
-export type Trigger = "change" | "schedule" | "person" | "chain";
-
-/** `knobas_core::payload::TriggerPath` — where a run's trigger word is, and what each means (#961). */
-export interface TriggerPath {
-  /** Leads to a string. */
-  at: PayloadPath;
-  values: TriggerValue[];
-}
-
-/** `knobas_core::payload::TriggerValue` — one source word and the trigger it is. */
-export interface TriggerValue {
-  value: string;
-  trigger: Trigger;
-}
-
-/**
- * `knobas_core::payload::Frame` — a pipeline or a run of the Builds frame
- * (#848), or a ticket system's saved view (#1207).
- */
-export type Frame = "pipeline" | "run" | "saved_view";
-
-/**
- * `knobas_core::payload::StatePath` — where a row's state sits, and the values
- * it draws a chip for (#666). A value its map does not name is a miss, and the
- * next candidate is tried.
- */
-export interface StatePath {
-  /** Leads to a string or a boolean. */
-  at: PayloadPath;
-  values: StateValue[];
-}
-
-/** `knobas_core::payload::StateValue` — one value a `StatePath` draws. */
-export interface StateValue {
-  /** The value as the source writes it: a string, or a boolean flag. */
-  value: string | boolean;
-  tone: Tone;
-  /** What the chip says instead of the value (`merged` for `true`), or `null`. */
-  text: string | null;
-}
-
-/**
- * `knobas_core::payload::ProjectPath` — where an item's chain of projects is
- * (an array of objects, outermost first), and each project's key and name
- * inside its object (#1019).
- */
-export interface ProjectPath {
-  at: PayloadPath;
-  key: PayloadPath[];
-  name: PayloadPath[];
-}
-
-/**
- * `knobas_core::payload::ParentPath` — where an item's parent sits in its
- * payload, and the names that parent answers to for `under:` (ADR-0018).
- */
-export interface ParentPath {
-  /** The parent's entity kind (`repo`, `build_config`). */
-  kind: string;
-  /**
-   * One object (the direct parent) or an array of objects (the chain,
-   * outermost first, the direct parent last).
-   */
-  at: PayloadPath;
-  /** Inside each parent object, the names it answers to; the first is shown. */
-  names: PayloadPath[];
-}
-
-/** What one sync run did — `knobas_sync::SyncReport`. */
-export interface SyncReport {
-  source_id: string;
-  upserted: number;
-  deleted: number;
-  /**
-   * Rows a **full** sync tombstoned because the run did not see them
-   * (hard-delete reconciliation). Counts only kinds that declared
-   * `full_sync_exhaustive` and emitted something, so it is 0 for an
-   * incremental run, for a kind whose full sync is a bounded window, and for a
-   * kind that emitted nothing.
-   */
-  swept: number;
-  /** Opaque to the frontend; hand it back to resume an incremental sync. */
-  cursor: string;
-}
+export type {
+  AdapterSource,
+  AdapterStatus,
+  AuthMethod,
+  AuthState,
+  BuildParameter,
+  CloneFrom,
+  ConnectionReport,
+  CredentialHealth,
+  DbStats,
+  Frame,
+  InstalledAdapter,
+  KindPaths,
+  ListPath,
+  MergeStyle,
+  MonitorKind,
+  NewSource,
+  ParentPath,
+  PayloadPath,
+  ProjectPath,
+  PullRequestState,
+  QueueCounts,
+  QueuedWrite,
+  Removal,
+  ReviewComment,
+  ReviewSide,
+  ReviewVerdict,
+  RoleClaim,
+  RoleMiss,
+  SecretAccount,
+  SecretInput,
+  SourceCount,
+  SourceDescriptor,
+  SourceDraft,
+  SourcePatch,
+  SourceSummary,
+  SourceSyncStatus,
+  StatePath,
+  StateValue,
+  SyncOutcome,
+  SyncPhase,
+  SyncProgress,
+  SyncReport,
+  SyncRunRow,
+  SyncTrigger,
+  Trigger,
+  TriggerPath,
+  TriggerValue,
+  UpdateCheck,
+  UpdateStyle,
+  WaitReason,
+  WriteOpPayload,
+  WriteState,
+} from "./generated/sources";
 
 /**
  * Register the mock source if it is not registered yet, then run a full sync
@@ -309,299 +98,6 @@ export interface SyncReport {
  */
 export function demoLoad(): Promise<SyncReport> {
   return invoke<SyncReport>("demo_load");
-}
-
-/**
- * Whether a source's credential works — `knobas_sync::AuthState`.
- *
- * `unauthorized` is the one the UI must act on: it is what puts *Re-enter
- * password* on the row rather than a shrug, and the scheduler never retries it
- * on its own (interfaces §8 P7). `missing_secret` is configured-but-no-secret,
- * which is a different prompt from a secret that was rejected.
- */
-export type AuthState =
-  | "ok"
-  | "unauthorized"
-  | "unreachable"
-  | "missing_secret"
-  | "unknown";
-
-/**
- * One source's credential health — `knobas_sync::CredentialHealth`, the
- * payload of `EVENTS.sourceHealth` and the return of `credentialHealth()`.
- */
-export interface CredentialHealth {
-  source_id: string;
-  state: AuthState;
-  /** RFC 3339, or null if it has never been checked. */
-  checked_at: string | null;
-  /** One line for the sources view. Never a secret. */
-  detail: string | null;
-  /** RFC 3339 — feeds the PAT expiry countdown. Null if the source will not say. */
-  secret_expires_at: string | null;
-}
-
-/** How a run ended — `knobas_sync::SyncOutcome`. */
-export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
-
-/**
- * Why a run happened — `knobas_sync::SyncTrigger`, the `trigger` of a
- * `knobas.sync_run` row.
- *
- * The diagnostics list labels a run with it: a scheduled poll, the user's
- * *Sync now*, the initial sync the first-run wizard drew a progress bar for,
- * or a backfill.
- *
- * `backfill` is the one that carries information the others do not. It is a
- * deliberate cursor-less run that widens the payload of items an incremental
- * would never re-fetch, and it is forbidden to reconcile -- so unlike every
- * other cursor-less run it *cannot* have tombstoned anything. When a
- * suspicious `swept` count needs explaining, this spelling is what rules a
- * run out.
- */
-export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
-
-/** One row of the sync log — `knobas_sync::run_log::SyncRunRow`. */
-export interface SyncRunRow {
-  id: number;
-  source_id: string;
-  trigger: SyncTrigger;
-  started_at: string;
-  /** null while the run is still going. */
-  finished_at: string | null;
-  outcome: SyncOutcome | null;
-  upserted: number;
-  deleted: number;
-  /** Rows the full-sync sweep tombstoned. */
-  swept: number;
-  error: string | null;
-  cursor_after: string | null;
-}
-
-/**
- * The coarse state one source's syncing is in — `knobas_sync::SourceSyncStatus`,
- * the payload of `EVENTS.syncState` and the return of `syncStatus()`.
- *
- * Coarse by rule: a transition each, at most a handful per run. Per-item
- * progress is {@link SyncProgress} on a channel and nowhere else.
- */
-export interface SourceSyncStatus {
-  source_id: string;
-  running: boolean;
-  /**
-   * The run this status is about: the one in flight, or — once `running` is
-   * false — the last one to finish, which is the run `last_outcome` describes.
-   * null only for a source that has never run.
-   *
-   * That is what `syncStatus()` answers, which is about the source. On an
-   * `EVENTS.syncState` event it is the run the event is about — the one that
-   * just started or just ended — which is what makes keying a listener on it
-   * sound (#304).
-   */
-  run_id: number | null;
-  /** RFC 3339, while `running`. */
-  started_at: string | null;
-  /** RFC 3339, of the last run that finished. */
-  last_finished_at: string | null;
-  last_outcome: SyncOutcome | null;
-  /**
-   * When the scheduler will run it next: last finish + interval, clamped up by
-   * `backoff_until`. Derived, never stored (P7). null while a run is in flight,
-   * and for a source that is disabled or needs a human.
-   */
-  next_run_at: string | null;
-  /** Held off until this, after a failure. Never set by a 401 (P7). */
-  backoff_until: string | null;
-  /**
-   * Whether the run `last_outcome` describes wrote anything to the mirror —
-   * upserted, deleted or swept a row (#759). null while no run has finished.
-   * `true` may be a run that rewrote items unchanged; `false` never hides one
-   * that changed something.
-   */
-  last_changed: boolean | null;
-}
-
-/** Where a run is — `knobas_sync::SyncPhase`. */
-export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
-
-/** One progress message — `knobas_sync::SyncProgress`. */
-export interface SyncProgress {
-  /** `knobas.sync_run.id`, so two runs on two channels stay distinguishable. */
-  run_id: number;
-  source_id: string;
-  phase: SyncPhase;
-  items: number;
-  elapsed_ms: number;
-  message: string | null;
-}
-
-/** One row of the sources view — `knobas_app::sources::SourceSummary`. */
-export interface SourceSummary {
-  id: string;
-  adapter_kind: string;
-  display_name: string;
-  base_url: string;
-  enabled: boolean;
-  sync_interval_secs: number;
-  config: unknown;
-  health: CredentialHealth;
-  last_run: SyncRunRow | null;
-  /** null when the source is disabled, running, or needs a human. */
-  next_run_at: string | null;
-  item_count: number;
-  /**
-   * Which kind of credential this source authenticates with.
-   *
-   * `null` is a source that needs none — the compiled-in mock reaches nothing.
-   * The same union `NewSource.auth_kind` submits, widened by `null`: the
-   * backend's `AuthKind::None` and an `auth_kind` column this build cannot
-   * read both arrive as `null`, and both mean "no credential kind to name".
-   *
-   * Never a secret. No command reads one back (contract §2.2).
-   */
-  auth_kind: AuthMethod | null;
-  /** From the adapter's descriptor, so the view needs no per-adapter table. */
-  kinds: KindInfo[];
-  /**
-   * The roles the source's adapter claims, from its descriptor template like
-   * {@link kinds} (#1196, ADR-0029). The mirror narrows a role's reads by
-   * these claims itself; the shell reads them only for which optional reads a
-   * source answers (`tf/roles.svelte.ts`, #1300). Empty for an adapter that claims none and
-   * for a source whose adapter is no longer compiled in.
-   *
-   * Always sent. Optional here only so a stand-in summary written before
-   * #1196 still type-checks; a summary without it claims nothing.
-   */
-  roles?: RoleClaim[];
-  /**
-   * The claimed roles whose declared paths missed on this source's records
-   * (#1199): the mirror leaves the source out of those roles' reads, the
-   * shell offers none of their optional reads (`tf/roles.svelte.ts`), and its
-   * health line names each path. Always sent; optional for the reason
-   * {@link roles} is.
-   */
-  role_misses?: RoleMiss[];
-}
-
-/**
- * Write-only. The backend has no way to send one back.
- *
- * Both fields are optional and **absent means "keep what is stored"** (#452).
- * One rule, read in both directions: a reader adding an account to an Uptime
- * Kuma cannot retype an API key Kuma showed them once, and a reader replacing
- * an expired key must not silently lose the account beside it. `add_source` is
- * the one caller for which *keep* has no meaning, and it refuses a missing
- * `value` by name.
- */
-export interface SecretInput {
-  value?: string | null;
-  /**
-   * The optional second credential of the version-2 keychain envelope: a
-   * username and password stored **beside** {@link value}, not instead of it.
-   *
-   * Only Uptime Kuma reads one, and only for its write half — the API key
-   * opens `/metrics`, the account opens socket.io, and a source with only the
-   * key reads every monitor and pauses none of them.
-   */
-  account?: SecretAccount | null;
-}
-
-/** A typed account on its way in — `knobas_app::sources::AccountInput`. */
-export interface SecretAccount {
-  username: string;
-  password: string;
-}
-
-/** What the Add-source form submits — `knobas_app::sources::NewSource`. */
-export interface NewSource {
-  id: string;
-  adapter_kind: string;
-  display_name: string;
-  base_url: string;
-  auth_kind: AuthMethod;
-  config: unknown;
-  secret: SecretInput;
-  sync_interval_secs: number;
-  enabled: boolean;
-}
-
-/**
- * What *Edit source* may change.
- *
- * No `id`, no `adapter_kind`: the instance id is the entity namespace, baked
- * into every entity id, link and activity row, and therefore immutable (P10).
- */
-export interface SourcePatch {
-  display_name?: string | null;
-  base_url?: string | null;
-  config?: unknown;
-  sync_interval_secs?: number | null;
-  enabled?: boolean | null;
-}
-
-/** An unsaved (or saved) source to test — `knobas_app::sources::SourceDraft`. */
-export interface SourceDraft {
-  /** Set, with `secret: null`, to re-test the stored credential. */
-  source_id: string | null;
-  adapter_kind: string;
-  base_url: string;
-  /**
-   * Only meaningful for an **unsaved** draft. A draft naming a saved source is
-   * tested against that source's *stored* configuration — otherwise *Test
-   * connection* could pass against auth the scheduled run never attempts.
-   */
-  auth_kind: AuthMethod;
-  config: unknown;
-  secret: SecretInput | null;
-}
-
-/** What *Test connection* found — `knobas_app::sources::ConnectionReport`. */
-export interface ConnectionReport {
-  ok: boolean;
-  account: string | null;
-  server_version: string | null;
-  secret_expires_at: string | null;
-  /** One line for the form, or null when it connected. */
-  error: string | null;
-  /** The class to branch on: `unauthorized` turns *Test* into *Re-enter*. */
-  code: IpcErrorCode | null;
-  elapsed_ms: number;
-  /**
-   * The adapter's connection note: the one line it says about the far end
-   * that nothing else here already says — Jira's Epic Link clause is the
-   * first (#326). Shown beneath the result line wherever a test result is
-   * shown, never stored. Null when the test failed (`error` is the line) and
-   * for an adapter with nothing to add.
-   */
-  detail: string | null;
-  /**
-   * Config values the adapter learned from the far end, keyed by the
-   * `config_schema` property each belongs in — Jira's Epic Link custom field
-   * id, whose value is different on every instance (#297).
-   *
-   * `AddSource` puts one into the matching form field when the reader left it
-   * empty, the same rule it applies to `username` and {@link account} (#82).
-   * Empty when the test failed, and empty for an adapter that discovers
-   * nothing.
-   */
-  discovered: Record<string, string>;
-}
-
-/** `knobas_sync::stats::SourceCount`. */
-export interface SourceCount {
-  source_id: string;
-  items: number;
-  synced_at: string | null;
-}
-
-/** `knobas_sync::stats::DbStats` — the diagnostics view's numbers. */
-export interface DbStats {
-  db_bytes: number;
-  entity_count: number;
-  item_count: number;
-  per_source: SourceCount[];
-  oldest_synced_at: string | null;
-  newest_synced_at: string | null;
 }
 
 // -- §2.2: sources, secrets, credential health --------------------------------
@@ -617,22 +113,6 @@ export function listAdapters(): Promise<SourceDescriptor[]> {
 }
 
 /**
- * What `install_adapter` recorded (#1202, ADR-0028), and the adapter's
- * descriptor template, which `listAdapters` answers from then on. `tag` is
- * `null` for a local manifest, which is no release.
- */
-export interface InstalledAdapter {
-  adapter_kind: string;
-  adapter_version: string;
-  interface_version: string;
-  source_url: string;
-  tag: string | null;
-  artifact_sha256: string;
-  hosts: string[];
-  template: SourceDescriptor;
-}
-
-/**
  * Install an external adapter (#1202, #1209): `source` is a GitHub
  * repository URL (its latest release), a manifest URL, or a local
  * `knobas-adapter.json`. A refused install rejects with `invalid` and the
@@ -641,50 +121,6 @@ export interface InstalledAdapter {
  */
 export function installAdapter(manifest: string): Promise<InstalledAdapter> {
   return invoke<InstalledAdapter>("install_adapter", { manifest });
-}
-
-/**
- * What the last update check of an installed adapter found (#1209):
- * `current`; `available`, a newer release nothing has switched to;
- * `failed`, the check could not read the latest release; `refused`, the
- * reader updated and the new release's checks refused it, so the installed
- * one stays.
- */
-export type UpdateCheck =
-  | { state: "current" }
-  | { state: "available"; tag: string | null; adapter_version: string }
-  | { state: "failed"; reason: string }
-  | { state: "refused"; tag: string | null; reason: string };
-
-/** A source of an installed adapter, which uninstall asks about. */
-export interface AdapterSource {
-  id: string;
-  display_name: string;
-}
-
-/**
- * One installed external adapter (#1209, #1210): its pin, its sources, why
- * it was refused at load or restore (`refused`), and the last update check
- * (`update`, `null` before one ran).
- */
-export interface AdapterStatus {
-  adapter_kind: string;
-  name: string;
-  adapter_version: string;
-  interface_version: string;
-  source_url: string;
-  tag: string | null;
-  artifact_sha256: string;
-  hosts: string[];
-  sources: AdapterSource[];
-  refused: string | null;
-  update: UpdateCheck | null;
-}
-
-/** Uninstall's answer for one source: remove its items, or keep them. */
-export interface Removal {
-  source_id: string;
-  purge_items: boolean;
 }
 
 export function listInstalledAdapters(): Promise<AdapterStatus[]> {
@@ -846,341 +282,6 @@ export function reindexFts(): Promise<void> {
 }
 
 // -- The write queue (issue #42) ----------------------------------------------
-
-/**
- * What the queue will do about a write next —
- * `knobas_core::write_queue::WriteState`.
- *
- * The panel branches on this and so does the shell badge, so the three open
- * states are three different sentences, not three shades of "waiting":
- *
- * - `pending` — needs **patience**. It goes on its own when the source can
- *   take it.
- * - `held` — needs a **decision**. Its target changed after it was queued, and
- *   nothing moves it but the user. There is no timeout.
- * - `refused` — needs a **decision**. The source rejected the operation, and
- *   it is deliberately never retried.
- * - `sent` / `discarded` — settled. These never appear in
- *   {@link pendingWrites}.
- */
-export type WriteState = "pending" | "held" | "refused" | "sent" | "discarded";
-
-/**
- * Why a pending write has not gone yet —
- * `knobas_core::write_queue::WaitReason`.
- *
- * Only the two faults that pass on their own or with a human's help. A refusal
- * is not a reason to wait and has its own {@link WriteState}, so this is
- * `null` on every row that is not `pending` — and on a pending one that has
- * not been tried yet, which `attempted_at` is what distinguishes.
- */
-export type WaitReason = "unreachable" | "unauthorized";
-
-/** How a merge lands its commits — `knobas_source::MergeStyle`. */
-export type MergeStyle = "merge" | "rebase" | "squash";
-
-/** How a head is brought up to date with its base — `knobas_source::UpdateStyle`. */
-export type UpdateStyle = "merge" | "rebase";
-
-/** The state an edit puts a pull request in — `knobas_source::PullRequestState`. */
-export type PullRequestState = "open" | "closed";
-
-/** What a review says of a pull request — `knobas_source::ReviewVerdict`. */
-export type ReviewVerdict = "approve" | "request_changes" | "comment";
-
-/**
- * One line comment of a review — `knobas_source::ReviewComment`: the file's
- * path, the line number on `side` (`old` the file as it was, `new` as it
- * becomes), and what it says.
- */
-export interface ReviewComment {
-  path: string;
-  line: number;
-  side: ReviewSide;
-  body: string;
-}
-
-/** Which side of a diff a line number counts on — `knobas_source::ReviewSide`. */
-export type ReviewSide = "old" | "new";
-
-/** One override of a run (#669) -- `knobas_source::BuildParameter`. */
-export interface BuildParameter {
-  name: string;
-  value: string;
-}
-
-/**
- * The serialized `knobas_source::WriteOp` a queued write carries.
- *
- * Externally tagged, so the variant name is the object's one key. **It grows
- * per milestone** (ADR-0006), and this union grows with it — which means a
- * frontend written today will meet a payload it does not recognise. Handle
- * that by narrowing on the key rather than assuming `Comment`: an unrecognised
- * op can still be applied and discarded, and only *editing* needs to know
- * where the words are.
- */
-export type WriteOpPayload =
-  | { Comment: { entity: string; body: string } }
-  | { Transition: { entity: string; status: string } }
-  | {
-      CreateTicket: {
-        entity: string;
-        title: string;
-        body: string;
-        ticket_type: string;
-      };
-    }
-  | { CreateBranch: { entity: string; name: string; from_ref: string } }
-  | {
-      CreatePullRequest: {
-        entity: string;
-        title: string;
-        body: string;
-        head: string;
-        base: string;
-      };
-    }
-  | { Approve: { entity: string; body: string } }
-  /**
-   * Merge a pull request (#667). `entity` is the **pull request**; `style` is
-   * `knobas_source::MergeStyle`, and a word outside the three does not decode.
-   * `delete_branch` deletes the head branch once merged (#708); absent reads
-   * as `false`.
-   */
-  | {
-      MergePullRequest: {
-        entity: string;
-        style: MergeStyle;
-        delete_branch: boolean;
-        /** The commit message the reader wrote (#843): first line the title; absent or `null` keeps the source's default. */
-        message?: string | null;
-      };
-    }
-  /**
-   * Bring a pull request's head up to date with its base (#708). `entity` is
-   * the **pull request**; `style` is `knobas_source::UpdateStyle`. Mirrors
-   * `knobas_source::WriteOp::UpdatePullRequestBranch`.
-   */
-  | { UpdatePullRequestBranch: { entity: string; style: UpdateStyle } }
-  /**
-   * Set a build configuration's parameter (#668). `entity` is the
-   * **configuration**; `name` the parameter's full name. On an inherited
-   * parameter the source creates an own value that overrides it. `base` is
-   * the value the edit was made against, and the source refuses the write
-   * when the parameter no longer holds it; `null` for a secret, whose value
-   * is never drawn, and whose write is last-write-wins.
-   */
-  | { SetParameter: { entity: string; name: string; value: string; base: string | null } }
-  /**
-   * Run one build of a configuration (#669). `entity` is the
-   * **configuration**; `branch` the source's name for it, `null` for the
-   * default branch; `parameters` only the values the reader changed, for this
-   * build alone; `clean_checkout` and `first_in_queue` the source's run
-   * options (#852), absent read as `false`. Mirrors
-   * `knobas_source::WriteOp::RunBuild`.
-   */
-  | {
-      RunBuild: {
-        entity: string;
-        branch: string | null;
-        parameters: BuildParameter[];
-        clean_checkout?: boolean;
-        first_in_queue?: boolean;
-      };
-    }
-  /**
-   * Review a pull request (#705). `entity` is the **pull request**; `verdict`
-   * is `knobas_source::ReviewVerdict`; `comments` the line comments that go
-   * with it, empty for a review of the whole change.
-   */
-  | { SubmitReview: { entity: string; verdict: ReviewVerdict; body: string; comments: ReviewComment[] } }
-  /**
-   * Delete a branch (#707). `entity` is the **branch**; the source refuses
-   * the default branch and a protected one. Mirrors
-   * `knobas_source::WriteOp::DeleteBranch`.
-   */
-  | { DeleteBranch: { entity: string } }
-  /**
-   * Edit, close or reopen a pull request (#706). `entity` is the **pull
-   * request**; a field left `null` is not written, so only what the reader
-   * changed reaches the source. Mirrors `knobas_source::WriteOp::EditPullRequest`.
-   */
-  | {
-      EditPullRequest: { entity: string; title: string | null; body: string | null; state: PullRequestState | null };
-    }
-  /**
-   * Commit one file's new text through the source, never the checkout (#822).
-   * `repo` is the **repository**; `new_branch` makes that branch from
-   * `branch` first, `null` commits onto `branch`; `content` is the whole new
-   * text; `base_sha` the blob the edit was made against. A file that changed
-   * since comes back held, theirs in the held snapshot (`text`, `base`) and
-   * this payload as the reader's. *Apply anyway* re-sends against `base` by
-   * itself; an *Edit* (amend) of a moved commit sends `base_sha` set to the
-   * held side's `base`, or it is held again. Mirrors
-   * `knobas_source::WriteOp::CommitFile`.
-   */
-  | {
-      CommitFile: {
-        repo: string;
-        branch: string;
-        new_branch: string | null;
-        path: string;
-        content: string;
-        message: string;
-        base_sha: string;
-      };
-    }
-  /**
-   * A write outside every role's vocabulary (#1194, ADR-0029): `id` is the
-   * adapter's own name for the action, `fields` the answers of the dialog it
-   * declared, by field name. The shell copies both from the action and never
-   * reads them. Mirrors `knobas_source::WriteOp::SourceAction`.
-   */
-  | { SourceAction: { entity: string; id: string; fields: Record<string, string> } }
-  | { TriggerBuild: { entity: string } }
-  | { RerunBuild: { entity: string } }
-  | {
-      LogWork: {
-        entity: string;
-        /** RFC 3339, UTC — when the logged span began. */
-        started: string;
-        /** How long was **worked**, which is not the span's length. */
-        seconds: number;
-        comment: string;
-      };
-    }
-  | {
-      CreatePage: {
-        /** The **parent page**, as an entity id — this op's queue target. */
-        parent: string;
-        /** The space key in Confluence's own spelling (`ENG`), not an id. */
-        space: string;
-        title: string;
-        /** Storage format, not text: what a later read must return unchanged. */
-        body: string;
-      };
-    }
-  | {
-      CreateMonitor: {
-        /**
-         * What the create targets: the source that will make it, as
-         * `assets::MonitorTarget.entity` gives it. Never composed here (#453).
-         */
-        entity: string;
-        /**
-         * What the monitor is called, and therefore what attaches it: the
-         * next poll mirrors it, and `knobas_sync::attach` draws the
-         * `monitored-by` link to every asset carrying this name.
-         */
-        name: string;
-        /**
-         * What it checks, spelled as `kind` reads it: an http(s) URL, `host:port`,
-         * a host, or a container's name (#864).
-         */
-        url: string;
-        /** The kind of check; absent is `http`, what every create meant before #864. */
-        kind?: MonitorKind;
-      };
-    }
-  | {
-      UpdatePage: {
-        entity: string;
-        /**
-         * The version the edit was made **against**, not the one to write: the
-         * adapter sends `base_version + 1` and Confluence aborts if somebody
-         * else got there first (#286).
-         */
-        base_version: number;
-        /**
-         * The page's **whole** storage format. Confluence's content `PUT`
-         * replaces the record, so a body carrying only the edited section
-         * would delete the rest of the page — `page-sections.ts`'s
-         * `replaceSectionBody` is what composes this.
-         */
-        body: string;
-      };
-    }
-  /**
-   * Stop a monitor checking (#452). `entity` is the **monitor** (`kuma:8`).
-   *
-   * No second field: Uptime Kuma's `pauseMonitor` takes a monitor id and
-   * nothing else, so a duration or a reason here would be something knobas
-   * asked a reader for and threw away.
-   */
-  | { PauseMonitor: { entity: string } }
-  /** Start a paused monitor checking again (#452). */
-  | { ResumeMonitor: { entity: string } };
-
-/** What kind of check a `CreateMonitor` asks for — `knobas_source::MonitorKind` (#864). */
-export type MonitorKind = "http" | "tcp" | "ping" | "docker";
-
-/**
- * One write knobas still owes a source —
- * `knobas_core::write_queue::QueuedWrite`.
- *
- * `CONTEXT.md`'s vocabulary: a row in `pending` is a **pending write**, one in
- * `held` is a **held write**.
- */
-export interface QueuedWrite {
-  id: number;
-  source_id: string;
-  /** The target, as an entity id. */
-  entity_id: string;
-  /** The stable snake_case operation name — `"comment"`. */
-  op: string;
-  /** The serialized write op; hand it back to {@link amendWrite} edited. */
-  payload: WriteOpPayload;
-  /**
-   * The target as it stood when the write was queued.
-   *
-   * One half of the two versions a held write is shown with. Its shape is
-   * per-op (`knobas_core::write_queue::project`); for `"comment"` it carries
-   * `{op, live, text}`, where `text` is the item's indexed text — which every
-   * adapter builds from its title, description and comment bodies, so a new
-   * reply is exactly what changes it.
-   */
-  target_snapshot: unknown;
-  state: WriteState;
-  wait_reason: WaitReason | null;
-  /** What the source said, in its own words. Untrusted: render it as text. */
-  detail: string | null;
-  queued_at: string;
-  attempted_at: string | null;
-  attempts: number;
-  /**
-   * The target as it stood when the write was held — the other half of the two
-   * versions. `null` until a write is held; kept afterwards.
-   */
-  held_snapshot: unknown | null;
-  settled_at: string | null;
-  /**
-   * Whether the user has this write's source turned on, as of this read —
-   * derived by the backend, never stored (issue #204).
-   *
-   * A disabled source's items leave `sync.live_item` (migration 0012), so its
-   * writes go `held` by the same mechanism as a withdrawn target's. The facts
-   * are different and so are the remedies: a target that changed wants the
-   * two-versions choice, a source that is off wants re-enabling — say which,
-   * and never offer *Send mine anyway* for a source that cannot take it.
-   * Flips on the next read once the source is back on; `true` for a source
-   * that was never configured.
-   */
-  source_enabled: boolean;
-}
-
-/**
- * How many writes are in each open state —
- * `knobas_core::write_queue::QueueCounts`.
- *
- * Three numbers rather than one, deliberately: a single total would let
- * "3 waiting" absorb a write that needs a decision, which is the one thing the
- * shell badge exists to prevent.
- */
-export interface QueueCounts {
-  pending: number;
-  held: number;
-  refused: number;
-}
 
 /**
  * Every write knobas still owes a source, newest first — pending, held and

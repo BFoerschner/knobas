@@ -255,6 +255,23 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::assets::dependencies::DepViewSettings::export_all(cfg)?;
     crate::assets::dependencies::DepView::export_all(cfg)?;
     crate::assets::dependencies::DepViews::export_all(cfg)?;
+    // sources.ts
+    knobas_source::SourceDescriptor::export_all(cfg)?;
+    crate::sources::SourceSummary::export_all(cfg)?;
+    crate::sources::NewSource::export_all(cfg)?;
+    crate::sources::SourcePatch::export_all(cfg)?;
+    crate::sources::SourceDraft::export_all(cfg)?;
+    crate::sources::ConnectionReport::export_all(cfg)?;
+    crate::sources::install::InstalledAdapter::export_all(cfg)?;
+    crate::sources::installed::AdapterStatus::export_all(cfg)?;
+    crate::sources::installed::Removal::export_all(cfg)?;
+    knobas_sync::SyncReport::export_all(cfg)?;
+    knobas_sync::progress::SyncProgress::export_all(cfg)?;
+    knobas_sync::run_log::SourceSyncStatus::export_all(cfg)?;
+    knobas_sync::stats::DbStats::export_all(cfg)?;
+    knobas_core::write_queue::QueuedWrite::export_all(cfg)?;
+    knobas_source::WriteOp::export_all(cfg)?;
+    knobas_core::write_queue::QueueCounts::export_all(cfg)?;
     Ok(())
 }
 

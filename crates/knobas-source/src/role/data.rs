@@ -36,7 +36,8 @@ use super::{Field, KindOf, minimum};
 use crate::SourceDescriptor;
 
 /// One declared path of a claimed role that missed on the records.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct RoleMiss {
     /// The role, as claimed (`ticket-system`).
     pub role: String,

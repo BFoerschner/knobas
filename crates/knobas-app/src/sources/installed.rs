@@ -55,8 +55,9 @@ impl Installs {
 }
 
 /// What the last update check of an installed adapter found.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export_to = "sources.ts")]
 pub enum UpdateCheck {
     /// The installed release is the latest.
     Current,
@@ -73,14 +74,16 @@ pub enum UpdateCheck {
 }
 
 /// A source of an installed adapter, for uninstall's question.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct AdapterSource {
     pub id: String,
     pub display_name: String,
 }
 
 /// One installed adapter, as Settings lists it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct AdapterStatus {
     pub adapter_kind: String,
     /// The descriptor's name, or the kind for an adapter refused at load.
@@ -99,7 +102,8 @@ pub struct AdapterStatus {
 }
 
 /// Uninstall's answer for one source: remove its items, or keep them.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "sources.ts")]
 pub struct Removal {
     pub source_id: String,
     pub purge_items: bool,
