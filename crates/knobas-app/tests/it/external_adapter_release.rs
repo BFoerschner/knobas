@@ -761,3 +761,36 @@ async fn a_public_github_repository_installs_its_latest_release() {
         "the latest is installed"
     );
 }
+
+/// An update that cannot reach its release is a failed check, not a
+/// refusal: nothing was held to the checks.
+#[tokio::test]
+async fn an_update_that_cannot_reach_its_release_is_a_failed_check() {
+    let forge = Forge::start().await;
+    forge.publish("v0.1.0", &fixture_bytes(), |_| {}).await;
+    let (pool, _connector) = scratch("update-unreachable").await;
+    let store = tempfile::tempdir().unwrap();
+    let registry = Registry::default();
+    install_from(&pool, &registry, store.path(), &forge, &forge.repo_url()).await;
+    forge.server.reset().await;
+
+    let Err(error) = installed::update(
+        &pool,
+        &registry,
+        store.path(),
+        &forge.endpoints(),
+        "wasm-fixture",
+    )
+    .await
+    else {
+        panic!("an unreachable release must not update");
+    };
+    assert!(
+        matches!(
+            only(&pool, &registry).await.update,
+            Some(UpdateCheck::Failed { .. })
+        ),
+        "{error}"
+    );
+    assert!(builds(&registry));
+}
