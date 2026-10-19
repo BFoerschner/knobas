@@ -5,9 +5,9 @@
   entity;` in `commands/mod.rs` is as it was, and `app/src/lib/ipc/entity.ts` changes only the
   path in its first comment. The precedents are the #38, #278 and #428 entries, which added the
   `backup`, `time` and `assets` command modules; this one adds no module to the IPC surface and
-  splits one that exists. Ratified by the implementer on Opus
-  under Björn's 2026-10-18 reserved-steps rule; the rulings are in
-  `docs/decisions/2026-10-unattended-rulings.md` under `## #1316`.
+  splits one that exists. Ratified by the implementer on Opus under Björn's 2026-10-18
+  reserved-steps rule; the rulings are in `docs/decisions/2026-10-unattended-rulings.md` under
+  `## #1316`.
 
   **The layout.** One file per section header of the old file, the smallest merged with their
   neighbours, as the ticket names them:
