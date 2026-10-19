@@ -881,3 +881,17 @@ test("the fake Gitea source claims ticket-system and its tickets reach the board
   });
   expect(board.columns.map((column) => column.status).sort()).toEqual(["closed", "open"]);
 });
+
+test("the fixture's mini_board reads a saved view by its savedView argument (#1245)", () => {
+  const board = demoHandlers()["mini_board"]!({
+    sources: [],
+    ctxId: null,
+    project: null,
+    perColumn: null,
+    query: null,
+    savedView: "jira:board-21",
+    lanes: null,
+  }) as { columns: { status: string | null }[] };
+  // The board's own columns, as `saved_view_board` answers, not one per status.
+  expect(board.columns.map((column) => column.status)).toEqual(["Ready", "In flight", "Shipped"]);
+});

@@ -63,12 +63,12 @@
     /**
      * `mini_board` over `sources`, every source when empty: capped per column
      * or not, narrowed by a query or not; or a Jira view's board, when
-     * `jiraView` names one (#877); in lanes or not (#939).
+     * `savedView` names one (#877); in lanes or not (#939).
      */
     board: (
       perColumn: number | null,
       query: string | null,
-      jiraView?: string | null,
+      savedView?: string | null,
       lanes?: LanesAsked | null,
       sources?: string[],
     ) => Promise<MiniBoard>;
@@ -142,8 +142,8 @@
   import {
     deleteTicketView,
     filterSuggestions,
-    hideJiraView,
-    openJiraView,
+    hideSavedView,
+    openSavedView,
     saveTicketView,
     ticketViews,
     translateTicketView,
@@ -209,8 +209,8 @@
     ready,
     timedTicket,
     ports = {
-      board: (perColumn, query, jiraView, lanes, sources) =>
-        miniBoard({ sources: sources ?? [], context: null, project: null }, perColumn, query, jiraView, lanes),
+      board: (perColumn, query, savedView, lanes, sources) =>
+        miniBoard({ sources: sources ?? [], context: null, project: null }, perColumn, query, savedView, lanes),
       openExternal,
       detail: getEntity,
       contexts: listContexts,
@@ -220,8 +220,8 @@
       views: ticketViews,
       saveView: saveTicketView,
       deleteView: deleteTicketView,
-      hideView: hideJiraView,
-      openView: openJiraView,
+      hideView: hideSavedView,
+      openView: openSavedView,
       translateView: translateTicketView,
     },
     viewId = null,
@@ -261,7 +261,7 @@
    * source's query into conditions. The shell reads no query language.
    */
   function offersCopy(row: TicketViewRow): boolean {
-    return row.jira_ref !== null && sourceRoles.answers(TICKET_SYSTEM, jiraSourceId(row.jira_ref), TRANSLATE_QUERY);
+    return row.saved_view !== null && sourceRoles.answers(TICKET_SYSTEM, jiraSourceId(row.saved_view), TRANSLATE_QUERY);
   }
 
   /** The source's reading of a Jira view's query, or `null` with a toast saying why there is none. */
@@ -320,10 +320,10 @@
   const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
   const sessionKey = $derived(viewId ?? "");
   /** The Jira view the board reads (#877), or `null`: Jira decides its tickets and their order. */
-  const jiraRef = $derived(view?.jira ? view.jira_ref : null);
+  const savedViewId = $derived(view?.jira ? view.saved_view : null);
   /** Where *Choose which* goes: the first Jira view's source, else the sources. */
   const jiraSettings = $derived.by(() => {
-    const ref = (views ?? []).find((row) => row.jira !== null)?.jira_ref;
+    const ref = (views ?? []).find((row) => row.jira !== null)?.saved_view;
     return ref ? sourceHash(jiraSourceId(ref)) : "#/settings";
   });
 
@@ -416,14 +416,14 @@
   function readBoard(
     perColumn: number | null,
     query: string | null,
-    jiraView: string | null,
+    savedView: string | null,
     lanes?: LanesAsked | null,
   ): Promise<MiniBoard> {
     const sources = untrack(() => scope);
     if (sources !== null && sources.length === 0) {
       return Promise.resolve(emptyBoard());
     }
-    return ports.board(perColumn, query, jiraView, lanes, sources ?? []);
+    return ports.board(perColumn, query, savedView, lanes, sources ?? []);
   }
 
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
@@ -437,7 +437,7 @@
   /** How many lanes a laned board reads: the first ten, ten more a *Show N more lanes*. */
   let lanesShown = $state(LANES_AT_FIRST);
   /** The view's own columns, which gather the board's statuses (R-3.15). */
-  const ownColumns = $derived(jiraRef !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
+  const ownColumns = $derived(savedViewId !== null ? drawnJiraColumns(view?.columns ?? []) : (view?.columns ?? []));
   /** The board's columns as the view's own columns gather them (R-3.15). */
   const cols = $derived(viewColumns(board?.columns ?? [], ownColumns));
   const expandKey = (lane: Lane, column: MiniBoardColumn) =>
@@ -485,7 +485,7 @@
     if (base === null) return;
     const query = toQuery(config, filter);
     const mine = ++reading;
-    readBoard(capFor(), query === "" ? null : query, jiraRef, lanesAsked())
+    readBoard(capFor(), query === "" ? null : query, savedViewId, lanesAsked())
       .then((answer) => {
         if (mine !== reading) return;
         board = answer;
@@ -498,7 +498,7 @@
     // A session that comes back to a filter has not counted the whole yet.
     if (query !== base && total === null) {
       const at = epoch;
-      readBoard(1, base === "" ? null : base, jiraRef)
+      readBoard(1, base === "" ? null : base, savedViewId)
         .then((answer) => {
           if (at === epoch) total ??= sum(answer);
         })
@@ -899,11 +899,11 @@
         />
       {/if}
     </div>
-    {#if view?.jira && view.jira_ref}
+    {#if view?.jira && view.saved_view}
       <JiraSourceLine
         jira={view.jira}
         name={view.name}
-        sourceId={jiraSourceId(view.jira_ref)}
+        sourceId={jiraSourceId(view.saved_view)}
         openExternal={ports.openExternal ?? openExternal}
       />
     {/if}
@@ -1087,7 +1087,7 @@
       copiedFrom={drafting.from ?? null}
       copy={drafting.copy ?? null}
       oncopy={editing?.jira && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
-      board={(perColumn, query) => readBoard(perColumn, query, editing?.jira ? editing.jira_ref : null)}
+      board={(perColumn, query) => readBoard(perColumn, query, editing?.jira ? editing.saved_view : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}

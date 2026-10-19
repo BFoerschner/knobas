@@ -5167,6 +5167,35 @@ mod tests {
         }
     }
 
+    /// `mini_board`'s saved-view argument (#1245) is the one `entity.ts` sends.
+    /// Tauri reads a command's arguments by name, camel-cased, so a rename on
+    /// one side alone is no compile error: the board would quietly answer the
+    /// room instead of the view. Read off both sources, the way
+    /// [`the_mirror_invokes_the_commands_by_their_registered_names`] reads the
+    /// barrel.
+    #[test]
+    fn mini_board_takes_the_saved_view_the_mirror_sends() {
+        let own = include_str!("entity.rs");
+        let signature = own
+            .split_once(concat!("pub async fn ", "mini_board(")) // split, or it finds this line
+            .and_then(|(_, rest)| rest.split_once(") ->"))
+            .map(|(arguments, _)| arguments)
+            .expect("mini_board's signature");
+        assert!(
+            signature.contains("saved_view: Option<String>,"),
+            "mini_board takes no `saved_view`: {signature}"
+        );
+        let sent = MIRROR
+            .split_once("invoke<MiniBoard>(\"mini_board\", {")
+            .and_then(|(_, rest)| rest.split_once("});"))
+            .map(|(arguments, _)| arguments)
+            .expect("entity.ts invokes mini_board");
+        assert!(
+            sent.contains("savedView: "),
+            "entity.ts sends mini_board no `savedView`: {sent}"
+        );
+    }
+
     /// §3a, as a resolution rather than as a claim.
     ///
     /// The whole promise is *"a new source's items get grouped, chipped and
@@ -5590,10 +5619,10 @@ fn announce_context<R: tauri::Runtime>(
 /// ([`knobas_search::Searcher::matching_ids`]); omitted or blank, it narrows
 /// nothing.
 ///
-/// `jira_view` (#877) names a Jira view (`sync.jira_view`'s entity id): the
-/// board is then [`jira_view_board`]'s, the tickets Jira put on that view in
-/// Jira's order under the view's own columns, and the room dimensions are
-/// not read.
+/// `saved_view` (#877; named for the role by #1245) names a ticket system's
+/// saved view (`sync.saved_view`'s entity id): the board is then
+/// [`saved_view_board`]'s, the tickets the source put on that view in its
+/// order under the view's own columns, and the room dimensions are not read.
 ///
 /// `lanes` (#939, #1098) puts the board in lanes by that field (R-3.5) on
 /// the server: `per_column` then caps each lane's column, and only the
@@ -5609,7 +5638,7 @@ pub async fn mini_board(
     project: Option<String>,
     per_column: Option<u32>,
     query: Option<String>,
-    jira_view: Option<String>,
+    saved_view: Option<String>,
     lanes: Option<knobas_core::mini_board::LaneField>,
     lanes_first: Option<u32>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
@@ -5618,8 +5647,8 @@ pub async fn mini_board(
         by,
         first: lanes_first,
     });
-    if let Some(view) = jira_view {
-        return jira_view_board_laned(&pool, &view, per_column, query.as_deref(), lanes).await;
+    if let Some(view) = saved_view {
+        return saved_view_board_laned(&pool, &view, per_column, query.as_deref(), lanes).await;
     }
     mini_board_laned(
         &pool,
@@ -5719,38 +5748,39 @@ pub async fn mini_board_laned(
     .await?)
 }
 
-/// A Jira view's board (#877, R-3.21, R-3.24): the live tickets Jira put on
-/// the view (`sync.jira_view_member`), narrowed by `query` like
-/// [`mini_board_inner`], **in Jira's order**, under the view's own columns --
-/// each holding the tickets whose status is one of its statuses, empty ones
-/// included, as on the Jira board. A status on no column does not show. A
-/// view with no columns keeps one column per status. `per_column` cuts each
-/// column after its first cards in Jira's order; `total` counts them all.
+/// A saved view's board, such as a Jira view's (#877, #1245, R-3.21, R-3.24):
+/// the live tickets the source put on the view (`sync.saved_view_member`),
+/// narrowed by `query` like [`mini_board_inner`], **in the source's order**,
+/// under the view's own columns -- each holding the tickets whose status is
+/// one of its statuses, empty ones included, as on the source's board. A
+/// status on no column does not show. A view with no columns keeps one column
+/// per status. `per_column` cuts each column after its first cards in that
+/// order; `total` counts them all.
 ///
-/// Keys Jira returned that knobas does not mirror (a project the source
+/// Keys the source returned that knobas does not mirror (a project the source
 /// does not sync) are not on the board; they stay in the member table.
 ///
 /// # Errors
 ///
 /// `not_found` for a view the mirror does not hold; otherwise as
 /// [`mini_board_inner`].
-pub async fn jira_view_board(
+pub async fn saved_view_board(
     pool: &PgPool,
     view: &str,
     per_column: Option<u32>,
     query: Option<&str>,
 ) -> Result<knobas_core::mini_board::MiniBoard, IpcError> {
-    jira_view_board_laned(pool, view, per_column, query, None).await
+    saved_view_board_laned(pool, view, per_column, query, None).await
 }
 
-/// [`jira_view_board`] in lanes (#939): the whole view put in lanes after it
+/// [`saved_view_board`] in lanes (#939): the whole view put in lanes after it
 /// is read ([`knobas_core::mini_board::in_lanes`]), each lane's column in
-/// Jira's order and capped at `per_column`.
+/// the source's order and capped at `per_column`.
 ///
 /// # Errors
 ///
-/// See [`jira_view_board`].
-pub async fn jira_view_board_laned(
+/// See [`saved_view_board`].
+pub async fn saved_view_board_laned(
     pool: &PgPool,
     view: &str,
     per_column: Option<u32>,
@@ -5763,7 +5793,7 @@ pub async fn jira_view_board_laned(
         None => (per_column, None),
     };
     let columns: Option<serde_json::Value> =
-        sqlx::query_scalar("select columns from sync.jira_view where entity_id = $1")
+        sqlx::query_scalar("select columns from sync.saved_view where entity_id = $1")
             .bind(view)
             .fetch_optional(pool)
             .await?;
@@ -5775,7 +5805,7 @@ pub async fn jira_view_board_laned(
     let columns: Vec<crate::ticket_views::ViewColumn> =
         serde_json::from_value(columns).map_err(IpcError::internal)?;
     let members: Vec<String> = sqlx::query_scalar(
-        "select entity_id from sync.jira_view_member where view_id = $1 order by rank",
+        "select entity_id from sync.saved_view_member where view_id = $1 order by rank",
     )
     .bind(view)
     .fetch_all(pool)

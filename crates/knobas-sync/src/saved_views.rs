@@ -1,6 +1,6 @@
 //! A ticket system's saved views (#1207, ADR-0029; first Jira's views, #877,
 //! migration `0044`): every live item of a source's saved-view kinds,
-//! projected into `sync.jira_view` and `sync.jira_view_member` at the end of
+//! projected into `sync.saved_view` and `sync.saved_view_member` at the end of
 //! each of that source's runs, and each one's `knobas.ticket_view` row kept in
 //! step.
 //!
@@ -89,7 +89,7 @@ pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
 
 /// `held` is what keeps a purge from failing the run (#1088). The statement
 /// reads `sync.live_item` from its snapshot, and the foreign key on
-/// `sync.jira_view.entity_id` checks against the item as it is *now*: an item
+/// `sync.saved_view.entity_id` checks against the item as it is *now*: an item
 /// deleted after the snapshot -- `config::delete`'s purge, which runs beside a
 /// source's run by design (#127, #632) -- was read as live and then failed the
 /// insert, and with it the whole run. `for key share` waits for a delete in
@@ -103,7 +103,7 @@ with held as (
    where source_id = $1 and kind = any($2)
      for key share
 )
-insert into sync.jira_view
+insert into sync.saved_view
        (entity_id, source_id, ref_kind, ref_id, board_type, name, jql, sub_query, query,
         columns, sprint, last_read)
 select i.entity_id, i.source_id,
@@ -126,20 +126,20 @@ select i.entity_id, i.source_id,
        sprint = excluded.sprint, last_read = excluded.last_read";
 
 const DROP_GONE_VIEWS: &str = "
-delete from sync.jira_view v
+delete from sync.saved_view v
  where v.source_id = $1
    and not exists (select 1 from sync.live_item i
                     where i.entity_id = v.entity_id and i.kind = any($2))";
 
 const DROP_MEMBERS: &str = "
-delete from sync.jira_view_member m
- using sync.jira_view v
+delete from sync.saved_view_member m
+ using sync.saved_view v
  where m.view_id = v.entity_id and v.source_id = $1";
 
 const INSERT_MEMBERS: &str = "
-insert into sync.jira_view_member (view_id, entity_id, rank)
+insert into sync.saved_view_member (view_id, entity_id, rank)
 select v.entity_id, $1 || ':' || k.key, k.n::integer
-  from sync.jira_view v
+  from sync.saved_view v
   join sync.item i on i.entity_id = v.entity_id
  cross join lateral jsonb_array_elements_text(
          case when jsonb_typeof(i.payload->'keys') = 'array'
@@ -153,14 +153,14 @@ with views as (
          case v.ref_kind when 'filter' then 'list' else 'board' end as layout,
          trim(both '-' from regexp_replace(lower(v.entity_id), '[^a-z0-9]+', '-', 'g')) as id,
          row_number() over (order by v.entity_id) as n
-    from sync.jira_view v
+    from sync.saved_view v
    where v.source_id = $1
 ),
 earlier as (
   select exists (select 1 from knobas.ticket_view t
-                  where left(t.jira_ref, length($1) + 1) = $1 || ':') as any
+                  where left(t.saved_view, length($1) + 1) = $1 || ':') as any
 )
-insert into knobas.ticket_view (id, name, view_group, position, layout, columns, jira_ref, is_new)
+insert into knobas.ticket_view (id, name, view_group, position, layout, columns, saved_view, is_new)
 select w.id, w.name, w.view_group,
        (select coalesce(max(t.position), 0) from knobas.ticket_view t) + w.n::integer,
        w.layout, w.columns, w.entity_id, e.any
@@ -168,14 +168,14 @@ select w.id, w.name, w.view_group,
     on conflict (id) do update set
        name = excluded.name, view_group = excluded.view_group,
        columns = excluded.columns, updated_at = now()
- where knobas.ticket_view.jira_ref = excluded.jira_ref
+ where knobas.ticket_view.saved_view = excluded.saved_view
    and (knobas.ticket_view.name, knobas.ticket_view.view_group, knobas.ticket_view.columns)
        is distinct from (excluded.name, excluded.view_group, excluded.columns)";
 
 const DROP_GONE_TICKET_VIEWS: &str = "
 delete from knobas.ticket_view t
- where left(t.jira_ref, length($1) + 1) = $1 || ':'
-   and not exists (select 1 from sync.jira_view v where v.entity_id = t.jira_ref)";
+ where left(t.saved_view, length($1) + 1) = $1 || ':'
+   and not exists (select 1 from sync.saved_view v where v.entity_id = t.saved_view)";
 
 /// Project one source's live saved views (see the module docs).
 ///

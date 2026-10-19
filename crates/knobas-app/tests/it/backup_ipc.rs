@@ -753,7 +753,7 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
                 column: "priority".to_owned(),
                 direction: "descending".to_owned(),
             }),
-            jira_ref: None,
+            saved_view: None,
         },
     )
     .await

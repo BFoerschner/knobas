@@ -33,7 +33,7 @@ function row(id: string, group: string, position: number, extra: Partial<TicketV
     card_fields: ["signals"],
     list_columns: ["key"],
     list_sort: null,
-    jira_ref: null,
+    saved_view: null,
     count: 1,
     unreadable: null,
     jira: null,
@@ -97,17 +97,17 @@ test("Save as a view takes the text and how it shows now; Duplicate and Undo kee
   const saved = row("pay", "Projects", 7, {
     query: "project:PAY",
     columns: [{ name: "Open", statuses: ["To Do"], limit: null }],
-    jira_ref: "board:3",
+    saved_view: "board:3",
   });
   const fromFilter = draftFromFilter(saved, "project:PAY retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
   expect(fromFilter).toEqual(
-    expect.objectContaining({ id: null, name: "", group: "Projects", query: "project:PAY retry", layout: "list", lanes: "epic", list_sort: null, jira_ref: null }),
+    expect.objectContaining({ id: null, name: "", group: "Projects", query: "project:PAY retry", layout: "list", lanes: "epic", list_sort: null, saved_view: null }),
   );
   expect(fromFilter.columns).toEqual(saved.columns);
   expect(fromFilter.columns).not.toBe(saved.columns);
   expect(draftFromFilter(null, "", savedShowing(null))).toEqual(expect.objectContaining({ group: "Mine", query: "", layout: "board" }));
-  expect(draftCopy(saved)).toEqual(expect.objectContaining({ id: null, position: null, name: "Copy of pay", jira_ref: null }));
-  expect(draftRestore(saved)).toEqual(expect.objectContaining({ id: "pay", position: 7, name: "pay", jira_ref: "board:3" }));
+  expect(draftCopy(saved)).toEqual(expect.objectContaining({ id: null, position: null, name: "Copy of pay", saved_view: null }));
+  expect(draftRestore(saved)).toEqual(expect.objectContaining({ id: "pay", position: 7, name: "pay", saved_view: "board:3" }));
 });
 
 test("a Jira view is read from a board of its type or a saved filter, and a sprint ends on a day (#879)", () => {
@@ -120,7 +120,7 @@ test("a Jira view is read from a board of its type or a saved filter, and a spri
 
 test("Jira boards and Jira filters come after every group of your own, and a Jira view is found by its JQL", () => {
   const views = [
-    row("cus", "Jira boards", 0, { jira: jiraOf("project = CUS"), jira_ref: "jira:board-31" }),
+    row("cus", "Jira boards", 0, { jira: jiraOf("project = CUS"), saved_view: "jira:board-31" }),
     row("ops", "Ops", 1),
     row("mine", "Mine", 2),
   ];
@@ -146,9 +146,9 @@ function jiraOf(jql: string, extra: Partial<JiraSource> = {}): JiraSource {
 
 test("a hidden Jira view leaves its group and is listed apart, in list order (#878, R-3.25)", () => {
   const views = [
-    row("flow", "Jira boards", 4, { jira: jiraOf("project = PAY", { hidden: true }), jira_ref: "jira:board-22" }),
-    row("cus", "Jira boards", 2, { jira: jiraOf("project = CUS"), jira_ref: "jira:board-31" }),
-    row("fix", "Jira filters", 3, { jira: jiraOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), jira_ref: "jira:filter-1" }),
+    row("flow", "Jira boards", 4, { jira: jiraOf("project = PAY", { hidden: true }), saved_view: "jira:board-22" }),
+    row("cus", "Jira boards", 2, { jira: jiraOf("project = CUS"), saved_view: "jira:board-31" }),
+    row("fix", "Jira filters", 3, { jira: jiraOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), saved_view: "jira:filter-1" }),
   ];
   expect(groupViews(views, "").map((group) => [group.name, group.views.map((view) => view.id)])).toEqual([
     ["Jira boards", ["cus"]],
@@ -185,7 +185,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
     unsynced: [],
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
-  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, jira_ref: "mock:board-40", columns, lanes: "priority" });
+  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, saved_view: "mock:board-40", columns, lanes: "priority" });
   // As the Jira adapter reads the query (#1208): the source's answer, not the shell's.
   const copy: QueryTranslation = {
     conditions: [{ key: "project", negated: false, values: ["OPS", "WEB"] }],
@@ -194,7 +194,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   };
   const { draft, from } = draftJiraCopy(board, jira, copy);
   expect(draft).toEqual(
-    expect.objectContaining({ id: null, position: null, name: "Platform on-call", group: "Mine", query: "project:OPS project:WEB", lanes: "priority", jira_ref: null }),
+    expect.objectContaining({ id: null, position: null, name: "Platform on-call", group: "Mine", query: "project:OPS project:WEB", lanes: "priority", saved_view: null }),
   );
   expect(draft.columns).toEqual(columns);
   expect(draft.columns).not.toBe(columns);
@@ -207,7 +207,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   // *Save as a view* on a Jira view: the copy's conditions, then what the bar adds, and how the tickets show now.
   const saved = draftJiraCopy(board, jira, copy, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
   expect(saved.draft).toEqual(
-    expect.objectContaining({ name: "", group: "Mine", query: "project:OPS project:WEB priority:High retry", layout: "list", lanes: "epic", jira_ref: null }),
+    expect.objectContaining({ name: "", group: "Mine", query: "project:OPS project:WEB priority:High retry", layout: "list", lanes: "epic", saved_view: null }),
   );
   expect(saved.from.left).toHaveLength(1);
 });

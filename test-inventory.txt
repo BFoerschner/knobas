@@ -134,6 +134,7 @@ knobas-app	lib/knobas_app	commands::entity::tests::a_declared_kind_resolves_to_t
 knobas-app	lib/knobas_app	commands::entity::tests::an_empty_list_binds_as_null
 knobas-app	lib/knobas_app	commands::entity::tests::every_combination_chooses_its_statement
 knobas-app	lib/knobas_app	commands::entity::tests::every_statement_names_its_columns_and_no_two_are_the_same
+knobas-app	lib/knobas_app	commands::entity::tests::mini_board_takes_the_saved_view_the_mirror_sends
 knobas-app	lib/knobas_app	commands::entity::tests::nothing_declared_resolves_to_none_rather_than_to_a_guess
 knobas-app	lib/knobas_app	commands::entity::tests::the_mirror_invokes_the_commands_by_their_registered_names
 knobas-app	lib/knobas_app	commands::entity::tests::the_order_deserializes_as_the_frontend_spells_it
@@ -1681,6 +1682,7 @@ knobas-db	lib/knobas_db	test_util::tests::a_removed_root_takes_its_lock_with_it
 knobas-db	lib/knobas_db	test_util::tests::a_sweep_removes_the_abandoned_and_spares_the_owned
 knobas-db	lib/knobas_db	test_util::tests::the_nonce_identifies_this_run_and_nothing_else
 knobas-db	lib/knobas_db	test_util::tests::the_reaper_holds_the_lock_it_took_until_the_directory_is_gone
+knobas-db	test/backup	an_archive_from_before_the_saved_view_rename_restores
 knobas-db	test/backup	the_archive_carries_the_owned_schema_and_leaves_the_mirror_out
 knobas-db	test/embedded	a_connector_does_not_print_its_password
 knobas-db	test/embedded	a_connector_hands_out_connections_outside_every_pool
@@ -1731,6 +1733,8 @@ knobas-db	test/schema	the_view_still_reaches_the_fts_index
 knobas-db	test/schema	the_write_queue_constrains_its_states_and_reasons
 knobas-db	test/schema	zero_eleven_makes_the_active_link_rule_unordered
 knobas-db	test/schema	zero_eleven_resolves_the_reversed_pairs_a_shipped_defect_left_behind
+knobas-db	test/schema	zero_fifty_three_keeps_the_saved_views_an_install_already_had
+knobas-db	test/schema	zero_fifty_three_names_the_saved_views_for_the_role
 knobas-db	test/schema	zero_seven_backfills_every_existing_link_as_confirmed
 knobas-db	test/schema	zero_three_applies_through_the_runner_to_a_database_that_predates_it
 knobas-db	test/schema	zero_twenty_seven_changes_only_a_title_that_holds_a_slash

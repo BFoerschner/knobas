@@ -117,9 +117,9 @@ interface Harness {
   views: TicketViewRow[];
   saved: TicketViewDraft[];
   deleted: string[];
-  /** Every `hide_jira_view` (#878): the view and whether it was hidden. */
+  /** Every `hide_saved_view` (#878): the view and whether it was hidden. */
   hidden: [string, boolean][];
-  /** Every `open_jira_view` (#878). */
+  /** Every `open_saved_view` (#878). */
   opened: string[];
   /** Every `translate_ticket_view` (#1208). */
   translated: string[];
@@ -239,7 +239,7 @@ function harness(
         if (row?.jira) row.jira = { ...row.jira, new: false };
         return Promise.resolve();
       },
-      board: (perColumn, query, _jiraView, lanes) => {
+      board: (perColumn, query, _savedView, lanes) => {
         reads.push(lanes ? { perColumn, query, lanes } : { perColumn, query });
         // Grammar keys narrow nothing here; the reads record them.
         const words = (query ?? "")
@@ -890,7 +890,7 @@ function view(id: string, name: string, group: string, position: number, extra: 
     card_fields: ["type", "signals", "comments", "assignee"],
     list_columns: ["key", "summary", "status", "priority", "signals", "assignee", "updated"],
     list_sort: null,
-    jira_ref: null,
+    saved_view: null,
     count: 3,
     unreadable: null,
     jira: null,
@@ -1024,7 +1024,7 @@ test("Save as a view saves the view's text plus the chips, dropdowns and words, 
       group: "Projects",
       query: "project:PAY issuetype:Story r",
       layout: "list",
-      jira_ref: null,
+      saved_view: null,
     }),
   ]);
   expect(dialog()).toBeNull();
@@ -1284,7 +1284,7 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
     view("my-work", "My work", "Mine", 0, { query: "assignee:@me", count: 2 }),
     view("jira-board-21", "Payments and Ops flow", "Jira boards", 1, {
       columns: FLOW_COLUMNS,
-      jira_ref: "jira:board-21",
+      saved_view: "jira:board-21",
       count: 18,
       jira: {
         kind: "board",
@@ -1309,11 +1309,11 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
   };
   const jiraReads: (string | null)[] = [];
   const plain = h.ports.board;
-  h.ports.board = async (perColumn, query, jiraView) => {
-    jiraReads.push(jiraView ?? null);
+  h.ports.board = async (perColumn, query, savedView) => {
+    jiraReads.push(savedView ?? null);
     const whole = await plain(perColumn, query);
-    if (!jiraView) return whole;
-    // As `jira_view_board` answers: each Jira column by its name.
+    if (!savedView) return whole;
+    // As `saved_view_board` answers: each Jira column by its name.
     return {
       sources: whole.sources,
       lanes: [],
@@ -1409,7 +1409,7 @@ test("Make an editable copy opens New view on your own copy: the JQL it could te
       group: "Mine",
       query: "project:PAY project:OPS",
       columns: FLOW_COLUMNS,
-      jira_ref: null,
+      saved_view: null,
     }),
   );
 });
@@ -1494,7 +1494,7 @@ function filtersHarness(board: Partial<NonNullable<TicketViewRow["jira"]>> = {})
   h.views.push(
     view("jira-filter-10300", "PAY without a fix version", "Jira filters", 2, {
       layout: "list",
-      jira_ref: "jira:filter-10300",
+      saved_view: "jira:filter-10300",
       count: 4,
       jira: {
         ...flow.jira!,
@@ -1576,7 +1576,7 @@ test("View settings on a Jira view says Jira decides, locks its columns, and sav
   flushSync();
   [...box.querySelectorAll<HTMLButtonElement>("button")].find((b) => b.textContent === "Save view")!.click();
   await settle();
-  expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", lanes: "assignee", columns: FLOW_COLUMNS, jira_ref: "jira:board-21" });
+  expect(h.saved.at(-1)).toMatchObject({ id: "jira-board-21", lanes: "assignee", columns: FLOW_COLUMNS, saved_view: "jira:board-21" });
 });
 
 const srcLines = () => [...target.querySelectorAll(".tf-vw-srcline")].map((p) => p.textContent!.replace(/\s+/g, " ").trim());
@@ -1670,9 +1670,9 @@ function trackerHarness() {
   const h = harness([], [], TRACKER_CORPUS);
   const whole = h.ports.board;
   const scopes: (string[] | undefined)[] = [];
-  h.ports.board = async (perColumn, query, jiraView, lanes, sources) => {
+  h.ports.board = async (perColumn, query, savedView, lanes, sources) => {
     scopes.push(sources);
-    const board = await whole(perColumn, query, jiraView, lanes);
+    const board = await whole(perColumn, query, savedView, lanes);
     if (!sources?.length) return board;
     const kept = (column: MiniBoard["columns"][number]) => column.cards.filter((c) => sources.includes(c.source_id));
     const columns = board.columns

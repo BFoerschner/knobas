@@ -64,7 +64,7 @@ const sourcePorts: SettingsPorts = {
   uninstallAdapter: () => Promise.reject(new Error("unused")),
   listen: () => Promise.resolve(() => {}),
   ticketViews: () => Promise.resolve([]),
-  hideJiraView: () => Promise.resolve(),
+  hideSavedView: () => Promise.resolve(),
 };
 
 function sectionPorts(over: Partial<SectionPorts> = {}) {

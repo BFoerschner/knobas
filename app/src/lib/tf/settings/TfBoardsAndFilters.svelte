@@ -7,7 +7,7 @@
     page's own save, so a sync recorded field id is kept. Read at the next
     sync.
   - Every Jira view the source keeps: its ticket count, the tickets on it
-    knobas does not mirror, and *Hide* / *Show* (`hide_jira_view`).
+    knobas does not mirror, and *Hide* / *Show* (`hide_saved_view`).
 -->
 <script lang="ts">
   import { ipcErrorMessage } from "../../ipc";
@@ -75,7 +75,7 @@
 
   async function toggle(view: SourceView) {
     try {
-      await ports.hideJiraView(view.id, !view.jira.hidden);
+      await ports.hideSavedView(view.id, !view.jira.hidden);
       read();
     } catch (cause) {
       push({ text: `${view.name}: ${ipcErrorMessage(cause)}`, tone: "err" });

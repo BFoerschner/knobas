@@ -2058,7 +2058,7 @@ const UNKEYED_ENTITY_IDS: [&str; 13] = [
     "knobas.timer.entity_id",
     "knobas.worklog.entity_id",
     "knobas.write_queue.entity_id",
-    "sync.jira_view_member.entity_id",
+    "sync.saved_view_member.entity_id",
     "sync.similar_text_counted.entity_id",
     "sync.similar_text_top.other_id",
 ];
@@ -2148,4 +2148,140 @@ async fn every_entity_id_compares_bytewise_and_a_title_by_the_database() {
         ["default", "default"],
         "a title sorts as the user reads"
     );
+}
+
+/// Migration `0053` (#1245): a ticket system's saved views keep no Jira name.
+/// The two tables `0044` made are `sync.saved_view` and
+/// `sync.saved_view_member`, `knobas.ticket_view.jira_ref` is `saved_view`,
+/// and no constraint or index on them still says `jira`.
+#[tokio::test]
+async fn zero_fifty_three_names_the_saved_views_for_the_role() {
+    let pool = &knobas_db::test_util::test_pool().await;
+    migrate::run(pool).await.unwrap();
+
+    let tables: Vec<Option<String>> = sqlx::query_scalar(
+        "select to_regclass(name)::text from unnest(array[
+           'sync.saved_view', 'sync.saved_view_member', 'sync.jira_view', 'sync.jira_view_member'
+         ]) as name",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        tables,
+        [
+            Some("sync.saved_view".to_owned()),
+            Some("sync.saved_view_member".to_owned()),
+            None,
+            None
+        ]
+    );
+
+    let columns: Vec<String> = sqlx::query_scalar(
+        "select column_name::text from information_schema.columns
+          where table_schema = 'knobas' and table_name = 'ticket_view'
+            and column_name in ('jira_ref', 'saved_view')",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert_eq!(columns, ["saved_view"]);
+
+    let named_for_jira: Vec<String> = sqlx::query_scalar(
+        "select c.conname::text from pg_constraint c
+          where c.conrelid in ('sync.saved_view'::regclass, 'sync.saved_view_member'::regclass)
+            and c.conname like '%jira%'
+         union all
+         select i.relname::text from pg_index x join pg_class i on i.oid = x.indexrelid
+          where x.indrelid in ('sync.saved_view'::regclass, 'sync.saved_view_member'::regclass)
+            and i.relname like '%jira%'",
+    )
+    .fetch_all(pool)
+    .await
+    .unwrap();
+    assert!(
+        named_for_jira.is_empty(),
+        "still named for Jira: {named_for_jira:?}"
+    );
+}
+
+/// An existing install (#1245): the views, their members and a ticket view's
+/// reference written under `0044`'s names are there under `0053`'s, so the
+/// rename asks no sync to run again. Its own database, because the wind-back
+/// renames the tables back.
+#[tokio::test]
+async fn zero_fifty_three_keeps_the_saved_views_an_install_already_had() {
+    let pool = knobas_db::test_util::scratch_database("saved-views-53")
+        .await
+        .pool(2)
+        .await
+        .expect("a pool on the scratch database");
+
+    // Wind back to an install that predates 0053: the old names, and the
+    // runner's record of 0053 gone.
+    sqlx::raw_sql(
+        "do $$
+         declare r record;
+         begin
+           for r in
+             select c.conrelid::regclass::text as rel, c.conname::text as name
+               from pg_constraint c
+              where c.conrelid in ('sync.saved_view'::regclass, 'sync.saved_view_member'::regclass)
+                and c.conname like 'saved\\_view%'
+           loop
+             execute format('alter table %s rename constraint %I to %I',
+                            r.rel, r.name, 'jira' || substr(r.name, length('saved') + 1));
+           end loop;
+         end
+         $$;
+         alter index sync.saved_view_source_idx rename to jira_view_source_idx;
+         alter table sync.saved_view rename to jira_view;
+         alter table sync.saved_view_member rename to jira_view_member;
+         alter table knobas.ticket_view rename column saved_view to jira_ref;
+         delete from public._sqlx_migrations where version = 53;",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    sqlx::raw_sql(
+        "insert into knobas.entity (id, kind, title) values ('jira:board-53', 'jira_view', 'PAY board');
+         insert into sync.item (entity_id, source_id, kind, payload)
+           values ('jira:board-53', 'jira', 'jira_view', '{}');
+         insert into sync.jira_view (entity_id, source_id, ref_kind, ref_id, name)
+           values ('jira:board-53', 'jira', 'board', '53', 'PAY board');
+         insert into sync.jira_view_member (view_id, entity_id, rank)
+           values ('jira:board-53', 'jira:PAY-2', 1), ('jira:board-53', 'jira:PAY-1', 2);
+         insert into knobas.ticket_view (id, name, view_group, position, jira_ref)
+           values ('jira-board-53', 'PAY board', 'Jira boards', 0, 'jira:board-53');",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    migrate::run(&pool).await.unwrap();
+
+    let name: String =
+        sqlx::query_scalar("select name from sync.saved_view where entity_id = 'jira:board-53'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(name, "PAY board");
+    let members: Vec<(String, i32)> = sqlx::query_as(
+        "select entity_id, rank from sync.saved_view_member
+          where view_id = 'jira:board-53' order by rank",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        members,
+        [("jira:PAY-2".to_owned(), 1), ("jira:PAY-1".to_owned(), 2)]
+    );
+    let shows: Option<String> =
+        sqlx::query_scalar("select saved_view from knobas.ticket_view where id = 'jira-board-53'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(shows.as_deref(), Some("jira:board-53"));
 }

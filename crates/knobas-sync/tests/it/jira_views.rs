@@ -1,6 +1,6 @@
 //! Jira views (#877) through `knobas_sync::run_once`: a source that emits
-//! `jira_view` items the way the Jira adapter does, then `sync.jira_view`,
-//! `sync.jira_view_member` and `knobas.ticket_view` read back.
+//! `jira_view` items the way the Jira adapter does, then `sync.saved_view`,
+//! `sync.saved_view_member` and `knobas.ticket_view` read back.
 //!
 //! Each test has a scratch database of its own, so source ids repeat freely.
 
@@ -187,7 +187,7 @@ fn source_of(adapter: Adapter, views: Vec<(String, String, Value, bool)>) -> (Bo
 
 async fn members(pool: &PgPool, view: &str) -> Vec<(String, i32)> {
     sqlx::query(
-        "select entity_id, rank from sync.jira_view_member where view_id = $1 order by rank",
+        "select entity_id, rank from sync.saved_view_member where view_id = $1 order by rank",
     )
     .bind(view)
     .fetch_all(pool)
@@ -203,7 +203,7 @@ async fn ticket_view(
     id: &str,
 ) -> Option<(String, String, Value, String, Option<String>)> {
     sqlx::query(
-        "select name, view_group, columns, lanes, jira_ref from knobas.ticket_view where id = $1",
+        "select name, view_group, columns, lanes, saved_view from knobas.ticket_view where id = $1",
     )
     .bind(id)
     .fetch_optional(pool)
@@ -215,7 +215,7 @@ async fn ticket_view(
             row.get("view_group"),
             row.get("columns"),
             row.get("lanes"),
-            row.get("jira_ref"),
+            row.get("saved_view"),
         )
     })
 }
@@ -231,7 +231,7 @@ async fn a_jira_view_is_kept_with_its_tickets_in_jiras_order_and_shows_as_a_tick
     )]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
 
-    let row = sqlx::query("select ref_kind, ref_id, board_type, name, sub_query, columns from sync.jira_view where entity_id = 'jira:board-22'")
+    let row = sqlx::query("select ref_kind, ref_id, board_type, name, sub_query, columns from sync.saved_view where entity_id = 'jira:board-22'")
         .fetch_one(&pool)
         .await
         .expect("the view is kept");
@@ -316,7 +316,7 @@ async fn a_view_whose_payload_says_nothing_holds_nothing() {
     )]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     let row = sqlx::query(
-        "select ref_kind, columns, sprint from sync.jira_view where entity_id = 'jira:board-9'",
+        "select ref_kind, columns, sprint from sync.saved_view where entity_id = 'jira:board-9'",
     )
     .fetch_one(&pool)
     .await
@@ -352,7 +352,7 @@ async fn a_board_deleted_in_jira_leaves_with_its_tickets_and_its_ticket_view() {
         .unwrap();
 
     let views: Vec<String> =
-        sqlx::query_scalar("select entity_id from sync.jira_view order by entity_id")
+        sqlx::query_scalar("select entity_id from sync.saved_view order by entity_id")
             .fetch_all(&pool)
             .await
             .unwrap();
@@ -397,17 +397,22 @@ async fn a_favourite_filter_shows_as_a_list_under_jira_filters() {
     )]);
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     let ref_kind: String = sqlx::query_scalar(
-        "select ref_kind from sync.jira_view where entity_id = 'jira:filter-10300'",
+        "select ref_kind from sync.saved_view where entity_id = 'jira:filter-10300'",
     )
     .fetch_one(&pool)
     .await
     .unwrap();
     assert_eq!(ref_kind, "filter");
-    let (name, group, columns, _, jira_ref) = ticket_view(&pool, "jira-filter-10300")
+    let (name, group, columns, _, saved_view) = ticket_view(&pool, "jira-filter-10300")
         .await
         .expect("a ticket view for the filter");
     assert_eq!(
-        (name.as_str(), group.as_str(), columns, jira_ref.as_deref()),
+        (
+            name.as_str(),
+            group.as_str(),
+            columns,
+            saved_view.as_deref()
+        ),
         (
             "PAY without a fix version",
             "Jira filters",
@@ -533,7 +538,7 @@ async fn a_board_whose_item_is_deleted_mid_projection_is_skipped_not_a_failed_sy
     run.commit().await.unwrap();
 
     let views: Vec<String> =
-        sqlx::query_scalar("select entity_id from sync.jira_view order by entity_id")
+        sqlx::query_scalar("select entity_id from sync.saved_view order by entity_id")
             .fetch_all(&pool)
             .await
             .unwrap();
@@ -664,7 +669,7 @@ async fn a_renamed_jira_source_still_lists_its_views_under_jira_boards_and_filte
     );
     knobas_sync::run_once(&pool, &src, None).await.unwrap();
     let groups: Vec<(String, String)> = sqlx::query_as(
-        "select id, view_group from knobas.ticket_view where jira_ref like 'jira:%' order by id",
+        "select id, view_group from knobas.ticket_view where saved_view like 'jira:%' order by id",
     )
     .fetch_all(&pool)
     .await

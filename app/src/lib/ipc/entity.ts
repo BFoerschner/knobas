@@ -2091,8 +2091,8 @@ export interface LanesAsked {
  * An unknown context is an empty board rather than a rejection — the tile has
  * to be able to say "nothing here" without saying "this broke".
  *
- * `jiraView` (#877) names a Jira view (its `jira_ref`): the board is then the
- * tickets Jira put on it, in Jira's order, under the view's own columns —
+ * `savedView` (#877) names a saved view (its `saved_view`, #1245): the board is then the
+ * tickets its source put on it, in the source's order, under the view's own columns —
  * each column's `status` is the column's name — and the room scope is not
  * read.
  *
@@ -2104,7 +2104,7 @@ export function miniBoard(
   filter: Pick<EntityFilter, "sources" | "context" | "project">,
   perColumn?: number | null,
   query?: string | null,
-  jiraView?: string | null,
+  savedView?: string | null,
   lanes?: LanesAsked | null,
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
@@ -2113,7 +2113,7 @@ export function miniBoard(
     project: filter.project,
     perColumn: perColumn ?? null,
     query: query ?? null,
-    jiraView: jiraView ?? null,
+    savedView: savedView ?? null,
     lanes: lanes?.by ?? null,
     lanesFirst: lanes?.first ?? null,
   });

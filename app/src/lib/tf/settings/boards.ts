@@ -49,7 +49,7 @@ export type SourceView = TicketViewRow & { jira: JiraSource };
 /** The source's Jira views: the boards, then the filters, each in list order. */
 export function sourceViews(views: TicketViewRow[], sourceId: string): SourceView[] {
   return views
-    .filter((view): view is SourceView => view.jira !== null && (view.jira_ref ?? "").startsWith(`${sourceId}:`))
+    .filter((view): view is SourceView => view.jira !== null && (view.saved_view ?? "").startsWith(`${sourceId}:`))
     .sort(
       (a, b) =>
         Number(a.jira.kind === "filter") - Number(b.jira.kind === "filter") ||

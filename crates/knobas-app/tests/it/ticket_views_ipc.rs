@@ -80,7 +80,7 @@ fn draft(name: &str, query: &str) -> TicketViewDraft {
         card_fields: vec!["type".to_owned(), "signals".to_owned()],
         list_columns: vec!["key".to_owned(), "summary".to_owned(), "status".to_owned()],
         list_sort: None,
-        jira_ref: None,
+        saved_view: None,
     }
 }
 
@@ -155,7 +155,7 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
         column: "updated".to_owned(),
         direction: "ascending".to_owned(),
     });
-    whole.jira_ref = Some("board:21".to_owned());
+    whole.saved_view = Some("board:21".to_owned());
     let saved = ticket_views::save(&pool, whole.clone())
         .await
         .expect("save");
@@ -173,7 +173,7 @@ async fn a_view_keeps_what_it_was_saved_with_and_there_is_no_cap() {
             card_fields: whole.card_fields.clone(),
             list_columns: whole.list_columns.clone(),
             list_sort: whole.list_sort.clone(),
-            jira_ref: whole.jira_ref.clone(),
+            saved_view: whole.saved_view.clone(),
         }
     );
 
