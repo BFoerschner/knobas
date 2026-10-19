@@ -7392,3 +7392,44 @@ The merge-manager's rulings (Opus):
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the reads'
   inner functions against embedded Postgres in the `it` binary (`docs_ipc.rs`, `assets_ipc.rs`),
   the page and job tests, and the fake-features suite. *Reversing:* n/a.
+
+## #1300: the shell filters nothing (Opus implementer, 2026-10-19)
+
+- **The page tests' `sourceRoles.take` witnesses go; the house rule and the module test replace
+  them.** *Fork:* keep the one `take` per page that #1296–#1298 left as a tripwire, or delete it.
+  *Ruling:* delete it and keep each test's draw-as-read assertions. With `keep`, `draws` and
+  `scope` gone a claims list cannot change what a page draws; `roles.test.svelte.ts` pins that the
+  module offers only `take`, `forget` and `answers`, and `house-rules.test.ts` fails on a page
+  under `lib/tf/` that filters by `source_id` or reads `claims`/`fills`. *Reversing:* re-add four
+  `take` calls.
+- **The Tickets board's `take` after-read test stays.** It is not a row stub: Tickets still reads
+  the role module for `answers`, and the test pins that a new source list does not re-read the
+  board. *Reversing:* delete one test.
+- **The reach tally names the section that counted each line, so *Around this ticket* needs no
+  run kinds.** *Fork:* keep `aroundLines(tally, runKindsOf(kindRegistry))` in the Tickets preview,
+  or tag the tally. *Ruling:* tag it (`SectionTally.section`); a line the Builds read counted is a
+  build whatever its kind. That leaves `runKindsOf` (now with `FrameKinds` in `job.ts`, no longer
+  re-exported from `sections.ts`) to `itemHash` and the Connections drawer's `sectionOf`, which
+  names the section a linked run opens in from its kind alone, by the same rule as its address.
+  Spec #1293 puts "a row carries its frame" out of scope, so that is as narrow as routing gets.
+  *Reversing:* restore the `runKinds` parameter.
+- **The house rule over-reports and lists its exemptions.** It flags every `.filter(` callback
+  naming `source_id` under `lib/tf/` and expects five by name: the shell's sync-status merge (two),
+  Code's team lookup by repository address, the Builds staleness warning's source pick, and a
+  repository's own pull requests. A lexical rule cannot tell a row filter by role from these, so
+  each carries its reason and a new one fails until someone writes one. *Reversing:* n/a.
+- **ADR-0029's amendment gains one sentence** naming the run frame's last use and the house rule.
+  `CONTEXT.md`'s Role entry already says what the code does and is unchanged; its Monitors entry's
+  stale layout wording is outside this ticket. *Reversing:* n/a.
+- **Seams, chosen without a person to confirm them:** the role module's interface, the house-rules
+  scan, `aroundLines` and `reachTally`. *Reversing:* n/a.
+
+The merge-manager's rulings (Sonnet, #1300):
+
+- **The section-tagged tally stays.** *Fork:* the section tally and `aroundLines` counting by
+  section go past the ticket's wording, or not. *Ruling:* keep. Criterion 2 asks for a section
+  module with no run kinds and a run-kinds helper used for routing only; the tag is how the module
+  meets it without the Tickets preview reading the registry, and spec #1293's out-of-scope item
+  (a row carries its frame) is untouched. *Reversing:* restore the `runKinds` parameter.
+- **`ipc/sources.ts` is a comment-only change.** Its doc comments follow the amendment; the
+  gate scope reads it as full only because a Rust test reads the file. *Reversing:* n/a.

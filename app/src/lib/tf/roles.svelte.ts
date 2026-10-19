@@ -1,32 +1,28 @@
 /**
- * Which sources each surface draws: the ones that claim its role (#1196,
- * ADR-0029, `CONTEXT.md` **Role**).
+ * What the shell still reads of the source list's role claims, now that the
+ * mirror answers a role and the shell asks for one and filters nothing
+ * (ADR-0029 as amended on 2026-10-19, #1293, #1300; `CONTEXT.md` **Role**).
  *
- * The shell draws a role, never a source. Code draws the sources that claim
- * `code-host`, Builds `ci`, Docs `wiki` and Monitors `monitoring`, whatever
- * their adapter kind, so a source of an adapter kind the shell has never seen
- * appears on every surface it claims. A source that claims none of them (the
- * compiled-in mock claims nothing, #1193) gets none of those surfaces.
+ * No surface keeps or drops a row here. Every read a role's surface is drawn
+ * from is narrowed to the role's fillers by the mirror: the pipelines, the
+ * Docs tree and the Monitors roster by themselves, the entity list and the
+ * ticket board by the `role` they are asked with. A page draws what its read
+ * answered; `lib/shell/house-rules.test.ts` pins that no page under `lib/tf/`
+ * filters rows by source.
  *
- * Tickets (#1200) draws `ticket-system`, but its board is counted on the
- * server, so it narrows its read rather than the rows: {@link SourceRoles.scope}
- * names the sources to read, and a dropped row would leave a count wrong.
+ * What is left is not a row filter:
  *
- * The claims ride on `list_sources` (`SourceSummary.roles`, §10.8), which the
- * shell reads once the database answers and again when a source is added or
- * removed (`TfShell.svelte`); it hands each answer to {@link sourceRoles}.
- * Module-level, like `kindRegistry` and `health`, because four pages read it
- * and the shell is the one place that already holds the list.
+ * - {@link SourceRoles.answers}: whether a source answers an optional read of
+ *   a role (`translate_query`, #1208), so Tickets offers a saved view's
+ *   editable copy only where it is claimed. It needs the list the shell read,
+ *   which `TfShell.svelte` hands to {@link sourceRoles} once the database
+ *   answers and again when a source is added or removed or a sync finishes.
+ * - {@link claims}: whether a source claims a role, read off a source the
+ *   caller holds (the job's Builds staleness warning, `job.ts`).
  *
- * Two cases narrow nothing, because the shell does not know their claims:
- * the time before the list has been read (or while it fails), and a row whose
- * source the list does not name, such as the items a removed source left
- * behind. Whether those stay drawn is not a question about roles.
- *
- * A claim is not enough where the records said otherwise (#1199, ADR-0028):
- * a role whose declared paths missed on the source's records
- * (`SourceSummary.role_misses`) is not drawn for that source, though its
- * items stay live everywhere else.
+ * A role a source claims is not filled where its records said otherwise
+ * (#1199, ADR-0028): a role whose declared paths missed on the source's
+ * records (`SourceSummary.role_misses`) answers no optional read.
  */
 import type { RoleClaim, RoleMiss } from "../ipc/sources";
 
@@ -62,37 +58,19 @@ export function fills(source: ClaimingSource, role: string): boolean {
 export interface SourceRoles {
   /** The source list the shell read last. */
   take(sources: readonly ClaimingSource[]): void;
-  /** Back to knowing nothing: every surface draws what it reads. */
+  /** Back to knowing nothing: no source answers an optional read. */
   forget(): void;
-  /** Whether a surface of `role` draws the rows of `sourceId`: it claims the role and fills it. */
-  draws(role: string, sourceId: string): boolean;
   /**
    * Whether `sourceId` answers the optional read `read` of `role` (#1208,
-   * `translate_query`): it fills the role and its claim names the read.
-   * Unlike {@link draws}, not knowing is no: an optional read is offered only
-   * where it is claimed, as an undeclared write is not drawn (ADR-0020).
+   * `translate_query`): it fills the role and its claim names the read. Not
+   * knowing is no: an optional read is offered only where it is claimed, as
+   * an undeclared write is not drawn (ADR-0020).
    */
   answers(role: string, sourceId: string, read: string): boolean;
-  /** `rows` as a surface of `role` draws them: the same array when nothing is dropped. */
-  keep<T extends { source_id: string }>(role: string, rows: T[]): T[];
-  /**
-   * The sources a read that the server narrows and counts asks for, for a
-   * surface of `role` (Tickets' board, #1200): `null` to narrow nothing, as
-   * {@link keep} does while the list is unread or when every listed source
-   * fills `role`; else the ids of the listed sources that fill it (claim it
-   * with no miss, #1199), which may be none.
-   */
-  scope(role: string): string[] | null;
 }
 
 export function createSourceRoles(): SourceRoles {
   const state = $state<{ sources: ClaimingSource[] | null }>({ sources: null });
-
-  function draws(role: string, sourceId: string): boolean {
-    if (state.sources === null) return true;
-    const source = state.sources.find((row) => row.id === sourceId);
-    return source === undefined || fills(source, role);
-  }
 
   return {
     take(sources) {
@@ -105,21 +83,10 @@ export function createSourceRoles(): SourceRoles {
     forget() {
       state.sources = null;
     },
-    draws,
     answers(role, sourceId, read) {
       const source = state.sources?.find((row) => row.id === sourceId);
       if (source === undefined || !fills(source, role)) return false;
       return (source.roles ?? []).some((claim) => claim.role === role && claim.reads.includes(read));
-    },
-    keep(role, rows) {
-      const kept = rows.filter((row) => draws(role, row.source_id));
-      return kept.length === rows.length ? rows : kept;
-    },
-    scope(role) {
-      if (state.sources === null) return null;
-      // Fillers, not claimers: a source whose records missed the role's paths is left out (#1199).
-      const fillers = state.sources.filter((source) => fills(source, role)).map((source) => source.id);
-      return fillers.length === state.sources.length ? null : fillers;
     },
   };
 }

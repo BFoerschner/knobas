@@ -104,15 +104,15 @@ test("Around this ticket groups the context's kinds as the room's tiles do, and 
   expect(aroundLines(null)).toEqual([]);
 });
 
-test("Around this ticket counts a CI run kind that is not build under Builds (#1256)", () => {
+test("Around this ticket counts what the Builds read answered under Builds, whatever its run kind (#1256, #1300)", () => {
   const tally = [
-    { kind: "build", tone: "ok" as const, count: 1 },
-    { kind: "workflow_run", tone: "err" as const, count: 2 },
+    { kind: "build", tone: "ok" as const, count: 1, section: "builds" as const },
+    { kind: "workflow_run", tone: "err" as const, count: 2, section: "builds" as const },
   ];
-  expect(aroundLines(tally, ["build", "workflow_run"])).toEqual([
-    { section: "Builds", count: "3 items", failing: "2 failing or down" },
-  ]);
-  expect(aroundLines(tally).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
+  expect(aroundLines(tally)).toEqual([{ section: "Builds", count: "3 items", failing: "2 failing or down" }]);
+  // A line no section read counted is grouped by its kind alone.
+  const loose = tally.map(({ kind, tone, count }) => ({ kind, tone, count }));
+  expect(aroundLines(loose).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
 });
 
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {

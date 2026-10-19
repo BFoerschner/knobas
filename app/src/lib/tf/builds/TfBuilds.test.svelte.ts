@@ -9,7 +9,6 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { JobPipeline, PipelineRow, RunRow } from "../../ipc/entity";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfBuilds, { forgetFolds, type BuildsPorts } from "./TfBuilds.svelte";
-import { sourceRoles } from "../roles.svelte";
 
 let target: HTMLElement;
 let page: ReturnType<typeof mount> | null = null;
@@ -340,13 +339,6 @@ test("a job with no pipelines says so and offers to search all of them", async (
 });
 
 test("Builds draws every pipeline the read answers and drops none by the source list (#1295)", async () => {
-  // The source list says TeamCity claims no CI; the mirror narrowed the read
-  // to CI's fillers already, so the page keeps its answer as it is.
-  sourceRoles.take([
-    // An adapter kind the shell has never seen.
-    { id: "relay", adapter_kind: "acme-ci", roles: [{ role: "ci", reads: ["run_log"] }] },
-    { id: "teamcity", adapter_kind: "teamcity", roles: [{ role: "wiki", reads: [] }] },
-  ]);
   const relay: PipelineRow = {
     ...pipeline("Rocket_Build", "Rocket_Build", [run("relay:run:7", "ok")]),
     entity_id: "relay:pipeline:Rocket_Build",

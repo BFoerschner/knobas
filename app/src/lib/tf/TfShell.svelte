@@ -230,7 +230,7 @@
         .then((rows) => {
           if (dead) return;
           sources = rows;
-          // Which sources each surface draws (#1196): the ones claiming its role.
+          // Which sources answer an optional read of a role (#1208); the mirror narrows the rows (#1300).
           sourceRoles.take(rows);
         })
         .catch(() => {});

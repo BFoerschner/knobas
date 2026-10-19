@@ -81,9 +81,11 @@
     originLabel,
     pagesRollup,
     resolveTicket,
+    runKindsOf,
     staleBuilds,
     weekReading,
     type AssetLine,
+    type FrameKinds,
     type SectionRow,
     type SourceFacts,
     type WeekReading,
@@ -92,7 +94,7 @@
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
-  import { ASSET_LIMIT, reachFilter, readSection, runKindsOf, SECTION_LIMIT, SECTION_READS, type FrameKinds, type SectionRead } from "./sections";
+  import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, SECTION_READS, type SectionRead } from "./sections";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";

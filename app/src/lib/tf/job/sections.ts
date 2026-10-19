@@ -12,9 +12,12 @@
  * read (ADR-0029 as amended on 2026-10-19). Builds names no kinds, and the
  * mirror answers the run kinds CI's fillers declare (#1295); Code, Pages and
  * Monitors name theirs within the role (#1296, #1297, #1298).
+ *
+ * Nothing here knows the CI role's run kinds (#1300): a run is a build because
+ * the Builds read answered it, and the tally says which section counted each
+ * line. Routing a run's address is `job.ts`'s `runKindsOf`.
  */
 import type { EntityFilter, EntityOrder, EntityPage, EntityRow, KindTally, Reached } from "../../ipc/entity";
-import type { KindRegistry } from "../../shell/kind-registry.svelte";
 import { CI, CODE_HOST, MONITORING, WIKI } from "../roles.svelte";
 import { CODE_KINDS } from "./job";
 
@@ -34,11 +37,6 @@ export interface SectionRead {
 }
 
 export type Section = "code" | "builds" | "pages" | "monitors";
-
-/** What the job needs of the adapters' claims: the CI role's run kinds, to route a run (#1256). */
-export type FrameKinds = Pick<KindRegistry, "frameKinds" | "load">;
-
-export { runKindsOf } from "./job";
 
 /**
  * The four sections read from the mirror. Assets come from the reach itself.
@@ -80,28 +78,42 @@ export interface ReachPorts {
 }
 
 /**
- * What the job's sections would hold for ticket `id`, counted by kind and
- * tone: the Code, Builds, Pages and Monitors reads as the job makes them,
- * each for its role, and
+ * One line of the reach tally: a kind and tone's count, and the section whose
+ * read counted it. `"assets"` is the reached assets, which come from the reach
+ * itself rather than a section read.
+ */
+export interface SectionTally extends KindTally {
+  section: Section | "assets";
+}
+
+/**
+ * What the job's sections would hold for ticket `id`, counted by section,
+ * kind and tone: the Code, Builds, Pages and Monitors reads as the job makes
+ * them, each for its role, and
  * the reached assets the Assets section reads (with no tone: their health is
  * read one asset at a time, and only on the job). A read that fails counts
  * nothing, as its section draws nothing.
  */
-export async function reachTally(ports: ReachPorts, id: string): Promise<KindTally[]> {
-  const reads = Object.values(SECTION_READS).map((read) => readSection(ports.listEntities, id, read).catch(() => []));
+export async function reachTally(ports: ReachPorts, id: string): Promise<SectionTally[]> {
+  const sections = Object.entries(SECTION_READS) as [Section, SectionRead][];
+  const reads = sections.map(([section, read]) =>
+    readSection(ports.listEntities, id, read)
+      .catch(() => [])
+      .then((rows) => rows.map((row) => ({ section, row }))),
+  );
   const assets = ports
     .jobReach(id)
     .then((rows) => rows.filter((row) => row.kind === "asset").slice(0, ASSET_LIMIT))
     .catch(() => [] as Reached[]);
   const rows = (await Promise.all(reads)).flat();
-  const counted = new Map<string, KindTally>();
-  const add = (kind: string, tone: KindTally["tone"]) => {
-    const key = `${kind}\u0000${tone ?? ""}`;
-    const held = counted.get(key) ?? { kind, tone, count: 0 };
+  const counted = new Map<string, SectionTally>();
+  const add = (section: SectionTally["section"], kind: string, tone: KindTally["tone"]) => {
+    const key = `${section}\u0000${kind}\u0000${tone ?? ""}`;
+    const held = counted.get(key) ?? { kind, tone, count: 0, section };
     held.count += 1;
     counted.set(key, held);
   };
-  for (const row of rows) add(row.kind, row.state?.tone ?? null);
-  for (const asset of await assets) add(asset.kind, null);
+  for (const { section, row } of rows) add(section, row.kind, row.state?.tone ?? null);
+  for (const asset of await assets) add("assets", asset.kind, null);
   return [...counted.values()];
 }

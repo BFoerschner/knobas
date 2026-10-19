@@ -464,8 +464,9 @@ export interface SourceSummary {
   kinds: KindInfo[];
   /**
    * The roles the source's adapter claims, from its descriptor template like
-   * {@link kinds} (#1196, ADR-0029): what Code, Builds, Docs and Monitors draw
-   * it for (`tf/roles.svelte.ts`). Empty for an adapter that claims none and
+   * {@link kinds} (#1196, ADR-0029). The mirror narrows a role's reads by
+   * these claims itself; the shell reads them only for which optional reads a
+   * source answers (`tf/roles.svelte.ts`, #1300). Empty for an adapter that claims none and
    * for a source whose adapter is no longer compiled in.
    *
    * Always sent. Optional here only so a stand-in summary written before
@@ -474,8 +475,9 @@ export interface SourceSummary {
   roles?: RoleClaim[];
   /**
    * The claimed roles whose declared paths missed on this source's records
-   * (#1199): the shell draws none of them for it (`tf/roles.svelte.ts`), and
-   * its health line names each path. Always sent; optional for the reason
+   * (#1199): the mirror leaves the source out of those roles' reads, the
+   * shell offers none of their optional reads (`tf/roles.svelte.ts`), and its
+   * health line names each path. Always sent; optional for the reason
    * {@link roles} is.
    */
   role_misses?: RoleMiss[];

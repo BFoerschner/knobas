@@ -10,7 +10,6 @@ import type { QueuedWrite } from "../../ipc/sources";
 import { toasts } from "../../shell/toasts.svelte";
 import { forgetFilters } from "../filter/filter-state.svelte";
 import TfDocs, { type DocsPorts } from "./TfDocs.svelte";
-import { sourceRoles } from "../roles.svelte";
 
 const TREE: DocsTree = {
   spaces: [
@@ -597,12 +596,6 @@ test("the choice is kept for the session, and without a job there is no switch",
 });
 
 test("Docs draws the spaces as read and keeps none by source: the read narrows itself to the wiki's fillers (#1296)", async () => {
-  // A source list that says neither source fills the wiki: the page drew
-  // neither space while it kept them by claims, and must now draw both.
-  sourceRoles.take([
-    { id: "notes", adapter_kind: "acme-notes", roles: [] },
-    { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
-  ]);
   const tree: DocsTree = {
     ...TREE,
     spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],
@@ -615,10 +608,6 @@ test("Docs draws the spaces as read and keeps none by source: the read narrows i
 });
 
 test("Docs draws the search hits as read, the read being the wiki's (#1296)", async () => {
-  sourceRoles.take([
-    { id: "notes", adapter_kind: "acme-notes", roles: [] },
-    { id: "confluence", adapter_kind: "confluence", roles: [{ role: "ci", reads: [] }] },
-  ]);
   const tree: DocsTree = {
     ...TREE,
     spaces: [...TREE.spaces, { source_id: "notes", key: "HB", name: "Handbook", pages: [{ entity_id: "notes:1", title: "Welcome", parent: null }] }],

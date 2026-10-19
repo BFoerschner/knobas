@@ -429,3 +429,91 @@ test("nothing outside the IPC barrel invokes a command", () => {
     "a module outside `lib/ipc/` reached for `invoke` — the ?fake-ipc census in lib/shell/dev/fake-tauri.test.ts parses only lib/ipc/*.ts, so that command is invisible to both the fixture and its record of what the walk cannot reach",
   ).toEqual(["lib/shell/dev/fake-tauri.ts"]);
 });
+
+/** The ticket-first shell's pages, as a path rather than as a spelling. */
+const TF_DIR = join(ROOT, "lib/tf");
+
+/** The argument lists of every `.<method>(` call in `code`, parentheses balanced. */
+function callArguments(code: string, method: string): string[] {
+  const found: string[] = [];
+  const opener = new RegExp(`\\.${method}\\s*\\(`, "g");
+  for (let match = opener.exec(code); match !== null; match = opener.exec(code)) {
+    let depth = 1;
+    let index = match.index + match[0].length;
+    const start = index;
+    while (index < code.length && depth > 0) {
+      if (code[index] === "(") depth += 1;
+      else if (code[index] === ")") depth -= 1;
+      index += 1;
+    }
+    found.push(code.slice(start, index - 1));
+  }
+  return found;
+}
+
+/**
+ * **The shell filters nothing** (#1293, #1300, ADR-0029 as amended on
+ * 2026-10-19): the mirror answers a role, and a page draws what its read
+ * answered. Every role change before the amendment (#1196, #1200, #1230,
+ * #1256, #1278) edited a dozen sites where a page read rows for every source
+ * and then dropped the ones whose source did not fill its role; a page that
+ * forgot one drew a source for a role it does not fill. The role module lost
+ * the means (`draws`, `keep`, `scope`; `roles.test.svelte.ts` pins what it
+ * still offers), and this rule keeps a page from growing its own.
+ *
+ * The scan reads every production file under `lib/tf/` and lists each
+ * `.filter(` whose callback names `source_id`, once per call. That
+ * over-reports by design: it cannot tell a row filter from a filter that
+ * merges one source's status rows, so the legitimate ones are spelled in the
+ * expected list with why, which also makes the rule fail in both directions
+ * (a pattern that reached nothing would leave the list short). A new entry is
+ * a row filter by source until its reason is written beside it; the fix for a
+ * page that needs one is to ask the mirror for the role, never to widen this
+ * list.
+ *
+ * The second half pins who reads a source's claims at all: `claims` and
+ * `fills` are the role module's, and the one caller outside it is the job's
+ * Builds staleness warning, which picks sources to warn about, not rows.
+ *
+ * Tests are out of the scan: a fixture that builds rows by source is not a
+ * page drawing them.
+ */
+test("no page under the ticket-first shell drops rows by source", () => {
+  const production = (file: string) =>
+    file.startsWith(TF_DIR + sep) && !/\.test\.(svelte\.)?ts$/.test(file);
+  const filters = sources()
+    .filter(production)
+    .flatMap((file) =>
+      callArguments(codeOf(readFileSync(file, "utf8")), "filter")
+        .filter((callback) => /\bsource_id\b/.test(callback))
+        .map(() => file.slice(ROOT.length)),
+    );
+  expect(
+    filters,
+    "a page under lib/tf/ filters by source_id: ask the read for the role (EntityFilter.role, or a read that narrows itself) and draw what it answers",
+  ).toEqual([
+    // A run's sync status replaces the one the shell held for its source:
+    // sync rows, one per source, never entity rows.
+    "lib/tf/TfShell.svelte",
+    "lib/tf/TfShell.svelte",
+    // Code's team filter: a pull request's repository is looked up by its
+    // source and path, the repository's address, to read the repo's teams.
+    "lib/tf/code/code.ts",
+    // The Builds staleness warning picks the sources to warn about: those that
+    // claim CI or drew a row here. It filters the source list, not rows.
+    "lib/tf/job/job.ts",
+    // A repository's pull requests: rows of the repository's own source,
+    // matched as its address names it, not narrowed to a role.
+    "lib/tf/repo/repo.ts",
+  ]);
+
+  const claimReaders = offenders(
+    (text, file) =>
+      production(file) &&
+      file !== join(TF_DIR, "roles.svelte.ts") &&
+      /\b(claims|fills)\s*\(/.test(codeOf(text)),
+  );
+  expect(claimReaders, "a page reads a source's role claims: the mirror decides who fills a role").toEqual([
+    "lib/tf/job/job.ts",
+  ]);
+});

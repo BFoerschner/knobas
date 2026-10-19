@@ -149,7 +149,6 @@
     ticketViews,
     translateTicketView,
   } from "../../ipc/search";
-  import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
@@ -157,7 +156,7 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { reachTally, runKindsOf } from "../job/sections";
+  import { reachTally } from "../job/sections";
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
@@ -695,10 +694,11 @@
       })
       .catch(() => {});
     // What the job's sections would show, through the job-reach read: no
-    // context is needed, and none is promoted to draw this (#1030). The
-    // adapters' claims route a run to its page (#1256), so they are read too.
-    void Promise.all([reachTally(ports, id), kindRegistry.load()]).then(([tally]) => {
-      if (!dead) around = aroundLines(tally, runKindsOf(kindRegistry));
+    // context is needed, and none is promoted to draw this (#1030). Each
+    // line says which section's read counted it, so a run of any kind counts
+    // under Builds without the shell knowing the CI role's run kinds (#1300).
+    void reachTally(ports, id).then((tally) => {
+      if (!dead) around = aroundLines(tally);
     });
     return () => (dead = true);
   });
