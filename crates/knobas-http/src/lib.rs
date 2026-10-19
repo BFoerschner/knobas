@@ -601,6 +601,9 @@ impl HttpClient {
 
 /// How many characters of a body [`HttpClient::get_json_with`] quotes when it
 /// is not the shape asked for: Jira's bound since #877.
+///
+/// Not [`classify::BODY_EXCERPT`], which bounds a *failing status's* body, in
+/// bytes. Each keeps the bound its message had before it moved here.
 pub const BODY_EXCERPT_CHARS: usize = 300;
 
 /// The option that puts a body's start into [`HttpClient::get_json_with`]'s

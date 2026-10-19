@@ -41,8 +41,8 @@
 //! 4. **The output is pinned** to literals computed before the two adapter
 //!    copies were folded into this module (#1314), so a drift fails here
 //!    first. The real servers are the other witness (ADR-0013): the Jira and
-//!    Gitea live suites poll an untouched source repeatedly and fail on the
-//!    first run that emits anything.
+//!    Gitea live suites poll an untouched source and fail on an idle run that
+//!    re-emits a record.
 
 use serde_json::Value;
 
