@@ -599,6 +599,12 @@ pub fn run() {
             // #1202's install of an external adapter from a local manifest,
             // appended at the foot: the list is append-only (§10.8).
             commands::sources::install_adapter,
+            // #1209's update check and update and #1210's uninstall, appended
+            // at the foot: the list is append-only (§10.8).
+            commands::sources::list_installed_adapters,
+            commands::sources::check_adapter_updates,
+            commands::sources::update_adapter,
+            commands::sources::uninstall_adapter,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

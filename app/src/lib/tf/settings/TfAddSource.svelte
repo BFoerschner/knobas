@@ -11,10 +11,11 @@
   rooms UI's `AddSource.svelte` does (contract §3: the backend orders the two
   writes), and only after a passing test of the draft as it stands.
 
-  *Install an adapter* (#1202, ADR-0028) takes the path of a local
+  *Install an adapter* (#1202, #1209, ADR-0028) takes a GitHub repository
+  URL (its latest release), a manifest URL, or the path of a local
   `knobas-adapter.json`. Install runs the static checks; a refusal is shown
   with its reason, and an installed adapter joins the radios, chosen, so its
-  generated form is there to fill. A manifest URL is #1209. The install note
+  generated form is there to fill. The install note
   names every host the adapter may reach (#1203): a fixed host as written, a
   template by the setting it is read from, since no source exists yet.
 
@@ -242,7 +243,7 @@
           id="tf-add-manifest"
           type="text"
           autocomplete="off"
-          placeholder="/path/to/knobas-adapter.json"
+          placeholder="A repository URL, a manifest URL or a file"
           aria-describedby="tf-add-manifest-note"
           bind:value={manifest}
         />
@@ -255,7 +256,7 @@
         {installNote.text}
       </p>
     {:else}
-      <p class="tf-dlg-note" id="tf-add-manifest-note">A local manifest. Install checks it before the adapter is offered.</p>
+      <p class="tf-dlg-note" id="tf-add-manifest-note">A GitHub repository, a manifest URL or a local manifest. Install checks it before the adapter is offered.</p>
     {/if}
     {#if chosen !== null}
       <div class="tf-formgrid">

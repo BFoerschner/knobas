@@ -542,6 +542,16 @@ a.tf-r:hover { background: var(--sheet-2); }
 .tf-formgrid input[type="text"] { width: 100%; }
 /* Add a source's *Install an adapter* row (#1202): the path, then its button. */
 .tf-add-inst { display: flex; gap: 8px; align-items: center; }
+/* Settings › Sources › Installed adapters (#1209, #1210) */
+.tf-ext-h { display: flex; align-items: center; gap: 12px; }
+.tf-ext-h h2 { font-size: var(--t-md); margin: 0; }
+.tf-ext-h .tf-btn { margin-left: auto; }
+.tf-ext-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; align-items: center;
+  padding: 12px 14px; border-bottom: 1px solid var(--rule-2);
+}
+.tf-ext-row:last-child { border-bottom: 0; }
+.tf-ext-row .tf-dim { overflow-wrap: anywhere; }
 .tf-add-inst input[type="text"] { flex: 1; min-width: 0; }
 
 /* ---------- time: the Day tab (#827) ----------

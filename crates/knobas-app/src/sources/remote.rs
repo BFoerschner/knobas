@@ -370,3 +370,99 @@ async fn get(url: &str, cap: usize) -> Result<Vec<u8>, FetchError> {
     }
     Ok(bytes.to_vec())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(input: &str) -> Origin {
+        Origin::parse(input, &Endpoints::default()).unwrap()
+    }
+
+    #[test]
+    fn a_github_repository_url_is_a_repository_with_or_without_its_git_suffix() {
+        for input in [
+            "https://github.com/harbour/surveys",
+            "https://github.com/harbour/surveys/",
+            "https://github.com/harbour/surveys.git",
+        ] {
+            assert_eq!(
+                parse(input),
+                Origin::GitHubRepo {
+                    owner: "harbour".to_owned(),
+                    repo: "surveys".to_owned()
+                },
+                "{input}"
+            );
+        }
+    }
+
+    #[test]
+    fn any_other_url_is_a_manifest_and_anything_else_a_local_file() {
+        let url = "https://github.com/harbour/surveys/releases/download/v1/knobas-adapter.json";
+        assert!(matches!(parse(url), Origin::Manifest(_)));
+        assert!(matches!(parse("https://forge.example/m.json"), Origin::Manifest(_)));
+        assert!(matches!(parse("/tmp/knobas-adapter.json"), Origin::Local(_)));
+        assert!(Origin::parse("  ", &Endpoints::default()).is_err());
+    }
+
+    #[test]
+    fn a_recorded_origin_reads_back_as_itself() {
+        let endpoints = Endpoints::default();
+        for input in [
+            "https://github.com/harbour/surveys",
+            "https://forge.example/harbour/surveys/releases/download/v1/knobas-adapter.json",
+            "/tmp/knobas-adapter.json",
+        ] {
+            let origin = parse(input);
+            assert_eq!(
+                Origin::parse(&origin.record(&endpoints), &endpoints).unwrap(),
+                origin
+            );
+        }
+    }
+
+    fn release(url: &str) -> Option<(String, String, String)> {
+        release_of(&url::Url::parse(url).unwrap(), &Endpoints::default())
+    }
+
+    #[test]
+    fn a_github_release_download_asks_github_s_api() {
+        assert_eq!(
+            release("https://github.com/harbour/surveys/releases/download/v1.2.0/knobas-adapter.json"),
+            Some((
+                "https://api.github.com/repos/harbour/surveys/releases".to_owned(),
+                "v1.2.0".to_owned(),
+                "knobas-adapter.json".to_owned()
+            ))
+        );
+    }
+
+    #[test]
+    fn a_forge_release_download_asks_its_own_api_under_its_path_prefix() {
+        assert_eq!(
+            release("https://forge.example/git/harbour/surveys/releases/download/v%201/m.json"),
+            Some((
+                "https://forge.example/git/api/v1/repos/harbour/surveys/releases".to_owned(),
+                "v 1".to_owned(),
+                "m.json".to_owned()
+            ))
+        );
+        assert_eq!(
+            release("http://127.0.0.1:3000/harbour/surveys/releases/download/v1/m.json")
+                .map(|r| r.0),
+            Some("http://127.0.0.1:3000/api/v1/repos/harbour/surveys/releases".to_owned())
+        );
+    }
+
+    #[test]
+    fn a_url_of_any_other_shape_is_no_release() {
+        for url in [
+            "https://forge.example/knobas-adapter.json",
+            "https://github.com/harbour/surveys/releases/latest/download/knobas-adapter.json",
+            "https://forge.example/harbour/surveys/releases/download/v1/m.json?x=1",
+        ] {
+            assert_eq!(release(url), None, "{url}");
+        }
+    }
+}

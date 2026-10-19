@@ -100,6 +100,84 @@ pub async fn install_adapter<R: tauri::Runtime>(
     .map_err(|error| error.to_ipc())
 }
 
+/// Every installed external adapter (#1209, #1210): its pin, its sources,
+/// why it was refused at load or restore, and the last update check.
+#[tauri::command]
+pub async fn list_installed_adapters<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::installed::list(&state.pool, &crate::sources::Registry::builtin())
+        .await
+        .map_err(IpcError::internal)
+}
+
+/// Check every installed adapter for a newer release (#1209), on demand.
+/// Changes no install; answers the list with each check.
+#[tauri::command]
+pub async fn check_adapter_updates<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+) -> Result<Vec<crate::sources::installed::AdapterStatus>, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::installed::check_updates(
+        &state.pool,
+        &crate::sources::Registry::builtin(),
+        &crate::sources::remote::Endpoints::default(),
+    )
+    .await
+    .map_err(IpcError::internal)
+}
+
+/// Update an installed adapter to its latest release (#1209), after every
+/// static check; a refusal is `invalid` and leaves the old version running.
+#[tauri::command]
+pub async fn update_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    kind: String,
+) -> Result<crate::sources::installed::AdapterStatus, IpcError> {
+    let state = crate::sources::state(&app)?;
+    crate::sources::installed::update(
+        &state.pool,
+        &crate::sources::Registry::builtin(),
+        &crate::sources::install::store_dir(&profile.dir),
+        &crate::sources::remote::Endpoints::default(),
+        &kind,
+    )
+    .await
+    .map_err(|error| error.to_ipc())
+}
+
+/// Uninstall an external adapter (#1210): each of its sources removed as
+/// its answer says, purge or keep, through the source-removal path, the
+/// scheduler told as `delete_source` tells it; then the install.
+#[tauri::command]
+pub async fn uninstall_adapter<R: tauri::Runtime>(
+    app: tauri::AppHandle<R>,
+    profile: State<'_, crate::Profile>,
+    kind: String,
+    removals: Vec<crate::sources::installed::Removal>,
+) -> Result<(), IpcError> {
+    let state = crate::sources::state(&app)?;
+    let removed = crate::sources::installed::uninstall(
+        &state.pool,
+        &state.secrets,
+        &crate::sources::Registry::builtin(),
+        &crate::sources::install::store_dir(&profile.dir),
+        &kind,
+        &removals,
+    )
+    .await
+    .map_err(|error| error.to_ipc())?;
+    for removal in removed {
+        state
+            .scheduler
+            .forget_source(&removal.source_id, Purge::from(removal.purge_items))
+            .await;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn list_sources<R: tauri::Runtime>(
     app: tauri::AppHandle<R>,

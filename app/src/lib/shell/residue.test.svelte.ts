@@ -424,6 +424,7 @@ const TfNotesSection = (await import("../tf/settings/TfNotesSection.svelte")).de
 const TfSourcePage = (await import("../tf/settings/TfSourcePage.svelte")).default;
 const TfBoardsAndFilters = (await import("../tf/settings/TfBoardsAndFilters.svelte")).default;
 const TfAddSource = (await import("../tf/settings/TfAddSource.svelte")).default;
+const TfInstalledAdapters = (await import("../tf/settings/TfInstalledAdapters.svelte")).default;
 const { listen: mockedListen } = await import("@tauri-apps/api/event");
 const ModalFixture = (await import("./Modal.fixture.svelte")).default;
 const TimerPicker = (await import("./TimerPicker.svelte")).default;
@@ -500,6 +501,10 @@ function settingsPorts() {
     syncAll: () => deferred([]),
     addSource: () => new Promise<never>(() => {}),
     installAdapter: () => new Promise<never>(() => {}),
+    listInstalledAdapters: () => deferred([]),
+    checkAdapterUpdates: () => deferred([]),
+    updateAdapter: () => new Promise<never>(() => {}),
+    uninstallAdapter: () => new Promise<never>(() => {}),
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
     ticketViews: () => deferred([]),
     hideJiraView: () => deferred(undefined),
@@ -1643,6 +1648,17 @@ const CASES: Case[] = [
           finished: 0,
           onsave: () => Promise.resolve(null),
         },
+      }),
+    }),
+  },
+  {
+    /** *Installed adapters* (#1209): its list read lands after the unmount. */
+    name: "TfInstalledAdapters",
+    source: "lib/tf/settings/TfInstalledAdapters.svelte",
+    open: (target) => ({
+      app: mount(TfInstalledAdapters, {
+        target,
+        props: { ports: settingsPorts(), layers: createLayers(), onremoved: () => {} },
       }),
     }),
   },

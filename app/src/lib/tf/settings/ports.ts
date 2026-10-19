@@ -45,6 +45,10 @@ import {
   reindexFts,
   deleteSource,
   installAdapter,
+  listInstalledAdapters,
+  checkAdapterUpdates,
+  updateAdapter,
+  uninstallAdapter,
   listAdapters,
   listSources,
   listSyncRuns,
@@ -57,6 +61,8 @@ import {
   type ConnectionReport,
   type DbStats,
   type InstalledAdapter,
+  type AdapterStatus,
+  type Removal,
   type CredentialHealth,
   type NewSource,
   type SecretInput,
@@ -84,6 +90,11 @@ export interface SettingsPorts {
   addSource: (input: NewSource) => Promise<SourceSummary>;
   /** *Install an adapter* in Add a source (#1202): a local `knobas-adapter.json`. */
   installAdapter: (manifest: string) => Promise<InstalledAdapter>;
+  /** *Installed adapters* under Sources (#1209, #1210). */
+  listInstalledAdapters: () => Promise<AdapterStatus[]>;
+  checkAdapterUpdates: () => Promise<AdapterStatus[]>;
+  updateAdapter: (kind: string) => Promise<AdapterStatus>;
+  uninstallAdapter: (kind: string, removals: Removal[]) => Promise<void>;
   listen: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>;
   /** Every ticket view (#812): a Jira source's page lists its Jira views (#878). */
   ticketViews: () => Promise<TicketViewRow[]>;
@@ -110,6 +121,10 @@ export const realSettingsPorts: SettingsPorts = {
   syncAll: () => syncAll(),
   addSource: (input) => addSource(input),
   installAdapter: (manifest) => installAdapter(manifest),
+  listInstalledAdapters: () => listInstalledAdapters(),
+  checkAdapterUpdates: () => checkAdapterUpdates(),
+  updateAdapter: (kind) => updateAdapter(kind),
+  uninstallAdapter: (kind, removals) => uninstallAdapter(kind, removals),
   listen: (event, handler) => tauriListen(event, handler),
   ticketViews: () => ticketViews(),
   hideJiraView: (id, hidden) => hideJiraView(id, hidden),

@@ -29,6 +29,7 @@
   import { SETTINGS_SECTIONS, settingsPlace, sourceState } from "./settings";
     import TfSourcePage from "./TfSourcePage.svelte";
   import TfSources from "./TfSources.svelte";
+  import TfInstalledAdapters from "./TfInstalledAdapters.svelte";
   import TfAppearanceSection from "./TfAppearanceSection.svelte";
   import TfBackupSection from "./TfBackupSection.svelte";
   import TfCheckoutsSection from "./TfCheckoutsSection.svelte";
@@ -80,6 +81,8 @@
   let error = $state<string | null>(null);
   let adapters = $state<SourceDescriptor[]>([]);
   let statuses = $state<Record<string, SourceSyncStatus>>({});
+  /** Moves when *Add a source* closes: an install there adds an adapter row. */
+  let installs = $state(0);
   /** Moves on every finished run, so a source's page re-reads its runs. */
   let finished = $state(0);
   // svelte-ignore state_referenced_locally
@@ -241,6 +244,7 @@
           onstopped={(ids) => ids.forEach(stopped)}
           onadd={() => (adding = true)}
         />
+        <TfInstalledAdapters {ports} {layers} refresh={installs} onremoved={() => void load()} />
       {:else if current === null}
         <header class="tf-stg-h"><h1>{sourceId}</h1></header>
         <p class="tf-stg-p">There is no source called {sourceId}. It may have been removed.</p>
@@ -275,9 +279,13 @@
   <TfAddSource
     {ports}
     {layers}
-    onclose={() => (adding = false)}
+    onclose={() => {
+      adding = false;
+      installs += 1;
+    }}
     onsaved={() => {
       adding = false;
+      installs += 1;
       push({ text: "Added. The first sync is running." });
       void load();
     }}

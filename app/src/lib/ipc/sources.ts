@@ -631,12 +631,83 @@ export interface InstalledAdapter {
 }
 
 /**
- * Install an external adapter from a local `knobas-adapter.json` (#1202).
- * A refused install rejects with `invalid` and the check's reason; a kind
- * already taken with `conflict`.
+ * Install an external adapter (#1202, #1209): `source` is a GitHub
+ * repository URL (its latest release), a manifest URL, or a local
+ * `knobas-adapter.json`. A refused install rejects with `invalid` and the
+ * check's reason; a kind already taken with `conflict`; a release nobody
+ * answers for with `unreachable`.
  */
 export function installAdapter(manifest: string): Promise<InstalledAdapter> {
   return invoke<InstalledAdapter>("install_adapter", { manifest });
+}
+
+/**
+ * What the last update check of an installed adapter found (#1209):
+ * `current`; `available`, a newer release nothing has switched to;
+ * `failed`, the check could not read the latest release; `refused`, the
+ * reader updated and the new release's checks refused it, so the installed
+ * one stays.
+ */
+export type UpdateCheck =
+  | { state: "current" }
+  | { state: "available"; tag: string | null; adapter_version: string }
+  | { state: "failed"; reason: string }
+  | { state: "refused"; tag: string | null; reason: string };
+
+/** A source of an installed adapter, which uninstall asks about. */
+export interface AdapterSource {
+  id: string;
+  display_name: string;
+}
+
+/**
+ * One installed external adapter (#1209, #1210): its pin, its sources, why
+ * it was refused at load or restore (`refused`), and the last update check
+ * (`update`, `null` before one ran).
+ */
+export interface AdapterStatus {
+  adapter_kind: string;
+  name: string;
+  adapter_version: string;
+  interface_version: string;
+  source_url: string;
+  tag: string | null;
+  artifact_sha256: string;
+  hosts: string[];
+  sources: AdapterSource[];
+  refused: string | null;
+  update: UpdateCheck | null;
+}
+
+/** Uninstall's answer for one source: remove its items, or keep them. */
+export interface Removal {
+  source_id: string;
+  purge_items: boolean;
+}
+
+export function listInstalledAdapters(): Promise<AdapterStatus[]> {
+  return invoke<AdapterStatus[]>("list_installed_adapters");
+}
+
+/** Check every installed adapter for a newer release; changes no install. */
+export function checkAdapterUpdates(): Promise<AdapterStatus[]> {
+  return invoke<AdapterStatus[]>("check_adapter_updates");
+}
+
+/**
+ * Update to the latest release after every static check. A refusal rejects
+ * with `invalid` and its reason, and the installed version stays.
+ */
+export function updateAdapter(kind: string): Promise<AdapterStatus> {
+  return invoke<AdapterStatus>("update_adapter", { kind });
+}
+
+/**
+ * Uninstall, with one answer per source of the adapter (`invalid` when one
+ * is missing): each source removed as `deleteSource` removes it.
+ */
+export function uninstallAdapter(kind: string, removals: Removal[]): Promise<void> {
+  return invoke<void>("uninstall_adapter", { kind, removals });
 }
 
 export function listSources(): Promise<SourceSummary[]> {
