@@ -30,10 +30,14 @@
 //! * **One place a failing body is read**: the caller's
 //!   [`BodyMessage`](classify::BodyMessage), consulted inside the attempt loop
 //!   both sends share, where the body still exists.
+//! * **One credential mapping** ([`credential`]): an adapter states its
+//!   [`CredentialRules`] and gets the same refusals, in the same order, as
+//!   every other (issue #1310).
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
 
 pub mod classify;
+mod credential;
 pub mod retry;
 
 use std::num::NonZeroU32;
@@ -47,6 +51,7 @@ use knobas_source::SourceError;
 use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
+pub use credential::{CredentialRules, TokenSpelling, credential};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
 // `knobas-http` and on nothing else for its transport. Otherwise all three
