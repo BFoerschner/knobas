@@ -749,7 +749,13 @@ export interface FakeClaimer {
  */
 export const ROLE_CLAIMERS: (() => FakeClaimer[])[] = [];
 
-/** A built-in role's minimum kinds (`knobas_source::role::MINIMUMS`): by id, and by the frame a source declares a kind on. */
+/**
+ * A built-in role's minimum kinds, required and optional, as
+ * `knobas_source::role::MINIMUMS` names them: by id, and by the frame a source
+ * declares a kind on. A copy, because this bridge stands in for the server and
+ * cannot read its table; a changed minimum is a §10.8 entry (ADR-0029), which
+ * is where this copy follows it.
+ */
 const ROLE_MINIMUMS: Record<string, { ids: string[]; frames: string[] }> = {
   "code-host": { ids: ["repo", "branch", "pr", "commit"], frames: [] },
   "ticket-system": { ids: ["ticket"], frames: ["saved_view"] },

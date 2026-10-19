@@ -307,7 +307,10 @@ fn a_filter_without_reach_is_unscoped() {
     }))
     .unwrap();
     assert_eq!(decoded.reach, None);
-    assert_eq!(decoded.role, None, "and no role, which is unscoped too (#1294)");
+    assert_eq!(
+        decoded.role, None,
+        "and no role, which is unscoped too (#1294)"
+    );
 }
 
 /// The job-reach read's row (#817), both origins, against `entity.ts`.

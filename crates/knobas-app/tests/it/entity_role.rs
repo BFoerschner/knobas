@@ -42,7 +42,10 @@ impl knobas_sync::scheduler::AdapterRegistry for WithCustom {
             accepts_account: false,
             min_sync_interval_secs: 60,
             roles: vec![
-                RoleClaim::new(knobas_source::role::TICKET_SYSTEM, ["reachable_transitions"]),
+                RoleClaim::new(
+                    knobas_source::role::TICKET_SYSTEM,
+                    ["reachable_transitions"],
+                ),
                 RoleClaim::new(DESK, []),
             ],
             source_actions: Vec::new(),
@@ -340,7 +343,12 @@ async fn a_custom_role_reads_its_adapters_other_kinds() {
         pairs(&[(&desk, "survey")]),
     );
     assert_eq!(
-        read(&pool, &asking(knobas_source::role::TICKET_SYSTEM), &[&desk, &mock]).await,
+        read(
+            &pool,
+            &asking(knobas_source::role::TICKET_SYSTEM),
+            &[&desk, &mock]
+        )
+        .await,
         pairs(&[(&desk, "ticket"), (&mock, "ticket")]),
     );
 }
@@ -390,11 +398,7 @@ async fn every_statement_reads_the_scope() {
         );
         assert_eq!(page.total, 2, "{include_deleted} {order:?}");
         if let Some(tally) = page.tally {
-            assert_eq!(
-                tally.iter().map(|t| t.count).sum::<i64>(),
-                2,
-                "{order:?}"
-            );
+            assert_eq!(tally.iter().map(|t| t.count).sum::<i64>(), 2, "{order:?}");
         }
     }
 }

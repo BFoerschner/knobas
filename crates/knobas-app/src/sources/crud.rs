@@ -1246,38 +1246,38 @@ pub async fn role_scope(
     })
 }
 
+/// The kinds of `role` among `fillers`, sorted: a built-in role's own (see
+/// [`builtin_kinds`]), or a custom role's, which are the kinds a filler emits
+/// that are no built-in role's it claims.
 fn role_kinds<'a>(role: &str, fillers: impl Iterator<Item = &'a SourceDescriptor>) -> Vec<String> {
     use knobas_source::role::minimum;
+    let builtin_role = minimum(role);
     let mut kinds = std::collections::BTreeSet::new();
     for template in fillers {
-        match minimum(role) {
-            Some(min) => kinds.extend(builtin_kinds(min, template)),
-            None => {
-                let builtin: std::collections::BTreeSet<String> = template
-                    .roles
-                    .iter()
-                    .filter_map(|claim| minimum(&claim.role))
-                    .flat_map(|min| builtin_kinds(min, template))
-                    .collect();
-                kinds.extend(
-                    template
-                        .entity_kinds
-                        .iter()
-                        .map(|kind| kind.id.clone())
-                        .filter(|kind| !builtin.contains(kind)),
-                );
-            }
+        if let Some(wanted) = builtin_role {
+            kinds.extend(builtin_kinds(wanted, template));
+            continue;
         }
+        let builtin: std::collections::BTreeSet<String> = template
+            .roles
+            .iter()
+            .filter_map(|claim| minimum(&claim.role))
+            .flat_map(|other| builtin_kinds(other, template))
+            .collect();
+        kinds.extend(
+            template
+                .entity_kinds
+                .iter()
+                .map(|kind| kind.id.clone())
+                .filter(|kind| !builtin.contains(kind)),
+        );
     }
     kinds.into_iter().collect()
 }
 
 /// The kinds of `min` that `template` emits or may emit: every kind it names
 /// by id, and every kind `template` declares on a frame it names.
-fn builtin_kinds(
-    min: &knobas_source::role::Minimum,
-    template: &SourceDescriptor,
-) -> Vec<String> {
+fn builtin_kinds(min: &knobas_source::role::Minimum, template: &SourceDescriptor) -> Vec<String> {
     use knobas_source::role::KindOf;
     min.kinds
         .iter()
