@@ -19,6 +19,9 @@ knobas-core = { path = "../knobas-core" }
 knobas-source = { path = "../knobas-source" }
 serde.workspace = true
 serde_json.workspace = true
+# The artifact hash a manifest names (#1202). The release `knobas-mockd` already
+# pulls.
+sha2 = "0.10"
 thiserror.workspace = true
 # The sink pump: `sync` runs the component and hands its items to the engine's
 # sink at once, through a channel of one, so a sink failure reaches the

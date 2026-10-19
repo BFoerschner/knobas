@@ -7,6 +7,7 @@
 
 pub mod crud;
 pub mod demo;
+pub mod install;
 pub mod paths;
 pub mod progress;
 pub mod registry;
@@ -82,7 +83,8 @@ pub struct SourcesState {
     pub secrets: Arc<dyn SecretStore>,
     /// **The trait, not the concrete `Registry`.**
     ///
-    /// `Registry` is a unit struct over a `const` table, so a `crud` written
+    /// `Registry` is a `const` table plus the installed adapters, which load
+    /// only from a real component, so a `crud` written
     /// against it can only ever build adapters that work -- which left the
     /// *failed*-credential path in `set_secret` untestable, and a mutation
     /// that cleared the backoff after a rejected password survived the whole
@@ -409,7 +411,8 @@ pub fn to_ipc(error: &SourcesError, source_id: Option<&str>) -> crate::IpcError 
 ///
 /// # Errors
 /// [`SourcesError::Bringup`] if the scheduler cannot open its pool, and
-/// [`SourcesError::Db`] if its startup reconciliation fails. Both mean the
+/// [`SourcesError::Db`] if the installed adapters cannot be read or the
+/// scheduler's startup reconciliation fails. Both mean the
 /// database is not usable, which the caller reports as a failed bring-up.
 pub async fn start<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
@@ -419,22 +422,17 @@ pub async fn start<R: tauri::Runtime>(
     // connection each from the connector, outside every pool (§10.6(c)).
     let sync_pool = db.pool_for(knobas_sync::scheduler::SYNC_POOL_SIZE).await?;
     let profile = app.state::<crate::Profile>().inner().clone();
-    let secrets = secret_store(&profile);
-    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::builtin());
-
-    let scheduler = Scheduler::start(SchedulerDeps {
-        pool: sync_pool,
-        connections: Arc::new(DbConnections(db.connector())),
-        registry: Arc::clone(&registry),
-        secrets: Arc::clone(&secrets),
-        // The owed links of #1050 resolved after every run (`ArrivalLinks`).
-        events: Arc::new(write_queue::ArrivalLinks::new(
-            TauriEvents::new(app.clone()),
-            db.pool().clone(),
-            Arc::clone(&registry),
-        )),
-        timing: SchedulerTiming::default(),
-    })
+    let state = bring_up(
+        app,
+        BringUp {
+            pool: db.pool().clone(),
+            sync_pool,
+            connections: db.connector(),
+            secrets: secret_store(&profile),
+            registry: Registry::builtin(),
+            store: install::store_dir(&profile.dir),
+        },
+    )
     .await?;
 
     // `manage` is the **last** step, and nothing between it and the scheduler's
@@ -443,17 +441,69 @@ pub async fn start<R: tauri::Runtime>(
     // scheduler on a closed pool behind; there is no such path today (a retry
     // only follows a bring-up that failed *before* this line), and this note is
     // what keeps it that way.
-    if !app.manage(SourcesState {
-        pool: db.pool().clone(),
-        scheduler,
-        secrets,
-        registry,
-    }) {
+    if !app.manage(state) {
         tracing::error!(
             "the sync engine was started twice in one process; the second one is orphaned"
         );
     }
     Ok(())
+}
+
+/// What [`bring_up`] starts the engine over: everything [`start`] takes from
+/// the database handle and the profile.
+pub struct BringUp {
+    /// The application pool.
+    pub pool: PgPool,
+    /// The scheduler's own bookkeeping pool, on the same database.
+    pub sync_pool: PgPool,
+    /// Where each run takes its dedicated connection, on the same database.
+    pub connections: knobas_db::embedded::Connector,
+    pub secrets: Arc<dyn SecretStore>,
+    /// The registry the installed adapters load into: the process's
+    /// ([`Registry::builtin`]) in the app.
+    pub registry: Registry,
+    /// The installed adapters' artifact store ([`install::store_dir`]).
+    pub store: std::path::PathBuf,
+}
+
+/// [`start`]'s body below the database handle: load the installed external
+/// adapters (#1202), then start the scheduler over the registry that holds
+/// them. A refused adapter is logged and recorded on the registry; it does
+/// not fail bring-up.
+///
+/// Split from `start` so a test can drive it without an `EmbeddedDb`: the
+/// load must run here, or an installed adapter is gone after a restart
+/// (`tests/it/external_adapter_install.rs` is the witness).
+///
+/// # Errors
+/// [`SourcesError::Db`] if the installed adapters cannot be read or the
+/// scheduler's startup reconciliation fails.
+pub async fn bring_up<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    deps: BringUp,
+) -> Result<SourcesState, SourcesError> {
+    install::load_installed(&deps.pool, &deps.registry, &deps.store).await?;
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(deps.registry);
+    let scheduler = Scheduler::start(SchedulerDeps {
+        pool: deps.sync_pool,
+        connections: Arc::new(DbConnections(deps.connections)),
+        registry: Arc::clone(&registry),
+        secrets: Arc::clone(&deps.secrets),
+        // The owed links of #1050 resolved after every run (`ArrivalLinks`).
+        events: Arc::new(write_queue::ArrivalLinks::new(
+            TauriEvents::new(app.clone()),
+            deps.pool.clone(),
+            Arc::clone(&registry),
+        )),
+        timing: SchedulerTiming::default(),
+    })
+    .await?;
+    Ok(SourcesState {
+        pool: deps.pool,
+        scheduler,
+        secrets: deps.secrets,
+        registry,
+    })
 }
 
 /// A scheduler over an already-open pool, for the IPC tests. **Tests only.**

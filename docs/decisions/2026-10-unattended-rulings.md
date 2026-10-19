@@ -5876,3 +5876,59 @@ The merge-manager's rulings (PR #1237, on Opus):
 - **No base-URL fallback stands, and the refusal names the empty key.** "comes from a forge
   source with no clone_base set ... fill it in with Edit source" instead of "names no address",
   so the person knows what to fill in. **Reversing:** low.
+
+## #1202 Install an external adapter from a local manifest (2026-10-19)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 entry is ratified** (`contract/10.8/1202-migration-0051-installed-external-adapters.md`):
+  migration `0051`, the command `install_adapter` and the DTO `InstalledAdapter`. Reasoning: the
+  spec asks for exactly this table ("a migration, with its §10.8 entry"), the command follows the
+  `commands/sources.rs` shim shape, and nothing frozen beyond them changes. **Reversing:** a new
+  migration that drops or reshapes the table; the command is additive.
+
+The implementer's rulings:
+
+- **The dev hook goes.** `KNOBAS_DEV_ADAPTER` is removed, as #1198's entry said the table would
+  replace it; a developer installs the fixture from a manifest instead. **Reversing:** low.
+- **The manifest's spelling.** `adapter_kind`, `adapter_version`, `interface_version`,
+  `artifact { file, sha256 }`, `hosts`, `limits { deadline_secs, memory_mib }`, the SPI's own
+  words where it has them. An unknown field is refused: a misspelt `host` would otherwise install
+  an adapter whose allowlist is silently empty. **Reversing:** medium once authors write
+  manifests; #1204 may rename the limits before then.
+- **The artifact is a bare file name beside the manifest**, as a release asset is. Reasoning: a
+  manifest must not name a file elsewhere on the reader's disk. **Reversing:** low.
+- **A local manifest has no tag** (`tag` null) and its `source_url` is its absolute path. The tag
+  is the release's, which only #1209's resolution knows. **Reversing:** low.
+- **The manifest's kind and version must be the descriptor's.** A manifest that says one thing
+  and a component that says another is refused, since the reader trusts what the manifest shows.
+  **Reversing:** low.
+- **One adapter per kind; a second install is `conflict`.** Updating is #1209's, and it re-runs
+  the checks. **Reversing:** low.
+- **A refused adapter at load does not fail bring-up.** It is logged and recorded on the
+  registry, and a source of it fails to build with the reason, which its health line shows.
+  **Reversing:** low.
+- **The registry's external list is shared by every clone** (`Arc<RwLock<…>>`), so the
+  scheduler's copy, made at bring-up, builds an adapter installed afterwards. **Reversing:** low.
+- **The fixture claims `wasm-fixture:survey-desk`, declares `Pat` and answers a survey's view**
+  (facts and text). `Pat` because every source takes a credential at Add source; the host never
+  passes it (#1203 attaches it). **Reversing:** low.
+- **Criterion 4 is witnessed at the backend**: an installed fixture's survey answers its block
+  view through `crud::view`, and its source claims the custom role. The frontend half (opening a
+  custom-role item draws its view, no navigation entry) is #1201's. **Reversing:** none needed.
+- **The component-side refusals are the fixture with one literal changed in its bytes**, the same
+  length, so it still loads and the named check is the one that refuses. The built-in-role cover
+  checks (kind, path, read) run `check_descriptor` over descriptors the fixture cannot be patched
+  into. **Reversing:** a fixture variant build, if a patch ever stops matching once.
+- **Install is a path field in *Add a source*,** under the adapter radios: knobas has no file
+  picker. An installed adapter joins the radios chosen; a refusal is shown with its reason.
+  **Reversing:** low.
+- **Merge-manager, PR #1238: the bring-up load is witnessed through `sources::bring_up`.**
+  `start` keeps only what needs the `EmbeddedDb` handle and the profile (the pools, the
+  connector, the secret store, `Registry::builtin()`, the store directory) and calls
+  `bring_up`, which loads the installed adapters and starts the scheduler. A test drives
+  `bring_up` over a scratch database; deleting the load fails it. Still unwitnessed: `start`
+  passing a registry other than `Registry::builtin()`. **Reversing:** low (inline it again).
+- **Merge-manager, PR #1238: an artifact name must be its own file name and hold no `:`.**
+  `C:x.wasm` is drive-relative on Windows, and `Path::join` would follow it off the release;
+  `x.wasm:s` names an NTFS stream. **Reversing:** low.

@@ -498,6 +498,7 @@ function settingsPorts() {
     syncNow: () => deferred(1),
     syncAll: () => deferred([]),
     addSource: () => new Promise<never>(() => {}),
+    installAdapter: () => new Promise<never>(() => {}),
     listen: (event: string, handler: (event: { payload: unknown }) => void) => mockedListen(event, handler),
     ticketViews: () => deferred([]),
     hideJiraView: () => deferred(undefined),

@@ -139,6 +139,7 @@ function ports(over: Partial<SettingsPorts> = {}): SettingsPorts {
     syncNow: vi.fn(() => Promise.resolve(42)),
     syncAll: vi.fn(() => Promise.resolve([1, 2])),
     addSource: vi.fn(() => Promise.reject(new Error("not in this test"))),
+    installAdapter: vi.fn(() => Promise.reject(new Error("not in this test"))),
     listen: vi.fn(() => Promise.resolve(() => {})),
     ticketViews: vi.fn(() => Promise.resolve(JIRA_VIEWS.map((row) => ({ ...row })))),
     hideJiraView: vi.fn(() => Promise.resolve()),
@@ -484,6 +485,95 @@ test("Add a source: the generated form, Test connection's fills, then one add_so
   expect(target.querySelector('[role="dialog"]')).toBeNull();
   // The list is read again, so the new source has its row.
   expect(p.listSources).toHaveBeenCalledTimes(2);
+});
+
+/** The fixture component's template as `list_adapters` answers it once installed (#1202). */
+const SURVEYS = {
+  id: "wasm-fixture",
+  adapter_kind: "wasm-fixture",
+  name: "Harbour surveys",
+  capabilities: [],
+  adapter_version: "0.1.0",
+  auth_methods: ["Pat" as const],
+  accepts_account: false,
+  min_sync_interval_secs: 60,
+  roles: [{ role: "wasm-fixture:survey-desk", reads: [] }],
+  source_actions: [],
+  write_ops: [],
+  entity_kinds: [{ id: "survey", label: "Survey", plural: "Surveys", monogram: "SV", full_sync_exhaustive: true }],
+  config_schema: {
+    type: "object",
+    properties: { fault: { type: "string", enum: ["none", "unauthorized", "unreachable", "swallow_sink"] } },
+    additionalProperties: false,
+  },
+  payload_paths: [],
+  clone_from: [],
+};
+
+test("Add a source installs an adapter from a manifest, and it joins the radios chosen (#1202)", async () => {
+  const p = ports();
+  const jira = (await p.listAdapters())[0]!;
+  p.listAdapters = vi.fn().mockResolvedValueOnce([jira]).mockResolvedValue([jira, SURVEYS]);
+  p.installAdapter = vi.fn(() =>
+    Promise.resolve({
+      adapter_kind: "wasm-fixture",
+      adapter_version: "0.1.0",
+      interface_version: "1.0.0",
+      source_url: "/releases/knobas-adapter.json",
+      tag: null,
+      artifact_sha256: "a".repeat(64),
+      hosts: ["{base_url}"],
+      template: SURVEYS,
+    }),
+  );
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  expect(dialogButton("Install").disabled).toBe(true);
+
+  type("#tf-add-manifest", "  /releases/knobas-adapter.json ");
+  dialogButton("Install").click();
+  await settle();
+
+  expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json");
+  expect(dialog().querySelector('[role="status"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
+    "Installed Harbour surveys 0.1.0.",
+  );
+  const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
+  expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual([
+    "Jira Data Center",
+    "Harbour surveys",
+  ]);
+  expect(radios[1]!.querySelector("input")!.checked).toBe(true);
+  // Its form is generated from its config schema, as a built-in's is.
+  expect(dialog().querySelector("#tf-add-cfg-fault")).not.toBeNull();
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-id")!.value).toBe("wasm-fixture");
+});
+
+test("Add a source shows a refused install with its reason, and offers nothing new (#1202)", async () => {
+  const p = ports({
+    installAdapter: vi.fn(() =>
+      Promise.reject({
+        code: "invalid",
+        message:
+          "install refused: the adapter's role claims are refused: role \"other:thing\" is neither a built-in role",
+        source_id: null,
+      }),
+    ),
+  });
+  await open([], p);
+  button("+ Add a source").click();
+  await settle();
+  type("#tf-add-manifest", "/releases/knobas-adapter.json");
+  dialogButton("Install").click();
+  await settle();
+
+  expect(dialog().querySelector('[role="alert"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
+    "Install refused: the adapter's role claims are refused: role \"other:thing\" is neither a built-in role",
+  );
+  expect(dialog().querySelectorAll(".tf-radio label")).toHaveLength(1);
+  // The path stays, so a fixed manifest is one press away.
+  expect(dialog().querySelector<HTMLInputElement>("#tf-add-manifest")!.value).toBe("/releases/knobas-adapter.json");
 });
 
 test("Add a source waits for a passing test of what is typed now", async () => {

@@ -583,6 +583,31 @@ export function listAdapters(): Promise<SourceDescriptor[]> {
   return invoke<SourceDescriptor[]>("list_adapters");
 }
 
+/**
+ * What `install_adapter` recorded (#1202, ADR-0028), and the adapter's
+ * descriptor template, which `listAdapters` answers from then on. `tag` is
+ * `null` for a local manifest, which is no release.
+ */
+export interface InstalledAdapter {
+  adapter_kind: string;
+  adapter_version: string;
+  interface_version: string;
+  source_url: string;
+  tag: string | null;
+  artifact_sha256: string;
+  hosts: string[];
+  template: SourceDescriptor;
+}
+
+/**
+ * Install an external adapter from a local `knobas-adapter.json` (#1202).
+ * A refused install rejects with `invalid` and the check's reason; a kind
+ * already taken with `conflict`.
+ */
+export function installAdapter(manifest: string): Promise<InstalledAdapter> {
+  return invoke<InstalledAdapter>("install_adapter", { manifest });
+}
+
 export function listSources(): Promise<SourceSummary[]> {
   return invoke<SourceSummary[]>("list_sources");
 }

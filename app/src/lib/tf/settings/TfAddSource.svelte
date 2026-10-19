@@ -11,6 +11,12 @@
   rooms UI's `AddSource.svelte` does (contract §3: the backend orders the two
   writes), and only after a passing test of the draft as it stands.
 
+  *Install an adapter* (#1202, ADR-0028) takes the path of a local
+  `knobas-adapter.json`. Install runs the static checks; a refusal is shown
+  with its reason, and an installed adapter joins the radios, chosen, so its
+  generated form is there to fill. A manifest URL is #1209, and the hosts it
+  may reach are shown from #1203.
+
   The rooms dialog's five steps are one page here, as prototype-6 draws it.
   Its *Schedule* step is not drawn: a new source syncs every 15 minutes, its
   default, and its page changes that.
@@ -34,7 +40,7 @@
     onclose,
     onsaved,
   }: {
-    ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource">;
+    ports: Pick<SettingsPorts, "listAdapters" | "testSource" | "addSource" | "installAdapter">;
     layers: Layers;
     onclose: () => void;
     onsaved: (source: SourceSummary) => void;
@@ -57,6 +63,10 @@
   let testing = $state(false);
   let saving = $state(false);
   let saveError = $state<string | null>(null);
+  let manifest = $state("");
+  let installing = $state(false);
+  /** The last install's answer: what was installed, or why it was refused. */
+  let installNote = $state<{ ok: boolean; text: string } | null>(null);
 
   $effect(() => {
     let dead = false;
@@ -117,6 +127,28 @@
     authKind = adapter.auth_methods[0] ?? null;
     report = null;
     tested = null;
+  }
+
+  async function install() {
+    const path = manifest.trim();
+    if (path === "" || installing) return;
+    installing = true;
+    installNote = null;
+    try {
+      const answer = await ports.installAdapter(path);
+      const rows = await ports.listAdapters();
+      adapters = rows;
+      const row = rows.find((adapter) => adapter.adapter_kind === answer.adapter_kind);
+      if (row) choose(row);
+      manifest = "";
+      installNote = { ok: true, text: `Installed ${answer.template.name} ${answer.adapter_version}.` };
+    } catch (cause) {
+      // The backend's reason opens with knobas' own word, so only that is capitalised.
+      const reason = ipcErrorMessage(cause);
+      installNote = { ok: false, text: reason.charAt(0).toUpperCase() + reason.slice(1) };
+    } finally {
+      installing = false;
+    }
   }
 
   async function test() {
@@ -186,6 +218,28 @@
           </label>
         {/each}
       </div>
+    {/if}
+    <div class="tf-formgrid">
+      <label for="tf-add-manifest">Install an adapter</label>
+      <div class="tf-add-inst">
+        <input
+          id="tf-add-manifest"
+          type="text"
+          autocomplete="off"
+          placeholder="/path/to/knobas-adapter.json"
+          aria-describedby="tf-add-manifest-note"
+          bind:value={manifest}
+        />
+        <button class="tf-btn" disabled={manifest.trim() === "" || installing} onclick={() => void install()}>Install</button>
+      </div>
+    </div>
+    {#if installNote !== null}
+      <!-- Text: a refusal's reason quotes what the manifest and the adapter wrote. -->
+      <p class="tf-dlg-note {installNote.ok ? '' : 'tf-stg-errt'}" id="tf-add-manifest-note" role={installNote.ok ? "status" : "alert"}>
+        {installNote.text}
+      </p>
+    {:else}
+      <p class="tf-dlg-note" id="tf-add-manifest-note">A local manifest. Install checks it before the adapter is offered.</p>
     {/if}
     {#if chosen !== null}
       <div class="tf-formgrid">

@@ -3139,6 +3139,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "wat",
  "wiremock",
 ]
 
@@ -3400,6 +3401,7 @@ dependencies = [
  "knobas-wasm-host",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "thiserror 2.0.20",
  "tokio",
  "tracing",

@@ -595,6 +595,9 @@ pub fn run() {
             // #870's link-set hint card, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::link_set_hints,
+            // #1202's install of an external adapter from a local manifest,
+            // appended at the foot: the list is append-only (§10.8).
+            commands::sources::install_adapter,
         ])
         .build(tauri::generate_context!())
         .expect("build the tauri application")

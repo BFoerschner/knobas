@@ -150,6 +150,10 @@ tauri = { version = "2", features = ["test"] }
 reqwest.workspace = true
 # `tests/it/backup.rs` writes archives somewhere that goes away with the test.
 tempfile = "3"
+# Components written as text for `tests/it/external_adapter_install.rs`'s
+# refusals: one that exports no source, one built against another interface.
+# The copy `knobas-wasm-host`'s tests pin, which wasmtime's own tree resolves.
+wat = "=1.258.3"
 # The docker-free stand-in `tests/it/adapter_to_mirror.rs` points the real Uptime
 # Kuma adapter at, serving the recording that crate's own suite serves (#442).
 # mockd would have been the place for it, but mockd is frozen (ADR-0013) and
