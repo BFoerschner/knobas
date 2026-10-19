@@ -226,7 +226,8 @@ const NOTES_HASH = "#/settings/notes";
  * of its own opens the section that lists it: a Jira view its ticket view, a
  * build configuration Builds, a route Dependencies' asset tree, a note
  * Settings › Notes (the one place notes are drawn while they hide, D10),
- * anything else Tickets, the home. Never Code: a kind that is not code does
+ * anything else its item page, `#/item/<id>`, which draws the source's block
+ * view (a custom role's item, #1201, ADR-0029). Never Code: a kind that is not code does
  * not belong there (#1094). Every surface opens a kind through this one rule
  * (#1101).
  */
@@ -260,7 +261,8 @@ export function itemHash(row: Pick<EntityRow, "entity_id" | "kind">): string {
     case "note":
       return NOTES_HASH;
     default:
-      return "#/tickets";
+      // A kind no surface draws, such as a custom role's (#1201, ADR-0029).
+      return `#/item/${id}`;
   }
 }
 

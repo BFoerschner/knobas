@@ -406,6 +406,7 @@ const TfCode = (await import("../tf/code/TfCode.svelte")).default;
 const TfRepo = (await import("../tf/repo/TfRepo.svelte")).default;
 const TfPr = (await import("../tf/pr/TfPr.svelte")).default;
 const TfPrFiles = (await import("../tf/pr/TfPrFiles.svelte")).default;
+const TfItem = (await import("../tf/item/TfItem.svelte")).default;
 const { createPendingComments } = await import("../detail/view/pending-comments.svelte");
 const TfMonitors = (await import("../tf/monitors/TfMonitors.svelte")).default;
 const TfDeps = (await import("../tf/deps/TfDeps.svelte")).default;
@@ -1379,6 +1380,35 @@ const CASES: Case[] = [
             submitWrite: () => deferred({} as never),
             prViewedFiles: () => deferred([]),
             setPrFileViewed: () => deferred([]),
+          },
+        },
+      }),
+    }),
+  },
+  // An item's page (#1201): the mirror row and the source's view, answering late.
+  {
+    name: "TfItem",
+    source: "lib/tf/item/TfItem.svelte",
+    open: (target) => ({
+      app: mount(TfItem, {
+        target,
+        props: {
+          id: "surveys:survey-1",
+          ready: true,
+          ports: {
+            getEntity: () =>
+              deferred({
+                row: { entity_id: "surveys:survey-1", kind: "survey", source_id: "surveys", title: "Quay crane 4 inspection" },
+                source: { id: "surveys", display_name: "Harbour surveys" },
+                kind_info: null,
+                body_text: "",
+                web_url: null,
+              } as never),
+            entityView: () =>
+              deferred({
+                sections: [{ id: "survey", title: "Survey", count: null, deferred: false, blocks: [{ type: "text", text: "Hoist brake worn", markdown: false }] }],
+                actions: [],
+              } as never),
           },
         },
       }),

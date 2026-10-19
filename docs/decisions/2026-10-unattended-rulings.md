@@ -6010,3 +6010,49 @@ The merge-manager's rulings (PR #1239, on Opus):
   declarations now reach `pr`, `commit` and `branch` too, and `0028` tags one row per adapter).
   **Reversing:** low.
 - No §10.8 entry: no frozen surface changed (adapter-owned descriptor and payloads only).
+
+## #1201 A custom role's item opens its block view (2026-10-19)
+
+The implementer's rulings (PR for #1201, on Opus):
+
+- **Where a custom role's item opens.** A new item page, `#/item/<entity id>` (`tf/item/`), which
+  draws the block view the item's own source answers. `itemHash` sends every kind no surface draws
+  there; such a kind went to Tickets before. The route is by kind, as every other item address is,
+  not by the source's roles: the shell never reads a role to address an item, and a kind no
+  built-in surface draws is a custom role's by ADR-0029. **Reversing:** low (`itemHash`'s default
+  case and `tf/item/`).
+- **What the page draws.** Facts, text (as text, as the pull request's description is), entity
+  lists (a row with an id links `#/entity/<id>`, which the shell resolves) and a log. Any other
+  block type is named and not drawn: diffs, trees and settings belong to a built-in role's page,
+  and a custom role's writes are source actions (#1194), not this ticket. A deferred section is
+  read on *Show*. A single section's title is not drawn again under the page's. **Reversing:** low.
+- **The fallback.** A view that answers `null` draws the mirror's `body_text`, with no line; a
+  failed read draws it under *Showing the mirror: <reason>* (ADR-0020 rule 2). The payload is
+  never drawn (ADR-0007), so the "generic projection" is the mirror's text, not its payload.
+  **Reversing:** low.
+- **The page's own words.** Prototype-6 has no item page, so its few sentences are knobas' own:
+  *Showing the mirror: <reason>* is ADR-0020 rule 2's wording, *Show <section> (<count>)* opens a
+  deferred section, and *Could not read …* follows the pull request page's failure line.
+  **Reversing:** copy only.
+- **No navigation entry, no breadcrumb.** The page lights no nav entry (`sectionOf` is `null`) and
+  draws its own header; `Esc` falls to the full-view rung (back to the job, else Tickets).
+  **Reversing:** low.
+- **No new §10.8 entry.** Criterion 1's round trip and frozen surface are #1193's entry (the
+  `<adapter_kind>:<name>` claim) and #1196's (`SourceSummary.roles`); this PR changes no IPC,
+  migration, `WriteOp` or minimum. The battery gains two clause-10 tests (`test:thing` passes,
+  `other-adapter:thing` is refused), which are tests, not a surface. **Reversing:** a §10.8 entry
+  if a reviewer reads the criterion as asking for one of #1201's own.
+
+The merge-manager's rulings (PR #1242, on Opus):
+
+- **A §10.8 entry is owed after all, for the battery's tests.** §10.8 freezes "any change to
+  `crates/knobas-source/src/**` (the `Source` trait, its DTOs, the contract battery)", and every
+  earlier PR that touched that path carried an entry, however small. The two clause-10 tests live
+  in `contract.rs`, so the PR adds `docs/contract/10.8/1201-custom-role-battery-witness.md`, which
+  records the touch as tests only. **Reversing:** delete one file and rerun `just contract-index`.
+- **The shell route `#/item/<entity id>` is not frozen IPC.** A hash route is the frontend's own
+  address; it adds no command, event, DTO field or barrel line, and the page reads only
+  `get_entity` and `entity_view`. The entry above says so. **Reversing:** none needed.
+- **An inbox, standup or connection row whose kind is unknown now opens the item page, not
+  Tickets.** It draws *Could not read …* when the mirror lacks the item, which says more than
+  Tickets did. Accepted as part of the default case. **Reversing:** one guard in `itemHash`.

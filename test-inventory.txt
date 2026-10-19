@@ -2176,6 +2176,7 @@ knobas-source	lib/knobas_source	contract::tests::a_ticket_system_whose_tickets_r
 knobas-source	lib/knobas_source	contract::tests::accepts_a_ci_claim_over_a_pipeline_and_a_run
 knobas-source	lib/knobas_source	contract::tests::accepts_a_conforming_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_current_step_absent_from_runs_not_in_flight
+knobas-source	lib/knobas_source	contract::tests::accepts_a_custom_role_namespaced_to_the_adapter
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_source_action_without_performing_it
 knobas-source	lib/knobas_source	contract::tests::accepts_a_declared_write_op_without_calling_write
 knobas-source	lib/knobas_source	contract::tests::accepts_a_later_candidate_an_earlier_one_resolves_for
@@ -2194,6 +2195,7 @@ knobas-source	lib/knobas_source	contract::tests::rejects_a_code_host_claim_witho
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_sync
 knobas-source	lib/knobas_source	contract::tests::rejects_a_connectivity_failure_misclassified_by_test_connection
 knobas-source	lib/knobas_source	contract::tests::rejects_a_current_step_absent_from_runs_in_flight
+knobas-source	lib/knobas_source	contract::tests::rejects_a_custom_role_namespaced_to_another_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_deferred_section_that_does_not_answer_its_own_read
 knobas-source	lib/knobas_source	contract::tests::rejects_a_do_nothing_adapter
 knobas-source	lib/knobas_source	contract::tests::rejects_a_foreign_namespace
