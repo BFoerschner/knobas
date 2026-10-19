@@ -116,8 +116,8 @@
   this adapter cannot follow: <link, Debug-quoted> is not a path rooted at the instance. Refusing
   rather than reporting a walk that stopped early as a completed one.")`, raised on the call after
   that page. `next` answers `Capped`, never `End`, when the walk would ask for a page past `cap`
-  pages, so `cap` pages are read at most; whether that fails the run stays the adapter's. Nothing
-  else in the crate changes.
+  pages, so `cap` pages are read at most; whether that fails the run stays the adapter's. The
+  crate docs gain one bullet naming the walk; nothing else in the crate changes.
 
   **The adapters:** Gitea's five sync walks (repositories, branches, pull requests, issues,
   commits) and its label read walk `PageNumber`, and its `sync::last_page` is gone; Jira's search

@@ -277,7 +277,7 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
     ))
 }
 
-// Where a listing ends is the transport's [`PageWalk`] over [`PageNumber`]
+// Where a listing ends is the transport's `PageWalk` over `PageNumber`
 // (#1315): on an **empty** page, never a short one (#81, ruled 2026-08-29).
 // `PAGE_SIZE` documents 50 as Gitea's *default* cap, a self-hosted instance
 // can lower `MAX_RESPONSE_ITEMS`, an endpoint can carry its own maximum, and a
@@ -286,13 +286,13 @@ fn cap_reached(what: &str, seen: usize) -> SourceError {
 // past every record after the stop. One walker for the five walks here, rather
 // than five inline comparisons, is how none of them drifts.
 //
-// [`fetch_comments`] is deliberately not a sixth. Issue #131 read the
+// `fetch_comments` is deliberately not a sixth. Issue #131 read the
 // discussion request as a paged listing that never paged, and the pinned
 // container says it is not one: `issueGetComments` declares no `page` and no
 // `limit` and ignores both, so "page until empty" there would re-read the same
 // discussion until the budget ran out and fold it into `body_text` once per
 // request. That read gets the server's own `X-Total-Count` instead -- see
-// [`crate::client::GiteaClient::issue_comments`] for the measurements.
+// `GiteaClient::issue_comments` for the measurements.
 //
 // The price is one extra request per *exhausted* walk, under the 10 req/s
 // limiter of interfaces §4.1 -- and the `MAX_*_PAGES` caps above are what keep

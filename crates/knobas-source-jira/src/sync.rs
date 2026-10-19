@@ -120,7 +120,7 @@ comment,worklog";
 ///    server is progress against a number it is getting wrong, so advancing a
 ///    watermark on that basis skips whatever sat in the gap.
 /// 2. **It is the only thing that terminates the loop.** The other exit is
-///    `start_at >= total`, and `total` is the very number the server is
+///    the records read reaching `total`, and `total` is the very number the server is
 ///    inflating. Restricting the refusal to full syncs -- which looks like the
 ///    careful, narrower fix, since no sweep follows an incremental -- makes an
 ///    incremental against such a server run forever. Verified: the test below
@@ -1078,7 +1078,7 @@ mod tests {
     /// stopped. That narrower fix is worse than it looks, for a reason the
     /// mutation check turned up rather than the argument: with
     /// `&& cursor.is_none()` on the cap, **this test does not terminate**. The
-    /// loop's only other exit is `start_at >= total`, and `total` is the number
+    /// loop's only other exit is the records read reaching `total`, and `total` is the number
     /// the server is inflating -- so an incremental against a mispaging server
     /// has no stop at all. (Measured: no completion in 180 s, against 1.7 s for
     /// the whole lib suite.)

@@ -19,16 +19,15 @@
 //! server stops offering a link, and an empty page there does not end it: the
 //! link is the server's word that there is more.
 //!
-//! **The cap is a request budget**, counted in pages handed out. When the
-//! walk would ask for a page past it, [`PageWalk::next`] answers
-//! [`Walked::Capped`] -- never a quiet [`Walked::End`] -- so a walk that
-//! promises a whole corpus can refuse a partial one, and a walk that promises
-//! only a budget can stop. Which of the two it is stays the adapter's.
+//! **The cap counts requests**, in pages handed out. When the walk would ask
+//! for a page past it, [`PageWalk::next`] answers [`Walked::Capped`] -- never
+//! a quiet [`Walked::End`] -- so a walk that promises a whole corpus can
+//! refuse a partial one, and a walk that promises only a budget can stop.
+//! Which of the two it is stays the adapter's.
 //!
-//! **Not every walk is this one.** TeamCity's walk re-reads its listing from
-//! the top with a wider count rather than asking for a next page (its
-//! `sync::all_of`), so it stays its own. Gitea's pull-request discussion is
-//! not paged at all (`client::issue_comments`).
+//! **Not every walk is a page sequence.** A walk that re-reads its listing
+//! from the top with a wider count, rather than asking for the next page,
+//! stays its adapter's own (TeamCity's).
 
 use std::future::Future;
 
