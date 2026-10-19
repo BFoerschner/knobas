@@ -36,7 +36,6 @@
   import type {
     CheckoutView,
     EntityDetail,
-    EntityOrder,
     EntityRow,
     JobLinkSets,
     LinkEntry,
@@ -93,7 +92,9 @@
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
-  import { ASSET_LIMIT, reachFilter, SECTION_LIMIT, SECTION_READS } from "./sections";
+  import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, sectionReads, type FrameKinds, type SectionRead } from "./sections";
+  import { kindRegistry } from "../../shell/kind-registry.svelte";
+  import { CI, CODE_HOST, MONITORING, sourceRoles, WIKI } from "../roles.svelte";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -118,6 +119,7 @@
     today = () => new Date(),
     apps = sharedApps,
     sets = bridgeSetPorts,
+    registry = kindRegistry,
   }: {
     /** What the address names: a key (`PAY-231`) or an entity id. */
     segment: string;
@@ -135,6 +137,8 @@
     apps?: Apps;
     /** *Apply a link set…* and *Save as a link set…* (#869). */
     sets?: JobSetPorts;
+    /** The adapters' claims, for the CI role's run kinds (#1230). */
+    registry?: FrameKinds;
   } = $props();
 
   /** `undefined` while reading, `null` when nothing answers to the address. */
@@ -232,14 +236,10 @@
   }
 
   /** One section's rows, through the reach; `[]` when the read fails. */
-  async function readRows(
-    id: string,
-    { kinds, order }: { kinds: readonly string[]; order: EntityOrder },
-    mine: number,
-  ): Promise<EntityRow[] | null> {
+  async function readRows(id: string, section: SectionRead, mine: number): Promise<EntityRow[] | null> {
     try {
-      const page = await ports.listEntities(reachFilter(id, kinds, order), SECTION_LIMIT, 0);
-      return mine === token ? page.rows : null;
+      const rows = await readSection(ports.listEntities, id, section);
+      return mine === token ? rows : null;
     } catch {
       // A section that cannot be read draws as having nothing; the Work tab's
       // line says when the reads themselves fail.
@@ -298,20 +298,25 @@
     void readInherited(id, mine);
     void readReach(id, mine);
     readSections(id, mine);
-    void readRows(id, SECTION_READS.code, mine).then((rows) => {
+    void readRows(id, sectionReads(registry).code, mine).then((rows) => {
       if (mine === token && rows) code = rows;
     });
   }
 
   /** Builds, Pages and Monitors, each through the reach. */
   function readSections(id: string, mine: number) {
-    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
-      if (mine === token && rows) builds = rows;
-    });
-    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
+    // Builds reads the CI role's run kinds, so it waits for the adapters' claims.
+    void registry
+      .load()
+      .then(() => readRows(id, sectionReads(registry).builds, mine))
+      .then((rows) => {
+        if (mine === token && rows) builds = rows;
+      });
+    const reads = sectionReads(registry);
+    void readRows(id, reads.pages, mine).then((rows) => {
       if (mine === token && rows) pages = rows;
     });
-    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
+    void readRows(id, reads.monitors, mine).then((rows) => {
       if (mine === token && rows) monitors = rows;
     });
   }
@@ -500,14 +505,11 @@
   const CHECKOUT_TRIES = 3;
 
   async function readCode(id: string, mine: number) {
-    const page = await ports.listEntities(
-      reachFilter(id, SECTION_READS.code.kinds, SECTION_READS.code.order),
-      SECTION_LIMIT,
-      0,
-    );
+    const rows = await readSection(ports.listEntities, id, sectionReads(registry).code);
     if (mine !== token) return;
-    code = page.rows;
-    const sorted = byAttention(page.rows);
+    code = rows;
+    // A clone is looked for in the repositories Code draws, never another source's.
+    const sorted = byAttention(sourceRoles.keep(CODE_HOST, rows));
     const candidates = [
       ...sorted.filter((row) => row.kind === "branch"),
       ...sorted.filter((row) => row.kind === "repo"),
@@ -632,7 +634,12 @@
   const mine = $derived(detail ? isMine(detail, sources) : false);
   const starting = $derived(detail ? offersStartWork(detail.status, mine) : false);
   const blocked = $derived(detail ? blockerEntries(detail) : []);
-  const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
+  // Each section draws the rows of the sources that fill its role (#1196, #1230).
+  const codeRows = $derived(code === null ? null : sourceRoles.keep(CODE_HOST, code));
+  const buildRows = $derived(builds === null ? null : sourceRoles.keep(CI, builds));
+  const pageRows = $derived(pages === null ? null : sourceRoles.keep(WIKI, pages));
+  const monitorRows = $derived(monitors === null ? null : sourceRoles.keep(MONITORING, monitors));
+  const stale = $derived(staleBuilds(sources, health, sync, buildRows ?? [], today()));
   /** What *Start work* suggests: a repository the ticket already reaches. */
   const suggestedRepo = $derived(
     [...reached.values()].find((row) => row.kind === "repo")?.entity_id ?? null,
@@ -714,8 +721,8 @@
           {/if}
           <div class="tf-grid">
             {#if !starting}
-              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {layers} {apps} />
-              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
+              <TfCodeSection rows={codeRows} {reached} {checkout} {checkoutOf} {layers} {apps} />
+              <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(buildRows)} rollup={buildRows ? buildsRollup(buildRows) : null}>
                 {#snippet before()}
                   {#each stale as warning (warning.sourceId)}
                     <div class="tf-stale">
@@ -727,8 +734,8 @@
               </TfSection>
             {/if}
             <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
-            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
-            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
+            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitorRows)} rollup={monitorRows ? monitorsRollup(monitorRows) : null} />
+            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pageRows)} rollup={pageRows ? pagesRollup(pageRows) : null} />
           </div>
         {:else if current.id === "conversation"}
           <TfConversation
