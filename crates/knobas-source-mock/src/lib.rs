@@ -850,7 +850,9 @@ fn items(source_id: &str) -> Vec<SyncItem> {
             None,
             None,
             &pipeline_payload(cfg),
-            Some(format!("{MOCK_BASE}/teamcity/viewType.html?buildTypeId={cfg}")),
+            Some(format!(
+                "{MOCK_BASE}/teamcity/viewType.html?buildTypeId={cfg}"
+            )),
         ));
     }
     for m in &f.monitors {

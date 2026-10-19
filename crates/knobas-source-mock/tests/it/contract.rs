@@ -1043,6 +1043,9 @@ async fn a_page_opens_as_the_headings_and_comments_its_record_holds() {
     assert_eq!(design.comments.len(), 1);
     assert_eq!(design.comments[0].author.as_deref(), Some("priya"));
     assert_eq!(design.version, None);
-    assert!(page("on-call-handbook").blocks.is_empty(), "no body, no blocks");
+    assert!(
+        page("on-call-handbook").blocks.is_empty(),
+        "no body, no blocks"
+    );
     assert!(knobas_source_mock::doc_content("ticket", &serde_json::json!({})).is_none());
 }

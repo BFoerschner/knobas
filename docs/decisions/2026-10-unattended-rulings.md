@@ -6514,3 +6514,35 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
   claim from the fixture's descriptor) survives `knobas-wasm-host`'s tests. That gap predates
   this ticket, which only changed how the claim is spelled. Filed as `backlog` follow-up #1267 rather
   than fixed here. **Reversing:** n/a.
+
+## #1240: the demo mock claims Builds, Docs and Monitors (Sonnet implementer)
+
+- **Builds: no new record invented; the dataset's builds become runs.** `build` keeps its kind
+  and gains the run frame's paths (pipeline = its build configuration, number as text, branch,
+  `started` = `when`, a state chip over `running`/`failed`/`success`). One `pipeline` item per
+  distinct configuration the builds name (3). `finished` exists only for a build with a stated
+  duration (#1187: `when` + 4 m 12 s); a running build and #412 (no duration) get none.
+  **Reversing:** low (drop the frame paths and the pipeline kind).
+- **Docs: one page added.** The dataset says *Standup protocols* is the "parent of daily protocol
+  pages" and gives a parent to none, so the wiki minimum's `parent` could resolve on nothing.
+  Added `daily-protocol-2026-08-21` (title from the dataset's own "Standup 2026-08-21" naming,
+  space ENG, edited 2026-08-21 like its parent, by mara, no body). It is the only invented page;
+  its editor is the parent's. The project key is the space (`ENG`, named *Engineering* in the
+  dataset), so the demo profile gains an `ENG` project room. **Reversing:** low.
+- **Monitoring: two monitors added.** The dataset has none. One health check per repository the
+  dataset gives a runtime (`payout-service`, `ledger-api`; `ops-runbooks` is Markdown), both
+  `up`, 38 ms and 112 ms, at `*.tidewater.example` addresses nothing serves. No outage is
+  invented. **Reversing:** low (delete `monitors` from `work.json`).
+- **The claims list each minimum's reads; the mock answers none live** (`run_log` and the CI
+  optional reads are not claimed, so an opened run draws its mirror only; `view` stays `None`).
+  The wiki's `doc_content` is answered: `knobas_source_mock::doc_content` is the registry row's
+  Docs projection (the registry test holds the claim and the row to each other), built from the
+  page's body runs and comments. **Reversing:** low.
+- **Cursor `tidewater-v3` becomes `v4`, `FirstRun.svelte` says 33 items** (27 + 1 page + 3
+  pipelines + 2 monitors), as the cursor's own note obliges.
+- **Test moves:** the recency-fallback test now uses `commit`, since builds declare a state; the
+  demo project census expects three rooms.
+- **Screenshots:** not taken. `just shot` runs under `?fake-ipc`, whose mock source is a
+  hand-written fixture and already sits beside fake CI, wiki and Kuma sources; the real `--demo`
+  is a Tauri window that only the desktop-witness slot may take. Handed to the milestone review.
+- No §10.8 entry: no frozen surface changed (adapter-owned descriptor, payloads and fixture).
