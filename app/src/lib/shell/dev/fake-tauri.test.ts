@@ -23,6 +23,7 @@ import { columnPathFor, stripFor, wireKey, wiresFor } from "../../assets/tree";
 
 import type { ProposalEvidence, SuggestionPage } from "../../ipc/entity";
 import { demoHandlers } from "./fake-tauri";
+import { FIXTURE_SOURCES } from "./fake/sources";
 
 test("the four commands the tray calls are answered", () => {
   const handlers = demoHandlers();
@@ -868,18 +869,19 @@ test("the fake Gitea source claims ticket-system and its tickets reach the board
   const gitea = sources.find((source) => source.id === "gitea");
   expect(gitea?.roles.find((claim) => claim.role === "ticket-system")?.reads).toContain("reachable_transitions");
 
-  const board = handlers["mini_board"]!({ sources: ["gitea"], ctxId: null, project: null, perColumn: null }) as {
+  const board = handlers["mini_board"]!({ role: "ticket-system", ctxId: null, project: null, perColumn: null }) as {
     columns: { status: string | null; cards: { source_id: string; key: string; priority: string | null; assignee: string | null; labels: string[] }[] }[];
+    sources: { source_id: string; statuses: string[] }[];
   };
-  const cards = board.columns.flatMap((column) => column.cards);
+  const cards = board.columns.flatMap((column) => column.cards).filter((card) => card.source_id === "gitea");
   expect(cards.length).toBeGreaterThan(0);
-  expect(cards.every((card) => card.source_id === "gitea" && /^tidewater\/[^/]+\/issues\/\d+$/.test(card.key))).toBe(true);
+  expect(cards.every((card) => /^tidewater\/[^/]+\/issues\/\d+$/.test(card.key))).toBe(true);
   expect(cards.find((card) => card.key === "tidewater/ledger/issues/57")).toMatchObject({
     priority: "medium",
     assignee: "jonas",
     labels: ["bug", "export"],
   });
-  expect(board.columns.map((column) => column.status).sort()).toEqual(["closed", "open"]);
+  expect(board.sources.find((source) => source.source_id === "gitea")?.statuses.sort()).toEqual(["closed", "open"]);
 });
 
 test("the fixture's mini_board reads a saved view by its savedView argument (#1245)", () => {
@@ -894,6 +896,29 @@ test("the fixture's mini_board reads a saved view by its savedView argument (#12
   }) as { columns: { status: string | null }[] };
   // The board's own columns, as `saved_view_board` answers, not one per status.
   expect(board.columns.map((column) => column.status)).toEqual(["Ready", "In flight", "Shipped"]);
+});
+
+test("the fixture's mini_board reads a role's fillers: the demo board whole, a miss's source off it, nobody's role empty (#1299)", () => {
+  const handlers = demoHandlers();
+  type Board = { columns: { status: string | null; total: number; cards: { source_id: string }[] }[]; sources: unknown[] };
+  const board = (role: string | null) =>
+    handlers["mini_board"]!({ ctxId: null, role, project: null, perColumn: null, query: null, savedView: null, lanes: null }) as Board;
+  const drawnBy = (read: Board) => [...new Set(read.columns.flatMap((column) => column.cards.map((card) => card.source_id)))].sort();
+  // Every demo source with tickets fills the ticket system: the board is the one every source draws.
+  expect(board("ticket-system")).toEqual(board(null));
+  expect(drawnBy(board("ticket-system"))).toEqual(["gitea", "mock"]);
+
+  const gitea = FIXTURE_SOURCES.find((source) => source.id === "gitea") as { role_misses?: { role: string }[] };
+  gitea.role_misses = [{ role: "ticket-system" }];
+  try {
+    const narrowed = board("ticket-system");
+    expect(drawnBy(narrowed)).toEqual(["mock"]);
+    const counted = narrowed.columns.reduce((all, column) => all + column.total, 0);
+    expect(counted).toBe(narrowed.columns.flatMap((column) => column.cards).length);
+  } finally {
+    delete gitea.role_misses;
+  }
+  expect(board("role_nobody:fills-this")).toEqual({ columns: [], sources: [], lanes: [], more_lanes: 0 });
 });
 
 test("the fixture's ticket_views carries a saved view's facts under saved_view_source, and none on a view of your own (#1273)", () => {

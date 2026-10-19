@@ -1650,7 +1650,7 @@ test("a count of one reads in the singular: the filter bar's ticket and the edit
 
 /**
  * Two sources besides Jira (#1200): `tracker`, of an adapter kind the shell
- * has never seen, claims the ticket system; `notes` claims only the wiki,
+ * has never seen, fills the ticket system; `notes` fills only the wiki,
  * though it has ticket-kind items. TRK-2 is a ticket whose source declares
  * none of the lane and column paths.
  */
@@ -1676,16 +1676,20 @@ const TRACKER_CORPUS: { status: string; card: MiniBoardCard }[] = [
   { status: "To Do", card: card("NOTE-1", "A page's to-do", { entity_id: "notes:NOTE-1", source_id: "notes" }) },
 ];
 
-/** {@link harness} over {@link TRACKER_CORPUS}, its board narrowed by `sources` as `mini_board` narrows a room. */
-function trackerHarness() {
+/**
+ * {@link harness} over {@link TRACKER_CORPUS}, its board asked for a role
+ * narrowed to `fillers`, as `mini_board` narrows to the sources the mirror
+ * says fill it (#1299). `roles` is every role a board read asked for.
+ */
+function trackerHarness(fillers: string[] = ["tracker"]) {
   const h = harness([], [], TRACKER_CORPUS);
   const whole = h.ports.board;
-  const scopes: (string[] | undefined)[] = [];
-  h.ports.board = async (perColumn, query, savedView, lanes, sources) => {
-    scopes.push(sources);
+  const roles: (string | undefined)[] = [];
+  h.ports.board = async (perColumn, query, savedView, lanes, role) => {
+    roles.push(role);
     const board = await whole(perColumn, query, savedView, lanes);
-    if (!sources?.length) return board;
-    const kept = (column: MiniBoard["columns"][number]) => column.cards.filter((c) => sources.includes(c.source_id));
+    if (role === undefined) return board;
+    const kept = (column: MiniBoard["columns"][number]) => column.cards.filter((c) => fillers.includes(c.source_id));
     const columns = board.columns
       .map((column) => ({ ...column, cards: kept(column), total: kept(column).length }))
       .filter((column) => column.total > 0);
@@ -1697,20 +1701,16 @@ function trackerHarness() {
       .filter((lane) => lane.count > 0);
     return { ...board, columns, lanes: laned };
   };
-  return { h, scopes };
+  return { h, roles };
 }
 
 const keysOnBoard = () => [...target.querySelectorAll(".tf-tcard")].map((el) => el.textContent!.match(/[A-Z]+-\d+/)![0]);
 
-test("a source of any adapter kind that claims the ticket system has its tickets on the board, the list and every lane (#1200)", async () => {
-  sourceRoles.take([
-    { id: "tracker", adapter_kind: "acme-tracker", roles: [{ role: "ticket-system", reads: ["reachable_transitions"] }] },
-    { id: "notes", adapter_kind: "acme-notes", roles: [{ role: "wiki", reads: [] }] },
-  ]);
-  const { h, scopes } = trackerHarness();
+test("a source of any adapter kind that fills the ticket system has its tickets on the board, the list and every lane (#1200, #1299)", async () => {
+  const { h, roles } = trackerHarness();
   await open(h);
 
-  expect(scopes[0]).toEqual(["tracker"]);
+  expect(roles[0]).toBe("ticket-system");
   expect(keysOnBoard().sort()).toEqual(["TRK-1", "TRK-2"]);
   expect(count()).toBe("2 tickets");
 
@@ -1725,7 +1725,7 @@ test("a source of any adapter kind that claims the ticket system has its tickets
   for (const [field] of LANE_FIELDS.filter(([field]) => field !== "none")) {
     chooseLanes(field);
     await settle();
-    expect(scopes.at(-1)).toEqual(["tracker"]);
+    expect(roles.at(-1)).toBe("ticket-system");
     expect(target.querySelector(".tf-empty")).toBeNull();
     const heads = [...target.querySelectorAll(".tf-lane h2")].map((h2) => h2.textContent!.replace(/\s+/g, " ").trim());
     expect(heads.sort()).toEqual(expected[field]!.slice().sort());
@@ -1745,27 +1745,28 @@ test("a source of any adapter kind that claims the ticket system has its tickets
   expect(bare).toEqual(["TRK-2", "Undeclared fields", "In Progress", "", "", "Unassigned", "never"]);
 });
 
-test("the board reads every source while the source list is unread or every listed source claims the ticket system (#1200)", async () => {
-  const { h, scopes } = trackerHarness();
+test("every board read asks for the ticket system, and the shell's source list answering reads nothing again (#1299)", async () => {
+  const { h, roles } = trackerHarness();
   await open(h);
-  expect(scopes[0]).toEqual([]);
-  expect(keysOnBoard()).toContain("NOTE-1");
+  expect(roles.length).toBeGreaterThan(0);
+  expect(new Set(roles)).toEqual(new Set(["ticket-system"]));
+  expect(keysOnBoard()).not.toContain("NOTE-1");
 
-  // The list answers after the board: the board is read again, narrowed.
+  // The shell's list of claims is no scope of the board's any more.
+  const asked = roles.length;
   sourceRoles.take([
     { id: "tracker", roles: [{ role: "ticket-system", reads: [] }] },
-    { id: "notes", roles: [] },
+    { id: "notes", roles: [{ role: "ticket-system", reads: [] }] },
   ]);
   await settle();
-  expect(scopes.at(-1)).toEqual(["tracker"]);
+  expect(roles).toHaveLength(asked);
   expect(keysOnBoard()).not.toContain("NOTE-1");
 });
 
-test("with no source claiming the ticket system the board reads nothing and says how to add one (#1200)", async () => {
-  sourceRoles.take([{ id: "notes", roles: [{ role: "wiki", reads: [] }] }]);
-  const { h, scopes } = trackerHarness();
+test("with no source filling the ticket system the board is read, empty, and says how to add one (#1200, #1299)", async () => {
+  const { h, roles } = trackerHarness([]);
   await open(h);
-  expect(scopes).toEqual([]);
+  expect(roles[0]).toBe("ticket-system");
   expect(target.querySelector(".tf-empty")!.textContent).toBe(
     "No tickets synced yet. Add a ticket system in Settings and they appear here.",
   );

@@ -61,16 +61,17 @@
   /** The reads this page makes, injectable so a test needs no bridge. */
   export interface TicketsPorts {
     /**
-     * `mini_board` over `sources`, every source when empty: capped per column
-     * or not, narrowed by a query or not; or a Jira view's board, when
-     * `savedView` names one (#877); in lanes or not (#939).
+     * `mini_board` over the sources filling `role`, every source without one
+     * (#1299): capped per column or not, narrowed by a query or not; or a
+     * Jira view's board, when `savedView` names one (#877); in lanes or not
+     * (#939).
      */
     board: (
       perColumn: number | null,
       query: string | null,
       savedView?: string | null,
       lanes?: LanesAsked | null,
-      sources?: string[],
+      role?: string,
     ) => Promise<MiniBoard>;
     /** Hands a Jira view's address to the browser: *Open in Jira* (#879). */
     openExternal?: (url: string) => Promise<void>;
@@ -94,7 +95,7 @@
     translateView: (id: string) => Promise<QueryTranslation | null>;
   }
 
-  /** A board with nothing on it, new each time, as `$state` may take it: what no claimer, and no answer yet, draw. */
+  /** A board with nothing on it, new each time, as `$state` may take it: what no answer yet draws. */
   function emptyBoard(): MiniBoard {
     return { columns: [], sources: [], lanes: [], more_lanes: 0 };
   }
@@ -209,8 +210,8 @@
     ready,
     timedTicket,
     ports = {
-      board: (perColumn, query, savedView, lanes, sources) =>
-        miniBoard({ sources: sources ?? [], context: null, project: null }, perColumn, query, savedView, lanes),
+      board: (perColumn, query, savedView, lanes, role) =>
+        miniBoard({ role: role ?? null, context: null, project: null }, perColumn, query, savedView, lanes),
       openExternal,
       detail: getEntity,
       contexts: listContexts,
@@ -402,28 +403,18 @@
 
   const typing = $derived(filter.text.trim() !== "");
   /**
-   * The sources the board is read over (#1200, ADR-0029): those that claim
-   * the ticket system, whatever their adapter kind. `null` reads every
-   * source, as `sourceRoles.keep` narrows nothing: the list is unread, or
-   * every source on it claims the role. Narrowed on the server, so every
-   * count is the claimers' own.
+   * `ports.board` for the ticket system (#1200, #1299, ADR-0029 as amended):
+   * the server reads it over the sources that fill the role, whatever their
+   * adapter kind, so every count is the fillers' own and nothing is narrowed
+   * here.
    */
-  const scope = $derived(sourceRoles.scope(TICKET_SYSTEM));
-  /** {@link scope} as a value, so the board is read again only when it changes. */
-  const scopeKey = $derived(JSON.stringify(scope));
-
-  /** `ports.board` over {@link scope}; with no source claiming the role, an empty board unread. */
   function readBoard(
     perColumn: number | null,
     query: string | null,
     savedView: string | null,
     lanes?: LanesAsked | null,
   ): Promise<MiniBoard> {
-    const sources = untrack(() => scope);
-    if (sources !== null && sources.length === 0) {
-      return Promise.resolve(emptyBoard());
-    }
-    return ports.board(perColumn, query, savedView, lanes, sources ?? []);
+    return ports.board(perColumn, query, savedView, lanes, TICKET_SYSTEM);
   }
 
   const sum = (b: MiniBoard) => b.columns.reduce((all, column) => all + column.total, 0);
@@ -717,7 +708,6 @@
   $effect(() => {
     if (!ready) return;
     void sessionKey;
-    void scopeKey;
     const text = base;
     untrack(() => {
       board = null;

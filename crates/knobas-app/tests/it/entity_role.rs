@@ -520,3 +520,106 @@ async fn a_reached_pipeline_is_not_read_for_ci() {
     };
     assert_eq!(read(&pool, &pipelines, &[&filler]).await, Vec::new());
 }
+
+/// One live ticket `key` of `source` in `status`, at the path the mock
+/// declares a ticket's status (`status`) and at Jira's.
+async fn ticket_in(pool: &PgPool, source: &str, key: &str, status: &str) {
+    let entity = format!("{source}:{key}");
+    sqlx::query("insert into knobas.entity (id, kind, title) values ($1, 'ticket', $1)")
+        .bind(&entity)
+        .execute(pool)
+        .await
+        .unwrap();
+    sqlx::query(
+        "insert into sync.item (entity_id, source_id, kind, title, body_text, payload)
+         values ($1, $2, 'ticket', $1, '', $3)",
+    )
+    .bind(&entity)
+    .bind(source)
+    .bind(serde_json::json!({ "status": status, "fields": { "status": { "name": status } } }))
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+/// **The ticket board is read for a role** (#1299): `mini_board` narrows
+/// itself to the role's fillers. A filler's tickets are drawn and counted; a
+/// claimer whose records missed a ticket-system path, a source whose adapter
+/// does not claim the ticket system and a removed source's leftovers are
+/// neither drawn nor counted, though each holds a live ticket. The status is
+/// this test's own, so its column holds only what this test wrote.
+#[tokio::test]
+async fn the_ticket_board_reads_the_roles_fillers() {
+    let pool = pool().await;
+    let status = unique("Triage");
+    let filler = configured(&pool, "mock").await;
+    let with_miss = configured(&pool, "mock").await;
+    let not_claiming = configured(&pool, "teamcity").await;
+    let removed = configured(&pool, "mock").await;
+    let all = [&filler, &with_miss, &not_claiming, &removed];
+    for source in all {
+        ticket_in(&pool, source, "T-1", &status).await;
+    }
+    ticket_in(&pool, &filler, "T-2", &status).await;
+    missed(&pool, &with_miss, knobas_source::role::TICKET_SYSTEM).await;
+    // A miss of another role takes nothing off the ticket board.
+    missed(&pool, &filler, knobas_source::role::CI).await;
+    sqlx::query("delete from knobas.source_config where id = $1")
+        .bind(&removed)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let board = knobas_app::commands::entity::mini_board_inner(
+        &pool,
+        None,
+        Some(knobas_source::role::TICKET_SYSTEM),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    let mut drawn: Vec<(&str, &str)> = board
+        .columns
+        .iter()
+        .flat_map(|column| &column.cards)
+        .filter(|card| all.contains(&&card.source_id))
+        .map(|card| (card.source_id.as_str(), card.key.as_str()))
+        .collect();
+    drawn.sort_unstable();
+    assert_eq!(
+        drawn,
+        vec![(filler.as_str(), "T-1"), (filler.as_str(), "T-2")]
+    );
+    let column = board
+        .columns
+        .iter()
+        .find(|column| column.status.as_deref() == Some(status.as_str()))
+        .expect("the filler's column");
+    assert_eq!(
+        column.total, 2,
+        "the column counts the filler's tickets alone"
+    );
+}
+
+/// A role nobody fills is an empty board, read: not every source's, which
+/// is what no source named once meant.
+#[tokio::test]
+async fn a_role_nobody_fills_is_an_empty_board() {
+    let pool = pool().await;
+    let source = configured(&pool, "mock").await;
+    ticket_in(&pool, &source, "T-1", "To Do").await;
+    let board = knobas_app::commands::entity::mini_board_inner(
+        &pool,
+        None,
+        Some("role_nobody:fills-this"),
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    assert!(board.columns.is_empty(), "{:?}", board.columns);
+    assert!(board.sources.is_empty());
+}

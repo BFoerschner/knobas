@@ -7316,3 +7316,36 @@ The merge-manager's rulings (Opus):
   kind on the pipeline frame, and `a_custom_role_reads_its_adapters_other_kinds` holds a desk
   pipeline that the custom role does not read. That mutant (`builtin_kinds` → `entity_list_kinds`
   in the custom branch) now dies there. *Reversing:* low (drop the desk's CI claim and pipeline).
+## #1299: the ticket board takes a role (Opus implementer, 2026-10-19)
+
+- **The ticket says `ticket_board`; the command is `mini_board`.** §10.8's #1294 entry books the
+  swap under that name, so the command keeps it. *Reversing:* n/a.
+- **The fillers are resolved at the app seam, not in the core read.** *Fork:* teach
+  `knobas_core::mini_board::Scope` a role, or resolve the role in `mini_board_laned` and hand the
+  core its fillers as `sources`. *Ruling:* the app seam, with `Room.sources` replaced by
+  `Room.role`. The core reads an empty source list as every source, so a role nobody fills
+  returns an empty board there, before any statement runs. *Reasoning:* the fillers function
+  lives in `knobas-app` (`sources::crud::fillers`) beside the registry, as #1295's pipelines read
+  calls it; the core's statements are unchanged, so its plan tests stand. *Reversing:* low.
+- **`mini_board_inner` takes `role` where it took `sources`.** Every caller passed `&[]` except
+  `start_work_live.rs`, which computed the ticket system's claimers itself; it now asks for the
+  role and keeps its claimers assert. *Reversing:* low.
+- **A saved view's board does not read the role.** *Fork:* narrow a Jira view's board to the
+  fillers too. *Ruling:* no. A saved view is its own source's list, and the room dimensions were
+  never read on it (`saved_view_board`); the ticket names the room's board only.
+  *Reversing:* low, one filter in `saved_view_board_laned`.
+- **`sourceRoles.scope` stays in the shell's role module, though the Tickets page no longer
+  calls it.** Retiring the shell's filters is #1300 ("The shell filters nothing"), and a sibling
+  bundle (#1296-#1298) is editing the module's callers now. *Reversing:* n/a.
+- **The fake board answers a role through `fakeRoleScope`.** The demo's mock, Gitea and Jira all
+  fill the ticket system, so `?fake-ipc` draws the same board as before; no screenshot was taken,
+  since nothing the page draws changed. *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **The open Tickets page no longer re-reads its board when the source list changes.** *Fork:*
+  keep a re-read on the shell's source list (a claim or miss changing while the page is open), or
+  drop it as the ticket says. *Ruling:* drop it. The ticket names the scope key among what goes,
+  the mirror resolves the fillers on every read, and Settings is its own page, so coming back
+  from adding a source mounts the board afresh. *Reversing:* low, one `void` of the source list
+  in the read effect.

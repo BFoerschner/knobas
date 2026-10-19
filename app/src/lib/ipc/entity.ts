@@ -2085,14 +2085,16 @@ export interface LanesAsked {
 }
 
 /**
- * The Tickets tile's mini board — `mini_board` (ADR-0009, #177).
+ * The ticket board — `mini_board` (ADR-0009, #177).
  *
- * Takes the room's own filter, so the board is scoped exactly as every other
- * tile in that room is: a stored room narrows by `context` — the fixed one-hop
- * membership `contextMembers` answers with (§16.11, ADR-0008) — and a derived
- * room by `sources`, which is empty in *All work*. Of what the scope admits the
- * board draws the live tickets, so a ticket the source deleted is off it.
- * Grouping and column order happen in the command, not here.
+ * `role` (#1299, ADR-0029 as amended) reads the board over the sources that
+ * fill that role, as the mirror answers them: the Tickets page asks for the
+ * ticket system's, and its columns and counts are then the fillers' alone. A
+ * role nobody fills is an empty board; `null` reads every source. `context`
+ * narrows to a stored context's fixed one-hop membership (§16.11, ADR-0008). Of
+ * what the scope admits the board draws the live tickets, so a ticket the
+ * source deleted is off it. Grouping and column order happen in the command,
+ * not here.
  *
  * `perColumn` cuts each column to its newest cards (#753): what the tile asks
  * for, so a room of thousands of tickets is not thousands of cards. Omitted,
@@ -2116,7 +2118,7 @@ export interface LanesAsked {
  * sent, biggest first (`MiniBoard.lanes`, `MiniBoard.more_lanes`).
  */
 export function miniBoard(
-  filter: Pick<EntityFilter, "sources" | "context" | "project">,
+  filter: Pick<EntityFilter, "role" | "context" | "project">,
   perColumn?: number | null,
   query?: string | null,
   savedView?: string | null,
@@ -2124,7 +2126,7 @@ export function miniBoard(
 ): Promise<MiniBoard> {
   return invoke<MiniBoard>("mini_board", {
     ctxId: filter.context,
-    sources: filter.sources,
+    role: filter.role ?? null,
     project: filter.project,
     perColumn: perColumn ?? null,
     query: query ?? null,

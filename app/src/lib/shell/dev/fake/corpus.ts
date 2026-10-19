@@ -367,6 +367,12 @@ export function mirrorRow(entry: (typeof CORPUS)[number]) {
  * in.
  */
 function miniBoard(args: Record<string, unknown>) {
+  // Asked for a role, the board is its fillers' (#1299), as the command's:
+  // a role nobody fills is an empty board, never every source's. The
+  // command takes no source list, so none is read off `args`.
+  const role = args["role"];
+  const sources = typeof role === "string" ? fakeRoleScope(role).sources : [];
+  if (typeof role === "string" && sources.length === 0) return { columns: [], sources: [], lanes: [], more_lanes: 0 };
   const perColumn = (args["perColumn"] as number | null | undefined) ?? null;
   const lanes = (args["lanes"] as LaneField | null | undefined) ?? null;
   // A Jira view's board (#877): the whole board under the same words, cut
@@ -375,7 +381,7 @@ function miniBoard(args: Record<string, unknown>) {
   const whole =
     typeof savedView === "string"
       ? fakeJiraBoard(savedView, boardOf({ ...args, sources: [], ctxId: null, project: null, perColumn: null }), null)
-      : boardOf({ ...args, perColumn: null });
+      : boardOf({ ...args, sources, perColumn: null });
   // In lanes (#939): each lane's column capped, the first lanes sent.
   if (lanes !== null) {
     return fakeLanes(whole, lanes, perColumn, (args["lanesFirst"] as number | null | undefined) ?? null);
@@ -466,11 +472,11 @@ function boardOf(args: Record<string, unknown>) {
 
 /**
  * `source_statuses` (#760): the statuses the source's live tickets show, in
- * the board's order -- `miniBoard`'s `sources` entry for one source.
+ * the board's order -- the board's `sources` entry for one source.
  */
 function sourceStatuses(args: Record<string, unknown>): string[] {
   if (args["sourceId"] !== "mock") return [];
-  const board = miniBoard({ sources: ["mock"], ctxId: null, project: null });
+  const board = boardOf({ sources: ["mock"], ctxId: null, project: null });
   return board.sources[0]?.statuses ?? [];
 }
 

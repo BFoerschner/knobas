@@ -906,7 +906,7 @@ async fn what_the_reader_waits_on() {
         tickets_view,
         "mini_board (no words, 8 a column)",
         runs,
-        || knobas_app::commands::entity::mini_board_inner(pool, None, &[], None, Some(8), None),
+        || knobas_app::commands::entity::mini_board_inner(pool, None, None, None, Some(8), None),
     )
     .await;
     for word in ["a", "jira0-123", "zzqx"] {
@@ -919,7 +919,7 @@ async fn what_the_reader_waits_on() {
                     knobas_app::commands::entity::mini_board_inner(
                         pool,
                         None,
-                        &[],
+                        None,
                         None,
                         cap,
                         Some(word),
@@ -968,7 +968,7 @@ async fn what_the_reader_waits_on() {
                 knobas_app::commands::entity::mini_board_inner(
                     pool,
                     None,
-                    &[],
+                    None,
                     None,
                     Some(8),
                     Some(&raw),
