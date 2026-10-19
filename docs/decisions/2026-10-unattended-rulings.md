@@ -6213,7 +6213,7 @@ The merge-manager's rulings:
   mirror. A 401 still ends the run. **Reversing:** low (`entity_kinds`, `sync::issues`).
 - **A ticket's project is its repository, though ADR-0010 says Gitea gets no project.** The
   ticket, spec #1192 and ADR-0029's ticket-system minimum all require one, and name the
-  repository. Only the `ticket` kind declares it. Follow-up filed to amend ADR-0010.
+  repository. Only the `ticket` kind declares it. Follow-up #1247 amends ADR-0010.
   **Reversing:** low (one declared path), but then the role is not filled.
 - **Priority is a scoped label's value (`Priority/High` → `High`, scope in any case); type and
   parent are always `null`.** Gitea's own *Default* label set spells priority this way. Gitea
@@ -6238,4 +6238,4 @@ The merge-manager's rulings:
   **Reversing:** low.
 - **The `?fake-ipc` Gitea source is not given the ticket-system claim.** The frontend
   suite's Gitea-shaped ticket source (#1200) already witnesses the board. Backlog follow-up
-  filed. **Reversing:** n/a.
+  #1248. **Reversing:** n/a.
