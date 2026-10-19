@@ -43,7 +43,7 @@ pub(crate) use knobas_http::credential;
 /// Which [`Auth`] each configured method means for TeamCity, and what a
 /// source that cannot authenticate reads as. The mapping itself, and the
 /// order it judges in, are [`credential`]'s; the transport uses a username as
-/// given, so [`username`] trims it first.
+/// given, so [`nonblank_username`] trims it first.
 pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
     // A TeamCity access token (2019.1+) is a Bearer token.
     pat: TokenSpelling::Bearer,
@@ -63,7 +63,7 @@ pub(crate) const CREDENTIAL_RULES: CredentialRules = CredentialRules {
 /// The configured username as [`credential`] should see it: trimmed, and
 /// absent when blank. The form lets whitespace through, and a blank username
 /// is the same mistake as none.
-pub(crate) fn username(cfg: &crate::TeamCityConfig) -> Option<&str> {
+pub(crate) fn nonblank_username(cfg: &crate::TeamCityConfig) -> Option<&str> {
     cfg.username
         .as_deref()
         .map(str::trim)
@@ -483,8 +483,7 @@ mod tests {
     /// it would get there.
     #[test]
     fn debug_never_prints_the_secret() {
-        let auth =
-            credential(
+        let auth = credential(
             &CREDENTIAL_RULES,
             Some(AuthMethod::Pat),
             None,

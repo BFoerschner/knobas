@@ -102,7 +102,7 @@ impl HttpRest {
         let credential = http::credential(
             &http::CREDENTIAL_RULES,
             instance.auth,
-            http::username(cfg),
+            http::nonblank_username(cfg),
             instance.secret.as_deref(),
         )?;
         Ok(Self {

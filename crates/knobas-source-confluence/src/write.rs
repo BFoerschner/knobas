@@ -267,8 +267,13 @@ mod tests {
                 );
             }
         });
-        let auth = credential(&CREDENTIAL_RULES, Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
-            .expect("a PAT is enough");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(knobas_source::AuthMethod::Pat),
+            None,
+            Some("pat"),
+        )
+        .expect("a PAT is enough");
         let http = ConfluenceHttp::new(
             &format!("http://{addr}"),
             &crate::ConfluenceConfig::default(),
@@ -335,8 +340,13 @@ mod tests {
                 let _ = socket.write_all(answer.as_bytes());
             }
         });
-        let auth = credential(&CREDENTIAL_RULES, Some(knobas_source::AuthMethod::Pat), None, Some("pat"))
-            .expect("a PAT is enough");
+        let auth = credential(
+            &CREDENTIAL_RULES,
+            Some(knobas_source::AuthMethod::Pat),
+            None,
+            Some("pat"),
+        )
+        .expect("a PAT is enough");
         let http = ConfluenceHttp::new(
             &format!("http://{addr}"),
             &crate::ConfluenceConfig::default(),
