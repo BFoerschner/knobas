@@ -98,9 +98,8 @@ async fn board(pool: &sqlx::PgPool, p: &str, keys: &[String]) -> (String, String
     )
     .await;
     let mut tx = pool.begin().await.unwrap();
-    let declared =
-        knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
-            .expect("Jira declares saved views");
+    let declared = knobas_sync::saved_views::declared(&knobas_source_jira::descriptor_template())
+        .expect("Jira declares saved views");
     knobas_sync::saved_views::project(&mut tx, "jira", &declared)
         .await
         .unwrap();

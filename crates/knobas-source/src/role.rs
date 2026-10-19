@@ -69,8 +69,8 @@ impl RoleClaim {
     }
 }
 
-/// How a minimum names a kind: by its id, or, for ADR-0022's Builds frame, by
-/// the [`Frame`] a kind declares (TeamCity's `build_config` is a pipeline).
+/// How a minimum names a kind: by its id, or by the [`Frame`] a kind declares
+/// (TeamCity's `build_config` is a pipeline, Jira's `jira_view` a saved view).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KindOf {
     Id(&'static str),
@@ -250,7 +250,7 @@ pub const MINIMUMS: &[Minimum] = &[
         )],
         // Saved views (#1207, ADR-0029): Jira's boards and filters. The kind
         // is named by its frame, as CI's are, so the projection
-        // (`knobas_sync::saved_views`) keys on the role and not on an
+        // (`knobas_sync::saved_views`) keys on the frame and not on an
         // adapter's kind id.
         optional_kinds: &[frame(Frame::SavedView, &[])],
         reads: &["reachable_transitions"],
@@ -459,10 +459,10 @@ fn check_kind(
     let emitted = |id: &str| d.entity_kinds.iter().any(|k| k.id == id);
     let (named, paths) = match need.kind {
         KindOf::Id(id) => {
-            if !emitted(id) && how == Need::Optional {
-                return Ok(());
-            }
             if !emitted(id) {
+                if how == Need::Optional {
+                    return Ok(());
+                }
                 return Err(ClaimError::MissingKind {
                     role: role.to_owned(),
                     kind: format!("{id:?}"),

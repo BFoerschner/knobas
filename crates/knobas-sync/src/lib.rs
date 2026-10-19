@@ -40,13 +40,13 @@ pub mod analyze;
 pub mod attach;
 pub mod config;
 pub mod health;
-pub mod saved_views;
 #[cfg(any(test, feature = "test-util"))]
 pub mod mirror;
 pub mod progress;
 pub mod role_check;
 pub mod run_log;
 pub mod samples;
+pub mod saved_views;
 pub mod scheduler;
 pub mod stats;
 pub mod write_queue;
@@ -635,8 +635,8 @@ async fn run_locked(
     };
     let full_sync = cursor.is_none();
     // Whether this source declares saved views (#1207), which gates their
-    // projection below: kinds declaring the saved-view frame, by role, never
-    // by an adapter's kind id.
+    // projection below: kinds declaring the saved-view frame the
+    // ticket-system minimum names, never an adapter's kind id.
     let saved_views = saved_views::declared(&source.descriptor());
 
     // What is kept of the source's roles, and whether this run judges them:

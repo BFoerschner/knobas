@@ -338,11 +338,12 @@ pub struct KindPaths {
     /// Empty for every kind the source does not order.
     #[serde(default)]
     pub position: Vec<PayloadPath>,
-    /// Which kind of the Builds frame this kind is (ADR-0022, #848): a
-    /// [`Frame::Pipeline`] the Builds view lists, or a [`Frame::Run`] of one;
-    /// or a ticket system's [`Frame::SavedView`] (#1207).
-    /// A role, not a path, like [`blocked_statuses`](Self::blocked_statuses).
-    /// `None` for every kind the frame does not draw.
+    /// Which part of a shell-owned frame this kind is: of the Builds frame
+    /// (ADR-0022, #848), a [`Frame::Pipeline`] the Builds view lists or a
+    /// [`Frame::Run`] of one; or a ticket system's [`Frame::SavedView`]
+    /// (#1207). A role, not a path, like
+    /// [`blocked_statuses`](Self::blocked_statuses). `None` for every kind no
+    /// frame draws.
     #[serde(default)]
     pub frame: Option<Frame>,
     /// What a pipeline is called (#848): TeamCity's configuration `name`.

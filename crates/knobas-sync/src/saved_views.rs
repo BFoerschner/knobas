@@ -4,7 +4,7 @@
 //! each of that source's runs, and each one's `knobas.ticket_view` row kept in
 //! step.
 //!
-//! **Keyed on the role, not on an adapter (#1207).** A saved-view kind is one
+//! **Keyed on the frame, not on an adapter (#1207).** A saved-view kind is one
 //! whose [`KindPaths`](knobas_core::payload::KindPaths) declares
 //! [`Frame::SavedView`], the ticket-system minimum's optional kind
 //! (`knobas_source::role`); Jira's `jira_view` is one. Nothing here names an
@@ -23,7 +23,7 @@
 //! foreign key's cascade -- and its ticket view with it. A run that fails
 //! leaves nothing behind.
 //!
-//! **What the ticket view row takes from Jira and what it keeps.** The name,
+//! **What the ticket view row takes from the source and what it keeps.** The name,
 //! the group (*Jira boards* or *Jira filters*: `<descriptor name> boards`, or
 //! `filters` for a view whose `kind` is `filter`) and the columns follow Jira at
 //! every run (R-3.24); the layout, lanes, card fields, list columns and sort
@@ -58,7 +58,7 @@ use sqlx::{Postgres, Transaction};
 /// What a descriptor declares of saved views: the kinds they arrive as, and
 /// the name their groups are made from. `None` when it declares none.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Declared {
+pub struct SavedViewKinds {
     kinds: Vec<String>,
     source_name: String,
 }
@@ -66,7 +66,7 @@ pub struct Declared {
 /// The saved-view kinds `descriptor` emits: each declares
 /// [`Frame::SavedView`] and is one of its `entity_kinds`.
 #[must_use]
-pub fn declared(descriptor: &SourceDescriptor) -> Option<Declared> {
+pub fn declared(descriptor: &SourceDescriptor) -> Option<SavedViewKinds> {
     let kinds: Vec<String> = descriptor
         .payload_paths
         .iter()
@@ -74,7 +74,7 @@ pub fn declared(descriptor: &SourceDescriptor) -> Option<Declared> {
         .filter(|p| descriptor.entity_kinds.iter().any(|k| k.id == p.kind))
         .map(|p| p.kind.clone())
         .collect();
-    (!kinds.is_empty()).then(|| Declared {
+    (!kinds.is_empty()).then(|| SavedViewKinds {
         kinds,
         source_name: descriptor.name.clone(),
     })
@@ -179,7 +179,7 @@ delete from knobas.ticket_view t
 pub async fn project(
     tx: &mut Transaction<'_, Postgres>,
     source_id: &str,
-    declared: &Declared,
+    declared: &SavedViewKinds,
 ) -> Result<(), sqlx::Error> {
     for statement in [UPSERT_VIEWS, DROP_GONE_VIEWS] {
         sqlx::query(statement)
