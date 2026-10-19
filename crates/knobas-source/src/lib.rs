@@ -203,6 +203,7 @@ pub struct SourceDescriptor {
 // them are in `knobas-core`, which may not depend on the SPI. Neither
 // `knobas-spi-types` nor this crate needs a database, so both build for
 // `wasm32-wasip2` (#1234). Re-exported so an adapter needs one `use`.
+pub use knobas_spi_types::delivery::Delivery;
 pub use knobas_spi_types::entity::EntityRef;
 pub use knobas_spi_types::payload::{
     Frame, KindPaths, ListPath, ParentPath, PayloadPath, ProjectPath, StateChip, StatePath,
@@ -1270,6 +1271,122 @@ impl WriteOp {
             WriteOp::UpdatePullRequestBranch { .. } => "update_pull_request_branch",
             WriteOp::CommitFile { .. } => "commit_file",
             WriteOp::SourceAction { .. } => SOURCE_ACTION,
+        }
+    }
+
+    /// How the queue delivers this op: what a hold compares, whether a resend
+    /// is harmless, whether a withdrawal can leave an unclaimed artefact,
+    /// which field names the target, and which link an arrival draws
+    /// (ADR-0006, amended 2026-10-19).
+    ///
+    /// **No wildcard arm**, for [`WriteOp::identifier`]'s reason: a new
+    /// variant does not compile until it states its delivery here. The
+    /// reasons per op are argued in `knobas_core::write_queue::project` for
+    /// the projection, and in `knobas-sync`'s `resend_is_harmless` and
+    /// `UNCLAIMED_OPS` for the resend and the withdrawal. Those two, sync's
+    /// `target_entity` and the app's `link_on_arrival` still answer for
+    /// themselves until #1308 and the app's slice of #1301 read this instead.
+    #[must_use]
+    pub fn delivery(&self) -> Delivery {
+        use knobas_spi_types::delivery::{ArrivalLink, Projection, TargetField};
+        // A source action's: maximally conservative on every count (#1194).
+        // Every other arm names each answer it loosens.
+        let conservative = Delivery {
+            projection: Projection::WHOLE,
+            resend_harmless: false,
+            can_leave_unclaimed: true,
+            target: TargetField::Entity,
+            link: None,
+        };
+        match self {
+            // What it does is the adapter's alone, so knobas can say nothing
+            // in its favour.
+            WriteOp::SourceAction { .. } => conservative,
+            // They add to a discussion and hold only on its declared state
+            // (#752); a second arrival is a second comment or review.
+            WriteOp::Comment { .. } | WriteOp::Approve { .. } | WriteOp::SubmitReview { .. } => {
+                Delivery {
+                    projection: Projection::DeclaredState,
+                    can_leave_unclaimed: false,
+                    ..conservative
+                }
+            }
+            // A judgement on the target's current state; a second arrival is
+            // a second move.
+            WriteOp::Transition { .. } => Delivery {
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // They overwrite, and the source refuses the repeat or it sets
+            // what is already set (#1122).
+            WriteOp::UpdatePage { .. }
+            | WriteOp::MergePullRequest { .. }
+            | WriteOp::SetParameter { .. }
+            | WriteOp::DeleteBranch { .. }
+            | WriteOp::UpdatePullRequestBranch { .. } => Delivery {
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // Overwrites only the fields it carries (#706).
+            WriteOp::EditPullRequest { .. } => Delivery {
+                projection: Projection::Whole { per_field: true },
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // A ticket's title is no address (#336).
+            WriteOp::CreateTicket { .. } => Delivery {
+                projection: Projection::Liveness,
+                ..conservative
+            },
+            // The head branch is the address, the source refuses the repeat,
+            // and the arrival is linked to its job (#984).
+            WriteOp::CreateBranch { .. } | WriteOp::CreatePullRequest { .. } => Delivery {
+                projection: Projection::Liveness,
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                link: Some(ArrivalLink::Related),
+                ..conservative
+            },
+            // They add beside the container; a second arrival is a second
+            // build or worklog.
+            WriteOp::TriggerBuild { .. }
+            | WriteOp::RerunBuild { .. }
+            | WriteOp::RunBuild { .. }
+            | WriteOp::LogWork { .. } => Delivery {
+                projection: Projection::Liveness,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // Created under its parent and drawn against its job (#1121).
+            WriteOp::CreatePage { .. } => Delivery {
+                projection: Projection::Liveness,
+                target: TargetField::Parent,
+                link: Some(ArrivalLink::Documents),
+                ..conservative
+            },
+            // The monitor's own state, and the same state twice is one.
+            WriteOp::PauseMonitor { .. } | WriteOp::ResumeMonitor { .. } => Delivery {
+                projection: Projection::Liveness,
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                ..conservative
+            },
+            // A monitor's name is a label, not an address (#453).
+            WriteOp::CreateMonitor { .. } => Delivery {
+                projection: Projection::Liveness,
+                ..conservative
+            },
+            // Into a repository; the source compares the file's own version
+            // (#822).
+            WriteOp::CommitFile { .. } => Delivery {
+                projection: Projection::Liveness,
+                resend_harmless: true,
+                can_leave_unclaimed: false,
+                target: TargetField::Repository,
+                ..conservative
+            },
         }
     }
 }

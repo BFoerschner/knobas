@@ -7029,3 +7029,65 @@ The merge-manager's rulings (Opus):
   (`crates/knobas-source/Cargo.toml` names only `knobas-spi-types`). Only that sentence changed.
   The rest of the amendment stands as written. A parenthetical marks the correction so a reader
   of the amendment sees it was edited. *Reversing:* one sentence.
+### #1307: implementer's rulings (Opus)
+
+- **`Delivery` lives in `knobas-spi-types`, re-exported as `knobas_core::delivery`.** *Fork:* the
+  core crate, as the ticket and ADR-0006's amendment say, or the crate the source SPI actually
+  depends on. *Ruling:* `knobas-spi-types`. Since #1234 `knobas-source` depends on
+  `knobas-spi-types` and on no other knobas crate, so `WriteOp::delivery` cannot name a type in
+  `knobas-core` without a dependency that pulls sqlx into the `wasm32-wasip2` build. The
+  re-export makes the type the core's by path, as `entity` and `payload` are. The amendment's
+  reason sentence names the wrong crate; follow-up filed. *Reversing:* low (one module move).
+- **`edit_pull_request`'s per-field projection is `Projection::Whole { per_field: true }`.**
+  *Fork:* a fourth shape, a check on the payload's serde tag, or the whole record carrying a
+  narrowing. *Ruling:* the narrowing. The ticket names three shapes and puts the edit with "the
+  rest whole"; a tag check would be the deleted identifier arm in another form. Which fields it
+  narrows to is still read from the queued payload, failing wide, so ADR-0007's pin
+  (`an_edit_read_that_misses_holds_on_the_whole_record`) is untouched. *Reversing:* low.
+- **`project` keeps the identifier as a label.** It still writes `"op"` into the snapshot:
+  pending rows carry it, and dropping it would hold every one of them on the next flush. No
+  decision reads it. *Reversing:* low, at the cost of one hold per open row.
+- **The declared-state lookup is asked of the shape** (`Projection::reads_declared_state`), not
+  of the op: the op-keyed helper is gone and sync's `declared_state` takes the shape.
+  *Reversing:* low.
+- **`attempt` decodes the op before hold detection**, since the shape comes from the decoded op.
+  A row nothing decodes is now refused at once; before, it could be held first and refused after
+  *Apply anyway*. It ends refused either way, and no test or reader reaches that row. *Reversing:*
+  low.
+- **`delivery()`'s arms start from a source action's delivery and name each answer they loosen.**
+  An arm that forgot a field inherits the conservative answer (holds on the whole record, is
+  not resent, discloses a withdrawal), never the loose one. *Reversing:* n/a.
+- **Roster tests.** Core's `every_projected_op_has_one_of_the_three_shapes` became
+  `every_shape_projects_its_own_fields`; `an_unstated_op_holds_on_the_whole_record` is deleted,
+  since no op can be unstated now; sync's `every_write_op_has_a_stated_projection` is deleted. The
+  probe-count assertion in sync's `every_write_op_says_whether_a_withdrawal_can_leave_one` read
+  `PROJECTED_OPS.len()` and goes with it, so until #1308 deletes that test nothing checks that
+  `write_op_probes` covers every variant. The core tests' op-name lists became one labelled
+  shape each, with a comment naming the ops `delivery()` gives it. *Reversing:* n/a.
+- **What witnesses the values.** A throwaway test (not committed) checked every probe's
+  `delivery()` against today's `resend_is_harmless`, `UNCLAIMED_OPS`, `target_entity`, the old
+  projection lists and `link_on_arrival`'s relation: 23 of 23 agree. The committed tests don't
+  read `Delivery` to check a table, as the spec asks; the sync harness witnesses the projection,
+  and #1308 and the app ticket make it witness the rest. With core's op-name lists gone, nothing
+  pinned `commit_file`'s liveness shape (a whole-record mutant survived every suite), so
+  `a_commit_into_a_repository_whose_record_moved_is_not_held` joins the harness. *Reversing:* n/a.
+
+### #1307: merge-manager's rulings (Opus)
+
+- **The PR needs a §10.8 entry.** *Fork:* treat `WriteOp::delivery()` as Rust-only and exempt,
+  or as a change to `crates/knobas-source/src/**`, which §10.8 freezes whatever its wire effect.
+  *Ruling:* an entry, `docs/contract/10.8/1307-writeop-delivery.md`, added on the branch. The
+  frozen list names the path, not the wire; every earlier change under it carries one.
+  *Reversing:* low (delete the file, rerun `just contract-index`).
+- **The reorder in `attempt` gets a witness.** *Fork:* leave "an undecodable row is refused at
+  once" to the PR text, or pin it. *Ruling:* pinned by
+  `an_undecodable_write_is_refused_rather_than_held`: a raw row whose payload no `WriteOp`
+  decodes, with a snapshot the current target does not match, is refused at its first flush and
+  never sent. Under the old order the same row was held. *Reversing:* n/a.
+- **`delivery()`'s values accepted against the old tables.** Checked by reading:
+  the 12 liveness ops, the 3 declared-state ops and the 8 whole ones (`edit_pull_request`
+  per-field) match the deleted `project` arms; the 11 harmless resends match
+  `resend_is_harmless`; the 4 that can leave an unclaimed artefact match `UNCLAIMED_OPS`;
+  `create_page` → `parent` and `commit_file` → `repo` match `target_entity`; `create_branch` and
+  `create_pull_request` → `related`, `create_page` → `documents` match `link_on_arrival`.
+  *Reversing:* n/a.

@@ -1229,6 +1229,61 @@ async fn a_commit_over_a_file_that_moved_is_held_with_both_versions() {
     assert_eq!(h.delivered(), vec!["b3: mine\n".to_owned()]);
 }
 
+/// A commit's target is its repository, and the mirror holds no file: a
+/// repository record that moved while the commit was queued is not what the
+/// commit overwrites, so it goes (#822). The file's own version, which the
+/// source compares, is what holds it (the test above).
+#[tokio::test]
+async fn a_commit_into_a_repository_whose_record_moved_is_not_held() {
+    let h = harness().await;
+    let repo = h.mirror("tidewater/payout-service", "payout-service").await;
+    h.file_at("b1");
+
+    h.answer(Answer::Unreachable);
+    let write = h.commit_file(&repo, "b1", "mine\n").await;
+    h.mirror("tidewater/payout-service", "payout-service\n\nretitled")
+        .await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(h.delivered(), vec!["b1: mine\n".to_owned()]);
+}
+
+/// A row no `WriteOp` decodes is refused at its first flush, even over a
+/// target that moved: the hold compares the shape the decoded op states, so
+/// the decode comes first, and a row that can never be sent is not offered
+/// for review as a hold (#1307).
+#[tokio::test]
+async fn an_undecodable_write_is_refused_rather_than_held() {
+    let h = harness().await;
+    let ticket = h.mirror("PAY-1307", "a payout fails").await;
+    let write = store::queue(
+        h.pool(),
+        &h.source,
+        &ticket,
+        "comment",
+        serde_json::json!({ "NoSuchOp": { "entity": ticket.to_string() } }),
+        serde_json::json!({ "op": "comment", "live": false }),
+    )
+    .await
+    .unwrap();
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    let refused = h.reload(write.id).await;
+    assert_eq!(refused.state, WriteState::Refused);
+    assert!(
+        refused
+            .detail
+            .as_deref()
+            .is_some_and(|d| d.starts_with("undecodable write")),
+        "{:?}",
+        refused.detail
+    );
+    assert!(h.delivered().is_empty());
+}
+
 /// A source with no stored credential cannot take a write, and that is a
 /// *waiting* fault rather than a lost edit -- entering the credential is what
 /// releases it.
@@ -1383,55 +1438,6 @@ fn write_op_probes() -> Vec<WriteOp> {
             fields: [("label".to_owned(), "7".to_owned())].into(),
         },
     ]
-}
-
-/// The forcing function ADR-0006 relies on, applied to hold detection: a new
-/// `WriteOp` variant that reaches the queue without a stated definition of
-/// "changed" must fail a test rather than fall back quietly.
-///
-/// The match has no wildcard arm for the same reason `WriteOp::identifier`
-/// has none, so a new variant stops this test compiling until it is given a
-/// probe value -- and then this assertion until it is given a projection.
-#[test]
-fn every_write_op_has_a_stated_projection() {
-    let probes = write_op_probes();
-    for op in &probes {
-        let identifier = match op {
-            WriteOp::Comment { .. }
-            | WriteOp::Transition { .. }
-            | WriteOp::CreateTicket { .. }
-            | WriteOp::CreateBranch { .. }
-            | WriteOp::CreatePullRequest { .. }
-            | WriteOp::Approve { .. }
-            | WriteOp::TriggerBuild { .. }
-            | WriteOp::RerunBuild { .. }
-            | WriteOp::LogWork { .. }
-            | WriteOp::CreatePage { .. }
-            | WriteOp::UpdatePage { .. }
-            | WriteOp::PauseMonitor { .. }
-            | WriteOp::ResumeMonitor { .. }
-            | WriteOp::CreateMonitor { .. }
-            | WriteOp::MergePullRequest { .. }
-            | WriteOp::SetParameter { .. }
-            | WriteOp::RunBuild { .. }
-            | WriteOp::SubmitReview { .. }
-            | WriteOp::DeleteBranch { .. }
-            | WriteOp::EditPullRequest { .. }
-            | WriteOp::UpdatePullRequestBranch { .. }
-            | WriteOp::CommitFile { .. }
-            | WriteOp::SourceAction { .. } => op.identifier(),
-        };
-        assert!(
-            store::PROJECTED_OPS.contains(&identifier),
-            "{identifier:?} has no stated definition of a changed target: add one \
-             to `knobas_core::write_queue::project` and list it in PROJECTED_OPS"
-        );
-    }
-    assert_eq!(
-        probes.len(),
-        store::PROJECTED_OPS.len(),
-        "PROJECTED_OPS lists an op `WriteOp` does not define"
-    );
 }
 
 /// Two flushers, one write, one delivery.
@@ -1676,14 +1682,6 @@ fn every_write_op_says_whether_a_withdrawal_can_leave_one() {
             op.identifier()
         );
     }
-    // `PROJECTED_OPS` is one entry per variant -- the test above is what makes
-    // that true -- so it is the variant count, and using it here rather than a
-    // literal means neither of these tests has a number to hand-bump.
-    assert_eq!(
-        probes.len(),
-        store::PROJECTED_OPS.len(),
-        "a `WriteOp` variant has no probe in `write_op_probes`"
-    );
     // And the other direction, which iterating the probes cannot reach: an
     // entry in `UNCLAIMED_OPS` that names no variant at all would never be
     // compared against one, so it would sit there inert and unfalsifiable.

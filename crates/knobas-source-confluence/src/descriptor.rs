@@ -203,7 +203,7 @@ mod tests {
     ///
     /// The three names are checked **literally**, not through
     /// `WriteOp::identifier`: this declaration is the wire contract the
-    /// frontend's `WriteOpPayload` and the queue's `PROJECTED_OPS` are keyed
+    /// frontend's `WriteOpPayload` and the queue's stored rows are keyed
     /// on, and a test that computed them from the enum would agree with a
     /// rename that broke every one of them (#286).
     #[test]

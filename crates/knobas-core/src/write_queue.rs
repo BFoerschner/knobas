@@ -33,6 +33,7 @@ use serde::Serialize;
 use sqlx::PgPool;
 
 use crate::CoreError;
+use crate::delivery::Projection;
 use crate::entity::EntityRef;
 use crate::payload::{StatePath, resolve_state};
 
@@ -324,47 +325,10 @@ pub async fn target_of(pool: &PgPool, entity: &EntityRef) -> Result<Option<Targe
     Ok(row)
 }
 
-/// The ops whose definition of "changed" is **stated** rather than inferred.
-///
-/// Hold detection is per-op, and a new `WriteOp` variant that reaches this
-/// module without an entry here would silently get the conservative fallback
-/// in [`project`] -- correct, but not *stated*, which is what issue #42 asks
-/// for. `knobas-sync`'s `every_write_op_has_a_stated_projection` matches on
-/// `WriteOp` with no wildcard arm, so growing the enum stops that test
-/// compiling until someone edits it -- and its message says what to decide.
-/// The compiler puts the decision in front of the person growing the enum; it
-/// is ADR-0006's review of that growth that must insist the new arm arrives
-/// with a probe and a stated projection rather than a bare arm.
-///
-/// It lives here rather than beside `WriteOp` because `knobas-source` depends
-/// on this crate, not the other way round.
-pub const PROJECTED_OPS: &[&str] = &[
-    "comment",
-    "transition",
-    "create_ticket",
-    "create_branch",
-    "create_pull_request",
-    "approve",
-    "trigger_build",
-    "rerun_build",
-    "log_work",
-    "create_page",
-    "update_page",
-    "pause_monitor",
-    "resume_monitor",
-    "create_monitor",
-    "merge_pull_request",
-    "set_parameter",
-    "run_build",
-    "submit_review",
-    "delete_branch",
-    "edit_pull_request",
-    "update_pull_request_branch",
-    "commit_file",
-    "source_action",
-];
-
-/// What `op` counts as its target having changed.
+/// What a write counts as its target having changed, by the `shape` its op's
+/// [`Delivery`](crate::delivery::Delivery) states. `op` is the identifier, and
+/// only labels the snapshot: rows queued before the shape was stated carry it,
+/// so dropping it would hold every one of them on the next flush.
 ///
 /// Taken when a write is queued and again immediately before it flushes; if
 /// the two differ, the write is held rather than sent. The output carries
@@ -378,11 +342,13 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///
 /// ## Per op
 ///
-/// Three shapes, and which one an op gets is a statement about what that op
-/// could *overwrite* -- never about how much work the comparison is.
+/// Three shapes ([`Projection`]), and which one an op gets is a statement
+/// about what that op could *overwrite* -- never about how much work the
+/// comparison is. `WriteOp::delivery` states it per variant; the reasons are
+/// argued here.
 ///
-/// **The declared state** -- `"comment"`, `"approve"` and `"submit_review"`
-/// ([`STATE_HELD_OPS`]; the deputy's ruling on #752, for Björn). These add to
+/// **The declared state** ([`Projection::DeclaredState`]) -- `"comment"`,
+/// `"approve"` and `"submit_review"` (the deputy's ruling on #752, for Björn). These add to
 /// a discussion rather than overwrite anything in it, and the reader works at
 /// their own speed: a second comment typed right after the first must not be
 /// held because the first one's re-sync moved the item's text. So what holds
@@ -399,7 +365,7 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// approval or a review on the whole record; with the send behind the reader,
 /// both made a quick second write hold on the first one's echo.
 ///
-/// **The whole mirrored record** -- `"transition"`, `"merge_pull_request"`,
+/// **The whole mirrored record** ([`Projection::Whole`]) -- `"transition"`, `"merge_pull_request"`,
 /// `"delete_branch"` and `"update_pull_request_branch"`, the ops that put a
 /// *judgement* onto a target whose current state is the whole reason for the
 /// judgement, `"set_parameter"`, which overwrites a value, and `"source_action"`
@@ -458,9 +424,10 @@ pub const PROJECTED_OPS: &[&str] = &[
 ///   (`updated_at` is `None`) and nothing a build changes, so a sync does not
 ///   move it on its own, and a false hold is one *Apply anyway* away.
 ///
-/// **Per field** -- `"edit_pull_request"` (issue #706), the one op whose
-/// projection depends on what it carries rather than on its name alone, and
-/// the reason `project` takes the queued `payload` at all. The op overwrites
+/// **Per field** (`Projection::Whole { per_field: true }`) --
+/// `"edit_pull_request"` (issue #706), the one op whose projection depends on
+/// what it carries rather than on its delivery alone, and the reason `project`
+/// takes the queued `payload` at all. The op overwrites
 /// only the fields it was given (the shell sends only what the reader
 /// changed), and the deputy's ruling on #706 is that it holds only when what
 /// it would overwrite changed: someone retitling the pull request must not
@@ -492,7 +459,7 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// written unless the payload says `null` for it in so many words, so a
 /// drifted shape projects the whole record rather than nothing.
 ///
-/// **Liveness alone** -- `"create_ticket"`, `"create_branch"`,
+/// **Liveness alone** ([`Projection::Liveness`]) -- `"create_ticket"`, `"create_branch"`,
 /// `"create_pull_request"`, `"trigger_build"`, `"rerun_build"`, `"run_build"`,
 /// `"log_work"`, `"create_page"`, `"pause_monitor"`, `"resume_monitor"`,
 /// `"create_monitor"`, `"commit_file"`.
@@ -576,12 +543,12 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// one where that clause has teeth (issue #286).
 ///
 /// **The whole mirrored record, and the version inside it** -- `"update_page"`
-/// joins `"transition"` and `"merge_pull_request"` in the `other` arm below,
+/// joins `"transition"` and `"merge_pull_request"` in the whole-record shape,
 /// and the reason is the sharpest of them: this op *replaces a page's body*.
 /// Anything at all that happened to the page since the reader started typing
 /// is something their re-assembled body would silently delete.
 ///
-/// That arm carries the verbatim `payload`, which is where a Confluence page
+/// That shape carries the verbatim `payload`, which is where a Confluence page
 /// keeps `version.number` -- so the two sides of a held `update_page` differ
 /// in the version number itself, and "the mirror's version has passed the one
 /// the edit was made against" is not a separate check bolted on here but the
@@ -612,67 +579,35 @@ pub const PROJECTED_OPS: &[&str] = &[
 /// it sends. That is the intended reading, not an accident of the lookup
 /// failing.
 ///
-/// **There is no wildcard fallback in the sense of "and everything else is
-/// fine".** The `other` arm below is the whole-record shape, and
-/// [`PROJECTED_OPS`] plus `knobas-sync`'s
-/// `every_write_op_has_a_stated_projection` is what stops a new op resting on
-/// it silently: the op has to be listed, which means somebody wrote down which
-/// of the three shapes it gets and why.
+/// **There is no fallback shape.** `WriteOp::delivery` matches with no
+/// wildcard arm (ADR-0006, amended 2026-10-19), so a new op does not compile
+/// until somebody writes down which of the three shapes it gets.
 ///
 /// `payload` is the queued write's own (`WriteOp`'s serde form) and `state`
-/// the target kind's declared state paths; only `"edit_pull_request"` reads
-/// the first, and only it and [`STATE_HELD_OPS`] the second
-/// ([`reads_declared_state`]).
+/// the target kind's declared state paths; only a per-field record reads the
+/// first, and only it and the declared state the second
+/// ([`Projection::reads_declared_state`]).
 #[must_use]
 pub fn project(
     op: &str,
+    shape: Projection,
     payload: &serde_json::Value,
     target: Option<&Target>,
     state: &[StatePath],
 ) -> serde_json::Value {
-    let live = target.is_some();
-    if op == "edit_pull_request"
-        && let Some(text) = edit_text(edit_writes(payload), target, state)
-    {
-        return serde_json::json!({ "op": op, "live": live, "text": text });
+    match shape {
+        Projection::Liveness => serde_json::json!({ "op": op, "live": target.is_some() }),
+        Projection::DeclaredState => added(op, target, state),
+        Projection::Whole { per_field: true } => {
+            match edit_text(edit_writes(payload), target, state) {
+                Some(text) => {
+                    serde_json::json!({ "op": op, "live": target.is_some(), "text": text })
+                }
+                None => whole(op, target),
+            }
+        }
+        Projection::Whole { per_field: false } => whole(op, target),
     }
-    if STATE_HELD_OPS.contains(&op) {
-        return added(op, target, state);
-    }
-    match op {
-        "create_ticket"
-        | "create_branch"
-        | "create_pull_request"
-        | "trigger_build"
-        | "rerun_build"
-        | "run_build"
-        | "log_work"
-        | "create_page"
-        | "pause_monitor"
-        | "resume_monitor"
-        | "create_monitor"
-        | "commit_file" => serde_json::json!({
-            "op": op,
-            "live": live,
-        }),
-        other => whole(other, target),
-    }
-}
-
-/// The ops that add to a discussion rather than overwrite anything in it,
-/// and so hold only on the target's **declared state** (the deputy's ruling
-/// on #752; see [`project`]'s *The declared state*). The build triggers and
-/// the creates add too, but beside a container rather than to a discussion,
-/// and they hold on liveness alone: a build moving from running to finished
-/// is when a re-run is asked for, not a reason to hold one.
-pub const STATE_HELD_OPS: &[&str] = &["comment", "approve", "submit_review"];
-
-/// Whether `op`'s hold reads the target kind's declared state paths, so the
-/// queue and the flush know when to look them up: [`STATE_HELD_OPS`], and
-/// `"edit_pull_request"` (its *Close* and *Reopen*, #706).
-#[must_use]
-pub fn reads_declared_state(op: &str) -> bool {
-    op == "edit_pull_request" || STATE_HELD_OPS.contains(&op)
 }
 
 /// What a write that adds compares (#752): its target's declared state, or
@@ -1432,39 +1367,39 @@ mod tests {
         let declared = gitea_pr_state();
         let none = serde_json::Value::Null;
 
-        for op in STATE_HELD_OPS {
-            assert!(PROJECTED_OPS.contains(op), "{op} must be stated");
-            assert!(reads_declared_state(op), "{op} reads the declared state");
-            let at = |t: Option<&Target>, s: &[StatePath]| project(op, &none, t, s);
-            for (moved, what) in [
-                (&replied, "a reply"),
-                (&retitled, "a retitle"),
-                (&pushed, "a push"),
-            ] {
-                assert_eq!(
-                    at(Some(&before), &declared),
-                    at(Some(moved), &declared),
-                    "{op}: {what} is not what a write that adds holds on"
-                );
-            }
-            for (moved, what) in [(&closed, "a close"), (&merged, "a merge")] {
-                assert_ne!(
-                    at(Some(&before), &declared),
-                    at(Some(moved), &declared),
-                    "{op}: {what} makes the write moot"
-                );
-            }
+        let op = "comment";
+        assert!(Projection::DeclaredState.reads_declared_state());
+        let at = |t: Option<&Target>, s: &[StatePath]| {
+            project(op, Projection::DeclaredState, &none, t, s)
+        };
+        for (moved, what) in [
+            (&replied, "a reply"),
+            (&retitled, "a retitle"),
+            (&pushed, "a push"),
+        ] {
+            assert_eq!(
+                at(Some(&before), &declared),
+                at(Some(moved), &declared),
+                "{op}: {what} is not what a write that adds holds on"
+            );
+        }
+        for (moved, what) in [(&closed, "a close"), (&merged, "a merge")] {
             assert_ne!(
                 at(Some(&before), &declared),
-                at(None, &[]),
-                "{op}: a target that is gone has changed"
+                at(Some(moved), &declared),
+                "{op}: {what} makes the write moot"
             );
-            // A kind that declares no state: a reply still goes, a vanishing
-            // target still holds.
-            assert_eq!(at(Some(&before), &[]), at(Some(&replied), &[]));
-            assert_eq!(at(Some(&before), &[]), at(Some(&closed), &[]));
-            assert_ne!(at(Some(&before), &[]), at(None, &[]));
         }
+        assert_ne!(
+            at(Some(&before), &declared),
+            at(None, &[]),
+            "{op}: a target that is gone has changed"
+        );
+        // A kind that declares no state: a reply still goes, a vanishing
+        // target still holds.
+        assert_eq!(at(Some(&before), &[]), at(Some(&replied), &[]));
+        assert_eq!(at(Some(&before), &[]), at(Some(&closed), &[]));
+        assert_ne!(at(Some(&before), &[]), at(None, &[]));
     }
 
     /// A write that adds, over a declared state that resolves nothing,
@@ -1474,6 +1409,7 @@ mod tests {
         let (before, after) = payload_differs();
         let projected = project(
             "comment",
+            Projection::DeclaredState,
             &serde_json::Value::Null,
             Some(&before),
             &gitea_pr_state(),
@@ -1483,6 +1419,7 @@ mod tests {
             projected,
             project(
                 "comment",
+                Projection::DeclaredState,
                 &serde_json::Value::Null,
                 Some(&after),
                 &gitea_pr_state()
@@ -1507,20 +1444,6 @@ mod tests {
         )
     }
 
-    /// An op with no stated projection at all falls back to the whole record,
-    /// so an op that reached the queue unlisted holds on any change rather than
-    /// on nothing. `PROJECTED_OPS` is what stops one getting there.
-    #[test]
-    fn an_unstated_op_holds_on_the_whole_record() {
-        let unlisted = "an_op_no_milestone_has_ratified";
-        assert!(!PROJECTED_OPS.contains(&unlisted));
-        let (before, after) = payload_differs();
-        assert_ne!(
-            project(unlisted, &serde_json::Value::Null, Some(&before), &[]),
-            project(unlisted, &serde_json::Value::Null, Some(&after), &[]),
-        );
-    }
-
     /// Issue #43's decision, pinned rather than left in a doc comment: the
     /// ops that put a judgement onto a target hold on **anything** about that
     /// target moving -- including a change only the raw payload can see, which
@@ -1537,33 +1460,23 @@ mod tests {
         // The payload the shape carries is where a Confluence page keeps
         // `version.number`, which is why "the mirror's version has passed the
         // one the edit was made against" needs no separate check (#286).
-        for op in [
-            "transition",
-            "update_page",
-            "merge_pull_request",
-            "set_parameter",
-            // A delete takes what the branch carries at the flush with it, so
-            // a push after the press is a reason to look again (#707).
-            "delete_branch",
-            // An update rewrites or extends the head as it stands at the
-            // flush, so a push after the press holds it (#708).
-            "update_pull_request_branch",
-            // What a source action overwrites is the adapter's alone, so any
-            // change to its target is a reason to look again (#1194).
-            "source_action",
-        ] {
-            assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
-            assert_ne!(
-                project(op, &serde_json::Value::Null, Some(&before), &[]),
-                project(op, &serde_json::Value::Null, Some(&after), &[]),
-                "{op}: a payload-only change is exactly the change it is about"
-            );
-            assert_ne!(
-                project(op, &serde_json::Value::Null, Some(&before), &[]),
-                project(op, &serde_json::Value::Null, None, &[]),
-                "{op}: a target that is gone has changed"
-            );
-        }
+        // `"transition"`, `"update_page"`, `"merge_pull_request"`,
+        // `"set_parameter"`, `"delete_branch"` (#707),
+        // `"update_pull_request_branch"` (#708) and `"source_action"` (#1194)
+        // take this shape (`WriteOp::delivery`).
+        let op = "transition";
+        let at =
+            |t: Option<&Target>| project(op, Projection::WHOLE, &serde_json::Value::Null, t, &[]);
+        assert_ne!(
+            at(Some(&before)),
+            at(Some(&after)),
+            "{op}: a payload-only change is exactly the change it is about"
+        );
+        assert_ne!(
+            at(Some(&before)),
+            at(None),
+            "{op}: a target that is gone has changed"
+        );
     }
 
     /// The other half of that decision: an op that *adds* something beside
@@ -1579,42 +1492,29 @@ mod tests {
             item_updated_at: Some(chrono::Utc::now()),
             ..before.clone()
         };
-        for op in [
-            "create_ticket",
-            "create_branch",
-            "create_pull_request",
-            "trigger_build",
-            "rerun_build",
-            // A custom run is a trigger with a branch and overrides (#669):
-            // a build beside the configuration, overwriting nothing on it.
-            "run_build",
-            // A new page goes *beside* whatever else sits under its parent, so
-            // a parent that was retitled or replied to is not a parent this
-            // write would overwrite -- but a parent that left the mirror is a
-            // page nobody would find the new one under (#286).
-            "create_page",
-            // A file commit's overwrite is guarded by its `base_sha` at the
-            // source, which the mirror cannot see (#822); a retitled or
-            // re-touched repository is not the file.
-            "commit_file",
-        ] {
-            assert!(PROJECTED_OPS.contains(&op), "{op} must be stated");
-            assert_eq!(
-                project(op, &serde_json::Value::Null, Some(&before), &[]),
-                project(op, &serde_json::Value::Null, Some(&after), &[]),
-                "{op}: a payload change is not something a create would overwrite"
-            );
-            assert_eq!(
-                project(op, &serde_json::Value::Null, Some(&before), &[]),
-                project(op, &serde_json::Value::Null, Some(&renamed), &[]),
-                "{op}: neither is a retitled or re-touched container"
-            );
-            assert_ne!(
-                project(op, &serde_json::Value::Null, Some(&before), &[]),
-                project(op, &serde_json::Value::Null, None, &[]),
-                "{op}: a container that is gone must still hold the write"
-            );
-        }
+        // The creates, the build triggers (`"run_build"` among them, #669),
+        // `"log_work"`, the monitor ops, `"create_page"` (#286) and
+        // `"commit_file"`, whose overwrite its `base_sha` guards at the source
+        // (#822), take this shape (`WriteOp::delivery`).
+        let op = "create_ticket";
+        let live = |t: Option<&Target>| {
+            project(op, Projection::Liveness, &serde_json::Value::Null, t, &[])
+        };
+        assert_eq!(
+            live(Some(&before)),
+            live(Some(&after)),
+            "{op}: a payload change is not something a create would overwrite"
+        );
+        assert_eq!(
+            live(Some(&before)),
+            live(Some(&renamed)),
+            "{op}: neither is a retitled or re-touched container"
+        );
+        assert_ne!(
+            live(Some(&before)),
+            live(None),
+            "{op}: a container that is gone must still hold the write"
+        );
     }
 
     /// A create's container need not be in the mirror at all -- `jira:PAY` is
@@ -1624,14 +1524,35 @@ mod tests {
     #[test]
     fn a_create_into_an_unmirrored_container_is_not_held() {
         assert_eq!(
-            project("create_ticket", &serde_json::Value::Null, None, &[]),
-            project("create_ticket", &serde_json::Value::Null, None, &[])
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            ),
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            )
         );
         assert_eq!(
-            project("create_ticket", &serde_json::Value::Null, None, &[])["live"],
+            project(
+                "create_ticket",
+                Projection::Liveness,
+                &serde_json::Value::Null,
+                None,
+                &[]
+            )["live"],
             serde_json::json!(false)
         );
     }
+
+    /// `edit_pull_request`'s shape (`WriteOp::delivery`).
+    const BY_FIELD: Projection = Projection::Whole { per_field: true };
 
     /// A queued `edit_pull_request` as the queue stores it: every field
     /// spelled, the ones left alone `null`.
@@ -1670,6 +1591,7 @@ mod tests {
         let close = edit(None, None, Some("closed"));
         let projected = project(
             "edit_pull_request",
+            BY_FIELD,
             &close,
             Some(&before),
             &gitea_pr_state(),
@@ -1677,7 +1599,13 @@ mod tests {
         assert_eq!(projected["payload"], before.payload);
         assert_ne!(
             projected,
-            project("edit_pull_request", &close, Some(&after), &gitea_pr_state())
+            project(
+                "edit_pull_request",
+                BY_FIELD,
+                &close,
+                Some(&after),
+                &gitea_pr_state()
+            )
         );
     }
 
@@ -1718,8 +1646,8 @@ mod tests {
         // adapter, it is handed the paths.
         let declared = gitea_pr_state();
         let held = |op: &serde_json::Value, after: Option<&Target>| {
-            project("edit_pull_request", op, Some(&before), &declared)
-                != project("edit_pull_request", op, after, &declared)
+            project("edit_pull_request", BY_FIELD, op, Some(&before), &declared)
+                != project("edit_pull_request", BY_FIELD, op, after, &declared)
         };
 
         let title = edit(Some("t"), None, None);
@@ -1755,8 +1683,8 @@ mod tests {
         // A source that declares no state: the whole record, so the same
         // retitle holds -- a false hold, never a missed one.
         assert_ne!(
-            project("edit_pull_request", &close, Some(&before), &[]),
-            project("edit_pull_request", &close, Some(&retitled), &[]),
+            project("edit_pull_request", BY_FIELD, &close, Some(&before), &[]),
+            project("edit_pull_request", BY_FIELD, &close, Some(&retitled), &[]),
         );
 
         for op in [&title, &body, &close] {
@@ -1778,46 +1706,58 @@ mod tests {
     #[test]
     fn an_edit_read_that_misses_holds_on_the_whole_record() {
         let (before, after) = payload_differs();
-        let whole = project("transition", &serde_json::Value::Null, Some(&before), &[]);
+        let whole = project(
+            "transition",
+            Projection::WHOLE,
+            &serde_json::Value::Null,
+            Some(&before),
+            &[],
+        );
         for payload in [
             serde_json::Value::Null,
             serde_json::json!({ "EditPull": { "title": "t", "body": null, "state": null } }),
             serde_json::json!({ "EditPullRequest": { "title": "t" } }),
             edit(None, None, None),
         ] {
-            let projected = project("edit_pull_request", &payload, Some(&before), &[]);
+            let projected = project("edit_pull_request", BY_FIELD, &payload, Some(&before), &[]);
             assert_eq!(projected["payload"], whole["payload"], "{payload}");
             assert_ne!(
                 projected,
-                project("edit_pull_request", &payload, Some(&after), &[]),
+                project("edit_pull_request", BY_FIELD, &payload, Some(&after), &[]),
                 "{payload}: a payload-only change must hold"
             );
         }
     }
 
-    /// Every op the SPI defines is projected as exactly one of the three
-    /// shapes, and no two shapes for one op. Reading the discriminating field
-    /// set is what catches an op added to `PROJECTED_OPS` and to no arm of
-    /// `project`, which would silently take the whole-record fallback while the
-    /// list claimed it was stated.
+    /// Each shape projects the field set its doc names. Liveness and the
+    /// declared state over a kind that declares none share one: both then
+    /// compare only whether the target is there.
     #[test]
-    fn every_projected_op_has_one_of_the_three_shapes() {
+    fn every_shape_projects_its_own_fields() {
         let (target, _) = payload_differs();
-        for op in PROJECTED_OPS {
-            let keys: std::collections::BTreeSet<String> =
-                project(op, &serde_json::Value::Null, Some(&target), &[])
-                    .as_object()
-                    .expect("a projection is an object")
-                    .keys()
-                    .cloned()
-                    .collect();
-            let shape: Vec<&str> = keys.iter().map(String::as_str).collect();
-            assert!(
-                shape == ["live", "op", "text"]
-                    || shape == ["live", "op"]
-                    || shape == ["item_updated_at", "live", "op", "payload", "text", "title"],
-                "{op:?} projects an unrecognised shape: {shape:?}"
-            );
+        for (shape, fields) in [
+            (Projection::Liveness, &["live", "op"][..]),
+            (Projection::DeclaredState, &["live", "op"][..]),
+            (
+                Projection::WHOLE,
+                &["item_updated_at", "live", "op", "payload", "text", "title"][..],
+            ),
+            (BY_FIELD, &["live", "op", "text"][..]),
+        ] {
+            let keys: std::collections::BTreeSet<String> = project(
+                "op",
+                shape,
+                &edit(Some("t"), None, None),
+                Some(&target),
+                &[],
+            )
+            .as_object()
+            .expect("a projection is an object")
+            .keys()
+            .cloned()
+            .collect();
+            let projected: Vec<&str> = keys.iter().map(String::as_str).collect();
+            assert_eq!(projected, fields, "{shape:?}");
         }
     }
 }

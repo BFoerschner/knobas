@@ -1393,8 +1393,7 @@ knobas-core	lib/knobas_core	write_queue::tests::a_write_that_adds_holds_only_on_
 knobas-core	lib/knobas_core	write_queue::tests::an_additive_op_holds_only_when_its_container_leaves_the_mirror
 knobas-core	lib/knobas_core	write_queue::tests::an_edit_holds_only_on_what_it_would_overwrite
 knobas-core	lib/knobas_core	write_queue::tests::an_edit_read_that_misses_holds_on_the_whole_record
-knobas-core	lib/knobas_core	write_queue::tests::an_unstated_op_holds_on_the_whole_record
-knobas-core	lib/knobas_core	write_queue::tests::every_projected_op_has_one_of_the_three_shapes
+knobas-core	lib/knobas_core	write_queue::tests::every_shape_projects_its_own_fields
 knobas-core	lib/knobas_core	write_queue::tests::the_open_states_are_the_three_that_still_owe_a_source
 knobas-core	lib/knobas_core	write_queue::tests::the_states_and_reasons_are_exactly_what_the_migration_allows
 knobas-core	test/it	ancestor_path::a_blank_title_is_not_a_segment_and_the_rest_still_form_a_path
@@ -2201,6 +2200,7 @@ knobas-source	lib/knobas_source	contract::tests::accepts_a_wrong_declaration_for
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_answers_the_read
 knobas-source	lib/knobas_source	contract::tests::accepts_an_adapter_that_draws_no_view
 knobas-source	lib/knobas_source	contract::tests::every_role_write_is_a_known_write_op
+knobas-source	lib/knobas_source	contract::tests::every_write_op_answers_a_delivery_whose_target_it_carries
 knobas-source	lib/knobas_source	contract::tests::no_role_names_the_source_action
 knobas-source	lib/knobas_source	contract::tests::rejects_a_base_at_a_key_no_record_has
 knobas-source	lib/knobas_source	contract::tests::rejects_a_blank_source_id
@@ -3765,6 +3765,7 @@ knobas-sync	test/it	write_choke_point::the_rule_actually_rejects_a_second_call_s
 knobas-sync	test/it	write_queue::a_close_holds_on_the_declared_state_and_not_on_a_retitle
 knobas-sync	test/it	write_queue::a_comment_that_landed_after_a_withdrawal_leaves_nothing_unclaimed
 knobas-sync	test/it	write_queue::a_comment_that_landed_and_timed_out_is_held
+knobas-sync	test/it	write_queue::a_commit_into_a_repository_whose_record_moved_is_not_held
 knobas-sync	test/it	write_queue::a_commit_over_a_file_that_moved_is_held_with_both_versions
 knobas-sync	test/it	write_queue::a_create_that_landed_and_timed_out_is_held_and_not_sent_again
 knobas-sync	test/it	write_queue::a_page_created_after_the_user_withdrew_it_is_recorded_with_its_id
@@ -3781,8 +3782,8 @@ knobas-sync	test/it	write_queue::a_withdrawn_write_is_terminal_and_recorded
 knobas-sync	test/it	write_queue::a_write_a_source_can_take_goes_at_once
 knobas-sync	test/it	write_queue::a_write_the_source_refuses_on_repeat_waits_rather_than_holds
 knobas-sync	test/it	write_queue::an_edited_held_write_sends_what_the_user_wrote
+knobas-sync	test/it	write_queue::an_undecodable_write_is_refused_rather_than_held
 knobas-sync	test/it	write_queue::an_undeliverable_write_is_kept_and_flushes_when_the_source_returns
-knobas-sync	test/it	write_queue::every_write_op_has_a_stated_projection
 knobas-sync	test/it	write_queue::every_write_op_says_whether_a_withdrawal_can_leave_one
 knobas-sync	test/it	write_queue::one_entitys_writes_keep_their_order_without_blocking_another
 knobas-sync	test/it	write_queue::two_comments_back_to_back_on_one_pull_request_both_go_in_order

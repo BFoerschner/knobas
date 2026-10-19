@@ -3052,6 +3052,36 @@ mod tests {
         }
     }
 
+    /// Every probe answers a delivery whose target field the op really has
+    /// (ADR-0006, amended 2026-10-19): a `TargetField::Parent` on a variant
+    /// with no `parent` would order and hold the write against nothing. That
+    /// every variant has a probe and a delivery at all is the compiler's to
+    /// say, through the no-wildcard matches; this test cannot see a missing
+    /// variant, only a duplicated probe.
+    #[test]
+    fn every_write_op_answers_a_delivery_whose_target_it_carries() {
+        use knobas_spi_types::delivery::TargetField;
+        let known = super::known_write_ops("test");
+        let mut identifiers = std::collections::BTreeSet::new();
+        for (id, op) in &known {
+            assert!(identifiers.insert(*id), "{id} has two probes");
+            let field = match op.delivery().target {
+                TargetField::Entity => "entity",
+                TargetField::Parent => "parent",
+                TargetField::Repository => "repo",
+            };
+            let wire = serde_json::to_value(op).expect("an op serialises");
+            let fields = wire
+                .as_object()
+                .and_then(|variant| variant.values().next())
+                .expect("an op is externally tagged");
+            assert!(
+                fields[field].as_str().is_some_and(|t| !t.is_empty()),
+                "{id}: its delivery names `{field}` as the target, which it does not carry"
+            );
+        }
+    }
+
     /// Every write a role's vocabulary names is a `WriteOp` the SPI knows, so
     /// a typo in a minimum is a red test and not a write no source can offer.
     #[test]

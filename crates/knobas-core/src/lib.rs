@@ -32,7 +32,7 @@ pub use knobas_spi_types::{
     declared_tickets, declared_trigger, declares_field, first_string_of, list_values_of,
     path_line_read, project_path_part, state_of,
 };
-pub use knobas_spi_types::{entity, payload, tone};
+pub use knobas_spi_types::{delivery, entity, payload, tone};
 
 /// Declare an enum whose variants are a **closed vocabulary shared with the
 /// database**: each one has a stored spelling, and a CHECK constraint in the
