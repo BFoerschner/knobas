@@ -7,7 +7,7 @@
   opens the source's page with the project added, unsaved.
 -->
 <script lang="ts">
-  import type { JiraSource } from "../../ipc/search";
+  import type { SavedViewSource } from "../../ipc/search";
   import { ago } from "../../shell/time";
   import { sourceHash } from "../settings/settings";
   import { jiraKindWords, sprintEnds } from "./views";
@@ -18,7 +18,7 @@
     sourceId,
     openExternal,
   }: {
-    jira: JiraSource;
+    jira: SavedViewSource;
     /** The view's name, which is the board's or the filter's. */
     name: string;
     /** The Jira source the view comes from. */
@@ -40,7 +40,7 @@
 <p class="tf-vw-srcline">
   Jira decides which tickets, from the {jiraKindWords(jira)} <b>{name}</b>{#if jira.sprint}, active sprint {jira.sprint
       .name}{#if jira.sprint.end_date}{" "}(ends {sprintEnds(jira.sprint.end_date)}){/if}{/if}:
-  <code>{jira.jql}</code>{#if jira.sub_query}{" "}and <code>{jira.sub_query}</code>{/if}. Read again at every sync, last
+  <code>{jira.source_query}</code>{#if jira.sub_query}{" "}and <code>{jira.sub_query}</code>{/if}. Read again at every sync, last
   {ago(jira.last_read)}.
   {#if jira.web_url}<a href={jira.web_url} onclick={open}>Open in Jira</a>{/if}
 </p>

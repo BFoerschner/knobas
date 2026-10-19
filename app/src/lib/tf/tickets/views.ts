@@ -6,10 +6,10 @@
 import type { MiniBoardCard, MiniBoardColumn } from "../../ipc/entity";
 import type {
   CardField,
-  JiraSource,
   LeftOut,
   ListColumn,
   QueryTranslation,
+  SavedViewSource,
   TicketView,
   TicketViewDraft,
   TicketViewRow,
@@ -33,13 +33,13 @@ export function drawnJiraColumns(own: ViewColumn[]): ViewColumn[] {
   return own.map((column) => ({ ...column, statuses: [column.name] }));
 }
 
-/** The Jira source a Jira view comes from: its `saved_view`'s source id (`jira:board-21` → `jira`). */
-export function jiraSourceId(ref: string): string {
+/** The source a saved view comes from: its `saved_view`'s source id (`jira:board-21` → `jira`). */
+export function savedViewSourceId(ref: string): string {
   return ref.split(":")[0]!;
 }
 
 /** What a Jira view is read from, in prototype-6's words (#879): *Kanban board*, *saved filter*. */
-export function jiraKindWords(jira: Pick<JiraSource, "kind" | "board_type">): string {
+export function jiraKindWords(jira: Pick<SavedViewSource, "kind" | "board_type">): string {
   if (jira.kind !== "board") return "saved filter";
   const type = jira.board_type ? jira.board_type[0]!.toUpperCase() + jira.board_type.slice(1) : "";
   return `${type} board`.trim();
@@ -81,8 +81,8 @@ export interface ViewGroup {
  */
 export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
   const found = views
-    .filter((view) => view.jira?.hidden !== true)
-    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.jira?.jql ?? view.query}`, find))
+    .filter((view) => view.source_view?.hidden !== true)
+    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.source_view?.source_query ?? view.query}`, find))
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
   const typed = [...new Set(found.map((view) => view.group))].filter(
     (group) => !([...OWN_GROUPS, ...JIRA_GROUPS] as readonly string[]).includes(group),
@@ -114,7 +114,7 @@ export function viewColumns(board: MiniBoardColumn[], own: ViewColumn[]): MiniBo
  */
 export function hiddenViews(views: TicketViewRow[]): TicketViewRow[] {
   return views
-    .filter((view) => view.jira?.hidden === true)
+    .filter((view) => view.source_view?.hidden === true)
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
 }
 
@@ -161,7 +161,7 @@ export function draftCopy(view: TicketView): TicketViewDraft {
 
 /** Where a copy of a Jira view came from, for the editor's line about it (#880). */
 export interface CopiedFrom {
-  kind: JiraSource["kind"];
+  kind: SavedViewSource["kind"];
   name: string;
   /** The parts of the query it left out, and why. */
   left: LeftOut[];
@@ -194,7 +194,7 @@ export function copyKeeps(copy: QueryTranslation): string {
  */
 export function draftJiraCopy(
   view: TicketView,
-  jira: JiraSource,
+  jira: SavedViewSource,
   copy: QueryTranslation,
   extra = "",
   showing?: Showing,

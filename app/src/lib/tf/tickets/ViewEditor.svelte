@@ -26,10 +26,10 @@
   import type {
     CardField,
     FieldSuggestion,
-    JiraSource,
     ListColumn,
     ParentSuggestion,
     QueryTranslation,
+    SavedViewSource,
     TicketViewDraft,
     ViewLanes,
   } from "../../ipc/search";
@@ -85,7 +85,7 @@
      * decides its name, which tickets and its columns, so those are shown and
      * not edited; layout, lanes, card fields and list columns are the reader's.
      */
-    jira?: JiraSource | null;
+    jira?: SavedViewSource | null;
     /** Where the view starts: a saved one (*Edit view*) or a new one. */
     draft: TicketViewDraft;
     /** *Edit view*: the title names the view, the button says *Save view*, *Delete view* shows. */
@@ -371,7 +371,7 @@
                 Like the board in Jira, it shows the active sprint, now {fromJira.sprint.name}, and moves on to the next
                 sprint when this one closes.{/if}
             </p>
-            <pre class="tf-vw-jql">{fromJira.jql}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
+            <pre class="tf-vw-jql">{fromJira.source_query}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
             <!-- A source that does not translate its query (#1208) offers no copy, so the line does not either. -->
             <p class="tf-dim">
               {#if oncopy}To change which tickets it holds, change it in Jira, or make your own copy. {keepsLine}{:else}To

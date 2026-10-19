@@ -114,20 +114,24 @@ pub struct TicketViewRow {
     pub count: Option<u64>,
     /// The part of the text the grammar could not read, or `None`.
     pub unreadable: Option<String>,
-    /// Where a Jira view comes from (#877), or `None` on a view somebody made.
-    pub jira: Option<JiraSource>,
+    /// What the source says about the saved view a view shows (#877, #1273),
+    /// or `None` on a view somebody made.
+    pub source_view: Option<SavedViewSource>,
 }
 
-/// What Jira says about a Jira view (#877, `sync.saved_view`): enough for the
-/// views pane and *View settings* to say where it comes from.
+/// What a ticket system says about one of its saved views (#877, #1273,
+/// `sync.saved_view`): enough for the views pane and *View settings* to say
+/// where it comes from.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
-pub struct JiraSource {
+pub struct SavedViewSource {
     /// `board` or `filter`.
     pub kind: String,
     /// `scrum`, `kanban` or `simple` for a board; `None` for a filter.
     pub board_type: Option<String>,
-    /// The saved filter's JQL, as Jira holds it.
-    pub jql: String,
+    /// The saved view's query in the source's own language, as the source
+    /// holds it (Jira's JQL); empty when the source sends none. Read from
+    /// `sync.saved_view.jql`, the column the adapter's payload fills.
+    pub source_query: String,
     /// A Kanban board's sub-filter, or `None`.
     pub sub_query: Option<String>,
     /// A Scrum board's active sprint, `{"id", "name", "end_date"}`, or `None`.
@@ -219,7 +223,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
     .fetch_all(pool)
     .await?;
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
-    let mut jira = jira_sources(pool, &views).await?;
+    let mut sources = saved_view_sources(pool, &views).await?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
     let readings = crate::commands::search::searcher(pool)
         .await?
@@ -229,40 +233,41 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
         .into_iter()
         .zip(readings)
         .map(|(view, reading)| {
-            // A Jira view counts what Jira put on it that knobas mirrors,
-            // which is what its board draws (#877); its text is not its own.
-            let source = view.saved_view.as_ref().and_then(|r| jira.remove(r));
+            // A saved view counts what its source put on it that knobas
+            // mirrors, which is what its board draws (#877); its text is not
+            // its own.
+            let source = view.saved_view.as_ref().and_then(|r| sources.remove(r));
             let reading = match &source {
                 Some((count, _)) => knobas_search::Reading::Count(*count),
                 None => reading,
             };
-            let jira = source.map(|(_, source)| source);
+            let source_view = source.map(|(_, source)| source);
             match reading {
                 knobas_search::Reading::Count(count) => TicketViewRow {
                     view,
                     count: Some(count),
                     unreadable: None,
-                    jira,
+                    source_view,
                 },
                 knobas_search::Reading::Unreadable(part) => TicketViewRow {
                     view,
                     count: None,
                     unreadable: Some(part),
-                    jira,
+                    source_view,
                 },
             }
         })
         .collect())
 }
 
-/// Per Jira view among `views`: how many of the tickets Jira put on it the
-/// mirror holds live, and where it comes from (#877). A view whose
+/// Per saved view among `views`: how many of the tickets its source put on it
+/// the mirror holds live, and where it comes from (#877). A view whose
 /// `saved_view` names no saved view is absent, and is counted by its text like
 /// any other.
-async fn jira_sources(
+async fn saved_view_sources(
     pool: &PgPool,
     views: &[TicketView],
-) -> Result<std::collections::HashMap<String, (u64, JiraSource)>, IpcError> {
+) -> Result<std::collections::HashMap<String, (u64, SavedViewSource)>, IpcError> {
     let refs: Vec<&str> = views
         .iter()
         .filter_map(|view| view.saved_view.as_deref())
@@ -325,10 +330,10 @@ async fn jira_sources(
     rows.iter()
         .map(|row| {
             let n: i64 = row.get("n");
-            let source = JiraSource {
+            let source = SavedViewSource {
                 kind: row.get("ref_kind"),
                 board_type: row.get("board_type"),
-                jql: row.get("jql"),
+                source_query: row.get("jql"),
                 sub_query: row.get("sub_query"),
                 sprint: row.get("sprint"),
                 last_read: row.get("last_read"),
@@ -822,10 +827,10 @@ mod tests {
             view: view.clone(),
             count: None,
             unreadable: None,
-            jira: Some(JiraSource {
+            source_view: Some(SavedViewSource {
                 kind: String::new(),
                 board_type: None,
-                jql: String::new(),
+                source_query: String::new(),
                 sub_query: None,
                 sprint: None,
                 last_read: chrono::DateTime::UNIX_EPOCH,
@@ -847,8 +852,8 @@ mod tests {
             .iter()
             .chain(&keys(&row["columns"][0]))
             .chain(&keys(&row["list_sort"]))
-            .chain(&keys(&row["jira"]))
-            .chain(&keys(&row["jira"]["unsynced"][0]))
+            .chain(&keys(&row["source_view"]))
+            .chain(&keys(&row["source_view"]["unsynced"][0]))
             .chain(&keys(&draft))
         {
             assert!(
@@ -862,7 +867,7 @@ mod tests {
             "export interface TicketViewDraft {",
             "export interface ViewColumn {",
             "export interface ListSort {",
-            "export interface JiraSource {",
+            "export interface SavedViewSource {",
             "export interface UnsyncedTickets {",
             "\"ticket_views\"",
             "\"save_ticket_view\"",
@@ -871,6 +876,32 @@ mod tests {
             "\"open_saved_view\"",
         ] {
             assert!(mirror.contains(name), "{name} is not in the mirror");
+        }
+        // The other direction for the row's saved-view facts (#1273): every
+        // field the mirror declares is one the wire sends, so a field left on
+        // its old name in `search.ts` fails here rather than reading
+        // `undefined` in the shell.
+        for (interface, sent) in [
+            ("export interface TicketViewRow extends TicketView {", &row),
+            ("export interface SavedViewSource {", &row["source_view"]),
+        ] {
+            let at = mirror.find(interface).unwrap();
+            let body = &mirror[at + interface.len()..];
+            let body = &body[..body.find("\n}").unwrap()];
+            for line in body.lines() {
+                let Some((field, _)) = line.strip_prefix("  ").and_then(|l| l.split_once(':'))
+                else {
+                    continue;
+                };
+                if field.starts_with(['/', '*', ' ']) {
+                    continue;
+                }
+                let field = field.trim_end_matches('?');
+                assert!(
+                    sent.get(field).is_some(),
+                    "{interface} declares {field}, which the wire does not send"
+                );
+            }
         }
         // Registered under the names the mirror invokes (#1245): a command is
         // addressed by a string, so a barrel line left on the old name is a

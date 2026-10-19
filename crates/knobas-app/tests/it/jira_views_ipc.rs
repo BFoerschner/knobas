@@ -150,12 +150,12 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
         Some(4),
         "the four it mirrors, not WEB-5 and not every ticket"
     );
-    let jira = row.jira.expect("where it comes from");
+    let jira = row.source_view.expect("where it comes from");
     assert_eq!(
         (jira.kind.as_str(), jira.board_type.as_deref()),
         ("board", Some("kanban"))
     );
-    assert_eq!(jira.jql, format!("project = {p}"));
+    assert_eq!(jira.source_query, format!("project = {p}"));
     assert_eq!(jira.sprint, None);
 
     // A view somebody made says nothing about Jira.
@@ -178,7 +178,7 @@ async fn a_jira_view_is_listed_under_jira_boards_with_what_its_board_draws() {
     )
     .await
     .unwrap();
-    assert_eq!(listed(&pool, &own.id).await.unwrap().jira, None);
+    assert_eq!(listed(&pool, &own.id).await.unwrap().source_view, None);
 }
 
 #[tokio::test]
@@ -323,17 +323,17 @@ fn own_draft(name: String) -> TicketViewDraft {
 async fn a_jira_view_hides_and_shows_again_and_keeps_its_tickets() {
     let pool = pool().await;
     let (p, id, _) = seeded(&pool).await;
-    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().hidden);
+    assert!(!listed(&pool, &id).await.unwrap().source_view.unwrap().hidden);
 
     ticket_views::hide(&pool, &id, true).await.expect("hide");
     let row = listed(&pool, &id)
         .await
         .expect("a hidden view is still listed");
-    assert!(row.jira.as_ref().unwrap().hidden);
+    assert!(row.source_view.as_ref().unwrap().hidden);
     assert_eq!(row.count, Some(4), "it keeps syncing");
 
     ticket_views::hide(&pool, &id, false).await.expect("show");
-    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().hidden);
+    assert!(!listed(&pool, &id).await.unwrap().source_view.unwrap().hidden);
 
     let own = ticket_views::save(&pool, own_draft(format!("{p} mine")))
         .await
@@ -356,10 +356,10 @@ async fn opening_a_new_jira_view_takes_its_new_mark_away() {
         .execute(&pool)
         .await
         .unwrap();
-    assert!(listed(&pool, &id).await.unwrap().jira.unwrap().new);
+    assert!(listed(&pool, &id).await.unwrap().source_view.unwrap().new);
 
     ticket_views::open(&pool, &id).await.expect("open");
-    assert!(!listed(&pool, &id).await.unwrap().jira.unwrap().new);
+    assert!(!listed(&pool, &id).await.unwrap().source_view.unwrap().new);
     ticket_views::open(&pool, &id)
         .await
         .expect("opening it again is no change");
@@ -398,7 +398,7 @@ async fn a_jira_view_counts_its_tickets_in_projects_the_source_does_not_sync() {
         "CUS-1".into(),
     ];
     let (id, _) = board(&pool, &p, &keys).await;
-    let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
+    let jira = listed(&pool, &id).await.unwrap().source_view.unwrap();
     let unsynced: Vec<(&str, u64)> = jira
         .unsynced
         .iter()
@@ -419,7 +419,7 @@ async fn a_jira_view_counts_its_tickets_in_projects_the_source_does_not_sync() {
             .execute(&pool)
             .await
             .unwrap();
-        let jira = listed(&pool, &id).await.unwrap().jira.unwrap();
+        let jira = listed(&pool, &id).await.unwrap().source_view.unwrap();
         assert_eq!(jira.unsynced, [], "{config} leaves no project out");
     }
 }
