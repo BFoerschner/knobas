@@ -53,3 +53,14 @@
   `tests/it/wiring.rs`'s handler-list scan, which attributes every file of `entity/` to module
   `entity`. Each now asserts it reached `entity/`, so a walk that stopped at the top level fails
   instead of passing over a hundred commands.
+
+  **Amended 2026-10-19 by #1317 and #1318** (the spec's second and third tickets). No file under
+  `commands/` is added or removed, and no command, field or wire shape changes; what moved is
+  where some types live. `list.rs` now holds the entity list's commands and shims only: the read,
+  its six statements, the plan accessor and `EntityRow`, `EntityFilter`, `EntityOrder`,
+  `KindTally`, `AttentionGroup`, `GroupTally` and `EntityPage` are in `knobas_core::entity_list`.
+  `builds.rs` keeps the live reads, pins, *This job* and presets: `RunRow`, `PipelineRow`,
+  `PINS_SETTING`, `PIPELINE_RECENT`, the frame-kinds CTE (exported as
+  `knobas_core::frame_kinds_cte!`) and the four mirror statements are in `knobas_core::builds`.
+  Those types are no longer at `knobas_app::commands::entity::<name>`; the mirror tests and the
+  integration tests import them from core. Every command and every `_inner` read keeps its path.
