@@ -7728,3 +7728,24 @@ The merge-manager's rulings on #1315 (Opus):
 - **§10.8: a dated amendment to #1316's entry, not a new entry.** No file under `commands/` is
   added or removed; the entry's table and its "every path stays" now say less than is true, so
   the amendment names what left `list.rs` and `builds.rs` and where it went.
+
+The merge-manager's rulings on #1317 and #1318 (Opus):
+
+- **"The app shims stay twelve lines each" (#1318).** *Fork:* hold the PR until `pipelines_inner`
+  (14) and `runs_of_pipeline` (19) fit, or tick it with a note. *Ruling:* ticked with a note. The
+  lines over twelve are the call into `with_commits`, whose other half is a live settings read,
+  and the same ticket keeps the live reads in the app; splitting the shims into helpers would
+  meet the count and not the intent. The statements, binds and row mapping are all in core.
+  *Reversing:* move `with_commits` behind a trait in core.
+- **The fillers resolved before the context and reach reads (#1317).** *Fork:* restore the old
+  order, or accept it. *Ruling:* accepted. All three are reads with nothing written between, so
+  each sees the same set as before; the one extra query is `role_scope` on a filter whose
+  `updated_within_days` is then refused, which answers the same `invalid`. *Reversing:* resolve
+  the scope in core through a callback.
+- **The `database: ` prefix on a query failure.** *Fork:* keep the old message or accept core's.
+  *Ruling:* accepted. No test, page or frontend string matches an `internal` message from these
+  reads, and `CoreError::Db`'s arm still notes a pool timeout. *Reversing:* match `Db` in the
+  shims.
+- **The §10.8 amendment, tightened** to match the diff: it now names `RoleScope`, `RawRun` and
+  `RunRow::read`, the run-columns macro, `declared_paths` left in `list.rs`, the two caller-visible
+  changes above, `CoreError::Invalid` and core's `test-util`. *Reversing:* n/a.

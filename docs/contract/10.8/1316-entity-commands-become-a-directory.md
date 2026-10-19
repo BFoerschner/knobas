@@ -55,14 +55,23 @@
   instead of passing over a hundred commands.
 
   **Amended 2026-10-19 by #1317 and #1318** (the spec's second and third tickets). No file under
-  `commands/` is added or removed, and no command, field or wire shape changes; what moved is
-  where some types live. `list.rs` now holds the entity list's commands and shims only: the read,
-  its six statements, the plan accessor and `EntityRow`, `EntityFilter`, `EntityOrder`,
-  `KindTally`, `AttentionGroup`, `GroupTally` and `EntityPage` are in `knobas_core::entity_list`.
-  `builds.rs` keeps the live reads, pins, *This job* and presets: `RunRow`, `PipelineRow`,
-  `PINS_SETTING`, `PIPELINE_RECENT`, the frame-kinds CTE (exported as
-  `knobas_core::frame_kinds_cte!`) and the four mirror statements are in `knobas_core::builds`.
-  Those types are no longer at `knobas_app::commands::entity::<name>`; the mirror tests and the
-  integration tests import them from core. Every command and every `_inner` read keeps its path.
-  Of the seven shared helpers, `state_of` and `entity_row` moved with the row and are `pub` in
-  `knobas_core::entity_list`; `list.rs` brings them back to its siblings with a `pub(super) use`.
+  `commands/` is added or removed, and no command, field, error code or wire shape changes; what
+  moved is where some types and statements live. `list.rs` now holds the entity list's commands,
+  their shims and `declared_paths`: the read, its six statements, the plan accessor and
+  `EntityRow`, `EntityFilter`, `EntityOrder`, `KindTally`, `AttentionGroup`, `GroupTally` and
+  `EntityPage` are in `knobas_core::entity_list`, and so is `RoleScope` (still re-exported at
+  `knobas_app::sources::crud::RoleScope`). `builds.rs` keeps the live reads, the commit linking
+  (`with_commits`), pins, *This job*, presets and job pipelines: `RunRow`, `PipelineRow`,
+  `RawRun` with `RunRow::read`, `PINS_SETTING`, `PIPELINE_RECENT`, the 100-run default, both
+  macros (the frame-kinds CTE exported as `knobas_core::frame_kinds_cte!`, the run columns
+  crate-private) and the four mirror statements are in `knobas_core::builds`. Those types are no
+  longer at `knobas_app::commands::entity::<name>`; the mirror tests and the integration tests
+  import them from core. Every command and every `_inner` read keeps its path. Of the seven shared
+  helpers, `state_of` and `entity_row` moved with the row and are `pub` in
+  `knobas_core::entity_list`; `list.rs` brings them and `EntityRow` back to its siblings with a
+  `pub(super) use`. No statement or bind order changed. Two things a caller can see: a query
+  failure in the moved reads still answers `internal`, now with core's `database: ` prefix on its
+  message, as every other core read's; and the list shim resolves a role's fillers before the
+  context and reach reads rather than after, which are independent reads. A refused filter is the
+  new `CoreError::Invalid`, which answers `invalid` with the old message. `knobas-core` gains a
+  `test-util` feature for the mirror tests' serde derives, turned on by `knobas-app`'s.
