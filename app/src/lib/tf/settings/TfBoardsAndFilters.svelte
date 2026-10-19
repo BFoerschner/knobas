@@ -19,11 +19,11 @@
     boardScope,
     counted,
     favouriteFilters,
-    sourceViews,
+    savedViewsOf,
     unsyncedWords,
     viewType,
     type BoardScope,
-    type SourceView,
+    type SavedViewRow,
   } from "./boards";
   import type { SettingsPorts } from "./ports";
 
@@ -48,7 +48,7 @@
   const DONE = "Saved. The next Jira sync reads the boards again.";
 
   let all = $state<TicketViewRow[] | null>(null);
-  const views = $derived(sourceViews(all ?? [], source.id));
+  const views = $derived(savedViewsOf(all ?? [], source.id));
   const boards = $derived(views.filter((view) => view.saved_view_source.kind === "board").length);
   const filters = $derived(views.filter((view) => view.saved_view_source.kind === "filter").length);
 
@@ -73,7 +73,7 @@
     if (inputs[stored]) inputs[stored].checked = true;
   }
 
-  async function toggle(view: SourceView) {
+  async function toggle(view: SavedViewRow) {
     try {
       await ports.hideSavedView(view.id, !view.saved_view_source.hidden);
       read();

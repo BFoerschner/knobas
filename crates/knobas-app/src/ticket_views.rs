@@ -130,7 +130,7 @@ pub struct SavedViewSource {
     pub board_type: Option<String>,
     /// The saved view's query in the source's own language, as the source
     /// holds it (Jira's JQL); empty when the source sends none. Read from
-    /// `sync.saved_view.jql`, the column the adapter's payload fills.
+    /// `sync.saved_view.source_query`, the column the adapter's payload fills.
     pub source_query: String,
     /// A Kanban board's sub-filter, or `None`.
     pub sub_query: Option<String>,
@@ -280,7 +280,7 @@ async fn saved_view_sources(
     // ADR-0007's direction: an id of any other shape is a miss, never a
     // guess, and is left out of the count.
     let rows = sqlx::query(
-        "select v.entity_id, v.ref_kind, v.board_type, v.jql, v.sub_query, v.sprint,
+        "select v.entity_id, v.ref_kind, v.board_type, v.source_query, v.sub_query, v.sprint,
                 v.last_read, i.web_url, tv.hidden, tv.is_new,
                 (select count(*) from sync.saved_view_member m
                    join sync.live_item t on t.entity_id = m.entity_id and t.kind = 'ticket'
@@ -333,7 +333,7 @@ async fn saved_view_sources(
             let source = SavedViewSource {
                 kind: row.get("ref_kind"),
                 board_type: row.get("board_type"),
-                source_query: row.get("jql"),
+                source_query: row.get("source_query"),
                 sub_query: row.get("sub_query"),
                 sprint: row.get("sprint"),
                 last_read: row.get("last_read"),

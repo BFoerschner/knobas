@@ -6876,3 +6876,57 @@ The merge-manager's rulings (Opus):
   outside queries rather than answering them, each guarded request now waits for the system's
   lookup timeout before it goes to the proxy (the call's deadline still holds it). Not in the
   ticket's criteria: follow-up #1290 (`backlog`). *Reversing:* n/a.
+## #1285: the shell's saved-view names and the stored query take the role's words (Opus implementer, 2026-10-19)
+
+- **The column is renamed.** *Fork:* rename `sync.saved_view.jql` with a migration, or record why
+  it stays. *Ruling:* rename it to `source_query` (migration `0054`, §10.8 entry
+  `1285-migration-0054-saved-view-source-query.md`). *Reasoning:* the column holds a saved view's
+  query in its source's language, and a second ticket system's view lands there too; #1273 gave
+  the wire field the same name, so storage, wire and shell now say one word. `query`, beside it,
+  stays the knobas-grammar query, as on the row. The rename touches one writer
+  (`knobas_sync::saved_views`) and one reader (`ticket_views::list`). The adapter's payload key
+  `jql` stays: it is Jira's own frame path (ADR-0007). Postgres 18's not-null constraint
+  `saved_view_jql_not_null` is renamed with it. *Reversing:* medium (another migration and §10.8
+  entry).
+- **No restore shim, checked again.** *Fork:* #1245's review found a renamed `knobas` column broke
+  older backups. *Ruling:* none needed here. `backup::dump` passes `--schema=knobas` and
+  `dump_tables` quotes `"knobas"."<table>"`, so no backup or share export holds `sync.saved_view`;
+  `restore` loads only what an archive carries. *Reversing:* n/a.
+- **The words.** *Fork:* what the shell's names become. *Ruling:* named for the type they hold:
+  `SavedViewSourceLine.svelte` with a `savedViewSource` prop, `savedViewKindWords`,
+  `draftSavedViewCopy`, ViewEditor's `savedViewSource` prop and `fixedSource` (the prop, fixed for
+  the dialog's life), TicketsPage's `savedViewSource` locals and `savedViewSettingsHref`, the class `.tf-vw-source-query`, and
+  `viewType({ kind, board_type })`. ViewMenu's `jira` prop, which holds the saved view's kind,
+  is `savedViewKind`, typed `SavedViewSource["kind"]`. From #1273's comment on the ticket,
+  `boards.ts`' `SourceView` is `SavedViewRow` and `sourceViews` is `savedViewsOf`, so *source
+  view* keeps its glossary meaning (ADR-0020). *Reasoning:* the field is `saved_view_source`, the
+  type `SavedViewSource`; the props and locals read the same. *Reversing:* low.
+- **ViewEditor's kind words reuse the helper.** *Fork:* rename `jiraLine`'s copy of
+  `jiraKindWords`' logic in place, or call the helper. *Ruling:* call `savedViewKindWords`; the
+  local is `decidesLine`. Same output for every kind and board type (both read `kind` and
+  `board_type` the same way), so the line the reader sees is unchanged. `boards.ts`' `viewType`
+  stays apart: it answers other words (*Board*, *Filter*) for the settings table. *Reversing:* low.
+- **What is not renamed.** *Fork:* other Jira names sit beside the ticket's list. *Ruling:*
+  `drawnJiraColumns` and `JIRA_GROUPS` stay (they take columns and group words, not a
+  `SavedViewSource`, and the groups are words the reader sees), as do every user-facing word
+  ("Jira decides…", "JQL", "Open in Jira") and doc comments that describe today's only adapter.
+  `TfBoardsAndFilters.svelte` held no `jira` local on this tree (#1287 had removed it); its
+  `SourceView` and `sourceViews` uses follow `boards.ts`. *Reasoning:* #1245's scope ruling: the
+  ticket's names and what must follow them. *Reversing:* low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the schema
+  (two `schema.rs` tests: names, and an existing install's query kept), the existing saved-view
+  tests in `knobas-sync` and `knobas-app`, and the vitest suites the shell rename reaches
+  (`views.test.ts`, `boards.test.ts`, `TicketsPage.test.svelte.ts`, `TfSettings`). *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **ViewMenu's renamed prop is pinned by the type checker.** *Fork:* mutant M3 (the board-head
+  `ViewMenu` still passing `jira=`) survives vitest and dies only in `svelte-check`; add a vitest
+  or not. *Ruling:* not. `svelte-check` runs in every `just check` and `check-front`, so the gate
+  fails on it, and an unknown prop is a type error, which is what the type checker is for.
+  *Reasoning:* a vitest would pin the menu's items, which existing `TicketsPage` tests already
+  cover for the other call site. *Reversing:* low.
+- **No restore shim, verified.** `knobas_db::backup::dump` passes `--schema=knobas`
+  (`OWNED_SCHEMA`), share exports dump named `knobas` tables, and no SQL outside
+  `knobas_sync::saved_views` and `ticket_views` names the column; the remaining `jql`s are the
+  adapter's payload key. *Reversing:* n/a.

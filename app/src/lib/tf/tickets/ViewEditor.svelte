@@ -53,7 +53,7 @@
   } from "./editor";
   import { columnName, LANE_FIELDS, splitLanes, when } from "./tickets";
   import { counted } from "../counted";
-  import { copyKeeps, drawnJiraColumns, LIST_COLUMN_ORDER, type CopiedFrom } from "./views";
+  import { copyKeeps, drawnJiraColumns, LIST_COLUMN_ORDER, savedViewKindWords, type CopiedFrom } from "./views";
 
   let {
     draft,
@@ -66,7 +66,7 @@
     onsave,
     ondelete,
     onclose,
-    jira = null,
+    savedViewSource = null,
     copiedFrom = null,
     oncopy,
     copy = null,
@@ -85,7 +85,7 @@
      * decides its name, which tickets and its columns, so those are shown and
      * not edited; layout, lanes, card fields and list columns are the reader's.
      */
-    jira?: SavedViewSource | null;
+    savedViewSource?: SavedViewSource | null;
     /** Where the view starts: a saved one (*Edit view*) or a new one. */
     draft: TicketViewDraft;
     /** *Edit view*: the title names the view, the button says *Save view*, *Delete view* shows. */
@@ -127,19 +127,17 @@
   let failed = $state<string | null>(null);
   const named = $derived(name.trim() !== "");
   const saveLabel = $derived(editing ? "Save view" : "Create view");
-  /** Fixed for the dialog's life: a Jira view stays one. */
-  const fromJira = untrack(() => jira);
-  const title = $derived(fromJira ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
+  /** Fixed for the dialog's life: a saved view stays one. */
+  const fixedSource = untrack(() => savedViewSource);
+  const title = $derived(fixedSource ? `Settings for ${start.name}` : editing ? `Edit ${start.name}` : "New view");
   /** *Which tickets* on a Jira view: where Jira's answer comes from, in prototype-6's words. */
-  const jiraLine = $derived.by(() => {
-    if (fromJira === null) return "";
-    const type = fromJira.board_type ? fromJira.board_type[0]!.toUpperCase() + fromJira.board_type.slice(1) : "";
-    const what = fromJira.kind === "board" ? `${type} board`.trim() : "saved filter";
-    return `Jira decides, from the ${what}`;
+  const decidesLine = $derived.by(() => {
+    if (fixedSource === null) return "";
+    return `Jira decides, from the ${savedViewKindWords(fixedSource)}`;
   });
   /** How much of a Jira view's query a copy would keep (#880). */
   const keepsLine = $derived.by(() => {
-    if (fromJira === null || copy === null) return "";
+    if (fixedSource === null || copy === null) return "";
     return copyKeeps(copy);
   });
   const uid = $props.id();
@@ -266,7 +264,7 @@
   $effect(() => {
     untrack(() => {
       // A Jira view's statuses are the ones on Jira's columns, as Jira holds them.
-      if (fromJira !== null) {
+      if (fixedSource !== null) {
         statuses = [...new Set((columns ?? []).flatMap((column) => column.statuses))];
         return;
       }
@@ -305,7 +303,7 @@
   const shown = $derived(
     answer === null
       ? null
-      : previewBoard(answer.columns, fromJira !== null ? drawnJiraColumns(start.columns) : (columns ?? [])),
+      : previewBoard(answer.columns, fixedSource !== null ? drawnJiraColumns(start.columns) : (columns ?? [])),
   );
   const laneCount = $derived(
     answer === null || !laned
@@ -339,7 +337,7 @@
         group: group.trim() || "Mine",
         query,
         layout,
-        columns: fromJira !== null ? start.columns : storedColumns(columns ?? [], statuses),
+        columns: fixedSource !== null ? start.columns : storedColumns(columns ?? [], statuses),
         lanes,
         card_fields: cardFields,
         list_columns: listColumns,
@@ -363,15 +361,15 @@
           void save();
         }}
       >
-        {#if fromJira !== null}
+        {#if fixedSource !== null}
           <section class="tf-vw-sec">
             <h3>Which tickets</h3>
             <p>
-              {jiraLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps Jira's order.{#if fromJira.sprint}
-                Like the board in Jira, it shows the active sprint, now {fromJira.sprint.name}, and moves on to the next
+              {decidesLine} <b>{start.name}</b>. knobas runs its query at every sync and keeps Jira's order.{#if fixedSource.sprint}
+                Like the board in Jira, it shows the active sprint, now {fixedSource.sprint.name}, and moves on to the next
                 sprint when this one closes.{/if}
             </p>
-            <pre class="tf-vw-jql">{fromJira.source_query}{#if fromJira.sub_query}{"\n"}{fromJira.sub_query}{/if}</pre>
+            <pre class="tf-vw-source-query">{fixedSource.source_query}{#if fixedSource.sub_query}{"\n"}{fixedSource.sub_query}{/if}</pre>
             <!-- A source that does not translate its query (#1208) offers no copy, so the line does not either. -->
             <p class="tf-dim">
               {#if oncopy}To change which tickets it holds, change it in Jira, or make your own copy. {keepsLine}{:else}To
@@ -496,7 +494,7 @@
           {#if layout === "board"}
             <div class="tf-vw-sub">
               <h4>Columns</h4>
-              {#if fromJira !== null}
+              {#if fixedSource !== null}
                 <p class="tf-dim">The columns come from the board in Jira and change when someone changes them there.</p>
               {:else}
                 <p class="tf-dim">
@@ -510,7 +508,7 @@
                       type="text"
                       aria-label="Column name"
                       value={column.name}
-                      disabled={fromJira !== null}
+                      disabled={fixedSource !== null}
                       oninput={(event) => setColumn(at, { name: event.currentTarget.value })}
                     />
                     <div class="tf-vw-vals">
@@ -519,7 +517,7 @@
                           type="button"
                           class="tf-vw-val"
                           aria-pressed={column.statuses.includes(status)}
-                          disabled={fromJira !== null}
+                          disabled={fixedSource !== null}
                           onclick={() => (columns = toggleStatus(columns ?? [], at, status))}>{status}</button
                         >
                       {/each}
@@ -530,7 +528,7 @@
                         min="0"
                         aria-label="At most"
                         value={column.limit ?? ""}
-                        disabled={fromJira !== null}
+                        disabled={fixedSource !== null}
                         placeholder="any"
                         oninput={(event) => {
                           const n = Number.parseInt(event.currentTarget.value, 10);
@@ -538,7 +536,7 @@
                         }}
                       /></label
                     >
-                    {#if fromJira === null}
+                    {#if fixedSource === null}
                     <span class="tf-vw-move">
                       <button
                         type="button"
@@ -563,7 +561,7 @@
               {#if loose.length > 0}
                 <p class="tf-vw-warn">{looseLine}</p>
               {/if}
-              {#if fromJira === null}
+              {#if fixedSource === null}
               <div class="tf-vw-btns">
                 <button
                   type="button"
@@ -687,11 +685,11 @@
     </div>
   {/snippet}
   {#snippet footer()}
-    {#if editing && ondelete && fromJira === null}
+    {#if editing && ondelete && fixedSource === null}
       <button type="button" class="tf-btn tf-ghost tf-vw-del" onclick={ondelete}>Delete view</button>
     {/if}
     <span class="tf-first tf-dim tf-vw-store"
-      >{fromJira !== null
+      >{fixedSource !== null
         ? "Only how it looks here. Jira still decides which tickets."
         : "Kept in knobas. Jira never sees it."}</span
     >

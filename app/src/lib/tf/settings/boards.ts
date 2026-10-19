@@ -44,12 +44,12 @@ export function favouriteFilters(config: unknown): boolean {
 }
 
 /** A saved view of the source `sourceId`, with what the source says about it. */
-export type SourceView = TicketViewRow & { saved_view_source: SavedViewSource };
+export type SavedViewRow = TicketViewRow & { saved_view_source: SavedViewSource };
 
-/** The source's Jira views: the boards, then the filters, each in list order. */
-export function sourceViews(views: TicketViewRow[], sourceId: string): SourceView[] {
+/** The source's saved views: the boards, then the filters, each in list order. */
+export function savedViewsOf(views: TicketViewRow[], sourceId: string): SavedViewRow[] {
   return views
-    .filter((view): view is SourceView => view.saved_view_source !== null && (view.saved_view ?? "").startsWith(`${sourceId}:`))
+    .filter((view): view is SavedViewRow => view.saved_view_source !== null && (view.saved_view ?? "").startsWith(`${sourceId}:`))
     .sort(
       (a, b) =>
         Number(a.saved_view_source.kind === "filter") - Number(b.saved_view_source.kind === "filter") ||
@@ -59,9 +59,9 @@ export function sourceViews(views: TicketViewRow[], sourceId: string): SourceVie
 }
 
 /** *Scrum board*, *Kanban board*, *Board* or *Filter*. */
-export function viewType(jira: SavedViewSource): string {
-  if (jira.kind === "filter") return "Filter";
-  const type = jira.board_type ?? "";
+export function viewType({ kind, board_type }: Pick<SavedViewSource, "kind" | "board_type">): string {
+  if (kind === "filter") return "Filter";
+  const type = board_type ?? "";
   return type === "" || type === "simple" ? "Board" : `${type[0]!.toUpperCase()}${type.slice(1)} board`;
 }
 

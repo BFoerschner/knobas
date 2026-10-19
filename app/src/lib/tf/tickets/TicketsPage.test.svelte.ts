@@ -1560,7 +1560,8 @@ test("View settings on a Jira view says Jira decides, locks its columns, and sav
   await settle();
   const box = target.querySelector<HTMLElement>(".tf-vw-dialog")!;
   expect(box.querySelector("h2")!.textContent).toBe("Settings for Payments and Ops flow");
-  expect(box.querySelector(".tf-vw-jql")!.textContent).toBe("project in (PAY, OPS) ORDER BY Rank ASC\nfixVersion is EMPTY");
+  expect(box.querySelector(".tf-vw-source-query")!.textContent).toBe("project in (PAY, OPS) ORDER BY Rank ASC\nfixVersion is EMPTY");
+  expect(box.querySelector(".tf-vw-sec p")!.textContent).toMatch(/^Jira decides, from the Kanban board Payments and Ops flow\. /);
   expect(box.querySelector<HTMLInputElement>('input[aria-label="Name"]')).toBeNull();
   expect([...box.querySelectorAll<HTMLInputElement>('input[aria-label="Column name"]')].map((i) => [i.value, i.disabled])).toEqual([
     ["Ready", true],

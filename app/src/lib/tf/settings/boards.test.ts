@@ -2,9 +2,9 @@
 import { expect, test } from "vitest";
 
 import type { SavedViewSource, TicketViewRow } from "../../ipc/search";
-import { boardScope, favouriteFilters, sourceViews, unsyncedWords, viewType } from "./boards";
+import { boardScope, favouriteFilters, savedViewsOf, unsyncedWords, viewType } from "./boards";
 
-function jira(extra: Partial<SavedViewSource> = {}): SavedViewSource {
+function savedViewSource(extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
     board_type: "kanban",
@@ -51,20 +51,20 @@ test("the stored choice, with D17's default where the config says nothing it kno
 
 test("a source's Jira views: its own only, boards before filters, each in list order", () => {
   const views = [
-    view("filter", 0, "jira:filter-1", jira({ kind: "filter", board_type: null })),
-    view("other", 1, "jira-eu:board-3", jira()),
+    view("filter", 0, "jira:filter-1", savedViewSource({ kind: "filter", board_type: null })),
+    view("other", 1, "jira-eu:board-3", savedViewSource()),
     view("mine", 2, null, null),
-    view("late", 5, "jira:board-9", jira()),
-    view("early", 3, "jira:board-2", jira()),
+    view("late", 5, "jira:board-9", savedViewSource()),
+    view("early", 3, "jira:board-2", savedViewSource()),
   ];
-  expect(sourceViews(views, "jira").map((row) => row.id)).toEqual(["early", "late", "filter"]);
+  expect(savedViewsOf(views, "jira").map((row) => row.id)).toEqual(["early", "late", "filter"]);
 });
 
 test("a view's type and the tickets on it knobas does not mirror, in words", () => {
-  expect(viewType(jira({ board_type: "scrum" }))).toBe("Scrum board");
-  expect(viewType(jira({ board_type: "kanban" }))).toBe("Kanban board");
-  expect(viewType(jira({ board_type: "simple" }))).toBe("Board");
-  expect(viewType(jira({ kind: "filter", board_type: null }))).toBe("Filter");
+  expect(viewType(savedViewSource({ board_type: "scrum" }))).toBe("Scrum board");
+  expect(viewType(savedViewSource({ board_type: "kanban" }))).toBe("Kanban board");
+  expect(viewType(savedViewSource({ board_type: "simple" }))).toBe("Board");
+  expect(viewType(savedViewSource({ kind: "filter", board_type: null }))).toBe("Filter");
   expect(unsyncedWords([])).toBeNull();
   expect(unsyncedWords([{ project: "WEB", count: 3 }])).toBe("and 3 in WEB, not synced");
   expect(

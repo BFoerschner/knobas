@@ -8,12 +8,12 @@ import {
   copyKeeps,
   draftCopy,
   draftFromFilter,
-  draftJiraCopy,
+  draftSavedViewCopy,
   draftRestore,
   drawnJiraColumns,
   groupViews,
   hiddenViews,
-  jiraKindWords,
+  savedViewKindWords,
   savedShowing,
   sprintEnds,
   translationText,
@@ -111,9 +111,9 @@ test("Save as a view takes the text and how it shows now; Duplicate and Undo kee
 });
 
 test("a Jira view is read from a board of its type or a saved filter, and a sprint ends on a day (#879)", () => {
-  expect(jiraKindWords({ kind: "board", board_type: "scrum" })).toBe("Scrum board");
-  expect(jiraKindWords({ kind: "board", board_type: null })).toBe("board");
-  expect(jiraKindWords({ kind: "filter", board_type: null })).toBe("saved filter");
+  expect(savedViewKindWords({ kind: "board", board_type: "scrum" })).toBe("Scrum board");
+  expect(savedViewKindWords({ kind: "board", board_type: null })).toBe("board");
+  expect(savedViewKindWords({ kind: "filter", board_type: null })).toBe("saved filter");
   expect(sprintEnds("2026-10-22T16:00:00Z")).toBe("22 Oct");
   expect(sprintEnds("soon")).toBe("");
 });
@@ -130,11 +130,11 @@ test("Jira boards and Jira filters come after every group of your own, and a Jir
   expect(groupViews(views, "project = cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
 });
 
-function savedViewOf(jql: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
+function savedViewOf(sourceQuery: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
     board_type: "scrum",
-    source_query: jql,
+    source_query: sourceQuery,
     sub_query: null,
     sprint: null,
     last_read: "",
@@ -174,7 +174,7 @@ test("a Jira view's columns are drawn by their own names, keeping Jira's order a
 });
 
 test("Make an editable copy starts a view of your own from the Jira view: its conditions, Jira's columns, what it left out", () => {
-  const jira = {
+  const savedViewSource = {
     kind: "board" as const,
     board_type: "kanban",
     source_query: "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
@@ -187,14 +187,14 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
     unsynced: [],
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
-  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", saved_view_source: jira, saved_view: "mock:board-40", columns, lanes: "priority" });
+  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", saved_view_source: savedViewSource, saved_view: "mock:board-40", columns, lanes: "priority" });
   // As the Jira adapter reads the query (#1208): the source's answer, not the shell's.
   const copy: QueryTranslation = {
     conditions: [{ key: "project", negated: false, values: ["OPS", "WEB"] }],
     kept: 1,
     left_out: [{ clause: "component = on-call", reason: "knobas does not sync components" }],
   };
-  const { draft, from } = draftJiraCopy(board, jira, copy);
+  const { draft, from } = draftSavedViewCopy(board, savedViewSource, copy);
   expect(draft).toEqual(
     expect.objectContaining({ id: null, position: null, name: "Platform on-call", group: "Mine", query: "project:OPS project:WEB", lanes: "priority", saved_view: null }),
   );
@@ -207,7 +207,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   });
 
   // *Save as a view* on a Jira view: the copy's conditions, then what the bar adds, and how the tickets show now.
-  const saved = draftJiraCopy(board, jira, copy, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
+  const saved = draftSavedViewCopy(board, savedViewSource, copy, "priority:High retry", { layout: "list", lanes: "epic", sort: savedShowing(null).sort });
   expect(saved.draft).toEqual(
     expect.objectContaining({ name: "", group: "Mine", query: "project:OPS project:WEB priority:High retry", layout: "list", lanes: "epic", saved_view: null }),
   );
