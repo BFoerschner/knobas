@@ -310,7 +310,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         register_guarded(name);
         // A system proxy resolves the name itself, and the resolver below
         // never sees it: judge it here first.
-        // A lookup that never answers is a failed one: the proxy gets it.
+        // A lookup that never answers is a failed one: the request goes on to the proxy.
         if let Ok(Ok(addrs)) = tokio::time::timeout(lookup_wait(bounds), lookup(name)).await
             && refuse_if_local(name, &addrs)
         {
@@ -534,12 +534,10 @@ fn refuse_if_local(name: &str, addrs: &[SocketAddr]) -> bool {
 /// The longest the pre-proxy lookup waits: the request's head bound when it
 /// is shorter than the cap, so the lookup never outlasts what the component
 /// asked for.
-const LOOKUP_WAIT: Duration = Duration::from_secs(2);
+const LOOKUP_CAP: Duration = Duration::from_secs(2);
 
 fn lookup_wait(bounds: Bounds) -> Duration {
-    bounds
-        .head
-        .map_or(LOOKUP_WAIT, |head| head.min(LOOKUP_WAIT))
+    bounds.head.map_or(LOOKUP_CAP, |head| head.min(LOOKUP_CAP))
 }
 
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {

@@ -6934,7 +6934,7 @@ The merge-manager's rulings (Opus):
 ## #1290 — bound the lookup before hand-off
 
 - **Which bound.** *Fork:* `Bounds::head` alone, or a fixed cap. *Ruling:* the shorter of
-  `Bounds::head` and a 2 s cap (`LOOKUP_WAIT`). `head` is `None` when the component sets no
+  `Bounds::head` and a 2 s cap (`LOOKUP_CAP`). `head` is `None` when the component sets no
   timeouts, so it cannot be the only bound; a long `head` (tens of seconds) would still stall a
   proxy-only reader far past what a lookup is worth. A timed-out lookup is a failed one: the
   request goes to the proxy. *Reversing:* low (one constant).
