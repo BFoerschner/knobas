@@ -26,7 +26,11 @@ pub(super) struct Label {
 /// the repository's own, then, where `owner` is an organisation, every page
 /// of the organisation's. Gitea's 404 for the organisation's is a user owner,
 /// which has none. Any other failure is the reason the action is disabled.
-pub(super) async fn read(source: &GiteaSource, owner: &str, repo: &str) -> Result<Vec<Label>, String> {
+pub(super) async fn read(
+    source: &GiteaSource,
+    owner: &str,
+    repo: &str,
+) -> Result<Vec<Label>, String> {
     let client = &source.client;
     let own = every(|page| client.labels_as(owner, repo, page));
     let org = async {

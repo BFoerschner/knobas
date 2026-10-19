@@ -2546,7 +2546,13 @@ async fn add_label_with_nothing_to_add_or_no_labels_read_says_why() {
 }
 
 /// One page of a label listing at `p`, answered for `page` only.
-async fn label_page(server: &MockServer, p: String, page: u32, labels: Value, total: Option<usize>) {
+async fn label_page(
+    server: &MockServer,
+    p: String,
+    page: u32,
+    labels: Value,
+    total: Option<usize>,
+) {
     let mut answer = ResponseTemplate::new(200).set_body_json(labels);
     if let Some(total) = total {
         answer = answer.insert_header("X-Total-Count", total.to_string().as_str());
@@ -2575,11 +2581,25 @@ async fn add_label_offers_the_repositorys_labels_past_the_first_page() {
     for total in [Some(51), None] {
         let server = gitea(pull.clone(), json!([])).await;
         let labels = format!("{REPO}/labels");
-        label_page(&server, labels.clone(), 1, Value::Array(first.clone()), total).await;
+        label_page(
+            &server,
+            labels.clone(),
+            1,
+            Value::Array(first.clone()),
+            total,
+        )
+        .await;
         let last = json!([{ "id": 200, "name": "late" }]);
         label_page(&server, labels.clone(), 2, last, total).await;
         // A page past the end, which a correct read never asks for.
-        label_page(&server, labels, 3, json!([{ "id": 300, "name": "beyond" }]), total).await;
+        label_page(
+            &server,
+            labels,
+            3,
+            json!([{ "id": 300, "name": "beyond" }]),
+            total,
+        )
+        .await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
         assert_eq!(
             labelled(&view, "Add label…"),
@@ -2602,12 +2622,22 @@ async fn add_label_offers_the_organisations_labels_too() {
     let mut pull = open_pull();
     pull["labels"] = Value::Array(org_first.clone());
     for (own, offered) in [
-        (json!([{ "id": 7, "name": "needs-qa" }]), &[("7", "needs-qa"), ("900", "org-late")][..]),
+        (
+            json!([{ "id": 7, "name": "needs-qa" }]),
+            &[("7", "needs-qa"), ("900", "org-late")][..],
+        ),
         (json!([]), &[("900", "org-late")][..]),
     ] {
         let server = gitea(pull.clone(), json!([])).await;
         answer(&server, format!("{REPO}/labels"), 200, own).await;
-        label_page(&server, ORG.to_owned(), 1, Value::Array(org_first.clone()), Some(51)).await;
+        label_page(
+            &server,
+            ORG.to_owned(),
+            1,
+            Value::Array(org_first.clone()),
+            Some(51),
+        )
+        .await;
         let last = json!([{ "id": 900, "name": "org-late" }]);
         label_page(&server, ORG.to_owned(), 2, last, Some(51)).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
