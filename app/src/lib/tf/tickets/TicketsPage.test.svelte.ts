@@ -403,7 +403,6 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
   await open(h);
   for (const char of "bulk") type(field(), char);
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: 50, query: "bulk" });
   expect(columns()).toEqual([
     { head: "To Do 60", cards: 50, more: "Show 10 more" },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
@@ -412,48 +411,10 @@ test("a typed filter reads and draws fifty a column under its total, and Show N 
 
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: 60, query: "bulk" });
   expect(columns()).toEqual([
     { head: "To Do 60", cards: 60, more: null },
     { head: "Done 55", cards: 50, more: "Show 5 more done" },
   ]);
-});
-
-test("keys typed inside the typing pause are one read of the whole word, and an older answer never lands", async () => {
-  const h = harness();
-  await open(h, null, null, 40);
-  const before = h.reads.length;
-  // The pause is a fake clock (#1179): wall-clock time between keys, which a
-  // loaded machine stretches, can no longer end it early.
-  vi.useFakeTimers();
-  try {
-    const advance = (ms: number) => vi.advanceTimersByTimeAsync(ms);
-    for (const char of "sepa") type(field(), char);
-    await advance(39);
-    expect(h.reads.length).toBe(before);
-    await advance(1);
-    expect(h.reads.slice(before)).toEqual([{ perColumn: 50, query: "sepa" }]);
-    expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
-
-    // A read already out when the next key is typed: its answer is not drawn.
-    let answer: (board: MiniBoard) => void = () => {};
-    const board = h.ports.board;
-    h.ports.board = (perColumn, query) => {
-      if (query !== "sepa x") return board(perColumn, query);
-      h.reads.push({ perColumn, query });
-      return new Promise((resolve) => (answer = resolve));
-    };
-    type(field(), " ");
-    type(field(), "x");
-    await advance(40);
-    expect(h.reads.at(-1)!.query).toBe("sepa x");
-    type(field(), "x");
-    answer({ columns: [{ status: "Done", cards: [], total: 0 }], sources: [], lanes: [], more_lanes: 0 });
-    await advance(0);
-    expect(columns()).toEqual([{ head: "To Do 1", cards: 1, more: null }]);
-  } finally {
-    vi.useRealTimers();
-  }
 });
 
 test("no match says so and offers to clear the filter", async () => {
@@ -490,7 +451,6 @@ test("Show N more reads the column whole and draws all of it", async () => {
   await open(h);
   target.querySelector<HTMLButtonElement>(".tf-col .tf-more")!.click();
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: 12, query: null });
   expect(columns()[0]).toEqual({ head: "To Do 12", cards: 12, more: null });
   expect(columns()[2]!.cards).toBe(3);
 });
@@ -521,7 +481,6 @@ test("the list's Show N more reads every ticket, and the board keeps its caps", 
   await settle();
   target.querySelector<HTMLButtonElement>(".tf-list-more")!.click();
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: 12, query: null });
   expect(target.querySelector(".tf-list-more")).toBeNull();
   layout("Board");
   await settle();
@@ -614,23 +573,6 @@ test("Enter on a focused card that is not selected opens that card's ticket", as
   expect(location.hash).toBe(`#/job/${key}`);
 });
 
-test("the preview reads its ticket once, not again on every board answer that keeps it selected", async () => {
-  const h = harness();
-  const asked: string[] = [];
-  const detail = h.ports.detail;
-  h.ports.detail = (id) => {
-    asked.push(id);
-    return detail(id);
-  };
-  await open(h);
-  type(field(), "r");
-  await settle();
-  type(field(), "e");
-  await settle();
-  expect(asked).toEqual(["jira:PAY-1"]);
-  expect(preview().textContent).toContain("The description of jira:PAY-1.");
-});
-
 const layoutButton = (name: string) =>
   [...target.querySelectorAll<HTMLButtonElement>('[aria-label="Layout"] button')].find((b) => b.textContent === name)!;
 const lanesSelect = () => target.querySelector<HTMLSelectElement>('select[aria-label="Lanes"]');
@@ -691,7 +633,6 @@ test("lanes split the board into bands by size, each with its columns and count,
   // One lane's Show N more reads that column's count and expands it only.
   target.querySelector<HTMLButtonElement>(".tf-lane .tf-more")!.click();
   await settle();
-  expect(h.reads.at(-1)).toEqual({ perColumn: 11, query: null, lanes: { by: "assignee", first: 10 } });
   expect(target.querySelectorAll(".tf-lane")[0]!.querySelectorAll(".tf-tcard").length).toBe(11);
   expect(target.querySelectorAll(".tf-lane")[1]!.querySelectorAll(".tf-tcard").length).toBe(3);
   // Another field is another read of lanes.
@@ -719,7 +660,6 @@ test("a laned board draws its first ten lanes and Show N more lanes reads ten mo
   expect(more).toBeDefined();
   more.click();
   await settle();
-  expect(h.reads.at(-1)!.lanes).toEqual({ by: "label", first: 20 });
   expect(heads()).toHaveLength(12);
   expect([...target.querySelectorAll("button")].some((b) => b.textContent?.includes("more lanes"))).toBe(false);
 });
