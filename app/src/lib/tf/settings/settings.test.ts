@@ -72,6 +72,21 @@ test("a row says Synced, Sign-in failed or what else holds it, with a dot in the
   });
 });
 
+test("a run stopped at a deadline or memory cap names the limit on the health line; other failures do not", () => {
+  const run = (error: string | null) =>
+    ({ enabled: true, last_run: { outcome: "error", error, finished_at: MIN_AGO(4) } }) as never;
+  const failed = status({ last_outcome: "error" });
+  const line = (error: string | null) => sourceState(run(error), health("ok"), failed, NOW).text;
+  expect(line('the external adapter "wasm-fixture" was stopped at its deadline of 600 s')).toBe(
+    "Failed 4 min ago, stopped at its deadline of 600 s",
+  );
+  expect(line('the external adapter "wasm-fixture" was stopped at its memory cap of 64 MiB')).toBe(
+    "Failed 4 min ago, stopped at its memory cap of 64 MiB",
+  );
+  expect(line("HTTP 500")).toBe("Failed 4 min ago");
+  expect(line(null)).toBe("Failed 4 min ago");
+});
+
 test("holdings name the kind when there is one, and say items when there are several", () => {
   expect(holdings({ item_count: 177, kinds: [ticket] })).toBe("177 tickets");
   expect(holdings({ item_count: 1, kinds: [ticket] })).toBe("1 ticket");

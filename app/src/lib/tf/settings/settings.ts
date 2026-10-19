@@ -91,6 +91,16 @@ const FAILED: Partial<Record<CredentialHealth["state"], string>> = {
   missing_secret: "No password stored",
 };
 
+/**
+ * The limit an external adapter's call passed, read from the host's fixed
+ * wording ("... was stopped at its deadline of 600 s" / "its memory cap of
+ * 64 MiB", `Exceeded` in knobas-wasm-host's limits.rs). Null for any other error.
+ */
+export function stoppedAt(error: string | null | undefined): string | null {
+  const m = /was stopped at (its (?:deadline|memory cap) of \d+ (?:s|MiB))/.exec(error ?? "");
+  return m ? m[1]! : null;
+}
+
 export function sourceState(
   source: Pick<SourceSummary, "enabled" | "last_run" | "role_misses">,
   health: CredentialHealth | null,
@@ -107,7 +117,11 @@ export function sourceState(
     return { tone: "warn", text: `Unreachable, synced ${ago(finished, now)}`, failed: false };
   }
   const outcome = status?.last_outcome ?? source.last_run?.outcome ?? null;
-  if (outcome === "error") return { tone: "warn", text: `Failed ${ago(finished, now)}`, failed: false };
+  if (outcome === "error") {
+    const limit = source.last_run?.outcome === "error" ? stoppedAt(source.last_run.error) : null;
+    const text = `Failed ${ago(finished, now)}`;
+    return { tone: "warn", text: limit ? `${text}, stopped at ${limit}` : text, failed: false };
+  }
   const misses = source.role_misses ?? [];
   if (misses.length > 0) {
     const [first] = misses;
