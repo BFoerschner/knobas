@@ -74,8 +74,9 @@
 /// storing it beside the value is what lets a custom key be read back as the
 /// thing it was entered as. A bare JSON scalar would make `"8080"` and `8080`
 /// the same property and would leave a date indistinguishable from a string.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "assets.ts")]
 pub enum PropertyKind {
     Text,
     Number,
@@ -110,7 +111,12 @@ impl PropertyKind {
 /// create dialog and the pane's property editor read *one* list. Without it
 /// the frontend would carry a second copy of sixteen types -- and, worse,
 /// would have to guess which kind an unfilled typed property takes.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+///
+/// The `kind` is what a pane's editor needs and what an asset's property row
+/// cannot carry: a declared key nobody has filled in arrives with
+/// `value: null`, and there is no kind in a `null`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct TypedProperty {
     /// The key it is stored under in `knobas.asset.properties`.
     pub key: &'static str,
@@ -121,7 +127,12 @@ pub struct TypedProperty {
 }
 
 /// One built-in asset type.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+///
+/// Read off the backend by `asset_types` rather than declared in the frontend,
+/// so the sixteen types are one list. The **ids are wire values and never
+/// change**; the labels are display and may be reworded.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "assets.ts")]
 pub struct AssetType {
     /// The `knobas.asset.type_id` value. A wire value -- see the module docs.
     pub id: &'static str,
@@ -130,12 +141,13 @@ pub struct AssetType {
     /// Two characters, for the fixed-width chip a column row draws.
     pub monogram: &'static str,
     /// The typed properties, **in the order the pane shows them**. The order is
-    /// the declaration's; it is not sorted anywhere.
+    /// the declaration's; it is not sorted anywhere. `custom` declares none.
     pub properties: &'static [TypedProperty],
     /// The child types conventionally suggested under one of these, by id, in
     /// the order the create dialog offers them.
     ///
-    /// A **suggestion and not a constraint** -- see the module docs. Empty is
+    /// A **suggestion and not a constraint** -- see the module docs: the
+    /// create dialog offers all sixteen whatever is in here. Empty is
     /// a real answer: nothing usually goes inside a table, a network or a
     /// `custom`, and an empty list is what makes the dialog say *any type*
     /// rather than name one at random.
@@ -545,9 +557,9 @@ mod tests {
         }
     }
 
-    /// The kind list and its spellings are one fact; the mirror is pinned
-    /// against `ALL`, so a fifth kind cannot arrive without the mirror hearing
-    /// about it.
+    /// The kind list and its spellings are one fact. The TypeScript union is
+    /// generated from this enum (`app/src/lib/ipc/generated/assets.ts`), so a
+    /// fifth kind arrives there with it; `ALL` is what this test walks.
     #[test]
     fn every_property_kind_spells_itself_the_way_serde_does() {
         for kind in PropertyKind::ALL {

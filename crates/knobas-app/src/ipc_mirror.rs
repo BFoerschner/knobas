@@ -205,6 +205,56 @@ fn export_roots(cfg: &Config) -> Result<(), ExportError> {
     crate::link_sets::JobLink::export_all(cfg)?;
     crate::link_sets::JobParent::export_all(cfg)?;
     crate::link_sets::JobLinkSets::export_all(cfg)?;
+    // assets.ts
+    knobas_core::asset::PropertyKind::export_all(cfg)?;
+    knobas_core::asset::TypedProperty::export_all(cfg)?;
+    knobas_core::asset::AssetType::export_all(cfg)?;
+    crate::assets::PropertyValue::export_all(cfg)?;
+    crate::assets::AssetStatus::export_all(cfg)?;
+    crate::assets::Environment::export_all(cfg)?;
+    crate::assets::AssetRow::export_all(cfg)?;
+    crate::assets::AssetProperty::export_all(cfg)?;
+    crate::assets::MemberAsset::export_all(cfg)?;
+    crate::assets::Visibility::export_all(cfg)?;
+    crate::assets::RouteRow::export_all(cfg)?;
+    crate::assets::RouteDetail::export_all(cfg)?;
+    crate::assets::AssetDetail::export_all(cfg)?;
+    crate::assets::DependsOnRow::export_all(cfg)?;
+    crate::assets::DependsOnThis::export_all(cfg)?;
+    crate::assets::MonitorTarget::export_all(cfg)?;
+    crate::assets::AttachedMonitor::export_all(cfg)?;
+    crate::assets::ImportEntry::export_all(cfg)?;
+    crate::assets::PropertyPlan::export_all(cfg)?;
+    crate::assets::PropertyChange::export_all(cfg)?;
+    crate::assets::AssetChange::export_all(cfg)?;
+    crate::assets::MonitorLink::export_all(cfg)?;
+    crate::assets::UnresolvedMonitor::export_all(cfg)?;
+    crate::assets::ImportPreview::export_all(cfg)?;
+    crate::assets::ImportOutcome::export_all(cfg)?;
+    crate::assets::AssetEdit::export_all(cfg)?;
+    crate::assets::RouteEdit::export_all(cfg)?;
+    crate::assets::Produced::export_all(cfg)?;
+    crate::assets::Landing::export_all(cfg)?;
+    crate::commands::assets::MonitoringSettings::export_all(cfg)?;
+    crate::assets::MonitorRow::export_all(cfg)?;
+    crate::assets::UptimeRatio::export_all(cfg)?;
+    crate::assets::MonitoredAsset::export_all(cfg)?;
+    crate::assets::MonitorSample::export_all(cfg)?;
+    crate::assets::AlertState::export_all(cfg)?;
+    crate::assets::AlertAsset::export_all(cfg)?;
+    crate::assets::OpenAlert::export_all(cfg)?;
+    crate::assets::UnmonitoredAsset::export_all(cfg)?;
+    crate::assets::dependencies::Layer::export_all(cfg)?;
+    crate::assets::dependencies::DepKind::export_all(cfg)?;
+    crate::assets::dependencies::DepItem::export_all(cfg)?;
+    crate::assets::dependencies::DepRelation::export_all(cfg)?;
+    crate::assets::dependencies::Dependencies::export_all(cfg)?;
+    crate::assets::dependencies::Group::export_all(cfg)?;
+    crate::assets::dependencies::Tiles::export_all(cfg)?;
+    crate::assets::dependencies::LayerInView::export_all(cfg)?;
+    crate::assets::dependencies::DepViewSettings::export_all(cfg)?;
+    crate::assets::dependencies::DepView::export_all(cfg)?;
+    crate::assets::dependencies::DepViews::export_all(cfg)?;
     Ok(())
 }
 
