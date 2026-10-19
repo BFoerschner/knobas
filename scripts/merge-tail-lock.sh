@@ -35,11 +35,13 @@ oldest_live_waiter() {
   for f in "$QUEUE"/*; do
     [ -e "$f" ] || continue
     n=${f##*/}
-    [ $((now - $(stat -f %m "$f"))) -le 120 ] || continue
+    [ $((now - $(mtime "$f"))) -le 120 ] || continue
     if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; fi
   done
   echo "${best:-}"
 }
+# GNU stat first: on Linux `stat -f` is file-system status and exits 0.
+mtime() { stat -c %Y "$1" 2>/dev/null || stat -f %m "$1"; }
 epoch() { [ -n "$1" ] || { echo 0; return; }; date -j -u -f %Y-%m-%dT%H:%M:%SZ "$1" +%s 2>/dev/null || date -u -d "$1" +%s 2>/dev/null || echo 0; }
 case "$cmd" in
 ready)
@@ -55,7 +57,7 @@ partner)
     case $n in *.merged) continue ;; esac
     [ "$n" != "$pr" ] || continue
     [ ! -e "$READY/$n.merged" ] || continue
-    [ -e "$QUEUE/$n" ] && [ $((now - $(stat -f %m "$QUEUE/$n"))) -le 120 ] || continue
+    [ -e "$QUEUE/$n" ] && [ $((now - $(mtime "$QUEUE/$n"))) -le 120 ] || continue
     if [ -z "$best" ] || [ "$n" -lt "$best" ]; then best=$n; fi
   done
   [ -n "$best" ] && echo "$best $(cat "$READY/$best")"
@@ -88,7 +90,7 @@ take)
         # found stale is still the holder (another waiter may have taken over
         # and acquired since we read it). A guard older than 60 s was left by
         # a waiter killed mid-takeover and would block every takeover for good.
-        if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(stat -f %m "$LOCK.takeover" 2>/dev/null || date +%s) )) -gt 60 ]; then
+        if [ -d "$LOCK.takeover" ] && [ $(( $(date +%s) - $(mtime "$LOCK.takeover" 2>/dev/null || date +%s) )) -gt 60 ]; then
           rmdir "$LOCK.takeover" 2>/dev/null
         fi
         if mkdir "$LOCK.takeover" 2>/dev/null; then

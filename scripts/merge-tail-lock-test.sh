@@ -15,7 +15,10 @@
 #
 # Everything runs under a private TMPDIR with a stubbed `gh` on PATH, so the
 # real lock under the machine's $TMPDIR is never touched.
-set -uo pipefail
+#
+# MERGE_TAIL_LOCK=<path> runs it against another copy of the script, such as
+# the one on `main` before #1274, to watch the race cases fail.
+set -uo pipefail # no -e: a failed check is counted, and the run goes on
 here=$(cd "$(dirname "$0")" && pwd)
 
 scratch=$(mktemp -d "${TMPDIR:-/tmp}/knobas-merge-tail-check.XXXXXX")
@@ -48,6 +51,17 @@ iso() { # iso <epoch seconds> -> GitHub's closedAt shape
     date -u -r "$1" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "@$1" +%Y-%m-%dT%H:%M:%SZ
 }
 lock() { bash "$lock_script" "$@"; }
+assert_status() { lock assert "$1" > /dev/null && echo 0 || echo 1; }
+# take_within <seconds> <PR> <out file>: prints take's exit status, or
+# "timeout" when it is still waiting after <seconds> (and is then killed).
+take_within() {
+    local job i
+    bash "$lock_script" take "$2" > "$3" & # the script itself, so `kill` reaches it
+    job=$!
+    for ((i = 0; i < $1 * 2; i++)); do kill -0 "$job" 2>/dev/null || break; sleep 0.5; done
+    if kill -0 "$job" 2>/dev/null; then kill "$job"; wait "$job" 2>/dev/null; echo timeout
+    else wait "$job"; echo $?; fi
+}
 fresh() { rm -rf "$TMPDIR"/knobas-merge-tail.*; } # each case starts unlocked, with no queue
 
 failures=0
@@ -65,7 +79,7 @@ lock take 1270 > "$scratch/h1.out"
     sleep 3
     echo "MERGED $(iso "$(date +%s)")" > "$GH_STUB/1270"
     sleep 5
-    lock assert 1270 > "$scratch/h1.assert" && echo 0 >> "$scratch/h1.assert" || echo 1 >> "$scratch/h1.assert"
+    assert_status 1270 > "$scratch/h1.assert"
     sleep 1
     lock release 1270 > "$scratch/h1.release"
 ) &
@@ -84,10 +98,13 @@ fresh
 echo OPEN > "$GH_STUB/1260"; echo OPEN > "$GH_STUB/1261"; echo OPEN > "$GH_STUB/1262"
 lock take 1260 > /dev/null
 echo "MERGED $(iso $(( $(date +%s) - 700 )))" > "$GH_STUB/1260"
+# 1261 is already in the queue, so 1262 can never be the lowest live waiter,
+# however the two start; both race to take the dead holder over.
+mkdir -p "$TMPDIR/knobas-merge-tail.queue"; touch "$TMPDIR/knobas-merge-tail.queue/1261"
 (
     lock take 1261 > "$scratch/w2a.out"
     sleep 3
-    lock assert 1261 > /dev/null && echo 0 > "$scratch/w2a.assert" || echo 1 > "$scratch/w2a.assert"
+    assert_status 1261 > "$scratch/w2a.assert"
     lock release 1261 > /dev/null
 ) &
 a_job=$!
@@ -110,31 +127,23 @@ echo OPEN > "$GH_STUB/1263"; echo OPEN > "$GH_STUB/1264"
 lock take 1263 > /dev/null
 echo "CLOSED $(iso $(( $(date +%s) - 700 )))" > "$GH_STUB/1263"
 mkdir "$TMPDIR/knobas-merge-tail.lock.takeover"
-touch -t "$(date -r $(( $(date +%s) - 120 )) +%Y%m%d%H%M.%S 2>/dev/null || date -d "@$(( $(date +%s) - 120 ))" +%Y%m%d%H%M.%S)" \
-    "$TMPDIR/knobas-merge-tail.lock.takeover"
-bash "$lock_script" take 1264 > "$scratch/w3.out" &  # the script itself, so `kill $!` reaches it
-stale_job=$!
-for _ in 1 2 3 4 5 6; do kill -0 "$stale_job" 2>/dev/null || break; sleep 0.5; done
-if kill -0 "$stale_job" 2>/dev/null; then kill "$stale_job"; fi
-wait "$stale_job" 2>/dev/null
-check "stale takeover guard: the dead holder is still taken over" has "$scratch/w3.out" "held by PR #1264"
+perl -e 'utime time - 120, time - 120, shift' "$TMPDIR/knobas-merge-tail.lock.takeover"
+stale_status=$(take_within 10 1264 "$scratch/w3.out")
+check "stale takeover guard: the dead holder is still taken over (status $stale_status)" has "$scratch/w3.out" "held by PR #1264"
 lock release 1264 > /dev/null
 
 # --- 3. Re-entrant take and assert ---
 fresh
 echo OPEN > "$GH_STUB/1280"; echo OPEN > "$GH_STUB/1281"
-check "assert: nobody holds the lock, exit 1" eval '! lock assert 1280 > /dev/null'
+check "assert: nobody holds the lock, exit 1" [ "$(assert_status 1280)" = 1 ]
 lock take 1280 > /dev/null
-check "assert: the holder, exit 0" eval 'lock assert 1280 > /dev/null'
-check "assert: anyone else, exit 1" eval '! lock assert 1281 > /dev/null'
-# A `take` that is not re-entrant would wait on itself forever: give it 3 s.
-bash "$lock_script" take 1280 > "$scratch/r.out" &  # the script itself, so `kill $!` reaches it
-reentry_job=$!
-for _ in 1 2 3 4 5 6; do kill -0 "$reentry_job" 2>/dev/null || break; sleep 0.5; done
-if kill -0 "$reentry_job" 2>/dev/null; then kill "$reentry_job"; reentry_status=timeout
-else wait "$reentry_job"; reentry_status=$?; fi
-check "take: re-entrant for the holder, at once (status $reentry_status)" [ "$reentry_status" = 0 ]
-check "take: the re-entry leaves the holder in place" eval 'lock assert 1280 > /dev/null'
+check "assert: the holder, exit 0" [ "$(assert_status 1280)" = 0 ]
+check "assert: anyone else, exit 1" [ "$(assert_status 1281)" = 1 ]
+# A `take` that is not re-entrant waits on itself forever; one that is returns
+# before its first poll. 10 s is far beyond that, even on a loaded machine.
+reentry_status=$(take_within 10 1280 "$scratch/r.out")
+check "take: re-entrant for the holder (status $reentry_status)" [ "$reentry_status" = 0 ]
+check "take: the re-entry leaves the holder in place" [ "$(assert_status 1280)" = 0 ]
 lock release 1280 > /dev/null
 
 if [ "$failures" -ne 0 ]; then echo "merge-tail-lock-test: $failures failed" >&2; exit 1; fi
