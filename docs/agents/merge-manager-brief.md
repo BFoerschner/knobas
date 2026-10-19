@@ -48,13 +48,13 @@ Yours is the ticket's only full gate: `just gate` on the **final merge head** (a
 
 Lock script from your dispatch. Take the lock only once the PR is **ready** and your fixes are pushed.
 
-1. `bash <lock> ready <PR> $(git rev-parse HEAD)`, then `bash <lock> take <PR>` (foreground). **Exit 3**: a partner merged your PR in a batch; confirm the issue closed, delete branch and worktree, `bash <lock> release <PR>`, report the merge SHA it printed.
+1. `bash <lock> ready <PR> $(git rev-parse HEAD)`, then `bash <lock> take <PR>` (foreground; a replacement merge-manager for the PR that holds the lock gets it back at once). **Exit 3**: a partner merged your PR in a batch; confirm the issue closed, delete branch and worktree, `bash <lock> release <PR>`, report the merge SHA it printed.
 2. Holding the lock: rebase onto `origin/main`; `MAIN=$(git rev-parse origin/main)`. Merge only against SHAs you recorded.
 3. `bash <lock> partner <PR>`. Nothing printed: gate your rebased head, merge alone. `<B> <B-sha>` printed:
    1. `git fetch origin "pull/<B>/head"`; if `gh pr view <B> --json headRefOid` ≠ `<B-sha>`, merge alone.
    2. `git switch -c batch-<PR>-<B>` from your rebased head; `git cherry-pick $(git merge-base $MAIN <B-sha>)..<B-sha>`. Any conflict: `--abort`, back to your branch, merge alone.
    3. `just gate $MAIN` once on the batch head, foreground.
-   4. Green: push your rebased head, merge yours `--match-head-commit`, `git fetch`, then `git rebase --onto origin/main <your rebased head>` the batch branch; its `HEAD^{tree}` must equal the gated batch tree. Push `git push --force-with-lease=<B branch>:<B-sha> origin HEAD:<B branch>`, merge B `--match-head-commit`, `bash <lock> merged <B> <merge SHA>`. Trees differ or push refused: stop, B's merge-manager carries on alone.
+   4. Green: push your rebased head, merge yours `--match-head-commit` (as in *Merge and cleanup* step 3), `git fetch`, then `git rebase --onto origin/main <your rebased head>` the batch branch; its `HEAD^{tree}` must equal the gated batch tree. Push `git push --force-with-lease=<B branch>:<B-sha> origin HEAD:<B branch>`, merge B `--match-head-commit` behind `bash <lock> assert <PR> &&` too, `bash <lock> merged <B> <merge SHA>`. Trees differ or push refused: stop, B's merge-manager carries on alone.
    5. Red: gate your own head alone, merge if green, say which PR failed if you can tell. B's cleanup stays with B's merge-manager.
 4. `merged` is only for a partner; for your own PR only `release`.
 5. `bash <lock> release <PR>` right after the last `gh pr merge` succeeds, or when you give up. Cleanup needs no lock.
@@ -63,11 +63,11 @@ Lock script from your dispatch. Take the lock only once the PR is **ready** and 
 
 1. Push fixes; `gh pr view <n> --json closingIssuesReferences` must list the issue (`Closes #N` outside backticks; `gh pr edit` if not).
 2. After a force-push: `until [ "$(gh pr view <n> --json mergeable --jq .mergeable)" = MERGEABLE ]; do sleep 5; done`, give up after 2 min.
-3. `gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, short imperative subject. `fatal: 'main' is already used by worktree` on exit 1 means it merged; confirm `gh pr view <n> --json state,mergedAt`.
+3. `bash <lock> assert <PR> && gh pr merge <n> --squash --delete-branch --match-head-commit <sha>`, short imperative subject, in one Bash call. `assert` exits 1 when your PR no longer holds the lock: someone took it over, so **stop and report, never merge**. `fatal: 'main' is already used by worktree` on exit 1 means it merged; confirm `gh pr view <n> --json state,mergedAt`.
 4. Release the lock.
 5. `git ls-remote --heads origin <branch>`; if present, `git push origin --delete <branch>`.
 6. `gh issue view <N> --json state`; if open, close with a comment naming PR and commit.
-7. `git -C /Users/dev/Projects/knobas worktree remove .worktrees/<name>` (the one git command allowed outside your worktree, post-merge only; `target` goes with it). Dirty: **report, never force**.
+7. `git -C /Users/dev/Projects/knobas worktree remove .worktrees/<name>` (the one git command allowed outside your worktree, post-merge only; `target` goes with it). Dirty: **report, never force**. Already gone (`gh pr merge --delete-branch` can remove it) is fine.
 
 Scratch files in the scratchpad from your dispatch, PR number in every filename.
 

@@ -522,13 +522,18 @@ shell:
 # holder -- against a stub `docker` and a scratch lock path; and the Gitea
 # lock's (issue #724), the same mechanism, which Gitea sessions queue on.
 # And the `knobas-test-` guard (issue #803): the prefix the knobas-db test
-# reaper deletes may not name a temp dir in `scripts/` or `testenv/`.
+# reaper deletes may not name a temp dir in `scripts/` or `testenv/`. And the
+# merge-tail lock's (issue #1274): a holder whose PR just merged keeps the lock
+# until it releases, a holder dead past the grace period is taken over by one
+# waiter, `take` is re-entrant and `assert` names the holder -- against a stub
+# `gh` and a private TMPDIR, about 15 s.
 witness-unit:
     testenv/desktop-witness-test.sh
     scripts/test-layout-test.sh
     scripts/append-only-merge-test.sh
     scripts/test-prefix-guard-test.sh
     scripts/test-prefix-guard.sh
+    scripts/merge-tail-lock-test.sh
     testenv/live-test.sh
     testenv/gitea-token-test.sh
     testenv/seed-env-test.sh
