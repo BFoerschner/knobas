@@ -421,7 +421,6 @@ fn client() -> Result<&'static reqwest::Client, HttpError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use http_body_util::BodyExt as _;
 
     /// A body whose frames arrive when the test sends them.
     struct Gated(tokio::sync::mpsc::Receiver<Bytes>);
