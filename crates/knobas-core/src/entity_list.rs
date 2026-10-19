@@ -642,7 +642,7 @@ drawn as (
 ///
 /// Whether a kind declares a state is read from `$8`; the parents from the
 /// stored copy of the declarations. Both are the app binary's
-/// `Registry::builtin()`, which bring-up writes to the database before its
+/// `Registry::for_process()`, which bring-up writes to the database before its
 /// first sync (`knobas-app`'s `commands::search::searcher`), so they agree. If that write
 /// failed (bring-up logs it and goes on), no row has a key and every build
 /// draws alone: the tile shows too many rows, never too few.

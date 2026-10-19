@@ -1,7 +1,7 @@
 //! Link-set patterns (#868, R-7.2, R-7.7) and the member rows the editor
 //! draws (#1008), through the link-set commands and the job's read, over the
 //! embedded PostgreSQL with the declarations the compiled-in adapters make
-//! (`Registry::builtin`) for a Jira, a TeamCity, a Confluence, an Uptime Kuma
+//! (`Registry::for_process`) for a Jira, a TeamCity, a Confluence, an Uptime Kuma
 //! and a Gitea source.
 //!
 //! This file's database is its own (#572); each test makes keys and project

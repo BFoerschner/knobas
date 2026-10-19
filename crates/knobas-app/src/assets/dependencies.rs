@@ -295,7 +295,7 @@ fn chip(row: &sqlx::postgres::PgRow) -> Result<Option<knobas_core::payload::Stat
 ///
 /// [`IpcError`] if a read fails.
 pub async fn read(pool: &PgPool) -> Result<Dependencies, IpcError> {
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     // The stored declarations `sync.item_parent` is kept from are this
     // binary's: the same call every search makes before it reads (#627).
     knobas_search::Searcher::declaring(pool.clone(), registry.templates()).await?;

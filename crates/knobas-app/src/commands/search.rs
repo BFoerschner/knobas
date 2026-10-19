@@ -329,7 +329,7 @@ pub async fn filter_suggestions(
 /// their payloads -- the parent `under:` scopes by among it (#595) -- and the
 /// one place the app hands those declarations to the database too (#627).
 ///
-/// **`Registry::builtin()`**, for the reason `commands::entity`'s
+/// **`Registry::for_process()`**, for the reason `commands::entity`'s
 /// `declared_paths` gives: a declaration is a property of the adapter kind,
 /// compiled into this binary, so the search has nothing to wait for and no
 /// reason to answer `not_ready` until the scheduler is up.
@@ -353,7 +353,7 @@ pub async fn searcher(pool: &PgPool) -> Result<knobas_search::Searcher, IpcError
     let notes_shown = crate::capture::shown(pool).await?;
     Ok(knobas_search::Searcher::declaring(
         pool.clone(),
-        crate::sources::Registry::builtin().templates(),
+        crate::sources::Registry::for_process().templates(),
     )
     .await?
     .with_notes_shown(notes_shown))

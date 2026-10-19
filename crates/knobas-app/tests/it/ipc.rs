@@ -388,15 +388,65 @@ fn every_sources_command_is_registered_and_reachable() {
 
     // `list_adapters` is the exception, deliberately: it touches neither the
     // database nor the keychain, so it answers on a cold start -- which is what
-    // lets the Add-source form be drawn before bring-up finishes.
-    let adapters = invoke("list_adapters", serde_json::json!({}))
-        .expect("list_adapters must answer without any managed state")
-        .deserialize::<serde_json::Value>()
-        .expect("a descriptor list came back");
+    // lets the Add-source form be drawn before bring-up finishes. It reads the
+    // lifecycle's registry, and the lifecycle is managed at the start of `setup`.
+    let adapters = invoke_managing("list_adapters", serde_json::json!({}), |app| {
+        app.manage(knobas_app::Lifecycle::new());
+    })
+    .expect("list_adapters must answer before bring-up")
+    .deserialize::<serde_json::Value>()
+    .expect("a descriptor list came back");
     assert!(
         adapters.as_array().is_some_and(|a| !a.is_empty()),
         "list_adapters returned nothing: {adapters}"
     );
+}
+
+/// A registry of one adapter kind the app does not compile in.
+struct ProbeRegistry;
+
+impl knobas_sync::scheduler::AdapterRegistry for ProbeRegistry {
+    fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
+        vec![knobas_source::SourceDescriptor {
+            id: "probe_kind".to_owned(),
+            adapter_kind: "probe_kind".to_owned(),
+            name: "Probe".to_owned(),
+            capabilities: Vec::new(),
+            adapter_version: "0".to_owned(),
+            auth_methods: Vec::new(),
+            accepts_account: false,
+            min_sync_interval_secs: 60,
+            roles: Vec::new(),
+            source_actions: Vec::new(),
+            clone_from: Vec::new(),
+            write_ops: Vec::new(),
+            entity_kinds: Vec::new(),
+            config_schema: serde_json::json!({}),
+            payload_paths: Vec::new(),
+        }]
+    }
+    fn build(
+        &self,
+        _: knobas_source::instance::SourceInstance,
+    ) -> Result<Box<dyn knobas_source::Source>, knobas_source::SourceError> {
+        unreachable!("list_adapters builds nothing")
+    }
+}
+
+/// The Add-source dialog's adapter list is the lifecycle's registry (#1321):
+/// a lifecycle given a registry of the test's own serves that registry's
+/// templates and none of the compiled-in table, before any bring-up.
+#[test]
+fn list_adapters_serves_the_lifecycles_registry() {
+    let lifecycle = knobas_app::Lifecycle::with_registry(std::sync::Arc::new(ProbeRegistry));
+    let adapters = invoke_managing("list_adapters", serde_json::json!({}), move |app| {
+        app.manage(lifecycle);
+    })
+    .expect("list_adapters must answer before bring-up")
+    .deserialize::<Vec<knobas_source::SourceDescriptor>>()
+    .expect("a descriptor list came back");
+    let kinds: Vec<&str> = adapters.iter().map(|a| a.adapter_kind.as_str()).collect();
+    assert_eq!(kinds, ["probe_kind"]);
 }
 
 // ---------------------------------------------------------------------------
@@ -451,7 +501,7 @@ fn sources_state(
                     .expect("a scheduler over the test pool"),
                 pool,
                 secrets: Arc::new(knobas_secrets::MemoryStore::new()),
-                registry: Arc::new(knobas_app::sources::Registry::builtin()),
+                registry: Arc::new(knobas_app::sources::Registry::for_process()),
             }
         })
     })

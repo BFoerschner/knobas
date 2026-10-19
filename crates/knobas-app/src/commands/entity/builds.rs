@@ -22,7 +22,7 @@ pub async fn pipelines_inner(pool: &PgPool) -> Result<Vec<PipelineRow>, IpcError
     let identity = identity_of(pool).await?;
     let fillers = crate::sources::crud::fillers(
         pool,
-        &crate::sources::Registry::builtin(),
+        &crate::sources::Registry::for_process(),
         knobas_source::role::CI,
     )
     .await?;

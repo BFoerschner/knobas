@@ -1045,7 +1045,7 @@ async fn app_with(
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
         connections: Arc::new(Connections(connector)),
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
         events: events.clone(),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
@@ -1058,7 +1058,7 @@ async fn app_with(
             pool,
             scheduler,
             secrets,
-            registry: Arc::new(Registry::builtin()),
+            registry: Arc::new(Registry::for_process()),
         },
         events,
     )
@@ -1817,7 +1817,7 @@ async fn the_reachable_transitions_read_answers_the_seeded_workflow_from_every_s
          would be testing nothing",
         env.statuses
     );
-    let source: Box<dyn Source> = Registry::builtin()
+    let source: Box<dyn Source> = Registry::for_process()
         .build(SourceInstance {
             id: JIRA.to_owned(),
             kind: "jira".to_owned(),
@@ -2070,7 +2070,7 @@ async fn the_reachable_transitions_read_answers_a_proper_subset_where_the_workfl
     // At the adapter, for the reason the PAY refusal above is: a refusal is the
     // one write that reaches no `POST`, and the queue's half of the story is
     // already `the_three_write_ops_go_through_the_queue_and_come_back_from_jira`.
-    let source: Box<dyn Source> = Registry::builtin()
+    let source: Box<dyn Source> = Registry::for_process()
         .build(SourceInstance {
             id: JIRA.to_owned(),
             kind: "jira".to_owned(),
@@ -3418,7 +3418,7 @@ async fn wiki_app(
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
         connections: Arc::new(Connections(connector)),
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
         events: events.clone(),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
@@ -3431,7 +3431,7 @@ async fn wiki_app(
             pool,
             scheduler,
             secrets,
-            registry: Arc::new(Registry::builtin()),
+            registry: Arc::new(Registry::for_process()),
         },
         events,
     )

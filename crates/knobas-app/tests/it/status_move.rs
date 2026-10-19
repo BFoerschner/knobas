@@ -157,7 +157,7 @@ async fn app(jira_url: &str) -> SourcesState {
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
         connections: Arc::new(Connections(connector)),
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
@@ -169,7 +169,7 @@ async fn app(jira_url: &str) -> SourcesState {
         pool,
         scheduler,
         secrets,
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
     }
 }
 

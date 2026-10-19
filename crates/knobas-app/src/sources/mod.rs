@@ -437,7 +437,7 @@ pub async fn start<R: tauri::Runtime>(
             sync_pool,
             connections: db.connector(),
             secrets: secret_store(&profile),
-            registry: Registry::builtin(),
+            registry: Registry::for_process(),
             store: install::store_dir(&profile.dir),
         },
     )
@@ -449,7 +449,8 @@ pub async fn start<R: tauri::Runtime>(
     let pool = state.pool.clone();
     tauri::async_runtime::spawn(async move {
         let endpoints = remote::Endpoints::default();
-        if let Err(error) = installed::check_updates(&pool, &Registry::builtin(), &endpoints).await
+        if let Err(error) =
+            installed::check_updates(&pool, &Registry::for_process(), &endpoints).await
         {
             tracing::warn!(%error, "the external adapters' update check did not run");
         }
@@ -480,7 +481,7 @@ pub struct BringUp {
     pub connections: knobas_db::embedded::Connector,
     pub secrets: Arc<dyn SecretStore>,
     /// The registry the installed adapters load into: the process's
-    /// ([`Registry::builtin`]) in the app.
+    /// ([`Registry::for_process`]) in the app.
     pub registry: Registry,
     /// The installed adapters' artifact store ([`install::store_dir`]).
     pub store: std::path::PathBuf,
@@ -551,7 +552,8 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     connections: knobas_db::embedded::Connector,
     pool: PgPool,
 ) -> Result<Scheduler, sqlx::Error> {
-    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::builtin());
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
+        Arc::new(Registry::for_process());
     Scheduler::start(SchedulerDeps {
         connections: Arc::new(DbConnections(connections)),
         pool: pool.clone(),

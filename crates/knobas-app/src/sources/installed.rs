@@ -45,7 +45,7 @@ impl Installs {
     #[must_use]
     pub fn for_profile(profile_dir: &Path) -> Self {
         Self {
-            registry: Registry::builtin(),
+            registry: Registry::for_process(),
             store: install::store_dir(profile_dir),
             endpoints: Endpoints::default(),
         }

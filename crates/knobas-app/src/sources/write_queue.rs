@@ -811,7 +811,7 @@ mod tests {
     }
 
     fn registry() -> crate::sources::Registry {
-        crate::sources::Registry::builtin()
+        crate::sources::Registry::for_process()
     }
 
     /// The store `submittable` reads an instance's own write ops through

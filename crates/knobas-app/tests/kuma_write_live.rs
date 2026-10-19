@@ -213,7 +213,7 @@ async fn app(env: &Env) -> SourcesState {
     let scheduler = Scheduler::start(SchedulerDeps {
         pool: pool.clone(),
         connections: Arc::new(Connections(connector)),
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
         secrets: secrets.clone(),
         events: Arc::new(Quiet),
         timing: knobas_sync::scheduler::SchedulerTiming::default(),
@@ -225,7 +225,7 @@ async fn app(env: &Env) -> SourcesState {
         pool,
         scheduler,
         secrets,
-        registry: Arc::new(Registry::builtin()),
+        registry: Arc::new(Registry::for_process()),
     }
 }
 

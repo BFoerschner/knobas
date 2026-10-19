@@ -543,7 +543,7 @@ const FIXTURES: &str = include_str!("../../../../app/src/lib/sources/fixtures.ts
 
 /// Each fixture const and the adapter kind it transcribes.
 ///
-/// The adapter side is looked up in `Registry::builtin()` rather than named
+/// The adapter side is looked up in `Registry::for_process()` rather than named
 /// here, so this table carries only the one fact it has to: which fixture is
 /// about which kind. A kind that is not compiled in fails the lookup.
 const MIRRORED: &[(&str, &str)] = &[
@@ -556,7 +556,7 @@ const MIRRORED: &[(&str, &str)] = &[
 fn adapter_schema(kind: &str) -> serde_json::Value {
     use knobas_app::sources::Registry;
     use knobas_sync::scheduler::AdapterRegistry;
-    Registry::builtin()
+    Registry::for_process()
         .descriptors()
         .into_iter()
         .find(|d| d.adapter_kind == kind)

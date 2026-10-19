@@ -44,16 +44,33 @@ use crate::{SyncError, run_backfill, run_from_stored_cursor};
 
 pub use crate::run_log::SourceSyncStatus;
 
-/// Turns a stored configuration into a live adapter.
+/// Turns a stored configuration into a live adapter, and answers what each
+/// adapter kind declares.
 ///
-/// Implemented in `knobas-app` over the compiled-in adapter table (P6: every
-/// adapter crate exposes `descriptor_template()` and `build(SourceInstance)`).
+/// Implemented in `knobas-app` over the compiled-in adapter table and the
+/// installed external adapters (P6: every adapter crate exposes
+/// `descriptor_template()` and `build(SourceInstance)`). Everything a read
+/// takes from the registry is here, so a read can take `&dyn AdapterRegistry`
+/// and a test can hand it a registry of its own (#1321).
 pub trait AdapterRegistry: Send + Sync + 'static {
-    /// One descriptor **template** per compiled-in adapter kind, with
-    /// `id == adapter_kind`: what the Add-source form is generated from, and
-    /// what the launcher reads kind metadata out of, without instantiating an
-    /// adapter or touching the keychain.
+    /// One descriptor **template** per adapter kind the registry holds, with
+    /// `id == adapter_kind`: the kinds, declared paths, roles and write ops
+    /// of each. What the Add-source form is generated from, and what the
+    /// reads take kind metadata from, without instantiating an adapter or
+    /// touching the keychain.
     fn descriptors(&self) -> Vec<SourceDescriptor>;
+
+    /// The Docs projection of an adapter kind (#859), `None` for a kind that
+    /// draws no pages or that the registry does not hold.
+    fn doc_projection(&self, _kind: &str) -> Option<knobas_source::docs::DocProjection> {
+        None
+    }
+
+    /// The Docs writes of an adapter kind (#862), `None` for a kind knobas
+    /// writes no pages for or that the registry does not hold.
+    fn doc_writes(&self, _kind: &str) -> Option<knobas_source::docs::DocWrites> {
+        None
+    }
 
     /// # Errors
     /// [`SourceError::Protocol`] if no adapter answers to the instance's

@@ -24,7 +24,7 @@ struct DrawingRegistry(Asked);
 
 impl AdapterRegistry for DrawingRegistry {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        Registry::builtin().descriptors()
+        Registry::for_process().descriptors()
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         Ok(Box::new(Drawing {
@@ -57,7 +57,7 @@ fn row(entity_id: Option<String>, title: &str) -> ViewRow {
 #[async_trait::async_trait]
 impl Source for Drawing {
     fn descriptor(&self) -> SourceDescriptor {
-        let mut d = Registry::builtin()
+        let mut d = Registry::for_process()
             .descriptors()
             .into_iter()
             .find(|d| d.adapter_kind == "mock")

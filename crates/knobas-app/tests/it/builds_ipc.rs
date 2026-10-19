@@ -1,7 +1,7 @@
 //! The Builds view (#848) through the two commands it calls: `pipelines`
 //! for the list on the left and `pipeline_runs` for the selected pipeline's
 //! runs, over the embedded PostgreSQL with the declarations the compiled-in
-//! TeamCity adapter makes (`Registry::builtin`), never a copy of them.
+//! TeamCity adapter makes (`Registry::for_process`), never a copy of them.
 //!
 //! Each test configures a TeamCity source of its own, so the rows it reads
 //! back are told apart by `source_id` from anything else in this database.
@@ -433,7 +433,7 @@ struct Answering;
 
 impl knobas_sync::scheduler::AdapterRegistry for Answering {
     fn descriptors(&self) -> Vec<knobas_source::SourceDescriptor> {
-        knobas_app::sources::Registry::builtin().descriptors()
+        knobas_app::sources::Registry::for_process().descriptors()
     }
     fn build(
         &self,
@@ -451,7 +451,7 @@ struct Answers {
 impl knobas_source::Source for Answers {
     fn descriptor(&self) -> knobas_source::SourceDescriptor {
         use knobas_sync::scheduler::AdapterRegistry as _;
-        let mut d = knobas_app::sources::Registry::builtin()
+        let mut d = knobas_app::sources::Registry::for_process()
             .descriptors()
             .into_iter()
             .find(|d| d.adapter_kind == "teamcity")

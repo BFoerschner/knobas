@@ -1,7 +1,7 @@
 //! Signals on tickets (#815) through the commands that read them: the cards
 //! `mini_board` draws, and `has:` through the same command's `query` and
 //! through `search`. Each signal is seeded on its own ticket, over the
-//! declarations the compiled-in adapters make (`Registry::builtin`), and the
+//! declarations the compiled-in adapters make (`Registry::for_process`), and the
 //! read and `has:` are held to one answer.
 //!
 //! This file's database is its own (#572); each test uses a project key

@@ -239,7 +239,7 @@ fn configured(id: &str, base_url: &str, config: Value) -> Box<dyn Source> {
         account: None,
         config,
     };
-    match Registry::builtin().build(instance) {
+    match Registry::for_process().build(instance) {
         Ok(source) => source,
         // `Box<dyn Source>` is not `Debug`, so `expect` is unavailable.
         Err(e) => panic!("the registry must build a jira instance: {e:?}"),
@@ -260,7 +260,7 @@ fn teamcity_adapter(id: &str, base_url: &str) -> Box<dyn Source> {
         account: None,
         config: serde_json::json!({}),
     };
-    match Registry::builtin().build(instance) {
+    match Registry::for_process().build(instance) {
         Ok(source) => source,
         Err(e) => panic!("the registry must build a teamcity instance: {e:?}"),
     }
@@ -709,7 +709,7 @@ async fn a_kuma_poll_leaves_one_sample_per_monitor_and_derives_warn_from_the_thr
         account: None,
         config: serde_json::json!({}),
     };
-    let real = Registry::builtin()
+    let real = Registry::for_process()
         .build(instance)
         .expect("the registry must build a kuma instance");
 
@@ -848,7 +848,7 @@ async fn a_kuma_monitor_reaches_the_mirror_and_the_launcher_finds_it_by_name() {
         account: None,
         config: serde_json::json!({}),
     };
-    let real = match Registry::builtin().build(instance) {
+    let real = match Registry::for_process().build(instance) {
         Ok(source) => source,
         Err(e) => panic!("the registry must build a kuma instance: {e:?}"),
     };
@@ -975,7 +975,7 @@ async fn after_kuma_syncs_the_estate_files_monitor_names_become_links() {
     let id = unique_id();
     configure(&pool, &id, "kuma", &kuma.uri()).await;
 
-    let real = Registry::builtin()
+    let real = Registry::for_process()
         .build(SourceInstance {
             id: id.clone(),
             kind: knobas_source_kuma::ADAPTER_KIND.to_owned(),

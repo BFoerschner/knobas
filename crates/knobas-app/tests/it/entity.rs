@@ -754,7 +754,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     // the census reaches it through the command seam, which resolves its own.
     let declarations = knobas_app::sources::paths::declared_paths(
         &pool,
-        &knobas_app::sources::Registry::builtin(),
+        &knobas_app::sources::Registry::for_process(),
     )
     .await
     .expect("what the configured sources declare");
@@ -1307,7 +1307,7 @@ async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
     let expected = Some("tidewater/payout-service".to_owned());
     let declarations = knobas_app::sources::paths::declared_paths(
         &pool,
-        &knobas_app::sources::Registry::builtin(),
+        &knobas_app::sources::Registry::for_process(),
     )
     .await
     .unwrap();
@@ -1408,7 +1408,7 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
 
     let declarations = knobas_app::sources::paths::declared_paths(
         &pool,
-        &knobas_app::sources::Registry::builtin(),
+        &knobas_app::sources::Registry::for_process(),
     )
     .await
     .unwrap();
@@ -1497,7 +1497,7 @@ async fn dated(pool: &PgPool, entity: &str, minutes: i32) {
 /// The registry's declarations for whatever is configured, as the command
 /// reads them.
 async fn builtin_declarations(pool: &PgPool) -> knobas_core::payload::Declarations {
-    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::builtin())
+    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
         .await
         .unwrap()
 }
@@ -4138,7 +4138,7 @@ async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
 
     let declarations = knobas_app::sources::paths::declared_paths(
         &pool,
-        &knobas_app::sources::Registry::builtin(),
+        &knobas_app::sources::Registry::for_process(),
     )
     .await
     .expect("what the configured sources declare");

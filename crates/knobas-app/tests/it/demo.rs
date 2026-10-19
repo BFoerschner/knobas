@@ -139,7 +139,7 @@ async fn an_unconfigured_source_cannot_be_reached() {
     knobas_db::migrate::run(&pool).await.unwrap();
     let secrets: Arc<dyn knobas_secrets::SecretStore> =
         Arc::new(knobas_secrets::MemoryStore::new());
-    let registry = knobas_app::sources::Registry::builtin();
+    let registry = knobas_app::sources::Registry::for_process();
 
     let missing = format!("nope-{}", &uuid::Uuid::new_v4().simple().to_string()[..12]);
     let error = knobas_app::sources::crud::set_secret(

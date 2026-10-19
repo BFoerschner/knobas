@@ -1,6 +1,6 @@
 //! Link sets (#866, ADR-0025, R-7.1, R-7.4, R-7.5, R-7.11) through the six
 //! commands and the job's read, over the embedded PostgreSQL with the
-//! declarations the compiled-in Jira adapter makes (`Registry::builtin`),
+//! declarations the compiled-in Jira adapter makes (`Registry::for_process`),
 //! written to `sync.parent_declaration` as the app writes them.
 //!
 //! This file's database is its own (#572); each test makes keys nothing else

@@ -39,7 +39,7 @@ pub async fn docs_tree_inner(pool: &PgPool) -> Result<crate::docs::DocsTree, Ipc
         .await
         .map_err(IpcError::internal)?
         .identity;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::tree(
         pool,
@@ -83,7 +83,7 @@ pub async fn docs_page_inner(
         .await
         .map_err(IpcError::internal)?
         .identity;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     let templates = registry.templates();
     crate::docs::page(
         pool,
@@ -126,7 +126,7 @@ pub async fn docs_search_inner(
     space: Option<&crate::docs::DocsScope>,
 ) -> Result<Option<crate::docs::DocsHits>, IpcError> {
     let searcher = crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     // The wiki's search, so it narrows itself to the role's fillers (#1296).
     let fillers = crate::sources::crud::fillers(pool, &registry, knobas_source::role::WIKI).await?;
     crate::docs::search(
@@ -171,7 +171,7 @@ pub async fn docs_export_markdown_inner(
 ) -> Result<crate::docs::DocExport, IpcError> {
     crate::commands::search::searcher(pool).await?;
     let declarations = declared_paths(pool).await?;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     crate::docs::export(
         pool,
         &declarations,
@@ -217,7 +217,7 @@ pub async fn docs_edit_section_payload(
     version: Option<u64>,
     text: &str,
 ) -> Result<serde_json::Value, IpcError> {
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     crate::docs::section_edit(
         pool,
         |kind| registry.doc_writes(kind),
@@ -294,7 +294,7 @@ pub async fn docs_create_page_payload(
     // The space comes from the census table, kept from the stored
     // declarations every search command writes first (#759).
     crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     crate::docs::create_page(pool, |kind| registry.doc_writes(kind), page).await
 }
 
@@ -343,7 +343,7 @@ pub async fn move_notes_payloads(
         return Err(IpcError::invalid("There are no notes to move."));
     }
     crate::commands::search::searcher(pool).await?;
-    let registry = crate::sources::Registry::builtin();
+    let registry = crate::sources::Registry::for_process();
     let mut payloads = Vec::with_capacity(notes.len());
     for page in crate::notes_export::note_pages(&notes, parent) {
         payloads

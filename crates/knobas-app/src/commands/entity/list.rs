@@ -28,7 +28,7 @@ pub async fn list_entities_inner(
 ) -> Result<EntityPage, IpcError> {
     list_entities_with_registry(
         pool,
-        &crate::sources::Registry::builtin(),
+        &crate::sources::Registry::for_process(),
         filter,
         limit,
         offset,
@@ -79,10 +79,9 @@ pub async fn list_entities(
 
 /// Every configured source's declared payload paths (#277).
 ///
-/// **`Registry::builtin()` rather than `SourcesState`'s trait object**, for the
-/// reason `Registry::templates` exists as an inherent method at all: a
-/// declaration is a property of the adapter *kind*, held in a `const` table
-/// compiled into this binary, so a read that wants one has nothing to wait for.
+/// **`Registry::for_process()` rather than `SourcesState`'s trait object**: a
+/// declaration is a property of the adapter *kind*, held by the process's
+/// registry, so a read that wants one has nothing to wait for.
 /// Reaching through `SourcesState` would make a room's list, the mini board and
 /// the project census answer `not_ready` until the scheduler is up, which is
 /// later than the pool -- a widening of `not_ready` bought for nothing. The
@@ -95,5 +94,5 @@ pub async fn list_entities(
 pub(super) async fn declared_paths(
     pool: &PgPool,
 ) -> Result<knobas_core::payload::Declarations, IpcError> {
-    crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await
+    crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await
 }

@@ -68,15 +68,20 @@ pub async fn demo_load<R: tauri::Runtime>(
 
 // -- §2.2: sources, secrets, credential health --------------------------------
 
-/// One descriptor template per compiled-in adapter kind (`id == adapter_kind`).
+/// One descriptor template per adapter kind the lifecycle's registry holds
+/// (`id == adapter_kind`): the compiled-in table and the installed external
+/// adapters.
 ///
 /// Touches neither the database nor the keychain: the Add-source form is
 /// generated from `config_schema` + `auth_methods`, and the launcher reads kind
 /// metadata, without instantiating anything. It therefore answers before
 /// bring-up, which is the point -- the form must be drawable on a cold start.
+/// The registry comes from [`Lifecycle`](crate::Lifecycle), managed at the
+/// start of `setup` before anything can call in, so taking it as state
+/// widens nothing.
 #[tauri::command]
-pub fn list_adapters() -> Vec<knobas_source::SourceDescriptor> {
-    crate::sources::Registry::builtin().templates()
+pub fn list_adapters(lifecycle: State<'_, Lifecycle>) -> Vec<knobas_source::SourceDescriptor> {
+    lifecycle.registry().descriptors()
 }
 
 /// Install an external adapter from a local `knobas-adapter.json` (#1202,

@@ -1,6 +1,6 @@
 //! The ticket keys (#811) through the commands the launcher calls:
 //! `search` and `filter_suggestions`, over the embedded PostgreSQL, with
-//! the declarations the compiled-in Jira adapter makes (`Registry::builtin`),
+//! the declarations the compiled-in Jira adapter makes (`Registry::for_process`),
 //! never a copy of them.
 //!
 //! This file's database is its own (#572); each test uses a project key

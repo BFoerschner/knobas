@@ -2149,13 +2149,13 @@ mod tests {
     /// The narrowing runs on every selection in the Tree, so being wrong in
     /// one direction costs a keychain read per configured source per click and
     /// in the other costs a control that never appears. Asserted against
-    /// `Registry::builtin` rather than against a fixture, because the claim is
+    /// `Registry::for_process` rather than against a fixture, because the claim is
     /// about what the compiled-in adapters declare -- and it is the rule that
     /// makes this a statement about the SPI rather than a table of kinds.
     #[test]
     fn only_a_kind_whose_ops_could_include_it_is_worth_a_keychain_read() {
         use knobas_sync::scheduler::AdapterRegistry as _;
-        let templates = crate::sources::Registry::builtin().descriptors();
+        let templates = crate::sources::Registry::for_process().descriptors();
         assert!(
             templates.len() >= 5,
             "the builtin registry lost its adapters: {}",

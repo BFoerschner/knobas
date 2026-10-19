@@ -273,7 +273,7 @@ struct Reg {
 }
 impl AdapterRegistry for Reg {
     fn descriptors(&self) -> Vec<SourceDescriptor> {
-        knobas_app::sources::Registry::builtin().templates()
+        knobas_app::sources::Registry::for_process().templates()
     }
     fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         Ok(Box::new(Slow {
@@ -495,7 +495,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                         "list_sources",
                         knobas_app::sources::crud::list(
                             &ui2,
-                            &knobas_app::sources::Registry::builtin(),
+                            &knobas_app::sources::Registry::for_process(),
                         ),
                     )
                     .await;

@@ -393,7 +393,8 @@ pub async fn thread(pool: &PgPool, entity_id: &str) -> Result<Thread, IpcError> 
         }
     }
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::builtin()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
+            .await?;
     for row in sqlx::query(PULLS)
         .bind(&id)
         .bind(declarations.as_param())

@@ -38,7 +38,7 @@ fn instance(instance_id: &str, kind: &str, auth: AuthMethod) -> SourceInstance {
 /// nothing instantiated and no keychain touched (interfaces §2.2).
 #[test]
 fn every_template_names_its_own_kind_and_declares_a_config_schema() {
-    let templates = Registry::builtin().descriptors();
+    let templates = Registry::for_process().descriptors();
     assert!(!templates.is_empty());
     for t in &templates {
         assert_eq!(t.id, t.adapter_kind, "a template's id is its kind");
@@ -114,7 +114,7 @@ fn linked_adapter_crates() -> Vec<&'static str> {
 /// rejects two rows claiming one kind.
 #[test]
 fn every_adapter_crate_linked_into_the_app_has_a_row() {
-    let kinds: Vec<String> = Registry::builtin()
+    let kinds: Vec<String> = Registry::for_process()
         .descriptors()
         .into_iter()
         .map(|t| t.adapter_kind)
@@ -223,7 +223,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
     .into_iter()
     .collect();
 
-    let actual: std::collections::BTreeMap<String, Vec<String>> = Registry::builtin()
+    let actual: std::collections::BTreeMap<String, Vec<String>> = Registry::for_process()
         .descriptors()
         .into_iter()
         .map(|t| (t.adapter_kind, t.write_ops))
@@ -243,7 +243,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
     // UI renders and every adapter refuses, and a source that lists ops while
     // reading as read-only would render actions the shell believes it cannot
     // perform.
-    for t in Registry::builtin().descriptors() {
+    for t in Registry::for_process().descriptors() {
         assert_eq!(
             t.write_ops.is_empty(),
             !t.capabilities.contains(&knobas_source::Capability::Write),
@@ -255,7 +255,7 @@ fn the_registry_declares_exactly_the_ratified_write_set() {
 
 #[test]
 fn building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_id() {
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
     for template in registry.descriptors() {
         let built = registry
             .build(instance(
@@ -277,7 +277,7 @@ fn building_an_instance_of_a_known_kind_yields_an_adapter_under_that_instances_i
 fn an_unknown_kind_is_refused_by_name() {
     // `Box<dyn Source>` is not `Debug`, so the success arm is matched rather
     // than unwrapped.
-    match Registry::builtin().build(instance("whatever", "nope", AuthMethod::Pat)) {
+    match Registry::for_process().build(instance("whatever", "nope", AuthMethod::Pat)) {
         Err(knobas_source::SourceError::Protocol { message, .. }) => {
             assert!(message.contains("nope"), "{message}");
         }
@@ -291,7 +291,7 @@ fn an_unknown_kind_is_refused_by_name() {
 /// would build the first and fail on the second.
 #[test]
 fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
     let built = registry
         .build(instance("jira-eu", "jira", AuthMethod::Pat))
         .expect("a second instance of a known kind builds");
@@ -325,7 +325,7 @@ fn the_registry_routes_on_the_kind_and_not_on_the_instance_id() {
 #[test]
 fn every_username_field_is_fillable_and_says_so() {
     let mut checked = 0_usize;
-    for t in Registry::builtin().descriptors() {
+    for t in Registry::for_process().descriptors() {
         let Some(property) = t.config_schema["properties"].get("username") else {
             continue;
         };
@@ -386,7 +386,7 @@ fn the_tick_is_far_shorter_than_the_smallest_floor_any_adapter_declares() {
         .tick
         .as_secs();
     let fits = |floor: u32| tick * 4 <= u64::from(floor);
-    let templates = Registry::builtin().templates();
+    let templates = Registry::for_process().templates();
     let smallest = templates
         .iter()
         .min_by_key(|t| t.min_sync_interval_secs)
@@ -408,7 +408,7 @@ fn the_tick_is_far_shorter_than_the_smallest_floor_any_adapter_declares() {
 /// read a claim names is one the app can make.
 #[test]
 fn an_adapter_claims_the_doc_content_read_exactly_when_it_has_a_docs_projection() {
-    let registry = Registry::builtin();
+    let registry = Registry::for_process();
     for t in registry.descriptors() {
         let claims = t
             .roles
@@ -427,7 +427,7 @@ fn an_adapter_claims_the_doc_content_read_exactly_when_it_has_a_docs_projection(
 /// built-in roles are each claimed by one of them.
 #[test]
 fn every_built_in_role_is_claimed_and_filled_by_a_compiled_in_adapter() {
-    let templates = Registry::builtin().descriptors();
+    let templates = Registry::for_process().descriptors();
     for t in &templates {
         assert_eq!(knobas_source::role::check(t), Ok(()), "{}", t.adapter_kind);
     }
