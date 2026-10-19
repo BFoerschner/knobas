@@ -309,7 +309,8 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         register_guarded(name);
         // A system proxy resolves the name itself, and the resolver below
         // never sees it: judge it here first.
-        if let Ok(addrs) = lookup(name).await
+        // A lookup that never answers is a failed one: the proxy gets it.
+        if let Ok(Ok(addrs)) = tokio::time::timeout(lookup_wait(bounds), lookup(name)).await
             && refuse_if_local(name, &addrs)
         {
             return Err(HttpError::ConnectionRefused);
@@ -529,7 +530,22 @@ fn refuse_if_local(name: &str, addrs: &[SocketAddr]) -> bool {
     true
 }
 
+/// The longest the pre-proxy lookup waits: the request's head bound when it
+/// is shorter than the cap, so the lookup never outlasts what the component
+/// asked for.
+const LOOKUP_WAIT: Duration = Duration::from_secs(2);
+
+fn lookup_wait(bounds: Bounds) -> Duration {
+    bounds
+        .head
+        .map_or(LOOKUP_WAIT, |head| head.min(LOOKUP_WAIT))
+}
+
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
+    #[cfg(feature = "test-util")]
+    if locked(silent_names()).contains(&name.to_ascii_lowercase()) {
+        return std::future::pending().await;
+    }
     #[cfg(feature = "test-util")]
     if let Some(ips) = locked(fake_answers()).get(&name.to_ascii_lowercase()) {
         return Ok(ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect());
@@ -553,6 +569,19 @@ fn fake_answers() -> &'static FakeAnswers {
 #[cfg(feature = "test-util")]
 pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
     locked(fake_answers()).insert(name.to_ascii_lowercase(), ips.to_vec());
+}
+
+#[cfg(feature = "test-util")]
+fn silent_names() -> &'static Mutex<std::collections::HashSet<String>> {
+    static NAMES: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new();
+    NAMES.get_or_init(Mutex::default)
+}
+
+/// Never answer a later lookup of `name` by the external adapters' clients,
+/// as a network whose DNS drops outside queries. For tests.
+#[cfg(feature = "test-util")]
+pub fn fake_dns_hangs(name: &str) {
+    locked(silent_names()).insert(name.to_ascii_lowercase());
 }
 
 #[cfg(feature = "test-util")]

@@ -3868,6 +3868,7 @@ knobas-wasm-host	test/it	network::a_declared_host_that_is_not_the_instance_gets_
 knobas-wasm-host	test/it	network::a_fixed_host_knobas_cannot_resolve_still_goes_through_the_proxy
 knobas-wasm-host	test/it	network::a_fixed_host_that_resolves_to_loopback_is_refused_and_nothing_reaches_it
 knobas-wasm-host	test/it	network::a_fixed_host_that_resolves_to_loopback_is_refused_through_a_proxy
+knobas-wasm-host	test/it	network::a_fixed_host_whose_lookup_never_answers_reaches_the_proxy_within_the_bound
 knobas-wasm-host	test/it	network::a_fixed_host_with_one_public_and_one_loopback_answer_is_refused
 knobas-wasm-host	test/it	network::a_fixed_loopback_address_or_localhost_still_works
 knobas-wasm-host	test/it	network::a_fixed_name_the_system_resolves_to_loopback_is_refused
