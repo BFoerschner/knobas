@@ -30,7 +30,7 @@
 //!
 //! # What "already delivered" means, and what it costs to get wrong
 //!
-//! An issue is recognised by [`crate::fingerprint`] of the raw `/search` record and
+//! An issue is recognised by [`knobas_source::fingerprint`] of the raw `/search` record and
 //! **not** by its `updated` (issue #345, cursor version 2). `/search` reports
 //! `updated` to the second, an issue changes in milliseconds, and this run is
 //! fired after every landed write -- so keying on the timestamp dropped, for
@@ -38,6 +38,15 @@
 //! recorded. The fingerprint is computed here, before the skip decision and before
 //! `complete`, which is what keeps the comparison like-for-like across runs
 //! without costing a request per issue.
+//!
+//! What that leaves, said plainly because it is #345's own shape: the
+//! fingerprint covers what the skip decision sees, and `complete` then puts
+//! more into what the sink receives. A change confined to a comment or worklog
+//! beyond a truncated container, where the count does not move either, is
+//! invisible to it, and if it also lands inside the second a previous run
+//! recorded, that run skips it. That is narrower than the hole it replaced:
+//! `(key, updated)` was blind to the same change and to every change that
+//! needed no such coincidence.
 
 use chrono::{DateTime, Utc};
 use knobas_source::{Sink, SourceError};
@@ -169,8 +178,9 @@ impl SyncRun<'_> {
                     .as_deref()
                     .and_then(parse_jira_time);
                 // Taken before `complete`, which is what makes the value
-                // comparable across runs -- see the module docs.
-                let fingerprint = crate::fingerprint::of(&raw.raw);
+                // comparable across runs -- see the module docs, *What
+                // "already delivered" means*.
+                let fingerprint = knobas_source::fingerprint::of(&raw.raw);
                 if let Some(u) = updated {
                     seen_in_window.push(crate::cursor::Seen {
                         k: raw.issue.key.clone(),
@@ -231,7 +241,7 @@ impl SyncRun<'_> {
             .iter()
             .map(|view| crate::cursor::SeenView {
                 k: view.key.clone(),
-                h: crate::fingerprint::of(&view.payload),
+                h: knobas_source::fingerprint::of(&view.payload),
             })
             .collect();
         let mut views_emitted = 0_usize;
@@ -1596,5 +1606,32 @@ mod tests {
             .await
             .unwrap_err();
         assert!(matches!(got, SourceError::Unauthorized { .. }), "{got:?}");
+    }
+
+    /// Jira's golden records -- the two issues of a real `/search` page and
+    /// an epic read whole -- fingerprint as they did before #1314 moved the
+    /// algorithm from this crate into `knobas_source::fingerprint`. The
+    /// literals are what this crate's own copy gave them, run on that copy. A
+    /// value that moves here would re-deliver every issue in the overlap
+    /// window once after the upgrade.
+    #[test]
+    fn golden_records_keep_their_fingerprints() {
+        let page: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/golden/search-page.json")).unwrap();
+        let issues = page["issues"].as_array().unwrap();
+        assert_eq!(issues[0]["key"], "PAY-231");
+        assert_eq!(
+            knobas_source::fingerprint::of(&issues[0]),
+            "bf376862bfa5eae0"
+        );
+        assert_eq!(issues[1]["key"], "PAY-240");
+        assert_eq!(
+            knobas_source::fingerprint::of(&issues[1]),
+            "d7d2e69253c3cee3"
+        );
+        assert_eq!(knobas_source::fingerprint::of(&page), "4b19d7a7866cebd1");
+        let epic: serde_json::Value =
+            serde_json::from_str(include_str!("../tests/golden/issue-epic.json")).unwrap();
+        assert_eq!(knobas_source::fingerprint::of(&epic), "58f840f0d1e66aea");
     }
 }

@@ -581,7 +581,7 @@ async fn sync_repo(
     //    the record's fingerprint is what decides, and the timestamp stays
     //    beside it for the cursor's reader.
     let updated_at = map::real_time(selected.repo.updated_at);
-    let fingerprint = crate::fingerprint::of(&selected.raw);
+    let fingerprint = knobas_source::fingerprint::of(&selected.raw);
     if before.repo_updated_at != updated_at
         || before.repo_fingerprint.as_deref() != Some(fingerprint.as_str())
     {
@@ -904,7 +904,7 @@ async fn issues(
             };
             let updated =
                 map::real_time(issue.updated_at).or_else(|| map::real_time(issue.created_at));
-            let fingerprint = crate::fingerprint::of(&raw);
+            let fingerprint = knobas_source::fingerprint::of(&raw);
             if watermark.is_some()
                 && updated == watermark
                 && before.issues_seen_at_watermark.get(&issue.number) == Some(&fingerprint)

@@ -16,8 +16,7 @@
 //! asks for is there; what was wrong is the identity it compared against. A
 //! fingerprint of the record is the identity: unchanged fingerprints the same,
 //! so an idle poll stays idle; changed fingerprints differently whatever its
-//! clock said. It is the move Jira made for the same hole in issue #345
-//! (`knobas-source-jira`'s `fingerprint.rs`, whose module docs measure it).
+//! clock said. It is the move Jira made for the same hole in issue #345.
 //!
 //! **Why not leave it to the sink.** The engine's sink rewrites every item it
 //! is handed (`synced_at`, the payload, and the passes that read a written
@@ -33,48 +32,17 @@
 //! `updated_at`), and an edit to an existing comment is not this class of
 //! change.
 //!
-//! # The algorithm is spelled out, and is Jira's
+//! # The algorithm is the source crate's
 //!
-//! FNV-1a over a canonical, length-framed, type-tagged encoding with object
-//! keys sorted here rather than by `serde_json`'s map type (a feature flag
-//! away from insertion order). The value is persisted inside a cursor, so it
-//! has to mean the same thing in the next build; `DefaultHasher` does not
-//! promise that, and a crate's hash could change under a version bump. It is
-//! a copy of Jira's rather than a shared helper on purpose: the crates both
-//! adapters depend on are `knobas-core`, `knobas-http` and the SPI, the first
-//! and last are frozen surfaces under §10.8 (a new export needs its own
-//! entry), and moving Jira's persisted value there would also touch the Jira
-//! adapter's cursor for a Gitea fix. Folding the two copies into one is a
-//! follow-up for whoever next needs a third.
-//! `a_known_record_keeps_its_fingerprint` pins the output to a literal so a
-//! drift between builds fails here first.
+//! [`knobas_source::fingerprint::of`], shared with Jira and with any external
+//! adapter (#1314; it was a copy of Jira's until then). What is Gitea's and
+//! stays here is the pull request's framing, [`of_pull`]: which fields move
+//! without the pull request and are stripped before the shared function sees
+//! the record. `a_pull_request_keeps_its_fingerprint` pins that output to the
+//! values it had before the copies were folded.
 
+use knobas_source::fingerprint::of;
 use serde_json::Value;
-
-const OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
-const PRIME: u64 = 0x0000_0100_0000_01b3;
-
-struct Fnv(u64);
-
-impl Fnv {
-    fn write(&mut self, bytes: &[u8]) {
-        for byte in bytes {
-            self.0 ^= u64::from(*byte);
-            self.0 = self.0.wrapping_mul(PRIME);
-        }
-    }
-}
-
-/// The fingerprint of one raw record, as sixteen hex characters.
-///
-/// Only ever compared against the fingerprint of the same record one run
-/// earlier; a collision costs one skipped re-delivery, which the next change
-/// to that record corrects.
-pub(crate) fn of(raw: &Value) -> String {
-    let mut hasher = Fnv(OFFSET_BASIS);
-    feed_value(&mut hasher, raw);
-    format!("{:016x}", hasher.0)
-}
 
 /// The fingerprint of one pull request, **less what moves without it**.
 ///
@@ -145,46 +113,6 @@ fn strip_user_churn(value: &mut Value) {
     }
 }
 
-fn feed_value(hasher: &mut Fnv, value: &Value) {
-    match value {
-        Value::Null => hasher.write(b"0"),
-        Value::Bool(false) => hasher.write(b"1"),
-        Value::Bool(true) => hasher.write(b"2"),
-        Value::Number(number) => {
-            hasher.write(b"3");
-            feed_framed(hasher, number.to_string().as_bytes());
-        }
-        Value::String(text) => {
-            hasher.write(b"4");
-            feed_framed(hasher, text.as_bytes());
-        }
-        Value::Array(items) => {
-            hasher.write(b"5");
-            feed_framed(hasher, &(items.len() as u64).to_le_bytes());
-            for item in items {
-                feed_value(hasher, item);
-            }
-        }
-        Value::Object(map) => {
-            hasher.write(b"6");
-            feed_framed(hasher, &(map.len() as u64).to_le_bytes());
-            let mut keys: Vec<&String> = map.keys().collect();
-            keys.sort_unstable();
-            for key in keys {
-                feed_framed(hasher, key.as_bytes());
-                feed_value(hasher, &map[key]);
-            }
-        }
-    }
-}
-
-/// Length first, then the bytes: the prefix is what stops two different
-/// records from encoding to the same stream.
-fn feed_framed(hasher: &mut Fnv, bytes: &[u8]) {
-    hasher.write(&(bytes.len() as u64).to_le_bytes());
-    hasher.write(bytes);
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,31 +120,38 @@ mod tests {
 
     /// The value is stored in every Gitea cursor: if it changed between two
     /// builds, every pull request on a watermark would be re-delivered once
-    /// after the upgrade. The literal was computed by an independent
-    /// re-implementation of the encoding (Python, 2026-10-14), not by this
-    /// function.
+    /// after the upgrade. Each literal is what Gitea's own copy of the
+    /// fingerprint gave the record before #1314 moved the algorithm to
+    /// `knobas_source::fingerprint`, run on that copy rather than computed by
+    /// this one. The records are the ones the two tests below build.
     #[test]
-    fn a_known_record_keeps_its_fingerprint() {
-        let record = json!({ "number": 144, "state": "open", "merged": false });
-        assert_eq!(of(&record), "d24648878fd1af9b");
-    }
+    fn a_pull_request_keeps_its_fingerprint() {
+        let pull = json!({ "number": 144, "state": "open",
+                           "base": { "ref": "main", "sha": "09a1",
+                                     "repo": { "full_name": "t/p", "updated_at": "a" } },
+                           "head": { "sha": "c90d",
+                                     "repo": { "full_name": "t/p", "updated_at": "a" } } });
+        assert_eq!(of_pull(&pull), "cfb6dcad79d20c88");
+        let mut head_moved = pull.clone();
+        head_moved["head"]["sha"] = json!("e1f2");
+        assert_eq!(of_pull(&head_moved), "bcc701f8ffae9e3a");
+        let mut retargeted = pull.clone();
+        retargeted["base"]["ref"] = json!("release");
+        assert_eq!(of_pull(&retargeted), "21cc869863e7c8eb");
+        let mut fork_gone = pull;
+        fork_gone["head"]["repo"] = Value::Null;
+        assert_eq!(of_pull(&fork_gone), "c1da22f8308fd690");
 
-    #[test]
-    fn key_order_does_not_reach_the_fingerprint() {
-        let one = json!({ "number": 144, "state": "open" });
-        let other = json!({ "state": "open", "number": 144 });
-        assert_eq!(of(&one), of(&other));
-    }
-
-    /// The case #764 is about: same number, same `updated_at`, merged.
-    #[test]
-    fn a_merge_inside_the_second_changes_the_fingerprint() {
-        let open = json!({ "number": 144, "updated_at": "2026-08-22T13:50:00Z",
-                           "state": "open", "merged": false });
-        let mut merged = open.clone();
-        merged["state"] = json!("closed");
-        merged["merged"] = json!(true);
-        assert_ne!(of(&open), of(&merged));
+        let user = json!({ "number": 144, "labels": [],
+                           "user": { "login": "mara", "last_login": "a", "followers_count": 1 },
+                           "requested_reviewers": [{ "login": "olu", "last_login": "a" }] });
+        assert_eq!(of_pull(&user), "bc53950ed650849c");
+        let mut reviewer_added = user.clone();
+        reviewer_added["requested_reviewers"] = json!([{ "login": "olu" }, { "login": "jonas" }]);
+        assert_eq!(of_pull(&reviewer_added), "ced87f8c020a5c58");
+        let mut labelled = user;
+        labelled["labels"] = json!([{ "name": "payments" }]);
+        assert_eq!(of_pull(&labelled), "a2d4fc41057096d6");
     }
 
     /// The pull request's own fields count; the repositories it embeds do not,
@@ -274,13 +209,5 @@ mod tests {
         let mut labelled = one.clone();
         labelled["labels"] = json!([{ "name": "payments" }]);
         assert_ne!(of_pull(&one), of_pull(&labelled));
-    }
-
-    #[test]
-    fn a_boundary_cannot_be_forged_by_the_content_around_it() {
-        assert_ne!(of(&json!({ "a": "4b" })), of(&json!({ "a4": "b" })));
-        assert_ne!(of(&json!(["a", "4b"])), of(&json!(["a4", "b"])));
-        assert_ne!(of(&json!([""])), of(&json!([])));
-        assert_ne!(of(&json!("1")), of(&json!(1)));
     }
 }

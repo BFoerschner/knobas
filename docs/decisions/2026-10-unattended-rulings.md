@@ -7487,3 +7487,34 @@ The merge-manager's rulings (Sonnet, #1300):
 - **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the
   transport test, as the ticket names, and Jira's own suite plus `just jira-live`.
   *Reversing:* n/a.
+
+## #1314: one fingerprint module in the source crate (Opus implementer, 2026-10-19)
+
+- **Only `of` is public.** *Fork:* the ticket says the FNV hasher, `of` and the value and framed
+  feeds live in the module. *Ruling:* they all live there, and only `of` is exported. Gitea's
+  pull-request framing strips fields from a cloned record and calls `of`, so no adapter needs the
+  hasher or the feeds, and every export of the frozen source crate is surface an external
+  adapter can come to depend on. *Reversing:* additive, one §10.8 amendment.
+- **"Every fixture record Jira's and Gitea's tests use" is read as the records of both
+  fingerprint test modules, Jira's two golden files and three of Gitea's wiremock builders.**
+  *Fork:* the sync tests build many more records, all through the same builders and compared
+  only against each other within a run. *Ruling:* pin every record of both fingerprint test
+  modules in the source crate (24), each `of_pull` record Gitea's tests build that has a distinct
+  value (7), Jira's golden `/search` page, its two issues and the epic (4), and one record each
+  from Gitea's `support::repo`, `issue` and `pull` (3). The old values come from temporary tests
+  run on the two adapter copies at bbe80420, before either was deleted. A drift in the shared
+  encoding moves all 38. *Reversing:* more rows.
+- **Pins live where their records live.** Jira's golden files and Gitea's wiremock builders are
+  each crate's own, so their pins stay there. The source crate cannot reach them, and pinning
+  them there would need copies of the records. *Reversing:* cheap.
+- **Gitea's generic fingerprint tests move; its pull-request cases stay**, as spec #1302's
+  testing decisions say. Gitea's `a_known_record_keeps_its_fingerprint`, key-order, merge-inside-
+  the-second and boundary tests are rows or cases of the shared module's tests now.
+  *Reversing:* n/a.
+- **Jira's module docs are split, not dropped.** The general part (why a cursor needs a
+  fingerprint, stability) is the shared module's doc. The Jira-specific measurement goes to
+  `cursor.rs`, and what the fingerprint cannot see goes to `sync.rs`, beside the calls.
+  *Reversing:* n/a.
+- **A §10.8 entry of its own** (`docs/contract/10.8/1314-source-fingerprint.md`), because
+  `crates/knobas-source/src/**` is frozen (#1234's entry) and #1310's entry covers
+  `crates/knobas-http/**` only. *Reversing:* n/a.

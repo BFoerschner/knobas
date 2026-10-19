@@ -28,6 +28,7 @@ pub mod clone_urls;
 pub mod contract;
 pub mod diff;
 pub mod docs;
+pub mod fingerprint;
 pub mod instance;
 pub mod pipeline;
 pub mod query;
