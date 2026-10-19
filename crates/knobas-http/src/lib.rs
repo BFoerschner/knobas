@@ -35,12 +35,16 @@
 //! * **One credential mapping** ([`credential`]): an adapter states its
 //!   [`CredentialRules`] and gets the same refusals, in the same order, as
 //!   every other (issue #1310).
+//! * **One page walk** ([`PageWalk`]): the loop, the cap and the rule that an
+//!   empty page ends a listing and a short one does not, for page number,
+//!   offset and next link (issue #1315).
 //! * **`User-Agent: knobas/<version> (<adapter_kind>/<adapter_version>)`** --
 //!   an admin reading their access log can tell what is calling them.
 
 pub mod classify;
 mod credential;
 pub mod retry;
+mod walk;
 
 use std::num::NonZeroU32;
 use std::sync::Arc;
@@ -54,6 +58,7 @@ use reqwest::header::{ACCEPT, HeaderMap, HeaderValue, USER_AGENT};
 
 pub use classify::{BodyMessage, ForbiddenReading, reqwest_error, response_error, status_error};
 pub use credential::{CredentialRules, TokenSpelling, credential};
+pub use walk::{NextLink, Offset, PageNumber, PageWalk, Paged, Protocol, Walked};
 
 // Every type this crate's signatures name, re-exported: an adapter depends on
 // `knobas-http` and on nothing else for its transport. Otherwise all three

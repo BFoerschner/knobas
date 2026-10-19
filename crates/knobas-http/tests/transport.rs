@@ -1135,3 +1135,206 @@ fn a_configured_method_maps_to_one_credential_or_one_refusal() {
         );
     }
 }
+
+// ---- The page walk (#1315) ------------------------------------------------
+
+mod walk {
+    use std::cell::RefCell;
+
+    use knobas_http::{NextLink, Offset, PageNumber, PageWalk, Paged, Walked};
+    use knobas_source::SourceError;
+
+    /// A page as a stand-in server answers it: its rows, and what it claims
+    /// about the rest (a total, a continuation link).
+    #[derive(Debug, Clone, PartialEq)]
+    struct Page {
+        rows: Vec<u32>,
+        total: Option<usize>,
+        next: Option<String>,
+    }
+
+    impl Paged for Page {
+        fn rows(&self) -> usize {
+            self.rows.len()
+        }
+        fn total(&self) -> Option<usize> {
+            self.total
+        }
+        fn next_link(&self) -> Option<&str> {
+            self.next.as_deref()
+        }
+    }
+
+    fn rows(rows: &[u32]) -> Page {
+        Page {
+            rows: rows.to_vec(),
+            total: None,
+            next: None,
+        }
+    }
+
+    /// Every page the walk hands out, then how it ended.
+    async fn drain<P, F, Fut>(mut walk: PageWalk<P, F>) -> (Vec<Vec<u32>>, String)
+    where
+        P: knobas_http::Protocol,
+        F: FnMut(P::At) -> Fut,
+        Fut: std::future::Future<Output = Result<Page, SourceError>>,
+    {
+        let mut read = Vec::new();
+        loop {
+            match walk.next().await {
+                Ok(Walked::Page(page)) => read.push(page.rows),
+                Ok(Walked::End) => return (read, "end".to_owned()),
+                Ok(Walked::Capped) => return (read, "capped".to_owned()),
+                Err(error) => return (read, error.to_string()),
+            }
+        }
+    }
+
+    /// Page number plus limit (Gitea): a short page is not the end -- a
+    /// server may cap a page below the limit asked for -- and an empty one is.
+    #[tokio::test]
+    async fn a_page_number_walk_continues_past_a_short_page_and_ends_on_an_empty_one() {
+        let pages = [rows(&[1, 2]), rows(&[3]), rows(&[4, 5]), rows(&[])];
+        let asked = RefCell::new(Vec::new());
+        let walk = PageWalk::new(PageNumber, 10, |page: u32| {
+            asked.borrow_mut().push(page);
+            let answer = pages[page as usize - 1].clone();
+            async move { Ok(answer) }
+        });
+        let (read, end) = drain(walk).await;
+        assert_eq!(read, vec![vec![1, 2], vec![3], vec![4, 5]]);
+        assert_eq!(end, "end");
+        assert_eq!(*asked.borrow(), vec![1, 2, 3, 4], "one request for the empty page");
+    }
+
+    /// The cap: the walk hands out at most `cap` pages, and when it would ask
+    /// for one more it answers `Capped`, not `End` -- a walk promising a whole
+    /// corpus must be able to tell the two apart. A listing that ends exactly
+    /// at the cap ends, rather than reading as capped.
+    #[tokio::test]
+    async fn a_walk_answers_capped_when_it_would_ask_past_its_cap() {
+        let asked = RefCell::new(0_u32);
+        let endless = PageWalk::new(PageNumber, 3, |page: u32| {
+            *asked.borrow_mut() += 1;
+            async move { Ok(rows(&[page])) }
+        });
+        let (read, end) = drain(endless).await;
+        assert_eq!(read, vec![vec![1], vec![2], vec![3]]);
+        assert_eq!(end, "capped");
+        assert_eq!(*asked.borrow(), 3, "no request past the cap");
+
+        let exact = PageWalk::new(PageNumber, 2, |page: u32| async move {
+            Ok(if page <= 2 { rows(&[page]) } else { rows(&[]) })
+        });
+        assert_eq!(drain(exact).await.1, "capped", "a full last page is not proof of the end");
+
+        let total = PageWalk::new(PageNumber, 2, |page: u32| async move {
+            Ok(Page {
+                total: Some(2),
+                ..rows(&[page])
+            })
+        });
+        assert_eq!(drain(total).await, (vec![vec![1], vec![2]], "end".to_owned()));
+    }
+
+    /// Offset plus total (Jira): each request starts where the records read so
+    /// far end, a short page continues, and reaching the reported total ends
+    /// the walk without asking for the empty page.
+    #[tokio::test]
+    async fn an_offset_walk_starts_each_page_after_the_records_read_and_stops_at_the_total() {
+        let asked = RefCell::new(Vec::new());
+        let walk = PageWalk::new(Offset, 10, |start: u32| {
+            asked.borrow_mut().push(start);
+            let page = match start {
+                0 => vec![1, 2],
+                2 => vec![3],
+                3 => vec![4, 5],
+                _ => vec![],
+            };
+            async move {
+                Ok(Page {
+                    total: Some(5),
+                    ..rows(&page)
+                })
+            }
+        });
+        let (read, end) = drain(walk).await;
+        assert_eq!(read, vec![vec![1, 2], vec![3], vec![4, 5]]);
+        assert_eq!(end, "end");
+        assert_eq!(*asked.borrow(), vec![0, 2, 3]);
+
+        // A total the server inflates still ends on the empty page.
+        let inflated = PageWalk::new(Offset, 10, |start: u32| async move {
+            Ok(Page {
+                total: Some(99),
+                ..rows(if start == 0 { &[1] } else { &[] })
+            })
+        });
+        assert_eq!(drain(inflated).await, (vec![vec![1]], "end".to_owned()));
+    }
+
+    /// Next link (Confluence): the first request carries no link, each later
+    /// one the link the page before offered, an empty page with a link is
+    /// followed, and a page without one ends the walk.
+    #[tokio::test]
+    async fn a_next_link_walk_follows_the_link_through_an_empty_page() {
+        let asked = RefCell::new(Vec::new());
+        let walk = PageWalk::new(NextLink { product: "Wiki" }, 10, |link: Option<String>| {
+            asked.borrow_mut().push(link.clone());
+            let page = match link.as_deref() {
+                None => Page {
+                    next: Some("/p2".to_owned()),
+                    ..rows(&[1])
+                },
+                Some("/p2") => Page {
+                    next: Some("/p3".to_owned()),
+                    ..rows(&[])
+                },
+                _ => rows(&[2]),
+            };
+            async move { Ok(page) }
+        });
+        let (read, end) = drain(walk).await;
+        assert_eq!(read, vec![vec![1], vec![], vec![2]]);
+        assert_eq!(end, "end");
+        assert_eq!(
+            *asked.borrow(),
+            vec![None, Some("/p2".to_owned()), Some("/p3".to_owned())]
+        );
+    }
+
+    /// An absolute continuation link is refused, not followed and not read as
+    /// the end -- after the page that offered it is handed out.
+    #[tokio::test]
+    async fn an_absolute_next_link_is_refused_after_its_page() {
+        let asked = RefCell::new(0_u32);
+        let walk = PageWalk::new(NextLink { product: "Wiki" }, 10, |_: Option<String>| {
+            *asked.borrow_mut() += 1;
+            async move {
+                Ok(Page {
+                    next: Some("https://elsewhere.example/p2".to_owned()),
+                    ..rows(&[1])
+                })
+            }
+        });
+        let (read, end) = drain(walk).await;
+        assert_eq!(read, vec![vec![1]]);
+        assert_eq!(
+            end,
+            "protocol: Wiki answered with a continuation link this adapter cannot follow: \
+             \"https://elsewhere.example/p2\" is not a path rooted at the instance. Refusing \
+             rather than reporting a walk that stopped early as a completed one."
+        );
+        assert_eq!(*asked.borrow(), 1);
+    }
+
+    /// A fetch's failure is the walk's.
+    #[tokio::test]
+    async fn a_failing_fetch_fails_the_walk() {
+        let walk = PageWalk::new(PageNumber, 10, |_: u32| async move {
+            Err::<Page, _>(SourceError::protocol("down"))
+        });
+        assert_eq!(drain(walk).await, (vec![], "protocol: down".to_owned()));
+    }
+}
