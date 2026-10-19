@@ -148,6 +148,7 @@
     ticketViews,
     translateTicketView,
   } from "../../ipc/search";
+  import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { openExternal } from "../../shell/open-external";
   import { push } from "../../shell/toasts.svelte";
   import { inTextField } from "../../shell/keys";
@@ -155,7 +156,7 @@
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import Marked from "../filter/Marked.svelte";
-  import { reachTally } from "../job/sections";
+  import { reachTally, runKindsOf } from "../job/sections";
   import { jobHash } from "../route";
   import { sourceHash } from "../settings/settings";
   import { sourceRoles, TICKET_SYSTEM, TRANSLATE_QUERY } from "../roles.svelte";
@@ -705,7 +706,7 @@
     // What the job's sections would show, through the job-reach read: no
     // context is needed, and none is promoted to draw this (#1030).
     void reachTally(ports, id).then((tally) => {
-      if (!dead) around = aroundLines(tally);
+      if (!dead) around = aroundLines(tally, runKindsOf(kindRegistry));
     });
     return () => (dead = true);
   });

@@ -104,6 +104,17 @@ test("Around this ticket groups the context's kinds as the room's tiles do, and 
   expect(aroundLines(null)).toEqual([]);
 });
 
+test("Around this ticket counts a CI run kind that is not build under Builds (#1256)", () => {
+  const tally = [
+    { kind: "build", tone: "ok" as const, count: 1 },
+    { kind: "workflow_run", tone: "err" as const, count: 2 },
+  ];
+  expect(aroundLines(tally, ["build", "workflow_run"])).toEqual([
+    { section: "Builds", count: "3 items", failing: "2 failing or down" },
+  ]);
+  expect(aroundLines(tally).map((line) => line.section)).toEqual(["Builds", "Workflow runs"]);
+});
+
 function ticket(key: string, extra: Partial<MiniBoardCard>): MiniBoardCard {
   return { ...card(0), entity_id: `jira:${key}`, key, title: key, ...extra };
 }

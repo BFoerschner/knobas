@@ -41,11 +41,16 @@ const UNKNOWN_RUN_KINDS = ["build"] as const;
 /** What the sections need of the adapters' claims. */
 export type FrameKinds = Pick<KindRegistry, "frameKinds" | "load">;
 
+/** The CI role's run kinds as the claims stand, the built-in adapter's while they are not known (#1230, #1256). */
+export function runKindsOf(registry: Pick<KindRegistry, "frameKinds">): readonly string[] {
+  return registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS;
+}
+
 /** The four sections read from the mirror, as the claims read now stand. Assets come from the reach itself. */
 export function sectionReads(registry: Pick<KindRegistry, "frameKinds">): Record<Section, SectionRead> {
   return {
     code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc" },
-    builds: { role: CI, kinds: registry.frameKinds(CI, "run") ?? UNKNOWN_RUN_KINDS, order: "latest_per_parent" },
+    builds: { role: CI, kinds: runKindsOf(registry), order: "latest_per_parent" },
     pages: { role: WIKI, kinds: ["page"], order: "updated_desc" },
     monitors: { role: MONITORING, kinds: ["monitor"], order: "updated_desc" },
   };

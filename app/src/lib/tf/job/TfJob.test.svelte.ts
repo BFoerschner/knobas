@@ -940,9 +940,9 @@ test("a job's Builds section lists the runs of a CI source whose run kind is not
   await settle();
   const runs = calls.list.find((filter) => filter.order === "latest_per_parent")!;
   expect([...runs.kinds].sort()).toEqual(["build", "workflow_run"]);
-  // Where a run of another kind opens is `itemHash`'s question, not the section's.
+  // A run of another kind opens Builds' run page, not the block view (#1256).
   const hrefs = [...section("builds").querySelectorAll(".tf-rows a")].map((row) => decodeURIComponent(row.getAttribute("href") ?? ""));
-  expect(hrefs.filter((href) => href.endsWith(RUN.entity_id) || href.endsWith(B_OK.entity_id))).toHaveLength(2);
+  expect(hrefs.filter((href) => href === `#/build/${RUN.entity_id}` || href === `#/build/${B_OK.entity_id}`)).toHaveLength(2);
 
   const tally = await reachTally(p, ID, { registry });
   expect(tally.find((line) => line.kind === "workflow_run")).toEqual({ kind: "workflow_run", tone: "err", count: 1 });
