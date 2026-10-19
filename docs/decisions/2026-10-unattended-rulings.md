@@ -7643,3 +7643,26 @@ The merge-manager's rulings on #1313 and #1314 (Opus):
 - **Seams, chosen without a person to confirm them:** the transport test, as the ticket names,
   and each adapter's suite unchanged, plus `just gitea-live` and `just atlassian-live`.
   *Reversing:* n/a.
+
+The merge-manager's rulings on #1315 (Opus):
+
+- **The next-link walk's empty-page exception stands.** *Fork:* the ticket's first criterion says
+  the walker stops "on an empty page"; Confluence's walk follows an empty page that carries a link.
+  *Ruling:* keep the exception. The ticket's own goal is that "a paged read stops where it stops
+  today", Confluence's unchanged cap test serves empty pages with a link, and the walker's module
+  docs, `NextLink`'s doc and the §10.8 amendment all state it. The criterion holds for the two
+  protocols where the client builds the next request. *Reversing:* one constant, plus a Confluence
+  test edit.
+- **The second criterion is met as the ticket lists it.** *Fork:* Gitea's view walks, Jira's views
+  listings and Confluence's comment completion still page on their own. *Ruling:* the ticket names
+  Gitea's sync pager and label read, Jira's search and comment loops and Confluence's continuation
+  walk, and all five now walk `PageWalk`; Jira's comment walk keeps no cap because it had none. The
+  others are outside the list and keep their own end rules unchanged. No follow-up: nothing a user
+  sees differs. *Reversing:* a ticket per remaining loop.
+- **Every migrated walk stops where it stopped.** Checked by hand against the deleted loops: the
+  count of requests at the cap (Gitea `page == MAX` after the empty check, Jira `pages >= MAX`
+  after the total check, Confluence's first search uncounted and `requests >= MAX` before a
+  follow) equals `cap` pages handed out, the empty page is fetched but not counted, a total reached
+  on the last allowed page ends rather than caps, Confluence's cap message wins over an absolute
+  link at the cap as before, and the Jira and Confluence messages are byte-identical.
+  *Reversing:* n/a.
