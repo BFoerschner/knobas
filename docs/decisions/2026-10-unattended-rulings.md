@@ -7068,4 +7068,6 @@ The merge-manager's rulings (Opus):
   `delivery()` against today's `resend_is_harmless`, `UNCLAIMED_OPS`, `target_entity`, the old
   projection lists and `link_on_arrival`'s relation: 23 of 23 agree. The committed tests don't
   read `Delivery` to check a table, as the spec asks; the sync harness witnesses the projection,
-  and #1308 and the app ticket make it witness the rest. *Reversing:* n/a.
+  and #1308 and the app ticket make it witness the rest. With core's op-name lists gone, nothing
+  pinned `commit_file`'s liveness shape (a whole-record mutant survived every suite), so
+  `a_commit_into_a_repository_whose_record_moved_is_not_held` joins the harness. *Reversing:* n/a.

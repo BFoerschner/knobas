@@ -1229,6 +1229,27 @@ async fn a_commit_over_a_file_that_moved_is_held_with_both_versions() {
     assert_eq!(h.delivered(), vec!["b3: mine\n".to_owned()]);
 }
 
+/// A commit's target is its repository, and the mirror holds no file: a
+/// repository record that moved while the commit was queued is not what the
+/// commit overwrites, so it goes (#822). The file's own version, which the
+/// source compares, is what holds it (the test above).
+#[tokio::test]
+async fn a_commit_into_a_repository_whose_record_moved_is_not_held() {
+    let h = harness().await;
+    let repo = h.mirror("tidewater/payout-service", "payout-service").await;
+    h.file_at("b1");
+
+    h.answer(Answer::Unreachable);
+    let write = h.commit_file(&repo, "b1", "mine\n").await;
+    h.mirror("tidewater/payout-service", "payout-service\n\nretitled")
+        .await;
+
+    h.answer(Answer::Accept);
+    flusher::flush_source(&h.deps, &h.source).await.unwrap();
+    assert_eq!(h.reload(write.id).await.state, WriteState::Sent);
+    assert_eq!(h.delivered(), vec!["b1: mine\n".to_owned()]);
+}
+
 /// A source with no stored credential cannot take a write, and that is a
 /// *waiting* fault rather than a lost edit -- entering the credential is what
 /// releases it.
