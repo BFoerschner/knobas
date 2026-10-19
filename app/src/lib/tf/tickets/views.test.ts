@@ -2,7 +2,7 @@
 import { expect, test } from "vitest";
 
 import type { MiniBoardCard } from "../../ipc/entity";
-import type { JiraSource, QueryTranslation, TicketViewRow } from "../../ipc/search";
+import type { QueryTranslation, SavedViewSource, TicketViewRow } from "../../ipc/search";
 import {
   columnLimit,
   copyKeeps,
@@ -36,7 +36,7 @@ function row(id: string, group: string, position: number, extra: Partial<TicketV
     saved_view: null,
     count: 1,
     unreadable: null,
-    jira: null,
+    saved_view_source: null,
     ...extra,
   };
 }
@@ -120,19 +120,21 @@ test("a Jira view is read from a board of its type or a saved filter, and a spri
 
 test("Jira boards and Jira filters come after every group of your own, and a Jira view is found by its JQL", () => {
   const views = [
-    row("cus", "Jira boards", 0, { jira: jiraOf("project = CUS"), saved_view: "jira:board-31" }),
+    row("cus", "Jira boards", 0, { saved_view_source: savedViewOf("project = CUS"), saved_view: "jira:board-31" }),
     row("ops", "Ops", 1),
     row("mine", "Mine", 2),
   ];
   expect(groupViews(views, "").map((group) => group.name)).toEqual(["Mine", "Ops", "Jira boards"]);
   expect(groupViews(views, "cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
+  // "project" is only in the source's query, so this finds it by that and not by its name (#1273).
+  expect(groupViews(views, "project = cus").map((group) => group.views.map((view) => view.id))).toEqual([["cus"]]);
 });
 
-function jiraOf(jql: string, extra: Partial<JiraSource> = {}): JiraSource {
+function savedViewOf(jql: string, extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
     board_type: "scrum",
-    jql,
+    source_query: jql,
     sub_query: null,
     sprint: null,
     last_read: "",
@@ -146,9 +148,9 @@ function jiraOf(jql: string, extra: Partial<JiraSource> = {}): JiraSource {
 
 test("a hidden Jira view leaves its group and is listed apart, in list order (#878, R-3.25)", () => {
   const views = [
-    row("flow", "Jira boards", 4, { jira: jiraOf("project = PAY", { hidden: true }), saved_view: "jira:board-22" }),
-    row("cus", "Jira boards", 2, { jira: jiraOf("project = CUS"), saved_view: "jira:board-31" }),
-    row("fix", "Jira filters", 3, { jira: jiraOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), saved_view: "jira:filter-1" }),
+    row("flow", "Jira boards", 4, { saved_view_source: savedViewOf("project = PAY", { hidden: true }), saved_view: "jira:board-22" }),
+    row("cus", "Jira boards", 2, { saved_view_source: savedViewOf("project = CUS"), saved_view: "jira:board-31" }),
+    row("fix", "Jira filters", 3, { saved_view_source: savedViewOf("fixVersion is EMPTY", { kind: "filter", hidden: true }), saved_view: "jira:filter-1" }),
   ];
   expect(groupViews(views, "").map((group) => [group.name, group.views.map((view) => view.id)])).toEqual([
     ["Jira boards", ["cus"]],
@@ -175,7 +177,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
   const jira = {
     kind: "board" as const,
     board_type: "kanban",
-    jql: "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
+    source_query: "project in (OPS, WEB) AND component = on-call ORDER BY priority DESC",
     sub_query: null,
     sprint: null,
     last_read: "",
@@ -185,7 +187,7 @@ test("Make an editable copy starts a view of your own from the Jira view: its co
     unsynced: [],
   };
   const columns = [{ name: "Working", statuses: ["In Progress", "In Review"], limit: 3 }];
-  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", jira, saved_view: "mock:board-40", columns, lanes: "priority" });
+  const board = row("mock-board-40", "Jira boards", 4, { name: "Platform on-call", saved_view_source: jira, saved_view: "mock:board-40", columns, lanes: "priority" });
   // As the Jira adapter reads the query (#1208): the source's answer, not the shell's.
   const copy: QueryTranslation = {
     conditions: [{ key: "project", negated: false, values: ["OPS", "WEB"] }],

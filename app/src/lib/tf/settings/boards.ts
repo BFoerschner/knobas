@@ -9,7 +9,7 @@
  * four choices and the Jira view words are Jira's, which is the only adapter
  * that declares the section; the page draws it for whichever adapter does.
  */
-import type { JiraSource, TicketViewRow, UnsyncedTickets } from "../../ipc/search";
+import type { SavedViewSource, TicketViewRow, UnsyncedTickets } from "../../ipc/search";
 
 /** The section's name in an adapter's schema. */
 export const BOARDS_SECTION = "boards-and-filters";
@@ -43,23 +43,23 @@ export function favouriteFilters(config: unknown): boolean {
   return field(config, "favourite_filters") !== false;
 }
 
-/** A Jira view of the source `sourceId`, with what Jira says about it. */
-export type SourceView = TicketViewRow & { jira: JiraSource };
+/** A saved view of the source `sourceId`, with what the source says about it. */
+export type SourceView = TicketViewRow & { saved_view_source: SavedViewSource };
 
 /** The source's Jira views: the boards, then the filters, each in list order. */
 export function sourceViews(views: TicketViewRow[], sourceId: string): SourceView[] {
   return views
-    .filter((view): view is SourceView => view.jira !== null && (view.saved_view ?? "").startsWith(`${sourceId}:`))
+    .filter((view): view is SourceView => view.saved_view_source !== null && (view.saved_view ?? "").startsWith(`${sourceId}:`))
     .sort(
       (a, b) =>
-        Number(a.jira.kind === "filter") - Number(b.jira.kind === "filter") ||
+        Number(a.saved_view_source.kind === "filter") - Number(b.saved_view_source.kind === "filter") ||
         a.position - b.position ||
         a.id.localeCompare(b.id),
     );
 }
 
 /** *Scrum board*, *Kanban board*, *Board* or *Filter*. */
-export function viewType(jira: JiraSource): string {
+export function viewType(jira: SavedViewSource): string {
   if (jira.kind === "filter") return "Filter";
   const type = jira.board_type ?? "";
   return type === "" || type === "simple" ? "Board" : `${type[0]!.toUpperCase()}${type.slice(1)} board`;

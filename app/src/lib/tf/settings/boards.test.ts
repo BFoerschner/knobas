@@ -1,14 +1,14 @@
 /** *Boards and filters*' pure rules (#878): the stored choice, the source's views, their words. */
 import { expect, test } from "vitest";
 
-import type { JiraSource, TicketViewRow } from "../../ipc/search";
+import type { SavedViewSource, TicketViewRow } from "../../ipc/search";
 import { boardScope, favouriteFilters, sourceViews, unsyncedWords, viewType } from "./boards";
 
-function jira(extra: Partial<JiraSource> = {}): JiraSource {
+function jira(extra: Partial<SavedViewSource> = {}): SavedViewSource {
   return {
     kind: "board",
     board_type: "kanban",
-    jql: "",
+    source_query: "",
     sub_query: null,
     sprint: null,
     last_read: "",
@@ -20,7 +20,7 @@ function jira(extra: Partial<JiraSource> = {}): JiraSource {
   };
 }
 
-function view(id: string, position: number, ref: string | null, source: JiraSource | null): TicketViewRow {
+function view(id: string, position: number, ref: string | null, source: SavedViewSource | null): TicketViewRow {
   return {
     id,
     name: id,
@@ -36,7 +36,7 @@ function view(id: string, position: number, ref: string | null, source: JiraSour
     saved_view: ref,
     count: 0,
     unreadable: null,
-    jira: source,
+    saved_view_source: source,
   };
 }
 

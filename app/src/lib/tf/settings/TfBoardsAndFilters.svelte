@@ -49,8 +49,8 @@
 
   let all = $state<TicketViewRow[] | null>(null);
   const views = $derived(sourceViews(all ?? [], source.id));
-  const boards = $derived(views.filter((view) => view.jira.kind === "board").length);
-  const filters = $derived(views.filter((view) => view.jira.kind === "filter").length);
+  const boards = $derived(views.filter((view) => view.saved_view_source.kind === "board").length);
+  const filters = $derived(views.filter((view) => view.saved_view_source.kind === "filter").length);
 
   function read() {
     ports
@@ -75,7 +75,7 @@
 
   async function toggle(view: SourceView) {
     try {
-      await ports.hideSavedView(view.id, !view.jira.hidden);
+      await ports.hideSavedView(view.id, !view.saved_view_source.hidden);
       read();
     } catch (cause) {
       push({ text: `${view.name}: ${ipcErrorMessage(cause)}`, tone: "err" });
@@ -123,19 +123,19 @@
       <thead><tr><th>In Tickets</th><th>Type</th><th>Tickets</th><th><span class="tf-sr">Hide or show</span></th></tr></thead>
       <tbody>
         {#each views as view (view.id)}
-          {@const outside = unsyncedWords(view.jira.unsynced)}
+          {@const outside = unsyncedWords(view.saved_view_source.unsynced)}
           <tr>
             <td
-              ><a href="#/tickets/{view.id}">{view.name}</a>{#if view.jira.hidden}{" "}<span class="tf-chip">hidden</span
+              ><a href="#/tickets/{view.id}">{view.name}</a>{#if view.saved_view_source.hidden}{" "}<span class="tf-chip">hidden</span
                 >{/if}</td
             >
-            <td class="tf-dim">{viewType(view.jira)}</td>
+            <td class="tf-dim">{viewType(view.saved_view_source)}</td>
             <td>{view.count ?? 0}{#if outside}{" "}<span class="tf-dim">{outside}</span>{/if}</td>
             <td class="tf-stg-end">
               <button
                 class="tf-btn tf-sm tf-ghost"
-                aria-label="{view.jira.hidden ? 'Show' : 'Hide'} {view.name}"
-                onclick={() => void toggle(view)}>{view.jira.hidden ? "Show" : "Hide"}</button
+                aria-label="{view.saved_view_source.hidden ? 'Show' : 'Hide'} {view.name}"
+                onclick={() => void toggle(view)}>{view.saved_view_source.hidden ? "Show" : "Hide"}</button
               >
             </td>
           </tr>

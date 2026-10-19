@@ -213,7 +213,7 @@ function harness(
           id,
           position: draft.position ?? h.views.length,
         };
-        h.views = [...h.views.filter((row) => row.id !== id), { ...made, count: 1, unreadable: null, jira: null }].sort(
+        h.views = [...h.views.filter((row) => row.id !== id), { ...made, count: 1, unreadable: null, saved_view_source: null }].sort(
           (a, b) => a.position - b.position,
         );
         return Promise.resolve(made);
@@ -226,7 +226,7 @@ function harness(
       hideView: (id, hidden) => {
         h.hidden.push([id, hidden]);
         const row = h.views.find((each) => each.id === id);
-        if (row?.jira) row.jira = { ...row.jira, hidden };
+        if (row?.saved_view_source) row.saved_view_source = { ...row.saved_view_source, hidden };
         return Promise.resolve();
       },
       translateView: (id) => {
@@ -236,7 +236,7 @@ function harness(
       openView: (id) => {
         h.opened.push(id);
         const row = h.views.find((each) => each.id === id);
-        if (row?.jira) row.jira = { ...row.jira, new: false };
+        if (row?.saved_view_source) row.saved_view_source = { ...row.saved_view_source, new: false };
         return Promise.resolve();
       },
       board: (perColumn, query, _savedView, lanes) => {
@@ -893,7 +893,7 @@ function view(id: string, name: string, group: string, position: number, extra: 
     saved_view: null,
     count: 3,
     unreadable: null,
-    jira: null,
+    saved_view_source: null,
     ...extra,
   };
 }
@@ -1276,7 +1276,7 @@ const FLOW_COPY: QueryTranslation = {
 
 /** A Jira board view, and a harness whose board answers it under Jira's columns, recording each read. */
 
-function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
+function jiraHarness(over: Partial<NonNullable<TicketViewRow["saved_view_source"]>> = {}): {
   h: Harness;
   jiraReads: (string | null)[];
 } {
@@ -1286,10 +1286,10 @@ function jiraHarness(over: Partial<NonNullable<TicketViewRow["jira"]>> = {}): {
       columns: FLOW_COLUMNS,
       saved_view: "jira:board-21",
       count: 18,
-      jira: {
+      saved_view_source: {
         kind: "board",
         board_type: "kanban",
-        jql: "project in (PAY, OPS) ORDER BY Rank ASC",
+        source_query: "project in (PAY, OPS) ORDER BY Rank ASC",
         sub_query: "fixVersion is EMPTY",
         sprint: null,
         last_read: "2026-10-17T09:56:00Z",
@@ -1487,21 +1487,21 @@ test("Save as a view on a Jira view is a copy too: the JQL it could test, then t
 // ---- Jira filters, new and hidden (#878) ----
 
 /** {@link jiraHarness} plus a favourite filter, the board marked as `board` says. */
-function filtersHarness(board: Partial<NonNullable<TicketViewRow["jira"]>> = {}) {
+function filtersHarness(board: Partial<NonNullable<TicketViewRow["saved_view_source"]>> = {}) {
   const { h, jiraReads } = jiraHarness();
   const flow = h.views[1]!;
-  flow.jira = { ...flow.jira!, ...board };
+  flow.saved_view_source = { ...flow.saved_view_source!, ...board };
   h.views.push(
     view("jira-filter-10300", "PAY without a fix version", "Jira filters", 2, {
       layout: "list",
       saved_view: "jira:filter-10300",
       count: 4,
-      jira: {
-        ...flow.jira!,
+      saved_view_source: {
+        ...flow.saved_view_source!,
         kind: "filter",
         board_type: null,
         sub_query: null,
-        jql: "project = PAY AND fixVersion is EMPTY",
+        source_query: "project = PAY AND fixVersion is EMPTY",
         new: false,
       },
     }),
@@ -1600,7 +1600,7 @@ test("a Scrum view names its active sprint and when it ends", async () => {
   const { h } = jiraHarness({
     board_type: "scrum",
     sub_query: null,
-    jql: "project = PAY ORDER BY Rank ASC",
+    source_query: "project = PAY ORDER BY Rank ASC",
     sprint: { id: 7, name: "Sprint 34", end_date: "2026-10-22T16:00:00Z" },
   });
   await open(h, null, "jira-board-21");

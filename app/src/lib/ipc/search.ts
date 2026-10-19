@@ -416,24 +416,24 @@ export interface TicketViewRow extends TicketView {
   count: number | null;
   /** The part of the text the grammar could not read, or `null`. */
   unreadable: string | null;
-  /** Where a Jira view comes from (#877), or `null` on a view somebody made. */
-  jira: JiraSource | null;
+  /** What the source says about the saved view a view shows (#877, #1273), or `null` on a view somebody made. */
+  saved_view_source: SavedViewSource | null;
 }
 
-/** What Jira says about a Jira view — `ticket_views::JiraSource` (#877). */
-export interface JiraSource {
+/** What a ticket system says about one of its saved views — `ticket_views::SavedViewSource` (#877, #1273). */
+export interface SavedViewSource {
   kind: "board" | "filter";
   /** `scrum`, `kanban` or `simple` for a board; `null` for a filter. */
   board_type: string | null;
-  /** The saved filter's JQL, as Jira holds it. */
-  jql: string;
+  /** The saved view's query in the source's own language, as the source holds it (Jira's JQL); empty when it sends none. */
+  source_query: string;
   /** A Kanban board's sub-filter, or `null`. */
   sub_query: string | null;
   /** A Scrum board's active sprint, or `null`. */
   sprint: { id: number; name: string; end_date: string | null } | null;
   /** RFC 3339: when the last sync read it. */
   last_read: string;
-  /** Where Jira shows it, or `null`. */
+  /** Where the source shows it, or `null`. */
   web_url: string | null;
   /** *Hide from the list* (#878, R-3.25): it keeps syncing. */
   hidden: boolean;
@@ -443,7 +443,7 @@ export interface JiraSource {
   unsynced: UnsyncedTickets[];
 }
 
-/** Tickets on a Jira view in one project the source does not sync — `ticket_views::Unsynced` (#879). */
+/** Tickets on a saved view in one project the source does not sync — `ticket_views::Unsynced` (#879). */
 export interface UnsyncedTickets {
   project: string;
   count: number;
