@@ -7349,3 +7349,46 @@ The merge-manager's rulings (Opus):
   the mirror resolves the fillers on every read, and Settings is its own page, so coming back
   from adding a source mounts the board afresh. *Reversing:* low, one `void` of the source list
   in the read effect.
+## #1296–#1298: Docs, Monitors and Code read their own role (Opus implementer, 2026-10-19)
+
+- **The Docs search narrows itself too.** *Fork:* leave `docs_search` unscoped (the tickets name
+  only `docs_tree`), or narrow it with the tree. *Ruling:* narrow it, with a §10.8 entry
+  (`1296-docs-search-reads-the-wiki-role.md`). The Docs page dropped the hits on the pages of a
+  space it had dropped; once the tree is narrowed on the server the page no longer holds those
+  spaces, so that filter had nothing to match and a wiki miss would have drawn its hits again.
+  `total` leaves out the hits not drawn, the arithmetic the shell did. *Reversing:* one bind,
+  one `where` clause and the entry.
+- **The fake gains a Confluence source that fills the wiki.** *Fork:* narrow the faked tree by
+  `fakeRoleScope` with no source to fill the wiki (an empty Docs page under `?fake-ipc`), register
+  a claimer outside the source list, or configure the source. *Ruling:* configure it in
+  `FIXTURE_SOURCES` ("Tidewater Confluence", as prototype-6's status line names one). The server
+  takes fillers from configured sources only, so a claimer outside the list would be a fake the
+  server cannot match. *Reversing:* one fixture entry; Settings and the health strip list one
+  source more.
+- **"Open-alert cards" on the Monitors tab are the down rows' *Ack*.** *Fork:* also narrow
+  `open_alerts`, or read the criterion as the tab's own drawing. *Ruling:* the tab draws no card
+  of its own; an alert is the *Ack* on a down row, which follows the roster. `open_alerts` feeds
+  the Assets view and the top strip, is no role surface in spec #1293, and is untouched.
+  *Reversing:* one more narrowed read and a §10.8 entry.
+- **A *For you* mention whose page no filler holds is left out**, where before it was drawn with
+  no space key. It follows the spaces, which is what the ticket asks. *Reversing:* one
+  `filter_map`.
+- **The page tests keep one `sourceRoles.take`, as a witness, not a stub.** *Fork:* drop every
+  `take` from the Docs, Monitors, Code and job tests, or keep one per page with a claims list
+  that would have dropped rows. *Ruling:* keep one per page and assert every row is drawn, so a
+  page that went back to keeping rows by claims fails. No test stubs a claim to make a row
+  appear. *Reversing:* delete four `take` calls once #1300 removes `keep`.
+- **`a_reading_is_drawn_only_where_its_source_declares_one` now asserts the undeclared monitor
+  is off the roster.** A source that declares no response time cannot fill monitoring, whose
+  minimum requires the path, so the row the test read a missing reading from no longer exists.
+  *Reversing:* n/a.
+- **The plan test binds the wiki's fillers, and the tree filters on `i.source_id`.** Filtering on
+  `p.source_id` let the planner walk `item_project_census_idx` per row on analysed tables, and
+  filtering on `s.id` probed `sync.item` by key on unanalysed ones; `i.source_id` keeps both of
+  `read_plans`' checks green. *Reversing:* n/a.
+- **The *Start work* repository picker stays unscoped** (`readRepos` in `TfJob.svelte`). It is
+  not a section and never kept rows by role; none of the three tickets names it. *Reversing:* one
+  `role` argument.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the reads'
+  inner functions against embedded Postgres in the `it` binary (`docs_ipc.rs`, `assets_ipc.rs`),
+  the page and job tests, and the fake-features suite. *Reversing:* n/a.
