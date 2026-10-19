@@ -1,34 +1,15 @@
 /**
  * App lifecycle and status — `crates/knobas-app/src/commands/app.rs`.
  *
- * Hand-written, and pinned to the Rust by tests in that module which
- * `include_str!` this file: a state or a field added on one side only fails
- * `cargo test`, not merely `svelte-check`.
+ * The types are generated from the Rust (`./generated/app.ts`, contract §2.6
+ * as amended by #1325): a field is explained in its Rust doc comment and
+ * nowhere else. The `invoke` functions stay hand-written, pinned to the Rust
+ * by a test in that module which `include_str!`s this file.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type { AppStatus } from "./generated/app";
 
-/**
- * How far the database has got — `commands::app::DbState`, tagged on `state`.
- *
- * A discriminated union, so `message` and `detail` are reachable only after
- * the check that identifies which state this is.
- */
-export type DbState =
-  | { state: "starting"; detail: string | null }
-  | { state: "migrating" }
-  | { state: "ready" }
-  | { state: "failed"; message: string };
-
-/** What the shell needs to decide what to draw — `commands::app::AppStatus`. */
-export interface AppStatus {
-  db: DbState;
-  /** No source configured and the first run was never completed (§14a). */
-  first_run: boolean;
-  /** The `--demo` profile: its own data dir, port and keychain suffix (P13). */
-  demo: boolean;
-  source_count: number;
-  app_version: string;
-}
+export type { AppStatus, DbState } from "./generated/app";
 
 /**
  * Liveness probe.

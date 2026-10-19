@@ -12,13 +12,19 @@ use tauri::Manager;
 
 use crate::{AppState, IpcError, Profile};
 
-/// How far the database has got.
+/// How far the database has got -- `commands::app::DbState`.
 ///
 /// Interfaces §2.1. Tagged on `state`, so TypeScript reads it as a
-/// discriminated union and the payload of a `failed` is reachable only after
-/// the check that it *is* a failure.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+/// discriminated union and `detail` and `message` are reachable only after
+/// the check that identifies which state this is.
+///
+/// - `starting`: coming up; `detail` is a line for the boot screen.
+/// - `migrating`: up, and running migrations.
+/// - `ready`: up, migrated, and answering queries.
+/// - `failed`: it will not come up; `message` is shown to the user as text.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export_to = "app.ts")]
 pub enum DbState {
     /// Coming up. `detail` is a line for the boot screen -- "downloading
     /// PostgreSQL 18.6", which on a first run is tens of seconds.
@@ -31,13 +37,14 @@ pub enum DbState {
     Failed { message: String },
 }
 
-/// What the shell needs to decide what to draw.
-#[derive(Debug, serde::Serialize)]
+/// What the shell needs to decide what to draw -- `commands::app::AppStatus`.
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "app.ts")]
 pub struct AppStatus {
     pub db: DbState,
     /// No source configured and the first run was never completed (§14a).
     pub first_run: bool,
-    /// The `--demo` profile: its own data dir, port and keychain (P13).
+    /// The `--demo` profile: its own data dir, port and keychain suffix (P13).
     pub demo: bool,
     pub source_count: u32,
     pub app_version: String,
@@ -401,66 +408,10 @@ mod tests {
         );
     }
 
-    /// Every variant, in the spelling `app/src/lib/ipc/app.ts` declares. A
-    /// state added on one side only is a screen the shell can never draw.
-    #[test]
-    fn every_db_state_has_its_typescript_counterpart() {
-        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        for state in [
-            DbState::Starting { detail: None },
-            DbState::Migrating,
-            DbState::Ready,
-            DbState::Failed {
-                message: String::new(),
-            },
-        ] {
-            let json = serde_json::to_value(&state).unwrap();
-            let tag = json["state"].as_str().unwrap().to_owned();
-            assert!(
-                mirror.contains(&format!("state: \"{tag}\"")),
-                "{tag:?} is missing from app/src/lib/ipc/app.ts"
-            );
-        }
-    }
-
-    /// The exact key set, not a `contains` check: a field added to `AppStatus`
-    /// with no counterpart in the mirror is invisible to a test that only
-    /// walks a hardcoded list.
-    #[test]
-    fn app_status_serialises_the_keys_the_mirror_declares() {
-        let status = AppStatus {
-            db: DbState::Ready,
-            first_run: false,
-            demo: true,
-            source_count: 3,
-            app_version: "0.1.0".to_owned(),
-        };
-        let json = serde_json::to_value(&status).unwrap();
-        let mut keys = json
-            .as_object()
-            .expect("an object")
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        keys.sort();
-        assert_eq!(
-            keys,
-            ["app_version", "db", "demo", "first_run", "source_count"]
-        );
-
-        let mirror = include_str!("../../../../app/src/lib/ipc/app.ts");
-        for key in &keys {
-            assert!(
-                mirror.contains(&format!("{key}:")),
-                "AppStatus.{key} is missing from app/src/lib/ipc/app.ts"
-            );
-        }
-    }
-
     /// Every command in this module is callable from the frontend.
     ///
-    /// The mirror is hand-written (contract §2.6), so a command added on the
-    /// Rust side alone compiles, lints and tests green while being unreachable
+    /// The invoke functions are hand-written (contract §2.6), so a command
+    /// added on the Rust side alone compiles, lints and tests green while being unreachable
     /// from the window -- and a command *renamed* on the Rust side alone leaves
     /// the mirror invoking a name that no longer exists, which fails only when
     /// a person clicks the button.

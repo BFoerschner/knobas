@@ -15,6 +15,14 @@ thiserror = "2"
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
 async-trait = "0.1"
+# The generated IPC mirror (#1325, contract §2.6 as amended): the TypeScript
+# shape of every type that crosses the bridge, written by
+# `knobas-app`'s `ipc_mirror` test. Pinned exactly: a new ts-rs can change the
+# text it writes, and that is a diff in every generated file. `chrono-impl`
+# and `uuid-impl` map `DateTime`/`NaiveDate` and `Uuid` to `string`; no
+# `serde-json-impl`, whose `JsonValue` is not §2.6's `unknown` (a
+# `serde_json::Value` field carries `#[ts(type = "unknown")]` instead).
+ts-rs = { version = "=12.0.1", features = ["chrono-impl", "uuid-impl"] }
 # `derive` is for `#[derive(FromRow)]`, `macros` for the `sqlx::migrate!` that
 # embeds `migrations/` in the binary -- sqlx 0.9 moved both behind these gates.
 # Neither implies compile-time-checked queries: no `query!`, no DATABASE_URL,
