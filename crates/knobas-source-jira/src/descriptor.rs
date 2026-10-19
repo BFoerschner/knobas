@@ -34,7 +34,10 @@ pub fn descriptor_template() -> SourceDescriptor {
         // path the role needs, and it answers the workflow read.
         roles: vec![knobas_source::role::RoleClaim::new(
             knobas_source::role::TICKET_SYSTEM,
-            ["reachable_transitions"],
+            [
+                "reachable_transitions",
+                knobas_source::role::TRANSLATE_QUERY,
+            ],
         )],
         // M2's ratified Jira set (issue #43, ADR-0006), plus M3.1's `log_work`
         // (issue #280). The UI renders its action bar from exactly this, so an

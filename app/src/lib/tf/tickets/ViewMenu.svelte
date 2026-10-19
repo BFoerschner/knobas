@@ -14,6 +14,7 @@
     name,
     className = "tf-vw-more",
     jira = null,
+    copies = true,
     onedit,
     onduplicate,
     ondelete,
@@ -27,6 +28,8 @@
      * (`onduplicate`, #880) only; Jira decides the rest.
      */
     jira?: "board" | "filter" | null;
+    /** Whether a Jira view's source translates its query (#1208): no *Make an editable copy* where it does not. */
+    copies?: boolean;
     onedit: () => void;
     onduplicate: () => void;
     ondelete: () => void;
@@ -90,9 +93,11 @@
         <button type="button" role="menuitem" onclick={() => pick(onedit)}
           ><b>View settings</b><span>lanes, cards and list columns</span></button
         >
-        <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
-          ><b>Make an editable copy</b><span>your own view, starting from this {jira}</span></button
-        >
+        {#if copies}
+          <button type="button" role="menuitem" onclick={() => pick(onduplicate)}
+            ><b>Make an editable copy</b><span>your own view, starting from this {jira}</span></button
+          >
+        {/if}
         <hr />
         <button type="button" role="menuitem" onclick={() => pick(onhide)}
           ><b>Hide from the list</b><span>it keeps syncing, so you can show it again</span></button

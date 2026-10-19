@@ -1,7 +1,7 @@
 //! The fixture external adapter (issue #1198, ADR-0028).
 //!
 //! A test adapter built to a WASM component against
-//! `knobas:adapter@1.1.0`. It serves three surveys, and a pipeline with one
+//! `knobas:adapter@1.2.0`. It serves three surveys, and a pipeline with one
 //! run ([`builds`], #1205), so that the host can be tested with the contract
 //! battery, every live read, and through the sync engine into the mirror,
 //! without a real product behind it. No external
@@ -22,7 +22,7 @@
 //!   blocks: who surveyed it, and its body (#1202); and CI, for the Builds
 //!   frame, with every optional read (#1205).
 //! * **Built with `--features v1_0`** it is the same adapter against the
-//!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads`: what the
+//!   frozen 1.0.0 world (`wit-1.0.0/`), which has no `downloads` or `query`: what the
 //!   host's hold on 1.0.0 components is tested with.
 //! * **`"fault": "swallow_sink"`** is a misbehaving adapter: it ignores what
 //!   `sink.item` answers and returns its cursor anyway, so the host's own
@@ -41,6 +41,9 @@
 //!   basic auth.
 //! * **`"download_mib"`** is how many MiB a download of every artifact
 //!   streams (default 1).
+//! * **`translate-query`** (#1208) reads a payload's `"survey_query"`
+//!   string as one `label` condition and leaves nothing out; a payload
+//!   without one it does not translate (`none`).
 
 mod builds;
 mod fetch;
@@ -107,6 +110,25 @@ struct Fixture;
 
 impl Guest for Fixture {
     type Adapter = Adapter;
+}
+
+#[cfg(not(feature = "v1_0"))]
+impl exports::knobas::adapter::query::Guest for Fixture {
+    fn translate_query(
+        _instance: Instance,
+        saved_view: String,
+    ) -> Result<Option<String>, SourceError> {
+        let view: serde_json::Value = serde_json::from_str(&saved_view)
+            .map_err(|e| protocol(format!("the saved view is not JSON: {e}")))?;
+        Ok(view["survey_query"].as_str().map(|query| {
+            serde_json::json!({
+                "conditions": [{ "key": "label", "negated": false, "values": [query] }],
+                "kept": 1,
+                "left_out": [],
+            })
+            .to_string()
+        }))
+    }
 }
 
 /// One instance, for one call.

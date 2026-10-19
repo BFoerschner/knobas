@@ -33,6 +33,7 @@ mod model;
 mod source;
 mod sync;
 mod time;
+mod translate;
 mod views;
 mod write;
 

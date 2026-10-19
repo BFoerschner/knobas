@@ -254,7 +254,8 @@ pub const MINIMUMS: &[Minimum] = &[
         // adapter's kind id.
         optional_kinds: &[frame(Frame::SavedView, &[])],
         reads: &["reachable_transitions"],
-        optional_reads: &[],
+        // *Make an editable copy* of a saved view (#1208).
+        optional_reads: &[TRANSLATE_QUERY],
         writes: &["transition", "comment", "create_ticket", "log_work"],
     },
     Minimum {
@@ -357,6 +358,9 @@ pub enum ClaimError {
 /// The code-host read a descriptor answers with
 /// [`clone_from`](SourceDescriptor::clone_from) (#1197).
 pub const CLONE_URLS: &str = "clone_urls";
+/// The ticket-system read [`Source::translate_query`](crate::Source::translate_query)
+/// answers (#1208): a saved view's query read into the search grammar.
+pub const TRANSLATE_QUERY: &str = "translate_query";
 
 /// Hold every role `descriptor` claims to that role's minimum, and answer the
 /// first item missing. A descriptor that claims nothing passes.

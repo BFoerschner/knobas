@@ -388,6 +388,15 @@ impl Source for JiraSource {
     ) -> Result<Option<knobas_source::view::SourceView>, SourceError> {
         Ok(None)
     }
+
+    /// A Jira view's JQL read into the search grammar (#1208): see
+    /// [`crate::translate`]. Pure, so it asks Jira nothing.
+    async fn translate_query(
+        &self,
+        view: &serde_json::Value,
+    ) -> Result<Option<knobas_source::query::Translation>, SourceError> {
+        Ok(Some(crate::translate::translate_view(view)))
+    }
 }
 
 #[cfg(test)]

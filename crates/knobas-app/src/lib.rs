@@ -519,6 +519,7 @@ pub fn run() {
             commands::search::delete_ticket_view,
             commands::search::hide_jira_view,
             commands::search::open_jira_view,
+            commands::search::translate_ticket_view,
             // #848's two Builds reads, appended at the foot: the list is
             // append-only (§10.8).
             commands::entity::pipelines,

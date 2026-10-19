@@ -132,6 +132,31 @@ fn an_instance_of_another_kind_is_refused() {
     );
 }
 
+#[tokio::test]
+async fn a_saved_view_s_query_crosses_to_the_component_and_its_translation_back() {
+    let source = load_fixture()
+        .build(instance("surveys", fault_config(Fault::None)))
+        .unwrap();
+    let copy = source
+        .translate_query(&serde_json::json!({ "survey_query": "crane 4" }))
+        .await
+        .unwrap()
+        .expect("the fixture translates a survey query");
+    assert_eq!(
+        serde_json::to_value(copy).unwrap(),
+        serde_json::json!({
+            "conditions": [{ "key": "label", "negated": false, "values": ["crane 4"] }],
+            "kept": 1,
+            "left_out": [],
+        })
+    );
+    let none = source
+        .translate_query(&serde_json::json!({}))
+        .await
+        .unwrap();
+    assert_eq!(none, None, "a view it does not translate is `none`");
+}
+
 /// A component that exports `knobas:adapter/source` at `version` and
 /// nothing in it: enough for the version check, which runs first.
 fn exporting(version: &str) -> Vec<u8> {
@@ -169,13 +194,13 @@ fn a_component_built_against_another_major_version_is_refused_at_load() {
     assert_eq!(
         error.to_string(),
         "the component is built against knobas:adapter@2.0.0, and this knobas hosts \
-         knobas:adapter@1.x up to 1.1.0"
+         knobas:adapter@1.x up to 1.2.0"
     );
 }
 
 #[test]
 fn a_component_built_against_a_newer_minor_version_is_refused_at_load() {
-    let error = load_error(&exporting("1.2.0"));
+    let error = load_error(&exporting("1.3.0"));
     assert!(matches!(error, LoadError::Unsupported { .. }), "{error:?}");
 }
 

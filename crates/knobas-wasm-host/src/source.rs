@@ -464,6 +464,46 @@ impl Source for WasmSource {
         )
     }
 
+    /// `query.translate-query` where the component exports it (#1208), and
+    /// the trait's default, `None`, where it does not: a component built
+    /// against 1.0.0 or 1.1.0 translates no query. Within the adapter's
+    /// deadline, as every call is (#1204).
+    async fn translate_query(
+        &self,
+        view: &serde_json::Value,
+    ) -> Result<Option<knobas_source::query::Translation>, SourceError> {
+        let Some(index) = self.adapter.inner.translate_query else {
+            return Ok(None);
+        };
+        let answer = limits::bounded(&self.adapter, async {
+            let mut store = new_store(
+                &self.adapter,
+                &self.instance.id,
+                SinkSlot::none(),
+                Arc::clone(&self.policy),
+            );
+            let instance = self
+                .adapter
+                .inner
+                .pre
+                .instance_pre()
+                .instantiate_async(&mut store)
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            type Answer = (Result<Option<String>, wit::SourceError>,);
+            let func = instance
+                .get_typed_func::<(wit::Instance, String), Answer>(&mut store, index)
+                .map_err(|e| failed(&self.adapter, &e))?;
+            let (answer,) = func
+                .call_async(&mut store, (self.instance.clone(), convert::to_json(view)))
+                .await
+                .map_err(|e| failed(&self.adapter, &e))?;
+            answer.map_err(convert::error)
+        })
+        .await?;
+        Self::decode(answer, "query translation")
+    }
+
     async fn artifact_preview(
         &self,
         entity: &str,
