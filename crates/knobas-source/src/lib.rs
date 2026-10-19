@@ -1175,15 +1175,20 @@ impl PullRequestState {
 /// What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
 /// Serialized as the snake_case word (`"request_changes"`); each adapter
 /// spells it its own way (Gitea's `event`).
+///
+/// - `approve`: the change may land.
+/// - `request_changes`: the change must change before it lands.
+/// - `comment`: words, and no verdict.
+///
+/// The verdicts are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum ReviewVerdict {
-    /// The change may land.
     Approve,
-    /// The change must change before it lands.
     RequestChanges,
-    /// Words, and no verdict.
     Comment,
 }
 
@@ -1231,17 +1236,23 @@ pub struct BuildParameter {
 #[derive(
     Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
 )]
+///
+/// - `http`: an http(s) URL fetched and expected to answer 2xx.
+/// - `tcp`: a TCP connection to `host:port`.
+/// - `ping`: an ICMP ping to a host.
+/// - `docker`: a container, by name, asked of the monitoring source's Docker
+///   host.
+///
+/// The kinds are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum MonitorKind {
-    /// An http(s) URL fetched and expected to answer 2xx.
     #[default]
     Http,
-    /// A TCP connection to `host:port`.
     Tcp,
-    /// An ICMP ping to a host.
     Ping,
-    /// A container, by name, asked of the monitoring source's Docker host.
     Docker,
 }
 
@@ -1261,15 +1272,20 @@ impl MonitorKind {
 /// How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
 /// the base branch. Serialized as the lowercase word (`"squash"`), which is
 /// also what a source view's merge action offers as its options.
+///
+/// - `merge`: a merge commit joining head into base.
+/// - `rebase`: the head's commits replayed onto base, no merge commit.
+/// - `squash`: the head's commits folded into one commit on base.
+///
+/// The styles are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum MergeStyle {
-    /// A merge commit joining head into base.
     Merge,
-    /// The head's commits replayed onto base, no merge commit.
     Rebase,
-    /// The head's commits folded into one commit on base.
     Squash,
 }
 
@@ -1293,13 +1309,18 @@ impl MergeStyle {
 /// brings the head up to date with its base. Serialized as the lowercase
 /// word, which is also what the view's *Update branch…* offers as its options
 /// and what Gitea's `?style=` takes.
+///
+/// - `merge`: the base merged into the head: a merge commit on the head.
+/// - `rebase`: the head's commits replayed onto the base: the head rewritten.
+///
+/// The styles are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum UpdateStyle {
-    /// The base merged into the head: a merge commit on the head.
     Merge,
-    /// The head's commits replayed onto the base: the head rewritten.
     Rebase,
 }
 

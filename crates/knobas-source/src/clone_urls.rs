@@ -78,15 +78,20 @@ pub fn is_entry(entry: &str) -> bool {
 ///
 /// Plain serde data, as everything crossing the SPI: `"base_url"`, or
 /// `{"config": "<key>"}`.
+///
+/// - `base_url`: the instance's base URL.
+/// - `{"config": <key>}`: the string the instance's config holds under this
+///   key, which the adapter's `config_schema` declares as a string property
+///   ([`config_declares`]).
+///
+/// The addresses are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum CloneFrom {
-    /// The instance's base URL.
     BaseUrl,
-    /// The string the instance's config holds under this key, which the
-    /// adapter's `config_schema` declares as a string property
-    /// ([`config_declares`]).
     Config(String),
 }
 

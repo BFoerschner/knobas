@@ -484,19 +484,25 @@ pub struct KindPaths {
 }
 
 /// How a run was started, in the shell's words (#961, #1146).
+///
+/// - `change`: a change pushed to what the pipeline builds: TeamCity's `vcs`.
+/// - `schedule`: a schedule: TeamCity's `schedule`.
+/// - `person`: a person, who [`KindPaths::started_by`] names: TeamCity's
+///   `user`.
+/// - `chain`: a step of a chain, queued because another step of it was
+///   (#1146): TeamCity's `snapshotDependency`. [`KindPaths::started_by`] may
+///   still name whoever queued the chain.
+///
+/// The triggers are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export_to = "sources.ts")]
 pub enum Trigger {
-    /// A change pushed to what the pipeline builds: TeamCity's `vcs`.
     Change,
-    /// A schedule: TeamCity's `schedule`.
     Schedule,
-    /// A person, who [`KindPaths::started_by`] names: TeamCity's `user`.
     Person,
-    /// A step of a chain, queued because another step of it was (#1146):
-    /// TeamCity's `snapshotDependency`. [`KindPaths::started_by`] may still
-    /// name whoever queued the chain.
     Chain,
 }
 
@@ -533,17 +539,22 @@ impl TriggerValue {
 
 /// Which part of a shell-owned frame a kind is: the Builds frame (ADR-0022,
 /// #848), or a ticket system's saved views (ADR-0029, #1207).
+///
+/// - `pipeline`: what a CI source runs: a TeamCity build configuration.
+/// - `run`: one execution of a pipeline: a TeamCity build.
+/// - `saved_view`: a view a ticket system keeps of its own tickets (#1207): a
+///   Jira board or filter. Each item of the kind becomes a ticket view,
+///   whichever adapter emits it; `knobas_sync::saved_views` reads its payload.
+///
+/// The parts are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
 #[ts(export_to = "sources.ts")]
 pub enum Frame {
-    /// What a CI source runs: a TeamCity build configuration.
     Pipeline,
-    /// One execution of a pipeline: a TeamCity build.
     Run,
-    /// A view a ticket system keeps of its own tickets (#1207): a Jira board
-    /// or filter. Each item of the kind becomes a ticket view, whichever
-    /// adapter emits it; `knobas_sync::saved_views` reads its payload.
     #[serde(rename = "saved_view")]
     SavedView,
 }

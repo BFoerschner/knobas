@@ -44,14 +44,19 @@ pub struct SyncProgress {
 }
 
 /// Where a run is.
+///
+/// - `fetching`: waiting on the remote system.
+/// - `writing`: writing a batch into Postgres.
+///
+/// The phases are documented here and not on each variant because the
+/// generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+/// type's and a field's doc but not a variant's (#1325).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "sources.ts")]
 pub enum SyncPhase {
     Started,
-    /// Waiting on the remote system.
     Fetching,
-    /// Writing a batch into Postgres.
     Writing,
     Finished,
     Failed,

@@ -74,6 +74,15 @@ export type BuildParameter = { name: string, value: string, };
  *
  * Plain serde data, as everything crossing the SPI: `"base_url"`, or
  * `{"config": "<key>"}`.
+ *
+ * - `base_url`: the instance's base URL.
+ * - `{"config": <key>}`: the string the instance's config holds under this
+ *   key, which the adapter's `config_schema` declares as a string property
+ *   ([`config_declares`]).
+ *
+ * The addresses are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type CloneFrom = "base_url" | { "config": string };
 
@@ -158,6 +167,16 @@ export type DbStats = { db_bytes: number, entity_count: number, item_count: numb
 /**
  * Which part of a shell-owned frame a kind is: the Builds frame (ADR-0022,
  * #848), or a ticket system's saved views (ADR-0029, #1207).
+ *
+ * - `pipeline`: what a CI source runs: a TeamCity build configuration.
+ * - `run`: one execution of a pipeline: a TeamCity build.
+ * - `saved_view`: a view a ticket system keeps of its own tickets (#1207): a
+ *   Jira board or filter. Each item of the kind becomes a ticket view,
+ *   whichever adapter emits it; `knobas_sync::saved_views` reads its payload.
+ *
+ * The parts are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type Frame = "pipeline" | "run" | "saved_view";
 
@@ -174,6 +193,23 @@ tag: string | null, artifact_sha256: string, hosts: Array<string>, template: Sou
 
 /**
  * The failure classes the frontend branches on.
+ *
+ * - `unauthorized`: the remote system refused the credential (401/403). A
+ *   human must act.
+ * - `unreachable`: the remote system could not be reached: connect, DNS, TLS,
+ *   timeout.
+ * - `not_found`: the thing addressed does not exist.
+ * - `conflict`: the write lost a race, or a uniqueness rule rejected it.
+ * - `invalid`: the arguments cannot be honoured -- a malformed id, an
+ *   unsupported combination, a mode the app is not in.
+ * - `not_ready`: the app is not there yet: the database is still starting, or
+ *   the source has never been configured. Retrying later is the right move.
+ * - `internal`: everything else. Nothing downstream can do anything but show
+ *   it.
+ *
+ * The codes are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type IpcErrorCode = "unauthorized" | "unreachable" | "not_found" | "conflict" | "invalid" | "not_ready" | "internal";
 
@@ -539,6 +575,14 @@ entry: PayloadPath, };
  * How a [`MergePullRequest`](WriteOp::MergePullRequest) lands its commits on
  * the base branch. Serialized as the lowercase word (`"squash"`), which is
  * also what a source view's merge action offers as its options.
+ *
+ * - `merge`: a merge commit joining head into base.
+ * - `rebase`: the head's commits replayed onto base, no merge commit.
+ * - `squash`: the head's commits folded into one commit on base.
+ *
+ * The styles are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type MergeStyle = "merge" | "rebase" | "squash";
 
@@ -551,6 +595,16 @@ export type MergeStyle = "merge" | "rebase" | "squash";
  * service, TCP for a database, Docker for a container, Ping for a VM. A
  * closed set, so a payload naming a check no adapter makes fails to decode at
  * `submit_write` rather than reaching a source.
+ *
+ * - `http`: an http(s) URL fetched and expected to answer 2xx.
+ * - `tcp`: a TCP connection to `host:port`.
+ * - `ping`: an ICMP ping to a host.
+ * - `docker`: a container, by name, asked of the monitoring source's Docker
+ *   host.
+ *
+ * The kinds are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type MonitorKind = "http" | "tcp" | "ping" | "docker";
 
@@ -762,6 +816,14 @@ export type ReviewSide = "old" | "new";
  * What a [`SubmitReview`](WriteOp::SubmitReview) says of the pull request.
  * Serialized as the snake_case word (`"request_changes"`); each adapter
  * spells it its own way (Gitea's `event`).
+ *
+ * - `approve`: the change may land.
+ * - `request_changes`: the change must change before it lands.
+ * - `comment`: words, and no verdict.
+ *
+ * The verdicts are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type ReviewVerdict = "approve" | "request_changes" | "comment";
 
@@ -1243,6 +1305,13 @@ export type SyncOutcome = "ok" | "unauthorized" | "unreachable" | "error";
 
 /**
  * Where a run is.
+ *
+ * - `fetching`: waiting on the remote system.
+ * - `writing`: writing a batch into Postgres.
+ *
+ * The phases are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type SyncPhase = "started" | "fetching" | "writing" | "finished" | "failed";
 
@@ -1341,6 +1410,18 @@ export type SyncTrigger = "schedule" | "manual" | "first_run" | "backfill";
 
 /**
  * How a run was started, in the shell's words (#961, #1146).
+ *
+ * - `change`: a change pushed to what the pipeline builds: TeamCity's `vcs`.
+ * - `schedule`: a schedule: TeamCity's `schedule`.
+ * - `person`: a person, who [`KindPaths::started_by`] names: TeamCity's
+ *   `user`.
+ * - `chain`: a step of a chain, queued because another step of it was
+ *   (#1146): TeamCity's `snapshotDependency`. [`KindPaths::started_by`] may
+ *   still name whoever queued the chain.
+ *
+ * The triggers are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type Trigger = "change" | "schedule" | "person" | "chain";
 
@@ -1391,6 +1472,13 @@ export type UpdateCheck = { "state": "current" } | { "state": "available", tag: 
  * brings the head up to date with its base. Serialized as the lowercase
  * word, which is also what the view's *Update branch…* offers as its options
  * and what Gitea's `?style=` takes.
+ *
+ * - `merge`: the base merged into the head: a merge commit on the head.
+ * - `rebase`: the head's commits replayed onto the base: the head rewritten.
+ *
+ * The styles are documented here and not on each variant because the
+ * generated TypeScript (`app/src/lib/ipc/generated/sources.ts`) carries a
+ * type's and a field's doc but not a variant's (#1325).
  */
 export type UpdateStyle = "merge" | "rebase";
 
