@@ -789,6 +789,8 @@ knobas-app	test/it	estate_exit::the_machine_in_a_context_brings_the_container_in
 knobas-app	test/it	external_adapter::the_fixture_component_s_items_reach_the_mirror_and_search_finds_them
 knobas-app	test/it	external_adapter_install::a_custom_role_not_namespaced_to_the_adapter_is_refused
 knobas-app	test/it	external_adapter_install::a_descriptor_that_does_not_decode_is_refused
+knobas-app	test/it	external_adapter_install::a_host_entry_that_is_neither_a_host_nor_a_whole_template_is_refused
+knobas-app	test/it	external_adapter_install::a_host_template_over_a_key_the_descriptor_does_not_declare_is_refused
 knobas-app	test/it	external_adapter_install::a_manifest_field_it_does_not_know_is_refused_naming_it
 knobas-app	test/it	external_adapter_install::a_manifest_missing_a_field_is_refused_naming_it
 knobas-app	test/it	external_adapter_install::a_manifest_that_is_not_json_is_refused
@@ -3744,6 +3746,14 @@ knobas-sync	test/scheduler_loop	trigger_all_skips_the_disabled_and_the_ones_need
 knobas-sync	test/scheduler_loop	triggering_a_source_that_does_not_exist_is_refused_without_a_log_row
 knobas-sync	test/scheduler_loop	triggering_after_shutdown_is_refused_rather_than_spawning_into_a_closed_pool
 knobas-sync	test/scheduler_loop	two_callers_watching_one_run_both_hear_it_end
+knobas-wasm-host	lib/knobas_wasm_host	allow::tests::a_fixed_host_allows_that_host_and_no_name_that_merely_starts_or_ends_with_it
+knobas-wasm-host	lib/knobas_wasm_host	allow::tests::a_template_resolves_over_the_address_and_declared_keys_only
+knobas-wasm-host	lib/knobas_wasm_host	allow::tests::a_template_whose_value_is_no_host_allows_nothing
+knobas-wasm-host	lib/knobas_wasm_host	allow::tests::an_address_is_compared_as_the_address_it_resolves_to
+knobas-wasm-host	lib/knobas_wasm_host	allow::tests::an_entry_is_a_host_or_a_whole_template
+knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_body_without_the_secret_passes_unchanged
+knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_header_holding_the_secret_is_dropped
+knobas-wasm-host	lib/knobas_wasm_host	redact::tests::a_spelling_split_across_chunks_is_redacted
 knobas-wasm-host	test/it	host::a_component_built_against_a_newer_minor_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_built_against_another_major_version_is_refused_at_load
 knobas-wasm-host	test/it	host::a_component_that_exports_no_source_is_refused_at_load
@@ -3753,3 +3763,9 @@ knobas-wasm-host	test/it	host::a_sync_emits_the_fixed_corpus_and_resumes_from_it
 knobas-wasm-host	test/it	host::an_instance_of_another_kind_is_refused
 knobas-wasm-host	test/it	host::the_descriptor_template_is_the_component_s_own
 knobas-wasm-host	test/it	host::the_host_wrapping_the_fixture_passes_the_contract_battery
+knobas-wasm-host	test/it	network::a_declared_host_that_is_not_the_instance_gets_no_credential
+knobas-wasm-host	test/it	network::a_header_token_reaches_the_instance_and_never_the_component
+knobas-wasm-host	test/it	network::a_redirect_to_an_undeclared_host_is_refused
+knobas-wasm-host	test/it	network::a_request_to_an_undeclared_host_is_refused_before_it_leaves
+knobas-wasm-host	test/it	network::basic_auth_reaches_the_instance_and_never_the_component
+knobas-wasm-host	test/it	network::the_secret_is_in_nothing_the_component_receives

@@ -38,6 +38,24 @@ wasmtime = { version = "=49.0.2", default-features = false, features = ["async",
 # the context's defaults refuse every socket and every name lookup.
 wasmtime-wasi = { version = "=49.0.2", default-features = false, features = ["p2"] }
 
+# `wasi:http` 0.2, the component's one way out (#1203): the outgoing
+# handler, held to the manifest's hosts by `net`'s hooks. Pinned with
+# wasmtime. Without its default transport (hyper over webpki roots).
+wasmtime-wasi-http = { version = "=49.0.2", default-features = false, features = ["p2"] }
+# The transport `net` sends through instead: the built-in adapters' client,
+# with the platform verifier and the system proxy.
+reqwest.workspace = true
+# Hosts and request authorities read the way a request's URL is (`allow`).
+url = "2"
+# The request, response and body types `wasi:http`'s hooks take, and the
+# redacting body (`redact`). The releases wasmtime-wasi-http resolves.
+http = "1"
+http-body = "1"
+http-body-util = "0.1"
+bytes = "1"
+# The basic-auth pair the host attaches.
+base64 = "0.22"
+
 [dev-dependencies]
 # Self-dev-dependency, so this crate's own integration tests see `test-util`
 # (the `knobas-db` and `knobas-app` convention).

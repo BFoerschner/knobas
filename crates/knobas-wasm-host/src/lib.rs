@@ -10,11 +10,12 @@
 //! and nothing else.
 //!
 //! **What the component is given.** Its own `instance` record, which holds
-//! no credential; the `sink` for a sync's items; `log`; and WASI 0.2 with
+//! no credential; the `sink` for a sync's items; `log`; WASI 0.2 with
 //! nothing in it: no directory, no environment, no argument, and the
-//! context's defaults refuse every socket and name lookup. Network access
-//! through an allowlist, and the credential the host attaches, are #1203.
-//! Call deadlines and memory caps are #1204.
+//! context's defaults refuse every socket and name lookup; and `wasi:http`
+//! 0.2's outgoing handler, held to the hosts its manifest declares, with the
+//! credential attached by the host to requests for the source's own address
+//! ([`net`], #1203). Call deadlines and memory caps are #1204.
 //!
 //! **One store per call.** Every call instantiates the component afresh,
 //! constructs its `adapter` from the instance, calls one function and drops
@@ -31,8 +32,11 @@ use wasmtime::component::{Component, Linker, ResourceTable, types::ComponentItem
 use wasmtime::{Engine, Store};
 use wasmtime_wasi::{WasiCtx, WasiCtxView, WasiView};
 
+pub mod allow;
 mod convert;
 pub mod manifest;
+mod net;
+mod redact;
 mod source;
 
 pub use source::WasmSource;
@@ -124,6 +128,9 @@ pub enum LoadError {
 #[derive(Clone)]
 pub struct WasmAdapter {
     inner: Arc<Inner>,
+    /// The hosts its manifest declares; none for a component loaded
+    /// without one, which then reaches nothing.
+    hosts: Arc<[allow::HostPattern]>,
 }
 
 struct Inner {
@@ -138,6 +145,7 @@ impl std::fmt::Debug for WasmAdapter {
         f.debug_struct("WasmAdapter")
             .field("kind", &self.inner.template.adapter_kind)
             .field("version", &self.inner.version)
+            .field("hosts", &self.hosts)
             .finish_non_exhaustive()
     }
 }
@@ -182,6 +190,8 @@ impl WasmAdapter {
         let mut linker = Linker::<HostState>::new(&engine);
         wasmtime_wasi::p2::add_to_linker_async(&mut linker)
             .map_err(|e| LoadError::Link(format!("{e:#}")))?;
+        wasmtime_wasi_http::p2::add_only_http_to_linker_async(&mut linker)
+            .map_err(|e| LoadError::Link(format!("{e:#}")))?;
         bindings::Adapter::add_to_linker::<_, wasmtime::component::HasSelf<_>>(
             &mut linker,
             |state| state,
@@ -198,6 +208,7 @@ impl WasmAdapter {
                 version,
                 template: placeholder_descriptor(),
             }),
+            hosts: Arc::from([]),
         };
         // Twice: the template's id is the adapter kind (`descriptor_template`'s
         // rule for a compiled-in adapter), which only the first answer names.
@@ -211,6 +222,20 @@ impl WasmAdapter {
             .expect("nothing else holds the adapter yet")
             .template = template;
         Ok(adapter)
+    }
+
+    /// This adapter with the hosts its manifest declares: what each of its
+    /// sources may reach, resolved per source at [`Self::build`].
+    #[must_use]
+    pub fn with_hosts(mut self, hosts: Vec<allow::HostPattern>) -> Self {
+        self.hosts = Arc::from(hosts);
+        self
+    }
+
+    /// The hosts its manifest declares.
+    #[must_use]
+    pub fn hosts(&self) -> &[allow::HostPattern] {
+        &self.hosts
     }
 
     /// The adapter kind the component says it is.
@@ -236,10 +261,14 @@ impl WasmAdapter {
     /// A source of this adapter, from a configured instance: the registry's
     /// `build`. The component's descriptor is read once, here.
     ///
+    /// Its policy is set here too: the manifest's hosts resolved over the
+    /// instance's address and declared config, and its credential.
+    ///
     /// # Errors
     ///
     /// [`SourceError::Protocol`] for an instance of another kind, an id that
-    /// is not a usable instance id, or a component whose descriptor does
+    /// is not a usable instance id, a credential the host cannot attach
+    /// ([`net::Policy::for_source`]), or a component whose descriptor does
     /// not decode or does not name the instance it was given.
     pub fn build(&self, instance: SourceInstance) -> Result<Box<dyn Source>, SourceError> {
         if instance.kind != self.kind() {
@@ -251,8 +280,17 @@ impl WasmAdapter {
         }
         knobas_source::instance::validate_instance_id(&instance.id)
             .map_err(|error| SourceError::protocol(error.to_string()))?;
+        let policy = Arc::new(net::Policy::for_source(
+            &instance,
+            &self.hosts,
+            &self.inner.template.config_schema,
+        )?);
         let wit_instance = convert::instance(&instance);
-        let descriptor = block_on(source::descriptor(self, wit_instance.clone()))?;
+        let descriptor = block_on(source::descriptor(
+            self,
+            wit_instance.clone(),
+            Arc::clone(&policy),
+        ))?;
         if descriptor.id != instance.id || descriptor.adapter_kind != instance.kind {
             return Err(SourceError::protocol(format!(
                 "the external adapter {:?} described itself as {:?} of kind {:?} when built as \
@@ -267,6 +305,7 @@ impl WasmAdapter {
             self.clone(),
             wit_instance,
             descriptor,
+            policy,
         )))
     }
 
@@ -280,6 +319,7 @@ impl WasmAdapter {
                 base_url: String::new(),
                 config: "{}".to_owned(),
             },
+            Arc::new(net::Policy::none(id)),
         ))
     }
 }
@@ -346,6 +386,8 @@ where
 /// What one call's store holds.
 pub(crate) struct HostState {
     wasi: WasiCtx,
+    http: wasmtime_wasi_http::WasiHttpCtx,
+    hooks: net::Hooks,
     table: ResourceTable,
     sink: source::SinkSlot,
     /// The instance id, for the component's log lines.
@@ -353,12 +395,14 @@ pub(crate) struct HostState {
 }
 
 impl HostState {
-    fn new(source_id: String, sink: source::SinkSlot) -> Self {
+    fn new(source_id: String, sink: source::SinkSlot, policy: Arc<net::Policy>) -> Self {
         Self {
             // Nothing in it: no preopened directory, no environment, no
             // argument, stdio to nowhere, and the defaults refuse every
             // socket address and every name lookup.
             wasi: WasiCtx::builder().build(),
+            http: wasmtime_wasi_http::WasiHttpCtx::new(),
+            hooks: net::Hooks::new(policy),
             table: ResourceTable::new(),
             sink,
             source_id,
@@ -375,10 +419,25 @@ impl WasiView for HostState {
     }
 }
 
-fn new_store(adapter: &WasmAdapter, source_id: &str, sink: source::SinkSlot) -> Store<HostState> {
+impl wasmtime_wasi_http::WasiHttpView for HostState {
+    fn http(&mut self) -> wasmtime_wasi_http::WasiHttpCtxView<'_> {
+        wasmtime_wasi_http::WasiHttpCtxView {
+            ctx: &mut self.http,
+            table: &mut self.table,
+            hooks: &mut self.hooks,
+        }
+    }
+}
+
+fn new_store(
+    adapter: &WasmAdapter,
+    source_id: &str,
+    sink: source::SinkSlot,
+    policy: Arc<net::Policy>,
+) -> Store<HostState> {
     Store::new(
         &adapter.inner.engine,
-        HostState::new(source_id.to_owned(), sink),
+        HostState::new(source_id.to_owned(), sink, policy),
     )
 }
 

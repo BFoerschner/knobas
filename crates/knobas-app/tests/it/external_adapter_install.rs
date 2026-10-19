@@ -129,6 +129,31 @@ async fn a_manifest_field_it_does_not_know_is_refused_naming_it() {
 }
 
 #[tokio::test]
+async fn a_host_template_over_a_key_the_descriptor_does_not_declare_is_refused() {
+    let message = refusal_of(|m| m["hosts"] = serde_json::json!(["{base_url}", "{tenant}"])).await;
+    says(
+        &message,
+        "install refused: the manifest's host template {tenant} names no key the descriptor's \
+         config_schema declares",
+    );
+}
+
+#[tokio::test]
+async fn a_host_entry_that_is_neither_a_host_nor_a_whole_template_is_refused() {
+    for entry in [
+        "https://api.example.com",
+        "{tenant}.example.com",
+        "*.example.com",
+    ] {
+        let message = refusal_of(|m| m["hosts"] = serde_json::json!([entry])).await;
+        says(
+            &message,
+            "install refused: the manifest is not well formed: host",
+        );
+    }
+}
+
+#[tokio::test]
 async fn an_artifact_outside_the_release_directory_is_refused() {
     let message = refusal_of(|m| m["artifact"]["file"] = "../fixture.wasm".into()).await;
     says(
@@ -430,6 +455,56 @@ async fn an_installed_fixture_is_offered_syncs_and_survives_a_restart() {
         add_and_sync(&pool, &connector, &restarted, "surveys-two").await,
         3
     );
+    // The row's hosts came back with it: the restarted adapter reaches its
+    // source's address, which `{base_url}` allows, and nothing else.
+    let (address, served) = one_response().await;
+    let reach = |fetch: String| {
+        use knobas_sync::scheduler::AdapterRegistry as _;
+        restarted
+            .build(knobas_source::instance::SourceInstance {
+                id: "surveys-three".to_owned(),
+                kind: "wasm-fixture".to_owned(),
+                display_name: "Harbour surveys".to_owned(),
+                base_url: address.clone(),
+                auth: None,
+                secret: None,
+                account: None,
+                config: serde_json::json!({ "fetch": fetch }),
+            })
+            .unwrap()
+    };
+    let refused = reach("http://localhost:9/elsewhere".to_owned())
+        .test_connection()
+        .await;
+    assert!(refused.is_err(), "{refused:?}");
+    let info = reach(format!("{address}/ping"))
+        .test_connection()
+        .await
+        .unwrap();
+    assert!(info.detail.unwrap().contains("pong"));
+    served.await.unwrap();
+}
+
+/// A local server that answers one request `pong`; answers its address and
+/// the task that serves it.
+async fn one_response() -> (String, tokio::task::JoinHandle<()>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = format!("http://{}", listener.local_addr().unwrap());
+    let served = tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = Vec::new();
+        let mut chunk = [0u8; 1024];
+        while !buf.windows(4).any(|w| w == b"\r\n\r\n") {
+            let n = socket.read(&mut chunk).await.unwrap();
+            assert!(n > 0, "the request ended early");
+            buf.extend_from_slice(&chunk[..n]);
+        }
+        let reply = "HTTP/1.1 200 OK\r\ncontent-length: 4\r\nconnection: close\r\n\r\npong";
+        socket.write_all(reply.as_bytes()).await.unwrap();
+        let _ = socket.shutdown().await;
+    });
+    (address, served)
 }
 
 /// The restart through the app's own bring-up (`sources::bring_up`, the body

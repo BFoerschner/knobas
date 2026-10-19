@@ -522,7 +522,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
       source_url: "/releases/knobas-adapter.json",
       tag: null,
       artifact_sha256: "a".repeat(64),
-      hosts: ["{base_url}"],
+      hosts: ["{base_url}", "api.example.com", "{mirror}"],
       template: SURVEYS,
     }),
   );
@@ -537,7 +537,7 @@ test("Add a source installs an adapter from a manifest, and it joins the radios 
 
   expect(p.installAdapter).toHaveBeenCalledWith("/releases/knobas-adapter.json");
   expect(dialog().querySelector('[role="status"]#tf-add-manifest-note')?.textContent?.trim()).toBe(
-    "Installed Harbour surveys 0.1.0.",
+    "Installed Harbour surveys 0.1.0. It may reach this source's address, api.example.com and the host in its mirror setting, and no other host.",
   );
   const radios = [...dialog().querySelectorAll<HTMLLabelElement>(".tf-radio label")];
   expect(radios.map((label) => label.querySelector("span")?.firstChild?.textContent)).toEqual([

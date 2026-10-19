@@ -6056,3 +6056,84 @@ The merge-manager's rulings (PR #1242, on Opus):
 - **An inbox, standup or connection row whose kind is unknown now opens the item page, not
   Tickets.** It draws *Could not read …* when the mirror lacks the item, which says more than
   Tickets did. Accepted as part of the default case. **Reversing:** one guard in `itemHash`.
+
+## #1203 HTTP allowlist and credential injection for external adapters (2026-10-19)
+
+Reserved for Björn, ruled by the implementer on Opus:
+
+- **The §10.8 entry is ratified** (`contract/10.8/1203-external-adapter-http-allowlist.md`): an
+  external adapter may import `wasi:http` 0.2's outgoing handler beside `knobas:adapter@1.0.0`,
+  and the world keeps its version. Reasoning: #1198's entry already gives the component WASI 0.2
+  beside the world and names #1203 for network access; no WIT type of the world changes, so no
+  component built against 1.0.0 stops linking. Only the world's doc comment changes, to stop
+  saying "nothing else". **Reversing:** dropping `wasi:http` is a new major version.
+
+The implementer's rulings:
+
+- **`wasi:http` with a host-side filter, not a knobas `http` interface.** Adapter authors get the
+  standard bindings (`wasip2`, any language's `wasi:http` client), and the WIT world stays frozen.
+  The filter is wasmtime-wasi-http's `send_request` hook. **Reversing:** a `knobas:adapter/http`
+  interface would be a minor version and a second way out to police.
+- **The transport is the workspace's reqwest**, not wasmtime-wasi-http's default (hyper over
+  webpki roots): a corporate CA and the system proxy work as they do for the built-ins, and no
+  second TLS stack enters the tree. No redirects, no cookies. **Reversing:** low (`net::send`).
+- **A refused request is `connection-refused`.** The spec asks for "an error the adapter sees as a
+  connectivity failure"; `HTTP-request-denied` sits with the request-shape errors, which an
+  adapter may map to a protocol fault. The host logs the refused host. **Reversing:** one line.
+- **A template is a whole entry, `{key}`.** `{tenant}.example.com` is refused at install: a
+  substituted value could carry `/`, `@` or `:` and turn the entry into another host, and no
+  adapter needs it yet. **Reversing:** low, additive.
+- **Template keys are `base_url` and the declared config keys.** `base_url` is not a config key
+  (it is the instance's address field), but `{base_url}` is the spec's own example. Install
+  refuses a template over any other key, and resolving ignores one. **Reversing:** low.
+- **A fixed host without a port allows the scheme's default port only; a URL value allows its own
+  scheme and port only.** So `{base_url}` of `https://jira.example` allows neither
+  `http://jira.example` nor `http://jira.example:443`.
+  **Reversing:** low.
+- **The credential's shape.** `Pat` and `ApiToken` are `Authorization: Bearer`, `UserPassword` is
+  basic auth over the config's `username` (the Jira convention), `OAuth` fails the build (ADR-0028:
+  not supported until an adapter needs it). A missing secret sends no credential, so the server's
+  401 reads as `missing_secret` does for a built-in. **Reversing:** low; a descriptor-declared
+  header scheme would be a §10.8 entry on `knobas-source`.
+- **The credential goes to the instance's origin, scheme, host and port, on any path.**
+  **Reversing:** low.
+- **Instance responses are redacted** (every spelling of the secret the host sent, streamed across
+  chunk boundaries; headers holding one dropped; `content-length` and trailers dropped; an
+  undecoded body refused, and the component's `Accept-Encoding` dropped so reqwest decodes gzip).
+  The brief names echoed headers. What redaction cannot catch, and is accepted: a server that
+  transforms the echo (upper-cases it, re-encodes it) or splits it across range requests. The
+  component never receives the secret from knobas itself; redaction covers a careless server.
+  **Reversing:** low (`redact`).
+- **Install shows the hosts as words**, not resolved addresses: no source exists at install, so
+  `{base_url}` is "this source's address" and `{key}` "the host in its key setting". The note reads
+  `InstalledAdapter.hosts`, so no IPC change. Showing the resolved list on the source's form is not
+  done. **Reversing:** low (`TfAddSource.svelte`).
+- **A 30 s connect timeout** on the transport. The component's `request-options` timeouts are
+  not honoured, and an outgoing body is buffered whole: the whole-call deadline and the memory cap
+  are #1204's, which bound both. **Reversing:** one line.
+
+The review's rulings (Standards axis, the implementer on Opus):
+
+- **#1198's minor-version rule is amended to say "a new `knobas:adapter` interface"**, so it agrees
+  with this entry's reading that `wasi:http` is WASI's and not a version bump. **Reversing:** a
+  1.1.0 bump instead.
+- **Redaction also takes the lower-cased form-encoding and the JSON escaping of the secret.**
+  Upper-casing and HTML entities stay accepted residual. **Reversing:** low.
+
+The merge-manager's rulings (PR #1243, on Opus):
+
+- **The §10.8 sign-off stands.** Witnessed, not only argued: the pre-#1203 fixture (built from
+  `origin/main`, no `wasi:http` import) passes `knobas-wasm-host`'s `host` tests under this host,
+  so a 1.0.0 component that does not import `wasi:http` still links. #1198's amended minor rule
+  agrees with this entry. **Reversing:** as the implementer's ruling.
+- **The transformed-echo gap is accepted, no follow-up.** It needs the reader's own instance to
+  reflect the credential re-encoded or sliced (a `Range` on an echo endpoint); Jira-, Gitea- and
+  GitLab-shaped APIs do not echo `Authorization`, and every literal spelling the host sent is
+  redacted. Closing it fully is not possible by pattern. **Reversing:** strip `Range` on instance
+  requests, one line in `net::Policy::attach`.
+- **The system proxy may see the credential of an `http://` source.** Over `https://` it sees only
+  a CONNECT. The built-in adapters behave the same, so no change. **Reversing:** `.no_proxy()` on
+  the client.
+- **A fixed host that resolves to a local address is a follow-up (#1244, backlog).** The allowlist
+  holds names, so a declared name can be pointed at loopback or the LAN. No credential goes there.
+  **Reversing:** n/a.

@@ -23,8 +23,11 @@
 //! claims is covered by its kinds, declared paths and reads
 //! ([`knobas_source::role::check`]).
 //!
-//! `hosts` and `limits` are stored as written and enforced by nothing yet:
-//! the allowlist is #1203, the deadline and memory cap #1204.
+//! `hosts` is the adapter's allowlist (#1203, [`crate::allow`]): each entry
+//! is a fixed host or a whole-entry template `{key}`, and a template's key
+//! must be `base_url` or a key the descriptor's `config_schema` declares.
+//! `limits` are stored as written and enforced by nothing yet: the deadline
+//! and memory cap are #1204.
 
 use knobas_source::SourceDescriptor;
 use knobas_source::role::ClaimError;
@@ -46,7 +49,7 @@ pub struct Manifest {
     pub interface_version: String,
     pub artifact: Artifact,
     /// The hosts the adapter may reach, fixed (`api.example.com`) or as a
-    /// template over its config (`{base_url}`). Enforced from #1203.
+    /// template over its config (`{base_url}`): [`crate::allow`].
     #[serde(default)]
     pub hosts: Vec<String>,
     /// The limits the adapter asks for. Enforced from #1204.
@@ -110,6 +113,11 @@ pub enum Refusal {
         manifest: String,
         descriptor: String,
     },
+    #[error(
+        "the manifest's host template {{{key}}} names no key the descriptor's config_schema \
+         declares (nor base_url)"
+    )]
+    UndeclaredTemplate { key: String },
     #[error("the adapter's role claims are refused: {0}")]
     Role(#[from] ClaimError),
 }
@@ -150,6 +158,7 @@ impl Manifest {
             return Err(Refusal::Manifest("adapter_version is empty".to_owned()));
         }
         manifest.interface()?;
+        manifest.host_patterns()?;
         let file = &manifest.artifact.file;
         // One normal component, and no `:`: on Windows `C:x.wasm` is a
         // drive-relative path, which `Path::join` would follow off the release.
@@ -166,6 +175,19 @@ impl Manifest {
             )));
         }
         Ok(manifest)
+    }
+
+    /// The `hosts` entries, read.
+    ///
+    /// # Errors
+    ///
+    /// [`Refusal::Manifest`] naming the first entry that is neither a fixed
+    /// host nor a whole-entry template.
+    pub fn host_patterns(&self) -> Result<Vec<crate::allow::HostPattern>, Refusal> {
+        self.hosts
+            .iter()
+            .map(|entry| crate::allow::HostPattern::parse(entry).map_err(Refusal::Manifest))
+            .collect()
     }
 
     /// The interface version the manifest names.
@@ -218,6 +240,7 @@ pub fn check(manifest: Manifest, artifact: Vec<u8>) -> Result<Checked, Refusal> 
         });
     }
     check_descriptor(&manifest, &adapter.template())?;
+    let adapter = adapter.with_hosts(manifest.host_patterns()?);
     Ok(Checked {
         manifest,
         adapter,
@@ -226,11 +249,13 @@ pub fn check(manifest: Manifest, artifact: Vec<u8>) -> Result<Checked, Refusal> 
 }
 
 /// The descriptor's half of the static checks: it names the manifest's
-/// kind and version, and its role claims hold.
+/// kind and version, every host template names a key its `config_schema`
+/// declares (or `base_url`), and its role claims hold.
 ///
 /// # Errors
 ///
-/// [`Refusal::Disagrees`] or [`Refusal::Role`].
+/// [`Refusal::Disagrees`], [`Refusal::Manifest`],
+/// [`Refusal::UndeclaredTemplate`] or [`Refusal::Role`].
 pub fn check_descriptor(manifest: &Manifest, descriptor: &SourceDescriptor) -> Result<(), Refusal> {
     let disagrees = |field, manifest: &str, descriptor: &str| Refusal::Disagrees {
         field,
@@ -250,6 +275,16 @@ pub fn check_descriptor(manifest: &Manifest, descriptor: &SourceDescriptor) -> R
             &manifest.adapter_version,
             &descriptor.adapter_version,
         ));
+    }
+    let declared = crate::allow::declared_keys(&descriptor.config_schema);
+    for pattern in manifest.host_patterns()? {
+        if let Some(key) = pattern.template_key()
+            && !crate::allow::resolvable(key, &declared)
+        {
+            return Err(Refusal::UndeclaredTemplate {
+                key: key.to_owned(),
+            });
+        }
     }
     knobas_source::role::check(descriptor)?;
     Ok(())

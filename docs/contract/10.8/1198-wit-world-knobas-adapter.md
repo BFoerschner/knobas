@@ -7,7 +7,8 @@
   reserved-steps rule; the ruling is in `docs/decisions/2026-10-unattended-rulings.md`.
 
   **What is frozen.** The file, from 1.0.0 on. A knobas release hosts one major version. A minor
-  version only adds (a new interface the host provides or reads, a new function on `adapter`
+  version only adds (a new `knobas:adapter` interface the host provides or reads; WASI 0.2's
+  own interfaces beside the world, `wasi:http` among them since #1203, are not `knobas:adapter`'s, a new function on `adapter`
   that the host looks up as optional, a new JSON shape inside a `json` value), and each minor is
   a §10.8 entry of its own, as this one is. **A new case in a WIT variant or a new field in a WIT
   record is not additive**: wasmtime type-checks a component's functions against the host's
