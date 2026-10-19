@@ -81,8 +81,8 @@ export interface ViewGroup {
  */
 export function groupViews(views: TicketViewRow[], find: string): ViewGroup[] {
   const found = views
-    .filter((view) => view.source_view?.hidden !== true)
-    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.source_view?.source_query ?? view.query}`, find))
+    .filter((view) => view.saved_view_source?.hidden !== true)
+    .filter((view) => find.trim() === "" || matchesAll(`${view.name} ${view.saved_view_source?.source_query ?? view.query}`, find))
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
   const typed = [...new Set(found.map((view) => view.group))].filter(
     (group) => !([...OWN_GROUPS, ...JIRA_GROUPS] as readonly string[]).includes(group),
@@ -114,7 +114,7 @@ export function viewColumns(board: MiniBoardColumn[], own: ViewColumn[]): MiniBo
  */
 export function hiddenViews(views: TicketViewRow[]): TicketViewRow[] {
   return views
-    .filter((view) => view.source_view?.hidden === true)
+    .filter((view) => view.saved_view_source?.hidden === true)
     .sort((a, b) => a.position - b.position || a.id.localeCompare(b.id));
 }
 

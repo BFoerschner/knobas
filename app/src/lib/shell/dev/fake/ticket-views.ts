@@ -129,7 +129,7 @@ interface FakeJira {
   member: (key: string) => boolean;
   /** `translate_ticket_view` (#1208): the Jira adapter's reading of its query, written out as it answers. */
   copy: QueryTranslation;
-  /** The row's `source_view`, typed by the mirror so the fake cannot drift from it (#1273). */
+  /** The row's `saved_view_source`, typed by the mirror so the fake cannot drift from it (#1273). */
   source: SavedViewSource;
 }
 const READ = "2026-10-17T09:56:00Z";
@@ -233,7 +233,7 @@ jiraFilter(10251, "Resolved this week", "project in (PAY, OPS) AND resolved >= -
   copied([is("project", "PAY", "OPS")], 1, ["resolved >= -7d", "knobas has no condition for resolved"]));
 VIEWS.forEach((view, position) => (view.position = position));
 
-const savedViewOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
+const fixtureOf = (ref: string | null) => JIRA.find((jira) => jira.ref === ref) ?? null;
 const keyNumber = (key: string) => Number.parseInt(key.split("-")[1] ?? "0", 10);
 
 interface BoardCard {
@@ -252,7 +252,7 @@ interface Board<Card extends BoardCard> {
  * `commands::entity::saved_view_board`, which is the authority.
  */
 export function fakeJiraBoard<Card extends BoardCard>(ref: string, whole: Board<Card>, perColumn: number | null): Board<Card> {
-  const jira = savedViewOf(ref);
+  const jira = fixtureOf(ref);
   const view = VIEWS.find((candidate) => candidate.saved_view === ref);
   if (!jira || !view) throw { code: "not_found", message: `no Jira view is called ${ref}`, source_id: null };
   const ordered = (cards: Card[]) => cards.filter((card) => jira.member(card.key)).sort((a, b) => keyNumber(a.key) - keyNumber(b.key));
@@ -291,18 +291,18 @@ export function handlers(): Record<string, Handler> {
       VIEWS.slice()
         .sort((a, b) => a.position - b.position)
         .map((view) => {
-          const jira = savedViewOf(view.saved_view);
+          const jira = fixtureOf(view.saved_view);
           if (jira) {
             const count = fakeTicketKeys().filter((key) => jira.member(key)).length;
-            return { ...view, count, unreadable: null, source_view: jira.source };
+            return { ...view, count, unreadable: null, saved_view_source: jira.source };
           }
           const part = unreadable(view.query);
-          return { ...view, count: part === null ? fakeTicketCount(view.query) : null, unreadable: part, source_view: null };
+          return { ...view, count: part === null ? fakeTicketCount(view.query) : null, unreadable: part, saved_view_source: null };
         }),
     save_ticket_view: (args) => {
       const sent = args["view"] as Omit<View, "id" | "position"> & { id: string | null; position: number | null };
       // *View settings* on a Jira view keeps what Jira decides (#877).
-      const stored = VIEWS.find((view) => view.id === sent.id && savedViewOf(view.saved_view) !== null);
+      const stored = VIEWS.find((view) => view.id === sent.id && fixtureOf(view.saved_view) !== null);
       const draft = stored
         ? { ...sent, name: stored.name, group: stored.group, query: stored.query, columns: stored.columns, saved_view: stored.saved_view }
         : sent;
@@ -323,7 +323,7 @@ export function handlers(): Record<string, Handler> {
     delete_ticket_view: (args) => {
       const at = VIEWS.findIndex((view) => view.id === args["id"]);
       if (at < 0) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
-      if (savedViewOf(VIEWS[at]!.saved_view))
+      if (fixtureOf(VIEWS[at]!.saved_view))
         throw { code: "invalid", message: `${String(args["id"])} is a Jira view: it comes from Jira at every sync and cannot be deleted here`, source_id: null };
       VIEWS.splice(at, 1);
       return null;
@@ -332,7 +332,7 @@ export function handlers(): Record<string, Handler> {
     hide_saved_view: (args) => {
       const view = VIEWS.find((each) => each.id === args["id"]);
       if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
-      const jira = savedViewOf(view.saved_view);
+      const jira = fixtureOf(view.saved_view);
       if (!jira)
         throw { code: "invalid", message: `${view.id} is not a Jira view: only a Jira view hides from the list; delete your own`, source_id: null };
       jira.source.hidden = args["hidden"] === true;
@@ -342,14 +342,14 @@ export function handlers(): Record<string, Handler> {
     translate_ticket_view: (args) => {
       const view = VIEWS.find((each) => each.id === args["id"]);
       if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
-      const jira = savedViewOf(view.saved_view);
+      const jira = fixtureOf(view.saved_view);
       if (!jira) throw { code: "invalid", message: `${view.id} is a view of your own`, source_id: null };
       return jira.copy;
     },
     open_saved_view: (args) => {
       const view = VIEWS.find((each) => each.id === args["id"]);
       if (!view) throw { code: "not_found", message: `no ticket view is called ${String(args["id"])}`, source_id: null };
-      const jira = savedViewOf(view.saved_view);
+      const jira = fixtureOf(view.saved_view);
       if (jira) jira.source.new = false;
       return null;
     },

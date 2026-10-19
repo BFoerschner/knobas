@@ -11,7 +11,7 @@
   `ticket_views`, `commands/search.rs`):
 
   ```rust
-  pub struct TicketViewRow { /* … */ pub source_view: Option<SavedViewSource> } // was `jira: Option<JiraSource>`
+  pub struct TicketViewRow { /* … */ pub saved_view_source: Option<SavedViewSource> } // was `jira: Option<JiraSource>`
   pub struct SavedViewSource { /* … */ pub source_query: String }             // was `JiraSource`, field `jql`
   ```
 
@@ -19,9 +19,9 @@
   `sub_query`, `sprint`, `last_read`, `web_url`, `hidden`, `new`, `unsynced`) is unchanged.
   `source_query` is the saved view's query in the source's own language (Jira's JQL), still read
   from `sync.saved_view.jql`: that column and the adapter's payload key `jql` are not renamed.
-  Mirrored in `app/src/lib/ipc/search.ts` (`TicketViewRow.source_view: SavedViewSource | null`,
+  Mirrored in `app/src/lib/ipc/search.ts` (`TicketViewRow.saved_view_source: SavedViewSource | null`,
   `export interface SavedViewSource`, `source_query: string`) and the fake IPC
-  (`fake/ticket-views.ts`, whose rows are now typed by `SavedViewSource`); the shell's
+  (`fake/ticket-views.ts`, whose fixture's facts are now typed by `SavedViewSource`); the shell's
   `jiraSourceId` is `savedViewSourceId`. Nothing stored carries these names: the row is computed
   at read time from `knobas.ticket_view` and `sync.saved_view`, whose columns are unchanged, so
   backups, share exports and their restore are untouched.
@@ -29,6 +29,6 @@
   Pinned by `ticket_views.rs`' mirror test, which now also checks the other direction for
   `TicketViewRow` and `SavedViewSource` (every field the mirror declares is one the wire sends,
   so a field left on its old name in `search.ts` fails), `fake-tauri.test.ts` (the fake's
-  `ticket_views` answers the facts under `source_view`), `views.test.ts` (a saved view is found
+  `ticket_views` answers the facts under `saved_view_source`), `views.test.ts` (a saved view is found
   by its source's query), and the existing Jira-views tests
   (`crates/knobas-app/tests/it/jira_views_ipc.rs`), unchanged but for the names.

@@ -36,7 +36,7 @@ function view(id: string, position: number, ref: string | null, source: SavedVie
     saved_view: ref,
     count: 0,
     unreadable: null,
-    source_view: source,
+    saved_view_source: source,
   };
 }
 

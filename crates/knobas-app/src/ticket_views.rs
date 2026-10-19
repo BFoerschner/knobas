@@ -116,7 +116,7 @@ pub struct TicketViewRow {
     pub unreadable: Option<String>,
     /// What the source says about the saved view a view shows (#877, #1273),
     /// or `None` on a view somebody made.
-    pub source_view: Option<SavedViewSource>,
+    pub saved_view_source: Option<SavedViewSource>,
 }
 
 /// What a ticket system says about one of its saved views (#877, #1273,
@@ -138,7 +138,7 @@ pub struct SavedViewSource {
     pub sprint: Option<serde_json::Value>,
     /// When the last sync read it (RFC 3339).
     pub last_read: chrono::DateTime<chrono::Utc>,
-    /// Where Jira shows it, or `None`.
+    /// Where the source shows it, or `None`.
     pub web_url: Option<String>,
     /// *Hide from the list* (#878, R-3.25): it keeps syncing, and the views
     /// pane draws it as one line at the bottom with *Show*.
@@ -146,14 +146,14 @@ pub struct SavedViewSource {
     /// Turned up after its source's first sync and not opened yet (#878,
     /// R-3.20).
     pub new: bool,
-    /// The tickets Jira put on it that knobas does not have, per project the
+    /// The tickets the source put on it that knobas does not have, per project the
     /// source does not sync, most first (#879, R-3.23): the Tickets warn line
     /// and *Boards and filters*' "and 9 in WEB, not synced" (#878, R-13a.2).
     /// A missing ticket of a project the source syncs is a sync still to come.
     pub unsynced: Vec<Unsynced>,
 }
 
-/// How many tickets on a Jira view are in one project the source does not
+/// How many tickets on a saved view are in one project the source does not
 /// sync (#879, R-3.23).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Unsynced {
@@ -241,19 +241,19 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
                 Some((count, _)) => knobas_search::Reading::Count(*count),
                 None => reading,
             };
-            let source_view = source.map(|(_, source)| source);
+            let saved_view_source = source.map(|(_, source)| source);
             match reading {
                 knobas_search::Reading::Count(count) => TicketViewRow {
                     view,
                     count: Some(count),
                     unreadable: None,
-                    source_view,
+                    saved_view_source,
                 },
                 knobas_search::Reading::Unreadable(part) => TicketViewRow {
                     view,
                     count: None,
                     unreadable: Some(part),
-                    source_view,
+                    saved_view_source,
                 },
             }
         })
@@ -827,7 +827,7 @@ mod tests {
             view: view.clone(),
             count: None,
             unreadable: None,
-            source_view: Some(SavedViewSource {
+            saved_view_source: Some(SavedViewSource {
                 kind: String::new(),
                 board_type: None,
                 source_query: String::new(),
@@ -852,8 +852,8 @@ mod tests {
             .iter()
             .chain(&keys(&row["columns"][0]))
             .chain(&keys(&row["list_sort"]))
-            .chain(&keys(&row["source_view"]))
-            .chain(&keys(&row["source_view"]["unsynced"][0]))
+            .chain(&keys(&row["saved_view_source"]))
+            .chain(&keys(&row["saved_view_source"]["unsynced"][0]))
             .chain(&keys(&draft))
         {
             assert!(
@@ -883,11 +883,18 @@ mod tests {
         // `undefined` in the shell.
         for (interface, sent) in [
             ("export interface TicketViewRow extends TicketView {", &row),
-            ("export interface SavedViewSource {", &row["source_view"]),
+            (
+                "export interface SavedViewSource {",
+                &row["saved_view_source"],
+            ),
         ] {
-            let at = mirror.find(interface).unwrap();
+            let at = mirror
+                .find(interface)
+                .unwrap_or_else(|| panic!("{interface} is not in the mirror"));
             let body = &mirror[at + interface.len()..];
-            let body = &body[..body.find("\n}").unwrap()];
+            let body = &body[..body
+                .find("\n}")
+                .unwrap_or_else(|| panic!("{interface} never closes"))];
             for line in body.lines() {
                 let Some((field, _)) = line.strip_prefix("  ").and_then(|l| l.split_once(':'))
                 else {

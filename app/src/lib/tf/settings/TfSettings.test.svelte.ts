@@ -170,7 +170,7 @@ const JIRA_VIEWS: TicketViewRow[] = [
   saved_view: `jira:${(id as string).replace("jira-", "")}`,
   count: count as number,
   unreadable: null,
-  source_view: {
+  saved_view_source: {
     kind: kind as "board" | "filter",
     board_type: type as string | null,
     source_query: "",

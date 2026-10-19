@@ -6744,13 +6744,17 @@ The merge-manager's rulings (Opus):
   *Reversing:* low.
 ## #1273: a ticket view's saved-view facts take the role's names (Opus implementer, 2026-10-19)
 
-- **The words.** *Fork:* what replaces `TicketViewRow.jira: Option<JiraSource>`. *Ruling:* the
-  ticket's example, `source_view: Option<SavedViewSource>` (`source_view: SavedViewSource | null`
-  in `search.ts`). The type says what it is: what a ticket system says about one of its saved
-  views. The field sits beside #1245's `saved_view` (the saved view's id), and the two read as a
-  pair: which saved view, and what its source says about it. *Reasoning:* ADR-0029's *saved
-  view* and #1245's word for it; the ticket named it. *Reversing:* low (one §10.8 entry and a
-  mechanical rename).
+- **The words.** *Fork:* what replaces `TicketViewRow.jira: Option<JiraSource>`; the ticket
+  offers `source_view: SavedViewSource` as an example. *Ruling:* the type `SavedViewSource` as
+  offered, the field `saved_view_source` (`saved_view_source: SavedViewSource | null` in
+  `search.ts`), not `source_view`. *Reasoning:* *source view* is already a glossary term
+  (`CONTEXT.md`, ADR-0020: what an adapter draws when the detail opens, `SourceView` in
+  `knobas_source::view` and `ipc/entity.ts`), so a `source_view` field holding something else
+  would give one word two meanings. `saved_view_source` is the field named by its type, and sits
+  beside #1245's `saved_view` (the saved view's id): which saved view, and what its source says
+  about it. ADR-0029's *saved view*, #1245's word. The standards review caught the clash after
+  the first push. `boards.ts`' `SourceView` type (from #878, not this PR) has the same clash and
+  is added to #1285. *Reversing:* low (one §10.8 entry and a mechanical rename).
 - **The `jql` field (the question the ticket left open).** *Fork:* keep `jql` on the wire,
   rename it on the wire only, or rename it with its storage column. *Ruling:* rename it on the
   wire to `source_query`, and keep the column `sync.saved_view.jql` and the adapter's payload
@@ -6758,14 +6762,15 @@ The merge-manager's rulings (Opus):
   and #1192 says *"JQL is Jira's answer"* to that, not the only answer, so a second ticket
   system's saved view would arrive with its query under Jira's name. The criterion asks that the
   facts name no adapter. `source_query` rather than `query` because the row already carries the
-  view's own `query` (search text in knobas' grammar), and `view.source_view.query` next to
+  view's own `query` (search text in knobas' grammar), and `view.saved_view_source.query` next to
   `view.query` would mean two different languages under one word. The payload key is the
   adapter's own frame path (ADR-0007), which `knobas-sync` reads in one place. The column is
   storage, and a rename there is a migration the ticket does not ask for. It is filed with the
   shell-side names as #1285 (`backlog`). *Reversing:* low.
 - **Scope.** *Fork:* how far into the shell to follow the type. *Ruling:* the wire field and its
-  type, their mirrors, the type's `jql` field, the helpers the ticket names (`jiraOf` in the fake and
-  in `views.test.ts`, `jiraSourceId`), and every read of `.jira` on a row. Left for #1285: the
+  type, their mirrors, the type's `jql` field, the helpers the ticket names (`jiraOf`: in the fake
+  `fixtureOf`, as it returns the fixture record, and in `views.test.ts` `savedViewOf`;
+  `jiraSourceId`), and every read of `.jira` on a row. Left for #1285: the
   component `JiraSourceLine.svelte`, `jiraKindWords`, `draftJiraCopy`, the `jira` props and
   locals that hold a `SavedViewSource`, the CSS class `.tf-vw-jql`, and every user-facing word
   ("JQL", "Open in Jira"), which would change what the app draws. The fake's Jira fixture

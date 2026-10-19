@@ -278,8 +278,8 @@
 
   /** *Duplicate*; on a Jira view, *Make an editable copy* (#880, R-3.25), from its source's reading (#1208). */
   async function copyView(row: TicketViewRow, known: QueryTranslation | null = null) {
-    if (row.source_view === null) return newView(draftCopy(row));
-    const jira = row.source_view;
+    if (row.saved_view_source === null) return newView(draftCopy(row));
+    const jira = row.saved_view_source;
     const copy = known ?? (await translation(row));
     if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy), editing: null };
   }
@@ -287,7 +287,7 @@
   function editView(row: TicketViewRow) {
     const opened = { draft: draftEdit(row), editing: row, copy: null };
     drafting = opened;
-    if (row.source_view === null || !offersCopy(row)) return;
+    if (row.saved_view_source === null || !offersCopy(row)) return;
     // *A copy keeps …* waits for the source's answer; a failed one leaves the line out.
     ports.translateView(row.id).then(
       (copy) => {
@@ -319,11 +319,11 @@
   /** The base query the board is read with: the view's text, `null` when there is nothing to read. */
   const base = $derived(view === null ? "" : view === undefined || view.unreadable !== null ? null : view.query);
   const sessionKey = $derived(viewId ?? "");
-  /** The Jira view the board reads (#877), or `null`: Jira decides its tickets and their order. */
-  const savedViewId = $derived(view?.source_view ? view.saved_view : null);
+  /** The saved view the board reads (#877), or `null`: its source decides its tickets and their order. */
+  const savedViewId = $derived(view?.saved_view_source ? view.saved_view : null);
   /** Where *Choose which* goes: the first Jira view's source, else the sources. */
   const jiraSettings = $derived.by(() => {
-    const ref = (views ?? []).find((row) => row.source_view !== null)?.saved_view;
+    const ref = (views ?? []).find((row) => row.saved_view_source !== null)?.saved_view;
     return ref ? sourceHash(savedViewSourceId(ref)) : "#/settings";
   });
 
@@ -562,8 +562,8 @@
    * test, then what the bar adds.
    */
   async function saveAsView() {
-    if (view?.source_view) {
-      const [row, jira, extra, now] = [view, view.source_view, toQuery({ ...config, base: "" }, filter), showing];
+    if (view?.saved_view_source) {
+      const [row, jira, extra, now] = [view, view.saved_view_source, toQuery({ ...config, base: "" }, filter), showing];
       const copy = await translation(row);
       if (copy !== null) drafting = { ...draftJiraCopy(row, jira, copy, extra, now), editing: null };
     } else newView(draftFromFilter(view ?? null, toQuery(config, filter), showing));
@@ -626,7 +626,7 @@
   const openedNew = new Set<string>();
   $effect(() => {
     const opened = view;
-    if (!opened || opened.source_view?.new !== true || openedNew.has(opened.id)) return;
+    if (!opened || opened.saved_view_source?.new !== true || openedNew.has(opened.id)) return;
     openedNew.add(opened.id);
     untrack(() => {
       ports
@@ -817,13 +817,13 @@
           <div class="tf-vw-row">
             <a href="#/tickets/{row.id}" aria-current={row.id === viewId ? "true" : undefined}
               ><span class="tf-vw-name"><Marked text={row.name} typed={find} /></span
-              >{#if row.source_view?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
+              >{#if row.saved_view_source?.new}<span class="tf-vw-new">new</span>{/if}{#if row.count !== null && row.count > 0}{" "}<span
                   class="tf-count">{row.count}</span
                 >{/if}</a
             >
             <ViewMenu
               name={row.name}
-              jira={row.source_view?.kind ?? null}
+              jira={row.saved_view_source?.kind ?? null}
               copies={offersCopy(row)}
               onedit={() => editView(row)}
               onduplicate={() => copyView(row)}
@@ -870,7 +870,7 @@
   <section class="tf-board-wrap">
     <div class="tf-board-head">
       <h1>{view?.name ?? (viewId === null ? "All tickets" : "")}</h1>
-      {#if view && view.source_view === null}<span class="tf-q"
+      {#if view && view.saved_view_source === null}<span class="tf-q"
           >{view.query.trim() === "" ? "every synced ticket" : view.query}</span
         >{/if}
       {#if view !== undefined && (view === null || view.unreadable === null)}
@@ -885,11 +885,11 @@
       {/if}
       {#if view}
         <button type="button" class="tf-btn tf-sm" onclick={() => editView(view)}
-          >{view.source_view === null ? "Edit view" : "View settings"}</button
+          >{view.saved_view_source === null ? "Edit view" : "View settings"}</button
         >
         <ViewMenu
           name="this view"
-          jira={view.source_view?.kind ?? null}
+          jira={view.saved_view_source?.kind ?? null}
           copies={offersCopy(view)}
           className="tf-btn tf-sm tf-ghost"
           onedit={() => editView(view)}
@@ -899,9 +899,9 @@
         />
       {/if}
     </div>
-    {#if view?.source_view && view.saved_view}
+    {#if view?.saved_view_source && view.saved_view}
       <JiraSourceLine
-        jira={view.source_view}
+        jira={view.saved_view_source}
         name={view.name}
         sourceId={savedViewSourceId(view.saved_view)}
         openExternal={ports.openExternal ?? openExternal}
@@ -937,7 +937,7 @@
     {/snippet}
     {#snippet saveButton()}
       <!-- On a Jira view it is a copy, so a source that translates no query offers none (#1208). -->
-      {#if !view?.source_view || offersCopy(view)}
+      {#if !view?.saved_view_source || offersCopy(view)}
         <button type="button" class="tf-btn tf-sm tf-ghost tf-vw-savef" onclick={() => void saveAsView()}>Save as a view</button>
       {/if}
     {/snippet}
@@ -1083,11 +1083,11 @@
       groups={groupNames}
       fields={suggested?.fields ?? []}
       parents={suggested?.parents ?? []}
-      jira={editing?.source_view ?? null}
+      jira={editing?.saved_view_source ?? null}
       copiedFrom={drafting.from ?? null}
       copy={drafting.copy ?? null}
-      oncopy={editing?.source_view && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
-      board={(perColumn, query) => readBoard(perColumn, query, editing?.source_view ? editing.saved_view : null)}
+      oncopy={editing?.saved_view_source && offersCopy(editing) ? () => void copyView(editing, drafting?.copy ?? null) : undefined}
+      board={(perColumn, query) => readBoard(perColumn, query, editing?.saved_view_source ? editing.saved_view : null)}
       onsave={save}
       ondelete={editing === null ? undefined : deleteFromEditor}
       onclose={() => (drafting = null)}
