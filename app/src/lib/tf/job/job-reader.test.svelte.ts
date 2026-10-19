@@ -6,7 +6,7 @@
  */
 import { expect, test } from "vitest";
 
-import type { ContextRow, EntityDetail, EntityFilter, EntityRow } from "../../ipc/entity";
+import type { ContextRow, EntityDetail, EntityFilter, EntityRow, JobLinkSets, Reached } from "../../ipc/entity";
 import { createJobReader, type JobReaderPorts } from "./job-reader.svelte";
 
 /** Lets every settled promise's callbacks run. */
@@ -97,12 +97,12 @@ function fakes(over: { failing?: string[] } = {}) {
     jobReach: async (id) => {
       asked.push(`jobReach ${id}`);
       await wait(id);
-      return [{ entity_id: `repo of ${id}`, kind: "repo", title: id, origin: "direct", via: null } as never];
+      return [{ entity_id: `repo of ${id}`, kind: "repo", step: `repo of ${id}`, origin: { kind: "own" } } satisfies Reached];
     },
     jobLinkSets: async (id) => {
       asked.push(`jobLinkSets ${id}`);
       await wait(id);
-      return { sets: [], parent: { entity_id: `parent of ${id}` } as never };
+      return { sets: [], parent: { ticket: `parent of ${id}`, title: null, links: [] } } satisfies JobLinkSets;
     },
     getAsset: (id) => Promise.reject(new Error(`no asset ${id}`)),
     credentialHealth: () => {
@@ -134,7 +134,7 @@ function slots(reader: ReturnType<typeof createJobReader>) {
     transitions: reader.transitions,
     thread: reader.thread?.me,
     lastVisit: reader.lastVisit,
-    inherited: (reader.inherited?.parent as { entity_id: string } | null | undefined)?.entity_id,
+    inherited: reader.inherited?.parent?.ticket,
     reached: [...reader.reached.keys()],
     code: reader.code?.map((one) => one.title),
     builds: reader.builds?.map((one) => one.title),

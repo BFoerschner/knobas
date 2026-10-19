@@ -65,6 +65,12 @@ export type JobReaderPorts = Pick<
   | "syncStatus"
 >;
 
+/** One repository *Start work*'s dropdown offers. */
+export interface RepoChoice {
+  entity_id: string;
+  title: string;
+}
+
 export interface JobReaderOptions {
   /** What *Time this week* counts from. */
   today: () => Date;
@@ -80,7 +86,7 @@ export interface JobReader {
   readonly week: WeekReading | null;
   /** Why the job could not be read, or `null`. */
   readonly failure: string | null;
-  /** Every configured source, for which ticket is the reader's. */
+  /** Every configured source, for which ticket is the person's own. */
   readonly sources: SourceFacts[];
   /** Every source's credential and last run: the Builds section's warning. */
   readonly health: CredentialHealth[];
@@ -90,7 +96,7 @@ export interface JobReader {
   readonly checkout: CheckoutView | null;
   readonly checkoutOf: string | null;
   /** Every repository, for *Start work*'s dropdown; `null` until asked. */
-  readonly repos: { entity_id: string; title: string }[] | null;
+  readonly repos: RepoChoice[] | null;
   readonly builds: EntityRow[] | null;
   readonly pages: EntityRow[] | null;
   readonly monitors: EntityRow[] | null;
@@ -101,7 +107,7 @@ export interface JobReader {
   readonly inherited: JobLinkSets | null;
   readonly thread: Thread | null;
   readonly threadFailure: string | null;
-  /** When the reader last opened this job before now: `null` for never. */
+  /** When the person last opened this job before now: `null` for never. */
   readonly lastVisit: string | null;
   readonly proposals: SuggestionEntry[] | null;
   /** Opens the job `segment` names: every slot starts fresh, and an answer for the last job is dropped. */
@@ -148,7 +154,7 @@ function fresh() {
     pages: null as EntityRow[] | null,
     monitors: null as EntityRow[] | null,
     assets: null as AssetLine[] | null,
-    repos: null as { entity_id: string; title: string }[] | null,
+    repos: null as RepoChoice[] | null,
   };
 }
 
@@ -164,7 +170,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
   /** The read's generation, so an answer for a ticket left behind is dropped. */
   let token = 0;
 
-  async function open(wanted: string, mine: number) {
+  async function readJob(wanted: string, mine: number) {
     try {
       const listed = await ports.listSources().catch(() => [] as SourceFacts[]);
       if (mine !== token) return;
@@ -421,7 +427,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
     open(segment) {
       const mine = ++token;
       Object.assign(state, fresh());
-      void open(segment, mine);
+      void readJob(segment, mine);
     },
     rereadReach(id) {
       if (state.detail?.row.entity_id !== id) return;
@@ -434,7 +440,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
       });
     },
     rereadDetail(id = state.detail?.row.entity_id) {
-      if (!id || state.detail?.row.entity_id !== id) return;
+      if (id === undefined || state.detail?.row.entity_id !== id) return;
       const mine = token;
       ports.getEntity(id).then(
         (again) => {
@@ -453,6 +459,7 @@ export function createJobReader(ports: JobReaderPorts, options: JobReaderOptions
         (view) => {
           if (mine === token && of === state.checkoutOf) state.checkout = view;
         },
+        // The line keeps what it has; the next open reads it again.
         () => {},
       );
     },
