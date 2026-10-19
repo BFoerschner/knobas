@@ -352,6 +352,51 @@ test("builds: 59 pipelines by name, each with at most twelve runs, and pipeline_
   expect(() => h["pipeline_runs"]!({ pipelineId: "teamcity:buildType:Nope" })).toThrow();
 });
 
+/** Runs `read` with `role` recorded as missed on fixture source `id`, then takes the miss back. */
+function withMiss<T>(id: string, role: string, read: () => T): T {
+  const source = FIXTURE_SOURCES.find((entry) => entry.id === id) as { role_misses?: { role: string }[] };
+  source.role_misses = [{ role }];
+  try {
+    return read();
+  } finally {
+    delete source.role_misses;
+  }
+}
+
+test("docs: the tree and the search read the wiki's fillers alone, so a recorded wiki miss empties both (#1296)", () => {
+  const h = demoHandlers() as Calls;
+  type Tree = { spaces: { source_id: string }[]; last_read: string | null; for_you: unknown[] };
+  const tree = h["docs_tree"]!({}) as Tree;
+  expect(new Set(tree.spaces.map((space) => space.source_id))).toEqual(new Set(["confluence"]));
+  expect(tree.last_read).not.toBeNull();
+  const hits = () => (h["docs_search"]!({ query: "payout", space: null }) as { hits: unknown[] }).hits;
+  expect(hits().length).toBeGreaterThan(0);
+  withMiss("confluence", "wiki", () => {
+    expect(h["docs_tree"]!({})).toEqual({ spaces: [], last_read: null, for_you: [] });
+    expect(hits()).toEqual([]);
+  });
+  expect((h["docs_tree"]!({}) as Tree).spaces).toHaveLength(tree.spaces.length);
+});
+
+test("monitors: the roster reads monitoring's fillers alone, paused one included, and a recorded miss takes Kuma's off (#1297)", () => {
+  const h = demoHandlers() as Calls;
+  type Row = { source_id: string; tombstoned: boolean };
+  const roster = h["monitor_roster"]!({}) as Row[];
+  expect(new Set(roster.map((row) => row.source_id))).toEqual(new Set(["kuma"]));
+  expect(roster.some((row) => row.tombstoned)).toBe(true);
+  withMiss("kuma", "monitoring", () => expect(h["monitor_roster"]!({})).toEqual([]));
+});
+
+test("code: every read Code makes for the code host role answers code host fillers alone, never Jira's or Kuma's (#1298)", () => {
+  const h = demoHandlers() as Calls;
+  for (const [kinds, order] of [[["repo"], "updated_desc"], [["pr"], "attention"], [["pr"], "updated_desc"], [["branch"], "updated_desc"]] as const) {
+    const filter = { sources: [], kinds, updated_within_days: null, order, context: null, project: null, include_deleted: false, reach: null, role: "code-host" };
+    const rows = (h["list_entities"]!({ filter, limit: 1000, offset: 0 }) as { rows: { source_id: string; kind: string }[] }).rows;
+    expect(rows.every((row) => ["mock", "gitea"].includes(row.source_id) && kinds.includes(row.kind as never))).toBe(true);
+    if (kinds[0] !== "branch") expect(rows.length).toBeGreaterThan(0);
+  }
+});
+
 test("builds: pipelines reads CI's fillers alone, so a recorded CI miss takes the source's pipelines off (#1295)", () => {
   const h = demoHandlers() as Calls;
   const sources = () => [...new Set((h["pipelines"]!({}) as { source_id: string }[]).map((p) => p.source_id))];

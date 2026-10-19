@@ -40,7 +40,7 @@
   import { ipcErrorMessage } from "../../ipc";
   import { codeFacts, entityCheckout, getEntity, jobReach, listContexts, listEntities, type EntityRow } from "../../ipc/entity";
   import { listSources } from "../../ipc/sources";
-  import { CODE_HOST, sourceRoles } from "../roles.svelte";
+  import { CODE_HOST } from "../roles.svelte";
   import FilterBar from "../filter/FilterBar.svelte";
   import { sessionFilter } from "../filter/filter-state.svelte";
   import type { FilterConfig, FilterScope } from "../filter/filter";
@@ -57,7 +57,6 @@
     GROUP_LABEL,
     GROUP_ORDER,
     headerLine,
-    keptPage,
     openCount,
     openPrsOf,
     PR_FLAGS,
@@ -106,7 +105,13 @@
   /** How many `entity_checkout` reads run at once: each may run `git status`. */
   const CHECKOUT_LANES = 4;
 
+  /**
+   * Every read Code makes asks for the code host role, so the mirror answers
+   * its fillers' rows alone and the page draws them as read; the kinds are
+   * the page's pick within the role (#1298, ADR-0029 as amended on 2026-10-19).
+   */
   const filterOf = (kinds: string[], order: EntityFilter["order"], reach: string | null = null): EntityFilter => ({
+    role: CODE_HOST,
     sources: [],
     kinds,
     updated_within_days: null,
@@ -117,18 +122,10 @@
     reach,
   });
 
-  let readRepos = $state<EntityPage | null>(null);
-  let readAttention = $state<EntityPage | null>(null);
-  let readEveryPr = $state<EntityPage | null>(null);
-  let readBranches = $state<EntityRow[]>([]);
-  // Code draws the sources that claim the code host role, never by adapter
-  // kind (#1196, ADR-0029): a row of any other source is dropped here.
-  const ofCodeHosts = (read: EntityPage | null): EntityPage | null =>
-    read === null ? null : keptPage(read, (sourceId) => sourceRoles.draws(CODE_HOST, sourceId));
-  const repos = $derived(ofCodeHosts(readRepos));
-  const attention = $derived(ofCodeHosts(readAttention));
-  const everyPr = $derived(ofCodeHosts(readEveryPr));
-  const branches = $derived(sourceRoles.keep(CODE_HOST, readBranches));
+  let repos = $state<EntityPage | null>(null);
+  let attention = $state<EntityPage | null>(null);
+  let everyPr = $state<EntityPage | null>(null);
+  let branches = $state<EntityRow[]>([]);
   let sources = $state<{ id: string; base_url?: string | null }[]>([]);
   let failed = $state<string | null>(null);
   let checkouts = $state<Record<string, CheckoutView>>({});
@@ -145,14 +142,14 @@
     };
     ports.listEntities(filterOf(["repo"], "updated_desc"), LIMIT, 0).then((page) => {
       if (!live) return;
-      readRepos = page;
+      repos = page;
       void readCheckouts(page.rows.map((row) => row.entity_id), () => live);
     }, fail);
     ports.listEntities(filterOf(["pr"], "attention"), LIMIT, 0).then((page) => {
-      if (live) readAttention = page;
+      if (live) attention = page;
     }, fail);
     ports.listEntities(filterOf(["pr"], "updated_desc"), LIMIT, 0).then((page) => {
-      if (live) readEveryPr = page;
+      if (live) everyPr = page;
     }, fail);
     ports.listSources().then(
       (rows) => {
@@ -174,11 +171,11 @@
       jobs = open;
       const own = open[0];
       if (current === null || own === undefined || keyOf(own.id) !== current) {
-        readBranches = [];
+        branches = [];
         return;
       }
       const page = await ports.listEntities(filterOf(["branch"], "updated_desc", own.id), 50, 0).catch(() => null);
-      if (live) readBranches = page?.rows ?? [];
+      if (live) branches = page?.rows ?? [];
     });
     return () => {
       live = false;

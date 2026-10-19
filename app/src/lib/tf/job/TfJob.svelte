@@ -94,7 +94,6 @@
   import TfSaveSet from "./TfSaveSet.svelte";
   import { ASSET_LIMIT, reachFilter, readSection, runKindsOf, SECTION_LIMIT, SECTION_READS, type FrameKinds, type SectionRead } from "./sections";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
-  import { CODE_HOST, MONITORING, sourceRoles, WIKI } from "../roles.svelte";
   import { currentJob } from "./current.svelte";
   import TfCodeSection from "./TfCodeSection.svelte";
   import TfDeps from "../deps/TfDeps.svelte";
@@ -506,8 +505,9 @@
     const rows = await readSection(ports.listEntities, id, SECTION_READS.code);
     if (mine !== token) return;
     code = rows;
-    // A clone is looked for in the repositories Code draws, never another source's.
-    const sorted = byAttention(sourceRoles.keep(CODE_HOST, rows));
+    // A clone is looked for in the repositories Code draws: the read asked for
+    // the code host role, so they are its fillers' alone (#1298).
+    const sorted = byAttention(rows);
     const candidates = [
       ...sorted.filter((row) => row.kind === "branch"),
       ...sorted.filter((row) => row.kind === "repo"),
@@ -632,10 +632,6 @@
   const mine = $derived(detail ? isMine(detail, sources) : false);
   const starting = $derived(detail ? offersStartWork(detail.status, mine) : false);
   const blocked = $derived(detail ? blockerEntries(detail) : []);
-  // Each section draws the rows of the sources that fill its role (#1196, #1230).
-  const codeRows = $derived(code === null ? null : sourceRoles.keep(CODE_HOST, code));
-  const pageRows = $derived(pages === null ? null : sourceRoles.keep(WIKI, pages));
-  const monitorRows = $derived(monitors === null ? null : sourceRoles.keep(MONITORING, monitors));
   const stale = $derived(staleBuilds(sources, health, sync, builds ?? [], today()));
   /** What *Start work* suggests: a repository the ticket already reaches. */
   const suggestedRepo = $derived(
@@ -718,7 +714,7 @@
           {/if}
           <div class="tf-grid">
             {#if !starting}
-              <TfCodeSection rows={codeRows} {reached} {checkout} {checkoutOf} {layers} {apps} />
+              <TfCodeSection rows={code} {reached} {checkout} {checkoutOf} {layers} {apps} />
               <TfSection id="builds" title="Builds" openLabel="Open Builds view" openHref="#/builds" footHref="#/builds" rows={lines(builds)} rollup={builds ? buildsRollup(builds) : null}>
                 {#snippet before()}
                   {#each stale as warning (warning.sourceId)}
@@ -731,8 +727,8 @@
               </TfSection>
             {/if}
             <TfSection id="assets" title="Assets" openLabel="Open in Dependencies" openHref="#/job/{encodeURIComponent(key)}/map" footHref="#/assets" rows={assetLines} rollup={assets ? assetsRollup(assets) : null} />
-            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitorRows)} rollup={monitorRows ? monitorsRollup(monitorRows) : null} />
-            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pageRows)} rollup={pageRows ? pagesRollup(pageRows) : null} />
+            <TfSection id="monitors" title="Monitors" openLabel="Open Monitors" openHref="#/monitors" footHref="#/monitors" onopen={() => (sessionFilter("monitors").scope = "job")} rows={lines(monitors)} rollup={monitors ? monitorsRollup(monitors) : null} />
+            <TfSection id="pages" title="Pages" openLabel="Open Docs view" openHref="#/docs" footHref="#/docs" onopen={() => (sessionFilter("docs").scope = "job")} rows={lines(pages)} rollup={pages ? pagesRollup(pages) : null} />
           </div>
         {:else if current.id === "conversation"}
           <TfConversation
