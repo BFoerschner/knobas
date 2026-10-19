@@ -6812,3 +6812,67 @@ The merge-manager's rulings (Opus):
   system's query would otherwise arrive under Jira's name. `query` would clash with the view's
   own knobas-grammar `query` on the same row, and renaming the `sync.saved_view.jql` column is a
   migration the ticket did not ask for, so it is left to #1285. *Reversing:* low.
+
+### #1283: implementer's rulings (Opus)
+
+- **How a guarded request is held when a system proxy carries it.** *Fork:* the ticket's three:
+  send guarded requests direct (`no_proxy`), resolve and judge the name before handing it to the
+  proxy, or refuse a guarded request a proxy would carry. *Ruling:* resolve and judge first, then
+  hand it over. Both other choices cut off a reader whose only way out is the proxy (a
+  corporate network, an endpoint agent's local proxy) from every host a manifest fixes, and
+  sending direct also goes around a proxy the reader configured. Judging first holds a name that
+  points home, which is the criterion's case. *Cost:* a name whose owner answers public to knobas
+  and local to the proxy (rebinding, TTL 0) still reaches the proxy's side; with a proxy on the
+  reader's machine, that is the reader's loopback. No credential goes there. *Reversing:* low
+  (one block in `net::send`).
+- **The check runs for every guarded request, proxied or not.** *Fork:* judge first only when a
+  proxy will carry the request. *Ruling:* every one. reqwest does not say which requests its
+  system proxy takes, and matching the system's settings ourselves would be a second copy that
+  can disagree with it. On a direct connection the resolver still judges the addresses the
+  connector then uses, so rebinding stays closed there; the cost is one more lookup, which the
+  system's cache mostly answers. This narrows #1244's "The check sits in a resolver of a second
+  client", which turned down a check before the request for its second lookup: the resolver stays
+  the guard on a direct connection, and the check before only adds the proxied case.
+  *Reversing:* low.
+- **A name knobas cannot resolve goes on to the proxy.** *Fork:* refuse it. *Ruling:* go on. A
+  network whose only way out is the proxy may answer no outside name to the reader's machine; on
+  a direct connection the resolver fails the same lookup anyway. A hostile owner gains nothing
+  the rebinding cost above does not already give. *Reversing:* low.
+- **The proxy seam for tests.** *Fork:* a test sets the process's proxy settings, or the client
+  takes a test's proxy. *Ruling:* `fake_proxy(name, url)` under `test-util`, a `Proxy::custom`
+  on the two clients that sends only the names a test registered through the test's proxy. A
+  proxy set by a test on its own client cannot reach the process-wide clients, and environment
+  proxies would leak into every parallel test. With `test-util` on, the clients do not read the
+  system proxy (reqwest drops it once a proxy is added); no shipped build has the feature.
+  *Reversing:* low.
+- **Seams, chosen without a person to confirm them** (tdd asks to agree them first): the SPI
+  (`dyn Source` over the fixture component) against a local server and a local forwarding proxy
+  that carries every request to that server, standing in for a proxy that resolves the name to
+  `127.0.0.1`. *Reversing:* n/a.
+
+### #1283: merge-manager's rulings (Opus)
+
+- **The rebinding window through a proxy.** *Fork:* hold the PR until a proxied request is guarded
+  against rebinding too, or merge with the static case closed. *Ruling:* merge. #1244 named the
+  threat as reach, not theft: no credential goes to a guarded host. The criterion's case (a name
+  that points home) is closed; what stays open needs a hostile owner timing two answers, and only
+  for a reader who configured a proxy. The only ways to close it (`no_proxy`, or refusing proxied
+  guarded requests) cut a proxy-only reader off every fixed host, which #1244's merge-manager
+  already turned down. *Reversing:* low.
+- **A name knobas cannot resolve does not reopen criterion 1.** *Fork:* refuse it. *Ruling:* keep
+  the implementer's pass-on. On the reader's machine a local proxy asks the same system resolver,
+  so a name that fails for knobas and answers loopback to the proxy needs the owner to fail the
+  first query and answer the second, which is the rebinding case above, not a new one. A name
+  that steadily resolves to `127.0.0.1` is refused (the criterion's test). *Reversing:* low.
+- **`fake_proxy` under `test-util` does not reach a shipped build.** `knobas-app` depends on
+  `knobas-wasm-host` without features and turns `test-util` on only as a dev-dependency; with
+  `resolver = "2"` that does not unify into `cargo build` (`cargo tree -p knobas-app -e
+  normal,features -i knobas-wasm-host` shows only `default`). No recipe or `tauri.conf.json`
+  passes `--features`. *Reversing:* n/a.
+- **The module comment still said the guard does not hold through a proxy.** The PR described a
+  "Through a system proxy" paragraph, but the module comment kept #1244's sentence. Rewritten by
+  the merge-manager to describe the check before hand-off and its cost. *Reversing:* n/a.
+- **The lookup before hand-off has no bound of its own.** On a proxy-only network whose DNS drops
+  outside queries rather than answering them, each guarded request now waits for the system's
+  lookup timeout before it goes to the proxy (the call's deadline still holds it). Not in the
+  ticket's criteria: follow-up #1290 (`backlog`). *Reversing:* n/a.
