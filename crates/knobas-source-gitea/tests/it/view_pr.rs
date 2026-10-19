@@ -208,10 +208,11 @@ async fn slow_gitea(
         .mount(&server)
         .await;
     // The repository's labels, which *Add label…* offers (#1194): `bug` is on
-    // the pull request already.
+    // the pull request already. Gitea counts them (#1235).
     get(format!("{REPO}/labels"))
         .respond_with(
             ResponseTemplate::new(200)
+                .insert_header("X-Total-Count", "2")
                 .set_body_json(json!([{ "id": 3, "name": "bug" }, { "id": 7, "name": "needs-qa" }]))
                 .set_delay(delay),
         )
@@ -2570,7 +2571,7 @@ async fn label_page(
 /// *Add label…* reads every page of the repository's labels (#1235): where
 /// the first fifty are all on the pull request, the fifty-first is offered,
 /// not "every label is on this pull request". Gitea's `X-Total-Count` says
-/// when the listing is whole; without one, a short page is the last.
+/// when the listing is whole; without one, an empty page does (#81's rule).
 #[tokio::test]
 async fn add_label_offers_the_repositorys_labels_past_the_first_page() {
     let first: Vec<Value> = (100..150)
@@ -2591,15 +2592,13 @@ async fn add_label_offers_the_repositorys_labels_past_the_first_page() {
         .await;
         let last = json!([{ "id": 200, "name": "late" }]);
         label_page(&server, labels.clone(), 2, last, total).await;
-        // A page past the end, which a correct read never asks for.
-        label_page(
-            &server,
-            labels,
-            3,
-            json!([{ "id": 300, "name": "beyond" }]),
-            total,
-        )
-        .await;
+        // Past the end: with a count, a page a correct read never asks for;
+        // without one, the empty page that ends the listing.
+        let beyond = match total {
+            Some(_) => json!([{ "id": 300, "name": "beyond" }]),
+            None => json!([]),
+        };
+        label_page(&server, labels, 3, beyond, total).await;
         let view = source(&server).view(PR, None).await.unwrap().unwrap();
         assert_eq!(
             labelled(&view, "Add label…"),
@@ -2629,7 +2628,8 @@ async fn add_label_offers_the_organisations_labels_too() {
         (json!([]), &[("900", "org-late")][..]),
     ] {
         let server = gitea(pull.clone(), json!([])).await;
-        answer(&server, format!("{REPO}/labels"), 200, own).await;
+        let count = own.as_array().map(Vec::len);
+        label_page(&server, format!("{REPO}/labels"), 1, own, count).await;
         label_page(
             &server,
             ORG.to_owned(),

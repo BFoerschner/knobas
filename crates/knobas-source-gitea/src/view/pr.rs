@@ -51,7 +51,8 @@ pub(super) async fn draw(
             // on its own pull requests (#705). So do landing's reads (#708)
             // and the head commit's statuses (#710), which *Checks* draws and
             // landing holds against the base's required checks (#721).
-            // And the repository's labels, which *Add label…* offers (#1194).
+            // And the repository's labels and its organisation's, which *Add
+            // label…* offers (#1194, #1235).
             let (reviews, commits, comments, viewer, landing, statuses, labels) = tokio::try_join!(
                 at.reviews(),
                 at.commits(Some(&pull)),

@@ -6564,10 +6564,12 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
 
 ## #1235 Add label… reads every page, and the organisation's labels (Opus implementer)
 
-- **A label listing is whole at Gitea's `X-Total-Count`, or on an empty page; with no count, on a
-  page shorter than fifty.** Gitea sends the count on both listings, so a server whose
-  `MAX_RESPONSE_ITEMS` is under fifty still pages through. At most 20 pages (a thousand labels)
-  per listing are read; past that the rest is not offered and nothing says so. **Reversing:** low.
+- **A label listing is whole on an empty page, or once Gitea's `X-Total-Count` is reached** --
+  never on a short page, #81's rule for the sync's walks (`sync.rs` `last_page`), so a server whose
+  `MAX_RESPONSE_ITEMS` is under fifty still pages through. Gitea sends the count on both listings,
+  which spares the empty page's request. At most 20 pages (a thousand labels) per listing are
+  read; past that the rest is not offered and nothing says so, unlike the view's row lists'
+  `left_out` note: a choice field has no row to say it in. **Reversing:** low.
 - **Whether the owner is an organisation is Gitea's answer to `GET /orgs/{owner}/labels`**: its
   404 is a user owner, with no organisation labels. Gitea's pull request and repository records
   carry no owner type, so asking first would be one more request for the same answer. Any other

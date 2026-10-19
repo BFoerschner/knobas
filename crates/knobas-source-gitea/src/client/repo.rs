@@ -32,14 +32,8 @@ impl GiteaClient {
         repo: &str,
         page: u32,
     ) -> Result<(Vec<T>, Option<usize>), SourceError> {
-        let (limit, page) = page_params(page);
-        let (labels, total): (Option<Vec<T>>, _) = self
-            .get_json_counted(
-                &format!("/repos/{}/{}/labels", segment(owner)?, segment(repo)?),
-                &[limit, page],
-            )
-            .await?;
-        Ok((labels.unwrap_or_default(), total))
+        let path = format!("/repos/{}/{}/labels", segment(owner)?, segment(repo)?);
+        self.label_page_as(&path, page).await
     }
 
     /// One page of fifty of `GET /orgs/{org}/labels`, the organisation's
@@ -50,10 +44,19 @@ impl GiteaClient {
         org: &str,
         page: u32,
     ) -> Result<(Vec<T>, Option<usize>), SourceError> {
+        self.label_page_as(&format!("/orgs/{}/labels", segment(org)?), page)
+            .await
+    }
+
+    /// Page `page` of the label listing at `path`, and its count.
+    async fn label_page_as<T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        page: u32,
+    ) -> Result<(Vec<T>, Option<usize>), SourceError> {
         let (limit, page) = page_params(page);
-        let (labels, total): (Option<Vec<T>>, _) = self
-            .get_json_counted(&format!("/orgs/{}/labels", segment(org)?), &[limit, page])
-            .await?;
+        let (labels, total): (Option<Vec<T>>, _) =
+            self.get_json_counted(path, &[limit, page]).await?;
         Ok((labels.unwrap_or_default(), total))
     }
 
