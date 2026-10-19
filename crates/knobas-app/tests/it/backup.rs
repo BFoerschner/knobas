@@ -28,6 +28,7 @@
 
 use knobas_app::commands::entity::get_entity_inner;
 use knobas_app::commands::search::search_inner;
+use knobas_app::sources::Registry;
 use knobas_db::backup;
 use knobas_search::{SearchFilters, SearchQuery};
 use sqlx::PgPool;
@@ -195,7 +196,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
 
     // Seam 1: the detail slide-over. The link was made before the dump; the
     // mirror row it resolves through was made after the restore.
-    let detail = get_entity_inner(&into, &seeded.ticket)
+    let detail = get_entity_inner(&into, &Registry::for_process(), &seeded.ticket)
         .await
         .expect("the restored ticket opens");
     assert_eq!(
@@ -230,6 +231,7 @@ async fn a_restored_backup_still_links_the_entities_a_later_sync_rebuilt() {
     // it.
     let hits = search_inner(
         &into,
+        &Registry::for_process(),
         SearchQuery {
             raw: seeded.token.clone(),
             limit: 20,
@@ -330,7 +332,7 @@ async fn a_restore_brings_back_no_mirror_rows_of_its_own() {
 
     // Before the re-sync the detail read therefore has nothing to open, which
     // is the honest state of a restored machine that has not synced yet.
-    let error = get_entity_inner(&into, &seeded.ticket)
+    let error = get_entity_inner(&into, &Registry::for_process(), &seeded.ticket)
         .await
         .expect_err("nothing is mirrored yet");
     assert_eq!(error.code, knobas_app::IpcErrorCode::NotFound);
@@ -447,6 +449,7 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
     ] {
         let response = search_inner(
             pool,
+            &Registry::for_process(),
             SearchQuery {
                 raw: raw.clone(),
                 limit: 20,
@@ -476,13 +479,18 @@ async fn under_answers(pool: &PgPool, t: &str) -> UnderAnswers {
         format!("ghost-{t}"),
     ] {
         parents.extend(
-            knobas_app::commands::search::filter_suggestions_inner(pool, &prefix, false)
-                .await
-                .unwrap()
-                .parents
-                .into_iter()
-                .filter(|parent| parent.name.contains(t))
-                .map(|parent| (parent.name, parent.kind)),
+            knobas_app::commands::search::filter_suggestions_inner(
+                pool,
+                &Registry::for_process(),
+                &prefix,
+                false,
+            )
+            .await
+            .unwrap()
+            .parents
+            .into_iter()
+            .filter(|parent| parent.name.contains(t))
+            .map(|parent| (parent.name, parent.kind)),
         );
     }
     parents.sort();
@@ -552,7 +560,9 @@ async fn a_restored_backup_answers_under_as_the_machine_it_came_from() {
     // stores its adapters' declarations before its first sync. Only then does
     // the source re-sync, so the stored parents below come from the insert
     // trigger and not from a declaration write recomputing after the fact.
-    knobas_app::commands::search::searcher(&into).await.unwrap();
+    knobas_app::commands::search::searcher(&into, &Registry::for_process())
+        .await
+        .unwrap();
     let declared: i64 = sqlx::query_scalar("select count(*) from sync.item_parent")
         .fetch_one(&into)
         .await

@@ -13,6 +13,7 @@ use knobas_app::commands::entity::{
     move_notes_payloads,
 };
 use knobas_app::docs::DocsScope;
+use knobas_app::sources::Registry;
 use knobas_source::docs::indexed::{comment_line, link_line, section_line};
 use knobas_source::docs::{DocBlock, Inline};
 use serde_json::{Value, json};
@@ -129,7 +130,9 @@ async fn the_tree_hangs_each_page_under_its_declared_parent() {
     let orphan = page(&pool, &src, "4", "Orphan", "OPS", &["Not synced"], "").await;
     let other = page(&pool, &src, "5", "Eng home", "ENG", &[], "").await;
 
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let mine: Vec<_> = tree.spaces.iter().filter(|s| s.source_id == src).collect();
     assert_eq!(
         mine.iter()
@@ -188,7 +191,9 @@ async fn the_tree_holds_only_live_pages() {
         .await
         .unwrap();
 
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let pages: Vec<&str> = tree
         .spaces
         .iter()
@@ -218,7 +223,9 @@ async fn children_are_in_the_sources_order_and_by_title_where_it_has_none() {
         }
         item(&pool, &format!("{src}:{id}"), &src, "page", title, payload).await;
     }
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let space = tree
         .spaces
         .iter()
@@ -247,13 +254,22 @@ async fn the_page_read_last_is_the_newest_visit() {
         .await
         .unwrap();
     assert_eq!(
-        docs_tree_inner(&pool).await.unwrap().last_read,
+        docs_tree_inner(&pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .last_read,
         Some(second)
     );
     knobas_app::conversation::visit(&pool, &first)
         .await
         .unwrap();
-    assert_eq!(docs_tree_inner(&pool).await.unwrap().last_read, Some(first));
+    assert_eq!(
+        docs_tree_inner(&pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .last_read,
+        Some(first)
+    );
 }
 
 /// A page reads as the header fields, the adapter's blocks, and what only the
@@ -315,7 +331,9 @@ async fn a_page_reads_as_blocks_with_the_mirror_filled_in() {
     )
     .await;
 
-    let doc = docs_page_inner(&pool, &handbook).await.unwrap();
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &handbook)
+        .await
+        .unwrap();
     assert_eq!(doc.title, "On-call handbook");
     assert_eq!(
         doc.source_name, "Confluence",
@@ -410,7 +428,9 @@ async fn what_the_mirror_does_not_hold_stays_unresolved() {
     let src = confluence(&pool).await;
     let storage = r#"<p><ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">NOPE-1</ac:parameter></ac:structured-macro> <ac:link><ri:page ri:content-title="Gone" /></ac:link></p>"#;
     let id = page(&pool, &src, "1", "Lonely", "OPS", &[], storage).await;
-    let doc = docs_page_inner(&pool, &id).await.unwrap();
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &id)
+        .await
+        .unwrap();
     assert_eq!(
         doc.blocks,
         vec![DocBlock::Paragraph {
@@ -443,18 +463,24 @@ async fn only_a_mirrored_page_reads() {
     item(&pool, &ticket, &src, "ticket", "Not a page", json!({})).await;
     use knobas_app::IpcErrorCode::{Invalid, NotFound};
     assert_eq!(
-        docs_page_inner(&pool, &ticket).await.unwrap_err().code,
-        NotFound
-    );
-    assert_eq!(
-        docs_page_inner(&pool, &format!("{src}:404"))
+        docs_page_inner(&pool, &Registry::for_process(), &ticket)
             .await
             .unwrap_err()
             .code,
         NotFound
     );
     assert_eq!(
-        docs_page_inner(&pool, "no colon").await.unwrap_err().code,
+        docs_page_inner(&pool, &Registry::for_process(), &format!("{src}:404"))
+            .await
+            .unwrap_err()
+            .code,
+        NotFound
+    );
+    assert_eq!(
+        docs_page_inner(&pool, &Registry::for_process(), "no colon")
+            .await
+            .unwrap_err()
+            .code,
         Invalid
     );
 }
@@ -468,7 +494,9 @@ async fn a_parent_loop_is_cut_and_both_pages_sit_at_the_top() {
     let src = confluence(&pool).await;
     let a = page(&pool, &src, "1", "Alpha", "OPS", &["Beta"], "").await;
     let b = page(&pool, &src, "2", "Beta", "OPS", &["Alpha"], "").await;
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let space = tree.spaces.iter().find(|s| s.source_id == src).unwrap();
     for id in [&a, &b] {
         let node = space.pages.iter().find(|p| p.entity_id == *id).unwrap();
@@ -485,7 +513,9 @@ async fn a_page_under_a_parent_loop_keeps_its_parent() {
     let a = page(&pool, &src, "1", "Alpha", "OPS", &["Beta"], "").await;
     let b = page(&pool, &src, "2", "Beta", "OPS", &["Alpha"], "").await;
     let c = page(&pool, &src, "3", "Gamma", "OPS", &["Alpha"], "").await;
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let space = tree.spaces.iter().find(|s| s.source_id == src).unwrap();
     let parent_of = |id: &str| {
         space
@@ -573,10 +603,15 @@ async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
     )
     .await;
 
-    let found = docs_search_inner(&pool, &format!("{w} attempts"), None)
-        .await
-        .unwrap()
-        .expect("words are a query");
+    let found = docs_search_inner(
+        &pool,
+        &Registry::for_process(),
+        &format!("{w} attempts"),
+        None,
+    )
+    .await
+    .unwrap()
+    .expect("words are a query");
     assert_eq!(found.total, 1);
     assert_eq!(found.needles, [w.clone(), "attempts".to_owned()]);
     let hit = &found.hits[0];
@@ -597,7 +632,7 @@ async fn a_search_finds_pages_with_every_word_and_says_where_the_snippet_is() {
     assert_eq!(hit.editor_name.as_deref(), Some("Tomasz Wójcik"));
 
     // A comment's sentence is the snippet when it holds the most words.
-    let found = docs_search_inner(&pool, &format!("{w} right"), None)
+    let found = docs_search_inner(&pool, &Registry::for_process(), &format!("{w} right"), None)
         .await
         .unwrap()
         .unwrap();
@@ -646,62 +681,100 @@ async fn the_space_the_grammar_and_the_empty_query() {
     };
     let mut both = vec![eng.clone(), ops.clone()];
     both.sort();
-    assert_eq!(ids(docs_search_inner(&pool, &w, None).await.unwrap()), both);
     assert_eq!(
-        ids(docs_search_inner(&pool, &w, Some(&scope(&src, "ENG")))
+        ids(docs_search_inner(&pool, &Registry::for_process(), &w, None)
             .await
             .unwrap()),
+        both
+    );
+    assert_eq!(
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &w,
+            Some(&scope(&src, "ENG"))
+        )
+        .await
+        .unwrap()),
         [eng.as_str()]
     );
     assert_eq!(
-        ids(
-            docs_search_inner(&pool, &format!("{w} space:OPS"), Some(&scope(&src, "ENG")))
-                .await
-                .unwrap()
-        ),
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} space:OPS"),
+            Some(&scope(&src, "ENG"))
+        )
+        .await
+        .unwrap()),
         [ops.as_str()],
         "the typed space wins over the picker"
     );
     assert_eq!(
-        ids(docs_search_inner(&pool, &format!("{w} project:ops"), None)
-            .await
-            .unwrap()),
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} project:ops"),
+            None
+        )
+        .await
+        .unwrap()),
         [ops.as_str()]
     );
     assert_eq!(
-        ids(docs_search_inner(&pool, &format!("{w} -cron"), None)
-            .await
-            .unwrap()),
-        [eng.as_str()]
-    );
-    assert_eq!(
         ids(
-            docs_search_inner(&pool, &format!("{w} \"backoff policy\""), None)
+            docs_search_inner(&pool, &Registry::for_process(), &format!("{w} -cron"), None)
                 .await
                 .unwrap()
         ),
         [eng.as_str()]
     );
     assert_eq!(
-        ids(docs_search_inner(&pool, &format!("{w} by:priya"), None)
-            .await
-            .unwrap()),
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} \"backoff policy\""),
+            None
+        )
+        .await
+        .unwrap()),
+        [eng.as_str()]
+    );
+    assert_eq!(
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} by:priya"),
+            None
+        )
+        .await
+        .unwrap()),
         [ops.as_str()]
     );
     assert_eq!(
-        ids(docs_search_inner(&pool, &format!("{w} updated:30d"), None)
-            .await
-            .unwrap()),
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} updated:30d"),
+            None
+        )
+        .await
+        .unwrap()),
         [eng.as_str()]
     );
     assert!(
-        ids(docs_search_inner(&pool, &format!("{w} type:ticket"), None)
-            .await
-            .unwrap())
+        ids(docs_search_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{w} type:ticket"),
+            None
+        )
+        .await
+        .unwrap())
         .is_empty()
     );
     assert!(
-        docs_search_inner(&pool, "   ", None)
+        docs_search_inner(&pool, &Registry::for_process(), "   ", None)
             .await
             .unwrap()
             .is_none()
@@ -806,7 +879,9 @@ async fn a_page_reads_with_its_rail_and_sections() {
     )
     .await;
 
-    let doc = docs_page_inner(&pool, &target).await.unwrap();
+    let doc = docs_page_inner(&pool, &Registry::for_process(), &target)
+        .await
+        .unwrap();
     assert_eq!(
         doc.backlinks
             .iter()
@@ -899,7 +974,9 @@ async fn for_you_is_the_pages_that_mention_the_reader() {
     )
     .await;
 
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let mine: Vec<_> = tree
         .for_you
         .iter()
@@ -934,7 +1011,7 @@ async fn export_writes_the_page_as_markdown() {
     .await;
     let folder =
         std::env::temp_dir().join(format!("knobas-export-{}", uuid::Uuid::new_v4().simple()));
-    let done = docs_export_markdown_inner(&pool, &id, &folder)
+    let done = docs_export_markdown_inner(&pool, &Registry::for_process(), &id, &folder)
         .await
         .unwrap();
     assert_eq!(done.file, "retry-budget.md");
@@ -963,9 +1040,16 @@ async fn a_section_edit_is_the_whole_body_against_the_version_read() {
         "<h2>Cap</h2><p>Five.</p><h2>Table</h2><table><tr><td>x</td></tr></table>",
     )
     .await;
-    let payload = docs_edit_section_payload(&pool, &id, 1, Some(7), "Six.\n- one")
-        .await
-        .unwrap();
+    let payload = docs_edit_section_payload(
+        &pool,
+        &Registry::for_process(),
+        &id,
+        1,
+        Some(7),
+        "Six.\n- one",
+    )
+    .await
+    .unwrap();
     assert_eq!(
         payload,
         json!({"UpdatePage": {
@@ -974,11 +1058,11 @@ async fn a_section_edit_is_the_whole_body_against_the_version_read() {
             "body": "<h2>Cap</h2><p>Six.</p><ul><li>one</li></ul><h2>Table</h2><table><tr><td>x</td></tr></table>",
         }})
     );
-    let refused = docs_edit_section_payload(&pool, &id, 2, Some(7), "x")
+    let refused = docs_edit_section_payload(&pool, &Registry::for_process(), &id, 2, Some(7), "x")
         .await
         .unwrap_err();
     assert!(refused.message.contains("table"), "{}", refused.message);
-    let moved = docs_edit_section_payload(&pool, &id, 1, Some(6), "x")
+    let moved = docs_edit_section_payload(&pool, &Registry::for_process(), &id, 1, Some(6), "x")
         .await
         .unwrap_err();
     assert!(moved.message.contains("changed"), "{}", moved.message);
@@ -996,7 +1080,9 @@ async fn a_new_page_goes_under_its_parent_in_storage_format() {
         title: " Retry runbook ".to_owned(),
         text: "Intro\n\n## Steps\n- restart".to_owned(),
     };
-    let (payload, source) = docs_create_page_payload(&pool, &new).await.unwrap();
+    let (payload, source) = docs_create_page_payload(&pool, &Registry::for_process(), &new)
+        .await
+        .unwrap();
     assert_eq!(source, src);
     assert_eq!(
         payload,
@@ -1011,7 +1097,11 @@ async fn a_new_page_goes_under_its_parent_in_storage_format() {
         title: "  ".to_owned(),
         ..new
     };
-    assert!(docs_create_page_payload(&pool, &blank).await.is_err());
+    assert!(
+        docs_create_page_payload(&pool, &Registry::for_process(), &blank)
+            .await
+            .is_err()
+    );
 }
 
 /// *Move to Confluence…* (#941, D10): one `CreatePage` per note under the
@@ -1037,7 +1127,9 @@ async fn moving_the_notes_queues_one_page_each_under_the_parent() {
             .unwrap();
     }
 
-    let payloads = move_notes_payloads(&pool, &parent).await.unwrap();
+    let payloads = move_notes_payloads(&pool, &Registry::for_process(), &parent)
+        .await
+        .unwrap();
 
     assert_eq!(
         payloads,
@@ -1060,7 +1152,9 @@ async fn moving_the_notes_queues_one_page_each_under_the_parent() {
         ]
     );
     assert_eq!(knobas_core::note::all(&pool).await.unwrap().len(), 3);
-    let elsewhere = move_notes_payloads(&pool, "conf-none:9").await.unwrap_err();
+    let elsewhere = move_notes_payloads(&pool, &Registry::for_process(), "conf-none:9")
+        .await
+        .unwrap_err();
     assert_eq!(elsewhere.code, knobas_app::IpcErrorCode::NotFound);
 }
 
@@ -1148,7 +1242,9 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
         knobas_app::conversation::visit(&pool, home).await.unwrap();
     }
 
-    let tree = docs_tree_inner(&pool).await.unwrap();
+    let tree = docs_tree_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     type Node<'a> = (&'a str, Option<&'a str>);
     let spaces: Vec<(&str, Vec<Node>)> = tree
         .spaces
@@ -1186,7 +1282,10 @@ async fn the_docs_reads_hold_only_the_wiki_fillers_pages() {
     wanted.sort_unstable();
     assert_eq!(mine, wanted, "For you is the filler's pages alone");
 
-    let found = docs_search_inner(&pool, &w, None).await.unwrap().unwrap();
+    let found = docs_search_inner(&pool, &Registry::for_process(), &w, None)
+        .await
+        .unwrap()
+        .unwrap();
     let mut hits: Vec<&str> = found.hits.iter().map(|h| h.entity_id.as_str()).collect();
     hits.sort_unstable();
     assert_eq!(hits, wanted, "the search hits the filler's pages alone");

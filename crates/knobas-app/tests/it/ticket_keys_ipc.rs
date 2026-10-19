@@ -8,6 +8,7 @@
 
 use knobas_app::commands::entity::mini_board_inner;
 use knobas_app::commands::search::{filter_suggestions_inner, search_inner};
+use knobas_app::sources::Registry;
 use knobas_search::{SearchFilters, SearchQuery};
 
 async fn pool() -> sqlx::PgPool {
@@ -71,6 +72,7 @@ async fn issue(pool: &sqlx::PgPool, key: &str, fields: serde_json::Value, sprint
 async fn keys(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
     let response = search_inner(
         pool,
+        &Registry::for_process(),
         SearchQuery {
             raw: raw.to_owned(),
             limit: 50,
@@ -173,7 +175,9 @@ async fn the_filter_suggestions_command_offers_the_keys_values() {
         &["active"],
     )
     .await;
-    let lists = filter_suggestions_inner(&pool, "", false).await.unwrap();
+    let lists = filter_suggestions_inner(&pool, &Registry::for_process(), "", false)
+        .await
+        .unwrap();
     let offered = |key: &str, value: &str| {
         lists
             .fields
@@ -193,7 +197,9 @@ async fn the_filter_suggestions_command_offers_the_keys_values() {
     ] {
         assert!(offered(key, value), "{key}:{value} in {:?}", lists.fields);
     }
-    let parents_only = filter_suggestions_inner(&pool, "", true).await.unwrap();
+    let parents_only = filter_suggestions_inner(&pool, &Registry::for_process(), "", true)
+        .await
+        .unwrap();
     assert!(parents_only.fields.is_empty());
 }
 

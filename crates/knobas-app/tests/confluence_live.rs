@@ -990,9 +990,13 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     .await;
 
     let entity = format!("{CONFLUENCE}:{id}");
-    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
-        .await
-        .expect("the reader reads the page");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the reader reads the page");
     assert!(page.readable);
     assert_eq!(
         page.space.as_ref().map(|s| s.key.as_str()),
@@ -1066,7 +1070,7 @@ async fn a_page_with_every_mapped_macro_reads_as_the_readers_blocks() {
     );
 
     // The tree: the new page hangs under its parent.
-    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
         .await
         .expect("the tree reads");
     let node = tree
@@ -1151,6 +1155,7 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     let entity = format!("{CONFLUENCE}:{id}");
     let found = knobas_app::commands::entity::docs_search_inner(
         &state.pool,
+        &Registry::for_process(),
         &format!("{word} attempts"),
         None,
     )
@@ -1179,11 +1184,15 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
         Some(env.space.as_str())
     );
 
-    let found =
-        knobas_app::commands::entity::docs_search_inner(&state.pool, &format!("{word} cap"), None)
-            .await
-            .expect("the search runs")
-            .expect("words are a query");
+    let found = knobas_app::commands::entity::docs_search_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &format!("{word} cap"),
+        None,
+    )
+    .await
+    .expect("the search runs")
+    .expect("words are a query");
     let hit = found
         .hits
         .iter()
@@ -1202,6 +1211,7 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
     // page under *Pages that link here*.
     let parent_page = knobas_app::commands::entity::docs_page_inner(
         &state.pool,
+        &Registry::for_process(),
         &format!("{CONFLUENCE}:{}", parent.id),
     )
     .await
@@ -1214,9 +1224,13 @@ async fn a_synced_page_keeps_its_sections_and_links_for_search_and_backlinks() {
 
     // The sections as Confluence normalised them: the plain one is editable,
     // the one holding a page link is not.
-    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
-        .await
-        .expect("the page reads");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the page reads");
     assert_eq!(page.sections.len(), 2, "{:?}", page.sections);
     assert_eq!(page.sections[0].refusal, None);
     assert_eq!(
@@ -1279,9 +1293,13 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
     })
     .await;
     let entity = format!("{CONFLUENCE}:{id}");
-    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
-        .await
-        .expect("the page reads");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the page reads");
     assert_eq!(page.sections.len(), 1, "{:?}", page.sections);
     assert_eq!(
         page.sections[0].refusal, None,
@@ -1297,6 +1315,7 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
     );
     let payload = knobas_app::commands::entity::docs_edit_section_payload(
         &state.pool,
+        &Registry::for_process(),
         &entity,
         1,
         page.version,
@@ -1340,9 +1359,13 @@ async fn an_edited_section_keeps_its_info_panel_in_confluence() {
         p["version"]["number"].as_i64() == Some(2)
     })
     .await;
-    let page = knobas_app::commands::entity::docs_page_inner(&state.pool, &entity)
-        .await
-        .expect("the page reads");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &entity,
+    )
+    .await
+    .expect("the page reads");
     let panels: Vec<(PanelKind, Option<&str>)> = page
         .blocks
         .iter()
@@ -1387,6 +1410,7 @@ async fn moved_notes_become_pages_under_the_picked_parent() {
 
     let payloads = knobas_app::commands::entity::move_notes_payloads(
         &state.pool,
+        &Registry::for_process(),
         &format!("{CONFLUENCE}:{}", parent.id),
     )
     .await
@@ -1597,10 +1621,13 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         sync_until(&state, id, "the child", serde_json::Value::is_object).await;
     }
 
-    let page =
-        knobas_app::commands::entity::docs_page_inner(&state.pool, &format!("{CONFLUENCE}:{top}"))
-            .await
-            .expect("the reader reads the page");
+    let page = knobas_app::commands::entity::docs_page_inner(
+        &state.pool,
+        &Registry::for_process(),
+        &format!("{CONFLUENCE}:{top}"),
+    )
+    .await
+    .expect("the reader reads the page");
     let DocBlock::Paragraph { text } = &page.blocks[0] else {
         panic!("the first block is the paragraph: {:#?}", page.blocks)
     };
@@ -1613,7 +1640,7 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         "the mention names the user the page record does not: {text:?}"
     );
 
-    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
         .await
         .expect("the tree reads");
     let parent_id = format!("{CONFLUENCE}:{top}");
@@ -1666,7 +1693,7 @@ async fn a_mention_of_anyone_resolves_and_children_keep_confluences_order() {
         (json!(0), json!(1)),
         "both siblings took their new places from one incremental run"
     );
-    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool)
+    let tree = knobas_app::commands::entity::docs_tree_inner(&state.pool, &Registry::for_process())
         .await
         .expect("the tree reads");
     let children: Vec<String> = tree

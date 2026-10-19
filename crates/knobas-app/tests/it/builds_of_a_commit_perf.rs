@@ -23,6 +23,7 @@
 //! scratch database of its own, so neither size is the other's fixture.
 
 use knobas_app::commands::entity::DETAIL_BUILDS_AT;
+use knobas_app::sources::Registry;
 use sqlx::PgPool;
 
 /// The gate's size: enough rows that the planner prices a scan above the
@@ -38,7 +39,9 @@ const SHA: &str = "c90d11a3f5e2b7c4d9018e6a2b3c4d5e6f708192";
 /// root's, and [`ON_THE_COMMIT`] of them on [`SHA`] too, then `analyze`.
 /// Written in one statement, so the insert trigger resolves them in one pass.
 async fn seed(pool: &PgPool, builds: i32) {
-    knobas_app::commands::search::searcher(pool).await.unwrap();
+    knobas_app::commands::search::searcher(pool, &Registry::for_process())
+        .await
+        .unwrap();
     sqlx::query(
         "insert into knobas.source_config (id, kind, display_name, base_url, auth_kind)
          values ('teamcity', 'teamcity', 'TeamCity', 'http://x', 'Pat') on conflict do nothing",
@@ -79,7 +82,7 @@ async fn seed(pool: &PgPool, builds: i32) {
 }
 
 async fn declarations(pool: &PgPool) -> knobas_core::payload::Declarations {
-    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
+    knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
         .await
         .unwrap()
 }

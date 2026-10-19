@@ -9,6 +9,7 @@ use knobas_app::commands::entity::{
     DEFAULT_RELATION, create_link_inner, get_entity_inner, list_entities_inner,
     list_projects_inner, recent_activity_inner, unlink_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_source_mock::MockSource;
 use sqlx::PgPool;
@@ -71,7 +72,9 @@ async fn seeded() -> PgPool {
         // The declarations' stored copy, written as bring-up writes it before
         // its first sync (ADR-0019): `sync.item_parent`, which the Builds
         // tile groups by (#688), is filled from it as items are written.
-        knobas_app::commands::search::searcher(&pool).await.unwrap();
+        knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+            .await
+            .unwrap();
         knobas_app::sources::demo::demo_load_inner(&pool)
             .await
             .unwrap();
@@ -151,7 +154,7 @@ async fn lists_the_newest_first_and_reports_the_unpaged_total() {
         kinds: vec!["ticket".to_owned()],
         ..all()
     };
-    let page = list_entities_inner(&pool, &filter, 2, 0, &no_paths())
+    let page = list_entities_inner(&pool, &Registry::for_process(), &filter, 2, 0, &no_paths())
         .await
         .unwrap();
 
@@ -174,7 +177,7 @@ async fn lists_the_newest_first_and_reports_the_unpaged_total() {
 #[tokio::test]
 async fn an_empty_filter_list_means_unfiltered_not_empty() {
     let pool = seeded().await;
-    let page = list_entities_inner(&pool, &all(), 5, 0, &no_paths())
+    let page = list_entities_inner(&pool, &Registry::for_process(), &all(), 5, 0, &no_paths())
         .await
         .unwrap();
 
@@ -205,10 +208,10 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
         sources: vec!["mock".to_owned()],
         ..all()
     };
-    let first = list_entities_inner(&pool, &mine, 3, 0, &no_paths())
+    let first = list_entities_inner(&pool, &Registry::for_process(), &mine, 3, 0, &no_paths())
         .await
         .unwrap();
-    let second = list_entities_inner(&pool, &mine, 3, 3, &no_paths())
+    let second = list_entities_inner(&pool, &Registry::for_process(), &mine, 3, 3, &no_paths())
         .await
         .unwrap();
 
@@ -224,9 +227,16 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
     assert_eq!(overlap, 0, "offset skipped nothing");
 
     // Past the end: no rows, and the total still describes the set.
-    let beyond = list_entities_inner(&pool, &mine, 3, 100_000, &no_paths())
-        .await
-        .unwrap();
+    let beyond = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &mine,
+        3,
+        100_000,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert!(beyond.rows.is_empty());
     assert_eq!(beyond.total, 0, "an empty page reports 0, not a guess");
 }
@@ -234,7 +244,7 @@ async fn offset_walks_the_same_ordering_and_total_does_not_move() {
 #[tokio::test]
 async fn a_tombstoned_entity_is_absent_unless_asked_for() {
     let pool = seeded().await;
-    let live = list_entities_inner(&pool, &all(), 500, 0, &no_paths())
+    let live = list_entities_inner(&pool, &Registry::for_process(), &all(), 500, 0, &no_paths())
         .await
         .unwrap();
     assert!(
@@ -246,9 +256,16 @@ async fn a_tombstoned_entity_is_absent_unless_asked_for() {
         include_deleted: true,
         ..all()
     };
-    let dead = list_entities_inner(&pool, &with_dead, 500, 0, &no_paths())
-        .await
-        .unwrap();
+    let dead = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &with_dead,
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
     assert!(
         dead.rows.iter().any(|r| r.entity_id == "mock:PAY-198"),
         "include_deleted must reach past the live-item view"
@@ -304,9 +321,16 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
         sources: vec!["mock".to_owned()],
         ..all()
     };
-    let page = list_entities_inner(&pool, &filter, 500, 0, &no_paths())
-        .await
-        .unwrap();
+    let page = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &filter,
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap();
 
     let titles = page
         .rows
@@ -327,6 +351,7 @@ async fn title_order_is_a_second_statement_not_string_interpolation() {
     // rows and this would pass however `TitleAsc` was implemented.
     let by_date = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec!["mock".to_owned()],
             ..all()
@@ -396,31 +421,46 @@ async fn the_recency_window_is_bound_as_a_parameter() {
 
     // Both directions, so a predicate that is simply ignored fails: the narrow
     // window drops the stale row, the absent window keeps it.
-    let narrow = ids(
-        list_entities_inner(&pool, &within(Some(1)), 500, 0, &no_paths())
-            .await
-            .unwrap(),
-    );
+    let narrow = ids(list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &within(Some(1)),
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap());
     assert!(
         narrow.contains(&fresh),
         "the fresh row is inside a one-day window"
     );
     assert!(!narrow.contains(&stale), "the stale row is not");
 
-    let unfiltered = ids(
-        list_entities_inner(&pool, &within(None), 500, 0, &no_paths())
-            .await
-            .unwrap(),
-    );
+    let unfiltered = ids(list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &within(None),
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap());
     assert!(unfiltered.contains(&fresh));
     assert!(unfiltered.contains(&stale));
 
     // ...and a window wide enough to reach past it takes it back.
-    let wide = ids(
-        list_entities_inner(&pool, &within(Some(365)), 500, 0, &no_paths())
-            .await
-            .unwrap(),
-    );
+    let wide = ids(list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &within(Some(365)),
+        500,
+        0,
+        &no_paths(),
+    )
+    .await
+    .unwrap());
     assert!(wide.contains(&stale));
 }
 
@@ -503,6 +543,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
     for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
         let project_room = ids(list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &EntityFilter {
                 order,
                 ..room(vec![source.clone()], Some("PAY"))
@@ -522,12 +563,16 @@ async fn a_project_narrows_the_room_within_its_sources() {
 
     // The dimension narrows within `sources`, so unscoped by source it reaches
     // both `PAY` projects -- which is why a project room names both halves.
-    let both =
-        ids(
-            list_entities_inner(&pool, &room(Vec::new(), Some("PAY")), 500, 0, &declarations)
-                .await
-                .unwrap(),
-        );
+    let both = ids(list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &room(Vec::new(), Some("PAY")),
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap());
     assert!(both.contains(&format!("{source}:PAY-1")));
     assert!(both.contains(&format!("{elsewhere}:PAY-9")));
 
@@ -535,6 +580,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
     // room, and is still in its source's.
     let source_room = ids(list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &room(vec![source.clone()], None),
         500,
         0,
@@ -546,6 +592,7 @@ async fn a_project_narrows_the_room_within_its_sources() {
     for project in ["PAY", "INT", "NOP"] {
         let narrowed = ids(list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &room(vec![source.clone()], Some(project)),
             500,
             0,
@@ -619,6 +666,7 @@ async fn a_project_room_shows_a_configuration_only_project() {
     for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
         let page = list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &EntityFilter {
                 sources: vec![source.clone()],
                 project: Some("Payout".to_owned()),
@@ -752,12 +800,9 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     // What the running binary resolves: every configured source's declaration,
     // off the compiled-in registry. Wanted here for the *room* half below --
     // the census reaches it through the command seam, which resolves its own.
-    let declarations = knobas_app::sources::paths::declared_paths(
-        &pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .expect("what the configured sources declare");
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::for_process())
+        .await
+        .expect("what the configured sources declare");
 
     // -- the census, which is what the switcher's rooms are built from -------
     //
@@ -814,6 +859,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     ] {
         let space_room = ids(list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &room(vec![wiki.clone()], Some("ENG"), kinds.clone()),
             500,
             0,
@@ -831,6 +877,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     // The Jira project's room is the tracker's, and the space room is not it.
     let project_room = ids(list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &room(vec![tracker.clone()], Some("PAY"), Vec::new()),
         500,
         0,
@@ -847,6 +894,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     // The spaceless page is in the wiki's room and in neither space's.
     let wiki_room = ids(list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &room(vec![wiki.clone()], None, Vec::new()),
         500,
         0,
@@ -858,6 +906,7 @@ async fn a_confluence_space_is_a_project_room_and_a_jira_project_is_another() {
     for space in ["ENG", "OPS", "NOPE"] {
         let narrowed = ids(list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &room(vec![wiki.clone()], Some(space), Vec::new()),
             500,
             0,
@@ -913,6 +962,7 @@ async fn a_project_narrows_the_include_deleted_statements_too() {
     for order in [EntityOrder::UpdatedDesc, EntityOrder::TitleAsc] {
         let page = list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &EntityFilter {
                 sources: vec![source.clone()],
                 project: Some("PAY".to_owned()),
@@ -951,17 +1001,24 @@ async fn the_source_filter_selects_a_room() {
         ..all()
     };
     assert!(
-        list_entities_inner(&pool, &mine, 500, 0, &no_paths())
+        list_entities_inner(&pool, &Registry::for_process(), &mine, 500, 0, &no_paths())
             .await
             .unwrap()
             .total
             > 0
     );
     assert_eq!(
-        list_entities_inner(&pool, &nobody, 500, 0, &no_paths())
-            .await
-            .unwrap()
-            .total,
+        list_entities_inner(
+            &pool,
+            &Registry::for_process(),
+            &nobody,
+            500,
+            0,
+            &no_paths()
+        )
+        .await
+        .unwrap()
+        .total,
         0
     );
 }
@@ -971,7 +1028,9 @@ async fn the_source_filter_selects_a_room() {
 #[tokio::test]
 async fn returns_the_row_its_source_and_the_raw_payload() {
     let pool = seeded().await;
-    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-231")
+        .await
+        .unwrap();
 
     assert_eq!(d.row.entity_id, "mock:PAY-231");
     assert_eq!(d.row.kind, "ticket");
@@ -1014,13 +1073,17 @@ async fn returns_the_row_its_source_and_the_raw_payload() {
 #[tokio::test]
 async fn a_tickets_detail_carries_its_declared_status() {
     let pool = seeded().await;
-    let live = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    let live = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-231")
+        .await
+        .unwrap();
     let said = live.payload["status"]
         .as_str()
         .expect("the mock record says its status flat");
     assert_eq!(live.status.as_deref(), Some(said));
 
-    let withdrawn = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    let withdrawn = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-198")
+        .await
+        .unwrap();
     assert_eq!(withdrawn.payload["status"], "Deleted");
     assert_eq!(
         withdrawn.status, None,
@@ -1032,7 +1095,9 @@ async fn a_tickets_detail_carries_its_declared_status() {
 #[tokio::test]
 async fn the_web_url_the_adapter_reported_survives_the_mirror() {
     let pool = seeded().await;
-    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-231")
+        .await
+        .unwrap();
     assert_eq!(
         d.web_url.as_deref(),
         Some("https://tidewater.example/browse/PAY-231")
@@ -1040,14 +1105,18 @@ async fn the_web_url_the_adapter_reported_survives_the_mirror() {
 
     // ...and an item the adapter gave no page for has none, rather than a
     // fabricated one. The button is absent exactly there.
-    let withdrawn = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    let withdrawn = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-198")
+        .await
+        .unwrap();
     assert_eq!(withdrawn.web_url, None);
 }
 
 #[tokio::test]
 async fn an_unknown_id_is_not_found_not_internal() {
     let pool = seeded().await;
-    let err = get_entity_inner(&pool, "mock:NOPE-1").await.unwrap_err();
+    let err = get_entity_inner(&pool, &Registry::for_process(), "mock:NOPE-1")
+        .await
+        .unwrap_err();
     assert_eq!(err.code, knobas_app::IpcErrorCode::NotFound, "{err}");
     // ...and the sentence names the id and the store it looked in, in the
     // glossary's own word: `CONTEXT.md`'s **Mirror** entry lists *index* under
@@ -1069,7 +1138,9 @@ async fn an_unknown_id_is_not_found_not_internal() {
 async fn a_malformed_id_is_invalid() {
     let pool = seeded().await;
     for bad in ["no-colon-here", "", ":PAY-1", "mock:"] {
-        let err = get_entity_inner(&pool, bad).await.unwrap_err();
+        let err = get_entity_inner(&pool, &Registry::for_process(), bad)
+            .await
+            .unwrap_err();
         assert_eq!(
             err.code,
             knobas_app::IpcErrorCode::Invalid,
@@ -1083,7 +1154,9 @@ async fn a_malformed_id_is_invalid() {
 #[tokio::test]
 async fn a_tombstoned_entity_is_still_readable_and_says_so() {
     let pool = seeded().await;
-    let d = get_entity_inner(&pool, "mock:PAY-198").await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-198")
+        .await
+        .unwrap();
     assert!(
         d.deleted_at.is_some(),
         "the banner has nothing to say without this"
@@ -1134,7 +1207,9 @@ async fn a_disabled_sources_entity_opens_with_the_marker_until_reenabled() {
     .await
     .unwrap();
 
-    let d = get_entity_inner(&pool, &entity).await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), &entity)
+        .await
+        .unwrap();
     assert!(
         !d.source.enabled,
         "the banner has nothing to say without this"
@@ -1149,7 +1224,9 @@ async fn a_disabled_sources_entity_opens_with_the_marker_until_reenabled() {
         .execute(&pool)
         .await
         .unwrap();
-    let back = get_entity_inner(&pool, &entity).await.unwrap();
+    let back = get_entity_inner(&pool, &Registry::for_process(), &entity)
+        .await
+        .unwrap();
     assert!(
         back.source.enabled,
         "re-enabling alone must clear the marker -- the proof nothing was stored"
@@ -1204,7 +1281,9 @@ async fn the_detail_carries_the_entitys_own_activity() {
         .await
         .unwrap();
 
-    let d = get_entity_inner(&pool, "mock:PAY-231").await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-231")
+        .await
+        .unwrap();
     assert!(d.activity.iter().any(|r| r.verb == verb));
     assert!(
         d.activity
@@ -1245,7 +1324,9 @@ async fn an_entity_whose_source_was_never_configured_is_still_readable() {
     .await
     .unwrap();
 
-    let d = get_entity_inner(&pool, &entity).await.unwrap();
+    let d = get_entity_inner(&pool, &Registry::for_process(), &entity)
+        .await
+        .unwrap();
     assert_eq!(d.source.id, source);
     assert_eq!(
         d.source.display_name, source,
@@ -1305,14 +1386,12 @@ async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
     .unwrap();
 
     let expected = Some("tidewater/payout-service".to_owned());
-    let declarations = knobas_app::sources::paths::declared_paths(
-        &pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .unwrap();
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let room = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![source.clone()],
             ..all()
@@ -1326,7 +1405,9 @@ async fn a_commits_room_line_and_detail_carry_its_repo_as_the_path() {
     assert_eq!(room.rows.len(), 1);
     assert_eq!(room.rows[0].path, expected, "the room's line");
 
-    let detail = get_entity_inner(&pool, &entity).await.unwrap();
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &entity)
+        .await
+        .unwrap();
     assert_eq!(detail.row.path, expected, "the detail panel");
 }
 
@@ -1406,12 +1487,9 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
     )
     .await;
 
-    let declarations = knobas_app::sources::paths::declared_paths(
-        &pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .unwrap();
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let chip = |text: &str, tone: Tone| {
         Some(StateChip {
             text: text.to_owned(),
@@ -1428,6 +1506,7 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
     ] {
         let room = list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &EntityFilter {
                 sources: vec![gitea.clone(), teamcity.clone(), "mock".to_owned()],
                 order,
@@ -1468,7 +1547,7 @@ async fn a_rooms_lines_carry_the_state_their_adapter_declares() {
         assert_eq!(ticket.state, None, "a ticket's adapter declares no state");
     }
 
-    let detail = get_entity_inner(&pool, &format!("{teamcity}:4711"))
+    let detail = get_entity_inner(&pool, &Registry::for_process(), &format!("{teamcity}:4711"))
         .await
         .unwrap();
     assert_eq!(
@@ -1497,7 +1576,7 @@ async fn dated(pool: &PgPool, entity: &str, minutes: i32) {
 /// The registry's declarations for whatever is configured, as the command
 /// reads them.
 async fn builtin_declarations(pool: &PgPool) -> knobas_core::payload::Declarations {
-    knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
+    knobas_app::sources::paths::declared_paths(pool, &Registry::for_process())
         .await
         .unwrap()
 }
@@ -1553,6 +1632,7 @@ async fn the_code_tile_draws_open_pull_requests_first_and_no_settled_one() {
 
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![gitea.clone()],
             kinds: vec!["pr".to_owned(), "branch".to_owned()],
@@ -1701,6 +1781,7 @@ async fn code_room(
 
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![gitea.clone()],
             kinds: kinds.iter().map(|&k| k.to_owned()).collect(),
@@ -1889,6 +1970,7 @@ async fn a_source_without_identity_keeps_its_branches_drawn_in_a_mixed_room() {
 
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![mine.clone(), anon.clone()],
             kinds: vec!["pr".to_owned(), "branch".to_owned()],
@@ -2009,6 +2091,7 @@ async fn code_pull(
 async fn code_page(pool: &PgPool, sources: &[&String]) -> knobas_core::entity_list::EntityPage {
     list_entities_inner(
         pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: sources.iter().map(|&s| s.clone()).collect(),
             kinds: vec!["pr".to_owned(), "branch".to_owned()],
@@ -2259,6 +2342,7 @@ async fn the_builds_tile_draws_each_configurations_latest_build_failing_first() 
 
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![teamcity.clone()],
             kinds: vec!["build".to_owned()],
@@ -2351,6 +2435,7 @@ async fn a_builds_configuration_is_the_parent_its_own_adapter_says_it_names() {
 
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![teamcity.clone()],
             kinds: vec!["build".to_owned()],
@@ -2394,9 +2479,16 @@ async fn a_kind_with_no_declared_state_falls_back_to_recency() {
             let pool = pool.clone();
             let declarations = declarations.clone();
             async move {
-                list_entities_inner(&pool, &filter, 500, 0, &declarations)
-                    .await
-                    .unwrap()
+                list_entities_inner(
+                    &pool,
+                    &Registry::for_process(),
+                    &filter,
+                    500,
+                    0,
+                    &declarations,
+                )
+                .await
+                .unwrap()
             }
         };
         let recency = read(EntityOrder::UpdatedDesc).await;
@@ -2437,6 +2529,7 @@ async fn a_kind_with_no_declared_state_falls_back_to_recency() {
     }
     let page = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &EntityFilter {
             sources: vec![gitea.clone()],
             kinds: vec!["branch".to_owned()],
@@ -2484,9 +2577,16 @@ async fn the_tile_orders_are_never_named_prepared_statements() {
             .unwrap()
     };
     let read = async |order| {
-        list_entities_inner(&pool, &EntityFilter { order, ..all() }, 5, 0, &no_paths())
-            .await
-            .unwrap();
+        list_entities_inner(
+            &pool,
+            &Registry::for_process(),
+            &EntityFilter { order, ..all() },
+            5,
+            0,
+            &no_paths(),
+        )
+        .await
+        .unwrap();
     };
 
     // Positive control: a plain order is cached, so it must move the count,
@@ -2518,6 +2618,7 @@ async fn the_tile_orders_refuse_the_withdrawn() {
     for order in [EntityOrder::Attention, EntityOrder::LatestPerParent] {
         let err = list_entities_inner(
             &pool,
+            &Registry::for_process(),
             &EntityFilter {
                 order,
                 include_deleted: true,
@@ -2572,7 +2673,10 @@ async fn linkable_pair(pool: &PgPool) -> (String, String) {
 /// The link entries `entity`'s detail view would draw -- each one the link
 /// record plus the end the viewer is *not* on.
 async fn links_on(pool: &PgPool, entity: &str) -> Vec<knobas_core::link::LinkEntry> {
-    get_entity_inner(pool, entity).await.unwrap().links
+    get_entity_inner(pool, &Registry::for_process(), entity)
+        .await
+        .unwrap()
+        .links
 }
 
 /// The other end arrives hydrated, and a target the source withdrew still
@@ -2951,7 +3055,7 @@ async fn each_link_mutation_writes_one_activity_line_on_the_from_end() {
 
     // ... and it rides along with the detail read the panel is drawn from.
     assert!(
-        get_entity_inner(&pool, &from)
+        get_entity_inner(&pool, &Registry::for_process(), &from)
             .await
             .unwrap()
             .activity
@@ -3023,7 +3127,10 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     // linking this entity would fail here, deliberately and not by ordering:
     // the criterion is "Nothing linked yet" being *replaced*. (PAY-231 is not
     // the subject since #1175: the demo load draws its branch link.)
-    let before = get_entity_inner(&pool, "mock:PAY-240").await.unwrap().links;
+    let before = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-240")
+        .await
+        .unwrap()
+        .links;
     assert!(
         before.is_empty(),
         "the demo profile's panel says \"Nothing linked yet\" before the write: {before:?}"
@@ -3038,7 +3145,10 @@ async fn a_link_over_the_seam_fills_the_demo_profiles_empty_links_panel() {
     .await
     .unwrap();
 
-    let after = get_entity_inner(&pool, "mock:PAY-240").await.unwrap().links;
+    let after = get_entity_inner(&pool, &Registry::for_process(), "mock:PAY-240")
+        .await
+        .unwrap()
+        .links;
     assert_eq!(
         after.len(),
         before.len() + 1,
@@ -4136,12 +4246,9 @@ async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
             .collect::<Vec<_>>()
     );
 
-    let declarations = knobas_app::sources::paths::declared_paths(
-        &pool,
-        &knobas_app::sources::Registry::for_process(),
-    )
-    .await
-    .expect("what the configured sources declare");
+    let declarations = knobas_app::sources::paths::declared_paths(&pool, &Registry::for_process())
+        .await
+        .expect("what the configured sources declare");
 
     // The source room itself: both monitors, under the one filter the room
     // hands every tile.
@@ -4149,9 +4256,16 @@ async fn a_kuma_source_has_a_room_of_its_own_and_no_project_rooms() {
         sources: vec![watchtower.clone()],
         ..all()
     };
-    let rows = list_entities_inner(&pool, &room, 500, 0, &declarations)
-        .await
-        .unwrap();
+    let rows = list_entities_inner(
+        &pool,
+        &Registry::for_process(),
+        &room,
+        500,
+        0,
+        &declarations,
+    )
+    .await
+    .unwrap();
     let ids: std::collections::BTreeSet<String> =
         rows.rows.into_iter().map(|row| row.entity_id).collect();
     assert_eq!(
@@ -4254,9 +4368,13 @@ async fn a_commits_detail_carries_the_builds_that_ran_on_it_failing_first() {
     .await;
 
     for entity in [pr.to_owned(), branch.to_owned(), commit.clone()] {
-        let detail = get_entity_inner(&pool, &format!("{gitea}:{entity}"))
-            .await
-            .unwrap();
+        let detail = get_entity_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{gitea}:{entity}"),
+        )
+        .await
+        .unwrap();
         let builds: Vec<(String, Option<Tone>)> = detail
             .builds
             .iter()
@@ -4274,9 +4392,13 @@ async fn a_commits_detail_carries_the_builds_that_ran_on_it_failing_first() {
     }
 
     // A build is not code: its own detail names no commit, so draws none.
-    let build = get_entity_inner(&pool, &format!("{teamcity}:passed"))
-        .await
-        .unwrap();
+    let build = get_entity_inner(
+        &pool,
+        &Registry::for_process(),
+        &format!("{teamcity}:passed"),
+    )
+    .await
+    .unwrap();
     assert!(build.builds.is_empty(), "{:?}", build.builds);
 }
 
@@ -4305,9 +4427,13 @@ async fn a_commit_no_build_ran_on_carries_none() {
     )
     .await;
     for entity in [commit, "tidewater/payout-service#10".to_owned()] {
-        let detail = get_entity_inner(&pool, &format!("{gitea}:{entity}"))
-            .await
-            .unwrap();
+        let detail = get_entity_inner(
+            &pool,
+            &Registry::for_process(),
+            &format!("{gitea}:{entity}"),
+        )
+        .await
+        .unwrap();
         assert!(detail.builds.is_empty(), "{entity}: {:?}", detail.builds);
     }
 }

@@ -25,7 +25,7 @@ const PR_HEAD: &str = concat!(
 );
 
 async fn pr_head(pool: &PgPool, entity: &EntityRef) -> Result<Option<String>, IpcError> {
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let head: Option<Option<String>> = sqlx::query_scalar(PR_HEAD)
         .bind(entity.to_string())
         .bind(declarations.as_param())

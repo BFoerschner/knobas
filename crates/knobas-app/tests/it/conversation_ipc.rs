@@ -7,6 +7,7 @@
 //! here is configured with.
 
 use knobas_app::conversation::{ChangeKind, thread, visit};
+use knobas_app::sources::Registry;
 use knobas_core::entity::EntityRef;
 
 async fn pool() -> sqlx::PgPool {
@@ -173,7 +174,7 @@ async fn a_jira_thread_reads_its_comments_with_mine_and_mentions() {
     )
     .await;
 
-    let read = thread(&pool, &id).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
     assert_eq!(read.me, ["mara"]);
     let lines: Vec<_> = read
         .comments
@@ -209,13 +210,20 @@ async fn a_payload_of_another_shape_reads_as_no_comments() {
     ] {
         let id = issue(&pool, payload.clone()).await;
         assert!(
-            thread(&pool, &id).await.unwrap().comments.is_empty(),
+            thread(&pool, &Registry::for_process(), &id)
+                .await
+                .unwrap()
+                .comments
+                .is_empty(),
             "{payload}"
         );
     }
     let missing = format!("jira:{}", key());
     assert_eq!(
-        thread(&pool, &missing).await.unwrap_err().code,
+        thread(&pool, &Registry::for_process(), &missing)
+            .await
+            .unwrap_err()
+            .code,
         knobas_app::IpcErrorCode::NotFound
     );
 }
@@ -257,7 +265,7 @@ async fn a_status_move_knobas_sent_is_a_change_and_not_a_comment() {
         .unwrap()
         .unwrap();
 
-    let read = thread(&pool, &id).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
     assert_eq!(read.comments.len(), 1);
     assert_eq!(
         read.changes
@@ -339,7 +347,7 @@ async fn a_status_change_made_in_jira_is_a_change_with_who_from_and_to() {
             .unwrap();
     }
 
-    let read = thread(&pool, &id).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
     assert_eq!(read.comments.len(), 1, "a status change is never a comment");
     let lines: Vec<_> = read
         .changes
@@ -410,7 +418,7 @@ async fn a_changelog_of_another_shape_reads_as_no_moves() {
         ] }),
     ] {
         let id = issue(&pool, serde_json::json!({ "changelog": changelog.clone() })).await;
-        let read = thread(&pool, &id).await.unwrap();
+        let read = thread(&pool, &Registry::for_process(), &id).await.unwrap();
         assert!(read.changes.is_empty(), "{changelog}");
         assert!(read.comments.is_empty(), "{changelog}");
     }
@@ -491,7 +499,9 @@ async fn a_linked_pull_requests_opening_and_merge_are_lines() {
     .await
     .unwrap();
 
-    let read = thread(&pool, &ticket).await.unwrap();
+    let read = thread(&pool, &Registry::for_process(), &ticket)
+        .await
+        .unwrap();
     assert!(read.comments.is_empty());
     let lines: Vec<_> = read
         .changes

@@ -15,6 +15,7 @@
 //! tests sharing `backup.schedule` would be each other's fixture. The server
 //! is still shared, so this costs a `create database` and not a postmaster.
 
+use knobas_app::sources::Registry;
 use std::sync::Arc;
 
 use knobas_app::backup::{self, BackupSchedule, BackupState};
@@ -724,11 +725,15 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
 
     // ...and a launcher search saved as a smart list (#506), which is what the
     // `smart_lists` part of a share export carries (#507).
-    let saved_list =
-        knobas_app::commands::search::create_smart_list_inner(pool, SAVED_LABEL, SAVED_QUERY)
-            .await
-            .expect("seed a saved smart list")
-            .id;
+    let saved_list = knobas_app::commands::search::create_smart_list_inner(
+        pool,
+        &Registry::for_process(),
+        SAVED_LABEL,
+        SAVED_QUERY,
+    )
+    .await
+    .expect("seed a saved smart list")
+    .id;
 
     // ...and a ticket view (#812), which is what the `ticket_views` part
     // carries, saved through the command the Tickets screen calls.
@@ -765,6 +770,7 @@ async fn seed_corpus(pool: &sqlx::PgPool, tag: &str) -> Seeded {
     // not.
     knobas_app::link_sets::save(
         pool,
+        &Registry::for_process(),
         knobas_app::link_sets::LinkSetDraft {
             id: None,
             name: format!("Payout stack {t}"),
@@ -1024,7 +1030,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
     // **The ticket view arrived whole, its text exactly as saved** (#812): the
     // row as the far machine lists it is the row the sharer saved, and the
     // text the grammar cannot read is still that text, read as unreadable.
-    let views = knobas_app::ticket_views::list(there)
+    let views = knobas_app::ticket_views::list(there, &Registry::for_process())
         .await
         .expect("the colleague's ticket views");
     assert_eq!(views.len(), 1, "{views:?}");
@@ -1056,7 +1062,7 @@ async fn a_share_export_restores_the_link_map_and_leaves_the_hours_behind() {
         "the link set did not cross whole"
     );
     // ...and the far machine reads it as a set, by the command its view calls.
-    let listed = knobas_app::link_sets::list(there)
+    let listed = knobas_app::link_sets::list(there, &Registry::for_process())
         .await
         .expect("the colleague's link sets");
     assert_eq!(listed.len(), 1, "{listed:?}");
@@ -1439,6 +1445,7 @@ async fn an_archive_holding_more_saved_lists_than_the_cap_restores_all_of_them()
     // that there was never one.
     let refused = knobas_app::commands::search::create_smart_list_inner(
         &colleague.pool,
+        &Registry::for_process(),
         "One more",
         "#payouts",
     )
@@ -1460,7 +1467,7 @@ async fn an_archive_holding_more_saved_lists_than_the_cap_restores_all_of_them()
 /// Whether the rail reads *needs attention* for one saved list -- the product's
 /// own verdict on a stored query, asked through the read the launcher makes.
 async fn needs_attention(pool: &sqlx::PgPool, id: &str) -> bool {
-    knobas_app::commands::search::smart_lists_inner(pool)
+    knobas_app::commands::search::smart_lists_inner(pool, &Registry::for_process())
         .await
         .expect("the rail")
         .into_iter()

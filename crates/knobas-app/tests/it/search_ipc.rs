@@ -20,6 +20,7 @@ use knobas_app::commands::search::{
     launcher_home_inner, rename_smart_list_inner, search_inner, smart_list_items_inner,
     smart_lists_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_search::{SearchFilters, SearchQuery};
 
 /// A pool with the schema on it.
@@ -111,7 +112,9 @@ async fn the_wire_shape_is_the_contract() {
     let pool = pool().await;
     let t = seed(&pool, "wire").await;
 
-    let response = search_inner(&pool, query(&t)).await.unwrap();
+    let response = search_inner(&pool, &Registry::for_process(), query(&t))
+        .await
+        .unwrap();
     let v = serde_json::to_value(&response).unwrap();
 
     assert!(v["interpreted"]["unknown_tokens"].is_array(), "{v}");
@@ -156,7 +159,9 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
     let pool = pool().await;
     let t = seed(&pool, "mkup").await;
 
-    let response = search_inner(&pool, query(&t)).await.unwrap();
+    let response = search_inner(&pool, &Registry::for_process(), query(&t))
+        .await
+        .unwrap();
     let segments: Vec<_> = response
         .groups
         .iter()
@@ -186,14 +191,16 @@ async fn no_markup_reaches_the_wire_in_a_snippet() {
 async fn errors_carry_a_code_the_frontend_can_branch_on() {
     let pool = pool().await;
 
-    let unknown = smart_list_items_inner(&pool, "nope", 10).await.unwrap_err();
+    let unknown = smart_list_items_inner(&pool, &Registry::for_process(), "nope", 10)
+        .await
+        .unwrap_err();
     assert_eq!(unknown.code, IpcErrorCode::NotFound, "{unknown:?}");
     assert!(unknown.message.contains("nope"), "{unknown:?}");
 
     // A query outside the engine's bounds is the caller's fault, not the
     // database's: `invalid`, so the box can say so rather than offering
     // *Retry*.
-    let huge = search_inner(&pool, query(&"p".repeat(1_000)))
+    let huge = search_inner(&pool, &Registry::for_process(), query(&"p".repeat(1_000)))
         .await
         .unwrap_err();
     assert_eq!(huge.code, IpcErrorCode::Invalid, "{huge:?}");
@@ -203,7 +210,9 @@ async fn errors_carry_a_code_the_frontend_can_branch_on() {
     // arm no bad argument can reach.
     let closed = knobas_db::test_util::test_pool().await;
     closed.close().await;
-    let dead = search_inner(&closed, query("sepa")).await.unwrap_err();
+    let dead = search_inner(&closed, &Registry::for_process(), query("sepa"))
+        .await
+        .unwrap_err();
     assert_eq!(dead.code, IpcErrorCode::Internal, "{dead:?}");
 }
 
@@ -222,7 +231,9 @@ async fn launcher_home_reports_source_health_beside_the_lists() {
     let pool = pool().await;
     seed(&pool, "home").await;
 
-    let home = launcher_home_inner(&pool).await.unwrap();
+    let home = launcher_home_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let v = serde_json::to_value(&home).unwrap();
 
     for field in ["smart_lists", "recent", "sources", "pending_writes"] {
@@ -279,7 +290,10 @@ async fn launcher_home_counts_the_pending_writes() {
     let pool = pool().await;
     let entity = knobas_core::entity::EntityRef::new("jira", &token("wq"));
 
-    let before = launcher_home_inner(&pool).await.unwrap().pending_writes;
+    let before = launcher_home_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap()
+        .pending_writes;
 
     let queued = knobas_core::write_queue::queue(
         &pool,
@@ -292,7 +306,10 @@ async fn launcher_home_counts_the_pending_writes() {
     .await
     .unwrap();
     assert_eq!(
-        launcher_home_inner(&pool).await.unwrap().pending_writes,
+        launcher_home_inner(&pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .pending_writes,
         before + 1,
         "a queued write is one the launcher still owes a source"
     );
@@ -302,7 +319,10 @@ async fn launcher_home_counts_the_pending_writes() {
         .unwrap()
         .expect("the write was pending, so it can be held");
     assert_eq!(
-        launcher_home_inner(&pool).await.unwrap().pending_writes,
+        launcher_home_inner(&pool, &Registry::for_process())
+            .await
+            .unwrap()
+            .pending_writes,
         before,
         "a held write waits for the user, not for the network"
     );
@@ -318,8 +338,13 @@ async fn the_rail_and_the_board_report_the_same_lists() {
     let pool = pool().await;
     seed(&pool, "rail").await;
 
-    let standalone = smart_lists_inner(&pool).await.unwrap();
-    let embedded = launcher_home_inner(&pool).await.unwrap().smart_lists;
+    let standalone = smart_lists_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap();
+    let embedded = launcher_home_inner(&pool, &Registry::for_process())
+        .await
+        .unwrap()
+        .smart_lists;
 
     let ids = |lists: &[knobas_search::SmartListSummary]| {
         lists.iter().map(|l| l.id.clone()).collect::<Vec<_>>()
@@ -335,7 +360,7 @@ async fn a_smart_list_answers_in_the_search_shape() {
     let pool = pool().await;
     seed(&pool, "list").await;
 
-    let response = smart_list_items_inner(&pool, "just-synced", 20)
+    let response = smart_list_items_inner(&pool, &Registry::for_process(), "just-synced", 20)
         .await
         .unwrap();
     let v = serde_json::to_value(&response).unwrap();
@@ -386,7 +411,9 @@ async fn the_trees_search_answers_with_assets_and_their_paths() {
     // What the box sends.
     let mut narrowed = query(&format!("pg {t}"));
     narrowed.filters.kinds = vec!["asset".to_owned()];
-    let response = search_inner(&pool, narrowed).await.unwrap();
+    let response = search_inner(&pool, &Registry::for_process(), narrowed)
+        .await
+        .unwrap();
 
     let kinds: Vec<_> = response.groups.iter().map(|g| g.kind.as_str()).collect();
     assert_eq!(kinds, ["asset"], "the mirror's rows are out: {kinds:?}");
@@ -408,7 +435,9 @@ async fn the_trees_search_answers_with_assets_and_their_paths() {
     // paths.
     let mut ancestors = query(&format!("site {t}"));
     ancestors.filters.kinds = vec!["asset".to_owned()];
-    let found = search_inner(&pool, ancestors).await.unwrap();
+    let found = search_inner(&pool, &Registry::for_process(), ancestors)
+        .await
+        .unwrap();
     let named: Vec<_> = found.groups[0]
         .hits
         .iter()
@@ -471,7 +500,7 @@ async fn a_text_free_query_filtered_to_assets_browses_the_estate() {
             ..SearchFilters::default()
         },
     };
-    let answer = search_inner(&pool, browse)
+    let answer = search_inner(&pool, &Registry::for_process(), browse)
         .await
         .expect("the estate browses");
 
@@ -532,9 +561,13 @@ async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
         .value;
 
     // The prefix, typed, and nothing else: no filter set by the caller.
-    let response = search_inner(&pool, query(&format!("asset: {t}")))
-        .await
-        .unwrap();
+    let response = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("asset: {t}")),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         response.interpreted.prefix,
         Some(knobas_search::Prefix::Asset)
@@ -562,7 +595,9 @@ async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
     // any other kind" is what that comes to.
     let mut by_filter = query(&t);
     by_filter.filters.kinds = vec!["asset".to_owned()];
-    let filtered = search_inner(&pool, by_filter).await.unwrap();
+    let filtered = search_inner(&pool, &Registry::for_process(), by_filter)
+        .await
+        .unwrap();
     let named = |answer: &knobas_search::SearchResponse| {
         answer
             .groups
@@ -586,12 +621,20 @@ async fn the_asset_prefix_answers_from_the_estate_with_its_path() {
         q.filters.kinds = kinds;
         q
     };
-    let by_prefix = search_inner(&pool, with_author(&format!("asset: {t}"), Vec::new()))
-        .await
-        .unwrap();
-    let by_kind = search_inner(&pool, with_author(&t, vec!["asset".to_owned()]))
-        .await
-        .unwrap();
+    let by_prefix = search_inner(
+        &pool,
+        &Registry::for_process(),
+        with_author(&format!("asset: {t}"), Vec::new()),
+    )
+    .await
+    .unwrap();
+    let by_kind = search_inner(
+        &pool,
+        &Registry::for_process(),
+        with_author(&t, vec!["asset".to_owned()]),
+    )
+    .await
+    .unwrap();
     assert_eq!(by_prefix.coverage, by_kind.coverage);
     assert_eq!(by_prefix.groups.len(), by_kind.groups.len());
 }
@@ -647,7 +690,9 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     .unwrap()
     .value;
 
-    let found = search_inner(&pool, query(&host)).await.unwrap();
+    let found = search_inner(&pool, &Registry::for_process(), query(&host))
+        .await
+        .unwrap();
     let ids: Vec<_> = found
         .groups
         .iter()
@@ -665,9 +710,13 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     // A **key** is schema and finds nothing: `hostname` stands on every VM in
     // the estate, so a query for it that answered with all of them would be a
     // launcher answering a question nobody asked.
-    let by_key = search_inner(&pool, query(&format!("hostname {t}")))
-        .await
-        .unwrap();
+    let by_key = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("hostname {t}")),
+    )
+    .await
+    .unwrap();
     assert!(
         !by_key
             .groups
@@ -693,7 +742,9 @@ async fn a_property_value_and_a_url_are_what_a_reader_types() {
     .unwrap()
     .value;
 
-    let by_port = search_inner(&pool, query("53002")).await.unwrap();
+    let by_port = search_inner(&pool, &Registry::for_process(), query("53002"))
+        .await
+        .unwrap();
     let ports: Vec<_> = by_port
         .groups
         .iter()
@@ -762,9 +813,13 @@ async fn moving_an_asset_moves_what_under_returns() {
     let mut moved = vec![vm.id.clone(), pg.id.clone(), route.id.clone()];
     moved.sort();
 
-    let before = search_inner(&pool, query(&format!("under:old-{t}")))
-        .await
-        .unwrap();
+    let before = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("under:old-{t}")),
+    )
+    .await
+    .unwrap();
     let mut expected = [moved.clone(), vec![old.id.clone()]].concat();
     expected.sort();
     assert_eq!(ids(&before), expected);
@@ -773,18 +828,26 @@ async fn moving_an_asset_moves_what_under_returns() {
         .await
         .unwrap();
 
-    let after_old = search_inner(&pool, query(&format!("under:old-{t}")))
-        .await
-        .unwrap();
+    let after_old = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("under:old-{t}")),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         ids(&after_old),
         std::slice::from_ref(&old.id),
         "nothing stale under the old site"
     );
 
-    let after_new = search_inner(&pool, query(&format!("under:new-{t}")))
-        .await
-        .unwrap();
+    let after_new = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("under:new-{t}")),
+    )
+    .await
+    .unwrap();
     let mut expected = [moved, vec![new.id.clone()]].concat();
     expected.sort();
     assert_eq!(ids(&after_new), expected);
@@ -941,7 +1004,7 @@ async fn estate_with_monitors(label: &str) -> sqlx::PgPool {
 
 /// The count of one list, off the board the launcher draws.
 async fn list_count(pool: &sqlx::PgPool, id: &str) -> i64 {
-    smart_lists_inner(pool)
+    smart_lists_inner(pool, &Registry::for_process())
         .await
         .expect("the board")
         .into_iter()
@@ -952,7 +1015,7 @@ async fn list_count(pool: &sqlx::PgPool, id: &str) -> i64 {
 
 /// Every asset id one list answers with, in the order it answers.
 async fn list_rows(pool: &sqlx::PgPool, id: &str) -> Vec<String> {
-    smart_list_items_inner(pool, id, 200)
+    smart_list_items_inner(pool, &Registry::for_process(), id, 200)
         .await
         .expect("the list's rows")
         .groups
@@ -1177,7 +1240,7 @@ async fn a_certificate_reading_that_is_not_a_number_is_a_miss_and_not_a_failure(
     // And the board still loads, which is the half that would have been an
     // outage.
     assert!(
-        launcher_home_inner(&pool)
+        launcher_home_inner(&pool, &Registry::for_process())
             .await
             .expect("the board still loads")
             .smart_lists
@@ -1201,7 +1264,7 @@ async fn every_estate_list_badges_until_it_is_opened() {
     context_holding(&pool, "shipping", "asset:orbstack-docker").await;
 
     let badged = |pool: sqlx::PgPool| async move {
-        smart_lists_inner(&pool)
+        smart_lists_inner(&pool, &Registry::for_process())
             .await
             .expect("the board")
             .into_iter()
@@ -1216,7 +1279,7 @@ async fn every_estate_list_badges_until_it_is_opened() {
             before.contains(&id.to_owned()),
             "{id} holds something and has never been opened: {before:?}"
         );
-        smart_list_items_inner(&pool, id, 20)
+        smart_list_items_inner(&pool, &Registry::for_process(), id, 20)
             .await
             .expect("opening the list");
     }
@@ -1298,7 +1361,9 @@ async fn mirror_row(
 
 /// The whole rail, as ids.
 async fn rail(pool: &sqlx::PgPool) -> Vec<knobas_search::SmartListSummary> {
-    smart_lists_inner(pool).await.expect("the rail")
+    smart_lists_inner(pool, &Registry::for_process())
+        .await
+        .expect("the rail")
 }
 
 /// One list off the rail.
@@ -1362,7 +1427,7 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
     .await;
 
     let raw = format!("#{t} @mara");
-    let made = create_smart_list_inner(&pool, "Mara's open ones", &raw)
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Mara's open ones", &raw)
         .await
         .expect("the query is one the grammar runs");
 
@@ -1397,7 +1462,7 @@ async fn a_saved_query_keeps_its_text_its_chips_and_its_prefix() {
 
     // Opening it: the rows the count promised, and the *saved query's* own
     // interpretation -- which is what draws the chip row above the results.
-    let opened = smart_list_items_inner(&pool, &made.id, 20)
+    let opened = smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
         .await
         .expect("the saved list opens");
     let v = serde_json::to_value(&opened).unwrap();
@@ -1509,10 +1574,10 @@ async fn a_saved_lists_count_is_the_number_of_rows_it_answers_with() {
         ("all of them", format!("#{t} @mara updated:7d")),
         ("a query that matches nothing", format!("{t} @nobody")),
     ] {
-        let made = create_smart_list_inner(&pool, name, &raw)
+        let made = create_smart_list_inner(&pool, &Registry::for_process(), name, &raw)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
-        let opened = smart_list_items_inner(&pool, &made.id, 200)
+        let opened = smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 200)
             .await
             .unwrap_or_else(|error| panic!("{name}: {error:?}"));
         assert_eq!(
@@ -1554,7 +1619,7 @@ async fn a_saved_lists_badge_lights_when_the_corpus_moves_and_clears_when_it_is_
     )
     .await;
 
-    let made = create_smart_list_inner(&pool, "Payments", &t)
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Payments", &t)
         .await
         .expect("saved");
     assert!(
@@ -1562,7 +1627,7 @@ async fn a_saved_lists_badge_lights_when_the_corpus_moves_and_clears_when_it_is_
         "it holds something and has never been opened"
     );
 
-    smart_list_items_inner(&pool, &made.id, 20)
+    smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
         .await
         .expect("opening it clears the badge");
     assert!(
@@ -1607,7 +1672,7 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
         "-4 minutes",
     )
     .await;
-    let healthy = create_smart_list_inner(&pool, "Still fine", &t)
+    let healthy = create_smart_list_inner(&pool, &Registry::for_process(), "Still fine", &t)
         .await
         .expect("saved");
 
@@ -1689,13 +1754,15 @@ async fn a_saved_query_the_grammar_refuses_reads_needs_attention_and_the_board_s
 
     // And the whole board draws, which is what a launcher opening actually
     // asks for.
-    let home = launcher_home_inner(&pool).await.expect("the board");
+    let home = launcher_home_inner(&pool, &Registry::for_process())
+        .await
+        .expect("the board");
     assert_eq!(home.smart_lists.len(), listed.len());
     assert!(!home.recent.is_empty());
 
     // Typing `list:<id>` for one answers with the reason, not with an empty
     // page: a refusal a reader can act on beats a list that looks empty.
-    let refused = smart_list_items_inner(&pool, "legacy-palette", 20)
+    let refused = smart_list_items_inner(&pool, &Registry::for_process(), "legacy-palette", 20)
         .await
         .expect_err("a list that cannot run cannot be opened");
     assert_eq!(refused.code, IpcErrorCode::Invalid);
@@ -1727,18 +1794,18 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         "-4 minutes",
     )
     .await;
-    let made = create_smart_list_inner(&pool, "Payments retries", &t)
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "Payments retries", &t)
         .await
         .expect("saved");
     assert_eq!(made.id, "payments-retries");
 
     // Opened once, so the seen-stamp exists and the rename can be shown not to
     // have lost it.
-    smart_list_items_inner(&pool, &made.id, 20)
+    smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
         .await
         .expect("opens");
 
-    rename_smart_list_inner(&pool, &made.id, "  SEPA  ")
+    rename_smart_list_inner(&pool, &Registry::for_process(), &made.id, "  SEPA  ")
         .await
         .expect("renamed");
     let renamed = rail_row(&pool, &made.id).await;
@@ -1750,7 +1817,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
 
     // A blank name is refused rather than stored.
     assert_eq!(
-        rename_smart_list_inner(&pool, &made.id, "   ")
+        rename_smart_list_inner(&pool, &Registry::for_process(), &made.id, "   ")
             .await
             .expect_err("a list needs a name")
             .code,
@@ -1761,7 +1828,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
     // A built-in is code and is not a saved list, so neither write reaches it.
     for id in ["mine", "not-monitored"] {
         assert_eq!(
-            rename_smart_list_inner(&pool, id, "Mine, renamed")
+            rename_smart_list_inner(&pool, &Registry::for_process(), id, "Mine, renamed")
                 .await
                 .expect_err("a built-in cannot be renamed")
                 .code,
@@ -1769,7 +1836,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
             "{id}"
         );
         assert_eq!(
-            delete_smart_list_inner(&pool, id)
+            delete_smart_list_inner(&pool, &Registry::for_process(), id)
                 .await
                 .expect_err("a built-in cannot be deleted")
                 .code,
@@ -1782,7 +1849,7 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         );
     }
 
-    delete_smart_list_inner(&pool, &made.id)
+    delete_smart_list_inner(&pool, &Registry::for_process(), &made.id)
         .await
         .expect("deleted");
     assert!(
@@ -1790,14 +1857,14 @@ async fn a_saved_list_can_be_renamed_and_deleted_and_a_built_in_can_be_neither()
         "nothing saved is left"
     );
     assert_eq!(
-        smart_list_items_inner(&pool, &made.id, 20)
+        smart_list_items_inner(&pool, &Registry::for_process(), &made.id, 20)
             .await
             .expect_err("it is gone")
             .code,
         IpcErrorCode::NotFound
     );
     assert_eq!(
-        delete_smart_list_inner(&pool, &made.id)
+        delete_smart_list_inner(&pool, &Registry::for_process(), &made.id)
             .await
             .expect_err("and stays gone")
             .code,
@@ -1838,7 +1905,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
             &"x".repeat(600) as &str,
         ),
     ] {
-        let refused = create_smart_list_inner(&pool, label, query)
+        let refused = create_smart_list_inner(&pool, &Registry::for_process(), label, query)
             .await
             .err()
             .unwrap_or_else(|| panic!("{why} was saved"));
@@ -1852,7 +1919,7 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
     }
     // A name is owed too, and its refusal is a different sentence: the query
     // was fine.
-    let unnamed = create_smart_list_inner(&pool, "   ", &t)
+    let unnamed = create_smart_list_inner(&pool, &Registry::for_process(), "   ", &t)
         .await
         .expect_err("a saved list needs a name");
     assert_eq!(unnamed.code, IpcErrorCode::Invalid);
@@ -1868,17 +1935,17 @@ async fn creating_refuses_a_query_it_cannot_run_and_never_shadows_a_built_in() {
 
     // And the collision: *My items* slugs onto the built-in that answers
     // `list:mine`.
-    let made = create_smart_list_inner(&pool, "My items", &t)
+    let made = create_smart_list_inner(&pool, &Registry::for_process(), "My items", &t)
         .await
         .expect("saved");
     assert_ne!(made.id, "mine", "a saved list may not shadow a built-in");
     assert_eq!(made.id, "my-items");
-    let clash = create_smart_list_inner(&pool, "mine", &t)
+    let clash = create_smart_list_inner(&pool, &Registry::for_process(), "mine", &t)
         .await
         .expect("saved");
     assert_eq!(clash.id, "mine-2");
     // The proof is what `list:mine` opens, not what the generator returned.
-    let built_in = smart_list_items_inner(&pool, "mine", 20)
+    let built_in = smart_list_items_inner(&pool, &Registry::for_process(), "mine", 20)
         .await
         .expect("the built-in still answers");
     assert!(
@@ -1929,9 +1996,13 @@ async fn under_reads_the_parent_the_compiled_in_gitea_adapter_declares() {
     .await
     .unwrap();
 
-    let response = search_inner(&pool, query(&format!("under:{t}")))
-        .await
-        .unwrap();
+    let response = search_inner(
+        &pool,
+        &Registry::for_process(),
+        query(&format!("under:{t}")),
+    )
+    .await
+    .unwrap();
     let hits: Vec<&str> = response
         .groups
         .iter()
@@ -1973,8 +2044,12 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     .await
     .unwrap();
 
-    let v =
-        serde_json::to_value(filter_suggestions_inner(&pool, "", false).await.unwrap()).unwrap();
+    let v = serde_json::to_value(
+        filter_suggestions_inner(&pool, &Registry::for_process(), "", false)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
 
     let mut keys: Vec<&str> = v.as_object().unwrap().keys().map(String::as_str).collect();
     keys.sort_unstable();
@@ -1999,7 +2074,7 @@ async fn the_suggestions_carry_kinds_sources_and_parents_with_their_kind() {
     let mut ours: Vec<(String, String)> = Vec::new();
     for prefix in [format!("o/{t}"), t.clone()] {
         let v = serde_json::to_value(
-            filter_suggestions_inner(&pool, &prefix, false)
+            filter_suggestions_inner(&pool, &Registry::for_process(), &prefix, false)
                 .await
                 .unwrap(),
         )

@@ -43,6 +43,7 @@
 
 use knobas_app::assets::{self, ESTATE_FILE_PRODUCER};
 use knobas_app::commands::search::search_inner;
+use knobas_app::sources::Registry;
 use knobas_app::time::{self, TimerTarget};
 use knobas_search::{SearchFilters, SearchQuery};
 use sqlx::PgPool;
@@ -289,7 +290,7 @@ async fn the_files_monitor_names_are_kept_on_the_assets_and_resolve_to_nothing_y
 async fn a_container_is_found_in_the_launcher_with_the_path_that_tells_it_apart() {
     let pool = &estate().await;
 
-    let found = search_inner(pool, query("knobas-teamcity"))
+    let found = search_inner(pool, &Registry::for_process(), query("knobas-teamcity"))
         .await
         .expect("the launcher's answer");
 

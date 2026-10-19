@@ -2078,13 +2078,12 @@ const ROSTER_ASSETS: &str = "select m.id as monitor_id, a.id, a.name, a.type_id,
 /// # Errors
 ///
 /// [`IpcError`] if a read fails.
-pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> {
-    let fillers = crate::sources::crud::fillers(
-        pool,
-        &crate::sources::Registry::for_process(),
-        knobas_source::role::MONITORING,
-    )
-    .await?;
+pub async fn monitor_roster(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<MonitorRow>, IpcError> {
+    let fillers =
+        crate::sources::crud::fillers(pool, registry, knobas_source::role::MONITORING).await?;
     let rows = sqlx::query(ROSTER)
         .bind(MONITOR_KIND)
         .bind(&fillers)
@@ -2099,9 +2098,7 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .map(|row| row.try_get("entity_id"))
         .collect::<Result<_, _>>()?;
     // Where each source keeps a monitor's reading (#1224).
-    let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
-            .await?;
+    let declarations = crate::sources::paths::declared_paths(pool, registry).await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
     for sample in sqlx::query(ROSTER_SAMPLES)

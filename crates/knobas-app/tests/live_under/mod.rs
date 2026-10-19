@@ -22,6 +22,7 @@
 
 #![allow(dead_code)]
 
+use knobas_app::sources::Registry;
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
@@ -50,7 +51,7 @@ pub fn under(name: &str) -> String {
 /// the scratch database and `Scheduler::start` -- a scheduler that is running
 /// may already be syncing.
 pub async fn declare(pool: &sqlx::PgPool) {
-    knobas_app::commands::search::searcher(pool)
+    knobas_app::commands::search::searcher(pool, &Registry::for_process())
         .await
         .expect("the adapters' declarations are stored");
 }
@@ -93,7 +94,7 @@ impl Found {
 /// * the `under:` coverage lists `source` as **answered** -- the verdict the
 ///   launcher prints when the result is empty, measured on the same corpus.
 pub async fn search(pool: &sqlx::PgPool, source: &str, raw: &str) -> Found {
-    let response = knobas_app::commands::search::searcher(pool)
+    let response = knobas_app::commands::search::searcher(pool, &Registry::for_process())
         .await
         .expect("the searcher is built the app's way")
         .search(knobas_search::SearchQuery {

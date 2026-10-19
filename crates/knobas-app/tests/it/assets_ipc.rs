@@ -25,6 +25,7 @@ use knobas_app::assets::{
     self, AssetEdit, AssetRow, AssetStatus, ESTATE_FILE_PRODUCER, Environment, HCLOUD_PRODUCER,
     PropertyValue,
 };
+use knobas_app::sources::Registry;
 use knobas_app::{IpcError, IpcErrorCode};
 use sqlx::{PgPool, Row};
 use tauri::ipc::CallbackFn;
@@ -2430,9 +2431,10 @@ async fn an_asset_linked_to_a_ticket_and_a_vm_is_on_both_of_their_details() {
 
     // And the ticket's own detail -- the other idiom, the slide-over -- shows
     // the asset under its links.
-    let detail = knobas_app::commands::entity::get_entity_inner(&pool, &ticket)
-        .await
-        .expect("the ticket's detail");
+    let detail =
+        knobas_app::commands::entity::get_entity_inner(&pool, &Registry::for_process(), &ticket)
+            .await
+            .expect("the ticket's detail");
     assert_eq!(
         detail
             .links
@@ -5246,7 +5248,9 @@ async fn the_roster_draws_each_monitors_type_target_reading_uptime_and_certifica
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(
         names(&roster),
         ["gitea", "knobas-teamcity"],
@@ -5315,7 +5319,9 @@ async fn a_drifted_payload_reads_as_absence_and_never_as_a_guess() {
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     let drifted = row(&roster, "drifted");
     assert_eq!(drifted.monitor_type, None, "a number is not a type");
     assert_eq!(
@@ -5340,7 +5346,9 @@ async fn a_reading_is_drawn_only_where_its_source_declares_one() {
     kuma_monitor(&pool, "kuma", "declared", payload.clone(), None).await;
     monitor_of(&pool, "unknown", "undeclared", payload, None, None).await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(row(&roster, "declared").response_time_ms, Some(13.0));
     assert_eq!(
         names(&roster),
@@ -5379,7 +5387,9 @@ async fn a_monitors_state_is_its_newest_sample_and_the_mirror_only_without_one()
     sample(&pool, &slow, 5, Some("warn")).await;
     sample(&pool, &slow, 90, Some("up")).await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(
         row(&roster, "slow").state.as_deref(),
         Some("warn"),
@@ -5413,7 +5423,9 @@ async fn the_bar_carries_the_last_days_samples_oldest_first_and_no_older_one() {
     sample(&pool, &watched, 60, None).await;
     sample(&pool, &watched, 1, Some("warn")).await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     let watched = row(&roster, "watched");
     assert_eq!(
         watched
@@ -5452,7 +5464,9 @@ async fn a_paused_monitor_stays_on_the_roster_with_its_samples() {
     sample(&pool, &paused, 120, Some("up")).await;
     tombstone(&pool, &paused).await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(names(&roster), ["gitea"]);
     let paused = row(&roster, "gitea");
     assert!(paused.tombstoned, "the chip that says Paused reads this");
@@ -5496,7 +5510,9 @@ async fn a_disabled_sources_monitors_leave_the_roster() {
     .await
     .expect("the disabled source");
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(
         names(&roster),
         ["gitea"],
@@ -5545,7 +5561,9 @@ async fn the_roster_holds_only_the_monitoring_fillers_monitors_paused_ones_inclu
     )
     .await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(names(&roster), ["filler paused", "filler up"]);
     assert!(row(&roster, "filler paused").tombstoned);
 }
@@ -5591,7 +5609,9 @@ async fn a_monitor_lists_the_assets_it_watches_with_their_path() {
     let not_an_asset = ticket(&pool, "PAY-9").await;
     link_as(&pool, &watching, &not_an_asset, "monitored-by").await;
 
-    let roster = assets::monitor_roster(&pool).await.expect("the roster");
+    let roster = assets::monitor_roster(&pool, &Registry::for_process())
+        .await
+        .expect("the roster");
     assert_eq!(
         row(&roster, "gitea")
             .assets
@@ -5917,7 +5937,7 @@ async fn a_monitor_from_a_source_the_reader_turned_off_still_counts_as_attached(
         "a link to a monitor is an attachment whether or not the reader is reading that source"
     );
     assert!(
-        assets::monitor_roster(&pool)
+        assets::monitor_roster(&pool, &Registry::for_process())
             .await
             .expect("the roster")
             .is_empty(),

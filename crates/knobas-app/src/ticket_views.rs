@@ -204,7 +204,10 @@ fn view_of(row: &sqlx::postgres::PgRow) -> Result<TicketView, IpcError> {
 /// # Errors
 ///
 /// `internal` if a read fails.
-pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
+pub async fn list(
+    pool: &PgPool,
+    registry: &dyn knobas_sync::scheduler::AdapterRegistry,
+) -> Result<Vec<TicketViewRow>, IpcError> {
     // A Jira view whose item is not live is not listed: its source is turned
     // off, and it comes back with the source, or its source was deleted with
     // the mirror purged, which leaves the entity tombstoned and no
@@ -225,7 +228,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<TicketViewRow>, IpcError> {
     let views = rows.iter().map(view_of).collect::<Result<Vec<_>, _>>()?;
     let mut sources = saved_view_sources(pool, &views).await?;
     let texts: Vec<&str> = views.iter().map(|view| view.query.as_str()).collect();
-    let readings = crate::commands::search::searcher(pool)
+    let readings = crate::commands::search::searcher(pool, registry)
         .await?
         .readings(&texts, "ticket")
         .await?;

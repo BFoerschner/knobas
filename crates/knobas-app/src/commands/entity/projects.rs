@@ -57,6 +57,6 @@ pub async fn list_projects_inner(
     // The declarations' stored copy, written first as every search command
     // writes it (one read when nothing changed): the census reads
     // `sync.item_project`, which the database resolves from it (#759).
-    crate::commands::search::searcher(pool).await?;
+    crate::commands::search::searcher(pool, &crate::sources::Registry::for_process()).await?;
     Ok(knobas_core::project::list(pool).await?)
 }

@@ -11,6 +11,7 @@ use knobas_app::commands::entity::{
     list_entities_inner, promote_context_inner, room_suggestions_inner,
 };
 use knobas_app::link_sets::{self, LinkSetDraft, LinkSetMember, LinkSetRule};
+use knobas_app::sources::Registry;
 use knobas_core::entity_list::{EntityFilter, EntityOrder};
 use knobas_core::reach::{self, Origin};
 use sqlx::PgPool;
@@ -28,7 +29,9 @@ async fn pool() -> PgPool {
     .execute(&pool)
     .await
     .unwrap();
-    knobas_app::commands::search::searcher(&pool).await.unwrap();
+    knobas_app::commands::search::searcher(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     pool
 }
 
@@ -167,6 +170,7 @@ async fn an_epic_rule_shows_its_members_on_every_ticket_under_the_epic() {
 
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Payout stack"),
             vec![member("repo", &repo)],
@@ -215,6 +219,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
 
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Children"),
             vec![member("page", &page)],
@@ -225,6 +230,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Project"),
             vec![member("monitor", &monitor)],
@@ -235,6 +241,7 @@ async fn parent_project_and_manual_rules_match_what_they_name() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "By hand"),
             vec![member("asset", &asset)],
@@ -270,6 +277,7 @@ async fn an_item_shows_once_with_its_first_reason() {
     link(&pool, &ticket, &own).await;
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "B"),
             vec![member("repo", &own), member("page", &shared)],
@@ -280,6 +288,7 @@ async fn an_item_shows_once_with_its_first_reason() {
     .unwrap();
     let a = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "A"),
             vec![member("page", &shared)],
@@ -324,6 +333,7 @@ async fn editing_a_set_changes_every_job_at_once() {
     link(&pool, &one, &own).await;
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Stack"),
             vec![member("repo", &first)],
@@ -339,7 +349,9 @@ async fn editing_a_set_changes_every_job_at_once() {
         vec![rule("epic", &epic)],
     );
     edit.id = Some(saved.set.id.clone());
-    link_sets::save(&pool, edit).await.unwrap();
+    link_sets::save(&pool, &Registry::for_process(), edit)
+        .await
+        .unwrap();
     for ticket in [&one, &two] {
         let got = reached(&pool, ticket).await;
         assert!(got.contains_key(&second), "{ticket} sees the added member");
@@ -377,6 +389,7 @@ async fn hiding_a_member_on_one_ticket_leaves_the_set_and_the_others() {
     let repo = thing(&pool, "repo", "hidden-here").await;
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Stack"),
             vec![member("repo", &repo)],
@@ -390,7 +403,7 @@ async fn hiding_a_member_on_one_ticket_leaves_the_set_and_the_others() {
     assert!(!reached(&pool, &one).await.contains_key(&repo));
     assert!(reached(&pool, &two).await.contains_key(&repo));
     assert_eq!(
-        link_sets::get(&pool, &saved.set.id)
+        link_sets::get(&pool, &Registry::for_process(), &saved.set.id)
             .await
             .unwrap()
             .set
@@ -448,6 +461,7 @@ async fn sets_never_feed_membership_the_tray_the_inbox_or_the_export() {
 
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Set"),
             vec![member("repo", &from_set)],
@@ -514,6 +528,7 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
 
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         LinkSetDraft {
             id: None,
             name: format!("  {} ", named(&p, "Payout stack")),
@@ -553,7 +568,9 @@ async fn a_set_reads_with_its_contents_rules_and_tickets_now() {
         ]
     );
 
-    let listed = link_sets::list(&pool).await.unwrap();
+    let listed = link_sets::list(&pool, &Registry::for_process())
+        .await
+        .unwrap();
     let row = listed.iter().find(|row| row.id == saved.set.id).unwrap();
     assert_eq!(row, &saved.set);
 }
@@ -581,6 +598,7 @@ async fn a_rules_preview_is_exactly_the_tickets_that_show_the_set() {
         let the_rule = rule(kind, &value);
         let saved = link_sets::save(
             &pool,
+            &Registry::for_process(),
             draft(
                 &named(&p, kind),
                 vec![member("repo", &repo)],
@@ -589,7 +607,7 @@ async fn a_rules_preview_is_exactly_the_tickets_that_show_the_set() {
         )
         .await
         .unwrap();
-        let previewed: Vec<String> = link_sets::preview(&pool, &the_rule)
+        let previewed: Vec<String> = link_sets::preview(&pool, &Registry::for_process(), &the_rule)
             .await
             .unwrap()
             .into_iter()
@@ -635,7 +653,9 @@ async fn a_set_knobas_cannot_store_is_refused() {
             "needs a name",
         ),
     ] {
-        let error = link_sets::save(&pool, refused).await.unwrap_err();
+        let error = link_sets::save(&pool, &Registry::for_process(), refused)
+            .await
+            .unwrap_err();
         assert_eq!(error.code, IpcErrorCode::Invalid);
         assert!(
             error.message.contains(why),
@@ -643,12 +663,15 @@ async fn a_set_knobas_cannot_store_is_refused() {
             error.message
         );
     }
-    let missing = link_sets::get(&pool, "no-such-set").await.unwrap_err();
+    let missing = link_sets::get(&pool, &Registry::for_process(), "no-such-set")
+        .await
+        .unwrap_err();
     assert_eq!(missing.code, IpcErrorCode::NotFound);
 
     // An editor still open on a set somebody deleted cannot bring it back.
     let saved = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Gone soon"),
             vec![],
@@ -664,10 +687,14 @@ async fn a_set_knobas_cannot_store_is_refused() {
         vec![rule("manual", &ticket)],
     );
     stale.id = Some(saved.set.id.clone());
-    let error = link_sets::save(&pool, stale).await.unwrap_err();
+    let error = link_sets::save(&pool, &Registry::for_process(), stale)
+        .await
+        .unwrap_err();
     assert_eq!(error.code, IpcErrorCode::NotFound);
     assert!(
-        link_sets::get(&pool, &saved.set.id).await.is_err(),
+        link_sets::get(&pool, &Registry::for_process(), &saved.set.id)
+            .await
+            .is_err(),
         "a save over a deleted set brought it back"
     );
 }
@@ -695,6 +722,7 @@ async fn a_this_job_list_holds_the_sets_members() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Docs"),
             vec![member("page", &page)],
@@ -716,6 +744,7 @@ async fn a_this_job_list_holds_the_sets_members() {
     };
     let page_rows = list_entities_inner(
         &pool,
+        &Registry::for_process(),
         &filter,
         50,
         0,
@@ -760,6 +789,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
 
     let stack = link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Stack"),
             vec![member("repo", &repo), member("page", &page)],
@@ -770,6 +800,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Kit"),
             vec![member("page", &page)],
@@ -780,6 +811,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     .unwrap();
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         draft(
             &named(&p, "Elsewhere"),
             vec![member("page", &page)],
@@ -790,7 +822,9 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     .unwrap();
     link_sets::hide(&pool, &story, &repo, true).await.unwrap();
 
-    let read = link_sets::on_job(&pool, &story).await.unwrap();
+    let read = link_sets::on_job(&pool, &Registry::for_process(), &story)
+        .await
+        .unwrap();
     let names: Vec<&str> = read.sets.iter().map(|set| set.name.as_str()).collect();
     assert_eq!(
         names,
@@ -835,7 +869,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
     );
     assert_eq!(on_stack.members[0].entity_kind.as_deref(), Some("repo"));
     assert_eq!(
-        link_sets::get(&pool, &stack.set.id)
+        link_sets::get(&pool, &Registry::for_process(), &stack.set.id)
             .await
             .unwrap()
             .set
@@ -845,7 +879,9 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
         "hiding never edits the set"
     );
 
-    let on_epic = link_sets::on_job(&pool, &other_epic).await.unwrap();
+    let on_epic = link_sets::on_job(&pool, &Registry::for_process(), &other_epic)
+        .await
+        .unwrap();
     let names: Vec<(&str, &str)> = on_epic
         .sets
         .iter()
@@ -864,7 +900,7 @@ async fn the_job_reads_each_set_that_applies_with_its_reason() {
         "a hide is per ticket"
     );
     assert!(
-        link_sets::on_job(&pool, "jira:NOPE-1")
+        link_sets::on_job(&pool, &Registry::for_process(), "jira:NOPE-1")
             .await
             .unwrap()
             .sets
@@ -888,7 +924,9 @@ async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
     link(&pool, &story, &repo).await;
     link(&pool, &sub, &story).await;
 
-    let read = link_sets::on_job(&pool, &sub).await.unwrap();
+    let read = link_sets::on_job(&pool, &Registry::for_process(), &sub)
+        .await
+        .unwrap();
     let parent = read.parent.expect("the story is the sub-task's parent");
     assert_eq!(parent.ticket, story);
     assert_eq!(parent.title.as_deref(), Some(format!("{p}-2").as_str()));
@@ -903,7 +941,7 @@ async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
         "the parent's own links, never the sub-task itself"
     );
     assert!(
-        link_sets::on_job(&pool, &story)
+        link_sets::on_job(&pool, &Registry::for_process(), &story)
             .await
             .unwrap()
             .parent
@@ -913,7 +951,7 @@ async fn a_sub_task_reads_its_parents_own_links_behind_the_switch() {
 
     // No other test in this file reads a parent, so the switch is this one's.
     reach::set_parent_links(&pool, false).await.unwrap();
-    let off = link_sets::on_job(&pool, &sub).await;
+    let off = link_sets::on_job(&pool, &Registry::for_process(), &sub).await;
     reach::set_parent_links(&pool, true).await.unwrap();
     assert!(off.unwrap().parent.is_none(), "the switch is off");
 }
@@ -984,9 +1022,12 @@ async fn an_item_linked_by_hand_under_one_epic_is_offered_to_its_set() {
         kind: "page".to_owned(),
         query: "name:Runbook*".to_owned(),
     }];
-    let stack = link_sets::save(&pool, stack).await.unwrap().set;
+    let stack = link_sets::save(&pool, &Registry::for_process(), stack)
+        .await
+        .unwrap()
+        .set;
 
-    let hints: Vec<link_sets::LinkSetHint> = link_sets::hints(&pool)
+    let hints: Vec<link_sets::LinkSetHint> = link_sets::hints(&pool, &Registry::for_process())
         .await
         .unwrap()
         .into_iter()
@@ -1007,6 +1048,7 @@ async fn an_item_linked_by_hand_under_one_epic_is_offered_to_its_set() {
     // Added, it is no longer offered.
     link_sets::save(
         &pool,
+        &Registry::for_process(),
         LinkSetDraft {
             id: Some(stack.id.clone()),
             name: stack.name.clone(),
@@ -1022,7 +1064,7 @@ async fn an_item_linked_by_hand_under_one_epic_is_offered_to_its_set() {
     .await
     .unwrap();
     assert!(
-        link_sets::hints(&pool)
+        link_sets::hints(&pool, &Registry::for_process())
             .await
             .unwrap()
             .iter()

@@ -16,6 +16,7 @@
 //! none takes over a second. Sizes come from the environment (`HP_SOURCES`,
 //! `HP_ITEMS`, `HP_SECS`, `HP_PAGE_DELAY_MS`, `HP_TRAY`).
 
+use knobas_app::sources::Registry;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
@@ -371,7 +372,9 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
         .unwrap();
     let mut sampler = connector.connect().await.unwrap();
     // What the app's bring-up does before the first sync.
-    knobas_app::commands::search::searcher(&ui).await.unwrap();
+    knobas_app::commands::search::searcher(&ui, &Registry::for_process())
+        .await
+        .unwrap();
 
     let secrets = MemoryStore::new();
     let mut ids = Vec::new();
@@ -493,10 +496,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                     timed(
                         t0,
                         "list_sources",
-                        knobas_app::sources::crud::list(
-                            &ui2,
-                            &knobas_app::sources::Registry::for_process(),
-                        ),
+                        knobas_app::sources::crud::list(&ui2, &Registry::for_process()),
                     )
                     .await;
                 });
@@ -519,6 +519,7 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                     "search",
                     search_inner(
                         &ui,
+                        &Registry::for_process(),
                         knobas_search::SearchQuery {
                             raw: q.into(),
                             limit: 50,
@@ -541,10 +542,20 @@ async fn the_ui_pool_keeps_a_free_connection_while_five_sources_sync() {
                     );
                 }
                 if tick.is_multiple_of(2) && jira0_synced.load(Ordering::Relaxed) {
-                    timed(t0, "get_entity", get_entity_inner(&ui, "jira0:JIRA0-5")).await;
+                    timed(
+                        t0,
+                        "get_entity",
+                        get_entity_inner(&ui, &Registry::for_process(), "jira0:JIRA0-5"),
+                    )
+                    .await;
                 }
                 if tick.is_multiple_of(5) {
-                    timed(t0, "launcher_home", launcher_home_inner(&ui)).await;
+                    timed(
+                        t0,
+                        "launcher_home",
+                        launcher_home_inner(&ui, &Registry::for_process()),
+                    )
+                    .await;
                     timed(
                         t0,
                         "credential_health",

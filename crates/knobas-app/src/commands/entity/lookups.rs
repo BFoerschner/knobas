@@ -55,7 +55,7 @@ pub async fn code_facts_inner(
     pool: &PgPool,
     entity_ids: &[String],
 ) -> Result<Vec<CodeFacts>, IpcError> {
-    let declarations = declared_paths(pool).await?;
+    let declarations = declared_paths(pool, &crate::sources::Registry::for_process()).await?;
     let rows = sqlx::query(CODE_FACTS)
         .bind(entity_ids)
         .bind(declarations.as_param())

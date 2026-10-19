@@ -17,6 +17,7 @@ use knobas_app::commands::entity::{
     accept_suggestion_inner, create_link_inner, detect_suggestions_inner, dismiss_suggestion_inner,
     get_entity_inner, proposal_evidence_inner, room_suggestions_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_app::suggestion_pass::SuggestionPass;
 use sqlx::PgPool;
 
@@ -158,7 +159,9 @@ async fn accepting_moves_a_proposal_into_the_panel_and_records_it() {
     // In the panel, on both ends -- the same read every other link arrives
     // through.
     for end in [&from, &to] {
-        let detail = get_entity_inner(&pool, end).await.unwrap();
+        let detail = get_entity_inner(&pool, &Registry::for_process(), end)
+            .await
+            .unwrap();
         assert!(
             detail.links.iter().any(|e| e.link.id == entry.link.id),
             "an accepted suggestion is an ordinary link on {end}"

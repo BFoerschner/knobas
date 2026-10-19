@@ -12,6 +12,7 @@
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
 use knobas_app::checkout::{FoundBy, set_clones_root, view};
 use knobas_app::commands::entity::get_entity_inner;
+use knobas_app::sources::Registry;
 use knobas_app::sources::demo;
 
 /// Held by every test that syncs the `mock` source **into the shared database**
@@ -240,6 +241,7 @@ async fn the_launcher_finds_a_demo_ticket_by_its_key() {
     for raw in ["PAY-231", "#PAY-231", "pay-231"] {
         let response = knobas_app::commands::search::search_inner(
             pool,
+            &Registry::for_process(),
             knobas_search::SearchQuery {
                 raw: raw.to_owned(),
                 limit: 20,
@@ -659,7 +661,7 @@ async fn the_demo_corpus_answers_the_checkout_the_desktop_driver_opens() {
     demo::demo_load_inner(&pool).await.unwrap();
 
     // 1. The entity read answers under the name the driver types.
-    let detail = get_entity_inner(&pool, "mock:payout-service")
+    let detail = get_entity_inner(&pool, &Registry::for_process(), "mock:payout-service")
         .await
         .expect("the demo corpus must carry the repository the driver opens");
     assert_eq!(detail.row.kind, "repo");

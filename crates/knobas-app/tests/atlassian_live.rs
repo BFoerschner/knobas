@@ -3653,6 +3653,7 @@ async fn the_launcher_finds_the_seeded_page_with_its_ancestor_path() {
     );
     let response = knobas_app::commands::search::search_inner(
         &state.pool,
+        &Registry::for_process(),
         knobas_search::SearchQuery {
             raw: CRITERION.to_owned(),
             limit: 30,

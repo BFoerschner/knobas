@@ -72,6 +72,7 @@ async fn the_fixture_component_s_items_reach_the_mirror_and_search_finds_them() 
 
     let found = knobas_app::commands::search::search_inner(
         &pool,
+        &Registry::for_process(),
         knobas_search::SearchQuery {
             raw: "quaywright".to_owned(),
             limit: 20,

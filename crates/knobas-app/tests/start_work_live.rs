@@ -1509,9 +1509,13 @@ async fn a_write_answers_on_queue_and_lands_behind_the_reader() {
             knobas_app::sources::write_queue::submit(state, payload)
                 .await
                 .expect("queued and sent");
-            knobas_app::commands::entity::get_entity_inner(&state.pool, &entity)
-                .await
-                .expect("the mirror reads");
+            knobas_app::commands::entity::get_entity_inner(
+                &state.pool,
+                &Registry::for_process(),
+                &entity,
+            )
+            .await
+            .expect("the mirror reads");
             view_text(state, &entity).await;
             started.elapsed()
         }
@@ -1809,16 +1813,20 @@ async fn back_to_back_comments_land_in_order_unheld_and_a_merge_between_holds_th
     let mut mirrored = String::new();
     for _ in 0..20 {
         sync(&state, GITEA).await;
-        mirrored = knobas_app::commands::entity::get_entity_inner(&state.pool, &merged_between)
-            .await
-            .map(|entity| {
-                entity
-                    .row
-                    .state
-                    .map(|chip| chip.text.to_string())
-                    .unwrap_or_default()
-            })
-            .unwrap_or_default();
+        mirrored = knobas_app::commands::entity::get_entity_inner(
+            &state.pool,
+            &Registry::for_process(),
+            &merged_between,
+        )
+        .await
+        .map(|entity| {
+            entity
+                .row
+                .state
+                .map(|chip| chip.text.to_string())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
         if mirrored == "merged" {
             break;
         }

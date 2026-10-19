@@ -8,6 +8,7 @@ use knobas_app::commands::search::{
     create_smart_list_inner, filter_suggestions_inner, launcher_home_inner, search_inner,
     smart_lists_inner,
 };
+use knobas_app::sources::Registry;
 use knobas_search::{SearchFilters, SearchQuery};
 
 async fn pool() -> sqlx::PgPool {
@@ -28,7 +29,7 @@ fn query(raw: &str) -> SearchQuery {
 
 /// The ids of every row `raw` returns, whatever group it is in.
 async fn ids(pool: &sqlx::PgPool, raw: &str) -> Vec<String> {
-    search_inner(pool, query(raw))
+    search_inner(pool, &Registry::for_process(), query(raw))
         .await
         .expect("a search")
         .groups
@@ -63,10 +64,13 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
         "a hidden note is behind the note: prefix"
     );
     assert!(
-        !launcher_home_inner(&pool).await.expect("home").notes_shown,
+        !launcher_home_inner(&pool, &Registry::for_process())
+            .await
+            .expect("home")
+            .notes_shown,
         "launcher_home says notes are shown while they are hidden (#1036)"
     );
-    let kinds = filter_suggestions_inner(&pool, "", false)
+    let kinds = filter_suggestions_inner(&pool, &Registry::for_process(), "", false)
         .await
         .expect("suggestions")
         .kinds;
@@ -87,17 +91,25 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
         "a shown note is behind the note: prefix"
     );
     assert!(
-        launcher_home_inner(&pool).await.expect("home").notes_shown,
+        launcher_home_inner(&pool, &Registry::for_process())
+            .await
+            .expect("home")
+            .notes_shown,
         "launcher_home says notes are hidden while they are shown (#1036)"
     );
-    let kinds = filter_suggestions_inner(&pool, "", false)
+    let kinds = filter_suggestions_inner(&pool, &Registry::for_process(), "", false)
         .await
         .expect("suggestions")
         .kinds;
     assert!(kinds.iter().any(|kind| kind.kind == "note"));
-    let list = create_smart_list_inner(&pool, "Zephyrine notes", "note:zephyrine")
-        .await
-        .expect("a saved list");
+    let list = create_smart_list_inner(
+        &pool,
+        &Registry::for_process(),
+        "Zephyrine notes",
+        "note:zephyrine",
+    )
+    .await
+    .expect("a saved list");
     assert_eq!(list.count, 1, "the saved list counts the shown note");
 
     // Off again: the note is still there, only the search leaves it out.
@@ -105,7 +117,9 @@ async fn a_hidden_note_is_not_found_and_a_shown_one_is() {
         .await
         .expect("notes hidden");
     assert!(!ids(&pool, "zephyrine").await.contains(&id));
-    let rail = smart_lists_inner(&pool).await.expect("the rail");
+    let rail = smart_lists_inner(&pool, &Registry::for_process())
+        .await
+        .expect("the rail");
     let row = rail.iter().find(|row| row.id == list.id).expect("the list");
     assert_eq!(row.count, 0, "the saved list counts a hidden note");
     let kept: i64 = sqlx::query_scalar("select count(*) from knobas.note where id = $1")

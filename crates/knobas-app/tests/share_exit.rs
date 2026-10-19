@@ -52,6 +52,7 @@
 
 mod live_digest;
 
+use knobas_app::sources::Registry;
 use std::sync::Arc;
 
 use knobas_app::assets::ESTATE_FILE_PRODUCER;
@@ -521,7 +522,7 @@ async fn the_shared_link_crosses_and_the_ticket_behind_it_has_not_arrived_yet() 
         "the link map is what a share export is for"
     );
 
-    let refused = get_entity_inner(pool, TICKET)
+    let refused = get_entity_inner(pool, &Registry::for_process(), TICKET)
         .await
         .expect_err("nothing is mirrored on a machine that has not synced");
     assert_eq!(
@@ -746,7 +747,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
         "and the work it names is not here yet: the badge counts the mirror"
     );
     assert_eq!(
-        get_entity_inner(&colleague.pool, TICKET)
+        get_entity_inner(&colleague.pool, &Registry::for_process(), TICKET)
             .await
             .expect_err("nothing is mirrored yet")
             .code,
@@ -773,7 +774,7 @@ async fn a_shared_link_resolves_once_the_jira_source_is_configured_and_synced() 
     // ---- 5. ...and syncs ---------------------------------------------------
     live_digest::sync(&colleague_engine, JIRA).await;
 
-    let opened = get_entity_inner(&colleague.pool, TICKET)
+    let opened = get_entity_inner(&colleague.pool, &Registry::for_process(), TICKET)
         .await
         .expect("the shared link's ticket opens on the clean machine");
     assert_eq!(
