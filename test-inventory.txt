@@ -789,6 +789,7 @@ knobas-app	test/it	entity_role::a_role_reads_its_fillers_and_its_kinds_and_nothi
 knobas-app	test/it	entity_role::a_source_filling_two_roles_is_drawn_for_each
 knobas-app	test/it	entity_role::an_unknown_role_is_an_empty_page
 knobas-app	test/it	entity_role::every_statement_reads_the_scope
+knobas-app	test/it	entity_role::the_pipelines_read_is_the_ci_fillers
 knobas-app	test/it	entity_view::a_commit_named_by_a_configured_clone_url_opens_the_mirrored_commit
 knobas-app	test/it	entity_view::a_commit_named_by_repository_and_sha_opens_the_mirrored_commit
 knobas-app	test/it	entity_view::a_row_keeps_its_address_only_where_the_mirror_holds_the_entity
