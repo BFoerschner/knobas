@@ -6500,3 +6500,17 @@ No step of the ticket is reserved for Björn. The implementer's rulings:
 - **Only the fixture's descriptor and items moved to the SPI types.** Its views, run reads and
   settings stay hand-written JSON, as the ticket asks; the battery still holds them to the SPI.
   **Reversing:** low.
+
+### Issue #1234 merge-manager (PR #1261, Opus), 2026-10-19
+
+- **The PR owed a §10.8 entry and had none.** Fork: treat an import-path move as outside the
+  frozen list, or as a change to it. Ruling: a change. §10.8 lists "any change to
+  `crates/knobas-source/src/**`", and this one changes the crate's dependency graph, the home of
+  `knobas_core::payload` that thirty entries name, and two new public re-exports (`EntityRef`,
+  `Frame`). The merge-manager added `docs/contract/10.8/1234-knobas-spi-types-crate.md`, which
+  also freezes the new rule that `knobas-source` and `knobas-spi-types` stay buildable for
+  `wasm32-wasip2`. **Reversing:** low (delete the entry; the code does not change).
+- **Fixture role-claim gap left for a follow-up.** The implementer's fourth mutant (drop the CI
+  claim from the fixture's descriptor) survives `knobas-wasm-host`'s tests. That gap predates
+  this ticket, which only changed how the claim is spelled. Filed as `backlog` follow-up #1267 rather
+  than fixed here. **Reversing:** n/a.
