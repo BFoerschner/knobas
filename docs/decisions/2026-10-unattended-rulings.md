@@ -7163,3 +7163,17 @@ The merge-manager's rulings (Opus):
   *Reversing:* one test per adapter.
 - **No §10.8 entry.** The transport's surface does not change. The #1310 entry already names
   #1311 as needing none beyond it. *Reversing:* n/a.
+
+The merge-manager's rulings (Opus):
+
+- **No §10.8 entry, confirmed by path.** *Fork:* whether swapping two adapters onto
+  `knobas_http::credential` owes an entry. *Ruling:* none. The diff touches only
+  `crates/knobas-source-confluence/**` and `crates/knobas-source-teamcity/**`, which the contract
+  places outside §10.8's list (#284's note). Nothing under `crates/knobas-source/src/**` or
+  `crates/knobas-http/**` changes. *Reversing:* one entry.
+- **Confluence's PAT spelling keeps no offline guard.** *Fork:* add a test that
+  `CREDENTIAL_RULES.pat` is `Bearer`, or rely on the live suite. *Ruling:* the live suite. A test
+  that compares a constant with itself pins nothing a reviewer would miss. What it would guard is
+  whether Confluence DC accepts Bearer, and only `confluence-live` can witness that (its revoked-PAT
+  test signs in with the seeded PAT first). `knobas-http`'s table pins the header each spelling
+  produces. *Reversing:* one test.
