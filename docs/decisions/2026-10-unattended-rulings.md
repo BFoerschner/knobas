@@ -8043,3 +8043,39 @@ reserved-steps rule. The entry is `docs/contract/10.8/1326-the-entity-barrel-is-
   8773c5f9 against the head, passes; a control mutation (`DiffLine.kind` losing `"del"`) fails
   eight names. The Rust diff, normalised for comments, `#[ts]` attributes and the `TS` derive,
   changes no serde attribute, field or variant, so the wire is the same code.
+
+## #1328: the assets barrel is generated (Opus implementer, 2026-10-20)
+
+- **The entity types the assets types carry.** *Fork:* wait for #1326 to derive `ActivityRow`,
+  `LinkEntry` and `Tone`, override them with `#[ts(type = "…")]`, or derive them here.
+  *Ruling:* derive them here, into `generated/entity.ts`, with the attributes #1326's branch
+  gives them (`ActivityRow`, `LinkEntry`, `LinkRow`, `LinkEnd`, `Tone`, and `Origin` and
+  `RuleClass` inlined; `#[ts(type = "unknown")]` on `ActivityRow::detail`). *Reasoning:* a
+  `type` override names a type without importing it, so the generated file would not compile;
+  waiting stalls a ticket on a sibling. The entity barrel stays hand-written until #1326, and
+  the five generated types are shape-identical to its hand-written ones (checked). *Reversing:*
+  whichever of the two lands second takes #1326's side of those files and regenerates.
+- **Per-arm names.** *Fork:* drop `TextProperty`, `NameEdit`, `TokenNeeded` and the other
+  sixteen names of single union arms, or keep them. *Ruling:* keep them as
+  `Extract<Union, { tag: "…" }>` aliases in the barrel. *Reasoning:* the ticket says no caller
+  changes and `assets/editing.ts` imports `PropertyEdit`; an alias picked out of the generated
+  union is not a second declaration of its shape. *Reversing:* delete an alias once nothing
+  imports it.
+- **`ImportProducer` stays hand-written.** It types `IMPORT_PRODUCERS`, a list the barrel
+  declares, and crosses no bridge; `assets::Producer` has private fields and an
+  `Option<Importer>` where the chooser has a boolean. #1326 keeps `LanesAsked` and `OpenAt` by
+  hand for the same reason. *Reversing:* n/a.
+- **Three TypeScript names differ from the Rust.** `dependencies::Layer`, `Group` and `Tiles`
+  are `DepLayer`, `DepGroup` and `DepTiles` in TypeScript; `#[ts(rename = "…")]` keeps the
+  TypeScript names callers use. *Reversing:* rename either side.
+- **Which tests are fixture pins.** Deleted: the nineteen tests in `commands::assets` named
+  `*_typescript_mirror` or `every_status_and_environment_is_in_the_mirror`, and the two in
+  `tests/it/dependencies_ipc.rs`, all of which read type text out of the barrel. Kept: the
+  barrel pins on invoke names and argument names, `the_chooser_offers_producers_this_build_knows`
+  (it reads `IMPORT_PRODUCERS`, which stays hand-written), and the two `relations.ts`
+  vocabulary pins, which are not about the barrel's types.
+- **A wrong Rust doc corrected.** `AssetProperty::custom` read "Whether this key is one the type
+  declares", the opposite of the field (`true` for a custom key). The generated JSDoc would have
+  carried the inversion, so it is fixed in the same change.
+- **No §10.8 entry.** #1325's entry books `generated/assets.ts` for this ticket, and no command,
+  argument or wire shape changed.

@@ -328,7 +328,9 @@ const MONITOR_KIND: &str = "monitor";
 /// thing from `up`. The four spellings are `0017`'s `asset_status_chk`, and
 /// [`tests::every_status_is_one_the_schema_accepts`] reads the migration to
 /// keep the two lists in step.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts")]
 pub enum AssetStatus {
@@ -464,7 +466,9 @@ impl Environment {
 /// - `internal`: reachable from inside the estate. What an unclassified route
 ///   reads as.
 /// - `public`: reachable from outside it.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts")]
 pub enum Visibility {

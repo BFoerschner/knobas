@@ -1439,5 +1439,4 @@ mod tests {
             assets::MONITORED_BY
         );
     }
-
 }

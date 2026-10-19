@@ -673,7 +673,9 @@ pub async fn place_kind(
 ///
 /// Documented here and not on each variant because the generated TypeScript
 /// carries a type's doc but not a variant's (#1325).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts", rename = "DepGroup")]
 pub enum Group {
@@ -694,7 +696,9 @@ pub enum Group {
 ///
 /// Documented here and not on each variant because the generated TypeScript
 /// carries a type's doc but not a variant's (#1325).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[derive(
+    Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS,
+)]
 #[serde(rename_all = "snake_case")]
 #[ts(export_to = "assets.ts", rename = "DepTiles")]
 pub enum Tiles {
