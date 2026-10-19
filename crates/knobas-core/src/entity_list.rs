@@ -37,7 +37,8 @@ use crate::CoreError;
 /// Deliberately not the mirror row. `body_text` and `payload` are the detail
 /// view's business (the app's `EntityDetail`), and a room that fetched them would pull
 /// the whole corpus into the webview to render five columns of it.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityRow {
     pub entity_id: String,
     pub kind: String,
@@ -130,8 +131,9 @@ pub fn entity_row(row: &sqlx::postgres::PgRow) -> Result<EntityRow, sqlx::Error>
 /// `test-util` turns this crate's on, and its `cargo test` turns that on
 /// through its self-dev-dependency; `tauri build` and the `clippy --lib` half
 /// of the gate compile without it.
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Serialize))]
+#[ts(export_to = "entity.ts")]
 pub struct EntityFilter {
     /// Source ids to include; empty means every source.
     pub sources: Vec<String>,
@@ -173,6 +175,7 @@ pub struct EntityFilter {
     /// row must be in both. Absent on the wire reads as `None`, so a caller
     /// written before #817 is unscoped as it was.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub reach: Option<String>,
     /// Only what this role's surface draws (#1294, ADR-0029 as amended on
     /// 2026-10-19): the rows of the sources that **fill** the role, which the
@@ -184,6 +187,7 @@ pub struct EntityFilter {
     /// empty, never an error. `None` is unscoped, and absent on the wire
     /// reads as `None`, as [`Self::reach`] does.
     #[serde(default)]
+    #[ts(optional = nullable)]
     pub role: Option<String>,
 }
 
@@ -193,9 +197,10 @@ pub struct EntityFilter {
 /// `Serialize` behind `test-util` for the same reason [`EntityFilter`] carries
 /// it: it rides inside the filter's round trip, and pins this union against the
 /// mirror's.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Serialize))]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum EntityOrder {
     /// Newest first, by the source's own timestamp. Undated items last.
     UpdatedDesc,
@@ -241,7 +246,8 @@ impl EntityOrder {
 /// What a tile's header phrases ("2 open pull requests · 5 branches", "1
 /// failing · 7 build configurations"), counted over the whole ordered set
 /// rather than the page, as [`EntityPage::total`] is.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct KindTally {
     pub kind: String,
     /// The tone of the rows' state chip; `None` for rows that have none.
@@ -256,8 +262,9 @@ pub struct KindTally {
 /// compared case-sensitively as the inbox and the standup compare it. A pull request
 /// and a branch are knobas' own words (`0001_init.sql`), and the inbox's
 /// review rule names `pr` the same way.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum AttentionGroup {
     /// Open pull requests whose declared reviewers include me (Gitea's
     /// `requested_reviewers`, as the inbox reads it). Whether I reviewed
@@ -282,14 +289,16 @@ pub enum AttentionGroup {
 }
 
 /// How many rows of the set one [`AttentionGroup`] holds.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct GroupTally {
     pub group: AttentionGroup,
     pub count: i64,
 }
 
 /// One page of a room, plus the size of the set it was cut from.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityPage {
     pub rows: Vec<EntityRow>,
     /// The whole filtered set, before `limit`/`offset`. `0` for an empty page.

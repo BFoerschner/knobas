@@ -99,7 +99,8 @@ pub async fn visit(pool: &PgPool, entity_id: &str) -> Result<Option<DateTime<Utc
 }
 
 /// One comment of a thread.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ThreadComment {
     /// Who wrote it, as the source names them to a person (Jira's
     /// `displayName`), else their account. `None` when the record says nobody.
@@ -116,8 +117,9 @@ pub struct ThreadComment {
 }
 
 /// What a [`ThreadChange`] says happened.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "entity.ts")]
 pub enum ChangeKind {
     /// The ticket was moved to another status.
     Status,
@@ -128,7 +130,8 @@ pub enum ChangeKind {
 }
 
 /// One change, drawn between the comments when *Include changes* is on.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ThreadChange {
     pub at: DateTime<Utc>,
     pub kind: ChangeKind,
@@ -152,7 +155,8 @@ pub struct ThreadChange {
 }
 
 /// A ticket's thread, oldest first.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Thread {
     pub comments: Vec<ThreadComment>,
     pub changes: Vec<ThreadChange>,

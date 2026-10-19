@@ -22,7 +22,8 @@ pub use crate::diff::{
 /// What [`Source::view`](crate::Source::view) answers for one entity: its
 /// sections, in the order the shell draws them as tabs. The first is the one a
 /// detail opens on.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SourceView {
     pub sections: Vec<ViewSection>,
     /// What a reader can do to the entity, drawn as a toolbar between the
@@ -54,7 +55,8 @@ impl SourceView {
 /// build's log. The whole-view read carries its `id`, `title` and `count` with
 /// `blocks` empty; the shell reads its blocks when the reader first opens the
 /// tab, by calling `view` again with the section's `id` (ADR-0020 rule 3).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ViewSection {
     /// Stable within one kind's view (`"overview"`, `"diff"`): what a deferred
     /// read names. Unique within one view.
@@ -74,8 +76,9 @@ pub struct ViewSection {
 ///
 /// Internally tagged (`{"type": "diff", ...}`) so the TypeScript mirror is a
 /// discriminated union on `type`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "ViewBlock")]
 pub enum Block {
     /// Label and value pairs: a commit's sha and author, a build's outcome.
     Facts { facts: Vec<Fact> },
@@ -184,14 +187,16 @@ pub enum Block {
 
 /// One step of a [`Block::Tree`]'s or [`Block::File`]'s trail: a
 /// directory's (or the file's own) name and the section that opens it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Crumb {
     pub name: String,
     pub section: String,
 }
 
 /// One entry of a [`Block::Tree`].
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct TreeEntry {
     pub name: String,
     pub kind: EntryKind,
@@ -203,8 +208,9 @@ pub struct TreeEntry {
 }
 
 /// What a [`TreeEntry`] is, as git records it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum EntryKind {
     Dir,
     File,
@@ -225,7 +231,8 @@ pub enum EntryKind {
 /// An action with no fields, no sentence, no `with_settings` and not
 /// `danger` queues on the button, with no dialog; its fixed `values` go with
 /// it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ViewAction {
     /// The [`WriteOp`](crate::WriteOp) identifier the action queues.
     pub write_op: String,
@@ -264,6 +271,7 @@ pub struct ViewAction {
     /// by `verdict` -- without the shell reading the label. A name here is
     /// never also a field's.
     #[serde(default)]
+    #[ts(type = "Record<string, string>")]
     pub values: std::collections::BTreeMap<String, String>,
     /// The entity the write targets where it is not the view's own, as an
     /// entity id (issue #707): a branch's *New branch…* and *Open pull
@@ -285,8 +293,9 @@ pub struct ViewAction {
 /// #709). The comments are the shell's -- written on a commentable
 /// [`Block::Diff`] and kept until sent or discarded -- and the action only
 /// says whether they go with it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum LineComments {
     /// The action never sends them (*Comment…*, *Merge…*).
     #[default]
@@ -300,7 +309,8 @@ pub enum LineComments {
 }
 
 /// How a reader comments on a [`Block::Diff`]'s lines (issue #709).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Commenting {
     /// The [`WriteOp`](crate::WriteOp) identifier the comments are sent
     /// through (`submit_review`). The shell offers to comment only where the
@@ -332,7 +342,8 @@ impl ViewAction {
 
 /// One input of a [`ViewAction`]'s dialog. The reader's answer reaches the
 /// shell's payload table as text under `name`.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ActionField {
     /// The key the value is handed on under, in the op's own words
     /// (`"style"`, `"delete_branch"`). Unique within one action.
@@ -372,8 +383,9 @@ impl ActionField {
 
 /// How an [`ActionField`] asks. Internally tagged (`{"type": "choice", ...}`),
 /// a union on `type` in the TypeScript mirror as [`Block`] is.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum FieldKind {
     /// One line. `suggestions` are offered as the reader types and none is
     /// picked: a run's branch suggests the branches recent builds ran on.
@@ -392,7 +404,8 @@ pub enum FieldKind {
 
 /// One option of a [`FieldKind::Choice`]: the `value` the op takes, and the
 /// `label` the reader sees.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ChoiceOption {
     /// What the op takes when this option is picked (`"squash"`).
     pub value: String,
@@ -412,7 +425,8 @@ impl ChoiceOption {
 }
 
 /// One label and its value.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Fact {
     pub label: String,
     pub value: String,
@@ -426,7 +440,8 @@ pub struct Fact {
 /// adapter names what it would be, and the app clears it for an entity the
 /// mirror does not hold, so the shell draws that row as plain text (ADR-0020
 /// rule 7). `url` is the source's own page for the row, when it has one.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ViewRow {
     pub entity_id: Option<String>,
     pub title: String,
@@ -446,6 +461,7 @@ pub struct ViewRow {
     /// Absent on the wire when `None`, so a row without one is the shape it
     /// was before.
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[ts(skip)]
     pub commit: Option<CommitHint>,
 }
 
@@ -459,7 +475,8 @@ pub struct CommitHint {
 }
 
 /// One named value of a [`Block::Settings`].
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Setting {
     pub name: String,
     /// The value as the source holds it. Empty for a `secret` one: the

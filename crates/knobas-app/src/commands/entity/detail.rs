@@ -9,7 +9,8 @@ use super::*;
 /// Every field falls back to the source id, because `run_once` syncs sources
 /// that have no `knobas.source_config` row (tests, ad-hoc imports, interfaces
 /// §1). An entity whose source was deleted still has to render.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SourceRef {
     pub id: String,
     pub display_name: String,
@@ -33,7 +34,8 @@ pub struct SourceRef {
 }
 
 /// Everything the slide-over draws for one entity (interfaces §2.5).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct EntityDetail {
     pub row: EntityRow,
     pub source: SourceRef,
@@ -50,6 +52,7 @@ pub struct EntityDetail {
     pub author: Option<String>,
     /// The source record **verbatim** (§3a): what the generic detail view
     /// projects. It is untrusted text all the way down.
+    #[ts(type = "unknown")]
     pub payload: serde_json::Value,
     /// Where the item lives in its own system, or `None` when the adapter
     /// reported no page -- in which case *Open in browser* is absent (P5).

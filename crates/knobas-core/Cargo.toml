@@ -18,6 +18,9 @@ chrono.workspace = true
 knobas-spi-types = { path = "../knobas-spi-types", features = ["sqlx"] }
 serde.workspace = true
 serde_json.workspace = true
+# The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
+# #1325): the entity barrel's types are declared here (#1326).
+ts-rs.workspace = true
 sqlx.workspace = true
 thiserror.workspace = true
 tracing = "0.1"

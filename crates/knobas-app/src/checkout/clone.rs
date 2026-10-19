@@ -56,7 +56,8 @@ use super::working_tree;
 pub const PROGRESS_EVERY: Duration = Duration::from_secs(1);
 
 /// What one clone reports while it runs and when it ends.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CloneEvent {
     /// The repo entity being cloned (a branch's repository when a branch was
     /// asked about).
@@ -68,8 +69,9 @@ pub struct CloneEvent {
 }
 
 /// Where a clone is.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "state", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum CloneState {
     /// Running: git's step, and the whole clone from 0 to 100.
     Progress { phase: String, percent: u8 },
@@ -87,8 +89,9 @@ pub enum CloneState {
 }
 
 /// [`clone::FailureCause`], on the wire.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "CloneFailureCause")]
 pub enum FailureCause {
     /// git could not sign in with the person's own credentials.
     Auth,
@@ -109,8 +112,9 @@ impl From<clone::FailureCause> for FailureCause {
 }
 
 /// What `clone_repo` answers.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum CloneAnswer {
     /// The clone started, or was already running; events follow.
     Cloning { path: String },

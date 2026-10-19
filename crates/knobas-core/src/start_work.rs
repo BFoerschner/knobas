@@ -47,6 +47,8 @@ crate::closed_vocabulary! {
     /// created through the link store and never written to either source,
     /// which is the whole reason the relationship survives regardless of what
     /// Jira or Gitea happens to record (story 9).
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts", rename = "StartWorkStepKind")]
     pub enum Step {
         /// The branch, in the repository the user chose.
         CreateBranch => "create_branch",
@@ -65,6 +67,8 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.start_work_step.outcome`, whose
     /// `start_work_outcome_chk` (migration 0008) allows exactly these
     /// spellings.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts", rename = "StartWorkOutcome")]
     pub enum StepOutcome {
         /// Planned; nothing has been attempted.
         Pending => "pending",
@@ -171,7 +175,8 @@ macro_rules! step_columns {
 }
 
 /// One step of one flow.
-#[derive(Clone, Debug, PartialEq, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, PartialEq, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "StartWorkStep")]
 pub struct FlowStep {
     pub id: i64,
     /// The ticket the flow is about -- and the flow's identity.
@@ -183,6 +188,7 @@ pub struct FlowStep {
     /// **The proposal**, as the user last left it: the serialized
     /// `knobas_source::WriteOp` a dispatching step will submit, or the link's
     /// relation.
+    #[ts(type = "unknown")]
     pub payload: serde_json::Value,
     /// The `knobas.write_queue` row this step dispatched, once it has one.
     ///

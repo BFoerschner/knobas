@@ -53,7 +53,8 @@ const ACTOR: &str = "user";
 /// than a habit: the item is `knobas_core`'s record and the actions are this
 /// crate's answer about it, and a flattened bag would make a later reader
 /// guess which half a field came from.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct InboxEntry {
     pub item: InboxItem,
     /// `knobas_source::WriteOp` identifiers, in the order the category asks

@@ -29,7 +29,8 @@ use sqlx::{PgPool, Row};
 use crate::IpcError;
 
 /// Every space the mirror holds pages of, and the page read last.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocsTree {
     /// Ordered by source, then key.
     pub spaces: Vec<DocSpace>,
@@ -42,7 +43,8 @@ pub struct DocsTree {
 }
 
 /// A page that needs the reader, and who asked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocForYou {
     pub entity_id: String,
     pub title: String,
@@ -54,7 +56,8 @@ pub struct DocForYou {
 }
 
 /// One space and its pages.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocSpace {
     pub source_id: String,
     pub key: String,
@@ -67,7 +70,8 @@ pub struct DocSpace {
 }
 
 /// One page in a space's tree.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocNode {
     pub entity_id: String,
     pub title: String,
@@ -77,7 +81,8 @@ pub struct DocNode {
 }
 
 /// One page, as the reader draws it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocPage {
     pub entity_id: String,
     pub source_id: String,
@@ -120,11 +125,13 @@ pub struct DocPage {
     /// Which Docs writes this page's source takes: `comment`, `update_page`,
     /// `create_page`, each where its adapter declares it and (for the two
     /// page writes) writes the source's markup (#862).
+    #[ts(as = "Vec<DocWrite>")]
     pub writes: Vec<String>,
 }
 
 /// A page that links to the one being read.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocBacklink {
     pub entity_id: String,
     pub title: String,
@@ -132,7 +139,8 @@ pub struct DocBacklink {
 }
 
 /// A ticket a page belongs to.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocWork {
     pub entity_id: String,
     /// The entity id past its namespace (`PAY-231`): the job's address.
@@ -144,14 +152,16 @@ pub struct DocWork {
 }
 
 /// A space, named.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocSpaceRef {
     pub key: String,
     pub name: Option<String>,
 }
 
 /// One step of a page's parent chain.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocAncestor {
     pub title: String,
     pub entity_id: Option<String>,
@@ -716,7 +726,8 @@ pub struct DocsScope {
 }
 
 /// The Docs search's answer (#860, R-10.3).
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocsHits {
     /// Every page the query admits, before the limit.
     pub total: u32,
@@ -731,7 +742,8 @@ pub struct DocsHits {
 }
 
 /// One page the Docs search found.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocHit {
     pub entity_id: String,
     pub title: String,
@@ -749,13 +761,15 @@ pub struct DocHit {
 }
 
 /// A hit's snippet: where it is, and its text with the matches marked.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocSnippet {
     /// The section heading it sits under, `None` before the first one.
     pub section: Option<String>,
     /// The comment's author's display name when it is a comment's; `Some("")`
     /// for a comment whose record named nobody.
     pub comment_by: Option<String>,
+    #[ts(inline)]
     pub segments: Vec<knobas_search::Segment>,
 }
 
@@ -1144,6 +1158,21 @@ mod search_tests {
     }
 }
 
+/// The Docs writes a page can offer, in [`DocPage::writes`]' order.
+pub const DOC_WRITES: [&str; 3] = ["comment", "update_page", "create_page"];
+
+/// [`DOC_WRITES`] as the generated TypeScript's `DocWrite` union (#1326): a
+/// Docs write a page's source takes, one entry of [`DocPage::writes`]. Never
+/// built: the wire carries the op identifier as a string, and this enum only
+/// names the union. `the_doc_write_union_is_the_list` pins it to the list.
+#[derive(ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename_all = "snake_case")]
+pub enum DocWrite {
+    Comment,
+    UpdatePage,
+    CreatePage,
+}
+
 /// Which Docs writes an adapter kind takes: `comment` where it declares it,
 /// `update_page` and `create_page` where it declares them **and** writes its
 /// own markup (`has_markup`, the registry's `doc_writes`).
@@ -1156,7 +1185,7 @@ pub fn docs_writes(
     let Some(template) = templates.iter().find(|t| t.adapter_kind == kind) else {
         return Vec::new();
     };
-    ["comment", "update_page", "create_page"]
+    DOC_WRITES
         .into_iter()
         .filter(|op| template.write_ops.iter().any(|w| w == op))
         .filter(|op| *op == "comment" || has_markup)
@@ -1167,7 +1196,8 @@ pub fn docs_writes(
 // -- Export as Markdown (#861) ----------------------------------------------
 
 /// What *Export as Markdown* wrote.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocExport {
     /// The file's name, `page_file_name(title)`.
     pub file: String,
@@ -1279,7 +1309,8 @@ pub async fn section_edit(
 }
 
 /// What *New page* asks for (R-10.16).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NewPage {
     /// The page it goes under, a mirrored page of the space.
     pub parent: String,
@@ -1581,5 +1612,26 @@ mod markdown_golden {
     fn an_empty_page_is_its_title() {
         assert_eq!(page_markdown("Empty", &[]), "# Empty\n");
         assert_eq!(page_markdown("", &[]), "# \n");
+    }
+}
+
+#[cfg(test)]
+mod writes_tests {
+    use super::*;
+
+    /// The `DocWrite` union the generated TypeScript declares (#1326) is
+    /// exactly [`DOC_WRITES`]: a write added to the list alone would reach
+    /// the shell as a word its types do not have.
+    #[test]
+    fn the_doc_write_union_is_the_list() {
+        let union = DOC_WRITES
+            .iter()
+            .map(|write| format!("\"{write}\""))
+            .collect::<Vec<_>>()
+            .join(" | ");
+        assert_eq!(
+            <DocWrite as ts_rs::TS>::inline(&ts_rs::Config::new()),
+            union
+        );
     }
 }

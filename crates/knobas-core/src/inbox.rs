@@ -105,8 +105,9 @@ use crate::CoreError;
 /// composed key as opaque text and nothing constrains it. So this list has no
 /// CHECK to be pinned against and is deliberately not declared with
 /// [`crate::closed_vocabulary!`], whose whole purpose is that pinning.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "InboxCategory")]
 pub enum Category {
     /// Somebody is waiting on your review of a pull request.
     ReviewRequest,
@@ -213,7 +214,8 @@ impl std::str::FromStr for Category {
 ///
 /// Everything a reader needs to judge an item without opening it (#45, story
 /// 7): which source it came from, what it is about, and why it is here.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct InboxItem {
     /// `'<category>:<subject>'` -- what snooze and done are keyed on, and what
     /// the interface hands back when the user answers.
@@ -841,8 +843,9 @@ pub fn rule(category: Category) -> Option<&'static Rule> {
 /// argument: the inbox view and the snoozed panel are one read with one
 /// predicate, and asking for the shelf by name is what keeps them from
 /// becoming two statements that can disagree about what "snoozed" means.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "InboxShelf")]
 pub enum Shelf {
     /// What needs you now. This is the inbox.
     Stream,

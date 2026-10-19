@@ -16,7 +16,8 @@ use super::*;
 /// suggestions are waiting, so that I can choose when to spend attention on
 /// them", and a number capped by `limit` answers a different question. Same
 /// shape and same reason as [`EntityPage`].
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SuggestionPage {
     pub rows: Vec<SuggestionEntry>,
     /// Every proposal in the room, before `limit`.

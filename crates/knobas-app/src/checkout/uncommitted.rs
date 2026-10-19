@@ -69,7 +69,8 @@ pub const READ_BYTES: usize = 16 * 1024 * 1024;
 pub const MAX_UNTRACKED: usize = 1_000;
 
 /// One half of the uncommitted diff, as a diff block carries it.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CappedDiff {
     pub files: Vec<DiffFile>,
     /// A cap cut this half: the per-view cap of the parser, or the read cap
@@ -78,7 +79,8 @@ pub struct CappedDiff {
 }
 
 /// What is uncommitted at a checkout.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct UncommittedDiff {
     /// Changed in the working tree and not staged (`git diff`).
     pub unstaged: CappedDiff,
@@ -95,8 +97,9 @@ pub struct UncommittedDiff {
 /// The answer the *Local changes* tab draws: the diff, or why there is none.
 /// The same four arms as the working tree's
 /// [`TreeRead`](super::working_tree::TreeRead).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DiffRead {
     /// git answered.
     Read(UncommittedDiff),

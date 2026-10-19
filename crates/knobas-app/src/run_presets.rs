@@ -17,7 +17,8 @@ use sqlx::{PgPool, Row};
 use crate::IpcError;
 
 /// One preset, as `save_run_preset` takes it and `run_presets` answers it.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct RunPreset {
     /// The pipeline's entity id; never checked against the mirror.
     pub pipeline_id: String,

@@ -111,7 +111,8 @@ const WINDOW_URL: &str = "capture.html";
 /// **derived** room -- *All work*, a source, a project -- has no context at
 /// all, and a reader browsing with nothing open has no foreground, and either
 /// can be true without the other.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CaptureContext")]
 pub struct Recorded {
     /// The `ctx:` entity of the last **stored** room, or `None`.
     pub context: Option<String>,
@@ -125,7 +126,8 @@ pub struct Recorded {
 /// nothing stored (`accelerator: None`), stored and registered
 /// (`refusal: None`), and stored but **not** registered, which is an
 /// accelerator and a sentence saying why.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CaptureShortcut")]
 pub struct ShortcutView {
     /// What is stored, or `None` when nothing is -- the default, in which case
     /// no shortcut is registered and knobas has taken no key from anybody.

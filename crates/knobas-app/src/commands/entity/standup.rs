@@ -342,7 +342,8 @@ pub async fn set_standup_publish_target(
 }
 
 /// What became of filing a ticket from an action item.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ActionItemTicket {
     /// The write queue row carrying the create.
     pub write_id: i64,

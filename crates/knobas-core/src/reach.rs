@@ -271,8 +271,9 @@ macro_rules! reach_walk {
 ///
 /// Tagged on `kind`; #866's link sets joined as the third arm without
 /// changing the two before it.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "ReachOrigin")]
 pub enum Origin {
     /// The ticket's own links, its context's adds, and where those lead.
     Own,
@@ -292,7 +293,8 @@ pub enum Origin {
 }
 
 /// One entity a ticket reaches.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Reached {
     pub entity_id: String,
     /// What `entity_id` is: `pr`, `build`, `asset`, `monitor`.

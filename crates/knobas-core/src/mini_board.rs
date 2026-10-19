@@ -386,7 +386,8 @@ const OBSERVED_STATUSES: &str = concat!(
 );
 
 /// One room's tickets as the mini board draws them.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct MiniBoard {
     /// The observed status columns, in display order: the four of [`LEADING`]
     /// first where the corpus shows them, every other observed status after
@@ -408,8 +409,9 @@ pub struct MiniBoard {
 
 /// What a board's lanes split by (R-3.5): the Tickets view's *Lanes*
 /// switch, spelled as a ticket view stores it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "entity.ts")]
 pub enum LaneField {
     /// The epic: the ticket's path line, as the card draws it.
     Epic,
@@ -446,7 +448,8 @@ pub struct Lanes {
 
 /// One lane of a laned board: the value its tickets share, how many they
 /// are, and its own columns, each capped and counted as a board's column is.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct MiniBoardLane {
     /// What its tickets share, in the source's words; `""` for the lane of
     /// tickets with none of it.
@@ -458,7 +461,8 @@ pub struct MiniBoardLane {
 }
 
 /// One status of a lane: its cards by id, newest first, and its count.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LaneColumn {
     /// As [`MiniBoardColumn::status`].
     pub status: Option<String>,
@@ -473,7 +477,8 @@ pub struct LaneColumn {
 /// The count the column header shows is `cards.len()`; it is not a field,
 /// because a count beside the list it counts is a second copy of the same fact
 /// and only one of them can be right.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct MiniBoardColumn {
     /// The status, in the source's own words -- or `None` for the terminal
     /// group: tickets whose mirrored record carries no status this read
@@ -489,7 +494,8 @@ pub struct MiniBoardColumn {
 }
 
 /// One ticket on the board.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct MiniBoardCard {
     /// The ticket's stable in-app address, which is what a click opens.
     pub entity_id: String,
@@ -542,7 +548,8 @@ pub struct MiniBoardCard {
 }
 
 /// The statuses one source's live ticket corpus shows, in the board's order.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SourceStatuses {
     pub source_id: String,
     /// Never carries the terminal group: "no status" is something a ticket can

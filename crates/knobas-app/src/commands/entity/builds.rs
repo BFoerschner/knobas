@@ -337,8 +337,9 @@ pub async fn pipeline_settings_inner(
 /// One step of the chain a run is in (#857, R-9.13): the step's pipeline,
 /// its name in the source's word, and its run on the run's branch read
 /// through the run kind's declarations (`None` where it has not run there).
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct ChainStepRow {
     pub pipeline_id: String,
     pub name: String,
@@ -971,8 +972,9 @@ pub async fn delete_run_preset(
 
 /// Why a pipeline is on a job (#850, R-9.1, R-9.2). Tagged on `kind`, so a
 /// link set (#866) joins as one more arm without changing these.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum PipelineReason {
     /// One of its runs built a branch the job reaches: a reached branch, by
     /// its title, or the branch a reached pull request is opened from (its
@@ -993,7 +995,8 @@ pub enum PipelineReason {
 
 /// One pipeline on a job, with every reason it is there (#850): branches
 /// first, then pull requests, then links, as prototype-6 lists them.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct JobPipeline {
     pub pipeline_id: String,
     pub reasons: Vec<PipelineReason>,

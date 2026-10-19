@@ -28,7 +28,8 @@ use serde::{Deserialize, Serialize};
 pub const PLACEHOLDERS: [&str; 4] = ["path", "file", "line", "name"];
 
 /// One application on the *Open in…* menu.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CheckoutApplication")]
 pub struct Application {
     /// Stable id: what `open_checkout` takes and the default names.
     pub id: String,
@@ -257,7 +258,8 @@ fn substitute(word: &str, at: &Fill<'_>) -> Result<String, TemplateError> {
 
 /// An application as a person typed it in the dialog: a new one has no id
 /// yet.
-#[derive(Clone, Debug, PartialEq, Eq, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CheckoutApplicationDraft")]
 pub struct Draft {
     /// The id it already has; `None` or blank for a new one.
     #[serde(default)]

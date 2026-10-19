@@ -28,7 +28,8 @@ use serde::Serialize;
 pub const TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What a checkout's working tree is doing right now.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct WorkingTreeState {
     /// The branch checked out; `None` for a detached head.
     pub branch: Option<String>,
@@ -54,8 +55,9 @@ pub struct WorkingTreeState {
 ///
 /// None of these is an error. A checkout panel is worth drawing without a
 /// state, and each arm is a sentence the panel says.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum TreeRead {
     /// git answered.
     Read(WorkingTreeState),

@@ -19,7 +19,8 @@ use crate::link::{LinkEnd, LinkRow, link_columns};
 /// not on. The tray is not read from either end -- it is read from a room -- so
 /// there is no "here" for it to leave out, and #41's story 20 wants both ends
 /// openable before deciding.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SuggestionEntry {
     pub link: LinkRow,
     pub from: LinkEnd,
@@ -49,7 +50,8 @@ struct ProposalRow {
 pub const ROWS_PER_ITEM: usize = 3;
 
 /// An item with proposals the tray does not draw, and how many (#774).
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct SuggestionMore {
     #[sqlx(flatten)]
     pub item: LinkEnd,

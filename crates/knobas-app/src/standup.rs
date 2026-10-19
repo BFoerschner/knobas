@@ -192,7 +192,8 @@ const BLOCKED_BY: &str = "blocked_by";
 /// display time: the discipline `knobas_core::inbox::InboxItem::reason` and
 /// `suggest::SuggestionEntry::reason` both record, and for the same reason --
 /// a line whose provenance cannot be shown is not shippable.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DigestLine {
     /// The item to open, as an entity id -- what the view addresses.
     ///
@@ -234,7 +235,8 @@ pub struct DigestLine {
 }
 
 /// The four lists, and which day the first of them is about.
-#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct StandupDigest {
     /// The day [`yesterday`](Self::yesterday) is really about, in the reader's
     /// own reckoning -- Friday, on a Monday.

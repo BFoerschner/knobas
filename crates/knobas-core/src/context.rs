@@ -40,6 +40,8 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.context.kind`, whose
     /// `context_kind_chk` (migration 0010) allows exactly these spellings --
     /// and `ALL` is what the test that pins the two together walks.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts")]
     pub enum ContextKind {
         /// A promoted epic: members start from its tickets.
         Epic => "epic",
@@ -95,7 +97,8 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for ContextKind {
 }
 
 /// One context, as `knobas.context` holds it.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ContextRow {
     /// `ctx:<uuid>` -- a local id (`RESERVED_NAMESPACES`), and also the id of
     /// this context's `knobas.entity` row.

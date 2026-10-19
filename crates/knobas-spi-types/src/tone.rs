@@ -18,8 +18,9 @@ use serde::{Deserialize, Serialize};
 ///
 /// Serialized lowercase, the spelling the TypeScript mirror and a declared
 /// path's value map both use.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "lowercase")]
+#[ts(export_to = "entity.ts")]
 pub enum Tone {
     Ok,
     Warn,

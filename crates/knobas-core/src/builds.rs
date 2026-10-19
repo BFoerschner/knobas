@@ -24,8 +24,9 @@ use crate::entity::EntityRef;
 /// extended (`crate::payload::parse_instant`); a run in flight has no
 /// `finished`, a queued one neither. `duration_seconds` is the one from the
 /// other, only where both are read.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct RunRow {
     pub entity_id: String,
     /// The run's number in the source's own spelling; a queued TeamCity
@@ -71,8 +72,9 @@ pub struct RunRow {
 /// source's word appears, in the list's header line (ADR-0022). `recent` is
 /// its last runs newest first, at most [`PIPELINE_RECENT`]: the strip, the
 /// latest time, and whether the latest run failed.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct PipelineRow {
     pub entity_id: String,
     pub source_id: String,

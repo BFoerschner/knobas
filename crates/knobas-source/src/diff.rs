@@ -19,8 +19,9 @@ pub const MAX_LINES_PER_FILE: usize = 1_500;
 pub const MAX_LINES_PER_VIEW: usize = 6_000;
 
 /// What happened to one file.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DiffChange {
     Added,
     Modified,
@@ -32,7 +33,8 @@ pub enum DiffChange {
 }
 
 /// One file of a diff.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DiffFile {
     /// Where the file is after the change (where it was, for a deletion).
     pub path: String,
@@ -65,7 +67,8 @@ pub struct DiffFile {
 /// this diff as it was when the comment was made -- gone, or another text in
 /// its place since a later push. An outdated thread is drawn muted at the end
 /// of its file, never on a line it was not written about.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LineThread {
     pub side: crate::ReviewSide,
     pub line: u32,
@@ -77,7 +80,8 @@ pub struct LineThread {
 /// on `path` in an earlier round, which a later push reverted or dropped.
 /// Outdated by definition -- there is no line left to be on -- and drawn in
 /// the diff's own outdated list, never dropped.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct FileThread {
     pub path: String,
     pub thread: LineThread,
@@ -86,7 +90,8 @@ pub struct FileThread {
 /// One comment of a [`LineThread`]. Source text, like every string of a view:
 /// `body` is the source's Markdown, drawn legibly and never as markup
 /// (ADR-0020 rule 5).
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LineComment {
     /// Who wrote it, as the source names them (a login).
     pub author: String,
@@ -96,7 +101,8 @@ pub struct LineComment {
 }
 
 /// One `@@` hunk.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct Hunk {
     /// The `@@ -a,b +c,d @@ context` line as the server sent it.
     pub header: String,
@@ -104,8 +110,9 @@ pub struct Hunk {
 }
 
 /// Whether a line was kept, added or removed.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DiffLineKind {
     Context,
     Add,
@@ -113,8 +120,10 @@ pub enum DiffLineKind {
 }
 
 /// One line of a hunk, with its number on each side it exists on.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DiffLine {
+    #[ts(inline)]
     pub kind: DiffLineKind,
     /// The line's number before the change; `None` for an added line.
     pub old: Option<u32>,

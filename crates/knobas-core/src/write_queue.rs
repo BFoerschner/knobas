@@ -44,6 +44,8 @@ crate::closed_vocabulary! {
     /// `write_queue_state_chk` (migration 0005) allows exactly these
     /// spellings -- and `ALL` is what the test that pins the two together
     /// walks.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "sources.ts")]
     pub enum WriteState {
         /// Will be retried automatically when the source can take it.
         Pending => "pending",

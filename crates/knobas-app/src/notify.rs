@@ -66,7 +66,8 @@ pub const CLOSED: &str = "__closed";
 
 /// What the frontend asks to have shown: the `notify` command's argument,
 /// mirrored as `NotificationDraft` in `app/src/lib/ipc/entity.ts`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NotificationDraft {
     pub title: String,
     pub body: String,
@@ -76,7 +77,8 @@ pub struct NotificationDraft {
 }
 
 /// The `notification:clicked` payload, mirrored as `NotificationClicked`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NotificationClicked {
     pub address: String,
 }

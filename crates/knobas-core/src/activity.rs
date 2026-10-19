@@ -11,7 +11,8 @@ use crate::CoreError;
 use crate::entity::EntityRef;
 
 /// One line of the activity log.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ActivityRow {
     pub id: i64,
     pub at: chrono::DateTime<chrono::Utc>,
@@ -21,6 +22,7 @@ pub struct ActivityRow {
     pub actor: String,
     pub verb: String,
     pub entity_id: Option<String>,
+    #[ts(type = "unknown")]
     pub detail: serde_json::Value,
 }
 

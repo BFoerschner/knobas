@@ -31,7 +31,8 @@ use uuid::Uuid;
 use crate::CoreError;
 
 /// Everything said for and against one proposal.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct ProposalEvidence {
     pub link_id: Uuid,
     /// The reason the rule stored, unchanged.
@@ -47,7 +48,8 @@ pub struct ProposalEvidence {
 }
 
 /// A stretch of one end's text.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "EvidenceExcerpt")]
 pub struct Excerpt {
     /// The end the text is from.
     pub entity_id: String,
@@ -57,7 +59,8 @@ pub struct Excerpt {
 }
 
 /// One run of an excerpt's text.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "EvidencePart")]
 pub struct Part {
     pub text: String,
     pub marked: bool,

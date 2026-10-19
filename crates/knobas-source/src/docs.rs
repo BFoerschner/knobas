@@ -67,7 +67,8 @@ pub struct DocContent {
 
 /// One section of a page body: a top-level heading and what follows it up to
 /// the next one (#862).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocSection {
     /// 1 for the first top-level heading.
     pub number: u32,
@@ -82,8 +83,9 @@ pub struct DocSection {
 
 /// Why a section is edited in the source and not in knobas (R-10.13): a text
 /// box round-trips plain text, and what it cannot hold would be lost.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum SectionRefusal {
     /// A table.
     Table,
@@ -99,7 +101,8 @@ pub enum SectionRefusal {
 }
 
 /// One version of a page, as the record names it.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocVersion {
     pub number: Option<u64>,
     /// The account that made it.
@@ -147,7 +150,8 @@ pub struct DocWrites {
 }
 
 /// One comment on a page.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct DocComment {
     /// The author's account name, the spelling `@me` matches. `None` where the
     /// record names nobody.
@@ -163,8 +167,9 @@ pub struct DocComment {
 ///
 /// Internally tagged (`{"type": "heading", ...}`) so the TypeScript mirror is
 /// a discriminated union on `type`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum DocBlock {
     /// A section heading. `level` is 1 to 6 as the source wrote it; the
     /// reader draws every level as a section head.
@@ -204,15 +209,17 @@ pub enum DocBlock {
 }
 
 /// One cell of a [`DocBlock::Table`].
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct TableCell {
     pub header: bool,
     pub text: Vec<Inline>,
 }
 
 /// Which panel a [`DocBlock::Panel`] is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum PanelKind {
     Info,
     Note,
@@ -221,8 +228,9 @@ pub enum PanelKind {
 }
 
 /// One run of text inside a block.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, ts_rs::TS)]
 #[serde(tag = "type", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "DocInline")]
 pub enum Inline {
     /// Words, with the marks the source put on them.
     Text {

@@ -134,8 +134,9 @@ async fn save(pool: &PgPool, stored: &Stored) -> Result<(), IpcError> {
 /// Where it is and nothing more: knobas runs git only for `status`, `diff`
 /// and `clone` (ADR-0021, ADR-0026, ADR-0023), so it does not ask git its
 /// version.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(tag = "status", rename_all = "snake_case")]
+#[ts(export_to = "entity.ts")]
 pub enum GitFound {
     /// The `git` on `PATH`.
     Found { path: String },
@@ -146,7 +147,8 @@ pub enum GitFound {
 }
 
 /// What Settings › Checkouts draws, and what every *Open in…* menu reads.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CheckoutSettings {
     pub clones_root: Option<String>,
     pub git: GitFound,
@@ -208,7 +210,8 @@ pub async fn set_applications(
 // -- #501's two commands, over the list --------------------------------------
 
 /// One application as #501's checkout panel draws it: a button.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts", rename = "CheckoutCommand")]
 pub struct OpenCommandView {
     /// The application's id: what `open_checkout` takes.
     pub action: String,

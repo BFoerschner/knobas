@@ -95,6 +95,8 @@ crate::closed_vocabulary! {
     /// Stored as lowercase text in `knobas.link.origin`, whose
     /// `link_origin_chk` (migration 0003) allows exactly these spellings --
     /// and `ALL` is what the test that pins the two together walks.
+    #[derive(ts_rs::TS)]
+    #[ts(export_to = "entity.ts")]
     pub enum Origin {
         /// Drawn by the user.
         Manual => "manual",
@@ -210,12 +212,14 @@ macro_rules! link_columns {
 pub(crate) use link_columns;
 
 /// One active link, as seen from either of its ends.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkRow {
     pub id: Uuid,
     pub from_id: String,
     pub to_id: String,
     pub relation: String,
+    #[ts(inline)]
     pub origin: Origin,
     /// Why the link exists, in the user's own words -- `None` unless one was
     /// given.
@@ -246,6 +250,7 @@ pub struct LinkRow {
     pub rule: Option<String>,
     /// Which class of evidence [`rule`](Self::rule) is, or `None` for a link a
     /// person drew.
+    #[ts(inline)]
     pub rule_class: Option<crate::suggest::RuleClass>,
     /// Why knobas proposed this link, in the detector's own words -- "the
     /// branch name contains PAY-231".
@@ -344,7 +349,8 @@ where
 /// person recognises: the panel has to say *what* was linked (spec §5a, #40's
 /// story 9). Resolved here rather than by a second read per row, because a
 /// detail view drawing ten links would otherwise make ten round trips.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkEnd {
     pub entity_id: String,
     pub kind: String,
@@ -359,7 +365,8 @@ pub struct LinkEnd {
 }
 
 /// One link, as a detail view draws it: the record, and its other end.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct LinkEntry {
     #[sqlx(flatten)]
     pub link: LinkRow,

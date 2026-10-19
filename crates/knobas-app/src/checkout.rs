@@ -83,8 +83,9 @@ pub const CLONES_ROOT_KEY: &str = "checkout.clones_root";
 pub const CHECKOUT_KINDS: [&str; 2] = ["repo", "branch"];
 
 /// How a checkout was arrived at, or that it was not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ts_rs::TS)]
 #[serde(rename_all = "snake_case")]
+#[ts(export_to = "entity.ts", rename = "CheckoutFoundBy")]
 pub enum FoundBy {
     /// A path this repository's override carries. Set by hand, and it wins.
     Override,
@@ -95,7 +96,8 @@ pub enum FoundBy {
 }
 
 /// What a repo or branch detail draws for its checkout.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CheckoutView {
     /// The repo entity the answer belongs to: the entity asked about when it
     /// is a repo, its repository when it is a branch, and `None` when a branch

@@ -15,6 +15,9 @@ version.workspace = true
 chrono.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+# The derive behind the generated IPC mirror (`knobas-app`'s `ipc_mirror`,
+# #1325): the entity barrel's types are declared here (#1326).
+ts-rs.workspace = true
 # Only for `Declarations::as_param`, the one bind the core's statements
 # share. `knobas-core` turns it on; a wasm build never does.
 sqlx = { workspace = true, optional = true }

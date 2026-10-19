@@ -108,7 +108,8 @@ pub const UNTITLED: &str = "Untitled note";
 const MAX_REF_CHARS: usize = 512;
 
 /// One note.
-#[derive(Clone, Debug, Serialize, sqlx::FromRow)]
+#[derive(Clone, Debug, Serialize, sqlx::FromRow, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NoteRow {
     /// `note:<uuid>`, and also the id of this note's `knobas.entity` row.
     pub id: String,
@@ -123,7 +124,8 @@ pub struct NoteRow {
 }
 
 /// One `[[ref]]` the body names, and what it points at -- if anything.
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct NoteRef {
     /// The text between the brackets, exactly as the body wrote it.
     ///

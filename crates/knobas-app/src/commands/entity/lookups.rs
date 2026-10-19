@@ -11,7 +11,8 @@ use super::*;
 /// Not on [`EntityRow`]: a room line and a launcher row are one wire shape
 /// over two structs (`commands::search`'s pin), read by a dozen statements,
 /// and these four facts are Code's alone. Code asks for the rows it holds.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
+#[ts(export_to = "entity.ts")]
 pub struct CodeFacts {
     /// The row asked about.
     pub entity_id: String,
@@ -108,8 +109,9 @@ pub async fn code_facts(
 /// opens at is `#/<kind>/<id>` -- or, for an asset or a route, the Tree's own
 /// encoder. The frontend has one function that turns the pair into an
 /// address; it has nothing that turns an id alone into one.
-#[derive(Debug, Clone, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize, ts_rs::TS)]
 #[cfg_attr(feature = "test-util", derive(serde::Deserialize))]
+#[ts(export_to = "entity.ts")]
 pub struct UrlMatch {
     pub entity_id: String,
     pub kind: String,
