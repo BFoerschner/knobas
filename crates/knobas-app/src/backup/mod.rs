@@ -185,7 +185,18 @@ pub struct BackupState {
     /// machine actually holds a credential for a source the archive brought.
     /// See [`restore`].
     pub secrets: Arc<dyn SecretStore>,
+    /// Where a restore reinstalls the external adapters it brought (#1210):
+    /// `None` restores the rows and installs nothing.
+    adapters: Option<RestoreAdapters>,
     cancel: CancellationToken,
+}
+
+/// The registry, store and endpoints a restore's reinstall uses (#1210).
+#[derive(Debug, Clone)]
+pub struct RestoreAdapters {
+    pub registry: crate::sources::Registry,
+    pub store: PathBuf,
+    pub endpoints: crate::sources::remote::Endpoints,
 }
 
 impl BackupState {
@@ -207,8 +218,17 @@ impl BackupState {
             connector,
             directory,
             secrets,
+            adapters: None,
             cancel: CancellationToken::new(),
         }
+    }
+
+    /// The same, reinstalling each restored external adapter into
+    /// `adapters` (#1210).
+    #[must_use]
+    pub fn with_adapters(mut self, adapters: RestoreAdapters) -> Self {
+        self.adapters = Some(adapters);
+        self
     }
 }
 
@@ -416,7 +436,29 @@ pub async fn restore(state: &BackupState, file: &str) -> Result<(), ExportError>
     }
     knobas_db::backup::restore(&state.connector, &path).await?;
     settle_restored_sources(state).await;
+    reinstall_restored_adapters(state).await;
     Ok(())
+}
+
+/// Reinstall every external adapter the archive brought (#1210,
+/// [`crate::sources::installed::reinstall_restored`]). Best-effort, for
+/// [`settle_restored_sources`]' reason: the archive is in, and an adapter
+/// refused here is recorded on the registry with its reason, which
+/// Settings shows, while the rest of the restore stands.
+async fn reinstall_restored_adapters(state: &BackupState) {
+    let Some(adapters) = &state.adapters else {
+        return;
+    };
+    if let Err(error) = crate::sources::installed::reinstall_restored(
+        &state.pool,
+        &adapters.registry,
+        &adapters.store,
+        &adapters.endpoints,
+    )
+    .await
+    {
+        tracing::warn!(%error, "the restore finished, but its external adapters were not read");
+    }
 }
 
 /// Bring every source the archive brought into line with *this* machine.
@@ -671,12 +713,19 @@ pub fn start<R: tauri::Runtime>(app: &tauri::AppHandle<R>, db: &knobas_db::Embed
         },
         |sources| Arc::clone(&sources.secrets),
     );
-    let state = Arc::new(BackupState::new(
-        db.pool().clone(),
-        db.connector(),
-        profile.backup_dir(),
-        secrets,
-    ));
+    let state = Arc::new(
+        BackupState::new(
+            db.pool().clone(),
+            db.connector(),
+            profile.backup_dir(),
+            secrets,
+        )
+        .with_adapters(RestoreAdapters {
+            registry: crate::sources::Registry::builtin(),
+            store: crate::sources::install::store_dir(&profile.dir),
+            endpoints: crate::sources::remote::Endpoints::default(),
+        }),
+    );
 
     if !app.manage(Arc::clone(&state)) {
         tracing::error!("the backup service was started twice in one process");

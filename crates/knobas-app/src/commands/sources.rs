@@ -94,7 +94,7 @@ pub async fn install_adapter<R: tauri::Runtime>(
     crate::sources::install::install_for_profile(
         &state.pool,
         &profile.dir,
-        std::path::Path::new(&manifest),
+        &manifest,
     )
     .await
     .map_err(|error| error.to_ipc())

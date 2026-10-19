@@ -16,17 +16,21 @@
 //! `limits` the deadline and memory cap of every call into it (#1204), as
 //! install's manifest made them.
 //!
-//! A manifest from a URL or a GitHub repository, and updates, are #1209;
-//! uninstall, backup and restore #1210.
+//! **From a release** (#1209): what the reader pastes may be a GitHub
+//! repository URL or a manifest URL as well as a local path
+//! ([`super::remote`]); the install records it in `source_url` with the
+//! release's tag. Listing, the update check, update, uninstall and the
+//! reinstall a restore makes are [`super::installed`].
 
 use std::path::{Path, PathBuf};
 
 use knobas_wasm_host::WasmAdapter;
-use knobas_wasm_host::manifest::{self, Manifest, Refusal};
+use knobas_wasm_host::manifest::{self, Checked, Manifest, Refusal};
 use sqlx::PgPool;
 
 use super::Registry;
 use super::registry::{KindTaken, TakenBy};
+use super::remote::{self, Endpoints, Origin, Pin};
 
 /// The directory under the profile's that holds installed artifacts, each
 /// named `<sha256>.wasm`.
@@ -65,6 +69,22 @@ pub enum InstallError {
     Store(std::io::Error),
     #[error("database: {0}")]
     Db(#[from] sqlx::Error),
+    #[error("{0}")]
+    Fetch(#[from] remote::FetchError),
+    #[error("no external adapter of kind {0:?} is installed")]
+    NotInstalled(String),
+    #[error(
+        "update refused: the latest release is adapter kind {release:?}, and the installed \
+         adapter is {installed:?}"
+    )]
+    KindChanged { installed: String, release: String },
+    #[error("uninstall asks about every source of {kind:?}; no answer for {missing}")]
+    Unanswered { kind: String, missing: String },
+    #[error("cannot remove the source {id}: {error}")]
+    Remove {
+        id: String,
+        error: super::SourcesError,
+    },
 }
 
 impl InstallError {
@@ -73,9 +93,17 @@ impl InstallError {
     #[must_use]
     pub fn to_ipc(&self) -> crate::IpcError {
         match self {
-            Self::ManifestUnreadable { .. } | Self::Refused(_) => crate::IpcError::invalid(self),
+            Self::ManifestUnreadable { .. }
+            | Self::Refused(_)
+            | Self::KindChanged { .. }
+            | Self::Unanswered { .. } => crate::IpcError::invalid(self),
+            Self::Fetch(remote::FetchError::Unreachable { .. }) => {
+                crate::IpcError::new(crate::IpcErrorCode::Unreachable, self)
+            }
+            Self::Fetch(_) => crate::IpcError::invalid(self),
             Self::KindTaken(_) => crate::IpcError::conflict(self),
-            Self::Store(_) | Self::Db(_) => crate::IpcError::internal(self),
+            Self::NotInstalled(_) => crate::IpcError::not_found(self),
+            Self::Store(_) | Self::Db(_) | Self::Remove { .. } => crate::IpcError::internal(self),
         }
     }
 }
@@ -91,47 +119,108 @@ pub async fn install(
     store: &Path,
     manifest_path: &Path,
 ) -> Result<InstalledAdapter, InstallError> {
-    let unreadable = |error| InstallError::ManifestUnreadable {
-        path: manifest_path.display().to_string(),
-        error,
-    };
-    let manifest_path = std::path::absolute(manifest_path).map_err(unreadable)?;
-    let text = tokio::fs::read_to_string(&manifest_path)
+    let manifest_path =
+        std::path::absolute(manifest_path).map_err(|error| InstallError::ManifestUnreadable {
+            path: manifest_path.display().to_string(),
+            error,
+        })?;
+    install_origin(
+        pool,
+        registry,
+        store,
+        &Endpoints::default(),
+        &Origin::Local(manifest_path),
+    )
+    .await
+}
+
+/// Install from what the reader pasted (#1209): a GitHub repository URL
+/// (its latest release), a manifest URL, or a local manifest's path.
+///
+/// # Errors
+///
+/// As [`install`], and [`InstallError::Fetch`] when the release cannot be
+/// found or read.
+pub async fn install_from(
+    pool: &PgPool,
+    registry: &Registry,
+    store: &Path,
+    endpoints: &Endpoints,
+    input: &str,
+) -> Result<InstalledAdapter, InstallError> {
+    let origin = Origin::parse(input, endpoints)?;
+    install_origin(pool, registry, store, endpoints, &origin).await
+}
+
+/// A release's manifest and artifact, fetched and held to every static
+/// check: what install and update both switch to.
+pub(crate) struct Fetched {
+    pub tag: Option<String>,
+    pub checked: Checked,
+}
+
+/// Fetch the release `pin` names at `origin` and run the static checks.
+pub(crate) async fn fetch_checked(
+    origin: &Origin,
+    pin: Pin<'_>,
+    endpoints: &Endpoints,
+) -> Result<Fetched, InstallError> {
+    let located = remote::locate(origin, pin, endpoints)
         .await
-        .map_err(unreadable)?;
-    let manifest = Manifest::parse(&text)?;
-    let artifact_path = manifest_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."))
-        .join(&manifest.artifact.file);
-    let artifact =
-        tokio::fs::read(&artifact_path)
-            .await
-            .map_err(|error| Refusal::ArtifactUnreadable {
-                file: manifest.artifact.file.clone(),
-                error,
-            })?;
+        .map_err(|error| match (origin, error) {
+            (Origin::Local(_), remote::FetchError::Unreadable { path, error }) => {
+                InstallError::ManifestUnreadable { path, error }
+            }
+            (_, error) => error.into(),
+        })?;
+    let manifest = Manifest::parse(&located.manifest)?;
+    let artifact = remote::artifact(&located, &manifest.artifact.file)
+        .await
+        .map_err(|error| match error {
+            remote::FetchError::Unreadable { error, .. } => {
+                InstallError::Refused(Refusal::ArtifactUnreadable {
+                    file: manifest.artifact.file.clone(),
+                    error,
+                })
+            }
+            other => other.into(),
+        })?;
     // Compiling a component takes a while; not on a runtime worker.
     let checked = tokio::task::spawn_blocking(move || manifest::check(manifest, artifact))
         .await
         .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    Ok(Fetched {
+        tag: located.tag,
+        checked,
+    })
+}
+
+async fn install_origin(
+    pool: &PgPool,
+    registry: &Registry,
+    store: &Path,
+    endpoints: &Endpoints,
+    origin: &Origin,
+) -> Result<InstalledAdapter, InstallError> {
+    let Fetched { tag, checked } = fetch_checked(origin, Pin::Latest, endpoints).await?;
     registry.check_free(&checked.manifest.adapter_kind)?;
 
     store_artifact(store, &checked.manifest.artifact.sha256, &checked.artifact)
         .await
         .map_err(InstallError::Store)?;
     let m = &checked.manifest;
-    let source_url = manifest_path.display().to_string();
+    let source_url = origin.record(endpoints);
     let inserted = sqlx::query(
         "insert into knobas.external_adapter
            (adapter_kind, adapter_version, interface_version, source_url, tag,
             artifact_sha256, hosts, limits)
-         values ($1, $2, $3, $4, null, $5, $6, $7)",
+         values ($1, $2, $3, $4, $5, $6, $7, $8)",
     )
     .bind(&m.adapter_kind)
     .bind(&m.adapter_version)
     .bind(&m.interface_version)
     .bind(&source_url)
+    .bind(&tag)
     .bind(&m.artifact.sha256)
     .bind(&m.hosts)
     .bind(sqlx::types::Json(&m.limits))
@@ -150,13 +239,13 @@ pub async fn install(
     }
     let template = checked.adapter.template();
     registry.add(checked.adapter)?;
-    tracing::info!(kind = %m.adapter_kind, sha256 = %m.artifact.sha256, "external adapter installed");
+    tracing::info!(kind = %m.adapter_kind, sha256 = %m.artifact.sha256, ?tag, "external adapter installed");
     Ok(InstalledAdapter {
         adapter_kind: m.adapter_kind.clone(),
         adapter_version: m.adapter_version.clone(),
         interface_version: m.interface_version.clone(),
         source_url,
-        tag: None,
+        tag,
         artifact_sha256: m.artifact.sha256.clone(),
         hosts: m.hosts.clone(),
         template,
@@ -168,17 +257,18 @@ pub async fn install(
 ///
 /// # Errors
 ///
-/// As [`install`].
+/// As [`install_from`].
 pub async fn install_for_profile(
     pool: &PgPool,
     profile_dir: &Path,
-    manifest_path: &Path,
+    input: &str,
 ) -> Result<InstalledAdapter, InstallError> {
-    install(
+    install_from(
         pool,
         &Registry::builtin(),
         &store_dir(profile_dir),
-        manifest_path,
+        &Endpoints::default(),
+        input,
     )
     .await
 }
@@ -191,7 +281,7 @@ pub fn artifact_path(store: &Path, sha256: &str) -> PathBuf {
 
 /// Write the artifact under its hash, through a temporary file renamed into
 /// place, so a crash never leaves a half-written file under a hash.
-async fn store_artifact(store: &Path, sha256: &str, bytes: &[u8]) -> std::io::Result<()> {
+pub(crate) async fn store_artifact(store: &Path, sha256: &str, bytes: &[u8]) -> std::io::Result<()> {
     tokio::fs::create_dir_all(store).await?;
     let target = artifact_path(store, sha256);
     let partial = store.join(format!("{sha256}.wasm.partial"));
@@ -254,7 +344,7 @@ pub async fn load_installed(
     Ok(out)
 }
 
-fn load_one(
+pub(crate) fn load_one(
     kind: &str,
     sha256: &str,
     bytes: &[u8],

@@ -109,6 +109,9 @@ struct External {
     /// Installed adapters refused at load, by kind, with the reason; a
     /// source of one fails to build with it.
     refused: Vec<(String, String)>,
+    /// The last update check of each installed adapter, by kind (#1209):
+    /// what the reader is told, which changes nothing until they act.
+    updates: Vec<(String, super::installed::UpdateCheck)>,
 }
 
 /// An external adapter of a kind the registry already has.
@@ -202,6 +205,73 @@ impl Registry {
         external.refused.retain(|(kind, _)| kind != adapter.kind());
         external.loaded.push(adapter);
         Ok(())
+    }
+
+    /// Put `adapter` in place of the loaded adapter of its kind, or add it
+    /// (an update, #1209; a restore's reinstall, #1210). A built-in kind is
+    /// still refused.
+    ///
+    /// # Errors
+    ///
+    /// [`KindTaken`] when a compiled-in row has its kind.
+    pub fn replace(&self, adapter: WasmAdapter) -> Result<(), KindTaken> {
+        let mut external = self.write();
+        let kind = adapter.kind().to_owned();
+        external.loaded.retain(|a| a.kind() != kind);
+        Self::free_in(&external, &kind)?;
+        external.refused.retain(|(k, _)| *k != kind);
+        external.updates.retain(|(k, _)| *k != kind);
+        external.loaded.push(adapter);
+        Ok(())
+    }
+
+    /// Forget the external adapter of `kind`: loaded, refused, its update
+    /// check (an uninstall, #1210).
+    pub fn remove(&self, kind: &str) {
+        let mut external = self.write();
+        external.loaded.retain(|a| a.kind() != kind);
+        external.refused.retain(|(k, _)| k != kind);
+        external.updates.retain(|(k, _)| k != kind);
+    }
+
+    /// Why the installed adapter of `kind` was refused, if it was.
+    #[must_use]
+    pub fn refusal(&self, kind: &str) -> Option<String> {
+        let external = self.read();
+        external
+            .refused
+            .iter()
+            .find(|(k, _)| k == kind)
+            .map(|(_, reason)| reason.clone())
+    }
+
+    /// The loaded external adapter of `kind`'s descriptor template.
+    #[must_use]
+    pub fn external_template(&self, kind: &str) -> Option<SourceDescriptor> {
+        let external = self.read();
+        external
+            .loaded
+            .iter()
+            .find(|a| a.kind() == kind)
+            .map(WasmAdapter::template)
+    }
+
+    /// Record the last update check of `kind`.
+    pub fn set_update(&self, kind: &str, check: super::installed::UpdateCheck) {
+        let mut external = self.write();
+        external.updates.retain(|(k, _)| k != kind);
+        external.updates.push((kind.to_owned(), check));
+    }
+
+    /// The last update check of `kind`, if one ran.
+    #[must_use]
+    pub fn update(&self, kind: &str) -> Option<super::installed::UpdateCheck> {
+        let external = self.read();
+        external
+            .updates
+            .iter()
+            .find(|(k, _)| k == kind)
+            .map(|(_, check)| check.clone())
     }
 
     /// Record that the installed adapter of `kind` was refused at load, so a

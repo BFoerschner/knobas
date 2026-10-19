@@ -8,9 +8,11 @@
 pub mod crud;
 pub mod demo;
 pub mod install;
+pub mod installed;
 pub mod paths;
 pub mod progress;
 pub mod registry;
+pub mod remote;
 pub mod write_queue;
 
 // `pub(crate)`: the demo load command builds a `TauriEvents` of its own to
