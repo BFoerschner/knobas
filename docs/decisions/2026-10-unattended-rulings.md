@@ -5937,7 +5937,7 @@ The implementer's rulings:
 Reserved for Björn, ruled by the implementer on Opus:
 
 - **The §10.8 sign-off** (`docs/contract/10.8/1199-role-data-check.md`): `knobas_source::role::data`
-  and `contract::fills_its_roles`, migration `0051` (`sync.role_check`), and
+  and `contract::fills_its_roles`, migration `0052` (`sync.role_check`), and
   `SourceSummary.role_misses`. Signed: no minimum, battery clause, command or event changes; the
   shape tests hold the mirror, and the table is derived state outside the backup. **Reversing:** a
   §10.8 amendment and a migration dropping the table.

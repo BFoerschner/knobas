@@ -1,4 +1,4 @@
-- **`crates/knobas-source/src/**`, migration `0051`, the IPC schema of `list_sources` (and of
+- **`crates/knobas-source/src/**`, migration `0052`, the IPC schema of `list_sources` (and of
   every command answering a `SourceSummary`) and the `sources.ts` mirror — issue #1199
   (2026-10-18): a source's first sync checks its claimed roles' declared paths on the records it
   emitted, and the source list carries what missed.** No new command, no `commands/` or `ipc/`
@@ -20,7 +20,7 @@
   (`fills_every_role_it_claims_on_the_seeded_corpus`, one per built-in), and so do the Gitea and
   Kuma fakes. The battery itself is unchanged.
 
-  **Migration `0051`** (`0051_the_roles_a_source_was_found_to_fill.sql`): `sync.role_check
+  **Migration `0052`** (`0052_the_roles_a_source_was_found_to_fill.sql`): `sync.role_check
   (source_id references knobas.source_config on delete cascade, role, missed_kind,
   missed_field, missed_path, checked_at)`, primary key `(source_id, role)`, the three miss columns
   null together. In `sync`, so a backup does not carry it and a restored source's first sync

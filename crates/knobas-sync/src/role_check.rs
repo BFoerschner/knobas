@@ -3,7 +3,7 @@
 //! role it claims, and where they missed.
 //!
 //! The engine feeds a [`DataCheck`] from its sink while a run writes, and
-//! [`record`] keeps what it found in `sync.role_check` (migration `0051`),
+//! [`record`] keeps what it found in `sync.role_check` (migration `0052`),
 //! inside the run's transaction. A source's **first sync** is judged; after
 //! that the check runs again only while some claimed role has not been
 //! judged (its kinds came back empty so far) or stands missed, so that a

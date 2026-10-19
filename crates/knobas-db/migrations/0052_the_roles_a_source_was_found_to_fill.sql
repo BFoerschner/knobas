@@ -1,4 +1,4 @@
--- 0051_the_roles_a_source_was_found_to_fill.sql -- one table, and nothing
+-- 0052_the_roles_a_source_was_found_to_fill.sql -- one table, and nothing
 -- else (issue #1199, spec #1192, ADR-0028 *The checks*, data half).
 --
 -- Single-writer, like every migration: a ticket that needs more schema takes
