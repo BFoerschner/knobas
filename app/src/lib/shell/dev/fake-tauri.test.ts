@@ -869,18 +869,19 @@ test("the fake Gitea source claims ticket-system and its tickets reach the board
   const gitea = sources.find((source) => source.id === "gitea");
   expect(gitea?.roles.find((claim) => claim.role === "ticket-system")?.reads).toContain("reachable_transitions");
 
-  const board = handlers["mini_board"]!({ sources: ["gitea"], ctxId: null, project: null, perColumn: null }) as {
+  const board = handlers["mini_board"]!({ role: "ticket-system", ctxId: null, project: null, perColumn: null }) as {
     columns: { status: string | null; cards: { source_id: string; key: string; priority: string | null; assignee: string | null; labels: string[] }[] }[];
+    sources: { source_id: string; statuses: string[] }[];
   };
-  const cards = board.columns.flatMap((column) => column.cards);
+  const cards = board.columns.flatMap((column) => column.cards).filter((card) => card.source_id === "gitea");
   expect(cards.length).toBeGreaterThan(0);
-  expect(cards.every((card) => card.source_id === "gitea" && /^tidewater\/[^/]+\/issues\/\d+$/.test(card.key))).toBe(true);
+  expect(cards.every((card) => /^tidewater\/[^/]+\/issues\/\d+$/.test(card.key))).toBe(true);
   expect(cards.find((card) => card.key === "tidewater/ledger/issues/57")).toMatchObject({
     priority: "medium",
     assignee: "jonas",
     labels: ["bug", "export"],
   });
-  expect(board.columns.map((column) => column.status).sort()).toEqual(["closed", "open"]);
+  expect(board.sources.find((source) => source.source_id === "gitea")?.statuses.sort()).toEqual(["closed", "open"]);
 });
 
 test("the fixture's mini_board reads a saved view by its savedView argument (#1245)", () => {

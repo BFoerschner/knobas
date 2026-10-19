@@ -2085,13 +2085,13 @@ export interface LanesAsked {
 }
 
 /**
- * The Tickets tile's mini board — `mini_board` (ADR-0009, #177).
+ * The ticket board — `mini_board` (ADR-0009, #177).
  *
  * `role` (#1299, ADR-0029 as amended) reads the board over the sources that
  * fill that role, as the mirror answers them: the Tickets page asks for the
  * ticket system's, and its columns and counts are then the fillers' alone. A
  * role nobody fills is an empty board; `null` reads every source. `context`
- * narrows to a stored room's fixed one-hop membership (§16.11, ADR-0008). Of
+ * narrows to a stored context's fixed one-hop membership (§16.11, ADR-0008). Of
  * what the scope admits the board draws the live tickets, so a ticket the
  * source deleted is off it. Grouping and column order happen in the command,
  * not here.

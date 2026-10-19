@@ -5705,13 +5705,13 @@ fn announce_context<R: tauri::Runtime>(
 // the `commands/` + `ipc/` layout, so a new read gets a section rather than a
 // file. It is a room read, and the shell reaches it from the room.
 
-/// The Tickets tile's mini board (ADR-0009, spec #175).
+/// The ticket board (ADR-0009, spec #175).
 ///
 /// `role` (#1299, ADR-0029 as amended on 2026-10-19) narrows the board to
 /// the sources that fill that role (`sources::crud::fillers`), read per call:
 /// the Tickets page asks for the ticket system's. Its columns and counts are
 /// then the fillers' alone; a role nobody fills is an empty board, read.
-/// Omitted, every source's tickets are on it. `ctx_id` is a stored room's
+/// Omitted, every source's tickets are on it. `ctx_id` is a stored
 /// context and `project` a project key; every narrowing given intersects.
 /// The grouping, the column order and the two payload reads all live in
 /// [`knobas_core::mini_board`]; this seam adds only the role's fillers.
