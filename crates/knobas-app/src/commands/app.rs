@@ -419,9 +419,8 @@ mod tests {
     /// The invoke functions are hand-written (contract §2.6), so a command
     /// added on the Rust side alone compiles, lints and tests green while
     /// being unreachable from the window -- and a command *renamed* on the
-    /// Rust side alone leaves
-    /// the mirror invoking a name that no longer exists, which fails only when
-    /// a person clicks the button.
+    /// Rust side alone leaves the mirror invoking a name that no longer
+    /// exists, which fails only when a person clicks the button.
     ///
     /// Matched on the `invoke("<name>")` string, because that is the thing
     /// that actually has to agree: a TS function may be called anything.

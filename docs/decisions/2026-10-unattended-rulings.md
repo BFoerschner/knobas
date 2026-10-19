@@ -7903,3 +7903,17 @@ the 2026-10-18 reserved-steps rule. The evidence is in
   `app_status_serialises_the_keys_the_mirror_declares`, the two that read `app.ts` for type
   text. `db_state_serialises_as_the_contract_declares` pins the wire shape, not the mirror, and
   stays.
+
+The merge-manager's rulings on #1325 (Opus):
+
+- **Variant docs dropped (requirement one).** *Fork:* hold the PR until a generator carries a
+  `///` on an enum variant, or accept the enum-doc convention. *Ruling:* accept. Confirmed in
+  `ts-rs-macros` 12.0.1 (`src/types/enum.rs` passes only the enum's own docs); no rule is lost,
+  since the convention moves each variant's meaning into the enum's doc and its payload rules
+  onto the payload fields, which carry. *Reversing:* move the bullets back once ts-rs emits them.
+- **`ts-rs` as a normal dependency, not a dev-dependency.** *Fork:* `#[cfg_attr(test, derive(TS))]`
+  with a dev-dependency, or a plain derive. *Ruling:* plain derive, normal dependency. The
+  barrels switched next derive on types in `knobas-core`, `knobas-source` and the other crates,
+  and `cfg(test)` is set only for the crate under test, so those crates need the impl in their
+  ordinary build anyway; one spelling everywhere. The cost is compile time of a derive, nothing
+  at run time. *Reversing:* swap to `cfg_attr` per crate.

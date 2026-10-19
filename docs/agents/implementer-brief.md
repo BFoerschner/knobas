@@ -12,6 +12,7 @@ The loop runs unattended; one prompt stalls it until Björn is back. Never: chai
 - Every ADR in `docs/adr/` is in force; a PR that contradicts one is wrong by construction.
 - Re-verify the ticket's diagnosis on the current tree before fixing; say in the PR if a sibling change overtook it.
 - Read `CLAUDE.md`, `docs/agents/working-model.md`, `CONTEXT.md`, and `docs/contract.md` §10.8 if the ticket touches IPC or migrations. §10.8 freezes the **module layout** too: no new files under `crates/knobas-app/src/commands/` (its `entity/` directory included) or `app/src/lib/ipc/` beyond what a §10.8 entry books (a new command joins the owning stream's module, and under `entity/` the file for its section), and every migration or IPC addition carries its own dated §10.8 entry in the same PR, matching the diff exactly.
+- A barrel switched to generated types (`app/src/lib/ipc/generated/<barrel>.ts`, contract §2.6 as amended by #1325) is never edited by hand: change the Rust type, regenerate with `cargo test -p knobas-app --lib ipc_mirror` (`just pre-gate` runs it) and commit the result; `just check`'s `ipc-mirror` step fails on a stale file.
 
 ## Decisions
 
