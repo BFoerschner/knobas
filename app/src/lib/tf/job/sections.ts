@@ -34,7 +34,7 @@ export interface SectionRead {
    * as read (#1295). A section without it is kept to its role's sources after
    * reading, and reads nothing when it names no kinds.
    */
-  asked: boolean;
+  sendsRole: boolean;
 }
 
 export type Section = "code" | "builds" | "pages" | "monitors";
@@ -50,10 +50,10 @@ export { runKindsOf } from "./job";
  * the shell's (#1295).
  */
 export const SECTION_READS: Readonly<Record<Section, SectionRead>> = {
-  code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc", asked: false },
-  builds: { role: CI, kinds: [], order: "latest_per_parent", asked: true },
-  pages: { role: WIKI, kinds: ["page"], order: "updated_desc", asked: false },
-  monitors: { role: MONITORING, kinds: ["monitor"], order: "updated_desc", asked: false },
+  code: { role: CODE_HOST, kinds: CODE_KINDS, order: "updated_desc", sendsRole: false },
+  builds: { role: CI, kinds: [], order: "latest_per_parent", sendsRole: true },
+  pages: { role: WIKI, kinds: ["page"], order: "updated_desc", sendsRole: false },
+  monitors: { role: MONITORING, kinds: ["monitor"], order: "updated_desc", sendsRole: false },
 };
 
 /**
@@ -63,8 +63,8 @@ export const SECTION_READS: Readonly<Record<Section, SectionRead>> = {
  * read, since an empty `kinds` with no role asks for every kind.
  */
 export async function readSection(listEntities: ReachPorts["listEntities"], id: string, read: SectionRead): Promise<EntityRow[]> {
-  if (!read.asked && read.kinds.length === 0) return [];
-  const page = await listEntities(reachFilter(id, read.kinds, read.order, read.asked ? read.role : null), SECTION_LIMIT, 0);
+  if (!read.sendsRole && read.kinds.length === 0) return [];
+  const page = await listEntities(reachFilter(id, read.kinds, read.order, read.sendsRole ? read.role : null), SECTION_LIMIT, 0);
   return page.rows;
 }
 
@@ -92,7 +92,7 @@ export interface ReachPorts {
 /**
  * What the job's sections would hold for ticket `id`, counted by kind and
  * tone: the Code, Builds, Pages and Monitors reads as the job makes them
- * (Builds asked for the CI role, the others kept to their role's sources), and
+ * (Builds sends the CI role, the others kept to their role's sources), and
  * the reached assets the Assets section reads (with no tone: their health is
  * read one asset at a time, and only on the job). A read that fails counts
  * nothing, as its section draws nothing.
@@ -104,7 +104,7 @@ export async function reachTally(
 ): Promise<KindTally[]> {
   const reads = Object.values(SECTION_READS).map((read) =>
     readSection(ports.listEntities, id, read)
-      .then((rows) => (read.asked ? rows : roles.keep(read.role, rows)))
+      .then((rows) => (read.sendsRole ? rows : roles.keep(read.role, rows)))
       .catch(() => []),
   );
   const assets = ports

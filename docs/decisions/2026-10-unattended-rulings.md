@@ -7223,7 +7223,7 @@ The merge-manager's rulings (Opus):
   pipelines off Dependencies too. Kept: that sentence is the reason the read is shared.
   *Reversing:* low.
 - **The job's sections mark which ones ask the mirror.** *Fork:* send `role` from all four
-  sections now, or only from Builds. *Ruling:* only Builds (`SectionRead.asked`); Code, Pages and
+  sections now, or only from Builds. *Ruling:* only Builds (`SectionRead.sendsRole`); Code, Pages and
   Monitors keep `sourceRoles.keep` until #1296–#1298 flip their own flag. `sectionReads(registry)`
   becomes the constant `SECTION_READS`, since no read takes kinds from the registry any more.
   *Reasoning:* the dispatch keeps this ticket to Builds. *Reversing:* low.

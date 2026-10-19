@@ -308,14 +308,13 @@
     // Builds asks for the CI role and the mirror answers its run kinds
     // (#1295); the adapters' claims only route a run to its page (#1256).
     void registry.load();
-    const reads = SECTION_READS;
-    void readRows(id, reads.builds, mine).then((rows) => {
+    void readRows(id, SECTION_READS.builds, mine).then((rows) => {
       if (mine === token && rows) builds = rows;
     });
-    void readRows(id, reads.pages, mine).then((rows) => {
+    void readRows(id, SECTION_READS.pages, mine).then((rows) => {
       if (mine === token && rows) pages = rows;
     });
-    void readRows(id, reads.monitors, mine).then((rows) => {
+    void readRows(id, SECTION_READS.monitors, mine).then((rows) => {
       if (mine === token && rows) monitors = rows;
     });
   }

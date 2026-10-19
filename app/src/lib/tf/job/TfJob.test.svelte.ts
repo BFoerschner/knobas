@@ -972,12 +972,11 @@ test("a job's Code section drops the rows of a source that does not claim code-h
   const p = ports({ others: [MOCK_REPO, B_OK, MOCK_BUILD] });
   open("PAY-231", { ports: p, registry: claimsRegistry() });
   await settle();
-  const hrefs = (id: string) => [...section(id).querySelectorAll(".tf-rows a")].map((row) => row.getAttribute("href") ?? "");
-  expect(hrefs("code").some((href) => href.includes("mock"))).toBe(false);
-  expect(hrefs("code")).toHaveLength(3);
+  expect(hrefsOf("code").some((href) => href.includes("mock"))).toBe(false);
+  expect(hrefsOf("code")).toHaveLength(3);
   // The source list says mock claims nothing, but Builds no longer keeps
   // rows by it: the mirror narrowed the read to CI's fillers already.
-  expect(hrefs("builds").sort()).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`, `#/build/${encodeURIComponent(MOCK_BUILD.entity_id)}`].sort());
+  expect(hrefsOf("builds").sort()).toEqual([`#/build/${encodeURIComponent(B_OK.entity_id)}`, `#/build/${encodeURIComponent(MOCK_BUILD.entity_id)}`].sort());
 
   const tally = await reachTally(p, ID);
   const count = (kind: string) => tally.filter((line) => line.kind === kind).reduce((n, line) => n + line.count, 0);
