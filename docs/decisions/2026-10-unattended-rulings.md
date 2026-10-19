@@ -7840,3 +7840,21 @@ The merge-manager's rulings on #1321 (Opus):
   once on `Lifecycle::with_registry(Probe)`, and asserts both answers. The post-write read is not
   a command, so its test drives `ArrivalLinks`. The prior art is `list_adapters`' injected
   registry test. *Reversing:* n/a.
+
+The merge-manager's rulings on #1322 (Opus):
+
+- **"Green unchanged" means assertions and fixtures.** *Fork:* the implementer's first ruling.
+  *Ruling:* upheld. Each grown call passes `&Registry::for_process()`, a clone sharing the one
+  process list, so every existing test reads the registry it read before; no assertion moved.
+  *Reversing:* pool-only wrappers, which #1323 would then delete.
+- **Pool-only reads outside the named clusters defer the first criterion's last clause.**
+  *Fork:* `builds.rs`, `board.rs`, `lookups.rs`, `projects.rs` and `viewed.rs` still reach the
+  singleton, now at their call sites. *Ruling:* the clause is ticked for the clusters the
+  ticket names; the rest is deferred to #1323, whose first criterion replaces "every remaining
+  direct call" outside bring-up and the lifecycle's default, so it covers them without a body
+  change. *Reversing:* thread them here instead.
+- **Commands holding `SourcesState` pass its registry.** *Fork:* the inbox stream, standup and
+  the three Docs writes. *Ruling:* upheld. They called `sources::state` before this PR, so their
+  `not_ready` window is unchanged, and in production `state.registry` is the process list. No
+  command's `State` arguments changed, so no read answers `not_ready` that did not before.
+  *Reversing:* n/a.

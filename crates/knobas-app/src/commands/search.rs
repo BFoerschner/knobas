@@ -16,7 +16,8 @@
 //! only place a behaviour lives is a behaviour no test can reach. Each command
 //! here is therefore two lines (resolve the pool, call the inner function) and
 //! everything worth asserting is in the `_inner`, which takes a `&PgPool` and
-//! the lifecycle's `&dyn AdapterRegistry` (#1322) and is exercised by `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
+//! the lifecycle's `&dyn AdapterRegistry` (#1322) and is exercised by
+//! `tests/it/search_ipc.rs`. `demo_load_inner` set the pattern.
 
 use knobas_sync::scheduler::AdapterRegistry;
 use sqlx::PgPool;
