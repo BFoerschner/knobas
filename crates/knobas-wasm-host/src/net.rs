@@ -295,7 +295,7 @@ async fn send(policy: &Policy, bounds: Bounds, request: http::Request<WasiBody>)
         } => (for_instance, guarded),
     };
     if guarded && let Some(name) = request.uri().host() {
-        guard(name);
+        register_guarded(name);
     }
     let (mut parts, body) = request.into_parts();
     if for_instance {
@@ -452,22 +452,24 @@ fn guarded_names() -> &'static Mutex<HashSet<String>> {
     NAMES.get_or_init(Mutex::default)
 }
 
-fn guard(name: &str) {
-    guarded_names()
-        .lock()
-        .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .insert(name.to_ascii_lowercase());
+/// Add `name` to the [guarded names](guarded_names).
+fn register_guarded(name: &str) {
+    locked(guarded_names()).insert(name.to_ascii_lowercase());
 }
 
 fn is_guarded(name: &str) -> bool {
-    guarded_names()
+    locked(guarded_names()).contains(&name.to_ascii_lowercase())
+}
+
+/// A lock a panic elsewhere left poisoned still holds whole values.
+fn locked<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-        .contains(&name.to_ascii_lowercase())
 }
 
 /// The clients' name lookup: the system's, and on the guarded client a
-/// refusal of a [guarded](guard) name any of whose addresses is local. An
+/// refusal of a [guarded](register_guarded) name any of whose addresses is local. An
 /// address in the URL never comes here; the connector reads it as it is.
 struct Resolver {
     guarded: bool,
@@ -497,7 +499,7 @@ impl reqwest::dns::Resolve for Resolver {
 
 async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
     #[cfg(feature = "test-util")]
-    if let Some(ips) = fake_answers().lock().unwrap().get(name) {
+    if let Some(ips) = locked(fake_answers()).get(&name.to_ascii_lowercase()) {
         return Ok(ips.iter().map(|ip| SocketAddr::new(*ip, 0)).collect());
     }
     // Port 0: the connector sets the request's.
@@ -505,9 +507,11 @@ async fn lookup(name: &str) -> std::io::Result<Vec<SocketAddr>> {
 }
 
 #[cfg(feature = "test-util")]
-fn fake_answers() -> &'static Mutex<std::collections::HashMap<String, Vec<std::net::IpAddr>>> {
-    static ANSWERS: OnceLock<Mutex<std::collections::HashMap<String, Vec<std::net::IpAddr>>>> =
-        OnceLock::new();
+type FakeAnswers = Mutex<std::collections::HashMap<String, Vec<std::net::IpAddr>>>;
+
+#[cfg(feature = "test-util")]
+fn fake_answers() -> &'static FakeAnswers {
+    static ANSWERS: OnceLock<FakeAnswers> = OnceLock::new();
     ANSWERS.get_or_init(Mutex::default)
 }
 
@@ -516,10 +520,7 @@ fn fake_answers() -> &'static Mutex<std::collections::HashMap<String, Vec<std::n
 /// test points at its own server.
 #[cfg(feature = "test-util")]
 pub fn fake_dns(name: &str, ips: &[std::net::IpAddr]) {
-    fake_answers()
-        .lock()
-        .unwrap()
-        .insert(name.to_ascii_lowercase(), ips.to_vec());
+    locked(fake_answers()).insert(name.to_ascii_lowercase(), ips.to_vec());
 }
 
 #[cfg(test)]

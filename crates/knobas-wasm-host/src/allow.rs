@@ -196,8 +196,8 @@ impl Target {
 pub struct Allowlist {
     /// The manifest's fixed entries.
     fixed: Vec<Allowed>,
-    /// Its templates' values: what the reader typed.
-    typed: Vec<Allowed>,
+    /// Its templates' values: addresses the reader typed.
+    from_templates: Vec<Allowed>,
 }
 
 impl Allowlist {
@@ -221,7 +221,8 @@ impl Allowlist {
                     } else {
                         config.get(key).and_then(serde_json::Value::as_str)
                     };
-                    list.typed.extend(value.and_then(Allowed::from_value));
+                    list.from_templates
+                        .extend(value.and_then(Allowed::from_value));
                 }
             }
         }
@@ -233,7 +234,7 @@ impl Allowlist {
     pub fn allows(&self, target: &Target) -> bool {
         self.fixed
             .iter()
-            .chain(&self.typed)
+            .chain(&self.from_templates)
             .any(|allowed| allowed.matches(target))
     }
 
@@ -243,7 +244,10 @@ impl Allowlist {
     #[must_use]
     pub fn guards(&self, target: &Target) -> bool {
         matches!(&target.host, Host::Domain(name) if name != "localhost")
-            && !self.typed.iter().any(|allowed| allowed.matches(target))
+            && !self
+                .from_templates
+                .iter()
+                .any(|allowed| allowed.matches(target))
     }
 }
 
@@ -429,7 +433,13 @@ mod tests {
     #[test]
     fn only_a_fixed_name_is_guarded() {
         let list = list(
-            &["api.example.com", "127.0.0.1:8080", "[::1]:8080", "localhost:9000", "{mirror}"],
+            &[
+                "api.example.com",
+                "127.0.0.1:8080",
+                "[::1]:8080",
+                "localhost:9000",
+                "{mirror}",
+            ],
             "",
             serde_json::json!({ "mirror": "http://gitea.lan:3000" }),
         );
@@ -448,7 +458,11 @@ mod tests {
             serde_json::json!({}),
         );
         assert!(!guards(&both, "http://gitea.lan:3000"));
-        let fixed_only = list(&["gitea.lan:3000"], "http://gitea.lan:3000", serde_json::json!({}));
+        let fixed_only = list(
+            &["gitea.lan:3000"],
+            "http://gitea.lan:3000",
+            serde_json::json!({}),
+        );
         assert!(guards(&fixed_only, "http://gitea.lan:3000"));
     }
 

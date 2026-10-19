@@ -355,7 +355,23 @@ async fn a_fixed_host_with_one_public_and_one_loopback_answer_is_refused() {
     assert!(local.seen().is_empty(), "{:?}", local.seen());
 }
 
-/// The control for the two above: the same name, resolving the same way,
+/// The same through the system's own lookup, not `fake_dns`: `localhost.`
+/// is a name other than `localhost`, and resolves to loopback.
+#[tokio::test]
+async fn a_fixed_name_the_system_resolves_to_loopback_is_refused() {
+    let local = Server::start(None).await;
+    let entry = format!("localhost.:{}", port(&local));
+    let source = fetching(
+        &[&entry],
+        &format!("http://{entry}/data"),
+        serde_json::json!({}),
+    );
+    let (ok, text) = answer(&*source).await;
+    assert!(!ok && text.contains("ConnectionRefused"), "{text}");
+    assert!(local.seen().is_empty(), "{:?}", local.seen());
+}
+
+/// The control for the refusals above: the same name, resolving the same way,
 /// reaches the server when the reader typed it (a template's value).
 #[tokio::test]
 async fn a_templated_host_that_resolves_to_loopback_still_works() {
@@ -372,6 +388,7 @@ async fn a_templated_host_that_resolves_to_loopback_still_works() {
     assert_eq!(local.seen().len(), 1, "{:?}", local.seen());
 }
 
+/// The source's own address is one the reader typed, local or not.
 #[tokio::test]
 async fn a_base_url_on_loopback_still_works() {
     let local = Server::start(None).await;
@@ -395,7 +412,11 @@ async fn a_fixed_loopback_address_or_localhost_still_works() {
     let local = Server::start(None).await;
     for host in ["127.0.0.1", "localhost"] {
         let entry = format!("{host}:{}", port(&local));
-        let source = fetching(&[&entry], &format!("http://{entry}/data"), serde_json::json!({}));
+        let source = fetching(
+            &[&entry],
+            &format!("http://{entry}/data"),
+            serde_json::json!({}),
+        );
         let (ok, text) = answer(&*source).await;
         assert!(ok, "{host}: {text}");
     }

@@ -3866,6 +3866,7 @@ knobas-wasm-host	test/it	network::a_declared_host_that_is_not_the_instance_gets_
 knobas-wasm-host	test/it	network::a_fixed_host_that_resolves_to_loopback_is_refused_and_nothing_reaches_it
 knobas-wasm-host	test/it	network::a_fixed_host_with_one_public_and_one_loopback_answer_is_refused
 knobas-wasm-host	test/it	network::a_fixed_loopback_address_or_localhost_still_works
+knobas-wasm-host	test/it	network::a_fixed_name_the_system_resolves_to_loopback_is_refused
 knobas-wasm-host	test/it	network::a_header_token_reaches_the_instance_and_never_the_component
 knobas-wasm-host	test/it	network::a_redirect_to_an_undeclared_host_is_refused
 knobas-wasm-host	test/it	network::a_request_to_an_undeclared_host_is_refused_before_it_leaves
