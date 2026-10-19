@@ -449,7 +449,8 @@ pub async fn start<R: tauri::Runtime>(
     let pool = state.pool.clone();
     tauri::async_runtime::spawn(async move {
         let endpoints = remote::Endpoints::default();
-        if let Err(error) = installed::check_updates(&pool, &Registry::for_process(), &endpoints).await
+        if let Err(error) =
+            installed::check_updates(&pool, &Registry::for_process(), &endpoints).await
         {
             tracing::warn!(%error, "the external adapters' update check did not run");
         }
@@ -551,7 +552,8 @@ pub async fn test_scheduler<R: tauri::Runtime>(
     connections: knobas_db::embedded::Connector,
     pool: PgPool,
 ) -> Result<Scheduler, sqlx::Error> {
-    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> = Arc::new(Registry::for_process());
+    let registry: Arc<dyn knobas_sync::scheduler::AdapterRegistry> =
+        Arc::new(Registry::for_process());
     Scheduler::start(SchedulerDeps {
         connections: Arc::new(DbConnections(connections)),
         pool: pool.clone(),

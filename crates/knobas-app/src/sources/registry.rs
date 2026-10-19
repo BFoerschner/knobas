@@ -156,9 +156,10 @@ impl Registry {
     /// process, which bring-up fills and an install adds to; every call
     /// returns a clone sharing it.
     ///
-    /// Reached from bring-up and from [`Lifecycle`](crate::Lifecycle)'s
-    /// default. A read takes the lifecycle's registry as `&dyn
-    /// AdapterRegistry` instead, so a test can give it one of its own.
+    /// Bring-up and [`Lifecycle`](crate::Lifecycle)'s default are the callers
+    /// meant to stay (#1305 moves the rest). A read takes the lifecycle's
+    /// registry as `&dyn AdapterRegistry` instead, so a test can give it one
+    /// of its own.
     #[must_use]
     pub fn for_process() -> Registry {
         static PROCESS: std::sync::OnceLock<Registry> = std::sync::OnceLock::new();

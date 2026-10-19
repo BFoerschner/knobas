@@ -76,8 +76,9 @@ pub async fn demo_load<R: tauri::Runtime>(
 /// generated from `config_schema` + `auth_methods`, and the launcher reads kind
 /// metadata, without instantiating anything. It therefore answers before
 /// bring-up, which is the point -- the form must be drawable on a cold start.
-/// The registry comes from [`Lifecycle`](crate::Lifecycle), managed before
-/// `setup` runs, so taking it as state widens nothing.
+/// The registry comes from [`Lifecycle`](crate::Lifecycle), managed at the
+/// start of `setup` before anything can call in, so taking it as state
+/// widens nothing.
 #[tauri::command]
 pub fn list_adapters(lifecycle: State<'_, Lifecycle>) -> Vec<knobas_source::SourceDescriptor> {
     lifecycle.registry().descriptors()

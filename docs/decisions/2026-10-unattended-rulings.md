@@ -7775,7 +7775,7 @@ The merge-manager's rulings on #1317 and #1318 (Opus):
   `BringUp` field fed from the lifecycle.
 - **The integration test lives in `tests/it/ipc.rs`.** It sits beside the existing
   `list_adapters` cold-start check, which now manages a fresh `Lifecycle`, the way the app does
-  before `setup`, where before it managed no state at all. *Reversing:* n/a.
+  at the start of `setup`, where before it managed no state at all. *Reversing:* n/a.
 - **Seams, chosen without a person to confirm them:** the integration binary's mock-app invoke
   of `list_adapters`, as the ticket names it, and a unit test over `&dyn AdapterRegistry` for
   the trait growth. *Reversing:* n/a.

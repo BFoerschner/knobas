@@ -389,13 +389,13 @@ fn every_sources_command_is_registered_and_reachable() {
     // `list_adapters` is the exception, deliberately: it touches neither the
     // database nor the keychain, so it answers on a cold start -- which is what
     // lets the Add-source form be drawn before bring-up finishes. It reads the
-    // lifecycle's registry, and the lifecycle is managed before `setup` runs.
+    // lifecycle's registry, and the lifecycle is managed at the start of `setup`.
     let adapters = invoke_managing("list_adapters", serde_json::json!({}), |app| {
         app.manage(knobas_app::Lifecycle::new());
     })
     .expect("list_adapters must answer before bring-up")
-        .deserialize::<serde_json::Value>()
-        .expect("a descriptor list came back");
+    .deserialize::<serde_json::Value>()
+    .expect("a descriptor list came back");
     assert!(
         adapters.as_array().is_some_and(|a| !a.is_empty()),
         "list_adapters returned nothing: {adapters}"

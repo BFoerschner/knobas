@@ -2100,7 +2100,8 @@ pub async fn monitor_roster(pool: &PgPool) -> Result<Vec<MonitorRow>, IpcError> 
         .collect::<Result<_, _>>()?;
     // Where each source keeps a monitor's reading (#1224).
     let declarations =
-        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process()).await?;
+        crate::sources::paths::declared_paths(pool, &crate::sources::Registry::for_process())
+            .await?;
 
     let mut samples: HashMap<String, Vec<MonitorSample>> = HashMap::new();
     for sample in sqlx::query(ROSTER_SAMPLES)

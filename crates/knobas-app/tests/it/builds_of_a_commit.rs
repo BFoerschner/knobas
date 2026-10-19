@@ -113,10 +113,12 @@ const WALK: &str = concat!(
 );
 
 async fn walked(pool: &PgPool, sha: &str) -> Vec<String> {
-    let declarations =
-        knobas_app::sources::paths::declared_paths(pool, &knobas_app::sources::Registry::for_process())
-            .await
-            .unwrap();
+    let declarations = knobas_app::sources::paths::declared_paths(
+        pool,
+        &knobas_app::sources::Registry::for_process(),
+    )
+    .await
+    .unwrap();
     sqlx::query_scalar(WALK)
         .bind(sha)
         .bind(declarations.as_param())

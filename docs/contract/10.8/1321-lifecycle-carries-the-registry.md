@@ -35,6 +35,6 @@
   test a lifecycle over a registry it built, and `Lifecycle::registry()` returns it.
 
   **One command reads it.** `list_adapters` now takes `State<'_, Lifecycle>` and answers
-  `lifecycle.registry().descriptors()`. `Lifecycle` is managed at build time, before `setup`, so
-  the command still answers before bring-up. Its name, its arguments from the frontend (none) and
+  `lifecycle.registry().descriptors()`. `Lifecycle` is managed synchronously at the start of
+  `setup`, before anything can call in, so the command still answers before bring-up. Its name, its arguments from the frontend (none) and
   its `Vec<SourceDescriptor>` are unchanged, and `app/src/lib/ipc/sources.ts` is untouched.
