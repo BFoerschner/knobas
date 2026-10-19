@@ -241,6 +241,7 @@ knobas-app	lib/knobas_app	sources::registry::tests::a_built_in_kind_is_taken
 knobas-app	lib/knobas_app	sources::registry::tests::a_clone_made_before_an_install_builds_the_installed_adapter
 knobas-app	lib/knobas_app	sources::registry::tests::a_source_of_an_adapter_refused_at_load_fails_with_the_reason
 knobas-app	lib/knobas_app	sources::registry::tests::an_external_adapter_joins_the_templates_once
+knobas-app	lib/knobas_app	sources::registry::tests::only_bring_up_and_the_lifecycles_default_call_for_process
 knobas-app	lib/knobas_app	sources::registry::tests::the_trait_object_answers_the_docs_projection_and_writes
 knobas-app	lib/knobas_app	sources::remote::tests::a_forge_release_download_asks_its_own_api_under_its_path_prefix
 knobas-app	lib/knobas_app	sources::remote::tests::a_github_release_download_asks_github_s_api

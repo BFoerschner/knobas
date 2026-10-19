@@ -7925,3 +7925,28 @@ The merge-manager's ruling on #1351 (Sonnet):
   clauses, or accept. *Ruling:* accept. The ticket names copies of the same helper; the inserts left
   differ in shape, and folding them in would need a many-argument helper that hides what each test
   varies. No follow-up. *Reversing:* file a ticket for a second helper; call sites are mechanical.
+
+## #1323: only bring-up and the lifecycle reach the process registry (Sonnet implementer, 2026-10-20)
+
+- **The install flow reaches the concrete list through a provided trait method, `as_any()`.**
+  *Fork:* install, update and uninstall write to the registry (`add`, `replace`, `remove`,
+  `refuse`, `set_update`), which the trait does not have and #1305 does not give it; the sources
+  state holds only the trait object. A new `SourcesState` field would have changed every test's
+  struct literal (about twenty). *Ruling:* `AdapterRegistry::as_any()` defaults to `None`;
+  `Registry` returns itself; `SourcesState::installable()` downcasts to the concrete `Registry`
+  (a clone sharing the one list). A state built over a test registry answers the install
+  commands `internal`, which no production state does. *Reversing:* a `SourcesState` field.
+- **The backup's restore takes the same handle.** `Installs::for_profile` took the singleton and
+  `backup::start` called it; it now takes `SourcesState::installable()` and, with no sources
+  state, restores no adapters, as it restores no secrets. *Reversing:* n/a.
+- **The scan covers non-test source of `src/` only.** *Fork:* whether `tests/` and unit-test
+  modules are in scope. *Ruling:* no. They build the process registry as a fixture, and the
+  command-module scan is scoped to `src/commands`. Each file is read up to its first
+  `#[cfg(test)]`; comment lines and the definition are skipped; every occurrence counts, so a
+  second call beside an allowed one fails. The allow-list is a count per file (`sources/mod.rs`,
+  `commands/app.rs`), and widening it is a reviewed edit to the test: a mutant that widened it
+  and added a call passed, by design. *Reversing:* extend the walk to `tests/`.
+- **`test_scheduler` takes the registry.** It was a third site under `test-util`; its one caller
+  passes the same registry to the `SourcesState` it builds. *Reversing:* n/a.
+- **Reads that held only a pool take the lifecycle's registry as a second argument,** as #1322's
+  did; tests pass `&Registry::for_process()`. No command's wire shape changed.
