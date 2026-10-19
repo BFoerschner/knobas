@@ -1,9 +1,12 @@
 /**
  * The estate — `crates/knobas-app/src/commands/assets.rs`.
  *
- * Hand-written, and pinned to the Rust by tests in that module which
- * `include_str!` this file: a field, a union member or a command name added on
- * one side only fails `cargo test`, not merely `svelte-check`.
+ * The types are generated from the Rust (`./generated/assets.ts`, contract
+ * §2.6 as amended by #1325, switched by #1328): a field is explained in its
+ * Rust doc comment and nowhere else. The `invoke` functions stay hand-written,
+ * pinned to the Rust by tests in that module which `include_str!` this file,
+ * and so does {@link ImportProducer}, the type of a list this file declares
+ * rather than of anything that crosses the bridge.
  *
  * A §10.8-ratified module pair on the `time` module's precedent (issue #428).
  * **Every** asset command belongs here — #432's routes, #439's import and
@@ -17,652 +20,130 @@
  * of the estate's own would be a second thing to keep in step with the first.
  */
 import { invoke } from "@tauri-apps/api/core";
+import type {
+  AssetDetail,
+  AssetEdit,
+  AssetRow,
+  AssetType,
+  DepLayer,
+  DepView,
+  DepViewSettings,
+  DepViews,
+  Dependencies,
+  DependsOnThis,
+  ImportOutcome,
+  ImportPreview,
+  Landing,
+  MemberAsset,
+  MonitorRow,
+  MonitoringSettings,
+  OpenAlert,
+  Produced,
+  PropertyValue,
+  RouteDetail,
+  RouteEdit,
+  RouteRow,
+  UnmonitoredAsset,
+  Visibility,
+} from "./generated/assets";
 
-import type { ActivityRow, LinkEntry, Tone } from "./entity";
+export type {
+  AlertAsset,
+  AlertState,
+  AssetChange,
+  AssetDetail,
+  AssetEdit,
+  AssetProperty,
+  AssetRow,
+  AssetStatus,
+  AssetType,
+  AttachedMonitor,
+  DepGroup,
+  DepItem,
+  DepKind,
+  DepLayer,
+  DepRelation,
+  DepTiles,
+  DepView,
+  DepViewSettings,
+  DepViews,
+  Dependencies,
+  DependsOnRow,
+  DependsOnThis,
+  Environment,
+  ImportEntry,
+  ImportOutcome,
+  ImportPreview,
+  Inherited,
+  Landing,
+  LayerInView,
+  MemberAsset,
+  MonitorLink,
+  MonitorRow,
+  MonitorSample,
+  MonitorTarget,
+  MonitoredAsset,
+  MonitoringSettings,
+  OpenAlert,
+  Produced,
+  PropertyChange,
+  PropertyKind,
+  PropertyPlan,
+  PropertyValue,
+  RouteDetail,
+  RouteEdit,
+  RouteRow,
+  TypedProperty,
+  UnmonitoredAsset,
+  UnresolvedMonitor,
+  UptimeRatio,
+  Visibility,
+} from "./generated/assets";
 
-/**
- * What a property value may be — `knobas_core::asset::PropertyKind`.
- *
- * The four story 6 names and no fifth; the *secret* kind is deferred with its
- * keychain convention, so there is nowhere in an asset a credential can be
- * typed.
- */
-export type PropertyKind = "text" | "number" | "date" | "url";
+// One name per arm of the three tagged unions, for a caller that holds one
+// arm. Picked out of the generated union, so an arm has one declaration.
 
-/** Free text — a hostname, an image tag, a size. */
-export interface TextProperty {
-  kind: "text";
-  /** Never blank: clearing a property is `null`, not `""`. */
-  value: string;
-}
+/** {@link PropertyValue}'s `text` arm. */
+export type TextProperty = Extract<PropertyValue, { kind: "text" }>;
+/** {@link PropertyValue}'s `number` arm. */
+export type NumberProperty = Extract<PropertyValue, { kind: "number" }>;
+/** {@link PropertyValue}'s `date` arm. */
+export type DateProperty = Extract<PropertyValue, { kind: "date" }>;
+/** {@link PropertyValue}'s `url` arm. */
+export type UrlProperty = Extract<PropertyValue, { kind: "url" }>;
 
-/** A number — a port, a row count. Finite; JSON has no other kind. */
-export interface NumberProperty {
-  kind: "number";
-  value: number;
-}
+/** {@link AssetEdit}'s `name` arm. */
+export type NameEdit = Extract<AssetEdit, { field: "name" }>;
+/** {@link AssetEdit}'s `status` arm. */
+export type StatusEdit = Extract<AssetEdit, { field: "status" }>;
+/** {@link AssetEdit}'s `environment` arm. */
+export type EnvironmentEdit = Extract<AssetEdit, { field: "environment" }>;
+/** {@link AssetEdit}'s `owner` arm. */
+export type OwnerEdit = Extract<AssetEdit, { field: "owner" }>;
+/** {@link AssetEdit}'s `property` arm. */
+export type PropertyEdit = Extract<AssetEdit, { field: "property" }>;
+/** {@link AssetEdit}'s `monitors` arm. */
+export type MonitorsEdit = Extract<AssetEdit, { field: "monitors" }>;
 
-/** A date, `YYYY-MM-DD`. Refused by the backend if it is not one. */
-export interface DateProperty {
-  kind: "date";
-  value: string;
-}
+/** {@link RouteEdit}'s `name` arm. */
+export type RouteNameEdit = Extract<RouteEdit, { field: "name" }>;
+/** {@link RouteEdit}'s `url` arm. */
+export type RouteUrlEdit = Extract<RouteEdit, { field: "url" }>;
+/** {@link RouteEdit}'s `target` arm. */
+export type RouteTargetEdit = Extract<RouteEdit, { field: "target" }>;
+/** {@link RouteEdit}'s `visibility` arm. */
+export type RouteVisibilityEdit = Extract<RouteEdit, { field: "visibility" }>;
+/** {@link RouteEdit}'s `property` arm. */
+export type RoutePropertyEdit = Extract<RouteEdit, { field: "property" }>;
+/** {@link RouteEdit}'s `monitors` arm. */
+export type RouteMonitorsEdit = Extract<RouteEdit, { field: "monitors" }>;
 
-/** An http(s) URL. Refused by the backend if it carries no scheme. */
-export interface UrlProperty {
-  kind: "url";
-  value: string;
-}
-
-/**
- * One property value — `assets::PropertyValue`.
- *
- * Tagged, and the tag is stored beside the value: a bare scalar would make
- * `"8080"` and `8080` the same property and would leave a date
- * indistinguishable from a string.
- */
-export type PropertyValue = TextProperty | NumberProperty | DateProperty | UrlProperty;
-
-/**
- * An asset's **own** status — `assets::AssetStatus`.
- *
- * What a person recorded, and not the same thing as `AssetRow.health`, which
- * is the worst of this and everything underneath. `"none"` means *nobody has
- * said*, which is a different thing from `"up"`. Its monitors' states join the
- * health in M4.1.
- */
-export type AssetStatus = "up" | "warn" | "down" | "none";
-
-/**
- * Which environment an asset belongs to — `assets::Environment`.
- *
- * Stored on the asset, and `null` here means *not set here* — what is in force
- * is `AssetDetail.effective_environment`, the nearest asset at or above that
- * sets one.
- */
-export type Environment = "dev" | "stage" | "prod" | "shared";
-
-/**
- * A value **in force** on an asset, and the asset that sets it —
- * `assets::Inherited`.
- *
- * Stories 8, 9 and 10 in one shape: what the value is, and where to go to
- * change it. `source_id` equal to the asset's own id is *set here*; anything
- * else is inherited from that ancestor, and the pane links to it.
- */
-export interface Inherited<T> {
-  value: T;
-  /** The asset the value is set on — the asset itself when it is set here. */
-  source_id: string;
-  source_name: string;
-}
-
-/**
- * One property a type declares — `knobas_core::asset::TypedProperty`.
- *
- * The `kind` is what a pane's editor needs and what an {@link AssetProperty}
- * cannot carry: a declared key nobody has filled in arrives with `value: null`,
- * and there is no kind in a `null`.
- */
-export interface TypedProperty {
-  /** The key it is stored under in the properties bag. */
-  key: string;
-  /** What the pane calls it. */
-  label: string;
-  kind: PropertyKind;
-}
-
-/**
- * One built-in asset type — `knobas_core::asset::AssetType`.
- *
- * Read off the backend rather than declared here, so the sixteen types are
- * one list. The **ids are wire values and never change**; the labels are
- * display and may be reworded.
- */
-export interface AssetType {
-  id: string;
-  label: string;
-  /** Two characters — the chip a column row draws. */
-  monogram: string;
-  /** In the order the pane shows them. `custom` declares none. */
-  properties: TypedProperty[];
-  /**
-   * The child types conventionally suggested under one of these, by id —
-   * story 17's *usual here*.
-   *
-   * A suggestion and not a constraint: the create dialog offers all sixteen
-   * whatever is in here, and an empty list is a real answer.
-   */
-  suggests: string[];
-}
-
-/**
- * One row of a Miller column — `assets::AssetRow`.
- *
- * `Row` and not `Node`: `CONTEXT.md`'s **Asset** entry lists *node* among the
- * words to avoid, and every list line this app already draws is a `…Row`.
- *
- * `type_label` and `monogram` are resolved by the backend out of the built-in
- * type table, so no surface here keeps a copy of sixteen types and their
- * chips.
- */
-export interface AssetRow {
-  /** `asset:<uuid>`, and also this asset's entity id. */
-  id: string;
-  /** The asset that holds this one; `null` at the top of the estate. */
-  parent_id: string | null;
-  type_id: string;
-  type_label: string;
-  /** Two characters — the type's chip. `"??"` for a type this build lost. */
-  monogram: string;
-  name: string;
-  status: AssetStatus;
-  /** Set **on this asset**; `null` where it inherits (#431). */
-  environment: Environment | null;
-  /** Set **on this asset**; `null` where it inherits (#431). */
-  owner: string | null;
-  /** Whether anything sits under it — what the chevron and the next column
-   * are drawn from. */
-  has_children: boolean;
-  /**
-   * The worst of {@link status} and every descendant's own status, down over
-   * warn over up over none (story 37). Monitors join the "own" half in M4.1.
-   */
-  health: AssetStatus;
-  /**
-   * The worst status **strictly underneath**; `"none"` when nothing under it
-   * has been rated. What colours the badge — a `down` asset holding one `warn`
-   * container has `health: "down"` and `inside: "warn"`, and the badge is
-   * about what is inside.
-   */
-  inside: AssetStatus;
-  /** How many descendants carry `warn` or `down` — the *N* in the badge. */
-  problems_inside: number;
-  /**
-   * How many **work items** this asset is linked to — story 32's other badge
-   * (#435).
-   *
-   * A work item is an entity the mirror holds: a ticket, a build, a page, a
-   * commit. Contexts, notes and other assets are knobas' own and are not
-   * counted, which is what makes the badge *linked work* rather than a count
-   * of links. Confirmed links only, either direction, one per link.
-   */
-  linked_work: number;
-}
-
-/**
- * One row of the pane's property list — `assets::AssetProperty`.
- *
- * Typed properties come first in the type's declared order, **including the
- * ones nobody has filled in** — that is how a reader learns a VM is meant to
- * have an IP. Custom keys follow, by key, with `custom: true`.
- */
-export interface AssetProperty {
-  key: string;
-  /** The type's label for a declared key; the key itself for a custom one. */
-  label: string;
-  /** `null` for a declared property with no value yet. */
-  value: PropertyValue | null;
-  custom: boolean;
-}
-
-/**
- * One row of a room's Assets tile — `assets::MemberAsset` (#434).
- *
- * The asset plus **where it sits**, and a carrier rather than a `path` field
- * on {@link AssetRow}: a Miller column draws no path, so the column reads
- * leave `path_text` unselected and this one tile does not put it on every
- * row of every walk.
- */
-export interface MemberAsset {
-  asset: AssetRow;
-  /** The ancestors' names, outermost first, `" / "` between; `null` at the
-   * top of the estate. */
-  path: string | null;
-}
-
-/**
- * Who can reach a route — `assets::Visibility`.
- *
- * Two values: *internal* is reachable from inside the estate, *public* from
- * outside it. Every finer shade — which VPN, which network — is a property
- * with a name of its own. `"internal"` is what an unclassified route reads as.
- */
-export type Visibility = "internal" | "public";
-
-/**
- * One route — `assets::RouteRow`.
- *
- * The same shape at both ends: in {@link AssetDetail.exposes} it is what this
- * asset exposes, and in {@link AssetDetail.reachable_via} it is a route whose
- * target is somewhere on this asset's containment path. **Where it lands** is
- * `target_id`: equal to the asset's own id means it lands here, and anything
- * else is named by `target_name` — an ancestor when `held_by` holds it, and
- * something inside otherwise. That comparison is what story 31's dashed wire
- * is drawn from.
- */
-export interface RouteRow {
-  /** `route:<uuid>` — and the `#/route/<id>` address. */
-  id: string;
-  /** The asset that exposes it. Never null. */
-  asset_id: string;
-  asset_name: string;
-  /** The asset it lands on; `null` for an endpoint that lands on nothing. */
-  target_id: string | null;
-  target_name: string | null;
-  name: string;
-  /** The URL or endpoint, carrying its scheme. */
-  url: string;
-  /** Who can reach it. `"internal"` is what an unclassified route reads as. */
-  visibility: Visibility;
-  /** A route has no type, so every property is the reader's own. */
-  properties: AssetProperty[];
-}
-
-/**
- * Everything the pane draws for one route — `assets::RouteDetail`.
- *
- * No held-by path of its own: a route sits on the asset that exposes it, and
- * `route.asset_id` is where the Tree opens.
- */
-export interface RouteDetail {
-  route: RouteRow;
-  /** This route's own activity lines, newest first. */
-  history: ActivityRow[];
-  /** The sources a monitor could be created in (#976), as {@link AssetDetail.monitor_targets}. */
-  monitor_targets: MonitorTarget[];
-}
-
-/** Everything the fixed right pane draws — `assets::AssetDetail`. */
-export interface AssetDetail {
-  asset: AssetRow;
-  properties: AssetProperty[];
-  /** The environment in force and the asset that sets it; `null` when nothing
-   * at or above this asset sets one. */
-  effective_environment: Inherited<Environment> | null;
-  /** The owner in force and the asset that sets it. */
-  effective_owner: Inherited<string> | null;
-  /** Outermost first, **excluding the asset itself**. Empty at the top. */
-  held_by: AssetRow[];
-  holds: AssetRow[];
-  /** The routes this asset exposes, by name (#432). */
-  exposes: RouteRow[];
-  /**
-   * The routes whose target is on this asset's containment path — landing on
-   * it, on something that holds it, or on something it holds — nearest first
-   * (#432). See {@link RouteRow} for which is which.
-   */
-  reachable_via: RouteRow[];
-  /** This asset's own activity lines, newest first. */
-  history: ActivityRow[];
-  /**
-   * Every confirmed link this asset takes part in, either end, newest first
-   * (#435).
-   *
-   * The same shape a ticket's detail carries, drawn by the same panel: linking
-   * an asset is the same gesture as linking a ticket (story 36), so the pane
-   * has no link list of its own.
-   */
-  links: LinkEntry[];
-  /**
-   * The Uptime Kuma names of the monitors watching this asset, as an import
-   * kept them (#439).
-   *
-   * **Names, not monitors.** A name becomes a `monitored-by` link the moment
-   * the mirror holds a monitor called that. So this is what the estate file
-   * said, and {@link monitoring} is what has been resolved out of it — a name
-   * in both has arrived, a name in only this one is still waiting.
-   */
-  monitors: string[];
-  /**
-   * The monitors watching this asset, by name — the pane's *monitoring*
-   * section (#445).
-   */
-  monitoring: AttachedMonitor[];
-  /**
-   * The sources a *Create monitor for this asset* would go to (#453, story
-   * 70).
-   *
-   * **Empty is the ordinary answer**, and drawing nothing when it is empty is
-   * the criterion: an Uptime Kuma configured with only its API key declares no
-   * write ops, so it is not here and the pane offers no control. Filled from
-   * the keychain by `commands::assets::get_asset`, so it says what *this*
-   * machine can do rather than what the adapter kind could.
-   */
-  monitor_targets: MonitorTarget[];
-}
-
-/**
- * One line of the *Depends on this* panel — `assets::DependsOnRow` (#505).
- *
- * The asset that breaks, where it sits, and why it is on the list. A carrier
- * rather than fields on {@link AssetRow}, {@link MemberAsset}'s reason: the
- * relation is true of this answer and not of the asset.
- */
-export interface DependsOnRow {
-  asset: AssetRow;
-  /** The ancestors' names, outermost first, `" / "` between; `null` at the
-   * top of the estate. */
-  path: string | null;
-  /**
-   * The relation it came through — `"depends-on"` or `"runs-on"` — and `null`
-   * when it came through **containment**, which the panel reads as *inside*.
-   *
-   * Null rather than a word: ADR-0014 makes holding a `parent_id` field and
-   * says there is no `holds` relation, so there is no relation to name here.
-   */
-  relation: string | null;
-}
-
-/**
- * What breaks if an asset goes down — `assets::DependsOnThis` (#505,
- * `CONTEXT.md`'s **Depends on this**).
- *
- * Two lists and no count: the number the panel draws is `assets.length`, and
- * the routes are listed beneath it and **not** counted, because the number is
- * about assets.
- */
-export interface DependsOnThis {
-  /** Every asset that breaks, nearest first. Never the asset itself. */
-  assets: DependsOnRow[];
-  /** The routes that land on the asset — the way in that stops working. */
-  routes: RouteRow[];
-}
-
-/**
- * One source a new monitor could be created in — `assets::MonitorTarget`.
- *
- * `entity` is what a `CreateMonitor` against this source targets, composed by
- * the backend from `knobas_source::monitor_target`. Never build it here: what
- * a create targets is the SPI's to spell, and a template string in a component
- * is the per-adapter table §3a forbids.
- */
-export interface MonitorTarget {
-  /** The configured source's id, which is also its entities' namespace. */
-  source_id: string;
-  /** What the reader called it when they added it. */
-  display_name: string;
-  /** The `entity` the create carries. */
-  entity: string;
-}
-
-/**
- * One monitor watching an asset — `assets::AttachedMonitor`.
- *
- * The attachment is a `monitored-by` link; the state and the address are the
- * mirror's, and both are null when the mirror no longer holds the monitor —
- * which is what a **paused** monitor is, since Kuma drops it from `/metrics`
- * and the adapter tombstones it.
- */
-export interface AttachedMonitor {
-  /** `<source>:<monitor id in Kuma>` — the address its detail opens at. */
-  entity_id: string;
-  /** Its name, which is the name an estate file uses to ask for it. */
-  name: string;
-  /** `up`, `down`, `pending`, `maintenance`, or null when there is no reading. */
-  state: string | null;
-  /** Its own page in Uptime Kuma (story 71); null when there is none left. */
-  web_url: string | null;
-  /**
-   * Whether it has left the mirror — paused in Kuma, or deleted.
-   *
-   * *Tombstoned* is `CONTEXT.md`'s word for it; the *Linked* panel under the
-   * pane's monitoring section renders the same fact — `LinkEnd.deleted_at` —
-   * with the older spelling *withdrawn*.
-   */
-  tombstoned: boolean;
-}
-
-/**
- * One entry of an import preview's *already in the tree* or *new* group —
- * `assets::ImportEntry`.
- *
- * Assets and routes in one shape, because the question a group answers is
- * about the **file**: what of it does knobas already hold. `kind` is which.
- */
-export interface ImportEntry {
-  /** The file's own id, which is the id the asset or route carries. */
-  id: string;
-  /** `"asset"` or `"route"` — the word `knobas.entity.kind` holds. */
-  kind: string;
-  name: string;
-  /** The type's label for an asset; `null` for a route, which has no type. */
-  type_label: string | null;
-  /** The parent for an asset, the exposing asset for a route. */
-  parent_id: string | null;
-}
-
-/**
- * What an apply would do with one property the file names —
- * `assets::PropertyPlan`.
- *
- * `"kept"` is the reader's own value surviving: a property edited by hand is
- * never overwritten by a later import of the same file (story 24).
- */
-export type PropertyPlan = "set" | "kept";
-
-/**
- * One property whose file value differs from the stored one —
- * `assets::PropertyChange`.
- *
- * Only the ones that differ, and both fates in one list: *the file says `cx23`
- * and it stays `cx33` because you typed that* is the sentence the preview
- * exists to say.
- */
-export interface PropertyChange {
-  key: string;
-  /** The type's label for a declared key, the key itself for a custom one. */
-  label: string;
-  /** What the asset carries now; `null` for a key it does not carry yet. */
-  from: PropertyValue | null;
-  /** What the file says. */
-  to: PropertyValue;
-  plan: PropertyPlan;
-}
-
-/**
- * One asset already in the tree that an apply would change —
- * `assets::AssetChange`.
- *
- * An asset with nothing to change is in {@link ImportPreview.known} instead,
- * so the length of this list is the honest answer to *what would this do*.
- */
-export interface AssetChange {
-  id: string;
-  /** The name **in the tree**: an import never renames. */
-  name: string;
-  properties: PropertyChange[];
-  /** Monitor names the file lists that this asset does not carry yet. */
-  monitors: string[];
-}
-
-/**
- * One `monitored-by` link an apply would draw — `assets::MonitorLink`.
- *
- * Only the names the mirror actually holds. A name it does not hold is kept on
- * the asset and reported as an {@link UnresolvedMonitor} instead.
- */
-export interface MonitorLink {
-  asset_id: string;
-  asset_name: string;
-  /** The Uptime Kuma name, as the file spells it and the mirror holds it. */
-  monitor_name: string;
-  /** The mirrored monitor's entity id — the other end of the link. */
-  monitor_id: string;
-}
-
-/**
- * One monitor name on one asset that answers to nothing in the mirror —
- * `assets::UnresolvedMonitor`.
- *
- * {@link MonitorLink}'s negative. Reported on **every** preview and not only
- * on the one that first kept the name: {@link AssetChange.monitors} lists what
- * an apply would write, so a name already on the asset is absent from it, and
- * a second preview of an unchanged file would otherwise say nothing at all
- * about six names that still find no monitor.
- */
-export interface UnresolvedMonitor {
-  asset_id: string;
-  asset_name: string;
-  /** The Uptime Kuma name, as the file spells it. */
-  monitor_name: string;
-}
-
-/**
- * What an import would do, before it has done any of it —
- * `assets::ImportPreview`.
- *
- * The three groups the Import dialog draws, plus the monitor links, which are
- * a write and therefore have to be announced by the same read, and the names
- * that found no monitor.
- */
-export interface ImportPreview {
-  /** What the file calls the estate. */
-  name: string;
-  /** Entries whose id knobas already holds. */
-  known: ImportEntry[];
-  /** Entries an apply would create, in the order it would create them. */
-  new: ImportEntry[];
-  /** The known assets with something to change, and what. */
-  changes: AssetChange[];
-  monitor_links: MonitorLink[];
-  /** The names the mirror does not hold, by asset and then by name. */
-  unresolved: UnresolvedMonitor[];
-}
-
-/** What an import did — `assets::ImportOutcome`. */
-export interface ImportOutcome {
-  assets_created: number;
-  routes_created: number;
-  /** Properties the file's value was written to. */
-  properties_set: number;
-  /** Properties left as they were because a hand edit claimed them. */
-  properties_kept: number;
-  /** Monitor names newly kept on an asset. */
-  monitors_kept: number;
-  /** `monitored-by` links drawn. */
-  monitors_linked: number;
-}
-
-/** Rename — `assets::AssetEdit::Name`. */
-export interface NameEdit {
-  field: "name";
-  value: string;
-}
-
-/** Set the asset's own status — `assets::AssetEdit::Status`. */
-export interface StatusEdit {
-  field: "status";
-  value: AssetStatus;
-}
-
-/** Set or clear the environment — `assets::AssetEdit::Environment`. */
-export interface EnvironmentEdit {
-  field: "environment";
-  /** `null` clears it, so the asset inherits again. */
-  value: Environment | null;
-}
-
-/** Set or clear the owner — `assets::AssetEdit::Owner`. */
-export interface OwnerEdit {
-  field: "owner";
-  /** `null` clears it. */
-  value: string | null;
-}
-
-/** Set or clear one property — `assets::AssetEdit::Property`. */
-export interface PropertyEdit {
-  field: "property";
-  key: string;
-  /** `null` removes the key. Blank text is refused: clear it instead. */
-  value: PropertyValue | null;
-}
-
-/**
- * Add Uptime Kuma monitor names — `assets::AssetEdit::Monitors` (#453).
- *
- * The one edit that **appends**: an asset's monitor names are added by the
- * estate import and by *Create monitor for this asset*, and taken away by
- * neither. A name the asset already carries changes nothing and writes no
- * history line.
- */
-export interface MonitorsEdit {
-  field: "monitors";
-  added: string[];
-}
-
-/**
- * One field changing — `assets::AssetEdit`.
- *
- * A discriminated union rather than a bag of optionals, because each edit
- * writes its own history line with a `from` and a `to`, and a bag would make
- * "cleared" and "not mentioned" the same value on the wire.
- */
-export type AssetEdit =
-  | NameEdit
-  | StatusEdit
-  | EnvironmentEdit
-  | OwnerEdit
-  | PropertyEdit
-  | MonitorsEdit;
-
-/** Rename a route — `assets::RouteEdit::Name`. */
-export interface RouteNameEdit {
-  field: "name";
-  value: string;
-}
-
-/** Set the URL or endpoint — `assets::RouteEdit::Url`. */
-export interface RouteUrlEdit {
-  field: "url";
-  /** Carries a scheme; a bare host is refused. */
-  value: string;
-}
-
-/** Set or clear the asset a route lands on — `assets::RouteEdit::Target`. */
-export interface RouteTargetEdit {
-  field: "target";
-  /** `null` makes it an endpoint that lands on nothing knobas knows. */
-  value: string | null;
-}
-
-/** Set who can reach it — `assets::RouteEdit::Visibility`. */
-export interface RouteVisibilityEdit {
-  field: "visibility";
-  value: Visibility;
-}
-
-/** Set or clear one of the route's own properties — `assets::RouteEdit::Property`. */
-export interface RoutePropertyEdit {
-  field: "property";
-  key: string;
-  /** `null` removes the key. */
-  value: PropertyValue | null;
-}
-
-/**
- * Add the names of monitors a route waits for — `assets::RouteEdit::Monitors`
- * (#976): {@link MonitorsEdit}'s append on the route's own column.
- */
-export interface RouteMonitorsEdit {
-  field: "monitors";
-  added: string[];
-}
-
-/**
- * One field of a route changing — `assets::RouteEdit`.
- *
- * {@link AssetEdit}'s shape for its reason. The asset that **exposes** a route
- * is not among them: a route is the address of the thing that answers it, so
- * re-exposing one elsewhere is a different route with a different history.
- */
-export type RouteEdit =
-  | RouteNameEdit
-  | RouteUrlEdit
-  | RouteTargetEdit
-  | RouteVisibilityEdit
-  | RoutePropertyEdit
-  | RouteMonitorsEdit;
+/** {@link Produced}'s `token_needed` arm. */
+export type TokenNeeded = Extract<Produced, { state: "token_needed" }>;
+/** {@link Produced}'s `landing_needed` arm. */
+export type LandingNeeded = Extract<Produced, { state: "landing_needed" }>;
+/** {@link Produced}'s `ready` arm. */
+export type ProducedFile = Extract<Produced, { state: "ready" }>;
 
 /**
  * The built-in type table: what a type is called, its monogram, the properties
@@ -816,7 +297,11 @@ export function deleteRoute(routeId: string): Promise<void> {
   return invoke<void>("delete_route", { routeId });
 }
 
-/** One entry of the Import dialog's chooser — `assets::Producer` (#508). */
+/**
+ * One entry of the Import dialog's chooser (#508): the part of `assets::Producer`
+ * the chooser draws. Hand-written, because nothing sends it over the bridge:
+ * it types {@link IMPORT_PRODUCERS}, a list this file declares.
+ */
 export interface ImportProducer {
   /** What the two Import commands are sent as their `producer`. */
   id: string;
@@ -889,91 +374,6 @@ export function previewEstateImport(file: string, producer: string): Promise<Imp
 }
 
 /**
- * What one run of a producer answered — `assets::Produced` (#509, #510).
- *
- * Three states and not a record of optionals: two of the three fields would be
- * meaningless in each, and `{ file: null, needs: null }` is a state the backend
- * is never in. `state` is the tag, the arrangement {@link PropertyValue} makes
- * with `kind`.
- *
- * It moved out of `assets::hcloud` when #510 gave it a second producer. The
- * move was the Rust path only — this union is unchanged, tag, arms and field
- * names — and `new_servers` therefore holds *container* names when the Docker
- * importer filled it. Renaming a field #509's §10.8 entry declared is a
- * conversation of its own; what this dialog *draws* is producer-neutral,
- * because the rendered sentence is nobody's frozen surface.
- */
-export type Produced = TokenNeeded | LandingNeeded | ProducedFile;
-
-/**
- * Nothing is stored under this importer's keychain account and no token was
- * sent — the dialog asks for one, **once**: the backend stores it after the run
- * succeeds, so the next run comes back with a file instead.
- *
- * Reachable only from a producer that has a credential. The Docker importer has
- * none — it spawns a CLI that reads this machine's own docker contexts — and
- * the backend refuses a token sent to it.
- */
-export interface TokenNeeded {
-  state: "token_needed";
-}
-
-/**
- * The live system holds things this estate does not, and nothing has said where
- * they go. The dialog asks *land under* — once per run, not once per finding —
- * and calls again with the answer.
- *
- * Reachable only from a producer whose findings have no natural parent, which
- * today is hcloud alone: a Docker container lands under the engine whose
- * context found it (spec #491, story 68).
- */
-export interface LandingNeeded {
-  state: "landing_needed";
-  /** The servers that are not in the tree, by name, in the order they came. */
-  servers: string[];
-}
-
-/** The estate file, in the checked-in shape, ready for the preview. */
-export interface ProducedFile {
-  state: "ready";
-  /** The file's text. Nothing in it says which producer made it (#508). */
-  file: string;
-  /**
-   * What this file would create, by name; empty when the estate holds it all.
-   * Servers from hcloud, containers from Docker — the name is #509's.
-   */
-  new_servers: string[];
-  /**
-   * What the run knew of and could not read, by name — for Docker, a container
-   * engine in the tree carrying no `docker_context`. Always empty for hcloud.
-   *
-   * Its own field rather than a silence: an engine with no context is
-   * indistinguishable in the file from an engine holding no containers, and the
-   * reader is the only one who can tell them apart.
-   */
-  skipped: string[];
-}
-
-/**
- * Where the servers an importer found and this estate does not hold will land —
- * `assets::Landing` (#509).
- *
- * **Three answers need three spellings**, and this type carries the two that
- * are answers: `{ parent: "asset:…" }` is *under this asset* and
- * `{ parent: null }` is *the top of the estate*, which is how `createAsset` and
- * `moveAsset` already spell a place. The third — *nothing has been said yet* —
- * is the whole argument being `null`, and is what `landing_needed` asks about.
- *
- * The distinction is not academic: a bare `string | null` gave *the top* and
- * *nothing said yet* one spelling, so a reader who chose the top was asked the
- * same question again, for ever on an estate with no assets to choose instead.
- */
-export interface Landing {
-  /** The asset the servers go under, or `null` for the top of the estate. */
-  parent: string | null;
-}
-
-/**
  * Run one importer against its live system (#509).
  *
  * `token` is sent only when the reader has just typed one; otherwise the
@@ -1014,23 +414,6 @@ export function applyEstateImport(file: string, producer: string): Promise<Impor
   return invoke<ImportOutcome>("apply_estate_import", { file, producer });
 }
 
-/**
- * The two numbers monitoring is shaped by — `commands::assets::MonitoringSettings`.
- *
- * Both are clamped by the backend on the way in and on the way out, so what
- * this posts and what it gets back can differ, and the section draws the
- * answer.
- */
-export interface MonitoringSettings {
-  /** How many days of samples knobas keeps. Default 90, floor 1. */
-  sample_retention_days: number;
-  /**
-   * The response time in milliseconds above which an otherwise-up monitor
-   * samples as *warn*. Default 1500.
-   */
-  response_time_warn_ms: number;
-}
-
 /** What monitoring is set to; the ratified defaults where nothing is stored. */
 export function monitoringSettings(): Promise<MonitoringSettings> {
   return invoke<MonitoringSettings>("monitoring_settings");
@@ -1050,103 +433,6 @@ export function setMonitoringSettings(
 }
 
 /**
- * One row of the Monitors tab's roster — `assets::MonitorRow` (#448).
- *
- * The whole tab in one shape. The three groups of fields are worth telling
- * apart: the identity and the address are the mirror's; `monitor_type`,
- * `target`, `response_time_ms`, `uptime` and `cert_days_remaining` are read
- * out of the mirrored payload; and `state` and `samples` are knobas' own
- * timeseries — *warn* exists nowhere in Uptime Kuma and is derived at sample
- * time, so a chip counting warns counts samples and not the mirror.
- */
-export interface MonitorRow {
-  /** `<source>:<monitor id in Kuma>` — the entity id, and its detail address. */
-  entity_id: string;
-  /** The source that mirrored it. */
-  source_id: string;
-  /** Its name in Uptime Kuma — the name an estate file uses to ask for it. */
-  name: string;
-  /**
-   * The state knobas last recorded: the newest sample in the window, and the
-   * mirror's own reading where the window holds none.
-   *
-   * `up`, `warn`, `down`, `pending`, `maintenance`, or `null` for a genuine
-   * miss. This is the bar's right-hand end, which is what makes the chip and
-   * the bar one statement.
-   */
-  state: string | null;
-  /** `http`, `ping`, `docker`, `port` — Kuma's word for the kind of monitor. */
-  monitor_type: string | null;
-  /** What it watches: the URL, else the hostname with its port. */
-  target: string | null;
-  /** Kuma's last reading in milliseconds; `null` for a poll that did not answer. */
-  response_time_ms: number | null;
-  /**
-   * When knobas last read this monitor — RFC 3339.
-   *
-   * `/metrics` carries no clock at all, so there is no "last checked" to
-   * mirror and this is when knobas looked.
-   */
-  checked_at: string;
-  /** Kuma's sliding-window uptime ratios, by its own labels, in label order. */
-  uptime: UptimeRatio[];
-  /** Days until the watched certificate expires; `null` for a monitor with none. */
-  cert_days_remaining: number | null;
-  /** Its own page in Uptime Kuma; `null` when there is none left. */
-  web_url: string | null;
-  /**
-   * Whether it has left the mirror — paused in Kuma, or deleted.
-   *
-   * *Tombstoned* is the word `CONTEXT.md` gives the state and
-   * {@link AttachedMonitor} uses; *Paused* is what the chip says, because
-   * pausing is what a reader did to make it true.
-   */
-  tombstoned: boolean;
-  /** The assets it is attached to by a `monitored-by` link, by name. */
-  assets: MonitoredAsset[];
-  /**
-   * The write ops the tab may offer on this row — `knobas_source::WriteOp`
-   * identifiers, already filtered by the backend (issue #452).
-   *
-   * The inbox's `actions` exactly: the surface renders what it is handed and
-   * decides nothing. Two filters have already run — what the source declares,
-   * which is empty for an Uptime Kuma configured with only an API key, and
-   * what this row's state has a use for: `pause_monitor` while it is live,
-   * `resume_monitor` once it is {@link tombstoned}.
-   */
-  actions: string[];
-  /** Its samples inside the bar's 24-hour window, oldest first. */
-  samples: MonitorSample[];
-}
-
-/** One uptime ratio at the window Kuma computed it over — `assets::UptimeRatio`. */
-export interface UptimeRatio {
-  /** Kuma's own label: `1d`, `30d`, `365d`. */
-  window: string;
-  /** `0` to `1`, as Kuma publishes it — not a percentage. */
-  ratio: number;
-}
-
-/** One asset a monitor watches — `assets::MonitoredAsset`. */
-export interface MonitoredAsset {
-  /** `asset:<uuid>` — and the `#/asset/<id>` address the name links to. */
-  id: string;
-  name: string;
-  /** The ancestors' names, outermost first; `null` at the top of the estate. */
-  path: string | null;
-  /** What its type is called, resolved by the backend: the *Watches* column's (#864). */
-  type_label: string;
-}
-
-/** One sample as the bar draws it — `assets::MonitorSample`. */
-export interface MonitorSample {
-  /** RFC 3339. */
-  taken_at: string;
-  /** `up`, `warn`, `down`, `pending`, `maintenance`, or `null` — a gap. */
-  state: string | null;
-}
-
-/**
  * The Monitors tab's roster: every monitor of a source filling the
  * monitoring role, tombstones included. The read narrows itself to the
  * role's fillers by source (#1297, §10.8's #1294 entry).
@@ -1157,50 +443,6 @@ export interface MonitorSample {
  */
 export function monitorRoster(): Promise<MonitorRow[]> {
   return invoke<MonitorRow[]>("monitor_roster");
-}
-
-/**
- * What trouble an open alert is about — `assets::AlertState`.
- *
- * Two words and not four: an alert exists only for `down` and `warn`, so
- * `AssetStatus`' `up` and `none` have no meaning here. The spellings are
- * shared with a status on purpose, so a reader can compare an alert with the
- * health it caused.
- */
-export type AlertState = "down" | "warn";
-
-/**
- * One asset an alert's monitor watches — `assets::AlertAsset`.
- *
- * A list on the alert and not a field, because `monitored-by` is an ordinary
- * link and two assets may name one monitor. Empty is a real answer: a monitor
- * attached to nothing still opens an alert.
- */
-export interface AlertAsset {
-  /** `asset:<uuid>` — what the row opens. */
-  id: string;
-  name: string;
-  /** Its ancestors, outermost first, or `null` at the top of the estate. */
-  path: string | null;
-}
-
-/**
- * One open alert — `assets::OpenAlert` (#444).
- *
- * **No address of its own.** The `id` is the row's number, what the alert is
- * about is the monitor, and what a reader opens is the asset — spec #427
- * story 61.
- */
-export interface OpenAlert {
-  id: number;
-  /** The monitor's entity id. */
-  monitor_id: string;
-  monitor_name: string;
-  state: AlertState;
-  opened_at: string;
-  /** When somebody said they had seen it. Written by #446's ack. */
-  acked_at: string | null;
-  assets: AlertAsset[];
 }
 
 /**
@@ -1232,38 +474,6 @@ export function ackAlert(monitorId: string): Promise<OpenAlert> {
 }
 
 /**
- * One row of the Monitors tab's *Not monitored* roster —
- * `assets::UnmonitoredAsset` (#449).
- *
- * Not an `AssetRow`: this is a line in a list of gaps, so it carries what the
- * list draws — where the asset sits and what kind of thing it is — and none of
- * the rollup an `AssetRow` would drag with it.
- */
-export interface UnmonitoredAsset {
-  /** `asset:<uuid>` — the `#/asset/<id>` address the name opens. */
-  id: string;
-  /** One of the built-in types; what the tab's type filter narrows by. */
-  type_id: string;
-  /** What that type is called, resolved by the backend. */
-  type_label: string;
-  /** The type's two-character chip. */
-  monogram: string;
-  name: string;
-  /** The ancestors' names, outermost first; `null` at the top of the estate. */
-  path: string | null;
-  /** The environment in force, own or inherited; `null` where nothing sets one (#864). */
-  environment: string | null;
-  /** The owner in force, the same way (#864). */
-  owner: string | null;
-  /**
-   * A route's URL (#976); `null` on an asset. A route is a row of type
-   * `route` whose `id` is `route:<uuid>`, whose `path` is where the exposing
-   * asset sits (its own name last), with that asset's environment and owner.
-   */
-  url: string | null;
-}
-
-/**
  * Every asset with no confirmed `monitored-by` link to a monitor.
  *
  * **A statement about attachment, not about attention.** An asset whose only
@@ -1278,61 +488,6 @@ export function unmonitoredAssets(): Promise<UnmonitoredAsset[]> {
 }
 
 // -- Dependencies (#871) ------------------------------------------------------
-
-/**
- * One shared layer — `knobas_app::assets::dependencies::Layer`: its name and
- * the kinds it holds, in order. The layers are the same in every view (D14).
- */
-export interface DepLayer {
-  id: string;
-  name: string;
-  /** Dependencies' kinds: asset type ids, `ticket`, `pr`, `page`, `repo`, `pipeline`, `route`. */
-  kinds: string[];
-}
-
-/** One kind a layer can hold — `DepKind`: the built-in label and monogram (D15). */
-export interface DepKind {
-  id: string;
-  label: string;
-  monogram: string;
-}
-
-/** One tile — `DepItem`. */
-export interface DepItem {
-  /** The entity id: `asset:…`, `route:…`, `jira:PAY-231`. */
-  id: string;
-  /** One of the {@link DepKind} ids. */
-  kind: string;
-  name: string;
-  /** Broken, warning, in flight or fine; `null` where nothing says. */
-  health: Tone | null;
-  /** The source's own state word: a ticket's status, a PR's state, a pipeline's newest run. */
-  state: string | null;
-  /** How many monitors are attached; `0` draws an asset or route hatched. */
-  monitors: number;
-  /** The environment in force on an asset or route. */
-  environment: string | null;
-  /** The owner in force on an asset. */
-  owner: string | null;
-}
-
-/**
- * One known relation — `DepRelation`: a confirmed link's relation, or
- * `inside`, `exposes`, `lands-on`, `in-repository`.
- */
-export interface DepRelation {
-  from: string;
-  to: string;
-  relation: string;
-}
-
-/** What Dependencies draws from the top bar — `Dependencies`. */
-export interface Dependencies {
-  layers: DepLayer[];
-  kinds: DepKind[];
-  items: DepItem[];
-  relations: DepRelation[];
-}
 
 /**
  * The top-bar opening of Dependencies (R-11.10, R-11.23): the shared layers,
@@ -1369,45 +524,6 @@ export function orderDepLayers(layerIds: string[]): Promise<DepLayer[]> {
 /** Put a kind at the end of a layer, or in no layer when `layerId` is `null`. */
 export function placeDepKind(kind: string, layerId: string | null): Promise<DepLayer[]> {
   return invoke<DepLayer[]>("place_dep_kind", { kind, layerId });
-}
-
-/** How a layer's tiles group in a view — `dependencies::Group`. */
-export type DepGroup = "none" | "environment" | "owner" | "parent" | "project" | "status";
-
-/** The tile size — `dependencies::Tiles`. */
-export type DepTiles = "auto" | "roomy" | "compact";
-
-/** What a view keeps for one layer — `LayerInView`. */
-export interface LayerInView {
-  hidden: boolean;
-  folded: boolean;
-  group: DepGroup;
-}
-
-/** Everything a view keeps — `DepViewSettings`. A layer it does not name shows, unfolded, ungrouped. */
-export interface DepViewSettings {
-  layers: Record<string, LayerInView>;
-  /** The environment filter: empty is every environment. */
-  environments: string[];
-  /** *Problems and what they touch*. */
-  problems: boolean;
-  tiles: DepTiles;
-  /** Healthy groups fold above this many items in a layer. */
-  fold_at: number;
-}
-
-/** One saved view — `DepView`. */
-export interface DepView {
-  id: string;
-  name: string;
-  settings: DepViewSettings;
-}
-
-/** Every view, in order, and the two that open first — `DepViews`. */
-export interface DepViews {
-  views: DepView[];
-  opens_from_ticket: string;
-  opens_from_top: string;
 }
 
 /** Every saved view of Dependencies and which opens from a ticket and from the top bar. */
