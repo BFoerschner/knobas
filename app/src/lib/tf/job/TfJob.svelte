@@ -92,7 +92,7 @@
   import { applyToast, savedToast, withHandRule, withoutHandRule } from "../sets/apply";
   import TfApplySet from "./TfApplySet.svelte";
   import TfSaveSet from "./TfSaveSet.svelte";
-  import { ASSET_LIMIT, reachFilter, readSection, SECTION_LIMIT, sectionReads, type FrameKinds, type SectionRead } from "./sections";
+  import { ASSET_LIMIT, reachFilter, readSection, runKindsOf, SECTION_LIMIT, sectionReads, type FrameKinds, type SectionRead } from "./sections";
   import { kindRegistry } from "../../shell/kind-registry.svelte";
   import { CI, CODE_HOST, MONITORING, sourceRoles, WIKI } from "../roles.svelte";
   import { currentJob } from "./current.svelte";
@@ -598,7 +598,7 @@
   function line(row: EntityRow): SectionRow {
     return {
       id: row.entity_id,
-      href: itemHash(row, registry.frameKinds("ci", "run") ?? []),
+      href: itemHash(row, runKindsOf(registry)),
       title: row.title,
       mono: false,
       repo: null,
